@@ -197,8 +197,10 @@
           name: '@wowyuarm/dsh-agent-team/host'
     - id: wowyuarm-agent-team-client
       name: '@wowyuarm/dsh-agent-team'
-    - id: wowyuarm-agent-team-invariants
-      name: '@deepseek-ai/dsh-invariants'
+    # The Team's invariant companion self-hosts: it validates the durable
+    # ledger from its own fiber, so no `@deepseek-ai/dsh-invariants` registry
+    # row is mounted — the Harness line after rc.2 removes that package, and
+    # the companion no longer depends on it (packages/agent-team/src/invariant.ts).
     - id: wowyuarm-agent-team-invariant
       name: '@wowyuarm/dsh-agent-team/invariant'
     # Team ledger medium backend. Vendored under our own package name (see

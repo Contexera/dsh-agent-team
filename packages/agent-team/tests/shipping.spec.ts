@@ -93,7 +93,10 @@ describe('Agent Team shipping contract', () => {
     expect(patch).toContain('agentPresets: true')
     expect(patch).toContain("name: '@wowyuarm/dsh-agent-team/host'")
     expect(patch).toContain("name: '@wowyuarm/dsh-agent-team'")
-    expect(patch).toContain("name: '@deepseek-ai/dsh-invariants'")
+    // The upstream registry row must stay gone: the Harness line after rc.2
+    // removes `@deepseek-ai/dsh-invariants` wholesale, and the companion now
+    // validates the ledger from its own fiber (src/invariant.ts).
+    expect(patch).not.toContain("name: '@deepseek-ai/dsh-invariants'")
     expect(patch).toContain("name: '@wowyuarm/dsh-agent-team/invariant'")
     // The Team ledger medium: only agent_team routes to SQLite through the
     // public per-domain route table. The backend is vendored under our own

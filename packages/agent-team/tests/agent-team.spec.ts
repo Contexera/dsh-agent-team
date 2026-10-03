@@ -7,7 +7,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // runs, 2026-09-17..21). The SQLite case below keeps its own 30s argument.
 vi.setConfig({ testTimeout: 30_000 })
 import { Context } from '@deepseek-ai/cordis'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
 import Storage from '@deepseek-ai/dsh-storage'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -1428,7 +1427,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('fails loud on malformed durable records and an invariant catches projection divergence', async () => {
     await expect(harness(storedPool([['operation:bad', { sequence: 'one' }]]))).rejects.toThrow(/does not match its schema/)
     const test = await harness()
-    await test.ctx.plugin(InvariantRegistry)
     await test.ctx.plugin(agentTeamInvariant)
     const domain = test.facility.get('agent_team')!
     const table = domain.table('operations')
@@ -1446,9 +1444,18 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     logError.mockRestore()
   })
 
+  it('fails the companion load when the mount replay finds a diverged ledger', async () => {
+    const test = await harness()
+    const table = test.facility.get('agent_team')!.table('operations')
+    const [id, operation] = [...table.entries()][0]!
+    await table.put(id, { ...(operation as AgentTeamOperation), sequence: 9 })
+    // Mounting is the boot gate: a ledger the projection cannot re-derive must
+    // reject the companion's own plugin load, not arm a later check.
+    await expect(test.ctx.plugin(agentTeamInvariant)).rejects.toThrow(/invariant violated/)
+  })
+
   it('keeps the commit-path replay off the commit call and coalesces a burst', async () => {
     const test = await harness()
-    await test.ctx.plugin(InvariantRegistry)
     await test.ctx.plugin(agentTeamInvariant)
     const validate = vi.spyOn(test.ctx.agentTeam, 'validateLedger')
     validate.mockClear()
@@ -1471,7 +1478,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const records = [...seeded.facility.get('agent_team')!.table('operations').entries()]
     const test = await harness(storedPool(records as Array<[string, unknown]>))
     const entries = vi.spyOn(test.facility.get('agent_team')!.table('operations'), 'entries')
-    await test.ctx.plugin(InvariantRegistry)
     await test.ctx.plugin(agentTeamInvariant)
     // The constructor already re-derived every durable record against its own
     // scratch projection; the mount must not read and re-derive it again.
@@ -1485,7 +1491,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness(storedPool(records as Array<[string, unknown]>))
     await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const entries = vi.spyOn(test.facility.get('agent_team')!.table('operations'), 'entries')
-    await test.ctx.plugin(InvariantRegistry)
     await test.ctx.plugin(agentTeamInvariant)
     // A commit invalidates the boot conclusion, so the mount reads the table again.
     expect(entries).toHaveBeenCalledTimes(1)
@@ -1505,7 +1510,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const seeded = await harness()
     const records = [...seeded.facility.get('agent_team')!.table('operations').entries()]
     const test = await harness(storedPool(records as Array<[string, unknown]>))
-    await test.ctx.plugin(InvariantRegistry)
     await test.ctx.plugin(agentTeamInvariant)
     const table = test.facility.get('agent_team')!.table('operations')
     const [id, operation] = [...table.entries()][0]!
@@ -1522,7 +1526,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('releases the deferred failure once a replay comes back clean', async () => {
     const settle = (): Promise<void> => new Promise(resolve => setImmediate(resolve))
     const test = await harness()
-    await test.ctx.plugin(InvariantRegistry)
     await test.ctx.plugin(agentTeamInvariant)
     const table = test.facility.get('agent_team')!.table('operations')
     const [id, operation] = [...table.entries()][0]!

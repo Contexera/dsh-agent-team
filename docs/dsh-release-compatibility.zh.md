@@ -230,6 +230,8 @@ Harness 随附一套 experimental Agent Teams，以独立 profile bundle 形式�
 
 DSH peers 正好声明这条已认证线：`>=0.2.0-rc.2 <0.2.1`，因此本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除；其余 peers 仍保持唯一一条已认证区间。
 
+被移除的 `@deepseek-ai/dsh-invariants` peer 同样随它指名的 registry row 一并删除：invariant companion 此后自持校验。
+
 经路由的 sqlite 后端是 vendored fork，根本不是 dependency（GitHub issue #28）：上游包只以 devDependency 钉在 fork 来源版本 0.1.5-rc.2，用作字节兼容 fixture 参照；每次兼容认证先把 fork 与该版本文件对一遍 diff，再做其他事。
 
 本基线取代的 `0.1.5-rc.1` 认证覆盖 Typert 生成、完整类型检查、499 个测试（1 个跳过）、构建、打包检查、lint，以及真实 browser composition（外部发布布局安装、Remote mount、Team mode 进入与退出、普通 DSH 恢复），peers 为 `>=0.1.5-rc.1 <0.1.6`。

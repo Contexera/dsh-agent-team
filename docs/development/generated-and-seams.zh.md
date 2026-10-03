@@ -74,7 +74,7 @@ types/requests-results.ts   公开的 request 与 result 形状
 
 **那六个面不会问的一个问题：崩溃重导。** 对这个 operation 驱动的每一个进程内效果——一次唤醒、一次销毁、一次激活、一个外部文件副作用——回答：如果进程在 commit 与效果之间死掉，由哪个 durable state 重导它，而这次重导是否幂等？效果是在 replay **之后**重导的，而不是由 replay 代替；它是一句问句，而不是第七个面。[`host-authority.md`](../architecture/host-authority.md) 记录了 Host 自己的那些重导。
 
-invariant companion 是"被覆盖"而不是"要扩展"：`invariant.ts` 注册一个 `agentTeam` invariant，在 mount 时与每次 commit 后校验整个 durable ledger，所以只要新 operation 能 replay，它的 durable record 就自动纳入覆盖。覆盖止于 durable table——上面那句问的进程内效果没有 invariant。只有当新 record 形状需要 projection validator 尚未断言的关系时才扩展它。
+invariant companion 是"被覆盖"而不是"要扩展"：`invariant.ts` 在 mount 时与每次 commit 后校验整个 durable ledger，所以只要新 operation 能 replay，它的 durable record 就自动纳入覆盖。覆盖止于 durable table——上面那句问的进程内效果没有 invariant。只有当新 record 形状需要 projection validator 尚未断言的关系时才扩展它。
 
 这份清单依赖两条边界：
 

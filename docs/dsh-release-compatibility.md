@@ -171,6 +171,8 @@ The current certified baseline is DSH `0.2.0-rc.2`; the paragraphs below preserv
 
 The DSH peers state exactly that certified line, `>=0.2.0-rc.2 <0.2.1`, so a line this repository has not verified falls outside the declared range instead of installing under an unverified compatibility claim. The removed `@deepseek-ai/dsh-tool-todo` peer left with the preset row it named when the Team surface dropped the session-local todo tool; the remaining peers keep the one certified range.
 
+The removed `@deepseek-ai/dsh-invariants` peer likewise left with the registry row it named when the invariant companion began validating on its own.
+
 The routed sqlite backend is a vendored fork, not a dependency at all (GitHub issue #28): the upstream package stays a devDependency pinned at the fork source, 0.1.5-rc.2, as the byte-compatibility fixture reference, and every compat round diffs the fork against that version's file before anything else.
 
 The `0.1.5-rc.1` baseline this replaced was certified over Typert generation, full typecheck, 499 tests (1 skipped), build, pack checks, lint, and real browser composition with published-layout installation, Remote mount, Team entry/exit, and ordinary DSH restoration, on peers `>=0.1.5-rc.1 <0.1.6`; `0.1.5-rc.2` was certified on those same peers with no manifest change.

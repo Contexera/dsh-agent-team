@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import InvariantRegistry, { InvariantError } from '@deepseek-ai/dsh-invariants'
 import Storage from '@deepseek-ai/dsh-storage'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -40,7 +39,6 @@ async function harness(): Promise<{ readonly ctx: Context }> {
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
-  await ctx.plugin(InvariantRegistry)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)
@@ -127,7 +125,7 @@ describe('post-commit delivery', () => {
 
   it('keeps an invariant divergence loud on the caller frame instead of swallowing it', async () => {
     const { ctx } = await harness()
-    ctx.on('agent-team/committed', () => { throw new InvariantError('@wowyuarm/dsh-agent-team', 'projection diverged (test seam)') })
+    ctx.on('agent-team/committed', () => { throw new agentTeamInvariant.AgentTeamInvariantError('projection diverged (test seam)') })
     await expect(ctx.agentTeam.createChannel({ requestId: requestId('invariant-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' }))
       .rejects.toThrow(/invariant violated/)
     // The loud path still reports a real commit: the operation is durable.

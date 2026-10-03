@@ -169,7 +169,6 @@
     "@deepseek-ai/dsh-command-compact": ">=0.2.0-rc.2 <0.2.1",
     "@deepseek-ai/dsh-compaction": ">=0.2.0-rc.2 <0.2.1",
     "@deepseek-ai/dsh-home-paths": ">=0.2.0-rc.2 <0.2.1",
-    "@deepseek-ai/dsh-invariants": ">=0.2.0-rc.2 <0.2.1",
     "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <0.2.1",
     "@deepseek-ai/dsh-sandbox-policy": ">=0.2.0-rc.2 <0.2.1",
     "@deepseek-ai/dsh-scope": ">=0.2.0-rc.2 <0.2.1",
