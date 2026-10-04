@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@wowyuarm/dsh-context-continuity':
-        specifier: ^0.2.0
-        version: 0.2.0(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))
+        specifier: ^0.2.1
+        version: 0.2.1(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))
       '@wowyuarm/dsh-jev':
         specifier: ^0.1.1
         version: 0.1.1(@deepseek-ai/schemastery@3.18.2)
@@ -534,8 +534,8 @@ packages:
   '@vitest/utils@4.1.10':
     resolution: {integrity: sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA==}
 
-  '@wowyuarm/dsh-context-continuity@0.2.0':
-    resolution: {integrity: sha512-jDMnWQAA3lOBAnisvoa4fmINHj0XwlAUwps7RJ4uTrkSCMsd4MlEz/xRP/kffM6aa1W7JYhhi3+eyUhJPs+KDA==}
+  '@wowyuarm/dsh-context-continuity@0.2.1':
+    resolution: {integrity: sha512-1FgSxmB04PulMvF+fhuvxik2FXNLEumUs/w4V1e8kdUmNI0RuADdC2a/UHLV41YexMvqxWUYj/A+3c5/oHOAjg==}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.1
       '@deepseek-ai/dsh-agent': '>=0.2.0-rc.1 <0.2.1'
@@ -1318,7 +1318,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
 
-  '@wowyuarm/dsh-context-continuity@0.2.0(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))':
+  '@wowyuarm/dsh-context-continuity@0.2.1(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))':
     dependencies:
       zod: 4.6.5
     optionalDependencies:

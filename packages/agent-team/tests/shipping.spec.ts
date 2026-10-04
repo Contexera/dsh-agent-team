@@ -294,7 +294,7 @@ describe('Agent Team shipping contract', () => {
     // rides the same way for the same reason, and one more: the Host mounts it
     // itself from the row's key, so its code has to be in the tree.
     expect(manifest.dependencies).toEqual({
-      '@wowyuarm/dsh-context-continuity': '^0.2.0',
+      '@wowyuarm/dsh-context-continuity': '^0.2.1',
       '@wowyuarm/dsh-jev': '^0.1.1',
       yaml: '^2.9.1',
       zod: '^4.4.3',
