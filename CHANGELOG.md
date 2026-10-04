@@ -8,6 +8,8 @@ All notable changes to this project are documented in this file. The format foll
 - Team Members no longer carry a session-local todo tool: planning belongs to the ledger, so the `team-member` preset drops that row and the peer that named it leaves with it.
 - The sender name follows the content-size setting: at a raised size the author grows with the message instead of staying at its default size, while the message body keeps the grid it already had.
 - The certified DSH baseline moves to `0.2.0-rc.2`: every `@deepseek-ai/dsh-*` peer advances to `>=0.2.0-rc.2 <0.2.1`, so a host still on `0.2.0-rc.1` falls outside the declared range.
+- Context management moves onto the engine's own four tools: `context_status` reads where a Member's context stands (budgets, lineage anchors, and what a compaction would replace), `context_compact` shortens the current generation in place, and the Team-authored `context_timeline` retires. The tools a Member is offered and the tool names its own descriptions mention are now one set.
+- A Member's long-gap relatedness gate can use the deployment's own `jev` service: the bundle declares `@wowyuarm/dsh-jev` as an optional peer and reads `ctx.jev` where a profile mounts one, while a profile without it leaves the gate off instead of failing.
 
 ## [0.2.0] - 2026-09-29
 

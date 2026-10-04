@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { contextTools, renderText } from './render-text.ts'
+import { engineTimelineItems } from '../src/context-tools.ts'
 import { AGENT_TEAM_TOOL_NAMES } from '@wowyuarm/dsh-agent-team/host'
 
 /**
@@ -8,40 +9,48 @@ import { AGENT_TEAM_TOOL_NAMES } from '@wowyuarm/dsh-agent-team/host'
  * (the checkpoint ref, per-anchor verdicts) has to appear in the rendered
  * text — a schema field the render drops is model-invisible (this exact
  * regression made seeded returns unusable in live dogfooding).
+ *
+ * All four context tools are the engine's own definitions, so what these tests
+ * pin is the Team's half of the contract: the vocabulary spliced in as
+ * `timelineGuidance`, and the one Team rule the adapter enforces — a row that is
+ * not restorable answers with a short digest instead of its ref, because the
+ * engine's render prints that field on every row.
  */
 
-const TIMELINE_VALUE = {
+const STATUS_VALUE = {
   usageTokens: 55577,
   hardLimit: 256000,
   handoffAt: 200000,
+  compactible: { compactibleTokens: 48000, retainedTailTokens: 32000 },
   items: [
     {
-      checkpointRef: 'context-checkpoint-' + 'a'.repeat(64),
-      name: 'live smoke before context rollover',
-      source: 'agent',
+      ref: 'context-checkpoint-' + 'a'.repeat(64),
+      label: 'live smoke before context rollover',
+      source: 'checkpoint',
       retainedTokens: 84971,
       discardedTokens: 0,
-      affectedThreads: ['thread:bce6b8c6-f781-47e6-8e87-4e99c7f446d1'],
+      affectedTopics: ['thread:bce6b8c6-f781-47e6-8e87-4e99c7f446d1'],
       restorable: true,
     },
     {
-      checkpointRef: 'team-boundary-' + 'b'.repeat(64),
-      name: 'team delivery',
-      source: 'team-boundary',
+      ref: '2f1c9a',
+      label: 'team delivery',
+      source: 'boundary',
+      kind: 'handoff',
       retainedTokens: 12000,
       discardedTokens: 8000,
-      affectedThreads: ['thread:one', 'thread:two'],
+      affectedTopics: ['thread:one', 'thread:two'],
       restorable: false,
       reason: 'multiple Threads entered the context through this boundary; write a fresh handoff instead',
       sourceSessionId: 'session-ancestor',
     },
     {
-      checkpointRef: 'context-checkpoint-' + 'c'.repeat(64),
-      name: 'current head',
+      ref: '9a0b1c',
+      label: 'current head',
       source: 'head',
       retainedTokens: 55577,
       discardedTokens: 0,
-      affectedThreads: [],
+      affectedTopics: [],
       restorable: false,
       reason: 'the head is the current working set; returning to it discards nothing',
     },
@@ -62,48 +71,55 @@ describe('context tools render the model-facing decision surface', () => {
     expect(text).toContain('post-rollover smoke anchor')
   })
 
-  it('context_timeline renders every item with name, source, token estimates, Threads, and verdict', () => {
+  it('context_status renders the budgets, the compaction price, and every row verdict', () => {
     const tools = contextTools()
-    expect(tools.has('context_timeline')).toBe(true)
-    const text = renderText(tools.get('context_timeline')!, {}, TIMELINE_VALUE)
-    // Budget summary line stays.
-    expect(text).toContain('55577')
-    expect(text).toContain('200000')
-    expect(text).toContain('256000')
-    // Each item renders its label, source, and size estimates.
-    for (const item of TIMELINE_VALUE.items) {
-      expect(text).toContain(item.name)
+    expect(tools.has('context_status')).toBe(true)
+    const text = renderText(tools.get('context_status')!, {}, STATUS_VALUE)
+    // The three budget numbers and the anchor tally are the header the decision
+    // starts from.
+    expect(text).toContain('Context: 55,577 / 200,000 handoff / 256,000 hard limit')
+    expect(text).toContain('Anchors: 3 rows · 1 restorable')
+    // A compaction started now is priced where this scope can price one: the
+    // member's two options have to be comparable from one read.
+    expect(text).toContain('Compact now: about 48K compactible; keeps the last ~32K verbatim')
+    // Each row renders its label, source, size estimates and Threads.
+    for (const item of STATUS_VALUE.items) {
+      expect(text).toContain(item.label)
       expect(text).toContain(`source: ${item.source}`)
       expect(text).toContain(`retained ~${item.retainedTokens}`)
       expect(text).toContain(`discarded ~${item.discardedTokens}`)
-      if (item.affectedThreads.length === 0) {
+      if (item.affectedTopics.length === 0) {
         expect(text).toContain('no Threads')
       } else {
-        for (const thread of item.affectedThreads) expect(text).toContain(thread)
+        for (const thread of item.affectedTopics) expect(text).toContain(thread)
       }
       if (item.restorable) {
         // A restorable anchor must carry its full ref for context_rollover.
-        expect(text).toContain(item.checkpointRef)
+        expect(text).toContain(item.ref)
         expect(text).toContain('restorable')
       } else {
         // A non-restorable anchor must state why, so the model writes a
         // fresh handoff instead of retrying the anchor.
         expect(text).toContain('not restorable')
         expect(text).toContain(item.reason)
+        expect(text).toContain('not selectable')
       }
     }
+    // A boundary's own kind survives the mapping onto the engine's three
+    // sources: a handoff boundary is not flattened into a generic boundary.
+    expect(text).toContain('source: boundary — handoff')
   })
 
-  it('context_timeline gives every row a short anchor id that is not a ref, so same-label rows stay distinct', () => {
-    const tools = contextTools()
+  it('the adapter answers a non-restorable row with a digest, never a citable ref', () => {
     // Two boundaries that share a label and a price — exactly what two
     // deliveries resolved in the same turn produce — must still be
-    // distinguishable in the render, and a row that is not restorable must
-    // never print a ref the model could try to cite.
+    // distinguishable, and a row that is not restorable must never hand the
+    // engine a ref-shaped string: the engine prints this field on every row, so
+    // a ref here is a ref the model can copy into checkpointRef.
     const anchor = {
       checkpointRef: 'team-boundary-' + '1'.repeat(64),
       name: 'Team message',
-      source: 'team-boundary',
+      source: 'team-boundary' as const,
       retainedTokens: 4242,
       discardedTokens: 0,
       affectedThreads: ['thread:one'],
@@ -111,62 +127,66 @@ describe('context tools render the model-facing decision surface', () => {
       reason: 'retained context would not materially shrink the working set',
     }
     const other = { ...anchor, checkpointRef: 'team-boundary-' + '2'.repeat(64) }
-    const text = renderText(tools.get('context_timeline')!, {}, { usageTokens: 10, hardLimit: 256000, handoffAt: 200000, items: [anchor, other] })
-    const rows = text.split('\n').filter(line => line.startsWith('- Team message'))
-    expect(rows).toHaveLength(2)
-    const ids = rows.map(row => /anchor ([0-9a-f]{6})\]/.exec(row)?.[1])
-    expect(ids[0]).toBeDefined()
-    expect(ids[1]).toBeDefined()
-    expect(ids[0]).not.toBe(ids[1])
+    const rows = engineTimelineItems([anchor, other])
     for (const row of rows) {
-      expect(row).toContain('not restorable')
-      expect(row).not.toContain('team-boundary-')
+      expect(row.ref).toMatch(/^[0-9a-f]{6}$/)
+      expect(row.ref).not.toContain('team-boundary-')
+      expect(row.restorable).toBe(false)
     }
-    // The id is a digest of the row's own ref: same input, same id, so a
-    // repeated read of one anchor stays recognizable.
-    const again = renderText(tools.get('context_timeline')!, {}, { usageTokens: 10, hardLimit: 256000, handoffAt: 200000, items: [anchor, other] })
-    expect(again).toBe(text)
-    // The description states Team's actual selection rule and what the id is
-    // (and is not): the rule is the retained prefix, not the boundary's own
-    // attribution, and the id is not citable.
-    const description = tools.get('context_timeline')!.description
-    expect(description).toContain('retained prefix through it stays inside one Thread')
-    expect(description).toContain('NOT a ref')
+    // Distinct rows stay distinct, and the digest is a function of the ref: a
+    // repeated read of one anchor keeps its identity.
+    expect(rows[0]!.ref).not.toBe(rows[1]!.ref)
+    expect(engineTimelineItems([anchor])[0]!.ref).toBe(rows[0]!.ref)
+    // A restorable row is the one row whose ref the rollover call may cite, so
+    // it answers with the ref itself.
+    const seeded = engineTimelineItems([{ ...anchor, restorable: true }])
+    expect(seeded[0]!.ref).toBe(anchor.checkpointRef)
+    // Team's own sources collapse onto the engine's kinds; the two that carry
+    // meaning a reader needs ride its opaque `kind` field.
+    expect(engineTimelineItems([{ ...anchor, source: 'agent' }])[0]!.source).toBe('checkpoint')
+    expect(engineTimelineItems([{ ...anchor, source: 'head' }])[0]!.source).toBe('head')
+    expect(engineTimelineItems([{ ...anchor, source: 'handoff' }])[0]!.kind).toBe('handoff')
+    expect(engineTimelineItems([{ ...anchor, source: 'compaction' }])[0]!.kind).toBe('compaction')
+    expect(engineTimelineItems([anchor])[0]!.kind).toBeUndefined()
   })
 
-  it('context_timeline keeps the output bounded by the Host-supplied item list', () => {
+  it('context_status keeps the output bounded by the Host-supplied item list', () => {
     const tools = contextTools()
     // The Host bounds items (default 12, at most 24); the render mirrors
     // that list one line per item and nothing beyond it.
     const items = Array.from({ length: 24 }, (_, index) => ({
-      checkpointRef: `context-checkpoint-${index.toString(16).padStart(64, '0')}`,
-      name: `anchor-${index}`,
-      source: 'agent',
+      ref: `context-checkpoint-${index.toString(16).padStart(64, '0')}`,
+      label: `anchor-${index}`,
+      source: 'checkpoint',
       retainedTokens: index * 100,
       discardedTokens: 0,
-      affectedThreads: [],
+      affectedTopics: [],
       restorable: true,
     }))
-    const text = renderText(tools.get('context_timeline')!, {}, { usageTokens: 1, hardLimit: 256000, handoffAt: 200000, items })
-    for (const item of items) expect(text).toContain(item.checkpointRef)
+    const text = renderText(tools.get('context_status')!, {}, { usageTokens: 1, hardLimit: 256000, handoffAt: 200000, items })
+    for (const item of items) expect(text).toContain(item.ref)
     expect(text).toContain('anchor-23')
+    expect(text).toContain('Anchors: 24 rows · 24 restorable')
   })
 
-  it('registers the rollover tool under its lifecycle name and not the legacy one', () => {
+  it('registers the engine roster and retires the Team-authored timeline name', () => {
     const tools = contextTools()
-    // Hard rename: the model-facing surface is `context_rollover` only. The
-    // legacy `new_context` name must not survive as a second registration —
-    // two synonyms would let stale sessions call a tool nobody documents.
-    expect(tools.has('context_rollover')).toBe(true)
+    // The roster the Host validates against and the registered surface are one
+    // list: a description naming a tool the surface lacks is exactly the defect
+    // this swap removed (the engine's own copy names context_status and
+    // context_compact).
+    for (const name of ['context_rollover', 'context_checkpoint', 'context_status', 'context_compact']) {
+      expect(tools.has(name)).toBe(true)
+      expect([...AGENT_TEAM_TOOL_NAMES]).toContain(name)
+    }
+    // Hard retirement: the Team-authored timeline must not survive as a second
+    // registration — two tools reading one lineage would let a stale session
+    // cite a ref the other never offered.
+    expect(tools.has('context_timeline')).toBe(false)
+    expect([...AGENT_TEAM_TOOL_NAMES]).not.toContain('context_timeline')
+    // The legacy rollover name stays retired too.
     expect(tools.has('new_context')).toBe(false)
-    // The Host's capability roster agrees: preset validation would fail on
-    // a roster/tool split.
-    expect([...AGENT_TEAM_TOOL_NAMES]).toContain('context_rollover')
     expect([...AGENT_TEAM_TOOL_NAMES]).not.toContain('new_context')
-    // The description states both modes of the same generation swap.
-    const description = tools.get('context_rollover')!.description
-    expect(description).toContain('context_rollover')
-    expect(description.toLowerCase()).toContain('checkpointref')
   })
 
   it('rollover guidance names what a fresh generation already carries, and asks for the unverified delta', () => {
@@ -187,9 +207,9 @@ describe('context tools render the model-facing decision surface', () => {
     // said which facts were unverified, against 70% that named side effects.
     expect(description).toContain('could not reconstruct on its own')
     expect(description).toContain('which items you verified and which you only trusted')
-    // The Team keeps its own timeline prose: the engine's render has no switch
-    // for "never print a ref-shaped string on a non-restorable row".
-    expect(tools.get('context_timeline')!.description).toContain('Every row carries a short `anchor` id')
+    // Team's rule about what a non-selectable row prints travels through the
+    // engine's text seam, not through a Team-authored render.
+    expect(tools.get('context_status')!.description).toContain('is a short digest, never a ref')
   })
 
   it('hardens the checkpointRef copy against fabricated refs (the seq-7709 misuse)', () => {
@@ -197,7 +217,7 @@ describe('context tools render the model-facing decision surface', () => {
     const rollover = tools.get('context_rollover')!
     // The tool description and the parameter description both instruct the
     // model to omit checkpointRef for ordinary rollovers and to cite only
-    // an exact ref a context_timeline result listed as restorable — never
+    // an exact ref a context_status result listed as restorable — never
     // a synthesized one. Dogfood showed "optional" alone does not stop a
     // model from inventing `team-boundary-...` refs.
     expect(rollover.description).toContain('never synthesize, guess, or reconstruct one')
@@ -206,33 +226,48 @@ describe('context tools render the model-facing decision surface', () => {
     const parameter = (rollover.parameters as { properties?: Record<string, { description?: string }> }).properties?.checkpointRef
     expect(parameter?.description).toContain('never synthesize or guess a ref')
     expect(parameter?.description).toContain('Omit for the default fresh rollover')
-    // The timeline description keeps fresh rollovers on the direct path:
-    // consulting the timeline is for checkpointRef returns, not a
-    // prerequisite for the default fresh handoff.
-    const timeline = tools.get('context_timeline')!.description
-    expect(timeline).toContain('never requires consulting this timeline first')
+    // The status description keeps fresh rollovers on the direct path:
+    // reading it is for checkpointRef returns, not a prerequisite for the
+    // default fresh handoff.
+    expect(tools.get('context_status')!.description).toContain('never requires reading this status first')
   })
 
-  it('timeline description states the effect-anchor boundary vocabulary (91c2299 labels)', () => {
+  it('status description states the effect-anchor boundary vocabulary (91c2299 labels)', () => {
     const tools = contextTools()
-    const timeline = tools.get('context_timeline')!.description
-    // The description is the model's map from timeline item labels to their
+    const status = tools.get('context_status')!.description
+    // The description is the model's map from timeline row labels to their
     // meaning when picking a checkpointRef. It must enumerate the labels the
     // fold actually renders — the three effect classes and first arrival —
     // and must not promise the retired push-side vocabulary (the live
     // seq-8666 mis-selection showed an unmapped label invites wrong picks).
-    expect(timeline).toContain('Team message')
-    expect(timeline).toContain('Team task claim change')
-    expect(timeline).toContain('Team attention change')
-    expect(timeline).toContain('First arrival')
-    expect(timeline).toContain('first delivered notice')
-    expect(timeline).not.toContain('claim changes and structured Team notifications')
+    expect(status).toContain('Team message')
+    expect(status).toContain('Team task claim change')
+    expect(status).toContain('Team attention change')
+    expect(status).toContain('First arrival')
+    expect(status).toContain('first delivered notice')
+    expect(status).not.toContain('claim changes and structured Team notifications')
     // The selectable-anchor sentence names the current boundary concept.
-    expect(timeline).toContain('A Team boundary is a selectable default checkpoint')
+    expect(status).toContain('A Team boundary is a selectable default')
     // The retired "delivery anchor" noun must not survive either: the
     // pre-59ae952 wording lives on in shipped sessions' prompts, so a
     // half-reverted description would still read as plausible prose.
-    expect(timeline).not.toContain('delivery anchor')
+    expect(status).not.toContain('delivery anchor')
+  })
+
+  it('context_compact states what changed, and says so when nothing was safe to replace', () => {
+    const tools = contextTools()
+    expect(tools.has('context_compact')).toBe(true)
+    const compacted = renderText(tools.get('context_compact')!, {}, { status: 'compacted', replaced: 12, replacedTokens: 40000, usageTokens: 60000 })
+    expect(compacted).toContain('replaced 12')
+    expect(compacted).toContain('Recent work kept verbatim')
+    expect(compacted).toContain('about 60000 tokens')
+    // "Nothing safe to compact" and "this scope has no engine" are different
+    // facts, and both must leave the context provably unchanged.
+    const nothing = renderText(tools.get('context_compact')!, {}, { status: 'nothing', reason: 'the recent tail already keeps this whole context verbatim' })
+    expect(nothing).toContain('Nothing safe to compact')
+    expect(nothing).toContain('This context is unchanged')
+    const unavailable = renderText(tools.get('context_compact')!, {}, { status: 'unavailable', reason: 'this agent scope mounts no compaction engine' })
+    expect(unavailable).toContain('not available in this scope')
   })
 
   it('context_rollover renders the scheduled swap and keeps render text self-describing', () => {

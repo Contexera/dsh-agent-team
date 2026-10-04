@@ -27,6 +27,7 @@ import type {} from '@deepseek-ai/dsh-tools'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
 import type { Domain } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type {} from '@wowyuarm/dsh-jev'
 import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeRequestScopedAttachment } from './attachments.ts'
 import { reportEnvironment } from './environment-check.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_NAMESPACE, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, planLegacyAdoption, type LegacyHumanProfileFields } from './human-profile.ts'
@@ -278,7 +279,7 @@ declare module '@deepseek-ai/cordis' {
 /** Tool-side request for one context rollover; the Host validates without side effects. */
 export interface AgentTeamNewContextToolRequest {
   readonly memberId: AgentTeamMemberId
-  /** Selected checkpoint ref from `context_timeline`; absent means fresh. */
+  /** Selected checkpoint ref from `context_status`; absent means fresh. */
   readonly checkpointRef?: AgentTeamContextCheckpointRef
   readonly relatedFiles?: readonly { readonly path: string; readonly reason: string }[]
 }
@@ -503,6 +504,15 @@ export default class AgentTeam extends TypertRemoteService {
       },
       activeClaimLabels: memberId => this.activeClaimLabels(memberId),
       runningJobLabels: memberId => this.runningJobLabels(memberId),
+      /**
+       * The relatedness judge of the long-gap gate: the deployment's own `jev`
+       * service, read from this Host's plane. A profile that mounts none leaves
+       * the gate off — a missing judge is a deployment choice, never a failure —
+       * and the read is lazy, so a jev row mounted after this Host still answers
+       * on the next step. `@wowyuarm/dsh-jev` is an optional peer for that
+       * reason: this Host names the service, it never mounts it.
+       */
+      judgeForAgent: () => this.ctx.get('jev'),
       failed: (memberId, diagnostic) => {
         this.setMemberFailure(memberId, 'compaction', diagnostic)
         this.emitAutoCompactionChanged(memberId)
@@ -2296,9 +2306,9 @@ export default class AgentTeam extends TypertRemoteService {
    */
   async contextTimelineForAgent(agent: Agent, request: AgentTeamTimelineToolRequest): Promise<AgentTeamTimelineToolResult> {
     const member = this.memberForAgent(agent)
-    if (member === undefined || member.state !== 'enabled') throw new Error('context_timeline requires an active Team Member')
+    if (member === undefined || member.state !== 'enabled') throw new Error('context_status requires an active Team Member')
     const limit = request.limit === undefined ? DEFAULT_TIMELINE_LIMIT : Math.trunc(request.limit)
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_TIMELINE_LIMIT) throw new Error(`context_timeline limit must be between 1 and ${MAX_TIMELINE_LIMIT}`)
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_TIMELINE_LIMIT) throw new Error(`context_status limit must be between 1 and ${MAX_TIMELINE_LIMIT}`)
     const meter = agent.ctx.get('tokenMeter')
     const measurement = meter?.measure(agent.session)
     const usageTokens = measurement?.totalTokens ?? 0
@@ -2506,7 +2516,7 @@ export default class AgentTeam extends TypertRemoteService {
       throw new Error(`context_rollover is refused while this Member owns jobs that would not survive the switch (${blocking.join(', ')}); collect or stop them first, then retry`)
     }
     if (request.checkpointRef === undefined) return { mode: 'fresh' }
-    if (!/^(context-checkpoint-[0-9a-f]{64}|team-boundary-[0-9a-f]{64})$/.test(request.checkpointRef)) throw new Error('checkpointRef must be an opaque ref exactly as returned by context_timeline')
+    if (!/^(context-checkpoint-[0-9a-f]{64}|team-boundary-[0-9a-f]{64})$/.test(request.checkpointRef)) throw new Error('checkpointRef must be an opaque ref exactly as returned by context_status')
     // Full current-state prevalidation through the ONE resolver the swap
     // itself uses: a ref that is fabricated, unattributable, nonshrinking,
     // unmeasurable, over-budget, or blocked by multiple active Claims

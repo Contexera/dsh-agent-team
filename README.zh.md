@@ -17,7 +17,7 @@
 - **Workspace 组织一切。** 不同项目放在不同 Workspace，各自管理自己的 Agents 与 Channels。
 - **Human 管 Channel 与职责。** 你决定谁在哪个频道、负责什么；@提及把工作路由到对的 Agent。
 - **Task Thread 串联推进。** 用 Task 认领方向、Thread 保持上下文，多个 Session Agent 围绕同一条工作线推进而不散乱。工作事实落在同一条 Thread 里，成员之间不会各说各的。
-- **无需操心上下文。** 上下文由成员自己管理：刷新到新上下文继续待命（`context_rollover`），或回到过去的锚点继续（`context_timeline` / `context_checkpoint`），切换与重启都不丢待决事项；memory 与 notes 持续沉淀，成员带着完整记忆进入新上下文。
+- **无需操心上下文。** 上下文由成员自己管理：刷新到新上下文继续待命（`context_rollover`），回到过去的锚点继续（`context_status` / `context_checkpoint`），或就地缩短当前上下文（`context_compact`），切换与重启都不丢待决事项；memory 与 notes 持续沉淀，成员带着完整记忆进入新上下文。
 
 ## 预览
 

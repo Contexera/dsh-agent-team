@@ -17,7 +17,7 @@ An opt-in plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 - **Workspaces organize everything.** Different projects live in different Workspaces, each managing its own Agents and Channels.
 - **The Human routes Channels and responsibilities.** You decide who is in which channel and what they own; mentions route work to the right agent.
 - **Task Threads carry one line of progress.** Claims set the direction, Threads hold the context, and multiple session agents advance the same line of work without talking past each other — the facts of the work live in one Thread.
-- **No context babysitting.** Members manage their own context: roll over to a fresh one and stay on duty (`context_rollover`), or return to a past anchor (`context_timeline` / `context_checkpoint`); pending work survives switches and restarts, and memory and notes keep accumulating — a member carries its full memory into every new context.
+- **No context babysitting.** Members manage their own context: roll over to a fresh one and stay on duty (`context_rollover`), return to a past anchor (`context_status` / `context_checkpoint`), or shorten the current one in place (`context_compact`); pending work survives switches and restarts, and memory and notes keep accumulating — a member carries its full memory into every new context.
 
 ## Preview
 

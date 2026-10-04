@@ -1,43 +1,49 @@
 /**
  * Model-facing context-management tools for Team Members.
  *
- * `context_rollover` and `context_checkpoint` are the published engine's tools,
- * built by `createContinuityTools`: the engine owns their argument contract, the
- * anti-forgery gate on a cited ref, the `concludeTurn()` timing, and the render
- * shapes, while the Team supplies its own vocabulary (`TEAM_CONTINUITY_TEXT`)
- * and the mechanism behind `ContinuityToolAdapter`. Hand-written copies of those
- * two descriptions used to live here and drifted from the engine's defaults, so
- * the Team's guidance now travels only through the engine's text seams.
+ * All four are the published engine's tools, built by `createContinuityTools`:
+ * the engine owns their argument contract, the anti-forgery gate on a cited ref,
+ * the `concludeTurn()` timing, and the render shapes, while the Team supplies
+ * its own vocabulary (`TEAM_CONTINUITY_TEXT`) and the mechanism behind
+ * `ContinuityToolAdapter`. Hand-written copies of those descriptions used to
+ * live here and drifted from the engine's defaults, so the Team's guidance now
+ * travels only through the engine's text seams — including the Team glossary the
+ * engine splices into `context_status` as `timelineGuidance`.
  *
- * `context_timeline` deliberately stays Team-owned. Its render never prints a
- * ref-shaped string for a non-restorable row — a short digest names the row
- * instead, because a printed ref is exactly what a model copies into
- * `checkpointRef` — and the engine's render has no switch for that. The
- * adapter's own `timeline` member is still implemented: the engine's contract
- * requires it, and the shape it returns is the one the engine's render reads.
+ * One Team rule survives only in the adapter: for a row the engine renders as
+ * not restorable it prints that row's `ref` verbatim (`brief` truncates at 120
+ * characters, and a Team ref is 83), and a printed ref is exactly what a model
+ * copies into `checkpointRef`. The adapter therefore answers such a row with a
+ * short digest instead of its ref — the same digest that keeps two rows sharing
+ * a label and a price apart — so no non-selectable row carries a citable string.
  * @module @wowyuarm/dsh-agent-team/context-tools
  */
 
 import { createHash } from 'node:crypto'
 import {
+  compactibleNow,
   createContinuityTools,
   type CheckpointToolRequest,
+  type ContextCompactionScope,
+  type ContextTimelineItem,
   type ContinuityToolAdapter,
   type ContinuityToolText,
   type RolloverToolRequest,
 } from '@wowyuarm/dsh-context-continuity'
 import type { AgentTeamContextCheckpointRef } from '@wowyuarm/dsh-agent-team/types'
-import { MAX_TIMELINE_LIMIT } from '@wowyuarm/dsh-agent-team/host'
-import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
+import { MAX_TIMELINE_LIMIT, type AgentTeamTimelineItem } from '@wowyuarm/dsh-agent-team/host'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { member, service } from './host-access.ts'
 
 /**
  * Short stable identifier for one timeline row: a digest of the anchor's own
  * ref. Rows routinely share a label (`Team message` is a constant) and a price
  * (the same completed turn prices both), so without it two distinct anchors
- * read as one duplicated row. Deliberately NOT the ref and deliberately not
- * actionable: a ref only means something on a restorable row, which prints it
- * in full for `context_rollover`.
+ * read as one duplicated row. It is also what a row that is NOT restorable
+ * answers as its `ref`, because the engine's render prints that field for every
+ * row: a ref only means something on a restorable row, which prints it in full
+ * for `context_rollover`.
  */
 function anchorId(checkpointRef: string): string {
   return createHash('sha256').update(checkpointRef).digest('hex').slice(0, 6)
@@ -51,16 +57,62 @@ function agentOf(exec: ToolRunContext) {
 }
 
 /**
+ * The compaction capability in one calling Agent's preset scope, priced by the
+ * same meter the pressure policy reads. The Host owns the address: a preset
+ * revision publishes its services behind its own isolate, so the engine is asked
+ * for through the one method that knows which realm holds it. A Member whose
+ * composition mounts none reports "not available in this scope" — never a
+ * failure, never a silent no-op.
+ *
+ * The meter travels with the scope because two engine decisions read it: how
+ * much of the newest surface a compaction keeps verbatim, and the price a status
+ * reports for a compaction started now. A scope without one still compacts —
+ * keeping the newest instruction and everything after it — and prices nothing.
+ */
+function compactionScopeFor(agent: Agent): ContextCompactionScope | undefined {
+  const engine = service(agent).compactionForAgent(agent)
+  if (engine === undefined) return undefined
+  const meter = agent.ctx.get('tokenMeter')
+  return { engine, ...(meter === undefined ? {} : { meter }) }
+}
+
+/**
+ * One Host timeline item in the engine's own vocabulary. Team's four sources
+ * collapse onto the engine's three kinds, and the two that say something a
+ * reader needs (`handoff`, `compaction`) ride its opaque `kind` field rather
+ * than being flattened silently.
+ *
+ * The `ref` of a row that is not restorable is a short digest rather than the
+ * ref itself: the engine's render prints this field on every row, and a printed
+ * ref is what a model copies into `checkpointRef`. Only a restorable row — the
+ * one kind of row whose ref `context_rollover` accepts — carries a citable
+ * string.
+ */
+export function engineTimelineItems(items: readonly AgentTeamTimelineItem[]): ContextTimelineItem[] {
+  return items.map(item => ({
+    ref: item.restorable ? item.checkpointRef : anchorId(item.checkpointRef),
+    label: item.name,
+    source: item.source === 'agent' ? 'checkpoint' as const : item.source === 'head' ? 'head' as const : 'boundary' as const,
+    ...(item.source === 'handoff' || item.source === 'compaction' ? { kind: item.source } : {}),
+    retainedTokens: item.retainedTokens,
+    discardedTokens: item.discardedTokens,
+    affectedTopics: [...item.affectedThreads],
+    restorable: item.restorable,
+    ...(item.reason === undefined ? {} : { reason: item.reason }),
+  }))
+}
+
+/**
  * Team's half of the engine's contract: resolve the calling execution to its
  * Member and Host, answer the ref gate from the one policy that owns it, and run
  * the effects. Every method resolves its own caller, because one adapter serves
- * all three tools.
+ * all four tools.
  */
 const adapter: ContinuityToolAdapter = {
   /**
    * One policy, two readers: a ref is restorable exactly when the Team timeline
    * — the same list the model picked from — offers it as such. The walk is asked
-   * for the widest window the timeline tool can show, so any ref a timeline read
+   * for the widest window `context_status` can show, so any ref a status read
    * could have printed is answered here.
    */
   async isRestorableRef(checkpointRef, exec) {
@@ -98,39 +150,22 @@ const adapter: ContinuityToolAdapter = {
       memberId: current.memberId,
       ...(request.limit === undefined ? {} : { limit: request.limit }),
     })
-    // Team's item vocabulary is its own (`agent` / `team-boundary` / `handoff` /
-    // `compaction` / `head`); the engine names the same anchors in its terms —
-    // four Team sources collapse onto the engine's three kinds, and the two that
-    // say something a reader needs (`handoff`, `compaction`) ride its opaque
-    // `kind` field rather than being flattened silently.
+    // "This scope cannot price a compaction" and "a compaction would replace
+    // nothing" are different facts, and only the second is worth showing, so an
+    // unpriced scope omits the field and the status omits its line.
+    const scope = compactionScopeFor(agent)
+    const compactible = scope === undefined ? undefined : compactibleNow(agent.session, scope)
     return {
       usageTokens: result.usageTokens,
       handoffAt: result.handoffAt,
       hardLimit: result.hardLimit,
-      items: result.items.map(item => ({
-        ref: item.checkpointRef,
-        label: item.name,
-        source: item.source === 'agent' ? 'checkpoint' as const : item.source === 'head' ? 'head' as const : 'boundary' as const,
-        ...(item.source === 'handoff' || item.source === 'compaction' ? { kind: item.source } : {}),
-        retainedTokens: item.retainedTokens,
-        discardedTokens: item.discardedTokens,
-        affectedTopics: [...item.affectedThreads],
-        restorable: item.restorable,
-        ...(item.reason === undefined ? {} : { reason: item.reason }),
-      })),
+      ...(compactible === undefined ? {} : { compactible }),
+      items: engineTimelineItems(result.items),
       ...(result.incompleteFrom === undefined ? {} : { incompleteFrom: result.incompleteFrom }),
     }
   },
-  /**
-   * The compaction capability in the calling Agent's preset scope. The Host
-   * owns that address: a preset revision publishes its services behind its own
-   * isolate, so the engine is asked for through the one method that knows which
-   * realm holds it. A Member whose composition mounts none reports "not
-   * available in this scope" — never a failure, never a silent no-op.
-   */
   compactionFor(agent) {
-    const engine = service(agent).compactionForAgent(agent)
-    return engine === undefined ? undefined : { engine }
+    return compactionScopeFor(agent)
   },
 }
 
@@ -140,94 +175,26 @@ const adapter: ContinuityToolAdapter = {
  * your handoff" sentence reads as "everything must be restated", which is what
  * our own corpus showed members doing. The checklist carries the one item the
  * engine's default does not ask for and the corpus showed missing: which facts
- * were verified and which were only trusted.
+ * were verified and which were only trusted. `timelineGuidance` is the glossary
+ * the engine splices into `context_status`: the engine names the structure, and
+ * only the Team can say what its own rows mean.
  */
 const TEAM_CONTINUITY_TEXT: ContinuityToolText = {
   subjectNoun: 'Team Member',
   carriedContext: 'You stay the same Team Member: your @handle and role, your private memory index, your skills catalog, and the Team and Workspace instructions carry across a rollover — they are re-injected at birth — and the Team ledger (Threads, Tasks, Claims, your inbox, your owner jobs) is one query away (team_view, team_inbox). Do not restate any of it.',
   rolloverChecklist: 'the objective and the atomic action in flight; facts and evidence not already recorded elsewhere; which items you verified and which you only trusted; inferences and unresolved conflicts; current external side effects and their verification state (files, git, jobs, browser state, remote calls); one explicit next step',
+  timelineGuidance: ' Team rows carry Team sources: `checkpoint` is one you recorded, `boundary` is a Team boundary this Host contributed — a committed team_message, a successful team_claim mutation, or a follow/unfollow, rendered as `Team message`, `Team task claim change`, `Team attention change` — and `head` is the current generation. A Thread\'s first delivered notice is a boundary too, rendered `First arrival: <refs>`; later re-deliveries and reminders produce none. A Team boundary is a selectable default exactly when the retained prefix through it stays inside one Thread and the return would shrink the working set below the handoff budget; a boundary spanning several Threads, or attributable to none, states its reason instead. The `anchor` shown on a row that is not restorable is a short digest, never a ref: cite only a ref printed on a restorable row.',
   topicNoun: 'Thread',
   topicNounPlural: 'Threads',
 }
 
 const engineTools = createContinuityTools(adapter, TEAM_CONTINUITY_TEXT)
 
-const contextTimeline = defineTool({
-  name: 'context_timeline',
-  description: 'Inspect the bounded structural timeline of this Member\'s context lineage: named checkpoints you recorded, Team boundaries (effect anchors: a committed team_message, a successful team_claim mutation, a follow/unfollow — rendered as `Team message`, `Team task claim change`, `Team attention change`; plus a Thread\'s first delivered notice, rendered as `First arrival: <refs>`), handoff and compaction boundaries, and the current head — across the current generation and its archived ancestors. Only the first delivery of a Thread\'s facts anchors; later re-deliveries and reminders produce no boundary. Returns approximate retained/discarded token estimates, current usage against the pressure budget, the Threads whose facts entered your context by each anchor, and which anchors are restorable. A Team boundary is a selectable default checkpoint exactly when the retained prefix through it stays inside one Thread and the return would shrink the working set below the handoff budget; a boundary spanning several Threads, or attributable to none, states its reason instead. Every row carries a short `anchor` id: it distinguishes rows that share a label and a price, and it is NOT a ref — only the `checkpointRef` printed on a restorable row may be cited to context_rollover. Structural only: no transcript content. A fresh context_rollover (no checkpointRef) never requires consulting this timeline first — call it directly. Use this tool only when you specifically intend a checkpointRef return: to pick the smallest sufficient ref, or to confirm that a fresh handoff is the better path when every anchor is marked non-restorable.',
-  parameters: {
-    limit: { type: 'number', description: 'Maximum number of items to return (default 12, at most 24).' },
-  },
-  output: {
-    schema: { type: 'object', additionalProperties: false, properties: {
-      usageTokens: { type: 'number', required: true },
-      hardLimit: { type: 'number', required: true },
-      handoffAt: { type: 'number', required: true },
-      items: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
-        checkpointRef: { type: 'string', required: true },
-        name: { type: 'string', required: true },
-        source: { type: 'string', required: true },
-        retainedTokens: { type: 'number', required: true },
-        discardedTokens: { type: 'number', required: true },
-        affectedThreads: { type: 'array', required: true, items: { type: 'string' } },
-        restorable: { type: 'boolean', required: true },
-        reason: { type: 'string' },
-        sourceSessionId: { type: 'string' },
-      } } },
-      incompleteFrom: { type: 'object', additionalProperties: false, properties: {
-        sessionId: { type: 'string', required: true },
-        reason: { type: 'string', required: true },
-      } },
-    } },
-    // The item list is the whole decision surface: without each anchor's
-    // ref, label, source, size estimates, affected Threads, and
-    // restorable/reason verdict, the model cannot pick a `checkpointRef` for
-    // `context_rollover` — the summary line alone left the tool unusable for
-    // seeded returns. The short anchor id distinguishes rows that share a
-    // label and a price without ever printing a ref that is not usable. The
-    // Host bounds items (default 12, at most 24), so the list cannot grow
-    // unbounded. `incompleteFrom` states where and why the lineage walk
-    // stopped early, so history read up to that ancestor is known to be a
-    // truncation, not everything that exists.
-    render: (_args, value) => {
-      const lines = [`Context timeline: ${value.usageTokens} tokens used (handoff at ${value.handoffAt}, hard limit ${value.hardLimit}). ${value.items.length} item(s):`]
-      for (const item of value.items) {
-        const threads = item.affectedThreads.length === 0 ? 'no Threads' : `Threads ${item.affectedThreads.join(', ')}`
-        const size = `retained ~${item.retainedTokens}, discarded ~${item.discardedTokens}`
-        const restorable = item.restorable
-          ? `restorable — ref: ${item.checkpointRef}`
-          : `not restorable — ${item.reason ?? 'no reason given'}`
-        lines.push(`- ${item.name} [source: ${item.source}; anchor ${anchorId(item.checkpointRef)}] (${size}; ${threads}) — ${restorable}`)
-      }
-      if (value.incompleteFrom !== undefined) {
-        lines.push(`History incomplete: the lineage walk stopped at Session ${value.incompleteFrom.sessionId} (${value.incompleteFrom.reason}); ancestors before it could not be read and are not reflected above.`)
-      }
-      return [{ type: 'text', text: lines.join('\n') }]
-    },
-  },
-  async execute(args, exec) {
-    const agent = exec.agent
-    if (agent === undefined) throw new Error('context_timeline requires an Agent session')
-    const current = member(agent)
-    const host = service(agent)
-    const limit = typeof args.limit === 'number' ? args.limit : undefined
-    const result = await host.contextTimelineForAgent(agent, { memberId: current.memberId, ...(limit === undefined ? {} : { limit }) })
-    // The Host result is deeply immutable; the tool output contract carries
-    // plain arrays, so re-shape without any semantic change.
-    return {
-      usageTokens: result.usageTokens,
-      hardLimit: result.hardLimit,
-      handoffAt: result.handoffAt,
-      items: result.items.map(item => ({ ...item, affectedThreads: [...item.affectedThreads] })),
-      ...(result.incompleteFrom === undefined ? {} : { incompleteFrom: result.incompleteFrom }),
-    }
-  },
-})
-
 export function registerContextTools(ctx: { readonly tools: { register(tool: unknown): void } }): void {
-  // The engine's two, then the Team's own timeline: one registration each, and
-  // the roster the Host validates against stays the same three names.
+  // The engine's four, and nothing else: the roster the Host validates against
+  // carries the same names, so no description names a tool this surface lacks.
   ctx.tools.register(engineTools.rollover)
   ctx.tools.register(engineTools.checkpoint)
-  ctx.tools.register(contextTimeline)
+  ctx.tools.register(engineTools.status)
+  ctx.tools.register(engineTools.compact)
 }

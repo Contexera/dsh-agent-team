@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@wowyuarm/dsh-context-continuity':
         specifier: ^0.2.0
-        version: 0.2.0
+        version: 0.2.0(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -36,6 +36,9 @@ importers:
       '@types/react-dom':
         specifier: ~18.3.7
         version: 18.3.7(@types/react@18.3.31)
+      '@wowyuarm/dsh-jev':
+        specifier: 0.1.1
+        version: 0.1.1(@deepseek-ai/schemastery@3.18.2)
       jscpd:
         specifier: ^5.0.16
         version: 5.0.16
@@ -549,6 +552,13 @@ packages:
         optional: true
       '@wowyuarm/dsh-jev':
         optional: true
+
+  '@wowyuarm/dsh-jev@0.1.1':
+    resolution: {integrity: sha512-6oAOWcCtAELI88dYECKSLHblqKvBOkozRz8TM8VWxZS2eO/0BDzkLmR5827AJT/iTWgkFokvc/MlfnZF3Pm1xw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.1
+      '@deepseek-ai/schemastery': ^3.18.1
 
   ansi-regex@5.0.1:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
@@ -1308,9 +1318,15 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
 
-  '@wowyuarm/dsh-context-continuity@0.2.0':
+  '@wowyuarm/dsh-context-continuity@0.2.0(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))':
     dependencies:
       zod: 4.6.5
+    optionalDependencies:
+      '@wowyuarm/dsh-jev': 0.1.1(@deepseek-ai/schemastery@3.18.2)
+
+  '@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2)':
+    dependencies:
+      '@deepseek-ai/schemastery': 3.18.2
 
   ansi-regex@5.0.1: {}
 

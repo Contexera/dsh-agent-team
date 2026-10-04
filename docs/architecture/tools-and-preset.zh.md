@@ -4,11 +4,13 @@
 
 显式的 `team-member` preset 是唯一的 Team Member composition。它加入完整 coding capability rows（shell、filesystem/search、web search 与 fetch、background jobs、skill 加载工具、compaction）；skill 发现本身不是 preset row——每个 Member 的 provider 由 Host 注册在其 agent scope 上（见 Host authority）、Team collaboration guidance/tools、Harness Workspace instruction discovery 和有界的 private-memory reference context。普通 Sessions 留在这个 isolated roster 之外，不会获得 Team prompt sections、tools 或 Member memory。
 
-八个 model-facing tools 定义在 `packages/tool-agent-team/src/`：五个 Team 工具在 `index.ts`，三个 context 工具在 `context-tools.ts`；实现的 collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离开的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了让测试可用就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
+九个 model-facing tools 定义在 `packages/tool-agent-team/src/`：五个 Team 工具在 `index.ts`，四个 context 工具在 `context-tools.ts`；实现的 collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离开的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了让测试可用就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
 
-Member 上下文自主管理在这些 preset 之上由 Host 编排。`context_rollover` 与 `context_checkpoint` 工具只做校验并结束/锚定 turn：在 tool 时，引擎的门先拒绝 Member 自己的 timeline 未列为 restorable 的 `checkpointRef`，通过这道门的 ref 仍由 Host 的 seed resolver（与换窗同一套）预校验，因此当下不可能成功的 ref 以 model-visible 的 error result 拒绝，而不是返回假 `scheduled`；可变 guard 集（jobs、route limits）在 commit seam 复查。
+Member 上下文自主管理在这些 preset 之上由 Host 编排。`context_rollover` 与 `context_checkpoint` 工具只做校验并结束/锚定 turn：在 tool 时，引擎的门先拒绝 Member 自己的 `context_status` 未列为 restorable 的 `checkpointRef`，通过这道门的 ref 仍由 Host 的 seed resolver（与换窗同一套）预校验，因此当下不可能成功的 ref 以 model-visible 的 error result 拒绝，而不是返回假 `scheduled`；可变 guard 集（jobs、route limits）在 commit seam 复查。
 
-三个 context 工具里有两个用的是引擎自己的定义：`context-tools.ts` 通过引擎的 `createContinuityTools` 构造 `context_rollover` 与 `context_checkpoint`，只提供 Team 词汇与 host adapter，不再自带文案与校验。`context_timeline` 仍是 Team 自己的实现——它的渲染对不可返回的行绝不打印可引用的 ref。
+四个 context 工具全部用引擎自己的定义：`context-tools.ts` 通过引擎的 `createContinuityTools` 构造 `context_rollover`、`context_checkpoint`、`context_status` 与 `context_compact`，只提供 Team 词汇与 host adapter，不再自带文案与校验。因此引擎的文案永远只点名本工具面确实存在的工具，而 Team 自己的词汇表经引擎的 `timelineGuidance` 接缝传入。
+
+唯一留在 adapter 里的 Team 规则是：引擎在每一行都渲染该行的 `ref`，所以不可返回的行以该 ref 的短摘要作答，而不给出 ref 本身——任何不可选择的行都不会携带可引用的字符串。
 
 单一 context-continuity coordinator（`ContextContinuityCoordinator`，来自 `@wowyuarm/dsh-context-continuity`）由 `context-continuity-host.ts` 绑定到 Member lifecycle，后者还用 Team 的 plugin id 与冻结的 handoff 文案构造引擎的 message codec。它监听各 Member Session 的事件，从 durable 的 `tool/call`+`tool/result` 对折出 rollover 与 checkpoint 意图，再经串行 lifecycle queue 执行换窗。
 

@@ -42,7 +42,7 @@ history 页渲染历史结果与 Thread 身份，首页给 full anchor、continu
 
 ## `context_rollover`
 
-`context_rollover` 为调用的 Member 安排一次进入全新上下文的 rollover。Agent 传入私有 `handoff`（及可选 `relatedFiles`；传入 `checkpointRef` 则改为回返到已记录的 checkpoint）。`checkpointRef` 在工具与参数两级 description 上做了 copy hardening：普通续代与压力换窗必须省略，只有引用 `context_timeline` 结果中列为 restorable 的精确 ref 时才提供——绝不合成或猜测。工具只做校验并返回 `status: 'scheduled'`，同时结束当前 turn——工具体本身不做任何 lifecycle 或 Inbox 副作用。
+`context_rollover` 为调用的 Member 安排一次进入全新上下文的 rollover。Agent 传入私有 `handoff`（及可选 `relatedFiles`；传入 `checkpointRef` 则改为回返到已记录的 checkpoint）。`checkpointRef` 在工具与参数两级 description 上做了 copy hardening：普通续代与压力换窗必须省略，只有引用 `context_status` 结果中列为 restorable 的精确 ref 时才提供——绝不合成或猜测。工具只做校验并返回 `status: 'scheduled'`，同时结束当前 turn——工具体本身不做任何 lifecycle 或 Inbox 副作用。
 
 Host 只在成功的 `tool/result` 持久落盘后才反应：等待所属 turn 结束并真正 idle，提交一个幂等的 `team/member-session-rolled-over` operation（Member actor、仅限自身，记录旧/新 Session id、成功的 handoff result sequence 和 trigger——绝不写入 handoff 正文），dispose 旧 Agent、归档旧 Session，再激活一个全新 Session，以 handoff 作为第一份 model-facing context。Member 身份、模型、私有记忆、skills、Claims 和 Attention 全部保留。不带 `checkpointRef` 时新 Session 不继承旧的事件/chunk 历史；带 ref 时以记录 checkpoint 的精确 completed-turn 前缀作 seed（标记 seeded，继承历史保持惰性）——ledger 绝不记录 handoff 正文。意图之后到达的非 Team 输入在新一代恰好投递一次；过期的 Team Inbox notices 被丢弃并从 ledger 重新派生。
 
@@ -54,14 +54,28 @@ Member 持有无法在切换中存活的 jobs 时 rollover 会被拒绝——任
 
 `context_checkpoint` 为调用的 Member 记录一个命名的当前上下文 checkpoint。与 `context_rollover` 一样，工具体不做 lifecycle 副作用：durable checkpoint 就是 Session projection 折叠的成功 `tool/call`+`tool/result` 对，返回的 ref 由 Member Session 身份加 tool call id 确定性派生，模型可以在结果存在前就引用它，跨代重复的 provider call id 也不会碰撞。checkpoint 在其所属 turn 结束时 resolve，模型把它作为一个完整工作单元的最后动作来记录；turn 结束后 Host 调度一条 quiet continuation message，让 Member 朝记录的锚点继续工作。投递跨重启恰好一次：projection 的 delivery record 是 durable 的，已送达 continuation 的 checkpoint 不会被重新调度。
 
-## `context_timeline`
+## `context_status`
 
-`context_timeline` 返回该 Member 跨当前 Session 与已归档祖先 lineage 的上下文代际有界结构视图：已记录的 checkpoints（各自锚定的已完成 turn、quiet continuation 是否已送达），以及 handoff、Team-boundary 和 compaction 边界——每个锚点附带其事实已进入该 Member 上下文的 Threads，仅从已送达的 Session 事实派生，绝不使用未读 ledger activity。fresh 的 `context_rollover`（不带 `checkpointRef`）从不需要先查 timeline；timeline 用于选定 checkpointRef 回返，或确认 fresh handoff 是更好路径。
+`context_status` 返回该 Member 跨当前 Session 与已归档祖先 lineage 的上下文代际有界结构视图：已记录的 checkpoints（各自锚定的已完成 turn、quiet continuation 是否已送达），以及 handoff、Team-boundary 和 compaction 边界——每个锚点附带其事实已进入该 Member 上下文的 Threads，仅从已送达的 Session 事实派生，绝不使用未读 ledger activity。
+
+它同时报告该 Member 相对 handoff 预算与 hard limit 的用量，并在该 Member 的 preset 作用域能定价时，报告此刻发起 compaction 会替换多少内容。
+
+工具定义来自引擎（`createContinuityTools`）而非 Team：Team 只提供其背后的 adapter，以及拼进 description 的词汇表，因此工具面与引擎自己的文案不会各自漂移。
+
+fresh 的 `context_rollover`（不带 `checkpointRef`）从不需要先读 status；status 用于选定 checkpointRef 回返，或确认 fresh handoff 是更好路径。
 
 Team 边界锚定在效果而非推送上：committed 的 `team_message`（start 的 Thread 从其结果持久化的 presentation meta 归属，reply 从其 call arguments 归属）、成功的 `team_claim` 变更、成功的 follow/unfollow 各锚定一个边界，label 按动作类别（`Team message`、`Team task claim change`、`Team attention change`）；typed rejection（`unread_required`、`stale_revision`）、失败调用、dm、读路径（`team_inbox`、`team_view`、`team_thread read`）从不产边界。 推送侧仅锚定每个 Thread 首次送达的通知——保留的「工作刚到手」锚点，label 标注该次送达首次引入的 Thread refs（`First arrival: …`），而非 notice 自身的泛化文案——同 Thread 的后续重发与纯提醒（recovery notice，以及该系统移除前记录的 progress-nudge 历史 notice）不产出任何边界。
 
 Team 边界在「经该锚点保留的前缀仍停留在单一 Thread 内」（即恰好一个 Thread 的事实经该锚点进入 Member 上下文）且回返能把工作集缩到 handoff 预算之下时，才是可选择的默认 checkpoint；Thread 归属来自已送达通知正文、claim 变更经 ledger 解析的 Task overlay、以及 committed 消息调用的 ref，前缀跨多 Thread（或不含任何 Thread）的边界以 reason 说明。 该判定依据的是保留前缀，而非边界自身的贡献——这正是 `context_rollover` 在 seed 新一代之前复查的同一证明。 默认边界的 ref 带 Session 作用域，连续代际在同一事件 seq 锚定也不会碰撞。 仅结构信息——不含任何 transcript 正文。
 
-渲染出的列表为每一行附一个短的稳定 `anchor` id（该行自身 ref 的摘要）：名称与价格相同的行仍可区分，而该 id 刻意不是 ref——只有 restorable 行上打印的 `checkpointRef` 才能交给 `context_rollover`。带 `checkpointRef` 的 `context_rollover` 调用会把 Member 回返到该 checkpoint 的精确 completed-turn 前缀：seed 是截至 checkpoint 的 `turn/end` 的 durable 前缀，构造上即平衡；子 Session 在 seed 来源处 parent，继承的 checkpoints 保持为惰性历史（子代不会触发继承的 intent）。回返在 `context_rollover` 工具 prevalidation 的相同条件下被拒绝——未 resolve、无法实质缩减工作集、超预算、或多个 active Claim（无法证明回退停留在单一 Thread 内）；每种拒绝情形下 fresh handoff 都是文档化的替代路径。上下文回返只是重读历史；它绝不声称回滚外部影响。
+渲染由引擎负责。对不可返回的行，Team 以该行自身 ref 的短稳定 `anchor` 摘要作答，而不给出 ref 本身：名称与价格相同的行仍可区分，且任何不可选择的行都不会携带可引用的字符串——只有 restorable 行上打印的 `ref` 才能交给 `context_rollover`。带 `checkpointRef` 的 `context_rollover` 调用会把 Member 回返到该 checkpoint 的精确 completed-turn 前缀：seed 是截至 checkpoint 的 `turn/end` 的 durable 前缀，构造上即平衡；子 Session 在 seed 来源处 parent，继承的 checkpoints 保持为惰性历史（子代不会触发继承的 intent）。回返在 `context_rollover` 工具 prevalidation 的相同条件下被拒绝——未 resolve、无法实质缩减工作集、超预算、或多个 active Claim（无法证明回退停留在单一 Thread 内）；每种拒绝情形下 fresh handoff 都是文档化的替代路径。上下文回返只是重读历史；它绝不声称回滚外部影响。
 
 seed 成本按来源 Session 自身重放的测量定价——无法测量成本的来源不可选择（预算无法证明）；祖先锚点的 discarded 数值近似为当前代的全部 usage。当某一级祖先无法读取时，遍历在该处停止，结果携带 `incompleteFrom`（该祖先的 id 与失败原因）：历史完整到最后一个列出的来源，且可证明在此之外不存在——这是关于历史的事实，绝不是关于 Member 可用性的事实。
+
+## `context_compact`
+
+`context_compact` 就地缩短调用 Member 的当前代：引擎用一段摘要替换较早历史中的一段，并保留该 Member 最新的工作原文。它绝不切换代际，也绝不回返到锚点——这两件事由 `context_rollover` 负责。
+
+Team 从该 Member 自己的 preset 作用域回答引擎的两个问题：由哪个 compaction 引擎服务它，以及它的 surface 值多少。范围由压力策略读取的同一 meter 定价，因此 compaction 实际替换的内容与 `context_status` 承诺的内容不会互相矛盾。
+
+preset 未挂载 compaction 引擎的 Member 会被告知该能力在此作用域不可用——绝不是静默 no-op；没有可安全替换内容的上下文会报告该上下文未改变。

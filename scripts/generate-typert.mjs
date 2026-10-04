@@ -80,6 +80,23 @@ try {
   await mkdir(engineTarget, { recursive: true })
   await cp(join(continuityDir, 'package.json'), join(engineTarget, 'package.json'))
   await cp(join(continuityDir, 'lib'), join(engineTarget, 'lib'), { recursive: true })
+  // The optional jev peer, for the same reason and in the same form: the Host
+  // face names `ctx.jev` as the long-gap gate's judge, and that service's own
+  // type augmentation is what types the read. It is a devDependency of this
+  // repository, so a clean install always has it; the published manifest keeps
+  // it an optional peer, and the empty type-only import that needs it is elided
+  // from the emitted declarations, so a consumer without jev is unaffected.
+  const jevSource = join(projectRoot, 'node_modules', '@wowyuarm', 'dsh-jev')
+  if (!existsSync(jevSource)) {
+    throw new Error(
+      `Typert analysis resolves the bundle's optional '@wowyuarm/dsh-jev' peer at '${jevSource}', which is not installed.`
+      + ' Run `corepack pnpm install` at the repository root (never npm install: it breaks the workspace links).',
+    )
+  }
+  const jevTarget = join(tempPackage, 'node_modules', '@wowyuarm', 'dsh-jev')
+  await mkdir(jevTarget, { recursive: true })
+  await cp(join(jevSource, 'package.json'), join(jevTarget, 'package.json'))
+  await cp(join(jevSource, 'lib'), join(jevTarget, 'lib'), { recursive: true })
   await writeFile(join(tempPackage, 'tsconfig.json'), JSON.stringify({
     extends: '../../tsconfig.base.json',
     include: ['src'],

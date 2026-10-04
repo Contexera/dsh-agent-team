@@ -462,8 +462,8 @@ describe('Agent Team Member persona', () => {
     for (const rule of [
       // The Team tool family, named in prose so a Member knows the surface exists.
       'team_view', 'team_inbox', 'team_thread', 'team_message', 'team_claim',
-      // The context lifecycle: park, anchor, and restore a generation.
-      'context_rollover', 'context_checkpoint', 'context_timeline',
+      // The context lifecycle: park, anchor, read where you stand, shorten in place.
+      'context_rollover', 'context_checkpoint', 'context_status', 'context_compact',
       // Branded refs are written with exactly one colon.
       'never a double colon',
       // Work on a Task is announced with a Claimed direction before it starts.

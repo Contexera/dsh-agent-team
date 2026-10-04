@@ -54,7 +54,7 @@ A committed mutation names its action (Claim created, completed, or released), r
 
 ## `context_rollover`
 
-`context_rollover` schedules one rollover of the calling Member into a fresh context. The Agent passes a private `handoff` (plus optional `relatedFiles`, or a `checkpointRef` to return to a recorded checkpoint instead). The `checkpointRef` is copy-hardened on both the tool and parameter descriptions: omit it for ordinary generation changes and pressure-driven handoffs, and supply it only when citing the exact ref a `context_timeline` result listed as restorable — never a synthesized or guessed one.
+`context_rollover` schedules one rollover of the calling Member into a fresh context. The Agent passes a private `handoff` (plus optional `relatedFiles`, or a `checkpointRef` to return to a recorded checkpoint instead). The `checkpointRef` is copy-hardened on both the tool and parameter descriptions: omit it for ordinary generation changes and pressure-driven handoffs, and supply it only when citing the exact ref a `context_status` result listed as restorable — never a synthesized or guessed one.
 
 The tool only validates and returns `status: 'scheduled'` after concluding the turn — it performs no lifecycle or Inbox side effect in the tool body.
 
@@ -80,11 +80,15 @@ A restart that lands between the durable rollover commit and the new Session's a
 
 The checkpoint resolves at its containing turn's end, so the model records it as the final action of a completed unit of work; after the turn the Host schedules one quiet continuation message so the Member can keep working toward the recorded anchor. Delivery is exactly-once across restarts: the projection's delivery record is durable, and a checkpoint whose continuation already landed is never re-scheduled.
 
-## `context_timeline`
+## `context_status`
 
-`context_timeline` returns one bounded structural view of the Member's context generations across the current Session and its archived ancestor lineage: recorded checkpoints (with the completed turn each anchors to, and whether its quiet continuation was delivered), plus handoff, Team-boundary, and compaction boundaries — each with the Threads whose facts entered the Member's context by that anchor, derived only from delivered Session facts, never from unread ledger activity.
+`context_status` returns one bounded structural view of the Member's context generations across the current Session and its archived ancestor lineage: recorded checkpoints (with the completed turn each anchors to, and whether its quiet continuation was delivered), plus handoff, Team-boundary, and compaction boundaries — each with the Threads whose facts entered the Member's context by that anchor, derived only from delivered Session facts, never from unread ledger activity.
 
-A fresh `context_rollover` (no `checkpointRef`) never requires consulting the timeline first; the timeline is for picking a checkpointRef return or confirming that a fresh handoff is the better path.
+It reports the Member's usage against the handoff budget and the hard limit, and — where the Member's preset scope can price one — what a compaction started now would replace.
+
+The definition is the engine's (`createContinuityTools`), not the Team's: the Team supplies the adapter behind it and the glossary it splices into the description, so the surface and the engine's own copy cannot drift apart.
+
+A fresh `context_rollover` (no `checkpointRef`) never requires reading the status first; the status is for picking a checkpointRef return or confirming that a fresh handoff is the better path.
 
 Team boundaries anchor on effect, not push: a committed `team_message` (a start's Thread is attributed from the durable presentation meta of its result, a reply's from its call arguments), a successful `team_claim` mutation, and a successful follow/unfollow each anchor one boundary, labeled by action class (`Team message`, `Team task claim change`, `Team attention change`); a typed rejection (`unread_required`, `stale_revision`), a failed call, a dm, or the read path (`team_inbox`, `team_view`, `team_thread read`) never does.
 
@@ -94,10 +98,18 @@ A Team boundary is a selectable default checkpoint exactly when the retained pre
 
 The rule is judged on the retained prefix, never on the boundary's own contribution, which is the same proof `context_rollover` revalidates before it seeds a generation. Default-boundary refs are session-scoped, so consecutive generations anchoring at the same event seq never collide. Structural only — no transcript content.
 
-The rendered list gives every row a short stable `anchor` id, a digest of that row's own ref: rows that share a name and a price stay distinguishable, and the id is deliberately not a ref — only the `checkpointRef` printed on a restorable row may be cited to `context_rollover`.
+Every row is rendered by the engine. On a row that is not restorable the Team answers with a short stable `anchor` digest of that row's own ref instead of the ref itself: rows that share a name and a price stay distinguishable, and no non-selectable row ever carries a citable string — only the `ref` printed on a restorable row may be cited to `context_rollover`.
 
 A `context_rollover` call with a `checkpointRef` rolls the Member back to that checkpoint's exact completed-turn prefix: the seed is the durable prefix through the checkpoint's `turn/end`, balanced by construction, and the child Session parents at the seed source while inherited checkpoints stay inert history (no inherited intent fires in the child).
 
 Return is rejected under the same conditions the `context_rollover` tool prevalidates — unresolved, nonshrinking, over-budget, or multiple active Claims (a rewind cannot be proven to stay inside one Thread); in every rejection case a fresh handoff is the documented alternative. A context return re-reads history; it never claims to revert external effects.
 
 Seed costs are priced from the source Session's own replayed measurement — a source whose cost cannot be measured is not selectable (the budget cannot be proven); the discarded figure for an ancestor anchor approximates the current generation's whole usage. When an ancestor cannot be read, the walk stops there and the result carries `incompleteFrom` (the ancestor's id and the failure reason): history is complete through the last listed source and provably absent beyond it, which is a fact about history, never about Member availability.
+
+## `context_compact`
+
+`context_compact` shortens the calling Member's current generation in place: the engine replaces one stretch of older history with a summary and keeps the Member's newest work verbatim. It never switches generation and never returns to an anchor — `context_rollover` owns both.
+
+The Team answers the engine's two questions about that stretch from the Member's own preset scope: which compaction engine serves it, and what its surface costs. The same meter the pressure policy reads prices the range, so what a compaction replaces and what a `context_status` promised cannot disagree.
+
+A Member whose preset mounts no compaction engine is told the capability is not available in this scope — never a silent no-op — and a context with nothing safe to replace reports that this context is unchanged.

@@ -43,7 +43,7 @@ function headerOf(sessionId: string): SessionHeader {
 
 /**
  * Read one log through the engine's production timeline read with Team's fold
- * config — the same path `context_timeline` takes, so a case here pins the
+ * config — the same path `context_status` takes, so a case here pins the
  * refs, kinds, and order the model is actually offered.
  */
 async function readTimeline(
