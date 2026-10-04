@@ -370,20 +370,42 @@ interface CheckpointSeed {
  * The settings service derives every form from the owning plugin's Config, so
  * the profile is this plugin's own config rather than a section of its own.
  *
- * Two kinds of field live here. Volatile ones — the profile and the judge's own
- * settings — are what the settings service offers a form for and what an edit
- * reaches live, without remounting the Host. The gate's thresholds are the
- * other kind: policy read once when the row mounts, so they stay non-volatile,
- * no settings form offers them, and a deployment states them in its own patch
- * layer.
+ * Every field here is volatile, and one rule follows from that: the settings
+ * service offers a form only for volatile fields, so a non-volatile field would
+ * be invisible AND unwritable — it would exist only in a deployment's patch
+ * layer. The gate's thresholds were that kind of field until the deadline a
+ * judge can answer within turned out to be a property of the endpoint rather
+ * than of the bundle; they are volatile now, and the Host keeps one gate object
+ * whose fields it refreshes in place, because the engine reads them per step.
  */
 export interface Config {
   name: Volatile<string>
   avatarRef: Volatile<string | undefined>
   /** Long-gap gate thresholds; an omitted field keeps the engine's default. */
-  readonly gate: PressureGate
+  readonly gate: TeamGateSettings
   /** The relatedness judge's own settings; a key here is what mounts it. */
   readonly jev: TeamJudgeSettings
+}
+
+/** The Host row's `gate` fields, as the settings service reads and writes them. */
+export interface TeamGateSettings {
+  /** At or above this context size the gate may hold a step. */
+  readonly tokens: Volatile<number | undefined>
+  /** A generation idle for at least this long counts as a long gap. */
+  readonly idleMs: Volatile<number | undefined>
+  /** How long one judgement may take before the step proceeds ungated. */
+  readonly judgeTimeoutMs: Volatile<number | undefined>
+}
+
+/**
+ * The gate object the pressure policy holds, refreshed in place rather than
+ * replaced: the engine reads every threshold at the step it applies to, so
+ * keeping the identity stable is what makes a settings edit change the policy
+ * of a running Host. A field the row omits is written as undefined, which is
+ * the engine's own signal to fall back to its default.
+ */
+type LivePressureGate = {
+  -readonly [K in keyof PressureGate]: PressureGate[K]
 }
 
 /** The Host row's `jev` fields, as the settings service reads and writes them. */
@@ -481,6 +503,12 @@ export default class AgentTeam extends TypertRemoteService {
     compaction?: string
   }>()
   private readonly pressurePolicy: TeamPressurePolicy
+  /**
+   * The gate thresholds the pressure policy reads, and the only copy of them:
+   * refreshed in place from the row's volatile config, never replaced, so the
+   * engine's per-step read sees a settings edit without a remount.
+   */
+  private readonly gate: LivePressureGate = {}
   /** The long-gap gate's judge: this Host's own `jev` mount, reconciled with the row. */
   private readonly contextJudge: TeamContextJudge
   private readonly notifiedInbox = new Map<AgentTeamMemberId, string>()
@@ -548,9 +576,10 @@ export default class AgentTeam extends TypertRemoteService {
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'agentTeam')
+    this.refreshGate()
     this.contextJudge = new TeamContextJudge(this.ctx, {
       config: () => this.judgeConfig(),
-      deadlineMs: () => this.config.gate.judgeTimeoutMs ?? DEFAULT_GATE_JUDGE_TIMEOUT_MS,
+      deadlineMs: () => this.gate.judgeTimeoutMs ?? DEFAULT_GATE_JUDGE_TIMEOUT_MS,
     })
     this.pressurePolicy = new TeamPressurePolicy({
       agentForMember: memberId => this.handles.get(memberId)?.agent,
@@ -561,9 +590,11 @@ export default class AgentTeam extends TypertRemoteService {
       },
       activeClaimLabels: memberId => this.activeClaimLabels(memberId),
       runningJobLabels: memberId => this.runningJobLabels(memberId),
-      // Deployment policy, read once at mount: the row's own gate config, whose
-      // omitted fields the engine answers with its own defaults.
-      gate: this.config.gate,
+      // Deployment policy: the row's own gate config, whose omitted fields the
+      // engine answers with its own defaults. This object is this Host's one
+      // copy, refreshed in place on every settings write, so an edit reaches the
+      // next step judged instead of the next mount.
+      gate: this.gate,
       /**
        * The relatedness judge of the long-gap gate: the service this Host
        * mounts from its own row's key, or one a deployment mounted itself. No
@@ -591,9 +622,11 @@ export default class AgentTeam extends TypertRemoteService {
     })
     this.ctx.on('loader/volatile-update', () => {
       this.syncHumanHandle()
-      // The judge's key and endpoint ride the same volatile row, so every write
-      // the settings surface makes is one reconciliation: mount on a new key,
-      // re-configure on a changed endpoint, unmount when the key is cleared.
+      // The whole row is volatile, so every write the settings surface makes is
+      // one reconciliation. The gate comes first: the judge's own budget is
+      // derived from the gate's deadline, so a write that raises both must not
+      // be reconciled against the deadline it replaced.
+      this.refreshGate()
       void this.contextJudge.sync().catch(error => {
         this.ctx.logger.warn('agent-team: the relatedness judge could not be reconciled: %s', error instanceof Error ? error.message : String(error))
       })
@@ -608,6 +641,17 @@ export default class AgentTeam extends TypertRemoteService {
       model: this.config.jev.model.get(),
       apiBase: this.config.jev.apiBase.get(),
     }
+  }
+
+  /**
+   * Copy the row's gate thresholds into the one gate object the pressure policy
+   * holds. Called once at construction and again on every volatile update, so
+   * the policy always reads the thresholds the settings document states.
+   */
+  private refreshGate(): void {
+    this.gate.tokens = this.config.gate.tokens.get()
+    this.gate.idleMs = this.config.gate.idleMs.get()
+    this.gate.judgeTimeoutMs = this.config.gate.judgeTimeoutMs.get()
   }
 
   /** Current human display name; the single source for team_view and @ matching. */
@@ -1670,7 +1714,7 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('contextJudge')
   contextJudgeForClient(_request: AgentTeamContextJudgeRequest): AgentTeamContextJudgeResult {
     const status = this.contextJudge.status()
-    const gate = this.config.gate
+    const gate = this.gate
     return Object.freeze({
       ...status,
       gate: Object.freeze({

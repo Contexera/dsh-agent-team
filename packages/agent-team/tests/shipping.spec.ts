@@ -152,14 +152,17 @@ describe('Agent Team shipping contract', () => {
     const profileFields = HUMAN_PROFILE_SETTINGS_SCHEMA.dict ?? {}
     expect(profileFields.name?.meta.volatile).toBe(true)
     expect(profileFields.avatarRef?.meta.volatile).toBe(true)
-    // The same row carries the long-gap gate, and it is the other kind of
-    // field: policy read once when the row mounts, so it must stay
-    // non-volatile — no settings form offers it, and a deployment states it in
-    // its own patch layer instead. Its three thresholds are all optional, so an
-    // omitted one keeps the engine's own default.
+    // The same row carries the long-gap gate. It is volatile like the rest,
+    // because a non-volatile field is one the settings service can neither show
+    // nor write — it would exist only in a deployment's patch layer, and the
+    // deadline a judge can answer within is a property of the endpoint rather
+    // than of the bundle. Its three thresholds stay optional, so an omitted one
+    // keeps the engine's own default.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
     expect(rowFields.gate?.meta.volatile).toBeUndefined()
-    expect(Object.keys(rowFields.gate?.dict ?? {})).toEqual(['tokens', 'idleMs', 'judgeTimeoutMs'])
+    const gateFields = rowFields.gate?.dict ?? {}
+    expect(Object.keys(gateFields)).toEqual(['tokens', 'idleMs', 'judgeTimeoutMs'])
+    for (const field of Object.values(gateFields)) expect(field.meta.volatile).toBe(true)
     // The judge's own fields are the volatile kind, because the Team settings
     // surface is where a Human enables the gate: every field has to reach the
     // running Host, and the key alone is a secret — so a read reports that it is

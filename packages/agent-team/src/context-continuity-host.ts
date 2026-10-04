@@ -167,11 +167,19 @@ const RECENT_INPUT_LIMIT = 8
  * judgement may take before the step proceeds without one — and the last is the
  * one that decides whether a configured judge is ever heard, because a judge
  * whose own budget is longer than this deadline never answers in time.
+ *
+ * All three are volatile, and the engine is what makes that safe: it reads
+ * every field at the step it applies to, never at construction, so a Host that
+ * keeps one gate object and refreshes its fields in place changes the policy a
+ * running generation is judged by. `judgeTimeoutMs` is the field that needs it
+ * most — the deadline a judge can answer within is a property of the endpoint,
+ * not of the bundle, and a deployment that discovers its endpoint is slow must
+ * be able to raise it without editing a patch layer and restarting.
  */
 export const TEAM_PRESSURE_GATE_SCHEMA = z.object({
-  tokens: z.natural().description('Context size at or above which the long-gap gate may hold a step. Default: 128000.'),
-  idleMs: z.natural().description('How long a generation must have been idle for a step to count as a long gap. Default: 1800000 (30 minutes).'),
-  judgeTimeoutMs: z.natural().description('How long one relatedness judgement may take before the step proceeds without one. Default: 5000.'),
+  tokens: z.natural().volatile().description('Context size at or above which the long-gap gate may hold a step. Default: 128000.'),
+  idleMs: z.natural().volatile().description('How long a generation must have been idle for a step to count as a long gap. Default: 1800000 (30 minutes).'),
+  judgeTimeoutMs: z.natural().volatile().description('How long one relatedness judgement may take before the step proceeds without one. Default: 5000.'),
 })
 
 export interface TeamPressurePolicyOptions {

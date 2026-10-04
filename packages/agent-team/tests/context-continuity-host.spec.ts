@@ -454,6 +454,37 @@ describe('the Team pressure policy over the engine', () => {
     expect(await step(build(33 * 60_000, { judgeTimeoutMs: 10 }, never).policy)).toBe('notice')
   })
 
+  it('applies a threshold written into the gate object a running policy holds', async () => {
+    // The Host keeps one gate object and refreshes its fields in place on every
+    // settings write, so the whole live-edit story rests on the engine reading
+    // those fields per step rather than capturing them at construction. This
+    // pins that: one policy, one object, two steps, two answers.
+    const idle = [{ type: 'turn/end', seq: 3, time: Date.now() - 5 * 60_000 } as unknown as SessionEvent]
+    const { agent } = pressureAgent({ ownEvents: idle })
+    const gate: PressureGate = {}
+    const policy = new TeamPressurePolicy({
+      agentForMember: () => agent,
+      limitsForAgent: () => ({ usageTokens: 200_000, hardLimit: 256_000, handoffAt: 200_000 }),
+      compactionForAgent: () => undefined,
+      activeClaimLabels: () => [],
+      runningJobLabels: () => [],
+      judgeForAgent: () => ({ decide: async () => ({ answers: { related: { type: 'noul', noul: 0.1 } } }) as never }),
+      gate,
+      failed: () => {},
+      log: () => {},
+    })
+    const step = async () => (await policy.onPreStep(MEMBER_ID, [humanInput('the other one?')], new AbortController().signal)).kind
+
+    // Five idle minutes are not a long gap at the engine's 30-minute default.
+    expect(await step()).toBe('notice')
+    // The same object, now stating a one-minute floor: the next step is held.
+    Object.assign(gate, { idleMs: 60_000 })
+    expect(await step()).toBe('hold')
+    // And a size threshold above this Member's usage switches the gate off again.
+    Object.assign(gate, { tokens: 300_000 })
+    expect(await step()).toBe('notice')
+  })
+
   it('switches the gate off when the deployment installed no judge', async () => {
     const idle = [{ type: 'turn/end', seq: 3, time: Date.now() - 33 * 60_000 } as unknown as SessionEvent]
     const { agent } = pressureAgent({ ownEvents: idle })

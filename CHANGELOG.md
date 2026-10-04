@@ -11,6 +11,7 @@ All notable changes to this project are documented in this file. The format foll
 - Context management moves onto the engine's own four tools: `context_status` reads where a Member's context stands (budgets, lineage anchors, and what a compaction would replace), `context_compact` shortens the current generation in place, and the Team-authored `context_timeline` retires. The tools a Member is offered and the tool names its own descriptions mention are now one set.
 - A Member's long-gap relatedness gate gets its judge from the deployment's own key: the bundle ships `@wowyuarm/dsh-jev` and mounts it when the Team Host row states a key — or names an environment variable that holds one — while a row without a key leaves the gate off instead of failing. The judge's own call budget is derived from the gate's deadline, so a configured judge always answers inside the time the gate gives it.
 - The long-gap gate's thresholds are row configuration: the Team Host row takes an optional `gate` object with `tokens`, `idleMs`, and `judgeTimeoutMs`, each field defaulting to the engine's own value, so a deployment can match the gate to its own cadence and give a slower judge the time it needs.
+- The gate's three thresholds are live settings, not mount-time policy: the Team settings surface can show and write them, and an edit reaches the next judged step without a restart. A slower judge endpoint — one whose answer arrives after the 5-second default — no longer needs a hand-edited patch layer.
 
 ## [0.2.0] - 2026-09-29
 
