@@ -2659,3 +2659,132 @@ it('states the local environment check on the Human profile page', async () => {
 
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
+
+/**
+ * The context gate page: the judge's live status above the form that configures
+ * it. The journey proves the whole path — page → settings document → the Host's
+ * own judge → back into the status line — because the thresholds the line
+ * prints come from the Remote that reads the gate in force, not from the form's
+ * drafts. A write that landed and a write that merely staged look identical on
+ * the page, so only that round trip tells them apart.
+ *
+ * The key literal is written, then cleared: mounting and unmounting the judge
+ * is the one state change this page can reach without a network call, and the
+ * literal is a fixture that never leaves the temporary profile.
+ */
+it('configures the context gate from Settings in real Web', async () => {
+  await installLocalBundle(false)
+  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
+  browser = await chromium.launch({ headless: true, executablePath: CHROME })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+  const consoleWatch = watchConsole(page)
+  await page.goto(scaffold.authenticatedUrl)
+  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
+
+  await page.getByRole('button', { name: '设置', exact: true }).click()
+  const panel = page.getByRole('dialog')
+  await panel.getByRole('button', { name: '上下文门控' }).click()
+
+  // A fresh profile holds no key: the page says so, names the environment
+  // variable this deployment reads, and prints the thresholds in force without
+  // claiming any of them as a default of its own.
+  const status = panel.locator('[data-context-judge]')
+  await status.waitFor()
+  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
+  const noKey = (await status.textContent())!
+  expect(noKey).toContain('未配置 key')
+  expect(noKey).toContain('TYPESAFE_API_KEY')
+  expect(noKey).toContain('生效阈值：')
+  expect(noKey).toContain('判官超时')
+  // The page states itself before the form: heading, what the gate is for, and
+  // the status block that says whether a judge answers today.
+  const heading = panel.getByRole('heading', { name: '上下文门控' })
+  await heading.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-no-key.png'), fullPage: true })
+
+  // Nothing is overridden in a fresh profile, so the endpoint controls start
+  // empty: the row states only what it states, and the engine's own defaults
+  // are never copied onto the page. The status line is where the numbers in
+  // force come from, and the key is a password field: a stored literal never
+  // rides a response, so the control starts blank and the page offers no clear
+  // until one is stored.
+  expect(await panel.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('')
+  expect(await panel.getByRole('textbox', { name: 'model' }).inputValue()).toBe('')
+  expect(await panel.getByRole('textbox', { name: 'key 环境变量' }).inputValue()).toBe('')
+  const keyField = panel.getByLabel('key', { exact: true })
+  expect(await keyField.getAttribute('type')).toBe('password')
+  expect(await keyField.getAttribute('autocomplete')).toBe('new-password')
+  expect(await keyField.inputValue()).toBe('')
+  expect(await panel.getByRole('button', { name: '清除已存的 key' }).count()).toBe(0)
+
+  // Keyboard write: type the literal, then save through the control the form
+  // owns. The judge mounts, and the status line reports the Host's own answer
+  // rather than the form's optimism.
+  await keyField.fill('sk-e2e-not-a-real-key')
+  await panel.getByRole('button', { name: '保存' }).click()
+  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('enabled')
+  expect(await keyField.inputValue()).toBe('')
+  expect((await status.textContent())!).toContain('判官已就绪')
+  // The configured control and its clear, where they stand under the key field.
+  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-key-configured.png'), fullPage: true })
+  // Then the same status block the no-key state drew, now stating that a judge
+  // answers and which thresholds are in force.
+  await heading.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-enabled.png'), fullPage: true })
+
+  // Clearing is its own write, and unmounts the judge again. It is the page's
+  // own control, so it is also where the keyboard path is proven: Tab from the
+  // key field reaches it, it carries the one focus ring the language defines,
+  // and Enter is what clears.
+  const clearButton = panel.getByRole('button', { name: '清除已存的 key' })
+  await clearButton.waitFor()
+  await keyField.click()
+  await page.keyboard.press('Tab')
+  const clearRing = await focusRing(page, '[role="dialog"] button:focus-visible')
+  expect(clearRing?.focusVisible).toBe(true)
+  expect(clearRing?.outlineStyle).not.toBe('none')
+  expect(clearRing?.outlineWidth).toBe('2px')
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
+  await expect.poll(async () => await panel.getByRole('button', { name: '清除已存的 key' }).count()).toBe(0)
+
+  // A threshold is row configuration, and the two places it can appear are kept
+  // apart: the field is empty because the row overrides nothing, while the
+  // status line prints the value in force. Saving an override moves that
+  // number, and reset stages the clear back to the composition layer, which the
+  // line follows again.
+  const inherited = /判官超时 (\d+) 毫秒/.exec((await status.textContent())!)?.[1]
+  expect(inherited).toBeDefined()
+  const timeout = panel.getByRole('textbox', { name: '判官超时（毫秒）' })
+  expect(await timeout.inputValue()).toBe('')
+  await timeout.fill('10000')
+  await panel.getByRole('button', { name: '保存' }).click()
+  await expect.poll(async () => (await status.textContent())!.includes('判官超时 10000 毫秒')).toBe(true)
+  await expect.poll(async () => await panel.getByRole('button', { name: '重置' }).count()).toBe(1)
+  await panel.getByRole('button', { name: '重置' }).click()
+  await panel.getByRole('button', { name: '保存' }).click()
+  await expect.poll(async () => (await status.textContent())!.includes(`判官超时 ${inherited} 毫秒`)).toBe(true)
+  expect(await timeout.inputValue()).toBe('')
+
+  // 390×844: the shipped panel keeps its 188px nav rail, so the page has to
+  // survive a column far narrower than its sentences. It must stay inside the
+  // panel and add no horizontal overflow of its own.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  // The status block is what the narrow rule restacks, so the shot is taken at
+  // the top of the page rather than wherever the last write left the scroll.
+  await heading.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-narrow.png'), fullPage: true })
+  const narrow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }))
+  expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
+  const statusBox = (await status.boundingBox())!
+  const panelBox = (await panel.boundingBox())!
+  expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1)
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+}, 180_000)

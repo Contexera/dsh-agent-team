@@ -1,0 +1,143 @@
+/* The context gate page: the judge's live status above the staged form that
+ * configures it. Geometry follows the Human profile page (760px column, 18px
+ * heading, 13px intro) so the two Team settings pages read as one surface; the
+ * status block speaks the environment check's language (16px glyph, 13px
+ * title, 12px detail) and takes a surface only for the state a reader is
+ * expected to act on. The fields and the save row are the shipped settings
+ * form's own, so only the seats this page adds are styled here. */
+
+.section {
+  container-type: inline-size;
+  color: var(--dsw-alias-label-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 760px;
+}
+
+.heading {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.intro {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+  margin: 0;
+}
+
+.status {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+}
+
+.statusIcon {
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+  height: 16px;
+  margin-top: 2px;
+  width: 16px;
+}
+
+.statusBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.statusTitle {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  margin: 0;
+}
+
+.statusDetail {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.status[data-context-judge='enabled'] .statusIcon {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+/* Only a judge that cannot be reached takes a surface: a missing key is a
+ * configuration step, a broken endpoint is something to go and fix. */
+.status[data-context-judge='unavailable'] {
+  background: var(--dsw-alias-state-warn-tertiary);
+  border-radius: var(--dsw-radius-md, 12px);
+  gap: 10px;
+  padding: 12px;
+}
+
+.status[data-context-judge='unavailable'] .statusIcon,
+.status[data-context-judge='unavailable'] .statusTitle,
+.status[data-context-judge='unavailable'] .statusDetail {
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupTitle {
+  font-size: 14px;
+  line-height: 22px;
+  margin: 0;
+  padding-top: 4px;
+}
+
+.groupHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+  padding-top: 2px;
+}
+
+/* The clear sits under the write-only control it belongs to, and says why it is
+ * unavailable while a draft is staged. */
+.clearRow {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.clearHint {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.notice {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+/* The settings shell keeps its nav rail at every viewport, so on a phone this
+ * column is narrow: the status glyph moves above its text rather than squeezing
+ * both, and the clear row stacks. The section is its own container, so this
+ * answers the width it actually gets. */
+@container (max-width: 420px) {
+  .status {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .clearRow {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -41,6 +41,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { HumanSettingsSection } from './HumanSettingsSection.tsx'
+import { ContextJudgeSettingsSection } from './ContextJudgeSettingsSection.tsx'
+import { TeamContextJudgeCheck } from './context-judge.ts'
+import { TeamContextGateForm, type TeamGateSection } from './context-gate-form.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
@@ -58,6 +61,14 @@ export type { TeamKey } from './locales.ts'
 export { TeamNavigation } from './navigation.ts'
 
 const NS = 'team'
+
+/**
+ * The Team Host row's settings namespace. Spelled here rather than imported,
+ * because a client package must not depend on a Host package — the profile, the
+ * judge's endpoint, and the gate's thresholds all live in this one row section,
+ * and each settings page renders only the group it owns.
+ */
+const TEAM_SETTINGS_NS = 'wowyuarm-agent-team-host'
 
 export const inject = [
   'slots', 'workspaces', 'layout', 'locale', 'remote', 'remote.session', 'sessions', 'connection', 'conversation', 'uiWorkspace',
@@ -238,11 +249,19 @@ function applyUi(ctx: ClientContext): void {
   const environment = new TeamEnvironmentCheck({
     loadEnvironment: () => ctx.remote.agentTeam.environment({}),
   })
+  // The long-gap gate's judge: what the Host answers about reachability, and
+  // the thresholds in force. Its own projection rather than a field of the
+  // environment check, because it re-reads after every write that can mount or
+  // unmount the judge while the environment verdict is settled once.
+  const contextJudge = new TeamContextJudgeCheck({
+    loadContextJudge: () => ctx.remote.agentTeam.contextJudge({}),
+  })
   ctx.effect(() => () => {
     navigation.dispose()
     drafts.dispose()
     humanIdentity.dispose()
     environment.dispose()
+    contextJudge.dispose()
     void disposeNavigation()
     void disposeDrafts()
   }, 'agent-team: navigation service')
@@ -381,6 +400,40 @@ function applyUi(ctx: ClientContext): void {
       },
     }),
   }, HumanSettingsSection as never))
+
+  // The context gate's page, ordered right after the profile and before Models.
+  // It follows the settings namespace rather than this plugin: the profile page
+  // above owns that namespace's identity fields, this one owns the judge's
+  // endpoint and the gate's thresholds, and neither renders the other's
+  // controls — so a deployment that never composed the Team row shows no trace
+  // of this page instead of an empty one. The form is built with the page and
+  // released with it, because a registration that outlives its namespace would
+  // hold drafts nothing could accept.
+  ctx.inject(['configForms'], (scope: ClientContext) => {
+    scope.effect(() => scope.configForms.whileServed([TEAM_SETTINGS_NS], () => {
+      const form = new TeamContextGateForm(scope.configForms.get<TeamGateSection>(TEAM_SETTINGS_NS), contextJudge)
+      const off = scope.slots.inject('settings.section', () => scope.slots.register({
+        name: 'settings.section',
+        id: 'team-context-gate',
+        order: 6,
+        label: () => ctx.locale.bind(NS)('contextGateNav'),
+        locale: NS,
+        inject: () => ({
+          judge: contextJudge,
+          form,
+          // The key's literal never rides a response; the describe mirror is
+          // what says whether one is stored.
+          keyConfigured: (): boolean => scope.configForms.describe().getSnapshot().view?.namespaces
+            .find(row => row.ns === TEAM_SETTINGS_NS)?.secrets
+            .some(secret => secret.path.join('.') === 'jev.apiKey' && secret.set) ?? false,
+        }),
+      }, ContextJudgeSettingsSection as never))
+      return () => {
+        off()
+        form.dispose()
+      }
+    }), 'agent-team: context gate settings')
+  })
 }
 
 export async function apply(ctx: ClientContext): Promise<void> {

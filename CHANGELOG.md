@@ -12,6 +12,7 @@ All notable changes to this project are documented in this file. The format foll
 - A Member's long-gap relatedness gate gets its judge from the deployment's own key: the bundle ships `@wowyuarm/dsh-jev` and mounts it when the Team Host row states a key — or names an environment variable that holds one — while a row without a key leaves the gate off instead of failing. The judge's own call budget is derived from the gate's deadline, so a configured judge always answers inside the time the gate gives it.
 - The long-gap gate's thresholds are row configuration: the Team Host row takes an optional `gate` object with `tokens`, `idleMs`, and `judgeTimeoutMs`, each field defaulting to the engine's own value, so a deployment can match the gate to its own cadence and give a slower judge the time it needs.
 - The gate's three thresholds are live settings, not mount-time policy: the Team settings surface can show and write them, and an edit reaches the next judged step without a restart. A slower judge endpoint — one whose answer arrives after the 5-second default — no longer needs a hand-edited patch layer.
+- Settings carries a second Team page for that gate: it says whether the judge is reachable right now and which thresholds are in force, and it writes the judge's endpoint, its key, and the gate's thresholds in one save. The key is write-only — a stored one is never echoed back, and removing it is an explicit clear rather than an empty field.
 
 ## [0.2.0] - 2026-09-29
 

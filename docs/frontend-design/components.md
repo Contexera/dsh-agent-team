@@ -52,7 +52,7 @@ The membership action is the row's only chrome — one `Button size="sm" variant
 Membership law follows the Host: joining needs `availability === 'active'` (the Host refuses any other availability), while leaving needs only the membership fact, so an already-joined Member who is temporarily down keeps a working 移除. The sidebar Agent list is the exception on spelling: it names Members as the directory does (`builder`), while rosters address them the way the composer does (`@builder`).
 
 ## Human profile settings
-Settings carries one Team surface: the `settings.section` entry `team-human` (「我的资料」), offered in ordinary mode only, because Team mode's sidebar takeover puts the settings panel out of reach. The shell draws the nav rail and the content column, so the section draws its own 18px/600 heading and then rows in the shipped settings language — 16px/0 padding over a hairline separator, a 14px/22px title above a 12px/18px tertiary description, 12px between controls — reusing the shipped `Button` and `Input` rather than restating them.
+Settings carries the first of the Team's two surfaces: the `settings.section` entry `team-human` (「我的资料」), offered in ordinary mode only, because Team mode's sidebar takeover puts the settings panel out of reach. The shell draws the nav rail and the content column, so the section draws its own 18px/600 heading and then rows in the shipped settings language — 16px/0 padding over a hairline separator, a 14px/22px title above a 12px/18px tertiary description, 12px between controls — reusing the shipped `Button` and `Input` rather than restating them.
 
 Because the nav lists that entry among the Harness's own pages, a 13px tertiary intro under the heading names what owns the page and where a change applies, and that header renders in every state — including a failed read — so the page never leaves "whose profile is this?" open. The name row is a form: a 36×200px field whose primary Save button owns the submit, so Enter saves a dirty field and Tab reaches that button as the next stop.
 
@@ -86,6 +86,21 @@ The range is written in words, never as a bare semver range, because a range str
 Two versions a reader could reasonably confuse are therefore kept apart: the running DSH version is the environment, and the certified version is the declared line. They are the same string only while the installation sits on the baseline.
 
 The block carries `data-environment` with its verdict, so an acceptance journey waits on a state rather than on prose.
+
+## Context gate settings
+Settings carries a second Team surface for the long-gap gate: the `settings.section` entry `team-context-gate` (「上下文门控」), ordered after the profile and before Models. It registers through `ctx.configForms.whileServed([namespace], …)`, so a deployment that never composed the Team Host row shows no trace of the page rather than an empty one, and the form is built with the page and released with it.
+
+That row is one settings namespace holding three groups, and each page renders only its own: the profile page owns the identity fields, this one owns `jev` and `gate`. So the page never renders the namespace's form wholesale — a flat form model addressed at `apiBase` would write the wrong path — and a projection adapter maps each control name onto the path it really lives at (`['jev','apiBase']`, `['gate','judgeTimeoutMs']`), flattening the section's `value`, `base`, and `user` layers the same way.
+
+The status block above the form is read, never derived: `remote.agentTeam.contextJudge` answers whether a judge is reachable, why not, which environment variable this deployment reads a key from, and the thresholds in force. Three verdicts are stated as text plus an icon and carried on `data-context-judge` — `enabled`, `no-key`, `unavailable` — and only `unavailable` takes a warn surface, because a missing key is a configuration step while a broken endpoint is something to go and fix.
+
+The thresholds print the Host's resolved values, never a default the page carries: a deployment that set them in its own patch layer, or a row whose write has not taken effect, is exactly what that line exists to show. `detail` stays a Host diagnostic and never becomes user copy.
+
+The form is the shipped settings stack — `SettingsFormModel` with `SettingsForm`, `SettingsValueField`, and `SettingsSecretField` — so drafts, override badges, reset, and the save behave as they do on the Harness's own settings pages. Every write goes through `ctx.configForms.get(namespace)`, which owns the revision fence and folds the Host's answer back into the mirror; a save that did not land keeps its drafts and says so, and a landed one re-reads the status.
+
+The key is write-only: the Host redacts the literal, so the control starts blank on every load, a blank draft writes nothing — opening the page can never clear a stored key — and the configured badge comes from the describe mirror's `secrets` list, the only place that state is readable. Removing a literal is an explicit clear of its own, offered only while no draft is staged, because a write moves the document revision a staged save is fenced to.
+
+The gate's three thresholds are ordinary fields on the same form: each shows the value the row resolves to, marks itself overridden when the user layer carries one, and reverts to the composition layer through reset. An edit reaches the next judged step, so the page never asks for a restart.
 
 ## Failure surfaces
 A failed projection renders one of two shapes, and the choice is a claim about what is still on screen. When nothing was ever loaded, the failure replaces the whole surface as `errorState`: it rides the same free space as the loading and empty surfaces it stands in for (`margin: auto`, `padding: 32px 0`), keeps to the 880px reading column, takes the 12px/18px error scale in `--dsw-alias-state-error-primary`, and carries the Host's message plus one `重试` that re-issues the read — message and retry inside a single `role="alert"`.
