@@ -12,7 +12,7 @@ Provider context-overflow 失败获得一条有界的 compact-and-retry 序列�
 
 大 context 里隔了很久才到的那一步先交给相关性 judge：judge 判为无关工作的输入被扣住而不是放行，原位投一条换代指令，直到被扣的输入交回。该 judge 就是 `jev` 服务：本 bundle 用 Host 行的 `jev.apiKey`（或该行指名的环境变量）自己挂载它，所以 **key 就是该门的开关**，行里没有 key 就让该门保持关闭。部署自己挂了 `jev` 行时改读那一份，绝不重复挂载。
 
-门控的三个阈值属于 Host 行自己的配置：`gate.tokens`、`gate.idleMs`、`gate.judgeTimeoutMs`，每个都可省略——省略的字段沿用引擎自己的默认值，部署只写它不同意的那些。部署在自己 profile 的 `cordis.patch.yml` 里按行 id `wowyuarm-agent-team-host` 设置它们，Team 设置页也把同样三个作为可写字段提供：引擎在每个生效的 step 上读一次，所以编辑作用于下一个被判断的 step，不需要重启。
+门控的三个阈值属于 Host 行自己的配置：`gate.tokens`、`gate.idleMs`、`gate.judgeTimeoutMs`，每个都可省略。部署在自己 profile 的 `cordis.patch.yml` 里按行 id `wowyuarm-agent-team-host` 设置它们，引擎在每个生效的 step 上读一次，所以编辑作用于下一个被判断的 step，不需要重启。省略 `tokens` 或 `idleMs` 沿用引擎的默认值；省略 `judgeTimeoutMs` 则拿到 Team 自己的预算——判官是经网络到达的。
 
 截止时间决定已配置的 judge 是否真被听到：一次判断耗时超过 `gate.judgeTimeoutMs`，该步就不经门控放行。因此本 bundle 挂载的 judge 拿到的调用预算是该截止时间再减一秒。
 

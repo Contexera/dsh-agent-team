@@ -14,6 +14,7 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SqliteStorageBackend } from '../src/vendor/storage-sqlite/index.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_TOKENS } from '@wowyuarm/dsh-context-continuity'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { snapshotReadData, receiptReadData } from './helpers/legacy-thread-read.ts'
 import AgentTeam, { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
@@ -37,7 +38,11 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
 
-async function harness(pool = new MemoryMediaPool(), workspaceIds = [alpha]): Promise<TeamHarness> {
+async function harness(
+  pool = new MemoryMediaPool(),
+  workspaceIds = [alpha],
+  config?: { readonly gate?: { readonly tokens?: number; readonly idleMs?: number; readonly judgeTimeoutMs?: number } },
+): Promise<TeamHarness> {
   const ctx = new Context()
   await ctx.plugin(Storage)
   ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
@@ -55,7 +60,7 @@ async function harness(pool = new MemoryMediaPool(), workspaceIds = [alpha]): Pr
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = config === undefined ? await ctx.plugin(AgentTeam) : await ctx.plugin(AgentTeam, config)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, fiber, facility }
 }
@@ -2570,5 +2575,30 @@ describe('body-authored mentions', () => {
     ledger.setHumanDisplayHandle('YuCreate')
     await expect(enroll(ledger, channelRef, 'human')).rejects.toThrow('reserved human alias')
     await expect(enroll(ledger, channelRef, 'Human')).rejects.toThrow('reserved human alias')
+  })
+})
+
+/**
+ * The gate's thresholds are row configuration the settings document omits, so
+ * the Host resolves an omitted field rather than publishing a second copy of a
+ * number nobody chose. Two of the three are the engine's to answer; the judge's
+ * budget is Team's, because a judge is reached over a network and the engine's
+ * default is sized for one beside the Host.
+ */
+describe('AgentTeam gate thresholds as the settings surface reports them', () => {
+  it('answers the judge\'s budget itself and leaves the other two to the engine', async () => {
+    const plain = await harness()
+
+    expect(plain.ctx.agentTeam.contextJudgeForClient({}).gate).toEqual({
+      tokens: DEFAULT_GATE_TOKENS,
+      idleMs: DEFAULT_GATE_IDLE_MS,
+      judgeTimeoutMs: 10_000,
+    })
+  })
+
+  it('keeps every threshold a deployment states, including a judge budget below Team\'s own', async () => {
+    const stated = await harness(undefined, undefined, { gate: { tokens: 64_000, idleMs: 60_000, judgeTimeoutMs: 3_000 } })
+
+    expect(stated.ctx.agentTeam.contextJudgeForClient({}).gate).toEqual({ tokens: 64_000, idleMs: 60_000, judgeTimeoutMs: 3_000 })
   })
 })

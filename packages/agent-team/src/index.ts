@@ -36,7 +36,7 @@ import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar 
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
 import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC, TEAM_PRESSURE_GATE_SCHEMA } from './context-continuity-host.ts'
-import { CONTEXT_CONTINUITY_PROJECTION_KEY, DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_JUDGE_TIMEOUT_MS, DEFAULT_GATE_TOKENS, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
+import { CONTEXT_CONTINUITY_PROJECTION_KEY, DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_TOKENS, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
 import { TeamContextJudge, type TeamContextJudgeConfig } from './context-judge.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
 import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, createTeamContextProjectionConfig, createTeamContextProjectionDefinition, foldTeamContextProjection, retainedTopicsThrough, TeamContextProjectionHost } from './context-projection.ts'
@@ -195,6 +195,19 @@ const CONTEXT_HARD_LIMIT_CAP = 256_000
 const CONTEXT_HANDOFF_AT_CAP = 200_000
 const CONTEXT_HANDOFF_RESERVE = 8_000
 const CONTEXT_SAFE_OUTPUT_RESERVE = 16_000
+/**
+ * The budget Team gives the long-gap gate's judge when the row states none.
+ *
+ * The engine's own default is five seconds, which is sized for a judge beside
+ * the Host. A hosted endpoint answers in up to about four seconds, and the gate
+ * hands the judge one second less than this deadline, so that default turns a
+ * slow-but-working judge into a coin flip — and the deployment that meets this
+ * problem is the one least able to diagnose it. Ten seconds leaves room for the
+ * slow tail while still bounding the wait on the path that starts a turn. A
+ * deployment that wants another number still sets `gate.judgeTimeoutMs`, which
+ * stays a row field.
+ */
+const TEAM_JUDGE_TIMEOUT_DEFAULT_MS = 10_000
 /**
  * Usage at or above which an acknowledged acceptance advises a fresh
  * rollover instead of keeping the context; capped by the route's effective
@@ -403,10 +416,15 @@ export interface TeamGateSettings {
  * keeping the identity stable is what makes a settings edit change the policy
  * of a running Host. A field the row omits is written as undefined, which is
  * the engine's own signal to fall back to its default.
+ *
+ * The judge's budget is the exception, and its type says so: Team answers that
+ * number, so it is never absent here. That is what lets the settings surface
+ * print the budget without a fallback of its own — one resolution, and no way
+ * for the number a Human reads to differ from the number the gate uses.
  */
 type LivePressureGate = {
   -readonly [K in keyof PressureGate]: PressureGate[K]
-}
+} & { judgeTimeoutMs: number }
 
 /** The Host row's `jev` fields, as the settings service reads and writes them. */
 export interface TeamJudgeSettings {
@@ -506,9 +524,11 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * The gate thresholds the pressure policy reads, and the only copy of them:
    * refreshed in place from the row's volatile config, never replaced, so the
-   * engine's per-step read sees a settings edit without a remount.
+   * engine's per-step read sees a settings edit without a remount. It starts at
+   * Team's own judge budget and the constructor's refresh replaces that with the
+   * row's, so the budget is never absent at any point a step could read it.
    */
-  private readonly gate: LivePressureGate = {}
+  private readonly gate: LivePressureGate = { judgeTimeoutMs: TEAM_JUDGE_TIMEOUT_DEFAULT_MS }
   /** The long-gap gate's judge: this Host's own `jev` mount, reconciled with the row. */
   private readonly contextJudge: TeamContextJudge
   private readonly notifiedInbox = new Map<AgentTeamMemberId, string>()
@@ -579,7 +599,7 @@ export default class AgentTeam extends TypertRemoteService {
     this.refreshGate()
     this.contextJudge = new TeamContextJudge(this.ctx, {
       config: () => this.judgeConfig(),
-      deadlineMs: () => this.gate.judgeTimeoutMs ?? DEFAULT_GATE_JUDGE_TIMEOUT_MS,
+      deadlineMs: () => this.gate.judgeTimeoutMs ?? TEAM_JUDGE_TIMEOUT_DEFAULT_MS,
     })
     this.pressurePolicy = new TeamPressurePolicy({
       agentForMember: memberId => this.handles.get(memberId)?.agent,
@@ -647,11 +667,16 @@ export default class AgentTeam extends TypertRemoteService {
    * Copy the row's gate thresholds into the one gate object the pressure policy
    * holds. Called once at construction and again on every volatile update, so
    * the policy always reads the thresholds the settings document states.
+   *
+   * Two fields pass through as the row states them, and the engine answers an
+   * omitted one with its own default. The judge's budget does not: a judge is
+   * reached over a network, so Team answers for that number itself rather than
+   * making every deployment discover the engine's local-call default.
    */
   private refreshGate(): void {
     this.gate.tokens = this.config.gate.tokens.get()
     this.gate.idleMs = this.config.gate.idleMs.get()
-    this.gate.judgeTimeoutMs = this.config.gate.judgeTimeoutMs.get()
+    this.gate.judgeTimeoutMs = this.config.gate.judgeTimeoutMs.get() ?? TEAM_JUDGE_TIMEOUT_DEFAULT_MS
   }
 
   /** Current human display name; the single source for team_view and @ matching. */
@@ -1708,8 +1733,10 @@ export default class AgentTeam extends TypertRemoteService {
    * The judge's own fields (key presence, endpoint, model) ride the settings
    * document this row already publishes, so nothing here restates them; the
    * gate's thresholds are row configuration the settings document deliberately
-   * omits, which is why the Host resolves an omitted field against the engine's
-   * own default here rather than letting a second copy of those numbers exist.
+   * omits, which is why the Host resolves an omitted field here rather than
+   * letting a second copy of those numbers exist. Two of the three fall back to
+   * the engine's own default; the judge's budget falls back to Team's, because
+   * that is the number the gate itself is given.
    */
   @Remote('contextJudge')
   contextJudgeForClient(_request: AgentTeamContextJudgeRequest): AgentTeamContextJudgeResult {
@@ -1720,7 +1747,9 @@ export default class AgentTeam extends TypertRemoteService {
       gate: Object.freeze({
         tokens: gate.tokens ?? DEFAULT_GATE_TOKENS,
         idleMs: gate.idleMs ?? DEFAULT_GATE_IDLE_MS,
-        judgeTimeoutMs: gate.judgeTimeoutMs ?? DEFAULT_GATE_JUDGE_TIMEOUT_MS,
+        // No fallback here: this number is the one the gate is given, so a
+        // second default could only ever disagree with the gate in force.
+        judgeTimeoutMs: gate.judgeTimeoutMs,
       }),
     })
   }
