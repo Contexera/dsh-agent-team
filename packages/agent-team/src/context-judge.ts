@@ -34,6 +34,14 @@ export interface TeamContextJudgeConfig {
  */
 const JUDGE_DEADLINE_MARGIN_MS = 1_000
 
+/**
+ * Wait before the judge's second attempt. Pinned rather than inherited from the
+ * service's own default, because it is half of the same budget the deadline
+ * above sizes: a backoff longer than this would spend the gate's remaining time
+ * waiting instead of asking again.
+ */
+const JUDGE_RETRY_DELAY_MS = 500
+
 /** The key a row states, or the one the named environment variable holds. */
 function resolvedKey(config: TeamContextJudgeConfig | undefined, envName: string): string | undefined {
   const stated = config?.apiKey
@@ -59,9 +67,13 @@ export function judgeMountConfig(
     ...(config?.model === undefined ? {} : { model: config.model }),
     ...(config?.apiBase === undefined ? {} : { apiBase: config.apiBase }),
     timeoutMs: Math.max(JUDGE_DEADLINE_MARGIN_MS, deadlineMs - JUDGE_DEADLINE_MARGIN_MS),
-    // One attempt: a retry budget belongs to a background pass, and this call
-    // sits on the path that starts a turn.
-    attempts: 1,
+    // Two attempts: this call sits on the path that starts a turn, so the
+    // budget stays small — but one transport blip should not cost the step its
+    // gate, which is what a single attempt did. The gate races the whole call
+    // against its deadline anyway, so a second attempt that cannot finish in
+    // time costs the turn nothing beyond what it already spent.
+    attempts: 2,
+    retryDelayMs: JUDGE_RETRY_DELAY_MS,
   }
 }
 

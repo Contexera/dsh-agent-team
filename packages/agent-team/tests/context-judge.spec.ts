@@ -73,12 +73,16 @@ describe('the Team context judge', () => {
   it('gives the judge a budget inside the gate\'s deadline, with a floor', () => {
     // The gate abandons a judgement that outlives its deadline, so the judge's
     // own timeout must stay under it — and a deployment that set a tiny
-    // deadline still gets a usable call rather than a zero budget.
+    // deadline still gets a usable call rather than a zero budget. The second
+    // attempt rides the same budget: one transport blip must not cost the step
+    // its gate, and the wait before that attempt is short enough to leave the
+    // deadline time to ask again.
     expect(judgeMountConfig(undefined, 'key', 'TYPESAFE_API_KEY', 5_000)).toMatchObject({
       apiKey: 'key',
       apiKeyEnv: 'TYPESAFE_API_KEY',
       timeoutMs: 4_000,
-      attempts: 1,
+      attempts: 2,
+      retryDelayMs: 500,
     })
     expect(judgeMountConfig({ model: 'm', apiBase: 'https://example.test/v1' }, 'key', 'K', 20_000)).toMatchObject({
       model: 'm',
