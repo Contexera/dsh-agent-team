@@ -232,7 +232,7 @@ DSH peers 正好声明这条已认证线：`>=0.2.0-rc.2 <0.2.1`，因此本仓�
 
 被移除的 `@deepseek-ai/dsh-invariants` peer 同样随它指名的 registry row 一并删除：invariant companion 此后自持校验。
 
-有一个 peer 不在 DSH 线上，因此也不在本次认证范围内：`@wowyuarm/dsh-jev` 以 optional peer 声明——档位挂载它时，Host 读取 `ctx.jev` 作为长间隔相关性 judge，没有挂载时该门保持关闭。bundle 自身绝不挂载它，其 peer 区间也不是已认证的兼容声明——安装 jev bundle 的部署自行指定 endpoint、model 与 key。
+有一个依赖不在 DSH 线上，因此也不在本次认证范围内：`@wowyuarm/dsh-jev` 随 bundle 一起交付——Team Host 用 Host 行里的 key 把它挂载成长间隔相关性 judge。它声明的 peers 只有 Cordis 与 Schemastery，因此不会往树里带进任何 DSH peer 声明；endpoint、model 与 key 仍由部署自己给出。
 
 经路由的 sqlite 后端是 vendored fork，根本不是 dependency（GitHub issue #28）：上游包只以 devDependency 钉在 fork 来源版本 0.1.5-rc.2，用作字节兼容 fixture 参照；每次兼容认证先把 fork 与该版本文件对一遍 diff，再做其他事。
 

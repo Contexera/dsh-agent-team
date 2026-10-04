@@ -389,6 +389,34 @@ export interface AgentTeamEnvironmentResult {
   readonly supportRange?: AgentTeamEnvironmentSupportRange | undefined
 }
 
+/** Relatedness-judge read: carries no input; the answer is the Host's own state. */
+export interface AgentTeamContextJudgeRequest {
+}
+
+/**
+ * What the Team settings surface states about the long-gap gate's judge. It
+ * carries only what the settings document cannot: whether a judge is actually
+ * reachable, why it is not, and the gate's effective thresholds — which are row
+ * configuration, so the Host resolves an omitted field against the engine's own
+ * default rather than letting a second copy of those numbers exist.
+ */
+export interface AgentTeamContextJudgeResult {
+  /** Whether a judge is reachable for the next step. */
+  readonly enabled: boolean
+  /** Why no judge is reachable; absent when one is. */
+  readonly reason?: 'no-key' | 'unavailable' | undefined
+  /** Host-side diagnostic behind `unavailable`; not rendered as user copy. */
+  readonly detail?: string | undefined
+  /** The environment variable this deployment reads the judge's key from. */
+  readonly keyEnv: string
+  /** The gate's thresholds in force: row configuration resolved against the engine's defaults. */
+  readonly gate: {
+    readonly tokens: number
+    readonly idleMs: number
+    readonly judgeTimeoutMs: number
+  }
+}
+
 /**
  * Human profile write: the fields the Client supplies, each one optional and
  * independent of the others.

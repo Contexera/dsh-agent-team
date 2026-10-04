@@ -36,7 +36,8 @@ import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar 
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
 import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC, TEAM_PRESSURE_GATE_SCHEMA } from './context-continuity-host.ts'
-import { CONTEXT_CONTINUITY_PROJECTION_KEY, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
+import { CONTEXT_CONTINUITY_PROJECTION_KEY, DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_JUDGE_TIMEOUT_MS, DEFAULT_GATE_TOKENS, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
+import { TeamContextJudge, type TeamContextJudgeConfig } from './context-judge.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
 import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, createTeamContextProjectionConfig, createTeamContextProjectionDefinition, foldTeamContextProjection, retainedTopicsThrough, TeamContextProjectionHost } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor, type AgentTeamDurableMemberResult } from './ledger.ts'
@@ -64,6 +65,8 @@ import type {
   AgentTeamClaimResult,
   AgentTeamClientMemberStatus,
   AgentTeamContextCheckpointRef,
+  AgentTeamContextJudgeRequest,
+  AgentTeamContextJudgeResult,
   AgentTeamAttachmentId,
   AgentTeamModelSelection,
   AgentTeamCreateChannelRequest,
@@ -362,31 +365,62 @@ interface CheckpointSeed {
 }
 
 /**
- * Config of the Team Host row: the Human profile (see human-profile.ts) plus
- * the long-gap gate's thresholds. The settings service derives every form from
- * the owning plugin's Config, so the profile is this plugin's own config rather
- * than a section of its own; both profile fields arrive volatile, which is what
- * lets an edit reach the running Host without remounting it. The gate is the
- * other kind of field: policy read once when the row mounts, so it stays
- * non-volatile and no settings form offers it — a deployment states it in its
- * own patch layer.
+ * Config of the Team Host row: the Human profile (see human-profile.ts), the
+ * long-gap gate's thresholds, and the judge those thresholds are applied to.
+ * The settings service derives every form from the owning plugin's Config, so
+ * the profile is this plugin's own config rather than a section of its own.
+ *
+ * Two kinds of field live here. Volatile ones — the profile and the judge's own
+ * settings — are what the settings service offers a form for and what an edit
+ * reaches live, without remounting the Host. The gate's thresholds are the
+ * other kind: policy read once when the row mounts, so they stay non-volatile,
+ * no settings form offers them, and a deployment states them in its own patch
+ * layer.
  */
 export interface Config {
   name: Volatile<string>
   avatarRef: Volatile<string | undefined>
   /** Long-gap gate thresholds; an omitted field keeps the engine's default. */
   readonly gate: PressureGate
+  /** The relatedness judge's own settings; a key here is what mounts it. */
+  readonly jev: TeamJudgeSettings
+}
+
+/** The Host row's `jev` fields, as the settings service reads and writes them. */
+export interface TeamJudgeSettings {
+  /** The API key itself; secret on read, and the switch that mounts the judge. */
+  apiKey: Volatile<string | undefined>
+  /** The environment variable holding the key, when it is not stated here. */
+  apiKeyEnv: Volatile<string | undefined>
+  /** The model id sent with every judgement. */
+  model: Volatile<string | undefined>
+  /** The endpoint base the judgements go to. */
+  apiBase: Volatile<string | undefined>
 }
 
 /**
- * The Host row's whole schema: the profile fields verbatim, so their
- * volatility and defaults stay owned by {@link HUMAN_PROFILE_SETTINGS_SCHEMA},
- * plus the gate. A patch layer that targets this row replaces its whole config,
- * so the two halves are declared together here and nowhere else.
+ * The judge's fields as one row form. Every one is volatile, because that is
+ * what makes the settings service offer them and what lets a key written in the
+ * Team settings surface mount the judge without restarting the Host; the key
+ * alone is a secret, so a read reports that it is set and never its value.
+ */
+const TEAM_JUDGE_SETTINGS_SCHEMA = z.object({
+  apiKey: z.string().role('secret').volatile().description('API key for the relatedness judge. Setting one enables jev-backed context management; clearing it disables it.'),
+  apiKeyEnv: z.string().volatile().description('Environment variable holding the key, when the key is not stated here. Default: TYPESAFE_API_KEY'),
+  model: z.string().volatile().description('Model id sent with every judgement. Default: the jev plugin\'s own default.'),
+  apiBase: z.string().volatile().description('Endpoint base the judgements go to. Default: the jev plugin\'s own default.'),
+})
+
+/**
+ * The Host row's whole schema: the profile fields verbatim, so their volatility
+ * and defaults stay owned by {@link HUMAN_PROFILE_SETTINGS_SCHEMA}, plus the
+ * gate and the judge. A patch layer that targets this row replaces its whole
+ * config, so the parts are declared together here and nowhere else.
  */
 export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
   gate: TEAM_PRESSURE_GATE_SCHEMA,
+  jev: TEAM_JUDGE_SETTINGS_SCHEMA,
 })
 
 /** Host owner of the single Agent Team in one dshHome. */
@@ -447,6 +481,8 @@ export default class AgentTeam extends TypertRemoteService {
     compaction?: string
   }>()
   private readonly pressurePolicy: TeamPressurePolicy
+  /** The long-gap gate's judge: this Host's own `jev` mount, reconciled with the row. */
+  private readonly contextJudge: TeamContextJudge
   private readonly notifiedInbox = new Map<AgentTeamMemberId, string>()
   private attachmentGcTimer?: ReturnType<typeof setInterval> | undefined
   /**
@@ -512,6 +548,10 @@ export default class AgentTeam extends TypertRemoteService {
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'agentTeam')
+    this.contextJudge = new TeamContextJudge(this.ctx, {
+      config: () => this.judgeConfig(),
+      deadlineMs: () => this.config.gate.judgeTimeoutMs ?? DEFAULT_GATE_JUDGE_TIMEOUT_MS,
+    })
     this.pressurePolicy = new TeamPressurePolicy({
       agentForMember: memberId => this.handles.get(memberId)?.agent,
       limitsForAgent: agent => this.routeLimitsForAgent(agent),
@@ -525,14 +565,13 @@ export default class AgentTeam extends TypertRemoteService {
       // omitted fields the engine answers with its own defaults.
       gate: this.config.gate,
       /**
-       * The relatedness judge of the long-gap gate: the deployment's own `jev`
-       * service, read from this Host's plane. A profile that mounts none leaves
-       * the gate off — a missing judge is a deployment choice, never a failure —
-       * and the read is lazy, so a jev row mounted after this Host still answers
-       * on the next step. `@wowyuarm/dsh-jev` is an optional peer for that
-       * reason: this Host names the service, it never mounts it.
+       * The relatedness judge of the long-gap gate: the service this Host
+       * mounts from its own row's key, or one a deployment mounted itself. No
+       * key and no other mount leaves the gate off — a missing judge is a
+       * deployment choice, never a failure — and the read is lazy, so a key
+       * written after this Host mounted still answers on the next step.
        */
-      judgeForAgent: () => this.ctx.get('jev'),
+      judgeForAgent: () => this.contextJudge.judge(),
       failed: (memberId, diagnostic) => {
         this.setMemberFailure(memberId, 'compaction', diagnostic)
         this.emitAutoCompactionChanged(memberId)
@@ -550,7 +589,25 @@ export default class AgentTeam extends TypertRemoteService {
       settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, this.ctx.fiber))
       this.adoptLegacyHumanProfile()
     })
-    this.ctx.on('loader/volatile-update', () => { this.syncHumanHandle() })
+    this.ctx.on('loader/volatile-update', () => {
+      this.syncHumanHandle()
+      // The judge's key and endpoint ride the same volatile row, so every write
+      // the settings surface makes is one reconciliation: mount on a new key,
+      // re-configure on a changed endpoint, unmount when the key is cleared.
+      void this.contextJudge.sync().catch(error => {
+        this.ctx.logger.warn('agent-team: the relatedness judge could not be reconciled: %s', error instanceof Error ? error.message : String(error))
+      })
+    })
+  }
+
+  /** The Host row's judge settings, as one plain config for the mount. */
+  private judgeConfig(): TeamContextJudgeConfig {
+    return {
+      apiKey: this.config.jev.apiKey.get(),
+      apiKeyEnv: this.config.jev.apiKeyEnv.get(),
+      model: this.config.jev.model.get(),
+      apiBase: this.config.jev.apiBase.get(),
+    }
   }
 
   /** Current human display name; the single source for team_view and @ matching. */
@@ -659,6 +716,10 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Open the durable ledger and restore every enabled Member independently. */
   protected async [Service.init](): Promise<void> {
+    // The judge is mounted from the row's own key before the first step can be
+    // judged: a deployment that states one gets the gate from its first turn,
+    // and one that states none keeps the gate off without a failure.
+    await this.contextJudge.sync()
     // The continuity projection registers once per Host: the framework keeps
     // one unit per projection key and drives it for every Session, so Team's
     // fold is session-agnostic and the state carries the identity it folds.
@@ -1595,6 +1656,29 @@ export default class AgentTeam extends TypertRemoteService {
     const stored = await readAttachment(attachmentsRoot(), request.attachmentId)
     if (stored === undefined) throw new RemoteError('team/attachment-not-found', `attachment '${request.attachmentId}' is no longer cached`, { attachmentId: request.attachmentId })
     return Object.freeze({ name: stored.name, mediaType: stored.mediaType, byteSize: stored.byteSize, bytesBase64: stored.bytes.toString('base64') })
+  }
+
+  /**
+   * The long-gap gate's judge, as the Team settings surface states it: whether
+   * a judge is reachable, why not when none is, and the thresholds in force.
+   * The judge's own fields (key presence, endpoint, model) ride the settings
+   * document this row already publishes, so nothing here restates them; the
+   * gate's thresholds are row configuration the settings document deliberately
+   * omits, which is why the Host resolves an omitted field against the engine's
+   * own default here rather than letting a second copy of those numbers exist.
+   */
+  @Remote('contextJudge')
+  contextJudgeForClient(_request: AgentTeamContextJudgeRequest): AgentTeamContextJudgeResult {
+    const status = this.contextJudge.status()
+    const gate = this.config.gate
+    return Object.freeze({
+      ...status,
+      gate: Object.freeze({
+        tokens: gate.tokens ?? DEFAULT_GATE_TOKENS,
+        idleMs: gate.idleMs ?? DEFAULT_GATE_IDLE_MS,
+        judgeTimeoutMs: gate.judgeTimeoutMs ?? DEFAULT_GATE_JUDGE_TIMEOUT_MS,
+      }),
+    })
   }
 
   /**

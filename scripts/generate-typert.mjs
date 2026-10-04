@@ -80,16 +80,16 @@ try {
   await mkdir(engineTarget, { recursive: true })
   await cp(join(continuityDir, 'package.json'), join(engineTarget, 'package.json'))
   await cp(join(continuityDir, 'lib'), join(engineTarget, 'lib'), { recursive: true })
-  // The optional jev peer, for the same reason and in the same form: the Host
-  // face names `ctx.jev` as the long-gap gate's judge, and that service's own
-  // type augmentation is what types the read. It is a devDependency of this
-  // repository, so a clean install always has it; the published manifest keeps
-  // it an optional peer, and the empty type-only import that needs it is elided
-  // from the emitted declarations, so a consumer without jev is unaffected.
+  // The jev plugin, for the same reason and in the same form: it is a shipped
+  // dependency of the bundle — the Host mounts it as the long-gap gate's judge
+  // from its own row's key — and that package's own type augmentation is what
+  // types the `ctx.jev` read beside the mount. A clean install always has it,
+  // so the copy is what the analysis package resolves instead of the installed
+  // tree, and the emitted declarations stay independent of this checkout.
   const jevSource = join(projectRoot, 'node_modules', '@wowyuarm', 'dsh-jev')
   if (!existsSync(jevSource)) {
     throw new Error(
-      `Typert analysis resolves the bundle's optional '@wowyuarm/dsh-jev' peer at '${jevSource}', which is not installed.`
+      `Typert analysis resolves the bundle's '@wowyuarm/dsh-jev' dependency at '${jevSource}', which is not installed.`
       + ' Run `corepack pnpm install` at the repository root (never npm install: it breaks the workspace links).',
     )
   }

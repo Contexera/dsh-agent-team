@@ -11,6 +11,9 @@ importers:
       '@wowyuarm/dsh-context-continuity':
         specifier: ^0.2.0
         version: 0.2.0(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))
+      '@wowyuarm/dsh-jev':
+        specifier: ^0.1.1
+        version: 0.1.1(@deepseek-ai/schemastery@3.18.2)
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -36,9 +39,6 @@ importers:
       '@types/react-dom':
         specifier: ~18.3.7
         version: 18.3.7(@types/react@18.3.31)
-      '@wowyuarm/dsh-jev':
-        specifier: 0.1.1
-        version: 0.1.1(@deepseek-ai/schemastery@3.18.2)
       jscpd:
         specifier: ^5.0.16
         version: 5.0.16

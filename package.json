@@ -62,12 +62,12 @@
   },
   "dependencies": {
     "@wowyuarm/dsh-context-continuity": "^0.2.0",
+    "@wowyuarm/dsh-jev": "^0.1.1",
     "yaml": "^2.9.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@deepseek-ai/dsh-storage-sqlite": "0.1.5-rc.2",
-    "@wowyuarm/dsh-jev": "0.1.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.0.0",
@@ -190,13 +190,7 @@
     "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.2.1",
     "@deepseek-ai/dsh-typert-protocol": ">=0.2.0-rc.2 <0.2.1",
     "@deepseek-ai/dsh-workspace": ">=0.2.0-rc.2 <0.2.1",
-    "@wowyuarm/dsh-jev": "^0.1.1",
     "react": "^18.2.0"
-  },
-  "peerDependenciesMeta": {
-    "@wowyuarm/dsh-jev": {
-      "optional": true
-    }
   },
   "keywords": [
     "agent-team",

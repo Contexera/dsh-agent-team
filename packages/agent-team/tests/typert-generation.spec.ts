@@ -26,6 +26,7 @@ describe('Agent Team generated Typert boundary', () => {
       'changeTask',
       'changes',
       'clearMemberContext',
+      'contextJudge',
       'createChannel',
       'environment',
       'getAttachment',

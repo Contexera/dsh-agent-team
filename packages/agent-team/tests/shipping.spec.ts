@@ -160,6 +160,14 @@ describe('Agent Team shipping contract', () => {
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
     expect(rowFields.gate?.meta.volatile).toBeUndefined()
     expect(Object.keys(rowFields.gate?.dict ?? {})).toEqual(['tokens', 'idleMs', 'judgeTimeoutMs'])
+    // The judge's own fields are the volatile kind, because the Team settings
+    // surface is where a Human enables the gate: every field has to reach the
+    // running Host, and the key alone is a secret — so a read reports that it is
+    // set and never its value.
+    const judgeFields = rowFields.jev?.dict ?? {}
+    expect(Object.keys(judgeFields)).toEqual(['apiKey', 'apiKeyEnv', 'model', 'apiBase'])
+    for (const field of Object.values(judgeFields)) expect(field.meta.volatile).toBe(true)
+    expect(judgeFields.apiKey?.meta.role).toBe('secret')
 
     expect(preset).toContain("name: '@wowyuarm/dsh-agent-team/tools'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")
@@ -279,8 +287,15 @@ describe('Agent Team shipping contract', () => {
     // The context-continuity engine rides as a regular dependency, never a
     // peer: profiles set autoInstallPeers: false, so a peer nothing else
     // provides resolves for nobody — the external-layout e2e crashed exactly
-    // there before this was fixed (0.1.14 gate, 2026-09-22).
-    expect(manifest.dependencies).toEqual({ '@wowyuarm/dsh-context-continuity': '^0.2.0', yaml: '^2.9.1', zod: '^4.4.3' })
+    // there before this was fixed (0.1.14 gate, 2026-09-22). The jev judge
+    // rides the same way for the same reason, and one more: the Host mounts it
+    // itself from the row's key, so its code has to be in the tree.
+    expect(manifest.dependencies).toEqual({
+      '@wowyuarm/dsh-context-continuity': '^0.2.0',
+      '@wowyuarm/dsh-jev': '^0.1.1',
+      yaml: '^2.9.1',
+      zod: '^4.4.3',
+    })
     expect(bundleManifest.dsh.client).toEqual({
       platform: 'web',
       // The Client half classifies a stream end with the Gateway's carrier-error
