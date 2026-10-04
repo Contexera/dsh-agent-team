@@ -121,6 +121,17 @@ const adapter: ContinuityToolAdapter = {
       ...(result.incompleteFrom === undefined ? {} : { incompleteFrom: result.incompleteFrom }),
     }
   },
+  /**
+   * The compaction capability in the calling Agent's preset scope. The Host
+   * owns that address: a preset revision publishes its services behind its own
+   * isolate, so the engine is asked for through the one method that knows which
+   * realm holds it. A Member whose composition mounts none reports "not
+   * available in this scope" — never a failure, never a silent no-op.
+   */
+  compactionFor(agent) {
+    const engine = service(agent).compactionForAgent(agent)
+    return engine === undefined ? undefined : { engine }
+  },
 }
 
 /**

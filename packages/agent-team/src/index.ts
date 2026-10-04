@@ -16,6 +16,7 @@ import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-app-boot'
+import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -32,9 +33,8 @@ import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTI
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
-import { PressurePolicyCoordinator } from './pressure-policy.ts'
+import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC } from './context-continuity-host.ts'
 import { CONTEXT_CONTINUITY_PROJECTION_KEY, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
-import { createTeamContextManagement, TEAM_CONTEXT_CODEC } from './context-continuity-host.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
 import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, createTeamContextProjectionConfig, createTeamContextProjectionDefinition, foldTeamContextProjection, retainedTopicsThrough, TeamContextProjectionHost } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor, type AgentTeamDurableMemberResult } from './ledger.ts'
@@ -428,7 +428,7 @@ export default class AgentTeam extends TypertRemoteService {
     /** Last non-busy automatic-compaction failure; entered transactions retain additional Session history. */
     compaction?: string
   }>()
-  private readonly pressurePolicy: PressurePolicyCoordinator
+  private readonly pressurePolicy: TeamPressurePolicy
   private readonly notifiedInbox = new Map<AgentTeamMemberId, string>()
   private attachmentGcTimer?: ReturnType<typeof setInterval> | undefined
   /**
@@ -494,21 +494,20 @@ export default class AgentTeam extends TypertRemoteService {
 
   constructor(ctx: Context, public config: Config) {
     super(ctx, 'agentTeam')
-    this.pressurePolicy = new PressurePolicyCoordinator({
+    this.pressurePolicy = new TeamPressurePolicy({
       agentForMember: memberId => this.handles.get(memberId)?.agent,
-      memberForAgent: agent => {
-        const member = this.memberForAgent(agent)
-        return member === undefined ? undefined : { memberId: member.memberId, sessionId: agent.id }
-      },
-      compactionForAgent: agent => this.ctx.agentPresets.serviceFor(agent, 'compaction'),
       limitsForAgent: agent => this.routeLimitsForAgent(agent),
+      compactionForAgent: agent => {
+        const engine = this.compactionForAgent(agent)
+        return engine === undefined ? undefined : { reduce: (reason, signal) => engine.compactIfNeeded(agent, reason, signal) }
+      },
       activeClaimLabels: memberId => this.activeClaimLabels(memberId),
       runningJobLabels: memberId => this.runningJobLabels(memberId),
-      failed: (memberId, _sessionId, diagnostic) => {
+      failed: (memberId, diagnostic) => {
         this.setMemberFailure(memberId, 'compaction', diagnostic)
         this.emitAutoCompactionChanged(memberId)
       },
-      log: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
+      log: (message, memberId) => { this.ctx.logger.warn(`agent-team: ${message} (member ${this.memberLabel(memberId)})`) },
     })
     // Human profile: this Host row's own Config (name + avatarRef, both
     // volatile), so the settings service derives its form from the schema and
@@ -688,7 +687,7 @@ export default class AgentTeam extends TypertRemoteService {
       if (handle === undefined || handle.agent.session.id !== session.id) return
       // A successful assistant response ends any open provider-overflow
       // recovery sequence for this Member.
-      if (event.type === 'assistant/message') this.pressurePolicy.onAssistantMessage(handle.agent)
+      if (event.type === 'assistant/message') this.pressurePolicy.onAssistantMessage(memberId)
       // Context management reacts only after a successful durable tool/result;
       // the projection (not this listener) decides what that means.
       this.contextManagement.onSessionEvent(memberId, handle.agent, event)
@@ -2256,6 +2255,17 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
+   * The compaction capability in one Member Agent's preset scope, or undefined
+   * when its composition mounts none. Both the pressure policy (the hard limit)
+   * and the engine's `context_compact` tool ask through here, so which realm
+   * holds the engine is stated once: a preset revision publishes services
+   * behind its own isolate, which `agent.ctx.get` cannot see from outside.
+   */
+  compactionForAgent(agent: Agent): CompactionEngine | undefined {
+    return this.ctx.agentPresets.serviceFor(agent, 'compaction')
+  }
+
+  /**
    * Agent-only checkpoint request validation: the tool calls this inside its
    * own running turn. Like `context_rollover`, the tool performs no side effect —
    * the durable checkpoint is the successful `tool/call`+`tool/result` pair
@@ -2727,22 +2737,37 @@ export default class AgentTeam extends TypertRemoteService {
             this.contextManagement.captureClaimedInput(agent, messages)
             return { kind: 'reject' as const }
           }
-          // Team pressure policy rides the same pre-step seam after the
+          // The engine's pressure policy rides the same pre-step seam after the
           // admission gate: the handoff-budget notice steers into the running
-          // turn, and the hard limit forces compaction before the request is
+          // turn, the hard limit forces a reduction before the request is
           // forwarded — failing closed blocks the step instead of submitting
-          // over the Team limit. Missing route capacity is an explicit reject.
-          const pressure = await this.pressurePolicy.onPreStep(agent, signal)
+          // over the limit — and a step arriving into a large context after a
+          // long gap may be held instead of admitted.
+          const member = this.memberForAgent(agent)
+          const pressure = member === undefined
+            ? { kind: 'continue' as const }
+            : await this.pressurePolicy.onPreStep(member.memberId, messages, signal)
+          if (pressure.kind === 'hold') {
+            // The gate kept the messages this step had claimed, and its one
+            // rollover instruction is already steered into their place. Arming
+            // the hold and keeping those messages are one call; the coordinator
+            // owns both exits from here — the input comes back once the driver
+            // converges, or rides into the next generation if the rollover
+            // lands — so this turn ends with nothing further to do.
+            this.contextManagement.holdClaimedInput(agent, messages)
+            return { kind: 'reject' as const }
+          }
           if (pressure.kind === 'reject') return { kind: 'reject' as const }
           const decision = await next()
           if (decision.kind === 'reject' || !this.contextManagement.needsAdmissionGate(agent)) return decision
           this.contextManagement.captureClaimedInput(agent, messages)
           return { kind: 'reject' as const }
         })
-        // Provider context-overflow recovery: one bounded compact-and-retry
-        // sequence per failure chain through the Team-owned policy.
+        // Provider context-overflow recovery: one bounded reduce-and-retry
+        // sequence per failure chain through the engine's policy.
         agentCtx.on('agent/request-error', async ({ agent, failure, signal }, next) => {
-          const retry = await this.pressurePolicy.onRequestError(agent, failure, signal)
+          const member = this.memberForAgent(agent)
+          const retry = member !== undefined && await this.pressurePolicy.onRequestError(member.memberId, failure, signal)
           if (retry) return { kind: 'retry' as const }
           return next()
         })

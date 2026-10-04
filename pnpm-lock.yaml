@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@wowyuarm/dsh-context-continuity':
-        specifier: ^0.1.6
-        version: 0.1.6
+        specifier: ^0.2.0
+        version: 0.2.0
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -531,19 +531,23 @@ packages:
   '@vitest/utils@4.1.10':
     resolution: {integrity: sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA==}
 
-  '@wowyuarm/dsh-context-continuity@0.1.6':
-    resolution: {integrity: sha512-ICXEl7YCrhGIq8fbcZ6MMFk0Dp/qLqERTSUZRUuH/f2LrMjRywB+x+jzYX1hdXb1zLXnwTyfNefnQQAuMTuq3A==}
+  '@wowyuarm/dsh-context-continuity@0.2.0':
+    resolution: {integrity: sha512-jDMnWQAA3lOBAnisvoa4fmINHj0XwlAUwps7RJ4uTrkSCMsd4MlEz/xRP/kffM6aa1W7JYhhi3+eyUhJPs+KDA==}
     peerDependencies:
       '@deepseek-ai/cordis': ^4.0.1
       '@deepseek-ai/dsh-agent': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-compaction': '>=0.2.0-rc.1 <0.2.1'
       '@deepseek-ai/dsh-llm': '>=0.2.0-rc.1 <0.2.1'
       '@deepseek-ai/dsh-session': '>=0.2.0-rc.1 <0.2.1'
       '@deepseek-ai/dsh-session-persistence': '>=0.2.0-rc.1 <0.2.1'
       '@deepseek-ai/dsh-session-projection': '>=0.2.0-rc.1 <0.2.1'
       '@deepseek-ai/dsh-session-query': '>=0.2.0-rc.1 <0.2.1'
       '@deepseek-ai/dsh-tools': '>=0.2.0-rc.1 <0.2.1'
+      '@wowyuarm/dsh-jev': ^0.1.1
     peerDependenciesMeta:
       '@deepseek-ai/dsh-session-query':
+        optional: true
+      '@wowyuarm/dsh-jev':
         optional: true
 
   ansi-regex@5.0.1:
@@ -1304,7 +1308,7 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
 
-  '@wowyuarm/dsh-context-continuity@0.1.6':
+  '@wowyuarm/dsh-context-continuity@0.2.0':
     dependencies:
       zod: 4.6.5
 

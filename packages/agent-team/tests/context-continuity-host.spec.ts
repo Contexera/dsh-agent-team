@@ -9,11 +9,11 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type Message, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { isDroppedNotice, type ContextProjectionState, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
+import { isDroppedNotice, type ContextProjectionState, type PressureJudgement, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
-import { TEAM_CONTEXT_CODEC, TeamContextContinuityHost, createTeamContextManagement } from '../src/context-continuity-host.ts'
+import { TEAM_CONTEXT_CODEC, TeamContextContinuityHost, TeamPressurePolicy, TeamPressurePolicyHost, createTeamContextManagement } from '../src/context-continuity-host.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberId } from '../src/types.ts'
 
 const MEMBER_ID = 'member:one' as AgentTeamMemberId
@@ -232,5 +232,204 @@ describe('the projection read', () => {
 
     expect(host.projectionForSubject(MEMBER_ID, SESSION_ID)).toBe(state)
     expect(host.projectionForSubject(MEMBER_ID, SessionId('session:two'))).toBeUndefined()
+  })
+})
+
+/** One Team notice: attributed to the plugin, so the gate must not judge it. */
+function teamNotice(text: string): UserMessage {
+  return createUserMessage({ content: [{ type: 'text', text }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Anything' } })
+}
+
+/** One human input, as it arrives from outside Team. */
+function humanInput(text: string): UserMessage {
+  return createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
+}
+
+/**
+ * One fake Member Agent exposing exactly what the pressure host reads: its own
+ * Session (id, inherited count, surface generation, derived messages, own
+ * event span), the token meter, and `steer`.
+ */
+function pressureAgent(options?: {
+  readonly sessionId?: string
+  readonly inheritedEventCount?: number
+  readonly generation?: number
+  readonly tokens?: number
+  readonly messages?: readonly Message[]
+  readonly ownEvents?: readonly SessionEvent[]
+}): { readonly agent: Agent; readonly steered: UserMessage[] } {
+  const steered: UserMessage[] = []
+  const agent = {
+    ctx: { get: (name: string) => (name === 'tokenMeter' ? { measure: () => ({ totalTokens: options?.tokens ?? 1_000 }) } : undefined) },
+    session: {
+      id: options?.sessionId ?? 'session:one',
+      inheritedEventCount: options?.inheritedEventCount ?? 0,
+      surface: { replaceGeneration: options?.generation ?? 0 },
+      ownEvents: () => options?.ownEvents ?? [],
+      deriveMessages: () => options?.messages ?? [],
+    },
+    steer: (message: UserMessage) => { steered.push(message) },
+  } as unknown as Agent
+  return { agent, steered }
+}
+
+/** A host over one fake Member, with the labels the Host would supply. */
+function pressureHost(agent: Agent | undefined, options?: {
+  readonly compaction?: boolean
+  readonly judge?: PressureJudgement | undefined
+  readonly limits?: { readonly usageTokens: number; readonly hardLimit: number; readonly handoffAt: number } | undefined
+}): { readonly host: TeamPressurePolicyHost; readonly failures: string[]; readonly logs: string[] } {
+  const failures: string[] = []
+  const logs: string[] = []
+  const host = new TeamPressurePolicyHost({
+    agentForMember: id => (id === MEMBER_ID ? agent : undefined),
+    limitsForAgent: () => options?.limits,
+    compactionForAgent: () => (options?.compaction === true ? { reduce: () => Promise.resolve(null) } : undefined),
+    activeClaimLabels: () => ['claim:a (unify forms)'],
+    runningJobLabels: () => ['build'],
+    judgeForAgent: () => options?.judge,
+    failed: (_memberId, diagnostic) => { failures.push(diagnostic) },
+    log: (message, memberId) => { logs.push(`${message} (member ${memberId})`) },
+  })
+  return { host, failures, logs }
+}
+
+describe('the Team pressure host', () => {
+  it('reads the admitted input and the generation\'s earlier input, with no Team notice on either side', () => {
+    const admitted = [teamNotice('Team: you were mentioned'), humanInput('what about the other one?')]
+    const { agent } = pressureAgent({
+      messages: [humanInput('unify the four dialogs'), teamNotice('Team: claim accepted'), humanInput('now the tests'), ...admitted],
+    })
+    const { host } = pressureHost(agent)
+
+    host.beginStep(MEMBER_ID, admitted)
+    const view = host.relatednessFor(MEMBER_ID)
+
+    // The judged input is the human's, never the rederived Team notice beside
+    // it; the earlier input is the generation's, and the messages this very
+    // step is admitting are not part of their own evidence.
+    expect(view).toEqual({ input: 'what about the other one?', recent: ['unify the four dialogs', 'now the tests'] })
+  })
+
+  it('offers no relatedness view outside a step, and never another Member\'s', () => {
+    const { agent } = pressureAgent({ messages: [humanInput('earlier')] })
+    const { host } = pressureHost(agent)
+
+    expect(host.relatednessFor(MEMBER_ID)).toBeUndefined()
+    host.beginStep(MEMBER_ID, [humanInput('held')])
+    expect(host.relatednessFor('member:two' as AgentTeamMemberId)).toBeUndefined()
+    host.endStep(MEMBER_ID)
+    expect(host.relatednessFor(MEMBER_ID)).toBeUndefined()
+  })
+
+  it('offers no view for a step that admits only Team notices', () => {
+    const { agent } = pressureAgent()
+    const { host } = pressureHost(agent)
+
+    host.beginStep(MEMBER_ID, [teamNotice('Team: a Thread moved')])
+
+    // Nothing a human asked for is arriving, so there is nothing to judge: the
+    // gate stays off rather than asking about Team's own bookkeeping.
+    expect(host.relatednessFor(MEMBER_ID)).toBeUndefined()
+  })
+
+  it('resolves limits, surface, log span and in-hand work from the Member\'s own Agent', () => {
+    const own = [{ type: 'turn/end', seq: 3, time: 1 } as unknown as SessionEvent]
+    const { agent } = pressureAgent({ sessionId: 'session:seven', inheritedEventCount: 2, generation: 5, tokens: 210_000, ownEvents: own })
+    const limits = { usageTokens: 210_000, hardLimit: 256_000, handoffAt: 200_000 }
+    const { host } = pressureHost(agent, { limits })
+
+    expect(host.limitsFor(MEMBER_ID)).toEqual(limits)
+    expect(host.surfaceFor(MEMBER_ID)).toEqual({ generation: 5, tokens: 210_000 })
+    expect(host.logSpanFor(MEMBER_ID)).toEqual({ sessionId: 'session:seven', inheritedEventCount: 2, events: own })
+    expect(host.inHandFor(MEMBER_ID)).toEqual({ inHand: ['claim:a (unify forms)'], jobs: ['build'] })
+    expect(host.limitsFor('member:two' as AgentTeamMemberId)).toBeUndefined()
+  })
+
+  it('refuses to report a steered notice that had no live Agent to reach', () => {
+    const { host } = pressureHost(undefined)
+
+    // The engine holds a step on the strength of this call: reporting success
+    // without delivering would stall the Member behind a message that does not
+    // exist, which is the one outcome the gate's own guard names.
+    expect(() => host.steer(MEMBER_ID, teamNotice('instruction'))).toThrow(/no live Agent/)
+  })
+})
+
+describe('the Team pressure policy over the engine', () => {
+  it('carries Team\'s own labels into the engine\'s notice', async () => {
+    const { agent, steered } = pressureAgent({ ownEvents: [] })
+    const policy = new TeamPressurePolicy({
+      agentForMember: () => agent,
+      limitsForAgent: () => ({ usageTokens: 200_000, hardLimit: 256_000, handoffAt: 200_000 }),
+      compactionForAgent: () => undefined,
+      activeClaimLabels: () => ['claim:a (unify forms)'],
+      runningJobLabels: () => ['build'],
+      failed: () => {},
+      log: () => {},
+    })
+
+    const decision = await policy.onPreStep(MEMBER_ID, [humanInput('carry on')], new AbortController().signal)
+
+    expect(decision.kind).toBe('notice')
+    const text = (steered[0]?.content[0] as { readonly text: string }).text
+    expect(text).toContain('Active Claims: claim:a (unify forms)')
+    expect(text).toContain('Owner jobs: 1 running')
+    expect(text).toContain('context_rollover')
+    // Without a compaction capability the notice must not name the in-place
+    // tool: a model told to call one it does not have would waste the turn.
+    expect(text).not.toContain('context_compact')
+  })
+
+  it('holds a long-gap step whose input the judge reads as unrelated, and admits the related one', async () => {
+    const idle = [{ type: 'turn/end', seq: 3, time: Date.now() - 33 * 60_000 } as unknown as SessionEvent]
+    const judge = (noul: number): PressureJudgement => ({
+      decide: async () => ({ answers: { related: { type: 'noul', noul } } }) as never,
+    })
+    const build = (noul: number) => {
+      const { agent, steered } = pressureAgent({ ownEvents: idle })
+      const policy = new TeamPressurePolicy({
+        agentForMember: () => agent,
+        limitsForAgent: () => ({ usageTokens: 200_000, hardLimit: 256_000, handoffAt: 200_000 }),
+        compactionForAgent: () => undefined,
+        activeClaimLabels: () => [],
+        runningJobLabels: () => [],
+        judgeForAgent: () => judge(noul),
+        failed: () => {},
+        log: () => {},
+      })
+      return { policy, steered }
+    }
+
+    const unrelated = build(0.1)
+    const held = await unrelated.policy.onPreStep(MEMBER_ID, [humanInput('the other one?')], new AbortController().signal)
+    expect(held.kind).toBe('hold')
+    // The instruction quotes the held request, because the held request is the
+    // one thing the model writing the handoff cannot otherwise see.
+    expect((unrelated.steered[0]?.content[0] as { readonly text: string }).text).toContain('the other one?')
+
+    const related = build(0.9)
+    const admitted = await related.policy.onPreStep(MEMBER_ID, [humanInput('keep going')], new AbortController().signal)
+    expect(admitted.kind).toBe('notice')
+  })
+
+  it('switches the gate off when the deployment installed no judge', async () => {
+    const idle = [{ type: 'turn/end', seq: 3, time: Date.now() - 33 * 60_000 } as unknown as SessionEvent]
+    const { agent } = pressureAgent({ ownEvents: idle })
+    const policy = new TeamPressurePolicy({
+      agentForMember: () => agent,
+      limitsForAgent: () => ({ usageTokens: 200_000, hardLimit: 256_000, handoffAt: 200_000 }),
+      compactionForAgent: () => undefined,
+      activeClaimLabels: () => [],
+      runningJobLabels: () => [],
+      failed: () => {},
+      log: () => {},
+    })
+
+    const decision = await policy.onPreStep(MEMBER_ID, [humanInput('the other one?')], new AbortController().signal)
+
+    // A missing judge is a deployment choice, not a failure: the step is
+    // admitted and only the ordinary handoff notice is steered.
+    expect(decision.kind).toBe('notice')
   })
 })
