@@ -7,10 +7,10 @@ import type { AgentTeamContextJudgeResult } from '@wowyuarm/dsh-agent-team/types
  *
  * The settings page stages the row configuration that mounts the judge, but it
  * cannot state whether a judge is actually reachable: `enabled` is a fact about
- * the running Host, and the thresholds in the same answer are the ones in
- * force, which a deployment may have set outside the settings document. So this
- * projection is read rather than derived, and every write that can mount or
- * unmount the judge re-reads it instead of predicting the outcome.
+ * the running Host, and a deployment may mount one from configuration the page
+ * never sees. So this projection is read rather than derived, and every write
+ * that can mount or unmount the judge re-reads it instead of predicting the
+ * outcome.
  *
  * Reads are demand-driven off the first subscriber, so an ordinary conversation
  * never calls the Remote.

@@ -1,73 +1,65 @@
 import {
-  SettingsFormModel, settingsNumberField, settingsTextField,
+  SettingsFormModel, settingsTextField,
   type SettingsFieldState, type SettingsFormActions, type SettingsFormPathOp, type SettingsFormScope,
   type SettingsFormScopeSnapshot, type SettingsFormShell,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamContextJudgeCheck } from './context-judge.ts'
 
 /**
- * The Team settings page's staged form over the judge's row configuration.
+ * The Team settings page's staged form over the judge's endpoint.
  *
- * The page edits two groups of one settings section: the `jev` endpoint the
- * judge is mounted from, and the `gate` thresholds that decide when it is
- * asked. The profile fields that share the same namespace belong to the Human
- * profile page and are never rendered here, so this form reaches its values
- * through a projection: the shared form model addresses one flat section, and
- * the adapter below maps each control to the path it really lives at.
+ * The page edits one group of the Team row's settings section: the `jev`
+ * endpoint the relatedness judge is mounted from. The identity fields that
+ * share that section belong to the Human profile rows and are never rendered
+ * here, so this form reaches its values through a projection — the shared form
+ * model addresses one flat section, and the adapter below maps each control to
+ * the path it really lives at.
  *
- * The key literal is the one control that is not read back — the Host redacts
+ * The key literal is the one control that is not read back: the Host redacts
  * it, so its draft starts blank on every load, a blank draft writes nothing,
  * and removing a stored literal is an explicit clear rather than an empty
  * string.
  */
 
+/** The group inside the Team row's settings section that this form edits. */
+const JUDGE_GROUP = 'jev'
+
 /** Where each control's value lives inside the Team row's settings section. */
 const FIELD_PATHS = {
-  apiBase: ['jev', 'apiBase'],
-  model: ['jev', 'model'],
-  apiKeyEnv: ['jev', 'apiKeyEnv'],
-  apiKey: ['jev', 'apiKey'],
-  tokens: ['gate', 'tokens'],
-  idleMs: ['gate', 'idleMs'],
-  judgeTimeoutMs: ['gate', 'judgeTimeoutMs'],
+  apiBase: [JUDGE_GROUP, 'apiBase'],
+  model: [JUDGE_GROUP, 'model'],
+  apiKey: [JUDGE_GROUP, 'apiKey'],
 } as const
 
 /** One control this page owns. */
-export type TeamGateField = keyof typeof FIELD_PATHS
+export type TeamJudgeField = keyof typeof FIELD_PATHS
 
-/** The two groups this page edits, as they sit inside the Team row's section. */
-export interface TeamGateSection {
+/** The group this form edits, as it sits inside the Team row's section. */
+export interface TeamJudgeSection {
   /** The judge's endpoint configuration. */
   readonly jev?: unknown
-  /** The long-gap gate's thresholds. */
-  readonly gate?: unknown
 }
 
-/**
- * Read one group of a section layer as a plain record.
- * @param layer - a section, or one of its composition layers.
- * @param group - group name inside the section.
- * @returns the group's members, or undefined when the layer carries none.
- */
-function groupOf(layer: unknown, group: string): Record<string, unknown> | undefined {
+/** Read the judge group of a section layer as a plain record. */
+function groupOf(layer: unknown): Record<string, unknown> | undefined {
   if (layer === null || typeof layer !== 'object') return undefined
-  const value = (layer as Record<string, unknown>)[group]
+  const value = (layer as Record<string, unknown>)[JUDGE_GROUP]
   return value !== null && typeof value === 'object' ? value as Record<string, unknown> : undefined
 }
 
 /**
- * Project one section layer onto the controls this page renders. A control
- * whose group or member the layer does not carry stays absent rather than
- * becoming an empty string, which is what the model reads to decide whether a
- * field is overridden and what a reset reverts to.
+ * Project one section layer onto the controls this page renders. A control the
+ * layer does not carry stays absent rather than becoming an empty string, which
+ * is what the model reads to decide whether a field is overridden and what a
+ * reset reverts to.
  * @param layer - a section, or one of its composition layers.
  * @returns the flat control values, or undefined when the layer carries none.
  */
 function flatten(layer: unknown): Record<string, unknown> | undefined {
   if (layer === null || typeof layer !== 'object') return undefined
+  const group = groupOf(layer)
   const flat: Record<string, unknown> = {}
-  for (const [field, path] of Object.entries(FIELD_PATHS) as [TeamGateField, readonly string[]][]) {
-    const group = groupOf(layer, path[0]!)
+  for (const [field, path] of Object.entries(FIELD_PATHS) as [TeamJudgeField, readonly string[]][]) {
     if (group !== undefined && Object.hasOwn(group, path[1]!)) flat[field] = group[path[1]!]
   }
   return flat
@@ -75,15 +67,15 @@ function flatten(layer: unknown): Record<string, unknown> | undefined {
 
 /** Address one control's edit at the path it really lives at. */
 function locate(op: SettingsFormPathOp): SettingsFormPathOp {
-  const path = FIELD_PATHS[op.path[0] as TeamGateField]
+  const path = FIELD_PATHS[op.path[0] as TeamJudgeField]
   return op.op === 'set'
     ? { op: 'set', path: [...path], value: op.value }
     : { op: 'unset', path: [...path] }
 }
 
 /** The shared form model's view of this page's controls, over the real section. */
-class TeamGateScope implements SettingsFormScope<Record<string, unknown>> {
-  constructor(private readonly section: SettingsFormScope<TeamGateSection>) {}
+class TeamJudgeScope implements SettingsFormScope<Record<string, unknown>> {
+  constructor(private readonly section: SettingsFormScope<TeamJudgeSection>) {}
 
   getSnapshot(): SettingsFormScopeSnapshot<Record<string, unknown>> {
     const snapshot = this.section.getSnapshot()
@@ -107,40 +99,36 @@ class TeamGateScope implements SettingsFormScope<Record<string, unknown>> {
 }
 
 /** Everything the page renders about the form, in one replaceable value. */
-export interface TeamContextGateSnapshot {
+export interface TeamJudgeFormSnapshot {
   /** Availability, writability, and what a save would do. */
   readonly shell: SettingsFormShell
   /** One state per control this page owns. */
-  readonly fields: Readonly<Record<TeamGateField, SettingsFieldState>>
+  readonly fields: Readonly<Record<TeamJudgeField, SettingsFieldState>>
 }
 
 /** The model's change subscription, which the page reads through `useSyncExternalStore`. */
-interface TeamGateStore {
-  getSnapshot(): TeamContextGateSnapshot
+interface TeamJudgeStore {
+  getSnapshot(): TeamJudgeFormSnapshot
   subscribe(listener: () => void): () => void
 }
 
-export class TeamContextGateForm {
+export class TeamJudgeForm {
   private readonly model: SettingsFormModel<Record<string, unknown>>
-  private readonly scope: TeamGateScope
-  private readonly store: TeamGateStore
+  private readonly scope: TeamJudgeScope
+  private readonly store: TeamJudgeStore
 
   /**
    * @param section - the Team row's configuration form, as the settings provider serves it.
    * @param judge - the status projection a landed write re-reads.
    */
   constructor(
-    private readonly section: SettingsFormScope<TeamGateSection>,
+    private readonly section: SettingsFormScope<TeamJudgeSection>,
     private readonly judge: TeamContextJudgeCheck,
   ) {
-    this.scope = new TeamGateScope(section)
+    this.scope = new TeamJudgeScope(section)
     this.model = new SettingsFormModel<Record<string, unknown>>(this.scope, [
       settingsTextField('apiBase'),
       settingsTextField('model'),
-      settingsTextField('apiKeyEnv'),
-      settingsNumberField('tokens'),
-      settingsNumberField('idleMs'),
-      settingsNumberField('judgeTimeoutMs'),
     ], [{
       field: 'apiKey',
       // The literal never rides a response, so a draft is only ever what the
@@ -153,7 +141,7 @@ export class TeamContextGateForm {
   }
 
   /** The form state the page renders. */
-  readonly getSnapshot = (): TeamContextGateSnapshot => this.store.getSnapshot()
+  readonly getSnapshot = (): TeamJudgeFormSnapshot => this.store.getSnapshot()
 
   /** Observe the form state. */
   readonly subscribe = (listener: () => void): (() => void) => this.store.subscribe(listener)
@@ -190,9 +178,9 @@ export class TeamContextGateForm {
   }
 
   /** Build the page's state from the model's reads and drafts. */
-  private project(): TeamContextGateSnapshot {
-    const fields = {} as Record<TeamGateField, SettingsFieldState>
-    for (const field of Object.keys(FIELD_PATHS) as TeamGateField[]) fields[field] = this.model.field(field)
+  private project(): TeamJudgeFormSnapshot {
+    const fields = {} as Record<TeamJudgeField, SettingsFieldState>
+    for (const field of Object.keys(FIELD_PATHS) as TeamJudgeField[]) fields[field] = this.model.field(field)
     return { shell: this.model.shell(), fields }
   }
 

@@ -2463,7 +2463,7 @@ const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42
  * panel unreachable by design — so this journey does its panel work first and
  * only then enters Team mode, to prove the same rename reaches the timeline.
  */
-it('configures the Human profile from Settings in real Web', async () => {
+it('configures the Team page identity from Settings in real Web', async () => {
   await installLocalBundle(false)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
@@ -2474,15 +2474,18 @@ it('configures the Human profile from Settings in real Web', async () => {
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const panel = page.getByRole('dialog')
-  await panel.getByRole('button', { name: '我的资料' }).click()
+  await panel.getByRole('button', { name: '团队', exact: true }).click()
   const nameField = panel.getByLabel('名字')
   await nameField.waitFor()
+  // The Team page carries two saves — this row's and the judge group's — so the
+  // identity row is addressed through the one form it owns.
+  const nameSave = panel.locator('form button[type="submit"]')
   // The Host has no override stored yet, so the page shows the historic default
   // and the version footnote's two facts: the bundle version and the repo link.
   expect(await nameField.inputValue()).toBe('human')
   // The page states what owns it before anything else: among the Harness's own
-  // settings pages, a bare 「我的资料」 leaves the reader guessing.
-  expect(await panel.textContent()).toContain('这是 Agent Team 的资料页')
+  // settings pages, a bare 「团队」 leaves the reader guessing.
+  expect(await panel.textContent()).toContain('你在 Team 里的身份')
   expect(await panel.textContent()).toMatch(/版本 \d+\.\d+\.\d+/)
   expect(await panel.getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('https://github.com/wowyuarm/dsh-agent-team')
   expect(await panel.getByRole('button', { name: '移除头像' }).count()).toBe(0)
@@ -2496,7 +2499,7 @@ it('configures the Human profile from Settings in real Web', async () => {
   expect(saveRing?.outlineStyle).not.toBe('none')
   await page.keyboard.press('Enter')
   await expect.poll(() => scaffold!.ctx.agentTeam.humanHandle()).toBe('Ada')
-  await expect.poll(async () => await panel.getByRole('button', { name: '保存' }).isDisabled()).toBe(true)
+  await expect.poll(async () => await nameSave.isDisabled()).toBe(true)
 
   // Avatar upload: bytes go to the persistent store, the reference into
   // settings, and the page draws what the browser can decode.
@@ -2508,22 +2511,22 @@ it('configures the Human profile from Settings in real Web', async () => {
   await expect.poll(async () => await preview.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
   expect(await preview.getAttribute('src')).toMatch(/^data:image\/png;base64,/)
   await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef !== undefined).toBe(true)
-  await page.screenshot({ path: join(UI09_SHOTS, 'human-profile.png'), fullPage: true })
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page.png'), fullPage: true })
 
   // A refused name is refused before the round trip: the field keeps what the
   // reader typed and the notice states the rule.
   await nameField.fill('   ')
   await panel.getByText('名字不能为空。').waitFor()
-  expect(await panel.getByRole('button', { name: '保存' }).isDisabled()).toBe(true)
-  await page.screenshot({ path: join(UI09_SHOTS, 'human-profile-empty-name.png'), fullPage: true })
+  expect(await nameSave.isDisabled()).toBe(true)
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-empty-name.png'), fullPage: true })
   await nameField.fill('Ada')
-  await expect.poll(async () => await panel.getByRole('button', { name: '保存' }).isDisabled()).toBe(true)
+  await expect.poll(async () => await nameSave.isDisabled()).toBe(true)
 
   // 390×844: the shipped panel keeps its 188px nav rail at every viewport, so
   // the question this answers is whether OUR column survives the squeeze.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
-  await page.screenshot({ path: join(UI09_SHOTS, 'human-profile-narrow.png'), fullPage: true })
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-narrow.png'), fullPage: true })
   const narrow = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,
@@ -2541,7 +2544,7 @@ it('configures the Human profile from Settings in real Web', async () => {
   await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef !== undefined).toBe(true)
   await expect.poll(async () => await panel.locator('[data-avatar="initial"]').textContent()).toBe('A')
   expect(await panel.locator('img').count()).toBe(0)
-  await page.screenshot({ path: join(UI09_SHOTS, 'human-profile-undecodable-avatar.png'), fullPage: true })
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-undecodable-avatar.png'), fullPage: true })
 
   // Removal returns the identity to the initial while the rename stands.
   await panel.getByRole('button', { name: '移除头像' }).click()
@@ -2612,7 +2615,7 @@ it('configures the Human profile from Settings in real Web', async () => {
  * journey states the fact on rc.1, rc.2, and whatever cut the adjacent checkout
  * carries instead of naming one cut once.
  */
-it('states the local environment check on the Human profile page', async () => {
+it('states the local environment check on the Team page', async () => {
   await installLocalBundle(false)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
@@ -2623,7 +2626,7 @@ it('states the local environment check on the Human profile page', async () => {
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const panel = page.getByRole('dialog')
-  await panel.getByRole('button', { name: '我的资料' }).click()
+  await panel.getByRole('button', { name: '团队', exact: true }).click()
   const block = panel.locator('[data-environment]')
   await block.waitFor()
   await expect.poll(async () => await block.getAttribute('data-environment')).toBe('ok')
@@ -2661,18 +2664,21 @@ it('states the local environment check on the Human profile page', async () => {
 }, 180_000)
 
 /**
- * The context gate page: the judge's live status above the form that configures
- * it. The journey proves the whole path — page → settings document → the Host's
- * own judge → back into the status line — because the thresholds the line
- * prints come from the Remote that reads the gate in force, not from the form's
- * drafts. A write that landed and a write that merely staged look identical on
- * the page, so only that round trip tells them apart.
+ * The judge group on the Team page: one line of state above the three controls
+ * that decide whether jev can be reached at all. The journey proves the whole
+ * path — page → settings document → the Host's own judge → back into the status
+ * line — because a write that landed and a write that merely staged look
+ * identical on the page, so only that round trip tells them apart.
+ *
+ * The page is deliberately small: the gate's thresholds and the key's
+ * environment variable share the same row and are Team's own business, so this
+ * journey also pins their absence from the controls and from the copy.
  *
  * The key literal is written, then cleared: mounting and unmounting the judge
  * is the one state change this page can reach without a network call, and the
  * literal is a fixture that never leaves the temporary profile.
  */
-it('configures the context gate from Settings in real Web', async () => {
+it('configures the jev endpoint from the Team page in real Web', async () => {
   await installLocalBundle(false)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
@@ -2683,60 +2689,72 @@ it('configures the context gate from Settings in real Web', async () => {
 
   await page.getByRole('button', { name: '设置', exact: true }).click()
   const panel = page.getByRole('dialog')
-  await panel.getByRole('button', { name: '上下文门控' }).click()
+  await panel.getByRole('button', { name: '团队', exact: true }).click()
+  const heading = panel.getByRole('heading', { name: '团队', exact: true })
+  await heading.waitFor()
+  const judgeToggle = panel.getByRole('button', { name: /^jev/ })
+  const judge = panel.locator('[data-team-judge]')
 
-  // A fresh profile holds no key: the page says so, names the environment
-  // variable this deployment reads, and prints the thresholds in force without
-  // claiming any of them as a default of its own.
-  const status = panel.locator('[data-context-judge]')
+  // A fresh profile holds no key: the row says so in one line and the controls
+  // that would change it are not on the page at all. A closed disclosure that
+  // merely hid its content would still be reachable by keyboard and by a screen
+  // reader, so the journey pins the absence rather than the styling.
+  const status = judgeToggle.locator('[data-context-judge]')
   await status.waitFor()
   await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
-  const noKey = (await status.textContent())!
-  expect(noKey).toContain('未配置 key')
-  expect(noKey).toContain('TYPESAFE_API_KEY')
-  expect(noKey).toContain('生效阈值：')
-  expect(noKey).toContain('判官超时')
-  // The page states itself before the form: heading, what the gate is for, and
-  // the status block that says whether a judge answers today.
-  const heading = panel.getByRole('heading', { name: '上下文门控' })
+  expect(await status.textContent()).toContain('未配置 key')
+  expect(await judgeToggle.getAttribute('aria-expanded')).toBe('false')
+  expect(await judge.count()).toBe(0)
+  expect(await panel.getByRole('textbox', { name: 'apiBase' }).count()).toBe(0)
   await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-no-key.png'), fullPage: true })
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-no-key.png'), fullPage: true })
 
+  // Opening it is what puts the three controls on the page — exactly those, and
+  // nothing else: the gate's thresholds and the key's environment variable share
+  // the same settings section and are Team's own business, so neither a control
+  // nor a number for them appears here. It is a real button, so the keyboard
+  // path a reader without a pointer has is the one that opens it.
+  await judgeToggle.focus()
+  await page.keyboard.press('Enter')
+  expect(await judgeToggle.getAttribute('aria-expanded')).toBe('true')
+  await judge.waitFor()
+  expect(await judge.textContent()).not.toContain('阈值')
+  expect(await judge.textContent()).not.toContain('环境变量')
+  expect(await judge.getByRole('textbox').count()).toBe(3)
+  expect(await judge.getByText('jev', { exact: true }).count()).toBe(0)
   // Nothing is overridden in a fresh profile, so the endpoint controls start
-  // empty: the row states only what it states, and the engine's own defaults
-  // are never copied onto the page. The status line is where the numbers in
-  // force come from, and the key is a password field: a stored literal never
-  // rides a response, so the control starts blank and the page offers no clear
-  // until one is stored.
-  expect(await panel.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('')
-  expect(await panel.getByRole('textbox', { name: 'model' }).inputValue()).toBe('')
-  expect(await panel.getByRole('textbox', { name: 'key 环境变量' }).inputValue()).toBe('')
-  const keyField = panel.getByLabel('key', { exact: true })
+  // empty: the row states only what it states, and the engine's own defaults are
+  // never copied onto the page. The key is a password field — a stored literal
+  // never rides a response — so it starts blank and there is nothing to clear.
+  expect(await judge.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('')
+  expect(await judge.getByRole('textbox', { name: 'model' }).inputValue()).toBe('')
+  const keyField = judge.getByLabel('key', { exact: true })
   expect(await keyField.getAttribute('type')).toBe('password')
   expect(await keyField.getAttribute('autocomplete')).toBe('new-password')
   expect(await keyField.inputValue()).toBe('')
-  expect(await panel.getByRole('button', { name: '清除已存的 key' }).count()).toBe(0)
-
-  // Keyboard write: type the literal, then save through the control the form
-  // owns. The judge mounts, and the status line reports the Host's own answer
-  // rather than the form's optimism.
-  await keyField.fill('sk-e2e-not-a-real-key')
-  await panel.getByRole('button', { name: '保存' }).click()
-  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('enabled')
-  expect(await keyField.inputValue()).toBe('')
-  expect((await status.textContent())!).toContain('判官已就绪')
-  // The configured control and its clear, where they stand under the key field.
-  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-key-configured.png'), fullPage: true })
-  // Then the same status block the no-key state drew, now stating that a judge
-  // answers and which thresholds are in force.
+  expect(await judge.getByRole('button', { name: '清除 key' }).count()).toBe(0)
   await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-enabled.png'), fullPage: true })
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-open.png'), fullPage: true })
+
+  // One save writes all three: the row now carries them, which is what the
+  // shipped overridden badge reports, and the judge mounts — the status line
+  // states the Host's own answer rather than the form's optimism.
+  await judge.getByRole('textbox', { name: 'apiBase' }).fill('https://openrouter.ai/api/v1')
+  await judge.getByRole('textbox', { name: 'model' }).fill('typesafe/jev-1.13')
+  await keyField.fill('sk-e2e-not-a-real-key')
+  await judge.getByRole('button', { name: '保存' }).click()
+  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('enabled')
+  expect(await status.textContent()).toContain('jev 已就绪')
+  await expect.poll(async () => await judge.getByRole('button', { name: '重置' }).count()).toBe(2)
+  expect(await keyField.inputValue()).toBe('')
+  await heading.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-enabled.png'), fullPage: true })
 
   // Clearing is its own write, and unmounts the judge again. It is the page's
   // own control, so it is also where the keyboard path is proven: Tab from the
   // key field reaches it, it carries the one focus ring the language defines,
   // and Enter is what clears.
-  const clearButton = panel.getByRole('button', { name: '清除已存的 key' })
+  const clearButton = judge.getByRole('button', { name: '清除 key' })
   await clearButton.waitFor()
   await keyField.click()
   await page.keyboard.press('Tab')
@@ -2744,37 +2762,66 @@ it('configures the context gate from Settings in real Web', async () => {
   expect(clearRing?.focusVisible).toBe(true)
   expect(clearRing?.outlineStyle).not.toBe('none')
   expect(clearRing?.outlineWidth).toBe('2px')
+  // The shot is taken while the ring is on the control, so the page's own
+  // control carries its focus state in the evidence rather than in prose.
+  await heading.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-key-configured.png'), fullPage: true })
   await page.keyboard.press('Enter')
   await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
-  await expect.poll(async () => await panel.getByRole('button', { name: '清除已存的 key' }).count()).toBe(0)
-
-  // A threshold is row configuration, and the two places it can appear are kept
-  // apart: the field is empty because the row overrides nothing, while the
-  // status line prints the value in force. Saving an override moves that
-  // number, and reset stages the clear back to the composition layer, which the
-  // line follows again.
-  const inherited = /判官超时 (\d+) 毫秒/.exec((await status.textContent())!)?.[1]
-  expect(inherited).toBeDefined()
-  const timeout = panel.getByRole('textbox', { name: '判官超时（毫秒）' })
-  expect(await timeout.inputValue()).toBe('')
-  await timeout.fill('10000')
-  await panel.getByRole('button', { name: '保存' }).click()
-  await expect.poll(async () => (await status.textContent())!.includes('判官超时 10000 毫秒')).toBe(true)
-  await expect.poll(async () => await panel.getByRole('button', { name: '重置' }).count()).toBe(1)
-  await panel.getByRole('button', { name: '重置' }).click()
-  await panel.getByRole('button', { name: '保存' }).click()
-  await expect.poll(async () => (await status.textContent())!.includes(`判官超时 ${inherited} 毫秒`)).toBe(true)
-  expect(await timeout.inputValue()).toBe('')
+  await expect.poll(async () => await judge.getByRole('button', { name: '清除 key' }).count()).toBe(0)
+  // The endpoint survives the key's removal: they are one row, but the clear
+  // writes exactly the one field it names.
+  expect(await judge.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('https://openrouter.ai/api/v1')
 
   // 390×844: the shipped panel keeps its 188px nav rail, so the page has to
   // survive a column far narrower than its sentences. It must stay inside the
-  // panel and add no horizontal overflow of its own.
+  // panel and add no horizontal overflow of its own. The shot is taken with the
+  // judge group itself in view — the panel scrolls, so a full-page capture at
+  // the top would leave the row this rule restacks below the fold.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
-  // The status block is what the narrow rule restacks, so the shot is taken at
-  // the top of the page rather than wherever the last write left the scroll.
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'context-gate-narrow.png'), fullPage: true })
+  await judgeToggle.scrollIntoViewIfNeeded()
+  // Two rules are measured here rather than eyeballed. The row's answer moves
+  // under the title it answers for, and the shipped field head turns into a
+  // column: at this width a label and its override badges cannot share a line,
+  // and side by side the badges are painted over the label's text.
+  const narrowGeometry = await judgeToggle.evaluate(toggle => {
+    const title = toggle.querySelector('[class*="groupTitle"]')!
+    const answer = toggle.querySelector('[data-context-judge]')!
+    const head = document.querySelector('[data-team-judge] [class*="head"]')!
+    const label = head.querySelector('label')!
+    const badges = head.querySelector('[class*="badges"]')
+    const titleBox = title.getBoundingClientRect()
+    const answerBox = answer.getBoundingClientRect()
+    const labelBox = label.getBoundingClientRect()
+    const badgesBox = badges?.getBoundingClientRect()
+    return {
+      answerBelowTitle: Math.round(answerBox.top - (titleBox.top + titleBox.height)),
+      labelWidth: Math.round(labelBox.width),
+      labelText: Math.round(label.scrollWidth),
+      badgesTop: badgesBox === undefined ? undefined : Math.round(badgesBox.top - labelBox.bottom),
+    }
+  })
+  expect(narrowGeometry.answerBelowTitle).toBeGreaterThanOrEqual(-1)
+  expect(narrowGeometry.labelWidth).toBeGreaterThanOrEqual(narrowGeometry.labelText)
+  expect(narrowGeometry.badgesTop).toBeGreaterThanOrEqual(-1)
+  // The answer is a sentence with a leading glyph, so at this width the glyph
+  // rides the first line of the text instead of hanging at the middle of a
+  // wrapped block, and the sentence starts where the glyph ends rather than in
+  // a column of its own.
+  const narrowAnswer = await status.evaluate(node => {
+    const glyph = node.querySelector('svg')!.getBoundingClientRect()
+    const text = node.querySelector('span')!.getBoundingClientRect()
+    return {
+      glyphTop: Math.round(glyph.top),
+      glyphRight: Math.round(glyph.right),
+      textTop: Math.round(text.top),
+      textLeft: Math.round(text.left),
+    }
+  })
+  expect(narrowAnswer.glyphTop - narrowAnswer.textTop).toBeLessThanOrEqual(4)
+  expect(narrowAnswer.textLeft).toBeGreaterThanOrEqual(narrowAnswer.glyphRight)
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-narrow-judge.png'), fullPage: true })
   const narrow = await page.evaluate(() => ({
     scrollWidth: document.documentElement.scrollWidth,
     clientWidth: document.documentElement.clientWidth,

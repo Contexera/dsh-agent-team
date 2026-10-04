@@ -40,10 +40,9 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import { HumanSettingsSection } from './HumanSettingsSection.tsx'
-import { ContextJudgeSettingsSection } from './ContextJudgeSettingsSection.tsx'
+import { TeamSettingsSection } from './TeamSettingsSection.tsx'
 import { TeamContextJudgeCheck } from './context-judge.ts'
-import { TeamContextGateForm, type TeamGateSection } from './context-gate-form.ts'
+import { TeamJudgeForm, type TeamJudgeSection } from './judge-form.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
@@ -354,21 +353,44 @@ function applyUi(ctx: ClientContext): void {
   registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'main', TeamConversation as never, undefined, 'conversation')
   registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
 
-  // The Human profile page: one settings section, ordered between General (0)
-  // and Models (10) so identity sits near the top. Writes go through the Team
-  // Remote, which answers with the Host's own rejection reason (a name
-  // collides, an empty one), and the shared identity re-reads afterwards, so a
-  // rename lands in the timeline and the member refs at the same moment the
-  // page shows it.
+  // The Team's settings page: one settings section, ordered between General (0)
+  // and Models (10) so it sits near the top. It holds two groups that write
+  // through two different documents: identity goes through the Team Remote,
+  // which answers with the Host's own rejection reason (a name collides, an
+  // empty one), and the shared identity re-reads afterwards, so a rename lands
+  // in the timeline and the member refs at the same moment the page shows it.
+  //
+  // The judge's endpoint is one group of the Team row's settings section, so it
+  // is offered only while this deployment serves a settings document: the page
+  // is registered here regardless, because identity is reachable without one,
+  // and the group is passed in as an absent value when there is none. The
+  // service is read through `ctx.get` rather than a hard `inject` for the same
+  // reason — a deployment without the settings UI keeps the rest of the Team.
+  const judgeForm: { current: TeamJudgeForm | undefined } = { current: undefined }
+  ctx.inject(['configForms'], (scope: ClientContext) => {
+    const form = new TeamJudgeForm(scope.configForms.get<TeamJudgeSection>(TEAM_SETTINGS_NS), contextJudge)
+    judgeForm.current = form
+    scope.effect(() => () => {
+      judgeForm.current = undefined
+      form.dispose()
+    }, 'agent-team: judge settings form')
+  })
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
-    id: 'team-human',
+    id: 'team-settings',
     order: 5,
-    label: () => ctx.locale.bind(NS)('humanSettingsNav'),
+    label: () => ctx.locale.bind(NS)('teamSettingsNav'),
     locale: NS,
     inject: () => ({
       identity: humanIdentity,
       environment,
+      judge: contextJudge,
+      judgeForm: judgeForm.current,
+      // The key's literal never rides a response; the describe mirror is what
+      // says whether one is stored.
+      keyConfigured: (): boolean => ctx.get('configForms')?.describe().getSnapshot().view?.namespaces
+        .find(row => row.ns === TEAM_SETTINGS_NS)?.secrets
+        .some(secret => secret.path.join('.') === 'jev.apiKey' && secret.set) ?? false,
       saveName: async (name: string) => {
         const saved = await ctx.remote.agentTeam.setHumanProfile({ name })
         if (!saved.ok) return saved.error.message
@@ -399,41 +421,7 @@ function applyUi(ctx: ClientContext): void {
         return undefined
       },
     }),
-  }, HumanSettingsSection as never))
-
-  // The context gate's page, ordered right after the profile and before Models.
-  // It follows the settings namespace rather than this plugin: the profile page
-  // above owns that namespace's identity fields, this one owns the judge's
-  // endpoint and the gate's thresholds, and neither renders the other's
-  // controls — so a deployment that never composed the Team row shows no trace
-  // of this page instead of an empty one. The form is built with the page and
-  // released with it, because a registration that outlives its namespace would
-  // hold drafts nothing could accept.
-  ctx.inject(['configForms'], (scope: ClientContext) => {
-    scope.effect(() => scope.configForms.whileServed([TEAM_SETTINGS_NS], () => {
-      const form = new TeamContextGateForm(scope.configForms.get<TeamGateSection>(TEAM_SETTINGS_NS), contextJudge)
-      const off = scope.slots.inject('settings.section', () => scope.slots.register({
-        name: 'settings.section',
-        id: 'team-context-gate',
-        order: 6,
-        label: () => ctx.locale.bind(NS)('contextGateNav'),
-        locale: NS,
-        inject: () => ({
-          judge: contextJudge,
-          form,
-          // The key's literal never rides a response; the describe mirror is
-          // what says whether one is stored.
-          keyConfigured: (): boolean => scope.configForms.describe().getSnapshot().view?.namespaces
-            .find(row => row.ns === TEAM_SETTINGS_NS)?.secrets
-            .some(secret => secret.path.join('.') === 'jev.apiKey' && secret.set) ?? false,
-        }),
-      }, ContextJudgeSettingsSection as never))
-      return () => {
-        off()
-        form.dispose()
-      }
-    }), 'agent-team: context gate settings')
-  })
+  }, TeamSettingsSection as never))
 }
 
 export async function apply(ctx: ClientContext): Promise<void> {

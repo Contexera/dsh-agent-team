@@ -37,14 +37,17 @@
 - membership 语义跟随 Host：加入要求 `availability === 'active'`（Host 会拒绝其他 availability），退出只要求 membership 事实本身，所以已经加入但暂时不可用的成员仍然保留可用的 移除。
 - 只有侧栏 Agents 在写法上不同：它像目录那样直呼 `builder`，其余花名册按 composer 的称呼写 `@builder`。
 
-## Human 资料页（我的资料）
-- 设置面板里 Team 的第一面是 `settings.section` 的 `team-human` 条目（「我的资料」），只在普通模式提供——Team 模式接管侧栏后设置面板不可达。导航轨与内容列由 shell 画，所以本段自己画 18px/600 标题，其余行沿用 shipped 设置语言：16px/0 内边距配 border-l2 发丝线、14px/22px 标题叠 12px/18px tertiary 说明、控件间距 12px；按钮与输入框直接用 shipped `Button` 与 `Input`，不另起一份声明。因为导航轨把这个条目与 Harness 自己的页面排在一起，标题下方加一行 13px tertiary 引言，写明这一页属于谁、改动作用在哪里——而且这行页头在**每个状态**都渲染（读取失败时也在），页面不会把「这是谁的资料」晾着不答。脚注写出版本号并链接仓库；升级提示行只在 Host 报告有时才出现。
+## 团队设置页（团队）
+- 设置面板里 Team 只有这一面：`settings.section` 的 `team-settings` 条目（「团队」），只在普通模式提供——Team 模式接管侧栏后设置面板不可达。导航轨与内容列由 shell 画，所以本段自己画 18px/600 标题，其余行沿用 shipped 设置语言：16px/0 内边距配 border-l2 发丝线、14px/22px 标题叠 12px/18px tertiary 说明、控件间距 12px；按钮与输入框直接用 shipped `Button` 与 `Input`，不另起一份声明。因为导航轨把这个条目与 Harness 自己的页面排在一起，标题下方加一行 13px tertiary 引言，写明这一页属于谁、改动作用在哪里——而且这行页头在**每个状态**都渲染（读取失败时也在），页面不会把「这是谁的 Team」晾着不答。脚注写出版本号并链接仓库；升级提示行只在 Host 报告有时才出现。
+- 这一页装着两组可写字段，各自答不同的文档，而且**从不把一组渲染成另一组**：身份走 Team Remote 读写，jev 端点则是 Team Host 行 settings 节里的一组、经 settings 提供方写入。整份渲染该命名空间的表单会把身份字段塞进 jev 组，也会把扁平的 `apiBase` 寻址到错误的路径。
 - 名字行是一个 form：36×200px 输入框，主色「保存」按钮持有 submit——脏字段里按 Enter 即保存，Tab 的下一站就是它。头像行画 40px 身份圆（`border-radius: 50%` 配 `corner-shape: round`）呈现图片或首字母，一个「更换头像」按钮驱动视觉隐藏的 `input[type="file"] accept="image/*"`（上限 10MB），只有在存有 `avatarRef` 时才多出「移除头像」。两处头像座位只在**这些字节真的能解码**时才画图——Host 按声明的 media type 收头像、不解码内容，所以手机拍的 HEIC 或传入途中损坏的字节会被存下来、再以画不出任何东西的 data URL 交回——`useAvatarImage` 把这个判断按 URL 记住：画不出就与「已移除」一样显示首字母，而新上传的字节因为是另一个 URL 会自动重试。
 - `human-identity.ts` 是这份资料的唯一读取方：`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取、引用未变时复用已经解码好的头像、后续读取失败时保留上一次已接受的值（只有从未加载成功才是 unavailable，此时整面 `role="alert"` 并自带重试），并在每次写入被接受后刷新。写入走 settings 命名空间：`remote.settings.update(namespace, patch, expectedRevision)` 与 `mutate(…, [{ op: 'unset', path: ['avatarRef'] }])`，经由一个可选的 `ctx.inject(['remote.settings'])` 绑定取得——未声明就读 `ctx.remote.settings` 会抛错，而硬性激活依赖会在 settings 服务缺席时把整个 Client 拖下水，所以服务缺席只报不可用。写入被拒绝时在该段内显示 Host 的 message，而不是让「正在保存…」一直挂着。Client 侧的 namespace 常量由测试钉在 Host 自己的常量上，两半不会静默漂移。
-- 390×844 下 shipped 面板保留它 188px 的导航轨（没有 media query），内容列只剩约 106px；所以本段自带 `@container (max-width: 420px)`：每行文案叠在控件上方、去掉宽版为控件预留的 48px 右内边距、输入框与按钮占满整列；浏览器验收在该宽度断言无横向溢出。
+- 390×844 下 shipped 面板保留它 188px 的导航轨（没有 media query），内容列只剩约 106px；所以本段自带 `@container (max-width: 420px)`：每行文案叠在控件上方、去掉宽版为控件预留的 48px 右内边距、输入框与按钮占满整列，jev 的答复另起一行并与行首齐平、图标领在句首（宽版它是行尾那一行的收束）；浏览器验收在该宽度断言无横向溢出，并把图标与它所领的那一行首句实测对齐。
 
 ## 环境检查（environment check）
 版本脚注之上，页面陈述的是关于这次安装、而不是关于 Human 的一个事实：这个 bundle 正跑在哪条 DSH 线上，以及那条线是否落在 bundle 自己声明的支持范围内。它是第二个投影（`environment-check.ts`、`TeamEnvironmentCheck`），**刻意不放进身份 store**——它只读一次、从不写回，唯一的渲染方就是设置页。
+
+它以页面其余行同一条发丝线开场：这条判定答的是这次安装、而不是它上方那个端点，没有这条线它会被读成 jev 组自己的一部分。
 
 判定只有三档，不新增第四档，也从不猜测。Host 建立不起来的事实就是 `undetermined`，这是一个落定的回答、而不是一次失败的请求：本块没有重试；Host 联系不上时整块什么都不渲染，而不是借用这个词。
 
@@ -60,14 +63,14 @@
 
 本块用 `data-environment` 携带自己的判定，验收 journey 因此等待的是一个状态而不是一段文案。
 
-## 上下文门控（context gate）
-- 设置面板里 Team 的第二面就是它：`settings.section` 的 `team-context-gate` 条目（「上下文门控」），排在资料页之后、Models 之前。它经 `ctx.configForms.whileServed([namespace], …)` 注册——没有装配 Team Host 行的部署**看不到这一页的任何痕迹**，而不是看到一个空壳；表单随页面建立、随页面释放。
-- 那一行是**一个** settings 命名空间、里面三组字段，而每一页只渲染自己那组：资料页拥有身份字段，这一页拥有 `jev` 与 `gate`。所以这一页**不整份渲染**该命名空间的表单——扁平的表单模型按 `apiBase` 寻址会写错路径——中间用一层投影适配器把每个控件名映射到它真正的路径（`['jev','apiBase']`、`['gate','judgeTimeoutMs']`），并同样方式拍平该节的 `value`、`base`、`user` 三层。
-- 表单之上的状态块是**读来的**，不是推导出来的：`remote.agentTeam.contextJudge` 回答判官此刻是否可达、不可达的原因、这次部署从哪个环境变量读 key，以及**生效中的**三个阈值。三档判定都用「文本 + 图标」表态并由 `data-context-judge` 携带——`enabled`、`no-key`、`unavailable`——且只有 `unavailable` 取警示面：缺 key 是一个配置步骤，端点坏掉才是要去修的事。
-- 阈值打印的是 **Host 解析后的值**，绝不是这一页自带的默认值：把阈值设在部署自己 patch 层里的情况，或写下去还没生效的情况，正是这行存在的理由。`detail` 始终是 Host 诊断，不变成用户文案。
+## jev 端点组
+- 页面第二组装的是 jev 要用的端点：三个控件——apiBase、model、只写的 key——收在一个默认折叠的披露行之后，那一行本身就是控件。行上带着状态与箭头，展开才出现字段；展开后的组带 `role="group"` 并以该标题为无障碍名，因为这一页有两个保存按钮，任何一个都不该在没有上下文的情况下被念出来。
+- 默认折叠，是因为端点设一次就不再动，而它的状态每次打开这一页都值得看见。折叠时控件**不在 DOM 里**、而不是被藏起来：只把内容藏起来的披露仍能被 Tab 摸到、也能被读屏念到，所以浏览器验收钉的是这种「不在场」（没有 `[data-team-judge]` 组体、没有字段），而不是暗示它的样式。
+- 状态就是这一行、不是字段上方另起的一行：`remote.agentTeam.contextJudge` 回答 jev 此刻是否可达，这一行用「文本 + 14px 图标」陈述 Host 自己的答复，并由 `data-context-judge` 携带——`enabled`、`no-key`、`unavailable`。只有 `unavailable` 取警示色：缺 key 是一个待做的步骤，端点不可达才是要去修的事。首次读取落定前这一行什么都不说，`detail` 始终是 Host 诊断、不变成用户文案。
+- 门控的三个阈值与 key 的环境变量和它同处一行，但**刻意不上页面**：它们是 Team 自己管的行配置，部署仍可在自己的 patch 层设置。Client 只读 `jev` 这一组，中间用一层投影适配器拍平该节的 `value`、`base`、`user` 三层，并把每个控件名映射到它真正的路径（`['jev','apiBase']`）。
 - 表单用的是 shipped 设置栈——`SettingsFormModel` 配 `SettingsForm`、`SettingsValueField`、`SettingsSecretField`——所以草稿、覆盖徽章、重置与保存的行为与 Harness 自己的设置页完全一致。所有写入都经 `ctx.configForms.get(namespace)`，revision 栅栏由它持有，Host 的答复也由它折回 mirror；没落地的保存保留草稿并如实说明，落地的保存会重读状态。
 - key 是**只写**的：Host 会 redact 字面值，所以这个控件每次加载都从空开始；空草稿不写任何东西——打开这一页永远不可能清掉已存的 key——而「已配置」徽章来自 describe mirror 的 `secrets` 列表，那是这份状态唯一可读的地方。移除字面值是一次**显式的清除写入**，且只在没有暂存草稿时才提供：写入会推动文档 revision，而暂存的保存正是被它栅栏住的。
-- 门控的三个阈值就是同一张表单上的普通字段：每个显示该行解析后的值，用户层带着覆盖时自己标记为已覆盖，重置则回到组合层。改动作用于下一个被判断的 step，所以这一页从不要求重启。
+- 这一组只在这次部署**提供 settings 文档**时才出现：段落本身照常注册，因为身份不依赖它也能读写，settings 服务缺席时这一组直接不渲染。文档在场时这一组也自己答自己——只读文档禁用全部控件并说明，命名空间没被提供时渲染表单自带的那行「没有提供」，而不是画出一堆没人接受的字段。
 
 ## 失败态呈现（failure surfaces）
 - 投影失败的呈现只有两种，选哪一种等于声明「屏幕上还剩什么」。**整面失败**（从未加载出投影）用 `errorState`：与它所替代的 loading / empty 面共用同一份空白区居中（`margin: auto`、`padding: 32px 0`），保持在 880px 阅读列内，取 12px/18px 的 error 字号与 `--dsw-alias-state-error-primary`，内容是 Host message 加一个重新发起读取的 `重试`——message 与按钮同在一个 `role="alert"` 里。**行旁失败**（行还在）用内联 `error`：在内容列内 `margin: 0`，读作所属列表的最后一行，而不是让已有内容的面重新居中。

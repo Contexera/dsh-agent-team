@@ -2,21 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamContextJudgeResult } from '@wowyuarm/dsh-agent-team/types'
-import { TeamContextGateForm, type TeamGateSection } from '../src/client/context-gate-form.ts'
+import { TeamJudgeForm, type TeamJudgeSection } from '../src/client/judge-form.ts'
 import { TeamContextJudgeCheck, type TeamContextJudgeLoader } from '../src/client/context-judge.ts'
 
 /**
- * The gate page edits two groups of one shared settings section, and the key is
- * write-only. These tests lock the three things that are easy to get wrong: the
- * flat form model is addressed at the real nested paths, a blank key draft
- * writes nothing (so opening the page can never clear a stored key), and a
- * landed write re-reads the status the Host now serves.
+ * The Team settings page edits one group of a shared settings section, and the
+ * key is write-only. These tests lock the three things that are easy to get
+ * wrong: the flat form model is addressed at the real nested paths, a blank key
+ * draft writes nothing (so opening the page can never clear a stored key), and
+ * a landed write re-reads the status the Host now serves.
  */
 
-const SECTION: TeamGateSection = {
-  jev: { apiBase: 'https://api.typesafe.ai/v1', model: 'jev-1.13.0', apiKeyEnv: 'TYPESAFE_API_KEY' },
-  gate: { tokens: 24000, idleMs: 300000, judgeTimeoutMs: 5000 },
-}
+const JEV = { apiBase: 'https://api.typesafe.ai/v1', model: 'jev-1.13.0', apiKeyEnv: 'TYPESAFE_API_KEY' }
+
+const SECTION: TeamJudgeSection = { jev: JEV }
 
 const REPORT: AgentTeamContextJudgeResult = {
   enabled: false,
@@ -26,25 +25,24 @@ const REPORT: AgentTeamContextJudgeResult = {
 }
 
 function bench() {
-  const stub = stubConfigForm<TeamGateSection>()
+  const stub = stubConfigForm<TeamJudgeSection>()
   const loadContextJudge = vi.fn(async (): Promise<RemoteResult<AgentTeamContextJudgeResult>> => ({ ok: true, value: REPORT }))
   const judge = new TeamContextJudgeCheck({ loadContextJudge } as unknown as TeamContextJudgeLoader)
-  const form = new TeamContextGateForm(stub.scope, judge)
+  const form = new TeamJudgeForm(stub.scope, judge)
   stub.publish({ status: 'ready', value: SECTION, base: SECTION, user: undefined, writable: true, revision: 7 })
   return { stub, form, judge, loadContextJudge }
 }
 
-describe('context gate form', () => {
-  it('reads both groups into the controls it owns', () => {
+describe('judge endpoint form', () => {
+  it('reads the group into the controls it owns, and only those', () => {
     const { form } = bench()
     const state = form.getSnapshot()
     expect(state.shell.available).toBe(true)
     expect(state.fields.apiBase.text).toBe('https://api.typesafe.ai/v1')
     expect(state.fields.model.text).toBe('jev-1.13.0')
-    expect(state.fields.apiKeyEnv.text).toBe('TYPESAFE_API_KEY')
-    expect(state.fields.tokens.text).toBe('24000')
-    expect(state.fields.idleMs.text).toBe('300000')
-    expect(state.fields.judgeTimeoutMs.text).toBe('5000')
+    // The `gate` thresholds and the key environment variable share the row and
+    // are not this page's controls; the projection carries no field for them.
+    expect(Object.keys(state.fields)).toEqual(['apiBase', 'model', 'apiKey'])
   })
 
   it('never seeds the key control: the literal does not ride a response', () => {
@@ -64,11 +62,11 @@ describe('context gate form', () => {
   it('writes a staged edit at the path the control really lives at, fenced to the revision it started from', async () => {
     const { stub, form } = bench()
     form.actions().edit('apiBase', 'https://openrouter.ai/api/v1')
-    form.actions().edit('judgeTimeoutMs', '10000')
+    form.actions().edit('model', 'typesafe/jev-1.13')
     await form.actions().save()
     expect(stub.mutate).toHaveBeenCalledWith([
       { op: 'set', path: ['jev', 'apiBase'], value: 'https://openrouter.ai/api/v1' },
-      { op: 'set', path: ['gate', 'judgeTimeoutMs'], value: 10000 },
+      { op: 'set', path: ['jev', 'model'], value: 'typesafe/jev-1.13' },
     ], 7)
   })
 
@@ -117,10 +115,10 @@ describe('context gate form', () => {
 
   it('stages a reset back to the composition layer as an unset of the real path', async () => {
     const { stub, form } = bench()
-    stub.publish({ user: { gate: { tokens: 1000 } }, value: { ...SECTION, gate: { tokens: 1000, idleMs: 300000, judgeTimeoutMs: 5000 } } })
-    form.actions().resetField('tokens')
+    stub.publish({ user: { jev: { model: 'typesafe/jev-1.13' } }, value: { jev: { ...JEV, model: 'typesafe/jev-1.13' } } })
+    form.actions().resetField('model')
     await form.actions().save()
-    expect(stub.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['gate', 'tokens'] }], 7)
+    expect(stub.mutate).toHaveBeenCalledWith([{ op: 'unset', path: ['jev', 'model'] }], 7)
   })
 
   it('renders nothing while the namespace is not served', () => {
