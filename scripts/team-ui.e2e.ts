@@ -1131,18 +1131,27 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // the default Settings size, and it grows with the body once that size is
   // raised, while the 11px time stays the fixed small grade. The axis is the
   // one variable the theme bootstrap publishes on body, so overriding it here
-  // walks the same path a raised Settings size takes.
+  // walks the same path a raised Settings size takes. Both ends of the
+  // published range are walked: the shipped secondary tier is size − 1 up to
+  // 14px and size − 2 above it, so 22px reads 20px/27px and 10px reads
+  // 9px/16px — the default is asserted around them so the restore is covered.
   const senderName = page.locator('[data-team-thread] article [class*="nameRow"] strong').first()
   await senderName.waitFor()
   const senderMetrics = async (): Promise<string> => await senderName.evaluate(node => {
     const { fontSize, lineHeight } = getComputedStyle(node)
     return `${fontSize}/${lineHeight}`
   })
+  const setAxis = async (size: string): Promise<void> => {
+    await page.evaluate(value => { document.body.style.setProperty('--dsh-content-font-size', value) }, size)
+  }
   await expect.poll(senderMetrics).toBe('13px/20px')
   const axisBefore = await page.evaluate(() => document.body.style.getPropertyValue('--dsh-content-font-size'))
-  await page.evaluate(() => { document.body.style.setProperty('--dsh-content-font-size', '17px') })
-  await expect.poll(senderMetrics).toBe('15px/22px')
-  await page.screenshot({ path: join(UI04_SHOTS, 'content-axis-17px.png') })
+  await setAxis('22px')
+  await expect.poll(senderMetrics).toBe('20px/27px')
+  await page.screenshot({ path: join(UI04_SHOTS, 'content-axis-22px.png') })
+  await setAxis('10px')
+  await expect.poll(senderMetrics).toBe('9px/16px')
+  await page.screenshot({ path: join(UI04_SHOTS, 'content-axis-10px.png') })
   await page.evaluate(value => {
     if (value === '') document.body.style.removeProperty('--dsh-content-font-size')
     else document.body.style.setProperty('--dsh-content-font-size', value)
