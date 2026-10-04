@@ -10,6 +10,7 @@ All notable changes to this project are documented in this file. The format foll
 - The certified DSH baseline moves to `0.2.0-rc.2`: every `@deepseek-ai/dsh-*` peer advances to `>=0.2.0-rc.2 <0.2.1`, so a host still on `0.2.0-rc.1` falls outside the declared range.
 - Context management moves onto the engine's own four tools: `context_status` reads where a Member's context stands (budgets, lineage anchors, and what a compaction would replace), `context_compact` shortens the current generation in place, and the Team-authored `context_timeline` retires. The tools a Member is offered and the tool names its own descriptions mention are now one set.
 - A Member's long-gap relatedness gate can use the deployment's own `jev` service: the bundle declares `@wowyuarm/dsh-jev` as an optional peer and reads `ctx.jev` where a profile mounts one, while a profile without it leaves the gate off instead of failing.
+- The long-gap gate's thresholds are row configuration: the Team Host row takes an optional `gate` object with `tokens`, `idleMs`, and `judgeTimeoutMs`, each field defaulting to the engine's own value, so a deployment can match the gate to its own cadence and give a slower judge the time it needs.
 
 ## [0.2.0] - 2026-09-29
 

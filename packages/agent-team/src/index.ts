@@ -22,6 +22,7 @@ import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
@@ -34,8 +35,8 @@ import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTI
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
-import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC } from './context-continuity-host.ts'
-import { CONTEXT_CONTINUITY_PROJECTION_KEY, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
+import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC, TEAM_PRESSURE_GATE_SCHEMA } from './context-continuity-host.ts'
+import { CONTEXT_CONTINUITY_PROJECTION_KEY, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
 import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, createTeamContextProjectionConfig, createTeamContextProjectionDefinition, foldTeamContextProjection, retainedTopicsThrough, TeamContextProjectionHost } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor, type AgentTeamDurableMemberResult } from './ledger.ts'
@@ -361,20 +362,36 @@ interface CheckpointSeed {
 }
 
 /**
- * Config of the Team Host row: the Human profile (see human-profile.ts). The
- * settings service derives every form from the owning plugin's Config, so the
- * profile is this plugin's own config rather than a section of its own; both
- * fields arrive volatile, which is what lets an edit reach the running Host
- * without remounting it.
+ * Config of the Team Host row: the Human profile (see human-profile.ts) plus
+ * the long-gap gate's thresholds. The settings service derives every form from
+ * the owning plugin's Config, so the profile is this plugin's own config rather
+ * than a section of its own; both profile fields arrive volatile, which is what
+ * lets an edit reach the running Host without remounting it. The gate is the
+ * other kind of field: policy read once when the row mounts, so it stays
+ * non-volatile and no settings form offers it — a deployment states it in its
+ * own patch layer.
  */
 export interface Config {
   name: Volatile<string>
   avatarRef: Volatile<string | undefined>
+  /** Long-gap gate thresholds; an omitted field keeps the engine's default. */
+  readonly gate: PressureGate
 }
+
+/**
+ * The Host row's whole schema: the profile fields verbatim, so their
+ * volatility and defaults stay owned by {@link HUMAN_PROFILE_SETTINGS_SCHEMA},
+ * plus the gate. A patch layer that targets this row replaces its whole config,
+ * so the two halves are declared together here and nowhere else.
+ */
+export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
+  ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
+  gate: TEAM_PRESSURE_GATE_SCHEMA,
+})
 
 /** Host owner of the single Agent Team in one dshHome. */
 export default class AgentTeam extends TypertRemoteService {
-  static Config = HUMAN_PROFILE_SETTINGS_SCHEMA
+  static Config = TEAM_HOST_ROW_SETTINGS_SCHEMA
   static inject = [
     'storageDomain',
     'workspaceRegistry',
@@ -504,6 +521,9 @@ export default class AgentTeam extends TypertRemoteService {
       },
       activeClaimLabels: memberId => this.activeClaimLabels(memberId),
       runningJobLabels: memberId => this.runningJobLabels(memberId),
+      // Deployment policy, read once at mount: the row's own gate config, whose
+      // omitted fields the engine answers with its own defaults.
+      gate: this.config.gate,
       /**
        * The relatedness judge of the long-gap gate: the deployment's own `jev`
        * service, read from this Host's plane. A profile that mounts none leaves

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { applyEntryPatches } from '@deepseek-ai/cordis-plugin-include'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE, HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
+import { TEAM_HOST_ROW_SETTINGS_SCHEMA } from '../src/index.ts'
 // @ts-expect-error untyped shared resolution module
 import { dshPeerRanges } from '../../../scripts/dsh-peers.mjs'
 
@@ -151,6 +152,14 @@ describe('Agent Team shipping contract', () => {
     const profileFields = HUMAN_PROFILE_SETTINGS_SCHEMA.dict ?? {}
     expect(profileFields.name?.meta.volatile).toBe(true)
     expect(profileFields.avatarRef?.meta.volatile).toBe(true)
+    // The same row carries the long-gap gate, and it is the other kind of
+    // field: policy read once when the row mounts, so it must stay
+    // non-volatile — no settings form offers it, and a deployment states it in
+    // its own patch layer instead. Its three thresholds are all optional, so an
+    // omitted one keeps the engine's own default.
+    const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
+    expect(rowFields.gate?.meta.volatile).toBeUndefined()
+    expect(Object.keys(rowFields.gate?.dict ?? {})).toEqual(['tokens', 'idleMs', 'judgeTimeoutMs'])
 
     expect(preset).toContain("name: '@wowyuarm/dsh-agent-team/tools'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")

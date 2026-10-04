@@ -18,6 +18,8 @@ A provider context-overflow failure gets one bounded compact-and-retry sequence 
 
 A step arriving into a large context after a long idle gap is put to the relatedness judge first: an input the judge reads as unrelated work is kept instead of admitted, and one rollover instruction takes its place until the held input returns. The judge is the deployment's own `jev` service, which the Host reads and never mounts (see DSH release compatibility); a profile that installs none leaves the gate off.
 
+The gate's three thresholds are the Host row's own configuration: `gate.tokens`, `gate.idleMs`, and `gate.judgeTimeoutMs`, each optional, so an omitted field keeps the engine's default and a deployment states only what it disagrees with. A deployment sets them in its own `cordis.patch.yml`, by the row id `wowyuarm-agent-team-host`, and they are read when that row mounts. The deadline is the field that decides whether a configured judge is ever heard: a judgement that takes longer than `gate.judgeTimeoutMs` leaves the step ungated.
+
 ## Agent notification boundary
 Host derives bounded coalesced notifications from durable unread state. Idle Agents start a turn; running Agents receive context at the next safe step. Direct mentions include Message body, sender, Channel, optional Task overlay, Thread, and Message ref. Task/Claim Activities include actor, transition, and affected Task/Thread/Claim refs. Ordinary unread exposes only a body-free Thread-first route with its unread count; taskful summaries may name the Task. No notice renders a revision or write token. Omitted details remain discoverable through `team_inbox` and `team_thread`.
 

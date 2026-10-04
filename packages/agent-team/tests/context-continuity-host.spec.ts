@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type Message, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { isDroppedNotice, type ContextProjectionState, type PressureJudgement, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
+import { isDroppedNotice, type ContextProjectionState, type PressureGate, type PressureJudgement, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { TEAM_CONTEXT_CODEC, TeamContextContinuityHost, TeamPressurePolicy, TeamPressurePolicyHost, createTeamContextManagement } from '../src/context-continuity-host.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberId } from '../src/types.ts'
@@ -411,6 +411,47 @@ describe('the Team pressure policy over the engine', () => {
     const related = build(0.9)
     const admitted = await related.policy.onPreStep(MEMBER_ID, [humanInput('keep going')], new AbortController().signal)
     expect(admitted.kind).toBe('notice')
+  })
+
+  it('reads the long-gap gate\'s thresholds from the row config', async () => {
+    const judge = (noul: number): PressureJudgement => ({
+      decide: async () => ({ answers: { related: { type: 'noul', noul } } }) as never,
+    })
+    /** One policy over a Member whose newest event is `idleMs` old. */
+    const build = (idleMs: number, gate: PressureGate, decide: PressureJudgement['decide'] = judge(0.1).decide) => {
+      const idle = [{ type: 'turn/end', seq: 3, time: Date.now() - idleMs } as unknown as SessionEvent]
+      const { agent, steered } = pressureAgent({ ownEvents: idle })
+      const policy = new TeamPressurePolicy({
+        agentForMember: () => agent,
+        limitsForAgent: () => ({ usageTokens: 200_000, hardLimit: 256_000, handoffAt: 200_000 }),
+        compactionForAgent: () => undefined,
+        activeClaimLabels: () => [],
+        runningJobLabels: () => [],
+        judgeForAgent: () => ({ decide }),
+        gate,
+        failed: () => {},
+        log: () => {},
+      })
+      return { policy, steered }
+    }
+    const step = async (policy: TeamPressurePolicy) => (await policy.onPreStep(MEMBER_ID, [humanInput('the other one?')], new AbortController().signal)).kind
+
+    // A gap the engine's 30-minute default ignores becomes a long gap once the
+    // row lowers the threshold: the same unrelated input is held, not admitted.
+    const fiveMinutes = 5 * 60_000
+    expect(await step(build(fiveMinutes, {}).policy)).toBe('notice')
+    expect(await step(build(fiveMinutes, { idleMs: 60_000 }).policy)).toBe('hold')
+
+    // A context below the row's own size threshold is never judged, however long
+    // the gap: raising `tokens` past this Member's usage switches the gate off.
+    expect(await step(build(33 * 60_000, {}).policy)).toBe('hold')
+    expect(await step(build(33 * 60_000, { tokens: 300_000 }).policy)).toBe('notice')
+
+    // The deadline is the field that decides whether a judge is heard at all:
+    // one that never answers within it leaves the step ungated by design, so a
+    // deployment whose judge is slower than this threshold never sees a hold.
+    const never = () => new Promise<never>(() => {})
+    expect(await step(build(33 * 60_000, { judgeTimeoutMs: 10 }, never).policy)).toBe('notice')
   })
 
   it('switches the gate off when the deployment installed no judge', async () => {

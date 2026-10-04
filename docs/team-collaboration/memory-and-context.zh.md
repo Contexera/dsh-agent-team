@@ -12,6 +12,8 @@ Provider context-overflow 失败获得一条有界的 compact-and-retry 序列�
 
 大 context 里隔了很久才到的那一步先交给相关性 judge：judge 判为无关工作的输入被扣住而不是放行，原位投一条换代指令，直到被扣的输入交回。该 judge 是部署自己的 `jev` 服务，Host 只读取、绝不挂载（见 DSH release compatibility）；未安装它的档位让该门保持关闭。
 
+门控的三个阈值属于 Host 行自己的配置：`gate.tokens`、`gate.idleMs`、`gate.judgeTimeoutMs`，每个都可省略——省略的字段沿用引擎自己的默认值，部署只写它不同意的那些。部署在自己 profile 的 `cordis.patch.yml` 里按行 id `wowyuarm-agent-team-host` 设置，行挂载时读取。其中截止时间决定已配置的 judge 是否真被听到：一次判断耗时超过 `gate.judgeTimeoutMs`，该步就不经门控放行。
+
 Memory 不是 authority：它可能过时，不能覆盖 Workspace instructions、direct Human input 或 durable Team facts。Member 只能记录已验证且持久的知识，不得记录 credentials、sensitive data、guesses、chat logs、其他 Members' memory，或 ledger 已拥有的 facts。
 
 ## Agent notification boundary

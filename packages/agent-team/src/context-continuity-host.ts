@@ -30,6 +30,7 @@ import {
   type ContextProjectionState,
   type ContextSubject,
   type PressureCompaction,
+  type PressureGate,
   type PressureInHand,
   type PressureJudgement,
   type PressureLimits,
@@ -43,6 +44,7 @@ import {
   type TransitionPlan,
 } from '@wowyuarm/dsh-context-continuity'
 import { SessionId as SessionIdBrand } from '@deepseek-ai/dsh-session'
+import z from '@deepseek-ai/schemastery'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamRolloverSessionRequest } from './types.ts'
 
@@ -157,6 +159,21 @@ const TEAM_PRESSURE_TEXT: PressureNoticeText = {
 /** How many of the generation's earlier user inputs one judgement is given. */
 const RECENT_INPUT_LIMIT = 8
 
+/**
+ * The long-gap gate as row configuration: every field is optional, so a
+ * deployment states only the thresholds it disagrees with and the engine's own
+ * default answers the rest. The three answer different questions — how large a
+ * context the gate applies to, what counts as a long gap, and how long one
+ * judgement may take before the step proceeds without one — and the last is the
+ * one that decides whether a configured judge is ever heard, because a judge
+ * whose own budget is longer than this deadline never answers in time.
+ */
+export const TEAM_PRESSURE_GATE_SCHEMA = z.object({
+  tokens: z.natural().description('Context size at or above which the long-gap gate may hold a step. Default: 128000.'),
+  idleMs: z.natural().description('How long a generation must have been idle for a step to count as a long gap. Default: 1800000 (30 minutes).'),
+  judgeTimeoutMs: z.natural().description('How long one relatedness judgement may take before the step proceeds without one. Default: 5000.'),
+})
+
 export interface TeamPressurePolicyOptions {
   /** Resolve the live Agent of one Member; absent means nothing to read. */
   readonly agentForMember: (memberId: AgentTeamMemberId) => Agent | undefined
@@ -168,6 +185,8 @@ export interface TeamPressurePolicyOptions {
   readonly activeClaimLabels: (memberId: AgentTeamMemberId) => readonly string[]
   /** The model-visible running-job labels for one Member's notice. */
   readonly runningJobLabels: (memberId: AgentTeamMemberId) => readonly string[]
+  /** The long-gap gate's thresholds; an omitted field keeps the engine's default. */
+  readonly gate?: PressureGate | undefined
   /**
    * The relatedness judge in one Member's scope, when the deployment installed
    * one. Absent — the member itself, or the whole deployment — switches the
@@ -314,7 +333,7 @@ export class TeamPressurePolicy {
 
   constructor(options: TeamPressurePolicyOptions) {
     this.host = new TeamPressurePolicyHost(options)
-    this.policy = new ContextPressurePolicy(this.host, TEAM_PRESSURE_TEXT)
+    this.policy = new ContextPressurePolicy(this.host, TEAM_PRESSURE_TEXT, options.gate)
   }
 
   /** The pre-step decision for one Member, with the input that step claims. */
