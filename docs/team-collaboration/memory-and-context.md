@@ -8,13 +8,13 @@ English | [中文](memory-and-context.zh.md)
 Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`; the persona carries only the resident rule that the index stays bounded and that detail lives in the note it names, and a Member's first-run `memory.md` scaffold states the same sections.
 
 ## Context pressure ownership
-The Host owns Member context pressure end to end.
+The engine owns Member context pressure end to end as policy; the Host binds that policy to one Member's readings and performs what it decides.
 
 Two budget thresholds derive from the Member's live routed selection — the selection captured for the current step when it entered prompt assembly, its current selection otherwise — resolved through the LLM service (capped at 200K handoff / 256K hard, with a safety reserve). At the handoff budget the Member receives one structured pressure notice per generation advising a `context_rollover` rollover — repeating is suppressed for that generation and re-armed after a rollover.
 
 At the hard limit the Host forces an in-place compaction before the next model request is forwarded, and a Member whose compaction provably advances neither its generation nor its measured pressure is failed closed (the step is rejected rather than submitted over the Team limit).
 
-A provider context-overflow failure gets one bounded compact-and-retry sequence before surfacing. A route whose window cannot be measured is an explicit rejection, never a silent over-limit submission. Accepted-Task auto compaction is retired: pressure policy is the only compaction trigger besides the Member's own explicit choice.
+A provider context-overflow failure gets one bounded compact-and-retry sequence before surfacing. A route whose window cannot be measured is an explicit rejection, never a silent over-limit submission. Accepted-Task auto compaction is retired: pressure policy is the only compaction trigger besides the Member's own explicit choice. A step arriving into a large context after a long idle gap is put to the relatedness judge first: an input the judge reads as unrelated work is kept instead of admitted, and one rollover instruction takes its place until the held input returns.
 
 ## Agent notification boundary
 Host derives bounded coalesced notifications from durable unread state. Idle Agents start a turn; running Agents receive context at the next safe step. Direct mentions include Message body, sender, Channel, optional Task overlay, Thread, and Message ref. Task/Claim Activities include actor, transition, and affected Task/Thread/Claim refs. Ordinary unread exposes only a body-free Thread-first route with its unread count; taskful summaries may name the Task. No notice renders a revision or write token. Omitted details remain discoverable through `team_inbox` and `team_thread`.

@@ -36,7 +36,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 ## Session 策略与上下文压力
 - Team 管理的 Agent sessions 使用显式 Team preset 和可信的 `danger-full-access` policy，这是面向可信 Workspace 的有意产品边界。
 - Host 激活 Member 时，会通过 session-title service 用其 handle 命名没有标题的 Member session，使普通 Session list 显示 Member identity。显式 rename 或任何已有 title 始终优先，命名失败不会导致 activation 失败。
-- 已接受 Task 的自动 compaction 已退役。Member 上下文压力由 Host 压力策略持有（见 Tools and preset）：预算阈值从当前 route 的 context window 派生，handoff 预算每 generation 一条通知，硬上限强制原地 compaction 并 fail-closed 验证，provider context-overflow 获得一条有界 compact-and-retry。Pending/error bookkeeping 只在进程内维护；只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。
+- 已接受 Task 的自动 compaction 已退役。Member 上下文压力由引擎的策略决定，Host 把该策略绑到 Member 的读数上（见 Tools and preset）：预算阈值从当前 route 的 context window 派生，handoff 预算每 generation 一条通知，judge 判为无关的长间隔 step 被扣住而不是放行，硬上限强制原地 compaction 并 fail-closed 验证，provider context-overflow 获得一条有界 compact-and-retry。Pending/error bookkeeping 只在进程内维护；只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。
 - 终止回合的恢复先读 Harness 的结构化失败、再看措辞：稳定的 code 单独决定——`RATE_LIMIT` 是 rate limiting，`TRANSPORT`/`TIMEOUT` 是 transient network，显式 429/503 响应是 rate limiting——其他任何 code（quota、auth、context、请求状态）无论 message 写什么都保持 manual；只有无 code 可用的错误才回落到窄 message 签名。
 - 两级分工不变：`agent/request-error` 负责同一步的 pressure/compaction 重试，`agent/error` 负责终止回合恢复及其连续错误上限；无论走哪条路，失败都保留已记录的 Member diagnostic。
 

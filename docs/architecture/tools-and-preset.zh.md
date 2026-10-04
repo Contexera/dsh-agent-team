@@ -30,7 +30,11 @@ unit 自带 fork cut，seed 子代的继承前缀折叠回同一引用。换窗�
 
 恢复由日志派生：重启重放 pending 意图并完成换窗；落在 rollover 的 durable commit 与新 Session 激活之间的重启，会从 ledger 记录的上一 Session 重建 handoff——即使新 Session 在崩溃前从未落盘——且重建幂等（自身日志已含 handoff 的一代不再收到第二条）。重启后的 carried-input 重放是有界的：当前代一旦已开始自身 turn 即跳过重放（其携带输入已在运行中被投递或取代）；上一代 Session 不可读时，属日志损坏类（`corrupt session log`，Host 会修复 torn tail）或确定性格式拒绝类（`SessionFormatUnsupportedError`，重试无法改变结果）的以 warn 放行，缺失/IO 及未知原因仍 fail-closed——当前代一旦运行过，其激活不再受退役代可读性阻塞。Member Session 是否有 durable 持久内容，通过 session-persistence inspection 判定（会等待进行中的 retirement drain），绝不使用会与 suspend 终末 flush 竞争的裸元数据列表。
 
-上下文压力是第二个 Host 持有的 coordinator（`pressure-policy.ts`），挂在同一 pre-step 接缝上：预算阈值从当前 route 的 context window 派生（handoff 200K / 硬上限 256K cap 加安全 reserve）；handoff 预算处每 generation 一条结构化通知建议 rollover（一次后重新武装）；硬上限处强制原地 compaction，无法证明进展即 fail closed；provider context-overflow 失败获得一条有界 compact-and-retry 序列。原地硬 compaction 绝不取消 owner，因此豁免于拒绝持有 running 或未上报 terminal jobs 的 rollover job guard。
+上下文压力是引擎自己的策略（`ContextPressurePolicy`）架在 Team 的宿主实现上，挂在同一 pre-step 接缝：预算阈值从当前 route 的 context window 派生（handoff 200K / 硬上限 256K cap 加安全 reserve）；handoff 预算处每 generation 一条结构化通知建议 rollover（一次后重新武装）；硬上限处策略强制原地 compaction，无法证明进展即 fail closed；provider context-overflow 失败获得一条有界 compact-and-retry 序列。
+
+大 context 里隔了很久才到的那一步先交给相关性 judge：judge 判为无关工作时，策略扣住这份输入、在原位投一条换代指令；被扣的输入在 driver 收敛后交回——若换代落地则随新代进入。按 Member 取的那些读数（limits、surface、log span、compaction、手上的工作）与 judge 由 Team 提供；决策顺序、通知闩与 fail-closed 证明仍归引擎。
+
+原地硬 compaction 绝不取消 owner，因此豁免于拒绝持有 running 或未上报 terminal jobs 的 rollover job guard。
 
 Web Client 是唯一的 Human control surface。它通过 typed Remote 把每个 mutation 委托给 `ctx.agentTeam`，不绕过 Host authorization 或 ledger commits。不要重新加入 slash-command adapter 作为第二界面。
 

@@ -6,7 +6,9 @@
 `memory.md` 是有界路由索引而非仓库：只装身份与职责、必须每步生效的长期规则、当前在手，以及每个主题簇一行；`notes/` 按需读取、从不注入。成员把索引常态保持在 8 KiB 以内、硬顶 16 KiB——超过硬顶索引整块不再注入，注入块始终自带用量。维护手艺（什么配得上一行、三层结构、压实与降级）归内置 `member-memory-manager` core skill，与 skill 写作归 `member-skill-manager` 同一套路；persona 只常驻「索引必须有界、细节留在它点名的那篇笔记里」这一条，成员首次生成的 `memory.md` 脚手架陈述同样的小节。
 
 ## 上下文压力归属
-Host 端到端拥有 Member 的上下文压力管理。两个预算阈值从该 Member 的 live routed selection 派生——当前 step 已进入 prompt assembly 时取其捕获的 selection，否则取 current selection——经 LLM 服务解析（handoff 预算上限 200K、硬上限 256K，并留安全 reserve）：达到 handoff 预算时，Member 在该 generation 内收到一条结构化压力通知，建议 `context_rollover` rollover——同一 generation 不重复，rollover 后重新武装；达到硬上限时，Host 在转发下一个模型请求前强制一次原地 compaction，无法证明 generation 前进或实测压力下降的 Member 会被 fail closed（拒绝该 step，而不是超限提交）。Provider context-overflow 失败获得一条有界的 compact-and-retry 序列后再上浮。无法测量窗口的 route 会显式拒绝，绝不静默超限提交。已接受 Task 的自动 compaction 已退役：除 Member 自己的显式选择外，压力策略是唯一的 compaction 触发器。
+Member 的上下文压力作为策略由引擎端到端持有；Host 把该策略绑到某一个 Member 的读数上，并执行它决定的事。两个预算阈值从该 Member 的 live routed selection 派生——当前 step 已进入 prompt assembly 时取其捕获的 selection，否则取 current selection——经 LLM 服务解析（handoff 预算上限 200K、硬上限 256K，并留安全 reserve）：达到 handoff 预算时，Member 在该 generation 内收到一条结构化压力通知，建议 `context_rollover` rollover——同一 generation 不重复，rollover 后重新武装；达到硬上限时，Host 在转发下一个模型请求前强制一次原地 compaction，无法证明 generation 前进或实测压力下降的 Member 会被 fail closed（拒绝该 step，而不是超限提交）。
+
+Provider context-overflow 失败获得一条有界的 compact-and-retry 序列后再上浮。无法测量窗口的 route 会显式拒绝，绝不静默超限提交。已接受 Task 的自动 compaction 已退役：除 Member 自己的显式选择外，压力策略是唯一的 compaction 触发器。大 context 里隔了很久才到的那一步先交给相关性 judge：judge 判为无关工作的输入被扣住而不是放行，原位投一条换代指令，直到被扣的输入交回。
 
 Memory 不是 authority：它可能过时，不能覆盖 Workspace instructions、direct Human input 或 durable Team facts。Member 只能记录已验证且持久的知识，不得记录 credentials、sensitive data、guesses、chat logs、其他 Members' memory，或 ledger 已拥有的 facts。
 
