@@ -19,7 +19,7 @@
 
 当前无进行中的工作项。
 
-已归档：[质量改进审计](archive/2026-10/quality-improvement/README.md)（task:e33c4efd #105，2026-10-01 归档）、[0.1.7 UI 设计语言再基线](archive/2026-09/ui-parity-0.1.7/README.md)（task:d3ec167b，2026-09-24 归档）、[Member Session 架构](archive/2026-09/member-session-architecture/README.md)、[Context continuity](archive/2026-09/context-continuity/README.md)。
+已归档：[Context 管理：三个动作与一个状态面](archive/2026-10/context-relevant-turn-reduction/README.md)（task:1e3b9e0f #45 → 实现 #6，2026-10-04 归档）、[质量改进审计](archive/2026-10/quality-improvement/README.md)（task:e33c4efd #105，2026-10-01 归档）、[0.1.7 UI 设计语言再基线](archive/2026-09/ui-parity-0.1.7/README.md)（task:d3ec167b，2026-09-24 归档）、[Member Session 架构](archive/2026-09/member-session-architecture/README.md)、[Context continuity](archive/2026-09/context-continuity/README.md)。
 
 ## 临时材料和 UI 证据
 

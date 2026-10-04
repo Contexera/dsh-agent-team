@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context 管理：三个动作与一个状态面 — 设计总览</title>
+<style>
+  :root {
+    --bg-base: #151517;
+    --bg-layer-1: #232324;
+    --bg-layer-2: #2c2c2e;
+    --bg-module: #353638;
+    --border-l1: #ffffff0f;
+    --border-l2: #ffffff1f;
+    --border-l3: #ffffff29;
+    --label-primary: #f9fafb;
+    --label-secondary: #cfd3d6;
+    --label-tertiary: #adb2b8;
+    --label-caption: #81858c;
+    --link: #7aaaff;
+    --accent: #5686fe;
+    --accent-soft: #5686fe26;
+    --success: #22c55e;
+    --success-soft: #22c55e1f;
+    --warn: #f59e0b;
+    --warn-soft: #f59e0b1f;
+    --error: #f25a5a;
+    --error-soft: #f25a5a1f;
+    --code-bg: #1b1b1c;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei", monospace;
+  }
+  html[data-theme="light"] {
+    --bg-base: #ffffff;
+    --bg-layer-1: #ffffff;
+    --bg-layer-2: #f9fafb;
+    --bg-module: #f1f3f5;
+    --border-l1: #0000000a;
+    --border-l2: #0000001a;
+    --border-l3: #0000001f;
+    --label-primary: #0f1115;
+    --label-secondary: #61666b;
+    --label-tertiary: #81858c;
+    --label-caption: #a2a4a6;
+    --link: #4176e6;
+    --accent: #4176e6;
+    --accent-soft: #4176e61f;
+    --success: #16a34a;
+    --success-soft: #22c55e14;
+    --warn: #dd8629;
+    --warn-soft: #f59e0b14;
+    --error: #ec1313;
+    --error-soft: #ec131314;
+    --code-bg: #f9fafb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 36px 40px; width: 1240px;
+    background: var(--bg-base); color: var(--label-primary);
+    font-family: var(--font); font-size: 13px; line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  header { border-bottom: .5px solid var(--border-l2); padding-bottom: 14px; margin-bottom: 22px; }
+  h1 { font-size: 21px; line-height: 30px; font-weight: 700; margin: 0 0 6px; letter-spacing: -.2px; }
+  .sub { color: var(--label-secondary); font-size: 14px; line-height: 22px; margin: 0; }
+  .sub b { color: var(--label-primary); }
+  h2 { font-size: 14px; line-height: 22px; font-weight: 500; margin: 0 0 3px; }
+  h2 .n {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; border-radius: 999px; margin-right: 8px;
+    background: var(--bg-module); color: var(--label-secondary);
+    font-size: 11px; font-weight: 500; vertical-align: 1px;
+  }
+  .hint { color: var(--label-tertiary); font-size: 12px; line-height: 18px; margin: 0 0 12px; }
+  section { margin-bottom: 26px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  .card { background: var(--bg-layer-1); border: .5px solid var(--border-l2); border-radius: 12px; padding: 14px 14px 12px; }
+  .card > h3 { font-size: 12px; line-height: 18px; font-weight: 500; color: var(--label-tertiary); margin: 0 0 10px; text-transform: uppercase; letter-spacing: .4px; }
+  .card .tagline { font-size: 12px; line-height: 18px; color: var(--label-caption); margin: 10px 0 0; }
+  .card .tagline b { color: var(--label-secondary); font-weight: 500; }
+
+  .rows { display: flex; flex-direction: column; gap: 4px; }
+  .row { display: grid; grid-template-columns: 46px 90px 1fr; align-items: center; gap: 8px; }
+  .seq { font-family: var(--mono); font-size: 11px; color: var(--label-caption); text-align: right; font-variant-numeric: tabular-nums; }
+  .kind { font-family: var(--mono); font-size: 10px; color: var(--label-tertiary); letter-spacing: -.2px; }
+  .body {
+    border: .5px solid var(--border-l2); border-radius: 8px; padding: 4px 9px;
+    background: var(--bg-layer-2); color: var(--label-secondary);
+    font-size: 12px; line-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .body b { color: var(--label-primary); font-weight: 500; }
+  .row.sys .body { background: transparent; border-style: dashed; color: var(--label-tertiary); }
+  .row.cut .body { border-color: var(--warn); background: var(--warn-soft); color: var(--label-primary); }
+  .row.prot .body { border-color: var(--success); background: var(--success-soft); color: var(--label-primary); }
+  .row.cur .body { border-color: var(--accent); background: var(--accent-soft); color: var(--label-primary); font-weight: 500; }
+  .row.gone .body { border-style: dashed; border-color: var(--border-l2); background: transparent; color: var(--label-caption); text-decoration: line-through; text-decoration-color: var(--label-caption); }
+  .row.new .body { border-color: var(--accent); border-style: dashed; background: var(--bg-layer-2); color: var(--link); }
+  .row.miss .body { border-style: dashed; border-color: var(--warn); background: transparent; color: var(--warn); }
+  .spacer { height: 8px; }
+  .brace { display: flex; align-items: center; gap: 8px; margin: 2px 0 2px 144px; }
+  .brace .bar { flex: 0 0 2px; align-self: stretch; border-radius: 2px; background: var(--warn); }
+  .brace .txt { font-size: 11px; color: var(--warn); font-family: var(--mono); }
+  .brace.ok .bar { background: var(--success); }
+  .brace.ok .txt { color: var(--success); }
+  .brace.acc .bar { background: var(--accent); }
+  .brace.acc .txt { color: var(--accent); }
+
+  .flow { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+  .pill { font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 999px; border: .5px solid var(--border-l3); color: var(--label-secondary); background: var(--bg-layer-2); }
+  .pill.acc { border-color: var(--accent); color: var(--link); background: var(--accent-soft); }
+  .pill.ok { border-color: var(--success); color: var(--success); background: var(--success-soft); }
+  .pill.no { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+  .arrow { color: var(--label-caption); font-size: 14px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: .5px solid var(--border-l1); vertical-align: top; }
+  th { color: var(--label-tertiary); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .4px; }
+  td.res { font-family: var(--mono); font-size: 11px; }
+  td.mono { font-family: var(--mono); font-size: 11px; color: var(--label-secondary); }
+  .r-noop { color: var(--label-tertiary); }
+  .r-keep { color: var(--warn); }
+  .r-base { color: var(--link); }
+  td.yes { color: var(--success); font-family: var(--mono); font-size: 11px; }
+  td.no { color: var(--warn); font-family: var(--mono); font-size: 11px; }
+  code { font-family: var(--mono); font-size: 11px; background: var(--bg-module); border-radius: 4px; padding: 1px 4px; }
+
+  .layers { display: flex; flex-direction: column; gap: 8px; }
+  .layer { display: grid; grid-template-columns: 190px 1fr; gap: 12px; align-items: start; border: .5px solid var(--border-l2); border-radius: 12px; padding: 11px 13px; background: var(--bg-layer-1); }
+  .layer.own { border-color: var(--accent); background: var(--accent-soft); }
+  .layer.dsh { border-color: var(--warn); background: var(--warn-soft); }
+  .layer.flat { border-style: dashed; }
+  .layer .who { font-size: 12.5px; font-weight: 500; }
+  .layer .who span { display: block; font-family: var(--mono); font-size: 10.5px; font-weight: 400; color: var(--label-caption); margin-top: 2px; }
+  .layer .does { font-size: 12px; line-height: 18px; color: var(--label-secondary); }
+  .layer .does b { color: var(--label-primary); font-weight: 500; }
+
+  pre { margin: 0; background: var(--code-bg); border: .5px solid var(--border-l2); border-radius: 8px; padding: 11px 13px; font-family: var(--mono); font-size: 11.5px; line-height: 18px; color: var(--label-secondary); overflow: hidden; }
+  pre .k { color: #b197fc; }
+  pre .t { color: #4dabf7; }
+  pre .c { color: var(--label-caption); }
+  pre .s { color: #69db7c; }
+  pre .del { color: var(--error); }
+  pre .add { color: var(--success); }
+  pre .w { color: var(--warn); }
+  html[data-theme="light"] pre .k { color: #6741d9; }
+  html[data-theme="light"] pre .t { color: #1c7ed6; }
+  html[data-theme="light"] pre .s { color: #2f9e44; }
+  html[data-theme="light"] pre .del { color: #ec1313; }
+  html[data-theme="light"] pre .add { color: #16a34a; }
+
+  .callout { border-left: 2px solid var(--warn); padding: 2px 0 2px 11px; color: var(--label-secondary); font-size: 12px; line-height: 19px; margin-top: 10px; }
+  .callout.good { border-left-color: var(--success); }
+  .callout.acc { border-left-color: var(--accent); }
+  .callout b { color: var(--label-primary); font-weight: 500; }
+
+  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .vs .side { border: .5px solid var(--border-l2); border-radius: 12px; padding: 12px 13px; background: var(--bg-layer-1); }
+  .vs .side.now { border-color: var(--warn); }
+  .vs .side.next { border-color: var(--success); }
+  .vs .side h4 { font-size: 12px; font-weight: 500; margin: 0 0 8px; }
+  .vs .side.now h4 { color: var(--warn); }
+  .vs .side.next h4 { color: var(--success); }
+  .vs .side p { margin: 0 0 6px; font-size: 12px; line-height: 19px; color: var(--label-secondary); }
+  .vs .side p:last-child { margin-bottom: 0; }
+  .vs .side code { font-family: var(--mono); font-size: 11px; background: var(--bg-module); border-radius: 4px; padding: 1px 4px; }
+
+  footer { margin-top: 26px; padding-top: 12px; border-top: .5px solid var(--border-l2); color: var(--label-caption); font-size: 11.5px; line-height: 18px; display: flex; justify-content: space-between; gap: 20px; }
+  footer code { font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Context 管理：三个动作与一个状态面</h1>
+  <p class="sub">模型管理 context 只有三个动作：<b>压缩</b>、<b>换代</b>、<b>回退</b>。今天只有一个入口能用——换代。压缩没有模型入口，回退有入口却被描述挡在门外。三个动作共享同一个结构：<b>锚点</b>。所以它们不是三件事，是一件事的三个方向。本设计补两件东西：一个<b>状态面</b>（发现入口），一个<b>压缩动作</b>（执行机构）。</p>
+</header>
+
+<section>
+  <h2><span class="n">1</span>今天的四个动作</h2>
+  <div class="card">
+    <div class="rows">
+      <div class="row cur"><span class="seq">压缩</span><span class="kind">compact</span><span class="body">模型<b>没有</b>这个动作 —— compaction 只有人类斜杠命令 <code>/compact</code>（走 <code>compactNow</code>）</span></div>
+      <div class="row prot"><span class="seq">换代</span><span class="kind">rollover</span><span class="body">能用：<code>context_rollover</code> —— 写 handoff → 新 Session → 重新装配</span></div>
+      <div class="row prot"><span class="seq">回退</span><span class="kind">return</span><span class="body">有入口（<code>context_rollover</code> + <code>checkpointRef</code>），但描述写着"只在<b>已经想回退</b>时用"</span></div>
+      <div class="row sys"><span class="seq">看状态</span><span class="kind">status</span><span class="body">有：<code>context_timeline</code> —— 但它只答"谱系里有哪些点"，不答"我在哪、能做什么、代价多少"</span></div>
+    </div>
+    <p class="tagline">已核验：<code>/compact</code> 是<b>斜杠命令</b>（人类敲的，经 <code>runMaintenance</code> 要求 true idle）；模型可调的 context 工具只有 <code>context_rollover</code> / <code>context_checkpoint</code> / <code>context_timeline</code> 三个。</p>
+  </div>
+  <div class="callout"><b>后果：</b>Team 在验收读到 128K 时建议换代——此刻离 <code>handoffAt</code>（默认 200K）还有七万多 token 余量，却要求最贵的那个动作。</div>
+  <div class="callout acc"><b>实测（先测后写）：</b>我在自己的 Member 会话里调了 <code>context_timeline</code> —— 8 行里 <b>5 行可回退</b>，每行都只属一个 Thread。回退能力在，只是没人用：描述把它挡在门外了。</div>
+</section>
+
+<section>
+  <h2><span class="n">2</span>四个对象 · 三个动作 · 一个状态面</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>四个对象</h3>
+      <table>
+        <tbody>
+          <tr><td class="mono">工作集</td><td>模型现在看得到的东西。它的 token 数就是"用了多少"</td></tr>
+          <tr><td class="mono">日志</td><td>落盘的完整记录。只追加。工作集是它的一种投影</td></tr>
+          <tr><td class="mono">锚点</td><td>谱系里一个可寻址的位置</td></tr>
+          <tr><td class="mono">代</td><td>一次上下文代。换代就是结束一代、开始新一代</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>三个动作 + 看状态</h3>
+      <table>
+        <thead><tr><th>动作</th><th>代</th><th>代价</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">压缩</td><td class="res r-base">同一代</td><td>一次摘要调用；cache 前缀可能失效</td></tr>
+          <tr><td class="mono">换代</td><td class="res r-base">新一代</td><td>写 handoff；重新装配；cache 重热</td></tr>
+          <tr><td class="mono">回退</td><td class="res r-base">新一代</td><td>丢掉锚点之后的内容；cache 重热</td></tr>
+          <tr><td class="mono">看状态</td><td class="res r-noop">同一代</td><td class="res r-noop">几乎为零</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="callout"><b>方向不同，这是关键。</b>压缩是"身后太长，缩短它"；换代是"翻到新的一页"；回退是"翻回旧的一页"。三者都<b>不删日志</b>——被压掉的、被丢掉的，都还在日志里。</div>
+</section>
+
+<section>
+  <h2><span class="n">3</span>锚点是共同货币</h2>
+  <p class="hint">三种位置标记是同一类结构：谱系里的一个点。差别只在来源与用途。</p>
+  <div class="vs">
+    <div class="side now">
+      <h4>压缩指令标出的位置</h4>
+      <p>"这条<b>之前</b>是旧的。"</p>
+      <p>来源：模型这一次的调用。用途：划定可压区间。</p>
+      <p>今天指令<b>不是</b> timeline 里的一行。</p>
+    </div>
+    <div class="side next">
+      <h4>Team 边界自动标出的位置</h4>
+      <p><code>team_message</code> / <code>team_claim</code> / attention 变更都会自动产生。</p>
+      <p>来源：账本里的操作。用途：回退的候选点。</p>
+      <p>今天它们<b>是</b> timeline 里的行。</p>
+    </div>
+  </div>
+  <div class="callout"><b>缺口就是这个：</b>今天的 timeline 行只有 checkpoint / boundary / handoff / head 四种，压缩指令不在其中。模型手里能看见的位置，与它能压缩的位置，是两个不相干的集合。</div>
+</section>
+
+<section>
+  <h2><span class="n">4</span>状态面：before / after</h2>
+  <p class="hint">同一个工具改名换描述：<code>context_timeline</code> → <code>context_status</code>。不新开工具——锚点行就是回退的决策面，状态面是它的超集。数据取自一次真实会话。</p>
+  <div class="grid2">
+    <div class="card">
+      <h3>Before — 只答"有哪些点"</h3>
+      <pre><span class="c">Context timeline: 149763 tokens used</span>
+<span class="c">  (handoff at 200000, hard limit 256000). 8 item(s):</span>
+- current head [head; anchor 637887]
+  (retained ~149763, discarded ~0) — <span class="del">not restorable</span>
+  — the head is the current working set
+- Team task claim change [team-boundary; 1464a9]
+  (retained ~140403, discarded ~9360) — restorable — ref: …
+- Team message [team-boundary; f9b5d7]
+  (retained ~105389, discarded ~44374) — restorable — ref: …
+- context handoff [handoff; 0b3ed8] — <span class="del">not restorable</span>
+  — source 'handoff' is not a restorable checkpoint
+- Team message [team-boundary; d81c34] — <span class="del">not restorable</span>
+  — retained context would not materially shrink …
+- …</pre>
+      <p class="tagline">没有组成。没有可压量。没有 turn 计数。只有"谱系里有哪些点"。</p>
+    </div>
+    <div class="card">
+      <h3>After — 我在哪、能做什么、代价多少</h3>
+      <pre><span class="c">Context: 149,763 / 200,000 handoff / 256,000 hard limit</span>
+Composition (heuristic): system ~8K · tools ~11K
+  · messages ~131K
+Anchors: 8 rows · 5 restorable
+  - "task #45 spec v4" [checkpoint] retained ~140K,
+    drops ~9K — <span class="add">restorable</span>, ref: …
+  - "Team message" [boundary] retained ~105K,
+    drops ~44K — <span class="add">restorable</span>, ref: …
+  - "context handoff" [handoff] — never a return target
+<span class="add">Compact now: about 118K compactible;</span>
+<span class="add">  keeps the last ~32K verbatim</span></pre>
+      <p class="tagline">锚点行<b>原样保留</b> <code>retained</code> / <code>discarded</code> / <code>restorable</code> / 理由——那几行就是回退的决策面。</p>
+    </div>
+  </div>
+  <div class="callout"><b>三点说明：</b>① 组成只有三类（system / tools / messages），<b>不是按 Thread</b>——按 Thread 的数字只在锚点行里有；<code>toolsTokens</code> 是工具 <b>schema</b>，不是工具结果，工具结果算在 messages 里。② "现在能压多少"是算出来的（用量 − 保留尾），不是存储字段。③ 人类界面已经有这个组成（Web 端 ContextMeter 的环），<b>模型看不到</b>。</div>
+</section>
+
+<section>
+  <h2><span class="n">5</span>压缩动作：一次 transaction 前后</h2>
+  <p class="hint">模型定<b>时机</b>；压<b>哪一段</b>由宿主选出，引擎校验（配平、存在、稳定性）。模型不碰 seq。第一版工具<b>不带参数</b>。</p>
+  <div class="grid2">
+    <div class="card">
+      <h3>Before — 调用压缩动作</h3>
+      <div class="rows">
+        <div class="row sys"><span class="seq">12</span><span class="kind">system</span><span class="body">你是 @Reeve …</span></div>
+        <div class="spacer"></div>
+        <div class="row cut"><span class="seq">31</span><span class="kind">user</span><span class="body">开始做 B 模块接口对齐</span></div>
+        <div class="row cut"><span class="seq">34</span><span class="kind">tool/result</span><span class="body">read packages/…</span></div>
+        <div class="row cut"><span class="seq">118</span><span class="kind">assistant</span><span class="body">验收通过，交付完成</span></div>
+        <div class="brace"><span class="bar"></span><span class="txt">已完结的工作段 · 可压</span></div>
+        <div class="spacer"></div>
+        <div class="row prot"><span class="seq">120</span><span class="kind">user</span><span class="body">继续处理 C</span></div>
+        <div class="row prot"><span class="seq">121</span><span class="kind">assistant</span><span class="body">…</span></div>
+        <div class="row prot"><span class="seq">122</span><span class="kind">tool/result</span><span class="body">…（未完成）</span></div>
+        <div class="brace ok"><span class="bar"></span><span class="txt">protected：当前动作与未完成工具链</span></div>
+        <div class="row cur"><span class="seq">123</span><span class="kind">user</span><span class="body"><b>「把身后压一压」</b> ← 压缩指令，工作集里最新的 user_input</span></div>
+        <div class="brace acc"><span class="bar"></span><span class="txt">区间上界：不含这条及其之后的任何消息</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>After — 一次 transaction 之后</h3>
+      <div class="rows">
+        <div class="row sys"><span class="seq">12</span><span class="kind">system</span><span class="body">你是 @Reeve …</span></div>
+        <div class="spacer"></div>
+        <div class="row gone"><span class="seq">31</span><span class="kind">shadowed</span><span class="body">开始做 B 模块接口对齐</span></div>
+        <div class="row gone"><span class="seq">34</span><span class="kind">shadowed</span><span class="body">read packages/…</span></div>
+        <div class="row gone"><span class="seq">118</span><span class="kind">shadowed</span><span class="body">验收通过，交付完成</span></div>
+        <div class="row new"><span class="seq">190</span><span class="kind">user</span><span class="body">[compaction summary] 31–118</span></div>
+        <div class="brace acc"><span class="bar"></span><span class="txt">旧事件仍在 append-only 日志里</span></div>
+        <div class="spacer"></div>
+        <div class="row prot"><span class="seq">120</span><span class="kind">user</span><span class="body">继续处理 C</span></div>
+        <div class="row prot"><span class="seq">121</span><span class="kind">assistant</span><span class="body">…</span></div>
+        <div class="row prot"><span class="seq">122</span><span class="kind">tool/result</span><span class="body">…（未完成）</span></div>
+        <div class="brace ok"><span class="bar"></span><span class="txt">原样保留，未参与压缩</span></div>
+        <div class="row cur"><span class="seq">123</span><span class="kind">user</span><span class="body">「把身后压一压」 ← 原样保留</span></div>
+      </div>
+      <p class="tagline">同一个 Session。摘要事务、平衡边界校验、token 计量全部复用 DSH 既有实现。</p>
+    </div>
+  </div>
+  <div class="callout good"><b>失败方向全都倒向"不压"：</b>没有可压区间、边界不合法、generation 已变化、摘要或事务失败、取消——一律<b>保留原 surface 并如实回报</b>。不静默，不谎报成功。模型调用时机不对，代价只是多一次摘要调用，不是丢事实。</div>
+</section>
+
+<section>
+  <h2><span class="n">6</span>契约：区间不含指令及其后</h2>
+  <div class="grid2">
+    <div class="side now" style="border:.5px solid var(--warn); border-radius:12px; padding:12px 13px; background:var(--bg-layer-1)">
+      <h4 style="font-size:12px;font-weight:500;margin:0 0 8px;color:var(--warn)">今天为什么成立 —— 但是副作用</h4>
+      <p style="margin:0 0 6px;font-size:12px;line-height:19px;color:var(--label-secondary)">保留尾默认是窗口的 <b>0.16</b>（200K 约 32K）。一条指令消息只有几十 token，<b>必然落在保留尾里</b>。所以区间自然停在指令之前。</p>
+      <p style="margin:0;font-size:12px;line-height:19px;color:var(--label-secondary)">没有人保证它。它是保留尾预算的副产品。</p>
+    </div>
+    <div class="side next" style="border:.5px solid var(--error); border-radius:12px; padding:12px 13px; background:var(--bg-layer-1)">
+      <h4 style="font-size:12px;font-weight:500;margin:0 0 8px;color:var(--error)">两处会破</h4>
+      <p style="margin:0 0 6px;font-size:12px;line-height:19px;color:var(--label-secondary)">① <code>retainTokens = 0</code>——overflow 那条路就是这么调的。区间末端正好落在"最新节点之前的那一条"上，<b>就是指令那条</b>：指令把自己压掉。</p>
+      <p style="margin:0;font-size:12px;line-height:19px;color:var(--label-secondary)">② 将来有人调小保留尾。静默失效，没有测试看着它。</p>
+    </div>
+  </div>
+  <div class="callout"><b>做法（已定，选项 B）：</b>上界由<b>我们</b>给——区间上界卡在"最新那条 <code>user/message</code> 之前"。门控触发时它正好是压缩指令；模型自判时它等于"本轮整段原样保留"，比保留尾 32K 更保守。加测试。一个会删内容的机制，边界值得是契约。</div>
+</section>
+
+<section>
+  <h2><span class="n">7</span>两条流程</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>A — 模型自判</h3>
+      <div class="rows">
+        <div class="row"><span class="seq">1</span><span class="kind">模型</span><span class="body">在边界处调状态面（刚闭合一段、长间隔回来、不确定站在哪里）</span></div>
+        <div class="row"><span class="seq">2</span><span class="kind">模型</span><span class="body">看到用量、组成、可压量、锚点</span></div>
+        <div class="row"><span class="seq">3</span><span class="kind">模型</span><span class="body">决定：压缩 / 回退 / 什么都不做</span></div>
+      </div>
+      <p class="tagline">这条不需要宿主参与。它今天就能成立——只差工具描述别再挡门。</p>
+    </div>
+    <div class="card">
+      <h3>B — 长间隔相关性门控</h3>
+      <div class="rows">
+        <div class="row"><span class="seq">1</span><span class="kind">宿主</span><span class="body">pre-step 读用量与间隔：≥ 128K <b>且</b> 距上一 turn ≥ 30min</span></div>
+        <div class="row"><span class="seq">2</span><span class="kind">jev</span><span class="body">问一次：本次输入与最近几轮 user_input 有关吗</span></div>
+        <div class="row"><span class="seq">3</span><span class="kind">宿主</span><span class="body">有关 / 判不出 / jev 不可用 → <b>不压</b>，正常继续</span></div>
+        <div class="row"><span class="seq">4</span><span class="kind">宿主</span><span class="body">无关 → 扣住本次输入，reject 这一步</span></div>
+        <div class="row"><span class="seq">5</span><span class="kind">宿主</span><span class="body"><code>followup</code> 投一条压缩指令。它成为最新 user_input</span></div>
+        <div class="row"><span class="seq">6</span><span class="kind">模型</span><span class="body">调用压缩动作。区间只覆盖指令之前的内容</span></div>
+        <div class="row"><span class="seq">7</span><span class="kind">宿主</span><span class="body">压完 → 把扣住的输入投回去，模型继续处理它</span></div>
+      </div>
+      <p class="tagline"><b>兜底：</b>模型没调压缩，或压缩失败 → turn 一结束就投回扣住的输入。不能卡住。</p>
+    </div>
+  </div>
+  <div class="callout"><b>两个数字在仓里已有名字，不要新造：</b><code>ACCEPT_TASK_BOUNDARY_THRESHOLD = 128_000</code>、<code>CLOCK_REFRESH_INTERVAL_MS = 1_800_000</code>。唤醒与扣件机制也现成（<code>idle ? followup : steer</code>；扣件今天绑在换代上）。</div>
+  <div class="callout acc"><b>成本提醒：</b>pre-step 在 turn 启动的关键路径上，而 jev 默认超时 30 秒 × 重试 3 次。这条用途要更紧的配置；判不出要"不压"并<b>显式记一条</b>，不装成安静。</div>
+</section>
+
+<section>
+  <h2><span class="n">8</span>落到哪：两个仓，DSH 零改动</h2>
+  <div class="layers">
+    <div class="layer own">
+      <div class="who">continuity（dsh-plugins）<span>本轮主体</span></div>
+      <div class="does"><b>压缩工具</b> <code>context_compact</code>，与 <code>context_rollover</code> / <code>context_checkpoint</code> / <code>context_timeline</code> 并列；<b>门控</b>写进通用策略 <code>ContextPressurePolicy</code>；<b>状态面契约</b>加组成与可压量。描述、校验、渲染、失败语义都在这层——它是产品面。</div>
+    </div>
+    <div class="flow" style="margin:2px 0"><span class="arrow" style="font-size:12px">↓ 适配器成员：机制由宿主注入</span></div>
+    <div class="layer own">
+      <div class="who">本仓 dsh-agent-team<span>只留机制</span></div>
+      <div class="does">选区间（约 25 行）并调 <code>ctx.compaction.compactRegion</code>；删掉自己那份重复的 <code>pressure-policy.ts</code>，改为实现 continuity 的 <code>PressurePolicyHost</code>；jev 接线与两个常量。</div>
+    </div>
+    <div class="flow" style="margin:2px 0"><span class="arrow" style="font-size:12px">↓ compactRegion(start, end, agent, signal)</span></div>
+    <div class="layer dsh">
+      <div class="who">DSH（deepseek-harness）<span>零改动</span></div>
+      <div class="does">只用它已经公开的面：<code>ctx.compaction</code>、契约包导出的 <code>toolPairingBalancedBefore/After</code>、<code>ctx.tokenMeter</code>、<code>session.surface.nodes</code>、<code>agent/pre-step</code>。不需要 <code>'requested'</code>，也不需要上游 patch。</div>
+    </div>
+    <div class="flow" style="margin:2px 0"><span class="arrow" style="font-size:12px">↓ 引擎既有能力</span></div>
+    <div class="layer flat">
+      <div class="who">引擎既有能力<span>不变</span></div>
+      <div class="does">摘要调用、事务与 durable 锁、surface 稳定性校验、"摘要必须更小"的比较、append-only log、token / cache 计量、replay 与 cold-fold 收敛。</div>
+    </div>
+  </div>
+  <div class="callout"><b>为什么走 <code>compactRegion</code>：</b>它不检查 token 门槛、保留尾由调用方定，而且能在 turn 内跑。<code>compactIfNeeded</code> 有阈值（<code>trigger</code> 还是封闭联合）；<code>compactNow</code> 保留尾是 <b>0</b>（等于全压），又要求 <b>true idle</b>，turn 内直接抛。</div>
+  <div class="callout"><b>代价摆在明处：</b>区间选择要自己写，约 25 行。<code>selectCompactableRange</code> 引不进来——它在 <code>src/region.ts</code>，发布包只含 <code>lib/index.js</code>。引擎仍然校验配平、存在与稳定性，所以我们复述的是"留多少"这条策略，不是引擎的机制。</div>
+  <div class="callout acc"><b>发布路径：</b>continuity 走 <code>pnpm changeset</code> → 0.1.6 发到 0.1.7 → 本仓依赖跟着升。本仓现在吃的是 pnpm store 里的 0.1.6，所以联调要先把 checkout link 进来。仍待定一条：机制那半边放宿主（推荐）还是放 continuity 自己直连引擎。</div>
+</section>
+
+<section>
+  <h2><span class="n">9</span>怎么知道成了</h2>
+  <div class="card">
+    <p style="margin:0 0 8px;font-size:12.5px;line-height:20px;color:var(--label-secondary)">
+      必须先回答：<b>这套东西实际值不值。</b>固定中文样本，四组对照：</p>
+    <div class="flow" style="margin:6px 0 2px">
+      <span class="pill">不压（keep）</span>
+      <span class="pill">现有压力压缩</span>
+      <span class="pill acc">门控触发的压缩</span>
+      <span class="pill">压完直接换代</span>
+    </div>
+    <p class="tagline">记录：模型是否在合适时机用状态面与压缩动作、是否滥调 · 接续质量与错误率 · prompt tokens 与 cache 前缀复用 · 摘要 / handoff / 重新装配 / 补读成本 · 压完后回查成功率 · crash / replay / cold fold / live fold 收敛。<b>值不值不做先验断言——这正是要实测的。</b></p>
+  </div>
+  <div class="callout"><b>本轮未做：</b>召回工具（<code>context_search</code> / <code>context_read</code>）不在本轮——今天的实情是 Member 压掉的东西自己搜不回来。jev 判"继续"、"那个呢？"这类回指的能力<b>本机未测</b>（没有 key），门控按可插拔设计，等有 key 的环境补一次实测。</div>
+</section>
+
+<footer>
+  <span>方案见 <code>spec.md</code>（第四版，含四版决策记录与测试原始输出）；实现见 <code>issues/01-compaction-action.md</code> · <code>02-status-surface.md</code> · <code>03-relatedness-gate.md</code>（03 依赖 01）；源码证据见 <code>materials/related-turn-reduction.md</code>。</span>
+  <span>状态：设计已冻结；DSH 零改动，落点以 continuity 为主；生产代码未实现</span>
+</footer>
+
+</body>
+</html>
