@@ -42,7 +42,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { TeamSettingsSection } from './TeamSettingsSection.tsx'
 import { TeamContextJudgeCheck } from './context-judge.ts'
-import { TeamJudgeForm, type TeamJudgeSection } from './judge-form.ts'
+import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from './judge-form.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
@@ -255,12 +255,18 @@ function applyUi(ctx: ClientContext): void {
   const contextJudge = new TeamContextJudgeCheck({
     loadContextJudge: () => ctx.remote.agentTeam.contextJudge({}),
   })
+  // The settings page's endpoint form. It is held in a seat rather than handed
+  // over as a value, because the service it is built over may arrive after the
+  // page's injected props were computed — and a slot entry's props are computed
+  // once and cached, so a value would freeze the answer.
+  const judgeForm = new TeamJudgeFormSeat()
   ctx.effect(() => () => {
     navigation.dispose()
     drafts.dispose()
     humanIdentity.dispose()
     environment.dispose()
     contextJudge.dispose()
+    judgeForm.dispose()
     void disposeNavigation()
     void disposeDrafts()
   }, 'agent-team: navigation service')
@@ -363,15 +369,14 @@ function applyUi(ctx: ClientContext): void {
   // The judge's endpoint is one group of the Team row's settings section, so it
   // is offered only while this deployment serves a settings document: the page
   // is registered here regardless, because identity is reachable without one,
-  // and the group is passed in as an absent value when there is none. The
-  // service is read through `ctx.get` rather than a hard `inject` for the same
-  // reason — a deployment without the settings UI keeps the rest of the Team.
-  const judgeForm: { current: TeamJudgeForm | undefined } = { current: undefined }
+  // and the seat above stays empty when there is none. The service is read
+  // through `ctx.get` rather than a hard `inject` for the same reason — a
+  // deployment without the settings UI keeps the rest of the Team.
   ctx.inject(['configForms'], (scope: ClientContext) => {
     const form = new TeamJudgeForm(scope.configForms.get<TeamJudgeSection>(TEAM_SETTINGS_NS), contextJudge)
-    judgeForm.current = form
+    judgeForm.hold(form)
     scope.effect(() => () => {
-      judgeForm.current = undefined
+      judgeForm.release(form)
       form.dispose()
     }, 'agent-team: judge settings form')
   })
@@ -385,7 +390,7 @@ function applyUi(ctx: ClientContext): void {
       identity: humanIdentity,
       environment,
       judge: contextJudge,
-      judgeForm: judgeForm.current,
+      judgeForm,
       // The key's literal never rides a response; the describe mirror is what
       // says whether one is stored.
       keyConfigured: (): boolean => ctx.get('configForms')?.describe().getSnapshot().view?.namespaces

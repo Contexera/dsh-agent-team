@@ -10,7 +10,7 @@ import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import { useContextJudge, type TeamContextJudgeSource } from './context-judge.ts'
-import type { TeamJudgeField, TeamJudgeForm } from './judge-form.ts'
+import type { TeamJudgeField, TeamJudgeForm, TeamJudgeFormSource } from './judge-form.ts'
 import css from './team-settings.module.css'
 
 /**
@@ -43,8 +43,8 @@ export interface TeamSettingsInjected {
   environment: TeamEnvironmentSource
   /** The judge's live status: whether one is reachable right now. */
   judge: TeamContextJudgeSource
-  /** The staged form over the judge's endpoint; absent when this deployment serves no settings document. */
-  judgeForm: TeamJudgeForm | undefined
+  /** The staged form over the judge's endpoint; it holds nothing while this deployment serves no settings document. */
+  judgeForm: TeamJudgeFormSource
   /** Whether the settings document holds a key literal for the judge. */
   keyConfigured: () => boolean
 }
@@ -77,6 +77,11 @@ function avatarInitial(name: string | undefined): string {
 export function TeamSettingsSection(props: TeamSettingsProps) {
   const { t, identity } = props
   const profile = useHumanIdentity(identity)
+  // The endpoint form is observed rather than received: the settings service it
+  // is built over can arrive after this entry's injected props were computed,
+  // and those props are cached for the entry's lifetime, so a value handed over
+  // once would never appear.
+  const judgeForm = useSyncExternalStore(props.judgeForm.subscribe, props.judgeForm.getSnapshot)
   // Undefined means "follow the Host value": the field re-syncs whenever the
   // profile changes underneath, without a background read clobbering a name
   // the reader is still editing.
@@ -217,11 +222,11 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
         </div>
       </div>
     </div>
-    {props.judgeForm === undefined
+    {judgeForm === undefined
       ? null
       : <JudgeGroup
           t={t}
-          form={props.judgeForm}
+          form={judgeForm}
           judge={props.judge}
           keyConfigured={props.keyConfigured}
         />}

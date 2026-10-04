@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamContextJudgeResult } from '@wowyuarm/dsh-agent-team/types'
-import { TeamJudgeForm, type TeamJudgeSection } from '../src/client/judge-form.ts'
+import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from '../src/client/judge-form.ts'
 import { TeamContextJudgeCheck, type TeamContextJudgeLoader } from '../src/client/context-judge.ts'
 
 /**
@@ -125,5 +125,46 @@ describe('judge endpoint form', () => {
     const { stub, form } = bench()
     stub.publish({ status: 'unavailable', value: undefined, writable: false })
     expect(form.getSnapshot().shell.available).toBe(false)
+  })
+})
+
+/**
+ * The seat the settings page binds: the form is held rather than handed over,
+ * because a slot entry's injected props are computed once and the settings
+ * service may answer after that moment.
+ */
+describe('judge form seat', () => {
+  it('publishes a held form and withdraws it again', () => {
+    const { form } = bench()
+    const seat = new TeamJudgeFormSeat()
+    const listener = vi.fn()
+    const stop = seat.subscribe(listener)
+    expect(seat.getSnapshot()).toBeUndefined()
+
+    seat.hold(form)
+    expect(seat.getSnapshot()).toBe(form)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    seat.release(form)
+    expect(seat.getSnapshot()).toBeUndefined()
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    // A disposed subscriber is not called again, and the seat keeps its value.
+    stop()
+    seat.hold(form)
+    expect(listener).toHaveBeenCalledTimes(2)
+    expect(seat.getSnapshot()).toBe(form)
+  })
+
+  it('ignores a release from a holder the seat no longer carries', () => {
+    const first = bench().form
+    const second = bench().form
+    const seat = new TeamJudgeFormSeat()
+    seat.hold(first)
+    seat.hold(second)
+    // The service that built the first form going away must not clear the
+    // replacement it was swapped for.
+    seat.release(first)
+    expect(seat.getSnapshot()).toBe(second)
   })
 })

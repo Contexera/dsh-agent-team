@@ -71,6 +71,7 @@
 - 表单用的是 shipped 设置栈——`SettingsFormModel` 配 `SettingsForm`、`SettingsValueField`、`SettingsSecretField`——所以草稿、覆盖徽章、重置与保存的行为与 Harness 自己的设置页完全一致。所有写入都经 `ctx.configForms.get(namespace)`，revision 栅栏由它持有，Host 的答复也由它折回 mirror；没落地的保存保留草稿并如实说明，落地的保存会重读状态。
 - key 是**只写**的：Host 会 redact 字面值，所以这个控件每次加载都从空开始；空草稿不写任何东西——打开这一页永远不可能清掉已存的 key——而「已配置」徽章来自 describe mirror 的 `secrets` 列表，那是这份状态唯一可读的地方。移除字面值是一次**显式的清除写入**，且只在没有暂存草稿时才提供：写入会推动文档 revision，而暂存的保存正是被它栅栏住的。
 - 这一组只在这次部署**提供 settings 文档**时才出现：段落本身照常注册，因为身份不依赖它也能读写，settings 服务缺席时这一组直接不渲染。文档在场时这一组也自己答自己——只读文档禁用全部控件并说明，命名空间没被提供时渲染表单自带的那行「没有提供」，而不是画出一堆没人接受的字段。
+- 表单是以**可观察的 seat**、而不是一个值交给页面的：slot entry 的注入 props 只算一次、并缓存到该 entry 的生命周期，所以首次渲染之后才应答的 settings 服务本来会让这一组一直不出现、要刷新。页面自己的测试钉的就是「渲染之后再填 seat」。
 
 ## 失败态呈现（failure surfaces）
 - 投影失败的呈现只有两种，选哪一种等于声明「屏幕上还剩什么」。**整面失败**（从未加载出投影）用 `errorState`：与它所替代的 loading / empty 面共用同一份空白区居中（`margin: auto`、`padding: 32px 0`），保持在 880px 阅读列内，取 12px/18px 的 error 字号与 `--dsw-alias-state-error-primary`，内容是 Host message 加一个重新发起读取的 `重试`——message 与按钮同在一个 `role="alert"` 里。**行旁失败**（行还在）用内联 `error`：在内容列内 `margin: 0`，读作所属列表的最后一行，而不是让已有内容的面重新居中。

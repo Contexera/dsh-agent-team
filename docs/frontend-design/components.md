@@ -106,6 +106,8 @@ The key is write-only: the Host redacts the literal, so the control starts blank
 
 The group is offered only while this deployment serves a settings document: the section is registered regardless, because identity is reachable without one, and an absent settings service simply leaves the group out. Inside a served document the group still answers for itself — a read-only document disables its controls and says so, and a namespace that is not served renders the form's own unavailable line instead of fields nothing would accept.
 
+The form reaches the page through an observable seat rather than as a value: a slot entry's injected props are computed once and cached for that entry's lifetime, so a settings service answering after the first render would otherwise leave the group off the page until a reload. Filling the seat after render is what the page's own test pins.
+
 ## Failure surfaces
 A failed projection renders one of two shapes, and the choice is a claim about what is still on screen. When nothing was ever loaded, the failure replaces the whole surface as `errorState`: it rides the same free space as the loading and empty surfaces it stands in for (`margin: auto`, `padding: 32px 0`), keeps to the 880px reading column, takes the 12px/18px error scale in `--dsw-alias-state-error-primary`, and carries the Host's message plus one `重试` that re-issues the read — message and retry inside a single `role="alert"`.
 

@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamContextJudgeResult, AgentTeamHumanProfileResult } from '@wowyuarm/dsh-agent-team/types'
 import { TeamHumanIdentity, type TeamHumanIdentityLoader } from '../src/client/human-identity.ts'
 import { TeamEnvironmentCheck, type TeamEnvironmentLoader } from '../src/client/environment-check.ts'
 import { TeamContextJudgeCheck, type TeamContextJudgeLoader } from '../src/client/context-judge.ts'
-import { TeamJudgeForm, type TeamJudgeSection } from '../src/client/judge-form.ts'
+import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from '../src/client/judge-form.ts'
 import { zh } from '../src/client/locales.ts'
 import { TeamSettingsSection } from '../src/client/TeamSettingsSection.tsx'
 
@@ -62,10 +62,11 @@ function renderSection(injected: Record<string, unknown> = {}) {
     saveName: vi.fn(async () => undefined),
     uploadAvatar: vi.fn(async () => undefined),
     removeAvatar: vi.fn(async () => undefined),
-    // A deployment that serves no settings document: the page keeps its
-    // identity rows and drops the judge group, which the judge tests below
-    // supply a form for.
-    judgeForm: undefined,
+    // A deployment that serves no settings document: the seat holds nothing,
+    // so the page keeps its identity rows and drops the judge group. The judge
+    // tests below fill the seat the way the Client does when the service
+    // answers.
+    judgeForm: new TeamJudgeFormSeat(),
     judge: INERT_JUDGE,
     keyConfigured: () => false,
     ...injected,
@@ -267,8 +268,15 @@ function renderJudgeGroup(options: {
   return {
     stub,
     form,
-    ...renderSection({ judge, judgeForm: form, keyConfigured: () => options.keyConfigured ?? false }),
+    ...renderSection({ judge, judgeForm: seatWith(form), keyConfigured: () => options.keyConfigured ?? false }),
   }
+}
+
+/** A seat already holding one form, as the Client's seat does once the service answers. */
+function seatWith(form: TeamJudgeForm): TeamJudgeFormSeat {
+  const seat = new TeamJudgeFormSeat()
+  seat.hold(form)
+  return seat
 }
 
 /** The group's one disclosure control, named by the title it carries. */
@@ -282,6 +290,31 @@ function openJudgeGroup(): HTMLElement {
 }
 
 describe('Team settings page: the judge group', () => {
+  it('shows the endpoint row when the settings service arrives after the first render', async () => {
+    // A slot entry's injected props are computed once and cached for the
+    // entry's lifetime, so the page is handed a seat to observe rather than a
+    // form to hold: a service that answers late still reaches this page
+    // without a reload.
+    const stub = stubConfigForm<TeamJudgeSection>()
+    const judge = new TeamContextJudgeCheck({
+      loadContextJudge: async (): Promise<RemoteResult<AgentTeamContextJudgeResult>> => ({ ok: true, value: NO_KEY }),
+    } as unknown as TeamContextJudgeLoader)
+    const seat = new TeamJudgeFormSeat()
+    renderSection({ judge, judgeForm: seat })
+    await waitFor(() => { expect(screen.getByLabelText('名字')).not.toBeNull() })
+    // Nothing is served yet, so the row is not on the page at all.
+    expect(screen.queryByRole('button', { name: new RegExp(`^${zh.teamJudgeGroupTitle}`) })).toBeNull()
+
+    stub.publish({ status: 'ready', value: {}, base: {}, user: {}, writable: true, revision: 4 })
+    await act(async () => { seat.hold(new TeamJudgeForm(stub.scope, judge)) })
+    // It arrives as the real row: the state is stated, and opening it puts the
+    // endpoint's own controls on the page.
+    await waitFor(() => { expect(screen.getByText(zh.teamJudgeNoKey)).not.toBeNull() })
+    expect(judgeToggle().getAttribute('aria-expanded')).toBe('false')
+    openJudgeGroup()
+    expect(screen.getByLabelText('apiBase')).not.toBeNull()
+  })
+
   it('states a reachable judge in one line', async () => {
     renderJudgeGroup({ report: READY })
     const status = await waitFor(() => screen.getByText(zh.teamJudgeReady))

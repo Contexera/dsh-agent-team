@@ -190,3 +190,66 @@ export class TeamJudgeForm {
     if (!this.model.shell().failed) await this.judge.refresh()
   }
 }
+
+/** Read-side face the settings page binds for the endpoint form. */
+export interface TeamJudgeFormSource {
+  getSnapshot(): TeamJudgeForm | undefined
+  subscribe(listener: () => void): () => void
+}
+
+/**
+ * The form's seat on the page, as an observable rather than a value.
+ *
+ * The form exists only while this deployment serves a settings document, and
+ * that service may arrive after the page's first render. A slot entry's
+ * injected props are computed once and cached for the entry's lifetime, so a
+ * value handed over at that moment would freeze the answer: the group would
+ * never appear until a reload. The page therefore observes this seat, which
+ * the service's arrival and departure both publish through.
+ */
+export class TeamJudgeFormSeat implements TeamJudgeFormSource {
+  private form: TeamJudgeForm | undefined
+  private readonly listeners = new Set<() => void>()
+
+  readonly getSnapshot = (): TeamJudgeForm | undefined => this.form
+
+  /**
+   * Observe the form, without reading anything on subscribe: the seat carries
+   * no remote state of its own, so a subscriber renders whatever is held now.
+   * @param listener - invoked after every hold or release.
+   * @returns the disposer removing this listener.
+   */
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener)
+    return () => { this.listeners.delete(listener) }
+  }
+
+  /**
+   * Publish the form the settings service answers with.
+   * @param form - the form built over that service's section scope.
+   */
+  hold(form: TeamJudgeForm): void {
+    this.form = form
+    this.publish()
+  }
+
+  /**
+   * Withdraw the form when its service goes away. Only the holder of the form
+   * in place can withdraw it, so a replacement is never cleared by the
+   * departure of the one it replaced.
+   * @param form - the form this caller holds.
+   */
+  release(form: TeamJudgeForm): void {
+    if (this.form !== form) return
+    this.form = undefined
+    this.publish()
+  }
+
+  dispose(): void {
+    this.listeners.clear()
+  }
+
+  private publish(): void {
+    for (const listener of this.listeners) listener()
+  }
+}
