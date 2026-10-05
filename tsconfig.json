@@ -38,6 +38,9 @@
       "@wowyuarm/dsh-agent-team/sqlite-backend": [
         "./packages/agent-team/src/vendor/storage-sqlite/index.ts"
       ],
+      "@wowyuarm/dsh-agent-team/compaction-engine": [
+        "./packages/agent-team/src/compaction-engine.ts"
+      ],
       "@wowyuarm/dsh-agent-team/member-context": [
         "./packages/agent-team/src/member-context.ts"
       ],

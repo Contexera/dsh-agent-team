@@ -335,6 +335,23 @@ describe('Agent Team shipping contract', () => {
     expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-client-runtime']).toBeUndefined()
     expect(bundleManifest.exports['./client']?.default).toBe('./packages/client-agent-team/lib/client.js')
 
+    // Every declared subpath is also mirrored in the resolution facades, which
+    // scripts/sync-paths.mjs builds from its own hardcoded maps — the script
+    // never reads package.json, so a subpath added to `exports` alone resolves
+    // at runtime (the Loader reads the real map) while any source import of it
+    // fails to compile, and `--check` stays green because the script is its own
+    // source of truth. `.` is the bare package name and `./package.json` is not
+    // a module; neither earns a facade row.
+    const syncPaths = await readFile(resolve(root, 'scripts/sync-paths.mjs'), 'utf8')
+    const facaded = new Set([...syncPaths.matchAll(/'@wowyuarm\/dsh-agent-team\/([a-z-]+)'/g)].map(match => match[1]!))
+    for (const subpath of Object.keys(bundleManifest.exports)) {
+      if (subpath === '.' || subpath === './package.json') continue
+      expect(
+        facaded.has(subpath.replace(/^\.\//, '')),
+        `subpath '${subpath}' is declared in package.json exports but missing from scripts/sync-paths.mjs`,
+      ).toBe(true)
+    }
+
     // Row health: every package row the declarative definition names must
     // resolve from this repository's linked node_modules — the same walk a
     // real profile install performs above its composition base. The
