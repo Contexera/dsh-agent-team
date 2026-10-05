@@ -237,6 +237,28 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('never drop detail a peer Member needs, move it below')
     expect(preset).toContain('mention the Human as @human — that is how they are notified')
     expect(preset).toContain('what needs deciding and what happens by default')
+    // Autonomy is the default and the escalation bar is a closed list. The
+    // 2026-10-05 ledger scan is why these lines exist: 836 of 1,502 Member
+    // messages mentioned the Human, 51% drew an immediate reply, and the
+    // median reply was 29 characters ("可以", "合吧", "分支删了吧") — the
+    // Human was rubber-stamping work the Member already had grounds to
+    // settle, and in 17% of replies was merely routing to another Member.
+    // Each assertion below pins one of the three behaviours that scan found
+    // missing; deleting one silently restores the escalation habit.
+    expect(preset).toContain('Decide and act by default')
+    expect(preset).toContain('Never close a message with a question whose answer you could determine yourself')
+    expect(preset).toContain('Mention the Human only when one of these holds')
+    expect(preset).toContain('A finished piece of work is reported, not submitted for approval')
+    expect(preset).toContain('The Human is not a router')
+    // Progress chatter is opt-in: an expected step earns no message, and a
+    // taken Task is announced without waiting for anyone to bless the plan.
+    expect(preset).toContain('Do not wait for anyone to confirm the plan')
+    expect(preset).toContain('silence while working is normal and correct')
+    // Disagreement resolves inside the team by function ownership (operator
+    // approved this default on 2026-10-05), and an unverified claim is the
+    // Member's gap to close rather than a decision handed upward.
+    expect(preset).toContain('the Member whose function owns the area decides and the work continues')
+    expect(preset).toContain('A gap in your own verification is yours to close')
     // One mention rule, and it is body-authored: the `@` is what makes a
     // mention, `@all` reaches the Channel, and a Member an existing Thread has
     // never carried is reported back rather than silently enrolled or refused.
