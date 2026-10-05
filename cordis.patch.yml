@@ -180,9 +180,14 @@
                 # The Team owns both compaction policy entry points (the pressure notice
                 # and the hard-limit forced reduction in its Host coordinator), so the
                 # plugin's own automatic listeners stay off; the engine implementation is
-                # still reused for member-initiated /compact and the Team policy.
+                # still reused for member-initiated /compact and the Team policy. The
+                # engine is the continuity subclass, so a summary the Member writes
+                # itself reaches the reduction instead of a template written for it.
+                # The row names this bundle's own re-export rather than the engine
+                # package: a row is resolved from the profile, which links this
+                # bundle but not the dependency nested inside it.
                 - id: compaction-basic
-                  name: '@deepseek-ai/dsh-compaction-basic'
+                  name: '@wowyuarm/dsh-agent-team/compaction-engine'
                   config:
                     auto: false
 

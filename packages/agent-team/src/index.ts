@@ -2002,8 +2002,8 @@ export default class AgentTeam extends TypertRemoteService {
       const taskBoundaryThreshold = Math.min(ACCEPT_TASK_BOUNDARY_THRESHOLD, limits.handoffAt)
       if (limits.usageTokens >= limits.handoffAt) {
         return Object.freeze({ usageTokens: limits.usageTokens, taskBoundaryThreshold, handoffAt: limits.handoffAt, hardLimit: limits.hardLimit,
-          action: 'handoff-now',
-          guidance: 'You are at or above the handoff budget. Finish the current atomic action and unsettled evidence, then call context_rollover with a fresh handoff now.' })
+          action: 'compact-now',
+          guidance: 'You are at or above the handoff budget. Finish the current atomic action and unsettled evidence, then call context_compact with a summary you write yourself — that shortens this generation in place, keeps your recent work verbatim, and is the default. Roll over only when the work has turned a page.' })
       }
       if (limits.usageTokens >= taskBoundaryThreshold) {
         return Object.freeze({ usageTokens: limits.usageTokens, taskBoundaryThreshold, handoffAt: limits.handoffAt, hardLimit: limits.hardLimit,

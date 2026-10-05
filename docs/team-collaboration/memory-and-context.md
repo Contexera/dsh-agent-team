@@ -10,7 +10,7 @@ Upkeep craft (what earns a line, the three tiers, compaction and demotion) is ow
 ## Context pressure ownership
 The engine owns Member context pressure end to end as policy; the Host binds that policy to one Member's readings and performs what it decides.
 
-Two budget thresholds derive from the Member's live routed selection — the selection captured for the current step when it entered prompt assembly, its current selection otherwise — resolved through the LLM service (capped at 200K handoff / 256K hard, with a safety reserve). At the handoff budget the Member receives one structured pressure notice per generation advising a `context_rollover` rollover — repeating is suppressed for that generation and re-armed after a rollover.
+Two budget thresholds derive from the Member's live routed selection — the selection captured for the current step when it entered prompt assembly, its current selection otherwise — resolved through the LLM service (capped at 200K handoff / 256K hard, with a safety reserve). At the handoff budget one pressure notice per generation leads with an in-place `context_compact` the Member summarizes itself and keeps `context_rollover` for work that has turned a page — repeating is suppressed for that generation and re-armed after a rollover.
 
 At the hard limit the Host forces an in-place compaction before the next model request is forwarded, and a Member whose compaction provably advances neither its generation nor its measured pressure is failed closed (the step is rejected rather than submitted over the Team limit).
 

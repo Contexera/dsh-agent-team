@@ -316,7 +316,7 @@ describe('Agent Team shipping contract', () => {
     // rides the same way for the same reason, and one more: the Host mounts it
     // itself from the row's key, so its code has to be in the tree.
     expect(manifest.dependencies).toEqual({
-      '@wowyuarm/dsh-context-continuity': '^0.2.1',
+      '@wowyuarm/dsh-context-continuity': '^0.3.0',
       '@wowyuarm/dsh-jev': '^0.1.1',
       yaml: '^2.9.1',
       zod: '^4.4.3',
@@ -347,6 +347,19 @@ describe('Agent Team shipping contract', () => {
       if (row === 'cordis:group') continue
       expect(() => resolution.resolve(row), `preset row '${row}' does not resolve`).not.toThrow()
     }
+    // Resolution against this repository's node_modules is necessary, never
+    // sufficient: the Loader resolves a row from the *profile*, which links this
+    // bundle and the host closure and nothing nested inside this bundle's
+    // dependency tree. A dependency's subpath therefore resolves here and fails
+    // in a real profile — the row reports `never started` and every Member is
+    // left unavailable, which is what the browser lane caught. Only a host
+    // package or this bundle's own name is reachable from a row.
+    for (const row of rows) {
+      expect(
+        row.startsWith('@deepseek-ai/') || row === '@wowyuarm/dsh-agent-team' || row.startsWith('@wowyuarm/dsh-agent-team/'),
+        `preset row '${row}' is neither a host-closure package nor this bundle's own subpath, so a real profile cannot resolve it`,
+      ).toBe(true)
+    }
   })
 })
 
@@ -369,7 +382,6 @@ describe('Boot-critical host closure surface', () => {
   const PRESET_HOST_ROWS = [
     '@deepseek-ai/dsh-persona',
     '@deepseek-ai/dsh-agent-instructions',
-    '@deepseek-ai/dsh-compaction-basic',
     '@deepseek-ai/dsh-compaction-tool-result-pruner',
   ]
 

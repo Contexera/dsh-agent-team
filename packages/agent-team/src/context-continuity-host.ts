@@ -179,7 +179,7 @@ const RECENT_INPUT_LIMIT = 8
 export const TEAM_PRESSURE_GATE_SCHEMA = z.object({
   tokens: z.natural().volatile().description('Context size at or above which the long-gap gate may hold a step. Default: 128000.'),
   idleMs: z.natural().volatile().description('How long a generation must have been idle for a step to count as a long gap. Default: 1800000 (30 minutes).'),
-  judgeTimeoutMs: z.natural().volatile().description('How long one relatedness judgement may take before the step proceeds without one. Default: 5000.'),
+  judgeTimeoutMs: z.natural().volatile().description("How long one relatedness judgement may take before the step proceeds without one. Default: 10000, not the engine's own 5000."),
 })
 
 export interface TeamPressurePolicyOptions {

@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+- The bundled context engine moves to `0.3.0`, and the `team-member` preset mounts its continuity engine, so a summary a Member writes itself reaches the reduction that replaces its context instead of a template written for it.
+- Context pressure advice names the reduction it means: at the handoff budget both the pressure notice and an accepted Task's guidance lead with shortening the context in place through `context_compact`, and keep `context_rollover` for work that has turned a page. The acceptance guidance's third action is `compact-now` rather than `handoff-now`.
 - Fixed the Plugins page keeping the center column after Team mode starts: Channels, the Inbox and Threads open there again, and the Plugins entry still opens its page once you leave Team mode.
 - Team Members no longer carry a session-local todo tool: planning belongs to the ledger, so the `team-member` preset drops that row and the peer that named it leaves with it.
 - The sender name follows the content-size setting: at a raised size the author grows with the message instead of staying at its default size, while the message body keeps the grid it already had.

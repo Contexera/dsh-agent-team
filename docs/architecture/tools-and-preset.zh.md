@@ -4,6 +4,8 @@
 
 显式的 `team-member` preset 是唯一的 Team Member composition。它加入完整 coding capability rows（shell、filesystem/search、web search 与 fetch、background jobs、skill 加载工具、compaction）；skill 发现本身不是 preset row——每个 Member 的 provider 由 Host 注册在其 agent scope 上（见 Host authority）、Team collaboration guidance/tools、Harness Workspace instruction discovery 和有界的 private-memory reference context。普通 Sessions 留在这个 isolated roster 之外，不会获得 Team prompt sections、tools 或 Member memory。
 
+每一行 `name:` 都是 Loader 针对 profile 解析的裸标识符，而不是针对本 bundle：profile 只链接本 bundle 与宿主闭包，所以一行只能点名宿主包或本 bundle 自己的子路径，绝不能点名嵌在本 bundle 依赖树里的包。一个在工作树里能解析的名字，在真实安装里仍可能让该行 `never started`，因此依赖里的模块只能经由本 bundle 自己名下的再导出才能到达一行。
+
 九个 model-facing tools 定义在 `packages/tool-agent-team/src/`：五个 Team 工具在 `index.ts`，四个 context 工具在 `context-tools.ts`；实现的 collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离开的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了让测试可用就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
 
 Member 上下文自主管理在这些 preset 之上由 Host 编排。`context_rollover` 与 `context_checkpoint` 工具只做校验并结束/锚定 turn：在 tool 时，引擎的门先拒绝 Member 自己的 `context_status` 未列为 restorable 的 `checkpointRef`，通过这道门的 ref 仍由 Host 的 seed resolver（与换窗同一套）预校验，因此当下不可能成功的 ref 以 model-visible 的 error result 拒绝，而不是返回假 `scheduled`；可变 guard 集（jobs、route limits）在 commit seam 复查。
@@ -32,7 +34,7 @@ unit 自带 fork cut，seed 子代的继承前缀折叠回同一引用。换窗�
 
 恢复由日志派生：重启重放 pending 意图并完成换窗；落在 rollover 的 durable commit 与新 Session 激活之间的重启，会从 ledger 记录的上一 Session 重建 handoff——即使新 Session 在崩溃前从未落盘——且重建幂等（自身日志已含 handoff 的一代不再收到第二条）。重启后的 carried-input 重放是有界的：当前代一旦已开始自身 turn 即跳过重放（其携带输入已在运行中被投递或取代）；上一代 Session 不可读时，属日志损坏类（`corrupt session log`，Host 会修复 torn tail）或确定性格式拒绝类（`SessionFormatUnsupportedError`，重试无法改变结果）的以 warn 放行，缺失/IO 及未知原因仍 fail-closed——当前代一旦运行过，其激活不再受退役代可读性阻塞。Member Session 是否有 durable 持久内容，通过 session-persistence inspection 判定（会等待进行中的 retirement drain），绝不使用会与 suspend 终末 flush 竞争的裸元数据列表。
 
-上下文压力是引擎自己的策略（`ContextPressurePolicy`）架在 Team 的宿主实现上，挂在同一 pre-step 接缝：预算阈值从当前 route 的 context window 派生（handoff 200K / 硬上限 256K cap 加安全 reserve）；handoff 预算处每 generation 一条结构化通知建议 rollover（一次后重新武装）；硬上限处策略强制原地 compaction，无法证明进展即 fail closed；provider context-overflow 失败获得一条有界 compact-and-retry 序列。
+上下文压力是引擎自己的策略（`ContextPressurePolicy`）架在 Team 的宿主实现上，挂在同一 pre-step 接缝：预算阈值从当前 route 的 context window 派生（handoff 200K / 硬上限 256K cap 加安全 reserve）；handoff 预算处每 generation 一条结构化通知，主推就地 `context_compact` 并由 Member 自己写摘要，`context_rollover` 留给已翻页的工作（一次后重新武装）；硬上限处策略强制原地 compaction，无法证明进展即 fail closed；provider context-overflow 失败获得一条有界 compact-and-retry 序列。
 
 大 context 里隔了很久才到的那一步先交给相关性 judge：judge 判为无关工作时，策略扣住这份输入、在原位投一条换代指令；被扣的输入在 driver 收敛后交回——若换代落地则随新代进入。按 Member 取的那些读数（limits、surface、log span、compaction、手上的工作）与 judge 由 Team 提供；决策顺序、通知闩与 fail-closed 证明仍归引擎。
 

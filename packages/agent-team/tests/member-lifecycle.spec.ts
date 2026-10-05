@@ -3019,7 +3019,7 @@ describe('Agent Team pressure policy integration (ticket 03)', () => {
     expect(rollover.contextAdvice?.action).toBe('rollover')
     expect(rollover.contextAdvice?.guidance).toContain('context_rollover')
 
-    // At the handoff budget the tier escalates to handoff-now.
+    // At the handoff budget the tier escalates to compact-now.
     pressureState.usageTokens = 200_000
     const rolloverRepeat = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-rollover-repeat'), workspaceId, taskRef: started.task!.taskRef })
     expect(rolloverRepeat.contextAdvice).toBeUndefined()
@@ -3034,12 +3034,13 @@ describe('Agent Team pressure policy integration (ticket 03)', () => {
     const humanRead2 = await ctx.agentTeam.readThread({ requestId: requestId('advice-human-read-2'), workspaceId, taskRef: started.task!.taskRef })
     const accepted2 = await ctx.agentTeam.changeTask({ requestId: requestId('advice-accept-2'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead2.thread.revision })
     if (accepted2.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted2.kind}`)
-    const handoffNow = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-now'), workspaceId, taskRef: started.task!.taskRef })
-    expect(handoffNow.contextAdvice?.action).toBe('handoff-now')
+    const compactNow = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-now'), workspaceId, taskRef: started.task!.taskRef })
+    expect(compactNow.contextAdvice?.action).toBe('compact-now')
+    expect(compactNow.contextAdvice?.guidance).toContain('context_compact')
 
     // A reopen-after-accept that is still unread must NOT advise: the Task is
     // open again, the acceptance no longer stands.
-    const reopened2 = await ctx.agentTeam.changeTask({ requestId: requestId('advice-reopen-2'), workspaceId, taskRef: started.task!.taskRef, action: 'reopen', baseRevision: handoffNow.thread.revision })
+    const reopened2 = await ctx.agentTeam.changeTask({ requestId: requestId('advice-reopen-2'), workspaceId, taskRef: started.task!.taskRef, action: 'reopen', baseRevision: compactNow.thread.revision })
     if (reopened2.kind !== 'committed') throw new Error(`expected committed reopen, received ${reopened2.kind}`)
     const staleAcceptRead = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-stale'), workspaceId, taskRef: started.task!.taskRef })
     expect(staleAcceptRead.contextAdvice).toBeUndefined()

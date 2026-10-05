@@ -61,7 +61,7 @@
     }
   },
   "dependencies": {
-    "@wowyuarm/dsh-context-continuity": "^0.2.1",
+    "@wowyuarm/dsh-context-continuity": "^0.3.0",
     "@wowyuarm/dsh-jev": "^0.1.1",
     "yaml": "^2.9.1",
     "zod": "^4.4.3"
@@ -114,6 +114,10 @@
     "./sqlite-backend": {
       "types": "./packages/agent-team/lib/types/vendor/storage-sqlite/index.d.ts",
       "default": "./packages/agent-team/lib/vendor/storage-sqlite/index.js"
+    },
+    "./compaction-engine": {
+      "types": "./packages/agent-team/lib/types/compaction-engine.d.ts",
+      "default": "./packages/agent-team/lib/compaction-engine.js"
     },
     "./member-context": {
       "types": "./packages/agent-team/lib/types/member-context.d.ts",

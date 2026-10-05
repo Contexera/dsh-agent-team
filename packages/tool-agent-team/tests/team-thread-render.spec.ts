@@ -94,12 +94,12 @@ describe('team_thread renders the model-facing decision surface', () => {
       readThroughSequence: 8190, remainingUnreadCount: 0,
       contextAdvice: {
         usageTokens: 203_000, taskBoundaryThreshold: 128_000, handoffAt: 200_000, hardLimit: 256_000,
-        action: 'handoff-now',
-        guidance: 'You are at or above the handoff budget. Finish the current atomic action and unsettled evidence, then call context_rollover with a fresh handoff now.',
+        action: 'compact-now',
+        guidance: 'You are at or above the handoff budget. Finish the current atomic action and unsettled evidence, then call context_compact with a summary you write yourself — that shortens this generation in place, keeps your recent work verbatim, and is the default. Roll over only when the work has turned a page.',
       },
     })
     expect(text).toContain('203,000')
-    expect(text).toContain('handoff')
+    expect(text).toContain('compact-now')
   })
 
   it('a read without unread accepts renders no context advice section', () => {

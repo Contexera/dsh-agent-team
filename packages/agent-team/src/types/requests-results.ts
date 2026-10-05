@@ -802,8 +802,8 @@ export interface AgentTeamContextAdvice {
   readonly handoffAt?: number | undefined
   /** Effective hard limit of the Member's current route; absent when unmeasured. */
   readonly hardLimit?: number | undefined
-  /** keep | rollover | handoff-now | unavailable. */
-  readonly action: 'keep' | 'rollover' | 'handoff-now' | 'unavailable'
+  /** keep | rollover | compact-now | unavailable. */
+  readonly action: 'keep' | 'rollover' | 'compact-now' | 'unavailable'
   readonly guidance: string
 }
 

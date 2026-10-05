@@ -24,7 +24,7 @@ cursor 只延续 Thread 行；continuation 页只渲染 Threads，翻页可达�
 
 五个 action 不共享一个最大化渲染：`status`、`follow`、`unfollow` 只回答 Attention 问题——一行结果携带 Thread ref、可选 Task standing 与 following 状态，没有 timeline。read 先渲染结果（确认与剩余的 unread 计数），再 Thread 身份与 following 状态，再导向（返回 facts 携带 Host 提供的 background 时给 full anchor，否则给 bounded anchor subject，anchor 本身是返回 fact 时绝不重复渲染），再只渲染 active Claims——当前 collision surface，每 Claim 一行（claim ref、owner、direction）——然后是带行内 unread/direct 标记的按时间排列的 facts，页脚给出 read-through sequence 与剩余 unread 计数——若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量，让重返的读者看到它没有在看的跨度有多大，而不是把本次 batch 当成整个 Thread。
 
-history 页渲染历史结果与 Thread 身份，首页给 full anchor、continuation 页给 bounded subject，选中 facts 与 cursor/hasMore 页脚——绝无当前 Claims 或 advice。每条 activity fact 都是结构化的——actor、Task ref，以及该 activity claim、完成、接受或 release 的 Claim refs——绝不是裸 kind。当一次 `read` 确认的是一个仍处于 done 状态 Task 的未读验收时，结果附带一段 `contextAdvice`：读取 Member 的实测用量、当前路由的预算、任务边界阈值 `min(128_000, effective handoffAt)`，以及唯一动作——保留当前上下文、验收收尾后 fresh rollover、或已达 handoff 预算时立即换窗。建议只是推荐：Host 绝不在验收时自动 checkpoint、rollover 或 compact，测量失败降级为显式 `unavailable` 文案而不会反转已提交的 read。history 与重复 read 不带建议。
+history 页渲染历史结果与 Thread 身份，首页给 full anchor、continuation 页给 bounded subject，选中 facts 与 cursor/hasMore 页脚——绝无当前 Claims 或 advice。每条 activity fact 都是结构化的——actor、Task ref，以及该 activity claim、完成、接受或 release 的 Claim refs——绝不是裸 kind。当一次 `read` 确认的是一个仍处于 done 状态 Task 的未读验收时，结果附带一段 `contextAdvice`：读取 Member 的实测用量、当前路由的预算、任务边界阈值 `min(128_000, effective handoffAt)`，以及唯一动作——保留当前上下文、验收收尾后 fresh rollover、或已达 handoff 预算时就地压缩。建议只是推荐：Host 绝不在验收时自动 checkpoint、rollover 或 compact，测量失败降级为显式 `unavailable` 文案而不会反转已提交的 read。history 与重复 read 不带建议。
 
 ## `team_message`
 
