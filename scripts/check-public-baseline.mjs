@@ -12,9 +12,19 @@
 // must reduce to ONE range (the same invariant `packages/agent-team/tests/
 // shipping.spec.ts` asserts), whose lower bound is the certified baseline.
 //
-// A surface that cannot be PARSED is a FAILURE, never a skip: if a README is
-// reworded, this goes red rather than quietly dropping the surface out of
-// coverage. Fix the pattern together with the prose.
+// A surface that cannot be PARSED is a FAILURE, never a skip: this goes red
+// when the marker that names the baseline has disappeared, or when the line it
+// sits on has been split, rather than quietly dropping the surface out of
+// coverage.
+//
+// The anchor rule — the same shape `check-version-consistency.mjs` applies to
+// these same README sentences, since one sentence read by two gates can only
+// fail as a union — is: the marker is the WHOLE phrase or clause that qualifies
+// the baseline, and the gap starts BEFORE its token, stays on one line, and
+// crosses no other inline-code span. Only prose after the marker is free; words
+// inserted inside the marker phrase stop the match. That last case is the
+// accepted cost of anchoring on the declaration, not a bug. Fix the pattern
+// together with the prose.
 //
 // Needs `gh` (authenticated) for the discussion body; `--offline` skips that
 // surface and is for local iteration only — never run it offline before a
@@ -54,14 +64,14 @@ const localSurfaces = [
     name: 'README.md',
     file: 'README.md',
     // "This release is certified against DSH `0.1.5-rc.1`."
-    pattern: /certified against DSH\s*`([^`]+)`/i,
+    pattern: /certified against DSH[^\n`]*`([^`]+)`/i,
     shown: value => `certified against DSH \`${value}\``,
   },
   {
     name: 'README.zh.md',
     file: 'README.zh.md',
     // "当前版本已针对 DSH `0.1.5-rc.1` 完成认证。"
-    pattern: /针对\s*DSH\s*`([^`]+)`/,
+    pattern: /针对 DSH[^\n`]*`([^`]+)`/,
     shown: value => `针对 DSH \`${value}\` 完成认证`,
   },
 ]
