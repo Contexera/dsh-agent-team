@@ -56,21 +56,21 @@ const failures = []
 const normalize = (version) => version.replace(/^dsh-v/u, '')
 
 // (a) Every named spot states the same certified version. Each pattern anchors
-// on the sentence that declares the current baseline, so history paragraphs
-// that mention older versions never participate.
+// on the sentence that declares the current baseline — a marker word, then the
+// backticked token, tolerating prose between them on the same line but never
+// across another inline-code span, and never requiring prose after the token.
+// An adjacency-only pattern reads a sentence rewrite as a version change (the
+// 2026-10-06 Chinese rewrite did exactly that), while dropping the marker would
+// let history paragraphs that mention older versions participate.
 const spots = [
   { file: '.github/workflows/ci.yml', pattern: /DSH_HARNESS_TAG:\s*dsh-v(\S+)/u },
   { file: '.hoplite/settings.json', pattern: /HARNESS_TAG=\\"dsh-v([^\\]+)\\"/u },
-  { file: 'docs/development/environments-and-install.md', pattern: /currently `dsh-v([^`]+)`; advance it per certification/u },
-  { file: 'docs/development/environments-and-install.md', pattern: /minimum compatible DSH version is `([^`]+)`/u },
-  // The marker and its token tolerate prose between them, bounded to one line
-  // and to no other inline-code span: a sentence rewrite that inserts words
-  // ("当前 tag 是 `dsh-v…`") is not a version change, and an adjacency-only
-  // pattern reports it as one. The 2026-10-06 Chinese rewrite did exactly that.
+  { file: 'docs/development/environments-and-install.md', pattern: /currently[^\n`]*`dsh-v([^`]+)`/u },
+  { file: 'docs/development/environments-and-install.md', pattern: /minimum compatible DSH version is[^\n`]*`([^`]+)`/u },
   { file: 'docs/development/environments-and-install.zh.md', pattern: /当前[^\n`]*`dsh-v([^`]+)`/u },
-  { file: 'docs/development/environments-and-install.zh.md', pattern: /最低兼容版本是 DSH `([^`]+)`/u },
-  { file: 'README.md', pattern: /certified against DSH `([^`]+)`/u },
-  { file: 'README.zh.md', pattern: /针对 DSH `([^`]+)` 完成认证/u },
+  { file: 'docs/development/environments-and-install.zh.md', pattern: /最低兼容版本是 DSH[^\n`]*`([^`]+)`/u },
+  { file: 'README.md', pattern: /certified against DSH[^\n`]*`([^`]+)`/u },
+  { file: 'README.zh.md', pattern: /针对 DSH[^\n`]*`([^`]+)`/u },
   // Quick start starts the host itself, and must start the certified line: an
   // unversioned `npx @deepseek-ai/dsh web` resolves `latest`, which would hand
   // the reader a host this bundle's peers refuse.
@@ -80,10 +80,10 @@ const spots = [
   // host line, and `extract` reads one match per spot, so it needs its own.
   { file: 'README.md', pattern: /npm i -g @deepseek-ai\/dsh@([0-9][^` ]*)/u },
   { file: 'README.zh.md', pattern: /npm i -g @deepseek-ai\/dsh@([0-9][^` ]*)/u },
-  { file: 'docs/architecture/host-authority.md', pattern: /targets DSH `([^`]+)`/u },
-  { file: 'docs/architecture/host-authority.zh.md', pattern: /目标为 DSH `([^`]+)`/u },
-  { file: 'docs/dsh-release-compatibility.md', pattern: /current certified baseline is DSH `([^`]+)`/u },
-  { file: 'docs/dsh-release-compatibility.zh.md', pattern: /已认证基线是 DSH `([^`]+)`/u },
+  { file: 'docs/architecture/host-authority.md', pattern: /targets DSH[^\n`]*`([^`]+)`/u },
+  { file: 'docs/architecture/host-authority.zh.md', pattern: /目标为 DSH[^\n`]*`([^`]+)`/u },
+  { file: 'docs/dsh-release-compatibility.md', pattern: /current certified baseline is DSH[^\n`]*`([^`]+)`/u },
+  { file: 'docs/dsh-release-compatibility.zh.md', pattern: /已认证基线是 DSH[^\n`]*`([^`]+)`/u },
 ]
 
 // One file can own two spots (the development guide states both the setup
