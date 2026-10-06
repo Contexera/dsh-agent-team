@@ -63,7 +63,11 @@ const spots = [
   { file: '.hoplite/settings.json', pattern: /HARNESS_TAG=\\"dsh-v([^\\]+)\\"/u },
   { file: 'docs/development/environments-and-install.md', pattern: /currently `dsh-v([^`]+)`; advance it per certification/u },
   { file: 'docs/development/environments-and-install.md', pattern: /minimum compatible DSH version is `([^`]+)`/u },
-  { file: 'docs/development/environments-and-install.zh.md', pattern: /当前 `dsh-v([^`]+)`/u },
+  // The marker and its token tolerate prose between them, bounded to one line
+  // and to no other inline-code span: a sentence rewrite that inserts words
+  // ("当前 tag 是 `dsh-v…`") is not a version change, and an adjacency-only
+  // pattern reports it as one. The 2026-10-06 Chinese rewrite did exactly that.
+  { file: 'docs/development/environments-and-install.zh.md', pattern: /当前[^\n`]*`dsh-v([^`]+)`/u },
   { file: 'docs/development/environments-and-install.zh.md', pattern: /最低兼容版本是 DSH `([^`]+)`/u },
   { file: 'README.md', pattern: /certified against DSH `([^`]+)`/u },
   { file: 'README.zh.md', pattern: /针对 DSH `([^`]+)` 完成认证/u },
