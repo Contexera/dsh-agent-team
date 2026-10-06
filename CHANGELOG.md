@@ -2,21 +2,20 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
-## [Unreleased]
+## [0.2.1] - 2026-10-06
 
-- The bundled context engine moves to `0.3.0`, and the `team-member` preset mounts its continuity engine, so a summary a Member writes itself reaches the reduction that replaces its context instead of a template written for it.
-- Context pressure advice names the reduction it means: at the handoff budget both the pressure notice and an accepted Task's guidance lead with shortening the context in place through `context_compact`, and keep `context_rollover` for work that has turned a page. The acceptance guidance's third action is `compact-now` rather than `handoff-now`.
-- Fixed the Plugins page keeping the center column after Team mode starts: Channels, the Inbox and Threads open there again, and the Plugins entry still opens its page once you leave Team mode.
-- Team Members no longer carry a session-local todo tool: planning belongs to the ledger, so the `team-member` preset drops that row and the peer that named it leaves with it.
-- The sender name follows the content-size setting: at a raised size the author grows with the message instead of staying at its default size, while the message body keeps the grid it already had.
-- The certified DSH baseline moves to `0.2.0-rc.2`: every `@deepseek-ai/dsh-*` peer advances to `>=0.2.0-rc.2 <0.2.1`, so a host still on `0.2.0-rc.1` falls outside the declared range.
-- Context management moves onto the engine's own four tools: `context_status` reads where a Member's context stands (budgets, lineage anchors, and what a compaction would replace), `context_compact` shortens the current generation in place, and the Team-authored `context_timeline` retires. The tools a Member is offered and the tool names its own descriptions mention are now one set.
-- The bundled context engine moves to `0.2.1`: the `context_status` anchor table folds adjacent rows that differ only by their anchor digest into one line, so a context that accumulated a run of them reads shorter while every row still names the anchor it covers.
-- A Member's long-gap relatedness gate gets its judge from the deployment's own key: the bundle ships `@wowyuarm/dsh-jev` and mounts it when the Team Host row states a key — or names an environment variable that holds one — while a row without a key leaves the gate off instead of failing. The judge's own call budget is derived from the gate's deadline, so a configured judge always answers inside the time the gate gives it.
-- The long-gap gate's thresholds are row configuration: the Team Host row takes an optional `gate` object with `tokens`, `idleMs`, and `judgeTimeoutMs`, so a deployment can match the gate to its own cadence. An omitted `tokens` or `idleMs` keeps the engine's default; an omitted `judgeTimeoutMs` gets Team's own budget, because a judge is reached over a network.
-- The judge's call budget is Team's to answer rather than a number every deployment has to discover. A row that states no `gate.judgeTimeoutMs` gets a budget sized for a hosted endpoint instead of the engine's local-call default, and that number lives in one place — the gate itself — rather than being copied a second time. Every threshold is read at the step it applies to, so an edit reaches the next judged step without a restart.
-- The judge gets a second attempt: a single transport blip used to cost that step its gate silently, because one failed call was the whole budget. The wait before the retry is Team's own number rather than the service default, so the second attempt still fits the deadline the gate races the call against.
-- Settings carries the Team's one page: your display name and avatar, and one collapsed row for the endpoint jev calls — apiBase, model, and a write-only key — that says whether jev is reachable right now, so the page opens on what you change rather than on a form you set once. The gate's thresholds and the key's environment variable stay row configuration the Team owns, so they are not on the page; a stored key is never echoed back, and removing one is an explicit clear rather than an empty field.
+- Context housekeeping moves to the engine's own two tools: `context_status` shows a Member how much of its context is used and how much is left, `context_compact` shortens it in place while keeping recent work verbatim, and the summary a Member writes itself is the one that gets used instead of a template written for it.
+- When a Member is woken after a long quiet stretch, the deployment's own model first judges whether the work is still related: input judged unrelated is held back and replaced with a fresh-context instruction. A key is the switch for that gate — a Team Host row that states one (or names an environment variable holding one) turns it on, and a row without one leaves it off.
+- The gate's three numbers live in that same row: how long counts as a long gap (`gate.idleMs`), how large counts as large (`gate.tokens`), and how long one judgement may take (`gate.judgeTimeoutMs`). An edit applies to the next judgement, with no restart.
+- Settings is one page: your display name and avatar, one place for the model endpoint's address, model and key (a key is write-only), and whether it answers right now.
+- Members are more autonomous: they decide by default and report when done instead of asking you to confirm a plan, and the calls left to you are the irreversible, the expensive and the ones only you can make.
+- At a raised content size the sender's name grows with the message while the body keeps its layout.
+- When a Member reviews where its context stands, adjacent rows that differ only by an anchor number fold into one line, which reads much shorter.
+- Fixed a message that failed to send being impossible to answer, and attachments uploading twice when a request is retried.
+- Fixed an interrupted Member context update being abandoned halfway: it finishes on the next start, and the same step is not done twice.
+- Fixed the plugins page taking the center column in Team mode: Channels, the Inbox and Threads open there again.
+- Certified against DSH `0.2.0-rc.2`: all 43 `@deepseek-ai/dsh-*` peers move together, so a host still on `0.2.0-rc.1` is outside the supported range.
+- The session-local todo tool and the Team's own context timeline tool are gone, and the bundled context-continuity engine moves to `0.3.0`.
 
 ## [0.2.0] - 2026-09-29
 

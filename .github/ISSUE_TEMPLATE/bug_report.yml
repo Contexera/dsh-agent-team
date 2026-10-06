@@ -16,7 +16,7 @@ body:
     attributes:
       label: Version
       description: "`dsh --version`, plus the version of `@wowyuarm/dsh-agent-team` (`dsh plugin --profile web ls @wowyuarm/dsh-agent-team`). If you upgraded DSH after installing the plugin, say so."
-      placeholder: "DSH 0.2.0-rc.2 · plugin 0.2.0"
+      placeholder: "DSH 0.2.0-rc.2 · plugin 0.2.1"
     validations:
       required: true
 
