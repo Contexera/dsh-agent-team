@@ -26,6 +26,9 @@ import {
   ContextContinuityCoordinator,
   ContextMessageCodec,
   ContextPressurePolicy,
+  DEFAULT_GATE_IDLE_MS,
+  DEFAULT_GATE_JUDGE_TIMEOUT_MS,
+  DEFAULT_GATE_TOKENS,
   type ContextContinuityHost,
   type ContextProjectionState,
   type ContextSubject,
@@ -160,6 +163,20 @@ const TEAM_PRESSURE_TEXT: PressureNoticeText = {
 const RECENT_INPUT_LIMIT = 8
 
 /**
+ * The budget Team gives the long-gap gate's judge when the row states none.
+ *
+ * The engine's own default is five seconds, which is sized for a judge beside
+ * the Host. A hosted endpoint answers in up to about four seconds, and the gate
+ * hands the judge one second less than this deadline, so that default turns a
+ * slow-but-working judge into a coin flip — and the deployment that meets this
+ * problem is the one least able to diagnose it. Ten seconds leaves room for the
+ * slow tail while still bounding the wait on the path that starts a turn. A
+ * deployment that wants another number still sets `gate.judgeTimeoutMs`, which
+ * stays a row field.
+ */
+export const TEAM_JUDGE_TIMEOUT_DEFAULT_MS = 10_000
+
+/**
  * The long-gap gate as row configuration: every field is optional, so a
  * deployment states only the thresholds it disagrees with and the engine's own
  * default answers the rest. The three answer different questions — how large a
@@ -177,9 +194,9 @@ const RECENT_INPUT_LIMIT = 8
  * be able to raise it without editing a patch layer and restarting.
  */
 export const TEAM_PRESSURE_GATE_SCHEMA = z.object({
-  tokens: z.natural().volatile().description('Context size at or above which the long-gap gate may hold a step. Default: 128000.'),
-  idleMs: z.natural().volatile().description('How long a generation must have been idle for a step to count as a long gap. Default: 1800000 (30 minutes).'),
-  judgeTimeoutMs: z.natural().volatile().description("How long one relatedness judgement may take before the step proceeds without one. Default: 10000, not the engine's own 5000."),
+  tokens: z.natural().volatile().description(`Context size at or above which the long-gap gate may hold a step. Default: ${DEFAULT_GATE_TOKENS}.`),
+  idleMs: z.natural().volatile().description(`How long a generation must have been idle for a step to count as a long gap. Default: ${DEFAULT_GATE_IDLE_MS} (30 minutes).`),
+  judgeTimeoutMs: z.natural().volatile().description(`How long one relatedness judgement may take before the step proceeds without one. Default: ${TEAM_JUDGE_TIMEOUT_DEFAULT_MS}, not the engine's own ${DEFAULT_GATE_JUDGE_TIMEOUT_MS}.`),
 })
 
 export interface TeamPressurePolicyOptions {

@@ -35,7 +35,7 @@ import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTI
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
-import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC, TEAM_PRESSURE_GATE_SCHEMA } from './context-continuity-host.ts'
+import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC, TEAM_JUDGE_TIMEOUT_DEFAULT_MS, TEAM_PRESSURE_GATE_SCHEMA } from './context-continuity-host.ts'
 import { CONTEXT_CONTINUITY_PROJECTION_KEY, DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_TOKENS, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type TransitionPlan } from '@wowyuarm/dsh-context-continuity'
 import { TeamContextJudge, type TeamContextJudgeConfig } from './context-judge.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
@@ -195,19 +195,6 @@ const CONTEXT_HARD_LIMIT_CAP = 256_000
 const CONTEXT_HANDOFF_AT_CAP = 200_000
 const CONTEXT_HANDOFF_RESERVE = 8_000
 const CONTEXT_SAFE_OUTPUT_RESERVE = 16_000
-/**
- * The budget Team gives the long-gap gate's judge when the row states none.
- *
- * The engine's own default is five seconds, which is sized for a judge beside
- * the Host. A hosted endpoint answers in up to about four seconds, and the gate
- * hands the judge one second less than this deadline, so that default turns a
- * slow-but-working judge into a coin flip — and the deployment that meets this
- * problem is the one least able to diagnose it. Ten seconds leaves room for the
- * slow tail while still bounding the wait on the path that starts a turn. A
- * deployment that wants another number still sets `gate.judgeTimeoutMs`, which
- * stays a row field.
- */
-const TEAM_JUDGE_TIMEOUT_DEFAULT_MS = 10_000
 /**
  * Usage at or above which an acknowledged acceptance advises a fresh
  * rollover instead of keeping the context; capped by the route's effective
