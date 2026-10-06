@@ -4,7 +4,7 @@
 
 ## Agent Team
 
-一个 dshHome 内唯一的共享协作域。Agent Team 保存跨成员的协作事实，不共享成员的模型上下文、session transcript 或私有记忆。
+一个 dshHome 内唯一的共享协作域。Agent Team 保存跨 Member 的协作事实，不共享 Member 的模型上下文、session transcript 或私有记忆。
 
 ## Member
 
@@ -16,7 +16,7 @@ Member 与 workspace 之间可 join/leave 的关系，以 ledger operation 提�
 
 ## Human Member
 
-当前 Harness 用户对应的特殊 Member。Human Member 参与消息、claim 和 activity，并拥有 channel、成员、验收及 task 终态的管理权限。
+当前 Harness 用户对应的特殊 Member。Human Member 参与消息、claim 和 activity，并拥有 channel、Member、验收及 task 终态的管理权限。
 
 ## Agent Member
 
@@ -28,7 +28,7 @@ Member 实体上的持久能力意图（可选 `capabilities` 字段：`tools.al
 
 ## Workspace
 
-一个项目及其共享工作目录。Agent Member 的 session cwd 是其 Workspace 的项目目录；成员私有记忆不存放在项目根目录。
+一个项目及其共享工作目录。Agent Member 的 session cwd 是其 Workspace 的项目目录；Member 私有记忆不存放在项目根目录。
 
 ## Channel
 
@@ -42,7 +42,7 @@ Member 在 Channel 或已有 Thread 中显式发出的不可变内容。每条 C
 
 附着在既有 Thread 上的可选 work-tracking overlay，而不是 Thread 存在的前提。 它可由顶层 Message 的显式「作为任务」意图原子创建，或由 Human promotion 原子附加；promotion 同时追加一条公开说明 Message。 Task 的工作状态从 Claims 派生，Human acceptance 与 closed 是显式覆盖事实：常规验收要求全部 Claim 完成（in_review）；Human 也可在 in_progress 时提前验收，accept 操作随之把当时仍 active 的 Claims 投影为 done 并在 activity 记录 `completedClaimRefs`（owner 各自收到通知），不伪造 owner 的 claim-done 事件；从未被 claim 的 todo Task 也可直接验收，activity 不携带 claim 列表，账目如实记录为无 Claim 完成。 面向 Human 的 `Task #N` 是 Task 在 home Channel 内的 durable 创建序号：taskful 顶层发送和后续 promotion 均参与排序，taskless anchor 最初在时间线的位置不参与；既有 ledger 的编号保持不变。
 
-它不是稳定身份；跨频道导航和持久引用必须使用 branded `taskRef`。
+它不是稳定身份；跨 Channel 导航和持久引用必须使用 branded `taskRef`。
 
 ## Thread
 
@@ -66,11 +66,11 @@ Claim 的自由文本工作方向。比较时执行 Unicode 规范化、首尾�
 
 ## Thread Inbox
 
-从 Thread Attention 与 direct mention 派生的成员级未读投影。它不是 Agent Session queue、浏览器状态或 per-message read 表；派生与读取语义见 [attention-and-messaging.zh.md](team-collaboration/attention-and-messaging.zh.md)，工具契约见 [tools.zh.md](team-collaboration/tools.zh.md)。
+从 Thread Attention 与 direct mention 派生的 Member 级未读投影。它不是 Agent Session queue、浏览器状态或 per-message read 表；派生与读取语义见 [attention-and-messaging.zh.md](team-collaboration/attention-and-messaging.zh.md)，工具契约见 [tools.zh.md](team-collaboration/tools.zh.md)。
 
 ## Follow
 
-Follow 是 Thread Attention 的一个操作语义，不是独立的持久对象或旧版 Delivery 订阅。follow 控制普通 Thread 更新是否形成该成员的 Inbox 工作；它不撤销 Channel 可见性。unfollow 在没有 active Claim 时结束当前 Attention 周期。
+Follow 是 Thread Attention 的一个操作语义，不是独立的持久对象或旧版 Delivery 订阅。follow 控制普通 Thread 更新是否形成该 Member 的 Inbox 工作；它不撤销 Channel 可见性。unfollow 在没有 active Claim 时结束当前 Attention 周期。
 
 ## Activity
 

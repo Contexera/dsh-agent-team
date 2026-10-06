@@ -18,21 +18,21 @@ Workspace 概览是当前页时它携带 `aria-current='page'`，与原先被选
 
 刻意保持安静：折叠头无 hover 底色，仅 chevron 变色反馈；不展示分区计数。行形态：频道行保留 `#` 标识；Agent 行复用头像语言并叠加 presence 角标。行内元数据（成员计数、presence 文字）已移除，保持列表简洁。
 
-定位高亮单一化（对齐宿主会话树「父静叶亮」的惯例）：任一时刻侧栏只有一行携带 `aria-current='page'` 与 hover 底色——打开频道/Thread 时是频道行，成员会话视图打开时是被选 Agent 卡片（`.agentSelect[aria-current='page']`），否则是工作区选择器（其概览为当前页时）。嵌入的成员会话是唯一能压在「读者仍身处其上的 Team 面」之上的覆盖层——那可能是 Inbox 页，也可能是他打开该 Agent 时所处的频道/Thread——此时高亮归它自己的 Agent 卡片：下层那个面保留原位但不携带高亮，覆盖层关闭后原样取回（Inbox 入口同样如此，它的页面在屏上时才是被标记的那一行）。
+定位高亮单一化（对齐宿主会话树「父静叶亮」的惯例）：任一时刻侧栏只有一行携带 `aria-current='page'` 与 hover 底色——打开 Channel/Thread 时是频道行，Member Session 视图打开时是被选 Agent 卡片（`.agentSelect[aria-current='page']`），否则是工作区选择器（其概览为当前页时）。嵌入的 Member Session 是唯一能压在「读者仍身处其上的 Team 面」之上的覆盖层——那可能是 Inbox 页，也可能是他打开该 Agent 时所处的 Channel/Thread——此时高亮归它自己的 Agent 卡片：下层那个面保留原位但不携带高亮，覆盖层关闭后原样取回（Inbox 入口同样如此，它的页面在屏上时才是被标记的那一行）。
 
 行级 ⋯ 菜单：`TeamRowMenu` 复用公共 `Menu`（`portal` + `closeOnPointerLeave`，锚为裸 ellipsis 图标按钮），hover / focus-within / 菜单开启三种状态可见；菜单开启时该行钉住 hover 底色（`data-menu-open`）。菜单含「编辑」入口，打开对应编辑器；error 态成员额外出现「恢复」项，走 `recoverMember` Remote（Host 向该成员活跃会话 steer 续作 prompt，运行时动作、不落 ledger）。历史上的「从全新上下文开始」入口已移除——Member 经 `context_rollover` 工具自管上下文，Host 侧 clear-context Remote 保留为无可见入口的迁移逃生门。
 
-频道编辑器（`编辑频道`）：名称/说明输入框 + 成员增删字段集。保存钮无改动即禁用（dirty 门），提交走 `updateChannel` Remote（幂等 request 同载荷复用），成功后由投影刷新回填行文案——不做乐观行内改名；成员增删仍走既有 join/remove Remote（request 按 方向+成员+频道 键复用）。
+频道编辑器（`编辑频道`）：名称/说明输入框 + 成员增删字段集。保存钮无改动即禁用（dirty 门），提交走 `updateChannel` Remote（幂等 request 同载荷复用），成功后由投影刷新回填行文案——不做乐观行内改名；成员增删仍走既有 join/remove Remote（request 按 方向+成员+Channel 键复用）。
 
-Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。模型选择复用公共 `Menu` 原语：触发钮呈 Input 形态（当前值 + 旋转 chevron），选项首行「跟随全局默认」，其后按 provider 分组标题 + 模型行、选中尾勾；目录经宿主级 `llm.models` 取得，不依赖任何活跃会话。提交走 `updateMember` Remote：缺省模型即清除覆盖（回到 Host 默认继承）；改模型对活跃成员原地更新 live model selection，保持 Agent 与 Session 身份不变，后续请求使用新选择；纯展示编辑不重启。
+Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。模型选择复用公共 `Menu` 原语：触发钮呈 Input 形态（当前值 + 旋转 chevron），选项首行「跟随全局默认」，其后按 provider 分组标题 + 模型行、选中尾勾；目录经宿主级 `llm.models` 取得，不依赖任何活跃会话。提交走 `updateMember` Remote：缺省模型即清除覆盖（回到 Host 默认继承）；改模型对活跃 Member 原地更新 live model selection，保持 Agent 与 Session 身份不变，后续请求使用新选择；纯展示编辑不重启。
 
-Agent 卡片会话视图：Agent 行的头像与文案整体是选择按钮（`打开 {name} 的会话`），点击不再退出 Team 模式——导航快照保留当前 Channel/Thread，并叠加运行时字段 `memberSessionId`（附 `returnToSessionId`，均不持久化），再调用 `sessions.open(memberSessionId)`；`conversation` 影子此时让位，由 shipped 会话根在 Team 侧栏之间渲染该成员会话。任何显式 Team 导航（选工作区/频道/Thread）都会关闭成员视图并恢复该 Team 位置；页脚「对话」关闭成员视图、还原 `returnToSessionId` 后离开 Team，普通外壳不会停在成员会话里。
+Agent 卡片会话视图：Agent 行的头像与文案整体是选择按钮（`打开 {name} 的会话`），点击不再退出 Team 模式——导航快照保留当前 Channel/Thread，并叠加运行时字段 `memberSessionId`（附 `returnToSessionId`，均不持久化），再调用 `sessions.open(memberSessionId)`；`conversation` 影子此时让位，由 shipped 会话根在 Team 侧栏之间渲染该 Member Session。任何显式 Team 导航（选工作区/Channel/Thread）都会关闭成员视图并恢复该 Team 位置；页脚「对话」关闭成员视图、还原 `returnToSessionId` 后离开 Team，普通外壳不会停在成员会话里。
 
 Member 经 `context_rollover` 换新上下文时，Agents 面板观察该 Member 的旧→新 Session 绑定，仅在嵌入页正是被观察的旧 live Session id 时恰好跟随一次，归档视图不跳转。
 
 窄屏 rail 三个图标按钮自上而下：收件箱（`IconQueueOutline14`，16px）→ 频道（`IconListPenOutline16`）→ Agents（`IconAgentPresetOutline16`）；不复用 checklist（任务）或 user（成员）图标。收件箱图标是目的地：点击打开 Inbox 页并请求展开侧栏；频道/Agents 图标点击请求展开侧栏并聚焦对应分区头部。
 
-Agent 创建流程没有频道选择页，Agent 编辑器没有成员区块——频道成员只在频道侧管理（创建对话框初始成员、频道编辑器成员行、成员管理对话框）；未入频道的 Member 仍可经 DM 触达。
+Agent 创建流程没有频道选择页，Agent 编辑器没有成员区块——Channel 成员只在 Channel 侧管理（创建对话框初始 Member、频道编辑器成员行、成员管理对话框）；未入 Channel 的 Member 仍可经 DM 触达。
 
 引入入口（`从其他 Workspace 引入`）：创建对话框内的 disclosure 按钮，在新建与引入两个视图间切换；引入视图复用共享 `TeamMemberRow` 名册，仅列全局存在且尚未参与此处的 Member（含 suspended——加入不依赖可用性）；确认走持久 `joinWorkspace` Remote，失败保留弹层与请求以便重试（requestId 复用），成功后行经 workspace 重取出现。
 
@@ -40,7 +40,7 @@ Agent 行上的破坏性动作按上下文分档：非创建 workspace 显示「
 
 对话框主体只保留一条块节奏——模式切换按钮是它的第一个块，与它所切换的内容之间留 16px——而其中的名册保持共享的 2px 行距，说明行与加载/空态行走对话框自己的 12/18 说明标尺，这样引入 Member 时不会把同一份名册画成第二种密度、也不会让说明文字顶上标题的字号。
 
-嵌入的成员会话输入面就是 shipped composer 本身，不做任何修改：Team 不注册任何 member-session composer surface——没有 shadow、没有 trigger sources、没有 dock strip。键盘契约、命令与引用菜单、附件都与普通会话完全一致。
+嵌入的 Member Session 输入面就是 shipped composer 本身，不做任何修改：Team 不注册任何 member-session composer surface——没有 shadow、没有 trigger sources、没有 dock strip。键盘契约、命令与引用菜单、附件都与普通会话完全一致。
 
 Team 模式沿同一做法把侧栏的 shipped 全局件一并收起：新建会话按钮与全局面板栏（今天是插件管理入口）指向的是 profile 而不是 Team，模式成立时隐藏、离开即还原。
 
@@ -58,9 +58,9 @@ slot 选举摘不掉别的插件注册的列表行、入口文案又是本地化
 
 数字住在宽窄两处的可访问名（`收件箱，6 条未读`）与窄轨悬停提示里——一次 hover 即得，侧栏本体永远不印数字。
 
-Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`，窄轨那枚图标还带上卡片同款当前页底色——rail 没有文字，底色是它唯一能说「你在这」的东西；被嵌入的成员会话覆盖期间它只是被记住的位置，不携带高亮。
+Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`，窄轨那枚图标还带上卡片同款当前页底色——rail 没有文字，底色是它唯一能说「你在这」的东西；被嵌入的 Member Session 覆盖期间它只是被记住的位置，不携带高亮。
 
-`TeamConversation` 第四个面：Thread | Channel | Inbox | welcome。选 Inbox 清掉 Channel/Thread 面；选 Workspace、Channel 或 Thread 清掉 Inbox。从 Inbox 行进入 Thread 后，Back 落在该行 Thread 的频道——Inbox 不进返回栈；再进 Inbox 走左侧卡片或窄轨图标。
+`TeamConversation` 第四个面：Thread | Channel | Inbox | welcome。选 Inbox 清掉 Channel/Thread 面；选 Workspace、Channel 或 Thread 清掉 Inbox。从 Inbox 行进入 Thread 后，Back 落在该行 Thread 的 Channel——Inbox 不进返回栈；再进 Inbox 走左侧卡片或窄轨图标。
 
 ### 页面框架与页头
 
@@ -88,7 +88,7 @@ Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`，窄轨
 
 (0) 每行以**「谁在这条 Thread 上」**领起——Task 有活跃 Claim 所有者时画那套叠放，用 Channel feed 的原话（`claimers`）和同一条判定（见上文 Thread 入口行：未 released 的 Claim、Task 处于 in_progress/in_review、按 Claim 顺序去重）；没有活跃所有者时回落到这一行时刻背后的人（`newestActor`），因为那是关于这条 Thread 唯一已知的事。两者都由 Host 解析好，行不必自己拿 Member 名册，且同一 Thread 在两段里画的是同一个簇。
 
-(1) 身份行——频道用 13px/20 primary 600 领起，只有当屏幕上的行跨了不止一个 Workspace 时前面才加 `workspace / `，taskful 时后面接同一枚发丝线 chip `Task #N`。这一行**保持为一个文本节点串**，分隔符本身就是独立文本节点，因为拆成多个样式化子项会丢掉控件可访问名里的空格；同时它用省略号压成一行：窄座位缩短溯源，而不是把一行折成三行，`overflow: hidden` 则保证比座位还宽的频道名不会把滚动条推进共享 timeline。
+(1) 身份行——Channel 用 13px/20 primary 600 领起，只有当屏幕上的行跨了不止一个 Workspace 时前面才加 `workspace / `，taskful 时后面接同一枚发丝线 chip `Task #N`。这一行**保持为一个文本节点串**，分隔符本身就是独立文本节点，因为拆成多个样式化子项会丢掉控件可访问名里的空格；同时它用省略号压成一行：窄座位缩短溯源，而不是把一行折成三行，`overflow: hidden` 则保证比座位还宽的 Channel 名不会把滚动条推进共享 timeline。
 
 身份是队列读者扫读的对象，所以由它承担整行的墨色；在改前，摘要拿着最重的墨、身份反而最轻，一页读下来是十段黑字而不是十个条目。
 

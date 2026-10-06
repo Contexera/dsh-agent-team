@@ -40,7 +40,7 @@ The full index and Where to start paths are in [`README.md`](README.md).
 
 - Source and tests define implementation behavior. When prose conflicts with code, fix the documentation — never record behavior the code does not implement.
 - One fact has one maintained home; cross-link between documents instead of duplicating the fact.
-- Maintained docs ship as bilingual pairs: change `foo.zh.md` in the same change as `foo.md`, translating prose while keeping technical terms (Agent, Workspace, Channel, Thread, Task, Claim, preset, Remote) in English.
+- Maintained docs ship as bilingual pairs: change `foo.zh.md` in the same change as `foo.md`, translating prose while keeping domain entity names in English (Agent, Member, Session, Workspace, Channel, Thread, Task, Claim, preset, Remote). A Chinese rendering is correct only when it names a different concept: `membership` renders as 成员关系, but a Member entity is always Member. Interface labels keep their natural Chinese — the `频道 · …` chip stays as-is.
 - Both sides of a pair state the same rules and carry the same outline — the same headings at the same levels, in the same order, which `check:docs` decides. How a rule is rendered is the translator's call and is deliberately not compared: a list in one half and a table or prose in the other is legal. Implementation naming — a file, symbol, storage key, or CSS value — may appear on only one side.
 - A new maintained document gets an index row and a Where to start path in both `README.md` and `README.zh.md` in the same change.
 - Write uncertain facts as `> TODO:` instead of guessing.

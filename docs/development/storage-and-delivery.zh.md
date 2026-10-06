@@ -19,7 +19,7 @@ DSH_BENCH_STORAGE=1 npx vitest run packages/agent-team/tests/storage-bench.spec.
 JSON 整文件重写的单次写成本随历史增长——1k→10k 约 2.7 倍——而 SQLite 稳定在逐语句 fsync 下限附近。启动侧仍是全量 `loadAll()` 加全量重放；后续 checkpoint/log 方向见 [storage architecture archive](../../.scratch/archive/2026-08/agent-team-storage-architecture/)。
 
 ## 多页面通知回归
-`npm run test:browser` 包含同一 BrowserContext 中的四个页面，随后再验证独立 BrowserContext。检查 Channel 实际渲染、跨页消息、关闭页面、退出 Team，以及浏览器发起的成员查询是否在 3 秒回归阈值内完成。该阈值只针对固定小数据集，不是生产延迟保证。完整流程还验证主动断网后无需新提交即可恢复。截图保留在 `artifacts/browser/`，包含桌面和 390×844 多页面视图。
+`npm run test:browser` 包含同一 BrowserContext 中的四个页面，随后再验证独立 BrowserContext。检查 Channel 实际渲染、跨页消息、关闭页面、退出 Team，以及浏览器发起的 Member 查询是否在 3 秒回归阈值内完成。该阈值只针对固定小数据集，不是生产延迟保证。完整流程还验证主动断网后无需新提交即可恢复。截图保留在 `artifacts/browser/`，包含桌面和 390×844 多页面视图。
 
 定向执行：`npm run test:browser -- -t "four same-origin"`。传输改动验收前仍需运行完整套件。这些检查不代表跨页草稿、导航存储、私有未读同步或隐藏页自动已读已通过验证；它们需要单独评估。
 

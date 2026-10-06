@@ -158,12 +158,12 @@ npm run test:browser
 
 3.3–3.5 各节的证据都建立在**新建** Session 之上：新 Session 以候选版本的原生格式写入，**从不经过 released-format 迁移**。
 
-因此有两类失效对它们是隐形的，而两类都已经发布过：成员 preset 行的配置与其 plugin schema 不再匹配（只在运行时显形），以及旧 artifact 内容被候选版本的迁移审计拒绝。
+因此有两类失效对它们是隐形的，而两类都已经发布过：Member preset 行的配置与其 plugin schema 不再匹配（只在运行时显形），以及旧 artifact 内容被候选版本的迁移审计拒绝。
 
 只要候选版本改动了 Session 格式、message source 词表或任何随包 preset 行，就要补上这两项检查：
 
 - **带已有历史的升级。** 取一个已经按上一条已认证版本线写入过 Member Session 的 profile——其中至少包含一个 rollover 世代——在候选版本下打开它们。每一个都必须能加载；出现拒绝就是 release blocker，而不是数据问题，因为该审计是 fail-closed 的且不改动源 artifact。记录检查过的 artifact 数量与逐个结果。
-- **已发布产物的存活面。** 判定**当前已发布**的 Team bundle 在候选 DSH 上是否仍然可用，而不只是候选 bundle 可用。在一个空目录里把已发布版本装到候选 DSH 上、启动它、并实际走一次成员创建。这一项决定发版紧迫性：当 npm `latest` 已经指向候选版本时，一个不兼容的已发布 bundle 会直接打断全新安装——这使本轮成为 release-blocking，而不是例行跟踪。
+- **已发布产物的存活面。** 判定**当前已发布**的 Team bundle 在候选 DSH 上是否仍然可用，而不只是候选 bundle 可用。在一个空目录里把已发布版本装到候选 DSH 上、启动它、并实际走一次 Member 创建。这一项决定发版紧迫性：当 npm `latest` 已经指向候选版本时，一个不兼容的已发布 bundle 会直接打断全新安装——这使本轮成为 release-blocking，而不是例行跟踪。
 
 第一项检查背后有一个长期陷阱：自定义 Session message source kind。`@deepseek-ai/dsh-llm` 把 `MessageSourceMap` 记为可合并扩展的 sum type，但 released-format 迁移审计只准入一份封闭且 build-static 的 source kind 列表；声明新 kind 的插件写出的日志，会被下一个格式世代整体拒绝。
 
@@ -244,17 +244,17 @@ DSH peers 正好声明这条已认证线：`>=0.2.0-rc.2 <0.2.1`，因此本仓�
 
 - 根 `main` slot 以 keyed 条目注册（key `conversation`、priority `-100`），并经 `renderSlot('main', {}, { entryKey: 'conversation' })` 渲染。
 - Session 经 handle API 访问（`open(id, 'read')` + `read()` + `close()`，`stat()` 返回 header 快照）。
-- 成员 preset 的 `dsh-persona` 行把配置放在 `prefix` 下。
+- Member preset 的 `dsh-persona` 行把配置放在 `prefix` 下。
 - `team-member` preset 以 `@deepseek-ai/dsh-agent-preset` 声明行与其 `@deepseek-ai/dsh-agent-preset-registry` 并列，落在 Team 自己的 `isolate` group 内。
 - 本 bundle 写出的每条持久 message source 携带生产者自身的 kind；退役的 `{ kind: 'plugin', plugin: … }` wrapper 在写入时即被拒绝。
 
-preset 组合没有编译期或单测守卫：成员类 spec 用的是合成 preset，因此某个行的配置与新 plugin schema 不匹配时，只有在真实 browser journey 里才会暴露——此时类型检查、单测、构建全绿，而所有成员都以 `preset "team-member" failed to mount: … $.prefix missing required value` 激活失败。
+preset 组合没有编译期或单测守卫：Member 类 spec 用的是合成 preset，因此某个行的配置与新 plugin schema 不匹配时，只有在真实 browser journey 里才会暴露——此时类型检查、单测、构建全绿，而所有 Member 都以 `preset "team-member" failed to mount: … $.prefix missing required value` 激活失败。
 
 把 `npm run test:browser` 当作随包 preset 行的认证闸门。
 
 §3.6 补上了上述检查的一个盲区：它们的证据都来自**新建** Session，而新 Session 从不经过 released-format 迁移。
 
-迁移拒绝是 fail-closed 的，且不改动源 artifact 一个字节，因此后果是 Session 读不出来、而不是数据损坏；不兼容的已发布 bundle 对安装期检查同样不可见，只在创建成员时显形。
+迁移拒绝是 fail-closed 的，且不改动源 artifact 一个字节，因此后果是 Session 读不出来、而不是数据损坏；不兼容的已发布 bundle 对安装期检查同样不可见，只在创建 Member 时显形。
 
 当 npm `latest` 指向候选版本时，这两类都是 release-blocking。
 

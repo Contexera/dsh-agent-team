@@ -14,15 +14,15 @@
 - 一个 run = 一次发言：同一 sender 连续的消息 + 其 Thread 入口行包进一个 `.messageRun` 块；活动行与未读边界打断 run。
 - 日界同样打断 run：跨天的相邻消息之间插入居中的日期锚（`.daySeparator`，`MM-DD`，跨年用完整 `YYYY-MM-DD`，与消息时间的数字风格一致）。活动没有自己的时钟 instant，继承前一条消息的日界、不触发锚；时间线的第一条消息不带头部锚。分块逻辑统一在 `team-separators.ts` 的 `chunkRunsWithDays`（单一权威实现）。
 - 块内分界：折叠行若自带 Thread 入口行（`.messageRow[data-grouped]` 且 `:has([data-thread-entry])`），上方画一条 border-l2 发丝线并稍增间距；普通文字接续不加线，避免整块被切碎。锚点是入口行自己的 `data-thread-entry`，不是「正文里的某个 button」——长文折叠的展开/收起钮与正文里渲染出的 Task ref 链接都是 button，按 button 认边界会误判。
-- 回合分隔线（`TeamRunDivider`）：同一 sender 的相邻消息间隔 ≥5 分钟即视为两次独立发言（agent 长发布常间隔小时级，纯折叠会抹掉层次与时刻），run 保持一块，但两者之间渲染全宽 border-l2 发丝线 + 线下首行标注后一条消息的时间（`formatMessageTime` 同款格式，`role="separator"`，缩进对齐正文列 38px=头像 28+间距 10）；该线替代其后折叠行自带的入口行发丝线（相邻选择器覆盖），不叠双线。频道页与 Thread 页共用同一判断与组件。
+- 回合分隔线（`TeamRunDivider`）：同一 sender 的相邻消息间隔 ≥5 分钟即视为两次独立发言（agent 长发布常间隔小时级，纯折叠会抹掉层次与时刻），run 保持一块，但两者之间渲染全宽 border-l2 发丝线 + 线下首行标注后一条消息的时间（`formatMessageTime` 同款格式，`role="separator"`，缩进对齐正文列 38px=头像 28+间距 10）；该线替代其后折叠行自带的入口行发丝线（相邻选择器覆盖），不叠双线。Channel 页与 Thread 页共用同一判断与组件。
 - run 是纯分组块，无 hover 边框/底色/阴影、无常驻边框——回合分隔线、日界锚与未读线承担全部消息边界感，run 自身只保留块间 2px 垂直空隙（`margin: 2px` + `padding: 3px`），不给内容"加笼子"。
 
 ## Mention 与 Task ref 强调
 - mention chip 渲染：Human 字面正文在字面分段时挂 chip，Agent plain-prose 正文复用同一条 `splitMentionNames` 分段，Agent 富 Markdown 正文则在公共 `MarkdownText` 渲染完成后于普通文字节点原位替换出 chip。三种路径都只挂 Message 已解析 mention 列表内的 handle（大小写不敏感、必须带 `@` 书写——裸名是正文、永不挂 chip，代码段落保持原文），且 effect 重跑不会对已生成的 chip 再包层；正文未出现的名字才落到尾部兜底 chip 行，不与内联 chip 重复。**chip 按「今天怎么称呼这个人」显示**：Human 改名前的 `human` 是 Host 仍会送达的别名，所以正文写着 `@human` 的旧消息在原位挂 chip、显示当前名，而不是带着一个正文从没写过的名字掉进尾部兜底行——这与 member ref 一律按当前 handle 命名是同一条规则。
 - 已知的 branded Task ref（`task:*`）通过 Host 的 `resolveTaskRefs` 批量解析，在 Human 字面文本、Agent plain-prose 和 Agent 富 Markdown 的原出现位置渲染为可点击的 `Task #N`；不再在富 Markdown 正文下方重复补入口。富 Markdown 在公共 `MarkdownText` 完成渲染后替换普通文字节点和"整段恰好是一个 ref"的行内代码（模型把 ref 当标识符加反引号样式是常态）；代码围栏、缩进代码、混合内容的行内代码和已有链接保留原文。模型输出的双冒号/大写拼写（如 `task::…`）在 `splitBrandedRefs` 解析口统一归一化为 ledger 铸造的单冒号小写 ref 后再解析与导航。
-- 点击当前视图未加载的 Task ref 时，Client 解析其所属 Workspace、Channel 和 Thread 后跨频道跳转；解析失败的 ref 保留为非导航原文。已解析链接用原始 ref 作为 tooltip。Task number（如 `Task #12`）是 Task 在其 home Channel 内的创建序号，Host 侧单一派生（`taskNumbers`），频道任务卡、Thread 标题、跨频道 ref 解析与 Agent inbox 标注共用同一口径；序号跨频道不唯一，稳定导航身份始终是 branded Task ref。
+- 点击当前视图未加载的 Task ref 时，Client 解析其所属 Workspace、Channel 和 Thread 后跨 Channel 跳转；解析失败的 ref 保留为非导航原文。已解析链接用原始 ref 作为 tooltip。Task number（如 `Task #12`）是 Task 在其 home Channel 内的创建序号，Host 侧单一派生（`taskNumbers`），Channel 任务卡、Thread 标题、跨 Channel ref 解析与 Agent inbox 标注共用同一口径；序号跨 Channel 不唯一，稳定导航身份始终是 branded Task ref。
 - 已知的 branded Thread ref（`thread:*`）走同一条路经 Host 的 `resolveThreadRefs` 批量解析，在原出现位置渲染为带所指 Thread 首行摘要的可点击 Thread chip（中文为`讨论 · …`），taskless Thread 之间不再长得一模一样。只有 Host 确认过的 ref（缩写拼写同样要过解析）才会成链，点击按解析出的完整 ref 导航；解析失败的保留为非导航原文，永远不会静默无响应。
-- 已知的 branded Channel ref（`channel:*`）在原出现位置渲染为带频道名的可点击 Channel chip（中文为`频道 · …`），点击跳到该频道。已知的 branded Member ref（`member:*`）渲染为带 handle 的 Member chip（中文为`成员 · @…`）——与会发通知的 `@mention` chip 刻意区分，引用永不发通知。点击活跃成员的 chip 按 agent card 同款行为打开其 session；被暂停的成员与 Human 只渲染为带名但不可点的文本。两者都直接复用已加载的频道/成员 roster 解析，不新增 Host 接口；落在已加载窗口之外的 ref 按解析失败同规则保留原文。
+- 已知的 branded Channel ref（`channel:*`）在原出现位置渲染为带频道名的可点击 Channel chip（中文为`频道 · …`），点击跳到该 Channel。已知的 branded Member ref（`member:*`）渲染为带 handle 的 Member chip（中文为`成员 · @…`）——与会发通知的 `@mention` chip 刻意区分，引用永不发通知。点击活跃 Member 的 chip 按 agent card 同款行为打开其 session；被暂停的 Member 与 Human 只渲染为带名但不可点的文本。两者都直接复用已加载的 Channel/Member roster 解析，不新增 Host 接口；落在已加载窗口之外的 ref 按解析失败同规则保留原文。
 
 ## 计数胶囊（count capsule）
 - `TeamCountBadge.tsx` 配上 `countBadge.module.css .badge` 是**唯一**一枚计数胶囊，读者能看到的每一处计数都穿它：Channel feed 的 Thread 入口、以及 Inbox 队列行。同一套声明每面各写一份（共享之前就是如此），正是 feed 那一份落到与队列行不同的行盒、数字彼此差出一个像素的原因。侧栏「收件箱」入口**有意不在其列**：它把未读说成一个点而不是一个数字（见「Inbox（收件箱）」），因为读者扫侧栏问的是「有没有东西在等」，而数量随每一条 fact 变动、是**专门去问**才要的答案，所以它留在控件自己的可访问名里。
@@ -31,10 +31,10 @@
 - 数字墨迹落在盒中心偏右约半个像素处——十个数字皆然，这是字形在自身 advance 里的落点，不是布局问题，任何声明都改不了。规则真正负责的是「一个字符保持 18px 的盒子」与「三处共用同一条规则」，`scripts/audit-ui-parity.mjs` 直接审计这条规则：重新引入第二份拷贝会让审计报错。
 
 ## 成员花名册（member rosters）
-- `TeamMemberRow.tsx` 是「画一个人」的唯一实现：`TeamMemberIdentity`（带 presence 角标的 `TeamMemberAvatar` + handle 与 description）加一个可选的 membership 动作。Channel 的「管理成员」弹层、编辑频道里的成员区、底栏只读成员列表都渲染它；侧栏 Agents 则把同一个 `TeamMemberIdentity` 放进自己的选择按钮里——所以同一批成员在不同面之间不会出现身份、字号或截断口径的漂移。
+- `TeamMemberRow.tsx` 是「画一个人」的唯一实现：`TeamMemberIdentity`（带 presence 角标的 `TeamMemberAvatar` + handle 与 description）加一个可选的 membership 动作。Channel 的「管理成员」弹层、编辑频道里的成员区、底栏只读成员列表都渲染它；侧栏 Agents 则把同一个 `TeamMemberIdentity` 放进自己的选择按钮里——所以同一批 Member 在不同面之间不会出现身份、字号或截断口径的漂移。
 - 行是三轨网格：24px 头像、`minmax(0, 1fr)` 文案、`auto` 动作；圆角取 shipped 圆角刻度的 md 档（12px）、8px/10px 内边距、最小高度 40px，hover 用 `--dsw-alias-interactive-bg-hover`。handle 为 12px/18px、weight 500、主色；description 为 11px/16px、tertiary，且在文案轨内省略号截断，不去顶宽网格。
 - 只读花名册不渲染动作，第三轨随之塌缩，把宽度还给 description，而不是留一个空洞。membership 动作是整行唯一的控件：一个 `Button size="sm" variant="outline"`，至少 64×28，标签在 添加/移除/更新中… 之间变化而外形不变；行自身的失败信息作为 `role="alert"` 渲染在行内文案轨下方。窄于 600px 时动作落到身份下方并与文案左对齐——被压窄的弹层放不下第三列。
-- membership 语义跟随 Host：加入要求 `availability === 'active'`（Host 会拒绝其他 availability），退出只要求 membership 事实本身，所以已经加入但暂时不可用的成员仍然保留可用的 移除。
+- membership 语义跟随 Host：加入要求 `availability === 'active'`（Host 会拒绝其他 availability），退出只要求 membership 事实本身，所以已经加入但暂时不可用的 Member 仍然保留可用的 移除。
 - 只有侧栏 Agents 在写法上不同：它像目录那样直呼 `builder`，其余花名册按 composer 的称呼写 `@builder`。
 
 ## 团队设置页（团队）
@@ -82,9 +82,9 @@
 
 ## Thread 顶层栏与 Claim 面板（header band / claim panel）
 - Thread 顶层栏装的是返回行、Task 身份、运行风险区与 Claims 区，整条带由 `.surfaceHeader` 自己那一条底边收口。因此带内两个分区**只靠间距分层**：分区级 `border-top` 会在什么都没围住的地方再画一条线，而带上方的组已经由带自己的边线结束了。这里「分隔线条数」是可量测的设计属性而非口味问题：shipped DSH 的分隔线只画在**组与组之间**（`PluginInventorySettingsTab.module.css` 的 `.group + .group { border-top: 0.5px solid … }`），所以原先每个分区各带一条 `1px solid var(--dsw-alias-border-l2)` 既不合房规也是多余的。保留的是：页头带自己的 `border-bottom`（真实结构边界）与时间线里的未读边界线（语义边界）。
-- 顶层栏是**有高度预算**的，不只是「整齐」问题：两个成员处于错误态时它占到 960px 视口里的 426px，把对话内容整个推到首屏以下；改成分区间距分层后同样内容只占 360px。
+- 顶层栏是**有高度预算**的，不只是「整齐」问题：两个 Member 处于错误态时它占到 960px 视口里的 426px，把对话内容整个推到首屏以下；改成分区间距分层后同样内容只占 360px。
 - 一行 Claim 是**三条网格轨道且都有内容**：presence 点、身份加状态一组、direction。身份与状态共用第一行、direction 独占第二行——handle 因此不会变成在宽行尽头漂着的后缀（880px 下旧单行布局会把 handle 放到它所属 direction 之后 158px 处），状态也不会飘在行尾、离开它所限定的那条 Claim。**窄屏不重排模板**：`14px minmax(0, 1fr) auto` 一套模板在 1440 与 390 都成立，两端因此不会各自漂移；14px 的点列加上列表 22px 缩进，让每个点都落在上方 `Claims · N` 标题的同一条竖轴上。
 - 行首的 presence 点是这一行**唯一**的活跃指示器：在 handle 旁再加一个「可用」徽标等于把同一件事说两遍，而这类重复读者会先察觉、后命名。已完成的 Claim 带 `claimRowDone`，把它的 direction 降到次级色，让完成的工作不再与进行中的抢注意力，但 Claim 本身仍然可见。
-- 运行风险行每个出错成员一行，行首是**该诊断结构化 class 的本地化名称**——`session-refused` / `session-unreadable` / `preset-composition` / `rollover` / `runtime` / `activation`，即 `AgentTeamMemberDiagnostic.class` 这条策略轴，`restartOffered` 早已按它分支。这条轴回答的是可本地化的「这是哪一类问题」，而 Host 的 `detail` 天生是英文，所以行内只截取它的首句，完整原文留在该行的 `title` 上。`AgentTeamClientMemberStatus` 本来就把整份 diagnostic 带到浏览器，因此这条轴不需要改 Host 协议。
-- 每个 class 一个句子 key，让可见行留在界面语言里，而不是把 Host 字符串直接贴进本地化界面；完全没有 diagnostic 的成员回落到 `runtime` 文案，而不是留空。
+- 运行风险行每个出错 Member 一行，行首是**该诊断结构化 class 的本地化名称**——`session-refused` / `session-unreadable` / `preset-composition` / `rollover` / `runtime` / `activation`，即 `AgentTeamMemberDiagnostic.class` 这条策略轴，`restartOffered` 早已按它分支。这条轴回答的是可本地化的「这是哪一类问题」，而 Host 的 `detail` 天生是英文，所以行内只截取它的首句，完整原文留在该行的 `title` 上。`AgentTeamClientMemberStatus` 本来就把整份 diagnostic 带到浏览器，因此这条轴不需要改 Host 协议。
+- 每个 class 一个句子 key，让可见行留在界面语言里，而不是把 Host 字符串直接贴进本地化界面；完全没有 diagnostic 的 Member 回落到 `runtime` 文案，而不是留空。
 - Task / Thread 身份下方那句开篇文字**在任意宽度、任意 Thread 类型下都只占一行**（`-webkit-line-clamp: 1`，同时写标准属性 `line-clamp`），完整原文留在 `title`。Task 标题本来就长且夹着不可断的 ref，而讨论的开篇就是它自己的锚消息——正文时间线里紧接着完整重复了一遍——所以给它在页头带里再留第二行，等于把页头高度花在读者已经能看到的文字上，还让页头高度取决于别人当初打了多少字。压成一行后，很长的开篇与两个字的开篇页头同高（实测 taskless Thread 两种都是 114px）。
