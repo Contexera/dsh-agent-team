@@ -59,9 +59,14 @@ const normalize = (version) => version.replace(/^dsh-v/u, '')
 // on the sentence that declares the current baseline — a marker word, then the
 // backticked token, tolerating prose between them on the same line but never
 // across another inline-code span, and never requiring prose after the token.
-// An adjacency-only pattern reads a sentence rewrite as a version change (the
-// 2026-10-06 Chinese rewrite did exactly that), while dropping the marker would
-// let history paragraphs that mention older versions participate.
+// The marker is the WHOLE phrase or clause that qualifies the baseline: a token
+// carrying its own `dsh-v` needs no `DSH` after the marker, and
+// `minimum compatible DSH version is` is marker from `minimum` to `is`. Only
+// prose after the marker is free; words inserted inside it stop the match,
+// which is the accepted cost of anchoring on the declaration. An adjacency-only
+// pattern reads a sentence rewrite as a version change (the 2026-10-06 Chinese
+// rewrite did exactly that), while dropping the marker would let history
+// paragraphs that mention older versions participate.
 const spots = [
   { file: '.github/workflows/ci.yml', pattern: /DSH_HARNESS_TAG:\s*dsh-v(\S+)/u },
   { file: '.hoplite/settings.json', pattern: /HARNESS_TAG=\\"dsh-v([^\\]+)\\"/u },
@@ -189,5 +194,6 @@ if (failures.length > 0) {
 console.log(
   `Version consistency check OK: ${stated.length + 1} version spots agree on ${reference}, `
     + `${peerRanges.length} DSH ranges admit from it, plugin ${manifest.version} `
-    + `(named by ${installSpots.length} install commands, restated by ${proseRanges.length} prose spots).`,
+    + `(named by ${installSpots.length} install commands, restated by the bug-report placeholder); `
+    + `the peer range is restated by ${proseRanges.length} prose spots.`,
 )
