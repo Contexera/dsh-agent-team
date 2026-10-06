@@ -4,7 +4,7 @@
 
 本文定义外部 `dsh-agent-team` bundle 跟进 DeepSeek Harness（DSH）新版本的固定流程。目标是让一个 DSH 版本只有在实际证明可以安装、组装和运行后，才被声明为受支持版本。DSH 发版触发兼容性认证，不自动触发 Team bundle 发版。
 
-本文不定义 Team 行为。Team 行为仍以 `packages/` 源码和测试为准；DSH 接口以相邻 Harness checkout 的源码、测试和发布包为准。
+本文不定义 Team 行为。Team 行为仍以 `packages/` 源码和测试为准。DSH 接口以相邻 Harness checkout 的源码、测试和发布包为准。
 
 ## 1. 触发条件
 
@@ -20,17 +20,17 @@
 
 ### 2.1 Team 版本与 DSH 版本
 
-Team bundle 的版本独立演进，遵循 Team 自身的变更；它不与 DSH 版本机械同步。原因是两者可以独立变化：
+Team bundle 的版本独立演进，遵循 Team 自身的变更。Team 版本不与 DSH 版本机械同步。原因是两者可以独立变化：
 
 - 已有的 peerDependencies 已覆盖候选 DSH，认证通过后只需记录认证结果，不需要发布 Team；
 - Team 修复缺陷或增加功能时需要独立发布，不能等待 DSH 发版；
 - 一个 DSH 版本可能需要多次 Team 修复或没有任何 Team 改动。
 
-DSH 兼容性由根 `package.json` 的 peerDependencies 和本文件的已认证基线表达，不由 Team bundle 的自身版本号推断。仅兼容性范围变更而没有功能改动时，仍需发布一个新的 Team bundle 版本，因为用户只能从已发布包取得新的 `package.json`。
+DSH 兼容性由根 `package.json` 的 peerDependencies 和本文件的已认证基线表达。不由 Team bundle 的自身版本号推断。仅兼容性范围变更而没有功能改动时，仍需发布一个新的 Team bundle 版本。用户只能从已发布包取得新的 `package.json`。
 
 ### 2.2 唯一版本依据
 
-认证对象是 DSH 的不可变 GitHub release tag，例如 `dsh-v0.1.1-rc.2`，以及该 tag 发布的同一组 npm 包。
+认证对象是 DSH 的不可变 GitHub release tag，以及该 tag 发布的同一组 npm 包，例如 `dsh-v0.1.1-rc.2`。
 
 检查时同时记录：
 
@@ -51,7 +51,7 @@ npm 的 prerelease 版本范围不是普通的连续区间。比如：
 
 不匹配 `0.1.1-rc.2`。包含 `0.1.0-rc.8` 的比较器只会启用同一 `0.1.0` 版本基线上的预发布版本。
 
-因此，不允许根据主版本号相同就假定兼容；也不允许用过宽范围掩盖未经验证的版本。只有候选 DSH 不在当前 peerDependencies 范围内、且认证通过时，才将根 `package.json` 内全部 `@deepseek-ai/dsh-*` peerDependencies 一起更新到新的版本线，并发布新的 Team bundle。它们必须保持一个可解析、无嵌套旧版 DSH 包的依赖图。
+因此，不允许根据主版本号相同就假定兼容。也不允许用过宽范围掩盖未经验证的版本。只有候选 DSH 不在当前 peerDependencies 范围内、且认证通过时，才将根 `package.json` 内全部 `@deepseek-ai/dsh-*` peerDependencies 一起更新到新的版本线。随后发布新的 Team bundle。它们必须保持一个可解析、无嵌套旧版 DSH 包的依赖图。
 
 ## 3. 认证流程
 
@@ -84,9 +84,9 @@ npm 的 prerelease 版本范围不是普通的连续区间。比如：
 
 在认证 Harness checkout 中先完成其自身的构建，使 Team 的 TypeScript facade 指向候选 tag 的实际声明文件。不要把旧 checkout 的 `lib/` 或 `node_modules` 当作候选版本的构建结果复用；这会掩盖声明或运行时不兼容。
 
-在该 checkout 中执行 `pnpm install --frozen-lockfile` 并完成构建：`pnpm run build:lib`、测试会加载的 native system addon 用 `pnpm run build:native-system`、浏览器车道需要的 `apps/web/dist` 用 `pnpm run build:web`。
+在该 checkout 中执行 `pnpm install --frozen-lockfile` 并完成构建。先跑 `pnpm run build:lib`。测试会加载的 native system addon，用 `pnpm run build:native-system` 构建。浏览器车道需要的 `apps/web/dist`，用 `pnpm run build:web` 构建。
 
-还要把日常仓库 `node_modules/@deepseek-ai/*` 的软链阵整份镜像到候选 checkout，并把 bundle 自链指向副本：类型检查走 facade，而测试套件与浏览器车道走这些软链。
+还要把日常仓库 `node_modules/@deepseek-ai/*` 的软链阵整份镜像到候选 checkout，并把 bundle 自链指向副本。类型检查走 facade，测试套件与浏览器车道走这些软链。
 
 再在隔离 Team 副本中运行：
 
@@ -96,7 +96,7 @@ npm run generate:typert
 npm run typecheck
 ```
 
-Typert 生成结果必须稳定。若结果变化，先审查生成物和 Remote contract，再决定是否修改 Team 源码；不要手改 `packages/agent-team/lib/typert.*`。
+Typert 生成结果必须稳定。若结果变化，先审查生成物和 Remote contract，再决定是否修改 Team 源码。不要手改 `packages/agent-team/lib/typert.*`。
 
 ### 3.3 自动验证
 
@@ -156,40 +156,40 @@ npm run test:browser
 
 ### 3.6 升级可行性
 
-3.3–3.5 各节的证据都建立在**新建** Session 之上：新 Session 以候选版本的原生格式写入，**从不经过 released-format 迁移**。
+3.3–3.5 各节的证据都建立在**新建** Session 之上。新 Session 以候选版本的原生格式写入，从不经过 released-format 迁移。
 
-因此有两类失效对它们是隐形的，而两类都已经发布过。Member preset 行的配置与其 plugin schema 不再匹配（只在运行时显形），以及旧 artifact 内容被候选版本的迁移审计拒绝。
+因此有两类失效对这些验证是隐形的。两类都已经发布过。一类是 Member preset 行的配置与其 plugin schema 不再匹配，只在运行时显形。另一类是旧 artifact 内容被候选版本的迁移审计拒绝。
 
 只要候选版本改动了 Session 格式、message source 词表或任何随包 preset 行，就要补上这两项检查：
 
-- **带已有历史的升级。** 取一个已经按上一条已认证版本线写入过 Member Session 的 profile，其中至少包含一个 rollover 世代。在候选版本下打开它们。每一个都必须能加载；出现拒绝就是 release blocker，而不是数据问题，因为该审计是 fail-closed 的且不改动源 artifact。记录检查过的 artifact 数量与逐个结果。
-- **已发布产物的存活面。** 判定**当前已发布**的 Team bundle 在候选 DSH 上是否仍然可用，而不只是候选 bundle 可用。在一个空目录里把已发布版本装到候选 DSH 上、启动它、并实际走一次 Member 创建。这一项决定发版紧迫性：当 npm `latest` 已经指向候选版本时，一个不兼容的已发布 bundle 会直接打断全新安装。这使本轮成为 release-blocking，而不是例行跟踪。
+- **带已有历史的升级。** 取一个已经按上一条已认证版本线写入过 Member Session 的 profile，其中至少包含一个 rollover 世代。在候选版本下打开这些 profile。每个 Session 都必须能加载。出现拒绝就是 release blocker，而不是数据问题。该审计是 fail-closed 的，且不改动源 artifact。记录检查过的 artifact 数量与逐个结果。
+- **已发布产物的存活面。** 判定当前已发布的 Team bundle 在候选 DSH 上是否仍然可用，而不只是候选 bundle 可用。在一个空目录里把已发布版本装到候选 DSH 上。启动它，实际走一次 Member 创建。这一项决定发版紧迫性。当 npm `latest` 已经指向候选版本，一个不兼容的已发布 bundle 会直接打断全新安装。这使本轮成为 release-blocking，而不是例行跟踪。
 
-第一项检查背后有一个长期陷阱：自定义 Session message source kind。`@deepseek-ai/dsh-llm` 把 `MessageSourceMap` 记为可合并扩展的 sum type，但 released-format 迁移审计只准入一份封闭且 build-static 的 source kind 列表。声明新 kind 的插件写出的日志，会被下一个格式世代整体拒绝。
+第一项检查背后有一个长期陷阱：自定义 Session message source kind。`@deepseek-ai/dsh-llm` 把 `MessageSourceMap` 记为可合并扩展的 sum type。released-format 迁移审计只准入一份封闭且 build-static 的 source kind 列表。声明新 kind 的插件写出的日志，会被下一个格式世代整体拒绝。
 
-这个陷阱还有**后半段**：该审计同时把 `plugin` source 的**成员**钉死为 `kind`、`plugin`、`form`、`sections`、`summary`。因此把同一份载荷改挂到已准入的 kind 之下，仍会因任何自造信封字段而失败。
+这个陷阱还有**后半段**。该审计同时把 `plugin` source 的成员钉死为 `kind`、`plugin`、`form`、`sections`、`summary`。把同一份载荷改挂到已准入的 kind 之下，仍会因任何自造信封字段而失败。
 
-两半都是 fail-closed，且报的是不同错误；因此认证证据必须跑通本包**实际产出**的 source，而不只是它们声明的 kind。
+两半都是 fail-closed，且报的是不同错误。认证证据必须跑通本包实际产出的 source，而不只是它们声明的 kind。
 
-正确做法是把插件语义编码进已准入的形状：结构化载荷用 `form: 'snapshot'` 下的具名 `{ name, text }` sections，人类可读单行用 `form: 'notice'` 下的 `summary`，其余散文放进不受约束的 model-facing 正文。
+正确做法是把插件语义编码进已准入的形状。结构化载荷用 `form: 'snapshot'` 下的具名 `{ name, text }` sections。人类可读单行用 `form: 'notice'` 下的 `summary`。其余散文放进不受约束的 model-facing 正文。
 
-section 的 `text` 是插件自己的字符串、会被逐字读回，因此列表要编码成 JSON，不要用分隔符拼接。路径或名字本身就可能包含那个分隔符，拆开后会还原出与写入不同的值。
+section 的 `text` 是插件自己的字符串，会被逐字读回。列表要编码成 JSON，不要用分隔符拼接。路径或名字本身就可能包含那个分隔符，拆开后会还原出与写入不同的值。
 
-自造成员没有通用槽位——上游 `compact` 插件是靠为其 plugin id 开特例才拿到一个——因此确实需要自造成员的插件应当向上游提出该需求。
+自造成员没有通用槽位。上游 `compact` 插件是靠为其 plugin id 开特例才拿到一个。确实需要自造成员的插件应当向上游提出该需求。
 
 ### 3.7 并存的另一套 Team 实现
 
 Harness 随附一套 experimental Agent Teams，以独立 profile bundle 形式发布（`@deepseek-ai/dsh-experimental-agent-team-profile`、`@deepseek-ai/dsh-experimental-agent-team-web-profile`）。
 
-它是与本 bundle 竞争的另一套 Team 实现，而不是本 bundle 依赖的扩展点。它注册自己的 model-facing 工具族（`spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_*`），在自己的 profile patch 里禁掉随附的全局 subagent 行以腾出这些名字，并自带成员、任务、store 与 client 面板。
+它是与本 bundle 竞争的另一套 Team 实现，不是本 bundle 依赖的扩展点。它注册自己的 model-facing 工具族（`spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_*`）。它在自己的 profile patch 里禁掉随附的全局 subagent 行，腾出这些名字。它自带成员、任务、store 与 client 面板。
 
-本 bundle 的工具是 `team_view`、`team_inbox`、`team_thread`、`team_message`、`team_claim`，只在其 `team-member` preset 内注册。
+本 bundle 的工具是 `team_view`、`team_inbox`、`team_thread`、`team_message`、`team_claim`，只在 `team-member` preset 内注册。
 
-认证覆盖的是**未挂载**这些 experimental 包的 profile。同时挂载两者属于**不支持**的组合。会出现两套 Team authority、两个工具族、两块 UI surface，而它们之间既无共享权威也无命名规则。
+认证覆盖的是未挂载这些 experimental 包的 profile。同时挂载两者属于不支持的组合。会出现两套 Team authority、两个工具族、两块 UI surface。它们之间既无共享权威也无命名规则。
 
 一个 profile 只选一套 Team profile。
 
-本条是**记录性结论、不是实测结论**——没有跑过共存验证，本 bundle 也不检查、不避让那套 experimental 实现。
+本条是记录性结论、不是实测结论。没有跑过共存验证，本 bundle 也不检查、不避让那套 experimental 实现。
 
 ## 4. 认证结果与发布门槛
 
@@ -228,7 +228,7 @@ Harness 随附一套 experimental Agent Teams，以独立 profile bundle 形式�
 
 当前 Team bundle 的已认证基线是 DSH `0.2.0-rc.2`；以下几段保留产生前几条基线的历史。
 
-DSH peers 正好声明这条已认证线：`>=0.2.0-rc.2 <0.2.1`，因此本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
+DSH peers 正好声明这条已认证线：`>=0.2.0-rc.2 <0.2.1`。本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
 
 被移除的 `@deepseek-ai/dsh-invariants` peer 同样随它指名的 registry row 一并删除：invariant companion 此后自持校验。
 
@@ -248,17 +248,17 @@ DSH peers 正好声明这条已认证线：`>=0.2.0-rc.2 <0.2.1`，因此本仓�
 - `team-member` preset 以 `@deepseek-ai/dsh-agent-preset` 声明行与其 `@deepseek-ai/dsh-agent-preset-registry` 并列，落在 Team 自己的 `isolate` group 内。
 - 本 bundle 写出的每条持久 message source 携带生产者自身的 kind；退役的 `{ kind: 'plugin', plugin: … }` wrapper 在写入时即被拒绝。
 
-preset 组合没有编译期或单测守卫：Member 类 spec 用的是合成 preset。因此某个行的配置与新 plugin schema 不匹配时，只有在真实 browser journey 里才会暴露：此时类型检查、单测、构建全绿，而所有 Member 都以 `preset "team-member" failed to mount: … $.prefix missing required value` 激活失败。
+preset 组合没有编译期或单测守卫：Member 类 spec 用的是合成 preset。某个行的配置与新 plugin schema 不匹配时，只有在真实 browser journey 里才会暴露：此时类型检查、单测、构建全绿，而所有 Member 都以 `preset "team-member" failed to mount: … $.prefix missing required value` 激活失败。
 
 把 `npm run test:browser` 当作随包 preset 行的认证闸门。
 
 §3.6 补上了上述检查的一个盲区：它们的证据都来自**新建** Session，而新 Session 从不经过 released-format 迁移。
 
-迁移拒绝是 fail-closed 的，且不改动源 artifact 一个字节，因此后果是 Session 读不出来、而不是数据损坏。不兼容的已发布 bundle 对安装期检查同样不可见，只在创建 Member 时显形。
+迁移拒绝是 fail-closed 的，且不改动源 artifact 一个字节。后果是 Session 读不出来，而不是数据损坏。不兼容的已发布 bundle 对安装期检查同样不可见，只在创建 Member 时显形。
 
 当 npm `latest` 指向候选版本时，这两类都是 release-blocking。
 
-存量历史的升级可行性是**实测**的，不是假定的。0.1.5 候选版的封闭 source-kind 审计会拒绝已发布线写出的每一份 Member artifact。此后 bundle 携带的启动期修复在本机全量 store 上修复了 44 份被拒 artifact，6 份因 Session 结构缺陷未动，没有向任何既有 artifact 写入一个字节，第二次遍历零发布。
+存量历史的升级可行性是**实测**的，不是假定的。0.1.5 候选版的封闭 source-kind 审计会拒绝已发布线写出的每一份 Member artifact。此后 bundle 携带的启动期修复在本机全量 store 上修复了 44 份被拒 artifact。6 份因 Session 结构缺陷未动。没有向任何既有 artifact 写入一个字节，第二次遍历零发布。
 
 ### DSH 0.1.7-rc.1
 
@@ -282,7 +282,7 @@ DSH `0.1.7-rc.1` 已认证，并推动基线前移。全部 `@deepseek-ai/dsh-*`
 
 DSH `0.1.7-rc.2` 在同一 peer 区间上认证通过，manifest 无改动。候选版本落在 `>=0.1.7-rc.1 <0.1.8` 之内，因此按 §4 记录基线而不移动 peer，所有版本位仍指向该区间下界。tag `477b4f42`（2026-09-24）在 npm 尚未发布它时就完成认证：当时 `next` 仍指向 `0.1.7-rc.1`。
 
-本 bundle 引入的符号没有被删除或改名。peer 包内的差异是 213 个非文档文件，集中在 bundle 组合进去的随包 Client 界面（`ui-primitives` 55、`ui-conversation` 22、`ui-workspace` 15）；`session-format-catalog`、`session-persistence` 与 Typert 协议只改了 manifest，因此不重新触发 §3.6。
+本 bundle 引入的符号没有被删除或改名。peer 包内的差异是 213 个非文档文件。差异集中在 bundle 组合进去的随包 Client 界面：`ui-primitives` 55、`ui-conversation` 22、`ui-workspace` 15。`session-format-catalog`、`session-persistence` 与 Typert 协议只改了 manifest，因此不重新触发 §3.6。
 
 两处上游变化止步于测试 fixture，都没有改动 bundle 源码。随包 layout 与 sidebar 现在 inject `shortcuts` 服务，接管测试台因此提供两个父级都需要的空 catalog 与空注册器。
 
@@ -364,7 +364,7 @@ tag `639ed01`（2026-09-29）在 `dsh-v0.2.0-rc.1` 之后 187 个提交。认证
 
 §3.5 解析出单一 DSH 世代：278 份 `@deepseek-ai/dsh-*` 拷贝全部是 `0.2.0-rc.2`，没有嵌套拷贝，也没有 peer 冲突告警。
 
-已发布的 `0.2.0` bundle 装到候选上并从真实 profile 启动：278 份 DSH 拷贝都在候选版本、组合出 188 行、没有 skipped bundle，Client 模块以 654,554 字节送达。
+已发布的 `0.2.0` bundle 装到候选上并从真实 profile 启动。278 份 DSH 拷贝都在候选版本，组合出 188 行，没有 skipped bundle。Client 模块以 654,554 字节送达。
 
 已认证基线于 2026-09-29 在这个候选上向前推进——它发生在认证之后，而不是认证的一部分。运维方把 45 个 DSH peers 移到 `>=0.2.0-rc.2 <0.2.1`，CI harness tag 与 Hoplite tag 移到 `dsh-v0.2.0-rc.2`，各命名区间的措辞位点一并更新。
 
