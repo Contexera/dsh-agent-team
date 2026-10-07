@@ -119,6 +119,45 @@ describe('Team Inbox surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it("draws each Task's own standing behind its number, and nothing on a Thread that is only a discussion", async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    const card = await b.view.findByRole('button', { name: '收件箱' })
+    const standing = [
+      ['待处理', 'todo'],
+      ['进行中', 'in_progress'],
+      ['待验收', 'in_review'],
+      ['已完成', 'done'],
+      ['已关闭', 'closed'],
+    ] as const
+    // One row per Task status plus the taskless control: the standing is the
+    // Task's own fact, so no row may borrow its neighbour's, and a Thread that
+    // is only a discussion must not grow one at all.
+    const rows = standing.map(([, status], index) => inboxRow('w1', `thread:${status}`, {
+      channelName: status,
+      previewText: `${status} row`,
+      taskNumber: index + 1,
+      task: { taskRef: `task:${index + 1}`, channelRef: 'channel:engineering', threadRef: `thread:${status}`, status, resolution: 'open' },
+    }))
+    const tasklessRow = (): ReturnType<typeof inboxRow> => inboxRow('w1', 'thread:taskless', { channelName: 'taskless', previewText: 'taskless row', task: undefined, taskNumber: undefined })
+    b.seedInbox([...rows, tasklessRow()])
+    b.seedInbox([...rows, tasklessRow()])
+    await waitForEntryUnread(card, 6)
+    fireEvent.click(card)
+    const rowOf = async (preview: string): Promise<HTMLElement> => await b.view.findByRole('button', { name: new RegExp(preview) })
+    for (const [word, status] of standing) {
+      const mark = (await rowOf(`${status} row`)).querySelector('[data-team-task-state]')
+      expect(mark?.getAttribute('data-team-task-state')).toBe(status)
+      // The standing is a dot plus the word every Task surface prints, so the
+      // two never drift into separate vocabularies.
+      expect(mark?.textContent).toBe(word)
+      expect(mark?.querySelector('[aria-hidden="true"]')).not.toBeNull()
+    }
+    const taskless = await rowOf('taskless row')
+    expect(taskless.querySelector('[data-team-task-state]')).toBeNull()
+    for (const [word] of standing) expect(taskless.textContent).not.toContain(word)
+    await b.runtime.dispose()
+  })
+
   it('drops the header count line while the queue is empty', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     fireEvent.click(await b.view.findByRole('button', { name: '收件箱' }))
@@ -163,8 +202,8 @@ describe('Team Inbox surfaces', () => {
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const rows = [
       inboxRow('w1', 'thread:named', { previewText: 'named row' }),
-      inboxRow('w1', 'thread:ambient', { channelName: 'delivery', previewText: 'ambient row', taskNumber: undefined, directCount: 0, unreadCount: 4, newestSequence: 12 }),
-      inboxRow('w1', 'thread:capped', { channelName: 'general', previewText: 'capped row', taskNumber: undefined, directCount: 3, unreadCount: 150, newestSequence: 13 }),
+      inboxRow('w1', 'thread:ambient', { channelName: 'delivery', previewText: 'ambient row', task: undefined, taskNumber: undefined, directCount: 0, unreadCount: 4, newestSequence: 12 }),
+      inboxRow('w1', 'thread:capped', { channelName: 'general', previewText: 'capped row', task: undefined, taskNumber: undefined, directCount: 3, unreadCount: 150, newestSequence: 13 }),
     ]
     b.seedInbox(rows)
     b.seedInbox(rows)

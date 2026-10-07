@@ -89,7 +89,9 @@ The row carries the Human-fixed information order.
 
 The Host resolves both, so the row needs no Member roster of its own, and the same Thread draws the same cluster in either section.
 
-(1) The identity line — the Channel in 13px/20 primary 600, preceded by `workspace / ` only while the rows on screen span more than one Workspace, and followed by `Task #N` as the same hairline chip when taskful.
+(1) The identity line — the Channel in 13px/20 primary 600, preceded by `workspace / ` only while the rows on screen span more than one Workspace, and followed by `Task #N` as the same hairline chip when taskful, then by where that Task stands.
+
+A row states the standing where the number already is, and it is the Task's own status rather than the Thread's: the 8px state dot and the 11px status word four pixels apart, which is the pairing the shipped pill uses for the Thread header's own status. It rides the same clamped run, so a squeezed seat shortens the standing with the Channel name and the number instead of the standing cutting its own hole in the line, and a Thread that is only a discussion draws neither chip nor standing.
 
 The line stays one run with its separator as a text node of its own, because splitting it into styled runs costs the spaces in the control's accessible name, and it clamps to one line with an ellipsis: a squeezed seat shortens the provenance instead of folding one row into three lines, while `overflow: hidden` stops a Channel name wider than the whole seat from pushing a scrollbar into the shared timeline.
 

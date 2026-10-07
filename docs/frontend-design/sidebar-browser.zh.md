@@ -92,7 +92,11 @@ Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`。窄轨
 
 (0) 每行以**「谁在这条 Thread 上」**领起。Task 有活跃 Claim 所有者时画那套叠放。叠放用 Channel feed 的原话 `claimers`。判定与上文 Thread 入口行同一条：未 released 的 Claim、Task 处于 in_progress/in_review、按 Claim 顺序去重。没有活跃所有者时回落到这一行时刻背后的人。`newestActor` 是关于这条 Thread 唯一已知的事。两者都由 Host 解析好，行不必自己拿 Member 名册。同一 Thread 在两段里画的是同一个簇。
 
-(1) 身份行——Channel 用 13px/20 primary 600 领起。屏幕上的行跨了不止一个 Workspace，前面才加 `workspace / `。taskful 时后面接同一枚发丝线 chip `Task #N`。这一行**保持为一个文本节点串**。分隔符本身就是独立文本节点。拆成多个样式化子项会丢掉控件可访问名里的空格。同时身份行用省略号压成一行。窄座位缩短溯源，不把一行折成三行。`overflow: hidden` 保证比座位还宽的 Channel 名不会把滚动条推进共享 timeline。
+(1) 身份行——Channel 用 13px/20 primary 600 领起。屏幕上的行跨了不止一个 Workspace，前面才加 `workspace / `。taskful 时后面接同一枚发丝线 chip `Task #N`，再接这个 Task 当下的状态。
+
+状态画在号码已经在的位置，说的是 Task 自己的状态，不是 Thread 的：8px 状态点 + 11px 状态词，相隔 4px。Thread 头部那枚 Pill 用的就是这一对。它跟溯源同处一个被压成一行的文本串，所以窄座位把它和 Channel 名、号码一起缩短，而不是给它单独挖一个洞；只作讨论的 Thread 既没有 chip 也没有状态。
+
+这一行**保持为一个文本节点串**。分隔符本身就是独立文本节点。拆成多个样式化子项会丢掉控件可访问名里的空格。同时身份行用省略号压成一行。窄座位缩短溯源，不把一行折成三行。`overflow: hidden` 保证比座位还宽的 Channel 名不会把滚动条推进共享 timeline。
 
 身份是队列读者扫读的对象，整行的墨色由身份承担。改前摘要拿着最重的墨，身份反而最轻。一页读下来是十段黑字，而不是十个条目。
 

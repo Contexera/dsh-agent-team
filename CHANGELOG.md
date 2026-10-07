@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
+## [Unreleased]
+
+- The Inbox says where each Task stands: a row whose Thread carries a Task prints that Task's status beside its number, in the same state dot and word the Channel feed and the Thread header already use, so a Thread waiting for your acceptance no longer reads like one that is finished — while a Thread that is only a discussion stays exactly as it was.
+
 ## [0.2.1] - 2026-10-06
 
 - Context housekeeping moves to the engine's own two tools: `context_status` shows a Member how much of its context is used and how much is left, `context_compact` shortens it in place while keeping recent work verbatim, and the summary a Member writes itself is the one that gets used instead of a template written for it.

@@ -156,6 +156,27 @@
   padding: 0 5px;
   white-space: nowrap;
 }
+/* Where the Task stands rides the same provenance run, right behind its number,
+   in the pair the Channel feed's Thread entry row and the Thread header already
+   speak: an 8px state dot then the status word. A reader scanning the queue is
+   choosing which Thread to pick back up, and that choice needs the standing, not
+   only the number — a Thread waiting for an acceptance and one already done read
+   the same otherwise. The pair is the shipped pill's own 4px pairing at this
+   row's 11px step, so the dot reads as part of its word rather than as a second
+   mark beside it. The whole pair is inline-level because the run it joins is a
+   line of text: a squeezed seat shortens the standing together with the Channel
+   name and the number instead of the standing cutting its own hole in the line,
+   and a Thread that is merely a discussion draws nothing at all. */
+.rowTaskState {
+  align-items: center;
+  color: var(--dsw-alias-label-secondary);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  line-height: 18px;
+  margin-left: 3px;
+  white-space: nowrap;
+}
 /* The instant closes the row's first line behind the count: the identity is what
    takes the free space, so the two of them sit at the right edge rather than the
    time alone, and the queue's own axis keeps one column the reader scans down. */

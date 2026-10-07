@@ -3,9 +3,10 @@ import type { AgentTeamInboxItem, AgentTeamMemberId } from '@wowyuarm/dsh-agent-
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime } from './team-formatters.ts'
+import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, taskStatusDot } from './team-formatters.ts'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
+import { TeamStateDot } from './TeamStateDot.tsx'
 import css from './conversation.module.css'
 import inboxCss from './inbox.module.css'
 
@@ -248,6 +249,20 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
         <span className={inboxCss.rowChannel}>#{item.channelName}</span>
         {' '}
         {item.taskNumber !== undefined && <span className={inboxCss.rowTask}>{t('taskLabel', { number: item.taskNumber })}</span>}
+        {/* Where the Task stands, in the pair the Channel feed's Thread entry row
+            and the Thread header already speak: an 8px state dot then its word, so
+            a reader picks the Thread back up knowing whether the work they left is
+            waiting for them or finished. It is the Task's own fact and it rides
+            the clamped provenance run, so a Thread that is merely a discussion
+            draws nothing extra and a squeezed seat shortens the standing along
+            with the Channel name instead of cutting a hole around it. */}
+        {item.task !== undefined && <>
+          {' '}
+          <span className={inboxCss.rowTaskState} data-team-task-state={item.task.status}>
+            <TeamStateDot size={8} state={taskStatusDot(item.task.status)} />
+            {formatTaskStatus(item.task.status, t)}
+          </span>
+        </>}
       </span>
       {/* One capsule per row, closing the identity line beside the instant it
           shares its subject with. A 「最近活跃」 row holds no unread, so it

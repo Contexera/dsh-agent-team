@@ -2143,6 +2143,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(stackBox.label).toBe(`由 ${stackItem.claimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
   expect(stackBox.width).toBe(clusterWidth(stackItem.claimOwners.length))
   expect(stackBox.inset).toBe(stackBox.width + 8)
+  // The row also states where its Task stands, behind the Task's own number and in
+  // the pair every other Task surface prints: a dot and the word the Host's status
+  // renders as. This row is the busiest shape a row has — live owners in the gutter
+  // and a standing on the identity line — and it arrived after the page had already
+  // opened, so the standing came in on a wake rather than with the first render.
+  await expect.poll(async () => await stackRow.locator('[data-team-task-state]').getAttribute('data-team-task-state')).toBe(stackItem.task!.status)
+  expect(await stackRow.locator('[data-team-task-state]').textContent()).toBe('进行中')
+  // The two Threads the tail above still holds carry no Task, and so draw no
+  // standing at all: the mark belongs to a Task, never to a row.
+  expect(await inboxRow.locator('[data-team-task-state]').count()).toBe(0)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-row-owners-desktop.png'), fullPage: true })
 
   // Losing the Host connection surfaces the failure in two places, and both
