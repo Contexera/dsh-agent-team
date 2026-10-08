@@ -16,7 +16,7 @@ Member sessions 出现在普通 Session list 中。Host 保持 Member Agent live
 
 Team ledger 仍是唯一的 Team durable authority。Recovery 和 teardown 改动需要 failure-window 或 composition evidence。不能依赖 silent fallback。
 
-Shipped bundle composition 只通过 public per-domain route table 把 `agent_team` domain 路由到 SQLite backend。其他 domains 保持 JSON default。SQLite medium（`$DSH_HOME/storages/agent_team.sqlite`）在首次 routed open 时全新创建。旧的 `agent_team.json` medium 永远不会被读取或迁移。是否移动或删除由 operator 决定。该 backend 是收归自有包名下的 vendored fork（`@wowyuarm/dsh-agent-team/sqlite-backend`，见 `packages/agent-team/src/vendor/storage-sqlite/`）。两个问题都归 [`development/storage-and-delivery.zh.md`](../development/storage-and-delivery.zh.md)：fork 为何存在，loader 行不得重新引入的启动约束。
+Shipped bundle composition 只通过 public per-domain route table 把 `agent_team` domain 路由到 SQLite backend。其他 domains 保持 JSON default。SQLite medium（`$DSH_HOME/storages/agent_team.sqlite`）在首次 routed open 时全新创建。旧的 `agent_team.json` medium 永远不会被读取或迁移。是否移动或删除由 operator 决定。该 backend 是收归自有包名下的 vendored fork（`@contexera/dsh-agent-team/sqlite-backend`，见 `packages/agent-team/src/vendor/storage-sqlite/`）。两个问题都归 [`development/storage-and-delivery.zh.md`](../development/storage-and-delivery.zh.md)：fork 为何存在，loader 行不得重新引入的启动约束。
 
 dsh `0.1.7-rc.1` 线上 message source 由生产者署名。Session format V4 要求每条持久 source 携带生产者自身的 kind。退役的 `{ kind: 'plugin', plugin: … }` wrapper 会在写入准入被拒。released V3 历史由上游在读时转换。转换做三件事：改名为 `plugin:<producer>`、删掉 `plugin` 键、保留 `form`/`sections`/`summary`。磁盘上永不改写。
 

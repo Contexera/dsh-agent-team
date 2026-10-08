@@ -49,7 +49,7 @@ git diff --check HEAD
 - `npm run typecheck`：先生成 Typert，再检查 Host、tools 和 Client 三个源码目录。
 - `npm run check:docs`：把 [`AGENTS.md`](../AGENTS.md) 的规则变成机械检查。检查六件事。第一，每份维护文档都有双语配对，切换器双向指对。第二，每对文档共享同一标题大纲：标题数量与层级一致。第三，所有相对链接可解析。第四，每个 `#fragment` 都指向目标文档真实存在的标题。第五，没有渲染块超出脚本中记录的单文件上限。第六，两个索引与现存文档集完全一致。同时覆盖四组 README 配对与仓库根的贡献指南配对。仓库根与每个 package 各一份 README，各自使用自己的切换器写法。只改文档时单独跑它即可。`node scripts/check-docs.mjs --budgets` 只打印单文件最长块表，不做判定。
 - `npm run check:core-skills`：把随包 skill 的出厂契约变成机械检查。检查五件事。front matter 的 `name` 与目录同名。`description` 说明真实触发场景。整个 skill 不超过 `scripts/check-core-skills.mjs` 中的审定字符预算。所有相对链接都不越出 skill 目录，安装器只复制该目录。`references/` 下的每个文件都被 `SKILL.md` 链接。
-- `npm run check:boundaries`：把下文的 package 接缝变成机械检查。`packages/*/src/` 下的文件不得用相对 specifier 跨越自己所在的 package 目录，去引用另一个 package。`import type` 豁免。运行时已被擦除。测试文件不在范围内：它们本就要把目录接起来。跨接缝的正确方式是用声明的 subpath，例如 `@wowyuarm/dsh-agent-team/remote`。
+- `npm run check:boundaries`：把下文的 package 接缝变成机械检查。`packages/*/src/` 下的文件不得用相对 specifier 跨越自己所在的 package 目录，去引用另一个 package。`import type` 豁免。运行时已被擦除。测试文件不在范围内：它们本就要把目录接起来。跨接缝的正确方式是用声明的 subpath，例如 `@contexera/dsh-agent-team/remote`。
 - `npm run check:versions`：把已认证版本一致性变成机械检查。CI tag、setup tag、开发指南、README、架构文档、兼容性基线、bug 报告占位符必须声明同一个 DSH 基线，双语都要。该基线必须是每个 `@deepseek-ai/dsh-*` peer 区间的下界。它只断言互相一致，从不写死版本号。在任何 release lane 上都不用改门。动过任何版本字符串后单独跑它。
 - `npm run check:facades`：只比不写。按相邻 Harness checkout 重算 path facades。已提交的 `tsconfig*.json` 或 `.generated-harness` 标记只要与生成结果不同就报错。给 `scripts/sync-paths.mjs` 加了 subpath，就不可能不带上重新生成的 facades。它由 `npm test` 捆绑执行。全新 clone 必须先重新生成 facades，见 [`environments-and-install.zh.md`](./environments-and-install.zh.md)。
 - `npm test`：先生成 Typert、跑 `check:facades`、`check:docs`、`check:core-skills`、`check:boundaries` 与 `check:versions`。再运行 Vitest。

@@ -57,7 +57,7 @@ Team 读取 `ctx.workspaces.list`，不复制 Workspace 创建或浏览状态。
 已核实的安装方式：
 
 ```sh
-dsh plugin --profile team-demo add @wowyuarm/dsh-agent-team
+dsh plugin --profile team-demo add @contexera/dsh-agent-team
 dsh --profile team-demo
 ```
 

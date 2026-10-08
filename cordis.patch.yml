@@ -143,7 +143,7 @@
             # preset's plugin list is the whole surface — the absence is real,
             # not shadowed by a host-plane default.
             - id: member-context
-              name: '@wowyuarm/dsh-agent-team/member-context'
+              name: '@contexera/dsh-agent-team/member-context'
 
             # Turn-level durable Team clock: the first step of every turn renders the
             # current instant (fixed UTC+8), elapsed since the preceding model-visible
@@ -152,12 +152,12 @@
             # dsh-time-context stays unmounted: its browser-zone policy would ask
             # background-woken Members to confirm dates with an absent user.
             - id: member-time-context
-              name: '@wowyuarm/dsh-agent-team/member-time-context'
+              name: '@contexera/dsh-agent-team/member-time-context'
               config:
                 refreshIntervalMs: 1800000
 
             - id: team-tools
-              name: '@wowyuarm/dsh-agent-team/tools'
+              name: '@contexera/dsh-agent-team/tools'
 
             # The host owns the Web service and both providers; the Team preset exposes only
             # the model-facing tools. Fetch resolves the host's anonymous HTTP provider, so
@@ -187,7 +187,7 @@
                 # package: a row is resolved from the profile, which links this
                 # bundle but not the dependency nested inside it.
                 - id: compaction-basic
-                  name: '@wowyuarm/dsh-agent-team/compaction-engine'
+                  name: '@contexera/dsh-agent-team/compaction-engine'
                   config:
                     auto: false
 
@@ -205,15 +205,15 @@
                     headChars: 4096
                     tailChars: 1024
         - id: wowyuarm-agent-team-host
-          name: '@wowyuarm/dsh-agent-team/host'
+          name: '@contexera/dsh-agent-team/host'
     - id: wowyuarm-agent-team-client
-      name: '@wowyuarm/dsh-agent-team'
+      name: '@contexera/dsh-agent-team'
     # The Team's invariant companion self-hosts: it validates the durable
     # ledger from its own fiber, so no `@deepseek-ai/dsh-invariants` registry
     # row is mounted — the Harness line after rc.2 removes that package, and
     # the companion no longer depends on it (packages/agent-team/src/invariant.ts).
     - id: wowyuarm-agent-team-invariant
-      name: '@wowyuarm/dsh-agent-team/invariant'
+      name: '@contexera/dsh-agent-team/invariant'
     # Team ledger medium backend. Vendored under our own package name (see
     # packages/agent-team/src/vendor/storage-sqlite/): DSH Desktop generation
     # installers strip `@deepseek-ai/*` copies and resolve them from the host
@@ -221,7 +221,7 @@
     # package blocks boot (GitHub issue #28). Mounted here as an ordinary
     # storage provider row beside the shipped JSON backend.
     - id: storage-sqlite
-      name: '@wowyuarm/dsh-agent-team/sqlite-backend'
+      name: '@contexera/dsh-agent-team/sqlite-backend'
       config:
         path: !!js dshHomePath('storages', 'agent_team.sqlite')
 

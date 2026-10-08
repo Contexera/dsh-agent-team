@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react'
-import type { AgentTeamMemberId } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { useAvatarImage } from './avatar-image.ts'
 import { memberHue } from './team-formatters.ts'
 import css from './avatar-stack.module.css'

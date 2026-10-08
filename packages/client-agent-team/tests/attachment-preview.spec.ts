@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamAttachmentId, AgentTeamGetAttachmentResult, AgentTeamGetAttachmentRequest } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamAttachmentId, AgentTeamGetAttachmentResult, AgentTeamGetAttachmentRequest } from '@contexera/dsh-agent-team/types'
 import { cachedAttachmentDataUrl, loadAttachmentDataUrl, type GetAttachment } from '../src/client/attachment-preview.ts'
 
 const attachment = (value: string, mediaType = 'image/png') => ({

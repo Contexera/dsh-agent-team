@@ -4,7 +4,7 @@ import {
   Button, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, Input,
   SettingsForm, SettingsSecretField, SettingsValueField, type SettingsFieldState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AgentTeamContextJudgeResult } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'

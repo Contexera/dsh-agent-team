@@ -90,7 +90,7 @@ if (!existsSync(continuityEntry)) {
 }
 if (continuityFromSibling) linkPackage('@wowyuarm/dsh-context-continuity', continuityDir)
 // The bundle's own self-reference must resolve for preset rows that name it.
-const selfRef = join(repoRoot, 'node_modules', '@wowyuarm')
+const selfRef = join(repoRoot, 'node_modules', '@contexera')
 mkdirSync(selfRef, { recursive: true })
 if (!existsSync(join(selfRef, 'dsh-agent-team'))) {
   if (process.platform === 'win32') {

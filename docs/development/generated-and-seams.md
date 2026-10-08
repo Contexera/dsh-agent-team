@@ -39,16 +39,16 @@ The `tsconfig*.json` facades must not gain `include` or `files`; they must conti
 Keep `zod` a link: a copy puts zod's own declarations inside the analysed package, where the analyzer's reachable-files walk queues a declaration file the program never loaded and dies with a `TypeError` rather than a diagnostic; a link that does not resolve instead surfaces as `TS2307: Cannot find module 'zod'` in every importing file.
 
 ## Package seams and module layout
-The published artifact is one root npm package, `@wowyuarm/dsh-agent-team`, declared by the root `package.json` and its `exports` map. The three `packages/*` directories have no manifest of their own: they are the build and export seams of that single package, each with its own build target and its own entry in `exports`.
+The published artifact is one root npm package, `@contexera/dsh-agent-team`, declared by the root `package.json` and its `exports` map. The three `packages/*` directories have no manifest of their own: they are the build and export seams of that single package, each with its own build target and its own entry in `exports`.
 
 ```text
-@wowyuarm/dsh-agent-team               root manifest, one published package
+@contexera/dsh-agent-team               root manifest, one published package
 ├── packages/agent-team         → ./host, ./types, ./typert, ./remote, …
 ├── packages/tool-agent-team    → ./tools
 └── packages/client-agent-team  → . (the plugin entry) and ./client
 ```
 
-Consumers therefore reach a package through a declared subpath (`@wowyuarm/dsh-agent-team/host`, `/remote`, `/types`, `/tools`, `/client`), never through a relative path into another directory's `lib/`. The generated `tsconfig*.json` facades and the Client bundler both map those subpaths, so a source-level relative import across seams bypasses the very contract that keeps generated artifacts swappable. `scripts/harness-dir.mjs` is the single pointer those mappings resolve the adjacent Harness checkout through.
+Consumers therefore reach a package through a declared subpath (`@contexera/dsh-agent-team/host`, `/remote`, `/types`, `/tools`, `/client`), never through a relative path into another directory's `lib/`. The generated `tsconfig*.json` facades and the Client bundler both map those subpaths, so a source-level relative import across seams bypasses the contract that keeps generated artifacts swappable. `scripts/harness-dir.mjs` is the single pointer those mappings resolve the adjacent Harness checkout through.
 
 Host source is deliberately flat. `packages/agent-team/src/` separates authority from seams by file, with three structural anchors — `index.ts` is the composition root and Remote adapter, `ledger.ts` is the durable authority, and `spec.ts` plus the `types.ts` barrel own the record schema and the public types. Every other file is one earned seam; [`architecture/README.md`](../architecture/README.md) names them and what each owns.
 

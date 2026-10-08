@@ -1,5 +1,5 @@
-import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef } from '@wowyuarm/dsh-agent-team/types'
-import { hasAllMarker, resolveBodyMentions, scanBodyHandles } from '@wowyuarm/dsh-agent-team/mentions'
+import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import { hasAllMarker, resolveBodyMentions, scanBodyHandles } from '@contexera/dsh-agent-team/mentions'
 import type { TeamKey } from './locales.ts'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamStateDotState } from './TeamStateDot.tsx'

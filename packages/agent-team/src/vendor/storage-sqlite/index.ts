@@ -19,7 +19,7 @@
  * SQLite storage backend for the storage hub: one database file hosts every
  * routed unit, document-per-row (`key TEXT` / `value TEXT` JSON). Registers
  * as backend `sqlite`; the disposer unregisters first, then closes the medium.
- * @module @wowyuarm/dsh-agent-team/sqlite-backend
+ * @module @contexera/dsh-agent-team/sqlite-backend
  */
 
 import type { Context } from '@deepseek-ai/cordis'

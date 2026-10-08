@@ -16,7 +16,7 @@
    native 这一步是独立的构建，不会由别处替我们完成。host addon 被 gitignore。Harness 的 `test` script 会在自己的 Vitest 之前用 `build:native-system` 构建它。本仓库是直接对那个 checkout 跑 Vitest。全新 clone 缺了它会表现为宿主 Team 激活失败（`Agent is not an active Team Member`），而不是缺模块报错。 它在所有平台都安全：`--host-addon-only` 在非 Linux/macOS 上直接退出、不构建。 不要复用上一次构建遗留的 `lib/` 或 `node_modules/`——旧产物可能掩盖声明或运行时不兼容。
 2. 工作流需要 `test:browser` 时，用 `corepack pnpm build:web` 构建 Harness `apps/web` dist。workspace install 已备好它的依赖。
 3. 在本仓库内用 `corepack pnpm install` 安装依赖。绝不能运行 `npm install`。它会静默破坏指向相邻 checkout vendor 包的 workspace 符号链接。故障随后才以误导性的 `Cannot find module 'zod'` 暴露。
-4. 用 `node scripts/link-harness-packages.mjs` 链接三样东西进本仓库 `node_modules`：Harness 的 workspace、它的 vendor 包、相邻的 context-continuity 引擎。再 `npm run build` 构建 bundle。引擎按 `scripts/continuity-dir.mjs` 的解析结果提供。日常开发对引擎工作树时，相邻 checkout 会被链接进 `node_modules`。此时这个 checkout 必须已构建（`npm run build`）。干净 checkout/CI 则直接用根 `dependencies` 从 registry 装好的那份，不再链接。`DSH_CONTEXT_CONTINUITY_DIR` 可把解析指向另一个 checkout。宿主测试从本仓库根按真实 `node_modules` 查找解析 preset row 与 bundle 自身的未发布 row（如 `@wowyuarm/dsh-agent-team/member-context`）。它与已发布 bundle 的 profile 安装布局一致。
+4. 用 `node scripts/link-harness-packages.mjs` 链接三样东西进本仓库 `node_modules`：Harness 的 workspace、它的 vendor 包、相邻的 context-continuity 引擎。再 `npm run build` 构建 bundle。引擎按 `scripts/continuity-dir.mjs` 的解析结果提供。日常开发对引擎工作树时，相邻 checkout 会被链接进 `node_modules`。此时这个 checkout 必须已构建（`npm run build`）。干净 checkout/CI 则直接用根 `dependencies` 从 registry 装好的那份，不再链接。`DSH_CONTEXT_CONTINUITY_DIR` 可把解析指向另一个 checkout。宿主测试从本仓库根按真实 `node_modules` 查找解析 preset row 与 bundle 自身的未发布 row（如 `@contexera/dsh-agent-team/member-context`）。它与已发布 bundle 的 profile 安装布局一致。
 5. 用 `node scripts/sync-paths.mjs` 对准全新 checkout 重新生成 TypeScript path facades。全新 clone 不能信任仓库里已提交的 facades。没有任何 npm script 会重写它们。跳过这一步，facades 指向的仍是生成时固化的旧路径。`npm test` 里那道只读门 `check:facades` 正是对这种不一致报错。`sync-paths` 同时生成测试 harness 需要的 `@deepseek-ai/dsh-client-locale/src/*` 通配映射。
 6. 冒烟验证：`npm run typecheck && npm test`。全绿 = 环境正确。大面积假挂（见下）= 环境不对。先修环境，再查 diff。
 
@@ -47,7 +47,7 @@
 发布形态是根 bundle：
 
 ```sh
-dsh plugin --profile web add @wowyuarm/dsh-agent-team
+dsh plugin --profile web add @contexera/dsh-agent-team
 dsh web
 ```
 
@@ -68,7 +68,7 @@ dsh web
 
 日常自用与开发验收使用两个并存 profile，互不干扰：
 
-- **稳定模式**（`--profile web`）：依赖 npm 发布版（`^0.1.x` 语义化范围），pnpm lockfile 锁定已装版本。发布后需按**精确版本号**安装 `dsh plugin --profile web add @wowyuarm/dsh-agent-team@X.Y.Z`。直接 `update` 可能在 lockfile 仍钉着旧解析的情况下报「Already up to date」。见 [`release-runbook.md`](../release-runbook.md) §6。
+- **稳定模式**（`--profile web`）：依赖 npm 发布版（`^0.1.x` 语义化范围），pnpm lockfile 锁定已装版本。发布后需按**精确版本号**安装 `dsh plugin --profile web add @contexera/dsh-agent-team@X.Y.Z`。直接 `update` 可能在 lockfile 仍钉着旧解析的情况下报「Already up to date」。见 [`release-runbook.md`](../release-runbook.md) §6。
 - **开发模式**（`--profile web-dev`）：依赖 `link:` 本地检出，rebuild + 重启即用最新代码。注意宿主加载的是构建产物 `packages/*/lib/`。改完源码只重启而不 `npm run build`，Member Session 仍会拿到旧工具清单。工具清单在激活时从当前运行代码派生。先 build 再重启才生效。
 
 启动运行时必须与安装形态匹配。稳定 profile 由发布版 dsh（全局安装的 `@deepseek-ai/dsh`，宿主全程运行 `lib/` 构建产物）启动。checkout 里的 `pnpm dsh`（tsx + tsconfig paths，宿主运行 `src/` 源码）只能启动 `link:` 安装的 profile。npm 安装的 bundle 周围没有 tsconfig paths。它的 harness 依赖会解析到各包的 `lib/`，与宿主的 `src/` 实例形成两份模块。`dsh-scope` 的 scope 标签是模块内 Symbol，跨实例不一致。Member 激活的 preset 校验会以 `selected preset is not team-enabled` 失败。表现为稳定 profile 全体 Agent 不可用（2026-08 诊断确认）。见到该症状时，先核对启动用的 `dsh` 是发布版还是 checkout 的 `pnpm dsh`。

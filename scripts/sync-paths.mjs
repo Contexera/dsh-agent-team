@@ -19,25 +19,25 @@ const cleaned = raw
 const base = JSON.parse(cleaned)
 
 const own = {
-  '@wowyuarm/dsh-agent-team/host': ['./packages/agent-team/src/index.ts'],
-  '@wowyuarm/dsh-agent-team/invariant': ['./packages/agent-team/src/invariant.ts'],
-  '@wowyuarm/dsh-agent-team/types': ['./packages/agent-team/src/types.ts'],
-  '@wowyuarm/dsh-agent-team/typert': ['./packages/agent-team/lib/typert.host.d.ts'],
-  '@wowyuarm/dsh-agent-team/remote': ['./packages/agent-team/lib/typert.remote-client.js'],
-  '@wowyuarm/dsh-agent-team/sqlite-backend': ['./packages/agent-team/src/vendor/storage-sqlite/index.ts'],
-  '@wowyuarm/dsh-agent-team/compaction-engine': ['./packages/agent-team/src/compaction-engine.ts'],
-  '@wowyuarm/dsh-agent-team/member-context': ['./packages/agent-team/src/member-context.ts'],
-  '@wowyuarm/dsh-agent-team/member-time-context': ['./packages/agent-team/src/member-time-context.ts'],
-  '@wowyuarm/dsh-agent-team/time-format': ['./packages/agent-team/src/time-format.ts'],
-  '@wowyuarm/dsh-agent-team/mentions': ['./packages/agent-team/src/mentions.ts'],
-  '@wowyuarm/dsh-agent-team/member-skills': ['./packages/agent-team/src/member-skills.ts'],
-  '@wowyuarm/dsh-agent-team/tools': ['./packages/tool-agent-team/src/index.ts'],
-  '@wowyuarm/dsh-agent-team/client': ['./packages/client-agent-team/src/client/index.ts'],
+  '@contexera/dsh-agent-team/host': ['./packages/agent-team/src/index.ts'],
+  '@contexera/dsh-agent-team/invariant': ['./packages/agent-team/src/invariant.ts'],
+  '@contexera/dsh-agent-team/types': ['./packages/agent-team/src/types.ts'],
+  '@contexera/dsh-agent-team/typert': ['./packages/agent-team/lib/typert.host.d.ts'],
+  '@contexera/dsh-agent-team/remote': ['./packages/agent-team/lib/typert.remote-client.js'],
+  '@contexera/dsh-agent-team/sqlite-backend': ['./packages/agent-team/src/vendor/storage-sqlite/index.ts'],
+  '@contexera/dsh-agent-team/compaction-engine': ['./packages/agent-team/src/compaction-engine.ts'],
+  '@contexera/dsh-agent-team/member-context': ['./packages/agent-team/src/member-context.ts'],
+  '@contexera/dsh-agent-team/member-time-context': ['./packages/agent-team/src/member-time-context.ts'],
+  '@contexera/dsh-agent-team/time-format': ['./packages/agent-team/src/time-format.ts'],
+  '@contexera/dsh-agent-team/mentions': ['./packages/agent-team/src/mentions.ts'],
+  '@contexera/dsh-agent-team/member-skills': ['./packages/agent-team/src/member-skills.ts'],
+  '@contexera/dsh-agent-team/tools': ['./packages/tool-agent-team/src/index.ts'],
+  '@contexera/dsh-agent-team/client': ['./packages/client-agent-team/src/client/index.ts'],
 }
 
 const ownTypes = {
   ...own,
-  '@wowyuarm/dsh-agent-team/remote': ['./packages/agent-team/lib/typert.remote-client.d.ts'],
+  '@contexera/dsh-agent-team/remote': ['./packages/agent-team/lib/typert.remote-client.d.ts'],
 }
 
 const harnessSrc = {
@@ -68,20 +68,20 @@ const harnessTypes = Object.fromEntries(
 )
 
 const buildOwn = {
-  '@wowyuarm/dsh-agent-team/host': ['./packages/agent-team/lib/types/index.d.ts'],
-  '@wowyuarm/dsh-agent-team/invariant': ['./packages/agent-team/lib/types/invariant.d.ts'],
-  '@wowyuarm/dsh-agent-team/types': ['./packages/agent-team/lib/types/types.d.ts'],
-  '@wowyuarm/dsh-agent-team/typert': ['./packages/agent-team/lib/typert.host.d.ts'],
-  '@wowyuarm/dsh-agent-team/remote': ['./packages/agent-team/lib/typert.remote-client.d.ts'],
-  '@wowyuarm/dsh-agent-team/sqlite-backend': ['./packages/agent-team/lib/types/vendor/storage-sqlite/index.d.ts'],
-  '@wowyuarm/dsh-agent-team/compaction-engine': ['./packages/agent-team/lib/types/compaction-engine.d.ts'],
-  '@wowyuarm/dsh-agent-team/member-context': ['./packages/agent-team/lib/types/member-context.d.ts'],
-  '@wowyuarm/dsh-agent-team/member-time-context': ['./packages/agent-team/lib/types/member-time-context.d.ts'],
-  '@wowyuarm/dsh-agent-team/time-format': ['./packages/agent-team/lib/types/time-format.d.ts'],
-  '@wowyuarm/dsh-agent-team/mentions': ['./packages/agent-team/lib/types/mentions.d.ts'],
-  '@wowyuarm/dsh-agent-team/member-skills': ['./packages/agent-team/lib/types/member-skills.d.ts'],
-  '@wowyuarm/dsh-agent-team/tools': ['./packages/tool-agent-team/lib/types/index.d.ts'],
-  '@wowyuarm/dsh-agent-team/client': ['./packages/client-agent-team/lib/types/client/index.d.ts'],
+  '@contexera/dsh-agent-team/host': ['./packages/agent-team/lib/types/index.d.ts'],
+  '@contexera/dsh-agent-team/invariant': ['./packages/agent-team/lib/types/invariant.d.ts'],
+  '@contexera/dsh-agent-team/types': ['./packages/agent-team/lib/types/types.d.ts'],
+  '@contexera/dsh-agent-team/typert': ['./packages/agent-team/lib/typert.host.d.ts'],
+  '@contexera/dsh-agent-team/remote': ['./packages/agent-team/lib/typert.remote-client.d.ts'],
+  '@contexera/dsh-agent-team/sqlite-backend': ['./packages/agent-team/lib/types/vendor/storage-sqlite/index.d.ts'],
+  '@contexera/dsh-agent-team/compaction-engine': ['./packages/agent-team/lib/types/compaction-engine.d.ts'],
+  '@contexera/dsh-agent-team/member-context': ['./packages/agent-team/lib/types/member-context.d.ts'],
+  '@contexera/dsh-agent-team/member-time-context': ['./packages/agent-team/lib/types/member-time-context.d.ts'],
+  '@contexera/dsh-agent-team/time-format': ['./packages/agent-team/lib/types/time-format.d.ts'],
+  '@contexera/dsh-agent-team/mentions': ['./packages/agent-team/lib/types/mentions.d.ts'],
+  '@contexera/dsh-agent-team/member-skills': ['./packages/agent-team/lib/types/member-skills.d.ts'],
+  '@contexera/dsh-agent-team/tools': ['./packages/tool-agent-team/lib/types/index.d.ts'],
+  '@contexera/dsh-agent-team/client': ['./packages/client-agent-team/lib/types/client/index.d.ts'],
 }
 
 const shared = {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
-import type { AgentTeamMemberId } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentTeamMemberId } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { TEAM_DRAFTS_STORAGE_KEY, TeamDraftStore } from '../src/client/drafts.ts'
 
 function storage(): Storage {

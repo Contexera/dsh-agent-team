@@ -3,7 +3,7 @@
  *
  * The Host owns the append-only collaboration ledger and all Member lifecycle
  * effects. Session history and browser state are projections, never Team facts.
- * @module @wowyuarm/dsh-agent-team
+ * @module @contexera/dsh-agent-team
  */
 
 import { randomUUID } from 'node:crypto'

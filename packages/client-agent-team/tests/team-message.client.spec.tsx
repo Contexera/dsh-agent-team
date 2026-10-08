@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamThreadRef } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
 import { rememberResolvedThreadRef, type ResolvedThreadRef } from '../src/client/refs.ts'

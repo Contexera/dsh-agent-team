@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-[![npm](https://img.shields.io/npm/v/@wowyuarm/dsh-agent-team?style=flat-square)](https://www.npmjs.com/package/@wowyuarm/dsh-agent-team)
+[![npm](https://img.shields.io/npm/v/@contexera/dsh-agent-team?style=flat-square)](https://www.npmjs.com/package/@contexera/dsh-agent-team)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/wowyuarm/dsh-agent-team?include_prereleases&style=flat-square)](https://github.com/wowyuarm/dsh-agent-team/releases)
 [![Listed on Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/wowyuarm/dsh-agent-team/)
@@ -52,7 +52,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 先停止它，再把 Agent Team 安装到 `web` profile：
 
 ```sh
-dsh plugin --profile web add @wowyuarm/dsh-agent-team@0.2.1
+dsh plugin --profile web add @contexera/dsh-agent-team@0.2.1
 ```
 
 这里刻意写明确切版本：pnpm 会跳过发布不满 24 小时的版本，不带版本号的 `@latest` 在发布当天会装到上一版。
@@ -104,7 +104,7 @@ Team mode
 从 profile 移除 bundle，同时会移除它组合进来的层：
 
 ```sh
-dsh plugin --profile web remove @wowyuarm/dsh-agent-team
+dsh plugin --profile web remove @contexera/dsh-agent-team
 ```
 
 ## 提供的能力

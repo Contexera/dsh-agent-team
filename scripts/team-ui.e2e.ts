@@ -13,7 +13,7 @@ import { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
 const TEAM_ROOT = '__TEAM_ROOT__'
 const HOME = '__HOME__'
 const CHROME = '__CHROME__'
-const STAGED_BUNDLE = join(HOME, 'profiles', 'node_modules', '@wowyuarm', 'dsh-agent-team')
+const STAGED_BUNDLE = join(HOME, 'profiles', 'node_modules', '@contexera', 'dsh-agent-team')
 const BROWSER_ARTIFACTS = join(TEAM_ROOT, 'artifacts/browser')
 const UI01_SHOTS = join(BROWSER_ARTIFACTS, 'ui-01')
 const UI02_SHOTS = join(BROWSER_ARTIFACTS, 'ui-02')
@@ -219,7 +219,7 @@ async function entryUnreadCapsule(page: Page, lineSelector: string): Promise<Ret
 async function installLocalBundle(clearArtifacts = true): Promise<void> {
   await rm(HOME, { recursive: true, force: true })
   if (clearArtifacts) await rm(BROWSER_ARTIFACTS, { recursive: true, force: true })
-  const scope = `${HOME}/profiles/node_modules/@wowyuarm`
+  const scope = `${HOME}/profiles/node_modules/@contexera`
   await mkdir(scope, { recursive: true })
   // The filter must match on both separators: on Windows cp walks backslash
   // paths, so forward-slash-only matching lets node_modules and src through.
@@ -276,7 +276,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const ordinaryComposer = page.locator('[data-composer-input][contenteditable="true"][data-placeholder="描述你想要构建的内容, / 调用指令, @ 文件或对话"]')
   await expect.poll(() => ordinaryComposer.count()).toBe(1)
 
-  expect(scaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@wowyuarm/dsh-agent-team')).toBe(true)
+  expect(scaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
   const teamTrigger = page.getByRole('button', { name: '团队' })
   const settingsTrigger = page.getByRole('button', { name: '设置' })
   const [teamBox, settingsBox] = await Promise.all([teamTrigger.boundingBox(), settingsTrigger.boundingBox()])

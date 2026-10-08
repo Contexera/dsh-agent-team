@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamContextJudgeResult } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
 
 /**
  * The Client's one projection of the long-gap gate's judge.

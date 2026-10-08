@@ -154,8 +154,8 @@ for (const [name, range] of peerRanges) {
 // resolves to the previous release on release day — which means the line moves
 // with every release. This gate is what makes forgetting it fail loudly.
 const installSpots = [
-  { file: 'README.md', pattern: /dsh plugin --profile web add @wowyuarm\/dsh-agent-team@(\d+\.\d+\.\d+)/u },
-  { file: 'README.zh.md', pattern: /dsh plugin --profile web add @wowyuarm\/dsh-agent-team@(\d+\.\d+\.\d+)/u },
+  { file: 'README.md', pattern: /dsh plugin --profile web add @contexera\/dsh-agent-team@(\d+\.\d+\.\d+)/u },
+  { file: 'README.zh.md', pattern: /dsh plugin --profile web add @contexera\/dsh-agent-team@(\d+\.\d+\.\d+)/u },
 ]
 for (const { file, pattern } of installSpots) {
   const installVersion = extract(file, pattern)

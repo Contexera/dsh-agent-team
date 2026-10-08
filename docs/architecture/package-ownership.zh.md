@@ -13,7 +13,7 @@ packages/agent-team
               typed Remote client + Team mode + browser presentation
 ```
 
-这三个目录是同一个发布包 `@wowyuarm/dsh-agent-team` 的构建与导出接缝，由根 `package.json` 声明；它们都没有自己的 manifest。依赖方向是单向的：Host 从不导入 Client 或 tools 的实现内部，tools 在执行时解析 live Host service，Client 只消费 typed Remote、公开类型与 Harness slots——绝不通过相对路径进入另一个接缝的生成 `lib/`。[`generated-and-seams.zh.md`](../development/generated-and-seams.zh.md) 负责接缝的具体机制、Host 模块布局与新增 operation 的清单。
+这三个目录是同一发布包 `@contexera/dsh-agent-team` 的构建与导出接缝，由根 `package.json` 声明；它们都没有自己的 manifest。依赖方向是单向的：Host 从不导入 Client 或 tools 的实现内部，tools 在执行时解析 live Host service，Client 只消费 typed Remote、公开类型与 Harness slots——绝不通过相对路径进入另一个接缝的生成 `lib/`。[`generated-and-seams.zh.md`](../development/generated-and-seams.zh.md) 负责接缝的具体机制、Host 模块布局与新增 operation 的清单。
 
 - `packages/agent-team` 拥有 Team capability。service 自身保留 ledger、handles、notifications 与 recovery orchestration，模块划分如下：
   - `src/index.ts` 组装 service 并声明 Remote methods；

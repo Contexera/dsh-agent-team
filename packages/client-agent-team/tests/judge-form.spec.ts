@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamContextJudgeResult } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
 import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from '../src/client/judge-form.ts'
 import { TeamContextJudgeCheck, type TeamContextJudgeLoader } from '../src/client/context-judge.ts'
 

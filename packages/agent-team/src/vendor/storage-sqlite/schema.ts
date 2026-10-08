@@ -20,7 +20,7 @@
  * layout version, the database open/configure sequence (permissions, pragmas,
  * version stamp/reject), and the unit metadata tables. Unit record tables are
  * created per descriptor in `unit.ts`.
- * @module @wowyuarm/dsh-agent-team/sqlite-backend/schema
+ * @module @contexera/dsh-agent-team/sqlite-backend/schema
  */
 
 import { DatabaseSync } from 'node:sqlite'

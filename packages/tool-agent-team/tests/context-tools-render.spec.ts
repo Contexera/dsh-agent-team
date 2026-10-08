@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { contextTools, renderText } from './render-text.ts'
 import { engineTimelineItems } from '../src/context-tools.ts'
-import { AGENT_TEAM_TOOL_NAMES } from '@wowyuarm/dsh-agent-team/host'
+import { AGENT_TEAM_TOOL_NAMES } from '@contexera/dsh-agent-team/host'
 
 /**
  * Render-layer discriminating tests: renders are the only channel a tool

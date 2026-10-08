@@ -57,7 +57,7 @@ Read the target component and CSS Module, then architecture/development and UI h
 Verified installation:
 
 ```sh
-dsh plugin --profile team-demo add @wowyuarm/dsh-agent-team
+dsh plugin --profile team-demo add @contexera/dsh-agent-team
 dsh --profile team-demo
 ```
 

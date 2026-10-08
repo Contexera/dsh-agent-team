@@ -20,46 +20,46 @@
     ],
     "noEmit": true,
     "paths": {
-      "@wowyuarm/dsh-agent-team/host": [
+      "@contexera/dsh-agent-team/host": [
         "./packages/agent-team/lib/types/index.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/invariant": [
+      "@contexera/dsh-agent-team/invariant": [
         "./packages/agent-team/lib/types/invariant.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/types": [
+      "@contexera/dsh-agent-team/types": [
         "./packages/agent-team/lib/types/types.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/typert": [
+      "@contexera/dsh-agent-team/typert": [
         "./packages/agent-team/lib/typert.host.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/remote": [
+      "@contexera/dsh-agent-team/remote": [
         "./packages/agent-team/lib/typert.remote-client.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/sqlite-backend": [
+      "@contexera/dsh-agent-team/sqlite-backend": [
         "./packages/agent-team/lib/types/vendor/storage-sqlite/index.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/compaction-engine": [
+      "@contexera/dsh-agent-team/compaction-engine": [
         "./packages/agent-team/lib/types/compaction-engine.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/member-context": [
+      "@contexera/dsh-agent-team/member-context": [
         "./packages/agent-team/lib/types/member-context.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/member-time-context": [
+      "@contexera/dsh-agent-team/member-time-context": [
         "./packages/agent-team/lib/types/member-time-context.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/time-format": [
+      "@contexera/dsh-agent-team/time-format": [
         "./packages/agent-team/lib/types/time-format.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/mentions": [
+      "@contexera/dsh-agent-team/mentions": [
         "./packages/agent-team/lib/types/mentions.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/member-skills": [
+      "@contexera/dsh-agent-team/member-skills": [
         "./packages/agent-team/lib/types/member-skills.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/tools": [
+      "@contexera/dsh-agent-team/tools": [
         "./packages/tool-agent-team/lib/types/index.d.ts"
       ],
-      "@wowyuarm/dsh-agent-team/client": [
+      "@contexera/dsh-agent-team/client": [
         "./packages/client-agent-team/lib/types/client/index.d.ts"
       ],
       "@deepseek-ai/dsh-storage-sqlite": [

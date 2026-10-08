@@ -4,7 +4,7 @@ import type {
   AgentTeamChannelRef,
   AgentTeamClientMemberStatus,
   AgentTeamMemberId,
-} from '@wowyuarm/dsh-agent-team/types'
+} from '@contexera/dsh-agent-team/types'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { rosterChannelName, rosterMember } from '../src/client/refs.ts'

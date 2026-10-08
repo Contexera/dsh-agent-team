@@ -11,7 +11,7 @@
  * (ledger, handles, notifications, recovery); this module owns per-Member
  * runtime invariants.
  *
- * @module @wowyuarm/dsh-agent-team/member-runtime
+ * @module @contexera/dsh-agent-team/member-runtime
  */
 
 import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'

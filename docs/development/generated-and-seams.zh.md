@@ -37,16 +37,16 @@ node scripts/sync-paths.mjs
 `generate:typert` 分析的是 Harness checkout 内的一份 Host face 副本，因此它自己准备那个临时包的外部依赖：context-continuity 引擎的已构建声明被复制进去，而 `zod` 从本仓库根安装链接过去——POSIX 上是 symlink，Windows 上是目录 junction（那里真正的 symlink 需要特权）。`zod` 必须保持为链接：复制会把 zod 自己的声明放进被分析的包内，分析器的 reachable-files 遍历会因此排入一个 program 从未加载的声明文件，以 `TypeError` 而非可诊断错误终止；反之链接若解析不到，才会以每个引用文件都报 `TS2307: Cannot find module 'zod'` 的形式暴露。
 
 ## Package 接缝与模块布局
-发布物是一个根 npm 包 `@wowyuarm/dsh-agent-team`，由根 `package.json` 及其 `exports` map 声明。三个 `packages/*` 目录没有自己的 manifest：它们是这个单一包的构建与导出接缝，各自有构建目标和 `exports` 条目。
+发布物是一个根 npm 包 `@contexera/dsh-agent-team`，由根 `package.json` 及其 `exports` map 声明。三个 `packages/*` 目录没有自己的 manifest：它们是这个单一包的构建与导出接缝，各自有构建目标和 `exports` 条目。
 
 ```text
-@wowyuarm/dsh-agent-team               根 manifest，一个发布包
+@contexera/dsh-agent-team               根 manifest，一个发布包
 ├── packages/agent-team         → ./host、./types、./typert、./remote 等
 ├── packages/tool-agent-team    → ./tools
 └── packages/client-agent-team  → .（插件入口）与 ./client
 ```
 
-因此消费方一律通过声明的 subpath（`@wowyuarm/dsh-agent-team/host`、`/remote`、`/types`、`/tools`、`/client`）访问，而不是用相对路径进入另一个目录的 `lib/`。生成的 `tsconfig*.json` facades 与 Client bundler 都映射这些 subpath；源码层跨接缝写相对导入，等于绕过"让生成产物可替换"的那份契约本身。`scripts/harness-dir.mjs` 是这些映射解析相邻 Harness checkout 的唯一指针。
+因此消费方一律通过声明的 subpath（`@contexera/dsh-agent-team/host`、`/remote`、`/types`、`/tools`、`/client`）访问，而不是用相对路径进入另一个目录的 `lib/`。生成的 `tsconfig*.json` facades 与 Client bundler 都映射这些 subpath；源码层跨接缝写相对导入，等于绕过"让生成产物可替换"的那份契约本身。`scripts/harness-dir.mjs` 是这些映射解析相邻 Harness checkout 的唯一指针。
 
 Host 源码刻意保持扁平。`packages/agent-team/src/` 按文件划分 authority 与接缝，有三个结构锚点——`index.ts` 是 composition root 与 Remote adapter，`ledger.ts` 是 durable authority，`spec.ts` 与 `types.ts` barrel 持有 record schema 与公开类型。其余每个文件都是一个 earned seam；它们各自的归属见 [`architecture/README.zh.md`](../architecture/README.zh.md)。
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import type { AgentTeamClientMemberStatus, AgentTeamJoinWorkspaceRequest } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamClientMemberStatus, AgentTeamJoinWorkspaceRequest } from '@contexera/dsh-agent-team/types'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamMemberRow } from './TeamMemberRow.tsx'
 import { mintRequestId } from './requests.ts'

@@ -92,13 +92,13 @@ describe('Agent Team shipping contract', () => {
     expect(patch).toContain('id: wowyuarm-agent-team-preset-team-member')
     expect(patch).toContain('id: team-member')
     expect(patch).toContain('agentPresets: true')
-    expect(patch).toContain("name: '@wowyuarm/dsh-agent-team/host'")
-    expect(patch).toContain("name: '@wowyuarm/dsh-agent-team'")
+    expect(patch).toContain("name: '@contexera/dsh-agent-team/host'")
+    expect(patch).toContain("name: '@contexera/dsh-agent-team'")
     // The upstream registry row must stay gone: the Harness line after rc.2
     // removes `@deepseek-ai/dsh-invariants` wholesale, and the companion now
     // validates the ledger from its own fiber (src/invariant.ts).
     expect(patch).not.toContain("name: '@deepseek-ai/dsh-invariants'")
-    expect(patch).toContain("name: '@wowyuarm/dsh-agent-team/invariant'")
+    expect(patch).toContain("name: '@contexera/dsh-agent-team/invariant'")
     // The Team ledger medium: only agent_team routes to SQLite through the
     // public per-domain route table. The backend is vendored under our own
     // package name (see packages/agent-team/src/vendor/storage-sqlite/):
@@ -108,7 +108,7 @@ describe('Agent Team shipping contract', () => {
     // bundle's) because insert blocks append rather than override: a
     // colliding id inside an insert list would duplicate the shipped row and
     // fail the boot sweep.
-    expect(patch).toContain("name: '@wowyuarm/dsh-agent-team/sqlite-backend'")
+    expect(patch).toContain("name: '@contexera/dsh-agent-team/sqlite-backend'")
     // The old host-package row must stay gone: re-adding it reintroduces the
     // Desktop boot block this vendoring exists to fix (GitHub issue #28).
     expect(patch).not.toContain('@deepseek-ai/dsh-storage-sqlite')
@@ -143,7 +143,7 @@ describe('Agent Team shipping contract', () => {
     const scopeGroup = composed.find(entry => entry.id === 'wowyuarm-agent-team-scope')
     const nestedRows = (Array.isArray(scopeGroup?.config) ? scopeGroup.config : []) as { id?: string; name?: string; config?: unknown }[]
     const hostRow = nestedRows.find(entry => entry.id === HUMAN_PROFILE_SETTINGS_NAMESPACE)
-    expect(hostRow?.name).toBe('@wowyuarm/dsh-agent-team/host')
+    expect(hostRow?.name).toBe('@contexera/dsh-agent-team/host')
     expect(hostRow?.config).toBeUndefined()
     // Both fields must be volatile: rc.1 derives one settings form per ACTIVE
     // plugin instance from that instance's Config schema, and a non-volatile
@@ -172,10 +172,10 @@ describe('Agent Team shipping contract', () => {
     for (const field of Object.values(judgeFields)) expect(field.meta.volatile).toBe(true)
     expect(judgeFields.apiKey?.meta.role).toBe('secret')
 
-    expect(preset).toContain("name: '@wowyuarm/dsh-agent-team/tools'")
+    expect(preset).toContain("name: '@contexera/dsh-agent-team/tools'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")
     expect(preset).toContain('mode: native')
-    expect(preset).toContain("name: '@wowyuarm/dsh-agent-team/member-context'")
+    expect(preset).toContain("name: '@contexera/dsh-agent-team/member-context'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-command-compact'")
     // Every lib directory that can enter the pack must be cleaned, so a
     // deleted source module cannot leave stale output behind.
@@ -308,7 +308,7 @@ describe('Agent Team shipping contract', () => {
     expect(manifest.files).toContain('packages/agent-team/core-skills/**/*')
     expect(manifest.files).toContain('packages/agent-team/lib/**/*')
     expect(manifest.files).toContain('packages/client-agent-team/lib/**/*')
-    expect(manifest.name).toBe('@wowyuarm/dsh-agent-team')
+    expect(manifest.name).toBe('@contexera/dsh-agent-team')
     // The context-continuity engine rides as a regular dependency, never a
     // peer: profiles set autoInstallPeers: false, so a peer nothing else
     // provides resolves for nobody — the external-layout e2e crashed exactly
@@ -327,7 +327,7 @@ describe('Agent Team shipping contract', () => {
       // class, so the module table has to answer for that request: the bundle
       // purity gate rejects the value import without this row.
       external: ['@deepseek-ai/dsh-api-gateway/client'],
-      inject: expect.not.arrayContaining(['@wowyuarm/dsh-agent-team/host']),
+      inject: expect.not.arrayContaining(['@contexera/dsh-agent-team/host']),
     })
     // An ordering hint for a package DSH no longer publishes is dead weight in
     // the manifest and a hard install failure as a peer.
@@ -343,7 +343,7 @@ describe('Agent Team shipping contract', () => {
     // source of truth. `.` is the bare package name and `./package.json` is not
     // a module; neither earns a facade row.
     const syncPaths = await readFile(resolve(root, 'scripts/sync-paths.mjs'), 'utf8')
-    const facaded = new Set([...syncPaths.matchAll(/'@wowyuarm\/dsh-agent-team\/([a-z-]+)'/g)].map(match => match[1]!))
+    const facaded = new Set([...syncPaths.matchAll(/'@contexera\/dsh-agent-team\/([a-z-]+)'/g)].map(match => match[1]!))
     for (const subpath of Object.keys(bundleManifest.exports)) {
       if (subpath === '.' || subpath === './package.json') continue
       expect(
@@ -373,7 +373,7 @@ describe('Agent Team shipping contract', () => {
     // package or this bundle's own name is reachable from a row.
     for (const row of rows) {
       expect(
-        row.startsWith('@deepseek-ai/') || row === '@wowyuarm/dsh-agent-team' || row.startsWith('@wowyuarm/dsh-agent-team/'),
+        row.startsWith('@deepseek-ai/') || row === '@contexera/dsh-agent-team' || row.startsWith('@contexera/dsh-agent-team/'),
         `preset row '${row}' is neither a host-closure package nor this bundle's own subpath, so a real profile cannot resolve it`,
       ).toBe(true)
     }
@@ -454,7 +454,7 @@ describe('Boot-critical host closure surface', () => {
           // Self-references resolve inside our own installed copy, which the
           // Desktop strip does not touch. Pinned to our own package name so a
           // typo'd sibling scope still fails below.
-          if (specifier === '@wowyuarm/dsh-agent-team' || specifier.startsWith('@wowyuarm/dsh-agent-team/')) continue
+          if (specifier === '@contexera/dsh-agent-team' || specifier.startsWith('@contexera/dsh-agent-team/')) continue
           const name = packageRoot(specifier)
           if (name !== undefined) note(name, file)
         }
@@ -466,7 +466,7 @@ describe('Boot-critical host closure surface', () => {
     for (const [text, via] of [[patch, 'cordis.patch.yml'], [preset, 'team-member preset definition']] as const) {
       for (const match of text.matchAll(/name:\s*['"]([^'"]+)['"]/g)) {
         const row = match[1]
-        if (row === undefined || row.startsWith('@wowyuarm/')) continue
+        if (row === undefined || row.startsWith('@contexera/')) continue
         const name = packageRoot(row)
         if (name !== undefined && name.startsWith('@deepseek-ai/')) note(name, via)
       }

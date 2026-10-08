@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberDiagnostic, AgentTeamMemberId } from '@wowyuarm/dsh-agent-team/types'
-import { AGENT_TEAM_HUMAN_HANDLE } from '@wowyuarm/dsh-agent-team/host'
+import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberDiagnostic, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
+import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'

@@ -24,7 +24,7 @@
  * manual-fold pattern the Host's context projection uses — so restart,
  * request reconstruction, and compaction all derive identical baselines
  * without a second durable store.
- * @module @wowyuarm/dsh-agent-team/member-time-context
+ * @module @contexera/dsh-agent-team/member-time-context
  */
 
 import type { Context } from '@deepseek-ai/cordis'

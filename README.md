@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh.md)
 
-[![npm](https://img.shields.io/npm/v/@wowyuarm/dsh-agent-team?style=flat-square)](https://www.npmjs.com/package/@wowyuarm/dsh-agent-team)
+[![npm](https://img.shields.io/npm/v/@contexera/dsh-agent-team?style=flat-square)](https://www.npmjs.com/package/@contexera/dsh-agent-team)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/wowyuarm/dsh-agent-team?include_prereleases&style=flat-square)](https://github.com/wowyuarm/dsh-agent-team/releases)
 [![Listed on Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/wowyuarm/dsh-agent-team/)
@@ -52,7 +52,7 @@ Install it globally if you want the `dsh` command for the steps below: `npm i -g
 Stop it, then install Agent Team into the `web` profile:
 
 ```sh
-dsh plugin --profile web add @wowyuarm/dsh-agent-team@0.2.1
+dsh plugin --profile web add @contexera/dsh-agent-team@0.2.1
 ```
 
 The version is pinned deliberately: pnpm skips releases published less than 24 hours ago, so an unpinned `@latest` install resolves to the previous release on release day.
@@ -104,7 +104,7 @@ The practical difference: a Member you created last week is still the same Membe
 Remove the bundle from the profile; this also removes its composed layers:
 
 ```sh
-dsh plugin --profile web remove @wowyuarm/dsh-agent-team
+dsh plugin --profile web remove @contexera/dsh-agent-team
 ```
 
 ## What it adds

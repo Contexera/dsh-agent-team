@@ -3,7 +3,7 @@
  *
  * The repository publishes one root package whose three `packages/*` directories
  * are build/export seams. A source file therefore reaches another seam through a
- * declared subpath (`@wowyuarm/dsh-agent-team/remote`), never by climbing out of
+ * declared subpath (`@contexera/dsh-agent-team/remote`), never by climbing out of
  * its own package directory with a relative specifier. Such an import bypasses
  * the `exports` map and the generated `tsconfig*.json` path facades, which is the
  * contract that keeps generated artifacts swappable.

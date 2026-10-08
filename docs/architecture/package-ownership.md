@@ -13,7 +13,7 @@ packages/agent-team
               typed Remote client + Team mode + browser presentation
 ```
 
-These three directories are the build and export seams of one published package, `@wowyuarm/dsh-agent-team`, declared by the root `package.json`; none has a manifest of its own. Dependency direction is one-way: Host never imports Client or tool implementation internals, tools resolve the live Host service at execution time, and Client consumes typed Remote plus public types and Harness slots — never another seam's generated `lib/` by relative path.
+These three directories are the build and export seams of one published package, `@contexera/dsh-agent-team`, declared by the root `package.json`; none has a manifest of its own. Dependency direction is one-way: Host never imports Client or tool implementation internals, tools resolve the live Host service at execution time, and Client consumes typed Remote plus public types and Harness slots — never another seam's generated `lib/` by relative path.
 
 [`generated-and-seams.md`](../development/generated-and-seams.md) owns the seam mechanics, the Host module layout, and the operation-extension checklist.
 

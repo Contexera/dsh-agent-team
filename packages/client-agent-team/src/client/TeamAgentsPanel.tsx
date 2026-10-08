@@ -3,7 +3,7 @@ import type {
   AgentTeamAddMemberRequest,
   AgentTeamClientMemberStatus,
   AgentTeamModelSelection,
-} from '@wowyuarm/dsh-agent-team/types'
+} from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { Button, IconArchiveOutlineRegular, IconEditOutlineRegular, IconPlayOutlineRegular, IconPlusOutlineRegular, IconRefreshOutlineRegular, Input, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamSidebarProps } from './slots.ts'

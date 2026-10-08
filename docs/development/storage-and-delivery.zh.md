@@ -3,7 +3,7 @@
 [English](storage-and-delivery.md) | 中文
 
 ## Team ledger 存储路由
-`agent_team` 域经根 `cordis.patch.yml` 的公开组合路由到 SQLite 后端：插入自有包名下的后端行 `@wowyuarm/dsh-agent-team/sqlite-backend`（介质为 `$DSH_HOME/storages/agent_team.sqlite`），并以顶层覆写行把 `storage-domain` 配置为 `backend: json` 加 `routes: { agent_team: sqlite }`。其余域保持 JSON 默认路由。
+`agent_team` 域经根 `cordis.patch.yml` 的公开组合路由到 SQLite 后端：插入自有包名下的后端行 `@contexera/dsh-agent-team/sqlite-backend`（介质为 `$DSH_HOME/storages/agent_team.sqlite`），并以顶层覆写行把 `storage-domain` 配置为 `backend: json` 加 `routes: { agent_team: sqlite }`。其余域保持 JSON 默认路由。
 
 - 覆写必须是顶层行而非 insert 列表项：insert 只追加新行，重复 id 会让装配失败。`packages/agent-team/tests/shipping.spec.ts` 用生产解析器（`loadOverlayPatches` + `applyEntryPatches`）模拟「Web bundle 层 + 本 bundle 层」叠加来锁住这一接线。
 - 该后端是 vendored fork（MIT，上游 `dsh-storage-sqlite` 0.1.5-rc.2，见 `packages/agent-team/src/vendor/storage-sqlite/`），而非对上游包的依赖：DSH Desktop generation 安装器会删掉 `@deepseek-ai/*` 拷贝，而没有任何已发布 host closure 提供上游包，因此 loader 行若指名它会阻断启动（GitHub issue #28）。fork 保留上游 `sqlite` backend 名与 config 形状，既有介质无需迁移；上游包只保留为 devDependency，用作字节兼容 fixture 参照。三个检查锁住这一面：`packages/agent-team/tests/storage-sqlite-compat.spec.ts` 在真实 ledger descriptor 下证明双向可读，`shipping.spec.ts` 把全部可达运行时根钉在 host closure 内，`node scripts/verify-desktop-strip-boot.mjs` 对删包后的 generation 重放一次真实 Loader 启动。每次 DSH 兼容认证都要把 fork 与上游文件对一遍 diff。

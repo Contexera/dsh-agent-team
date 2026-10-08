@@ -10,7 +10,7 @@
  * passes through this module; a future configuration layer may make the
  * zone configurable, but the render must stay a single deterministic
  * formatter per stored instant.
- * @module @wowyuarm/dsh-agent-team/time-format
+ * @module @contexera/dsh-agent-team/time-format
  */
 
 /** The fixed Team coordination offset from UTC, in minutes. */

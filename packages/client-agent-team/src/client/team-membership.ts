@@ -8,7 +8,7 @@ import type {
   AgentTeamRemoveChannelMemberRequest,
   AgentTeamRemoveChannelMemberResult,
   AgentTeamRequestId,
-} from '@wowyuarm/dsh-agent-team/types'
+} from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 

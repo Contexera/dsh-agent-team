@@ -15,7 +15,7 @@
  * `unit_globals` table. Each primitive is a single statement, so atomicity
  * comes from SQLite itself — no explicit transactions, and no write queue
  * (write ordering is the caller's responsibility per the KV contract).
- * @module @wowyuarm/dsh-agent-team/sqlite-backend/unit
+ * @module @contexera/dsh-agent-team/sqlite-backend/unit
  */
 
 import type { DatabaseSync, StatementSync } from 'node:sqlite'

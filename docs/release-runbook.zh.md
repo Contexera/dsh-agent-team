@@ -2,7 +2,7 @@
 
 [English](release-runbook.md) | 中文
 
-本文是发布 `@wowyuarm/dsh-agent-team` 一个版本的操作流程。它存在的意义是：维护者只看这一页就能跑完一次发布，包括那些因为曾经有缺陷流到用户手里才加上的检查。它不是行为规范——行为由源码与测试定义；而「这个 bundle 支持哪条 DSH 线」是另一个问题，由 [`dsh-release-compatibility.md`](dsh-release-compatibility.md) 负责。认证决定 peer 范围，本文决定承载该决定的版本如何到达 npm。
+本文是发布 `@contexera/dsh-agent-team` 版本的操作流程。它存在的意义是：维护者只看这一页就能跑完一次发布，包括那些因为曾经有缺陷流到用户手里才加上的检查。它不是行为规范——行为由源码与测试定义；而「这个 bundle 支持哪条 DSH 线」是另一个问题，由 [`dsh-release-compatibility.md`](dsh-release-compatibility.md) 负责。认证决定 peer 范围，本文决定承载该决定的版本如何到达 npm。
 
 ## 1. 谁决定什么
 
@@ -82,10 +82,10 @@ npm publish --tag <dist-tag> --access public
 
 ## 6. 发布后核验
 
-1. `npm view @wowyuarm/dsh-agent-team dist-tags.<dist-tag>`——等于 §5 发布时所用的那个 tag 值 `X.Y.Z`。占用 `latest` 的发布同时会移动 packument 自身的 `version`；预发布停在自己的 tag 上，`latest` 留在原处。
+1. `npm view @contexera/dsh-agent-team dist-tags.<dist-tag>`——等于 §5 发布时所用的那个 tag 值 `X.Y.Z`。占用 `latest` 的发布同时会移动 packument 自身的 `version`；预发布停在自己的 tag 上，`latest` 留在原处。
 2. GitHub Release 存在、带显式标题，两种语言段落都能渲染。
 3. 置顶的兼容性讨论里能看到新的发布评论。
-4. 稳定 profile 按**精确版本**安装：`dsh plugin --profile web add @wowyuarm/dsh-agent-team@X.Y.Z`。直接 `update` 可能报「Already Up to date」，因为 lockfile 钉住了解析结果；不能让 profile 停留在「读更新的 ledger、跑更旧的 bundle」的状态——两个 profile 共用 `$DSH_HOME/storages/`。
+4. 稳定 profile 按**精确版本**安装：`dsh plugin --profile web add @contexera/dsh-agent-team@X.Y.Z`。直接 `update` 可能报「Already Up to date」，因为 lockfile 钉住了解析结果；不能让 profile 停留在「读更新的 ledger、跑更旧的 bundle」的状态——两个 profile 共用 `$DSH_HOME/storages/`。
 5. 在**空目录里全新安装**，确认 bundle 是从 registry 加载的——不是从 checkout，也不是通过源码软链接。
 6. §2 第 4 步修正过的正文，从 `raw.githubusercontent.com` 读回来仍然正确，而不只是在工作树里正确。
 7. `npm run check:public-baseline` 针对已发布版本为绿。

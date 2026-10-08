@@ -1,5 +1,5 @@
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamAttachmentId, AgentTeamGetAttachmentRequest, AgentTeamGetAttachmentResult } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamAttachmentId, AgentTeamGetAttachmentRequest, AgentTeamGetAttachmentResult } from '@contexera/dsh-agent-team/types'
 
 /** Base64 one file payload in chunks so large uploads stay off the call-stack limit. */
 export function bytesToBase64(bytes: Uint8Array): string {

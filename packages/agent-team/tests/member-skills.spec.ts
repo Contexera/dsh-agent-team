@@ -57,8 +57,8 @@ async function memberSkillsHarness(): Promise<{
   // names resolve through the linked node_modules (the bundle self-link plus
   // harness checkout links).
   const teamMemberPlugins = [
-    { id: 'member-context', name: '@wowyuarm/dsh-agent-team/member-context' },
-    { id: 'team-tools', name: '@wowyuarm/dsh-agent-team/tools' },
+    { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
+    { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
     { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
   ]
 

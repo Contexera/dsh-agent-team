@@ -158,7 +158,7 @@ async function buildSharedHarness(): Promise<{
   // distinguishable-tool fixture is a real module beside this spec, where its
   // own imports resolve.
   const teamMemberPlugins = [
-    { id: 'member-context', name: '@wowyuarm/dsh-agent-team/member-context' },
+    { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
     { id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href },
   ]
 
