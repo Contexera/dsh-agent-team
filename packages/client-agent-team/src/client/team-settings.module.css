@@ -332,3 +332,12 @@
     flex-direction: column;
   }
 }
+
+/* A refused settings write, stated under the control that made it: the switch
+   must not sit in a state the Host never accepted without saying so. */
+.groupNotice {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}

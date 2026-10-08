@@ -1,7 +1,7 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useRef, useState, useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  Button, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, Input,
+  Button, Checkbox, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, Input,
   SettingsForm, SettingsSecretField, SettingsValueField, type SettingsFieldState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
@@ -224,12 +224,15 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
     </div>
     {judgeForm === undefined
       ? null
-      : <JudgeGroup
-          t={t}
-          form={judgeForm}
-          judge={props.judge}
-          keyConfigured={props.keyConfigured}
-        />}
+      : <Fragment>
+          <JudgeGroup
+            t={t}
+            form={judgeForm}
+            judge={props.judge}
+            keyConfigured={props.keyConfigured}
+          />
+          <ReplyGroup t={t} form={judgeForm} />
+        </Fragment>}
     <div className={css.environment}>
       <EnvironmentCheck t={t} environment={props.environment} />
     </div>
@@ -261,6 +264,48 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
  * derived, because a deployment may mount a judge from configuration this page
  * cannot see, and it states what the Host answered rather than predicting it.
  */
+/**
+ * The quote-reply switch.
+ *
+ * It rides the same settings document as the judge's endpoint — one section,
+ * one revision — but writes on the click instead of on a Save, because a
+ * switch that appears to do nothing until something else is pressed reads as
+ * broken. The Host is what actually gates the feature; this control only asks.
+ */
+function ReplyGroup(props: {
+  readonly t: PropsLocale<'team'>['t']
+  readonly form: TeamJudgeForm
+}) {
+  const { t, form } = props
+  const state = useSyncExternalStore(form.subscribe, form.getSnapshot, form.getSnapshot)
+  const [failed, setFailed] = useState(false)
+  const [pending, setPending] = useState(false)
+  // An absent value is the Host's own default, which is on.
+  const enabled = state.fields.replyEnabled.text !== 'off'
+
+  const toggle = async (next: boolean): Promise<void> => {
+    setPending(true)
+    setFailed(false)
+    const landed = await form.setReplyEnabled(next)
+    setPending(false)
+    if (!landed) setFailed(true)
+  }
+
+  return <div className={css.group}>
+    <span className={css.groupTitle}>{t('teamReplyGroupTitle')}</span>
+    <div className={css.groupBody} role="group" aria-label={t('teamReplyGroupTitle')} data-team-reply>
+      <Checkbox
+        checked={enabled}
+        disabled={!state.shell.writable || pending}
+        label={t('teamReplyEnabled')}
+        onChange={(next) => { void toggle(next) }}
+      />
+      <p className={css.groupHint}>{t('teamReplyGroupHint')}</p>
+      {failed && <p className={css.groupNotice} role="alert">{t('teamReplyWriteFailed')}</p>}
+    </div>
+  </div>
+}
+
 function JudgeGroup(props: {
   readonly t: PropsLocale<'team'>['t']
   readonly form: TeamJudgeForm

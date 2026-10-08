@@ -218,6 +218,12 @@ export interface AgentTeamResolveThreadRefsResult {
   readonly resolved: readonly AgentTeamResolvedThreadRef[]
 }
 
+/** Whether this deployment offers quote-replies. */
+export interface AgentTeamReplySettings {
+  /** On unless the Team Host row turns it off. */
+  readonly enabled: boolean
+}
+
 /**
  * Look up the context of Messages cited by `replyToMessageRef`. A reply stores
  * only its parent's identity, so the author and the excerpt a reader sees are

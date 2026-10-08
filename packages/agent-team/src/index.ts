@@ -125,6 +125,7 @@ import type {
   AgentTeamRemoveMemberRequest,
   AgentTeamRemoveMemberResult,
   AgentTeamReplyRequest,
+  AgentTeamReplySettings,
   AgentTeamReplyResult,
   AgentTeamSendMessageRequest,
   AgentTeamSendMessageResult,
@@ -388,6 +389,14 @@ export interface Config {
   readonly gate: TeamGateSettings
   /** The relatedness judge's own settings; a key here is what mounts it. */
   readonly jev: TeamJudgeSettings
+  /**
+   * Whether quoting a specific Message is available at all. On unless a
+   * deployment turns it off, because the feature changes how a Thread reads and
+   * how answering a Member delivers — a Team that does not want it says so. The
+   * Host is the authority: the Client hides the affordance, and the write
+   * itself is refused here.
+   */
+  replyEnabled: Volatile<boolean | undefined>
 }
 
 /** The Host row's `gate` fields, as the settings service reads and writes them. */
@@ -449,6 +458,7 @@ const TEAM_JUDGE_SETTINGS_SCHEMA = z.object({
  */
 export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
+  replyEnabled: z.boolean().volatile().description('Quote-replies: link a Thread message to the one it answers, and deliver to that message\'s author. On unless turned off here.'),
   gate: TEAM_PRESSURE_GATE_SCHEMA,
   jev: TEAM_JUDGE_SETTINGS_SCHEMA,
 })
@@ -644,6 +654,13 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /** The Host row's judge settings, as one plain config for the mount. */
+  /** Whether quote-replies are available; the one place the flag is read. */
+  private repliesEnabled(): boolean {
+    // On unless a deployment states otherwise: the feature is useful out of the
+    // box, and the switch exists to turn it off, not to hide it.
+    return this.config.replyEnabled.get() !== false
+  }
+
   private judgeConfig(): TeamContextJudgeConfig {
     return {
       apiKey: this.config.jev.apiKey.get(),
@@ -981,6 +998,9 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('resolveMessageRefs')
   resolveMessageRefs(request: AgentTeamResolveMessageRefsRequest): AgentTeamResolveMessageRefsResult {
     this.requireWorkspace(request.workspaceId)
+    // A quote is part of the reply feature: with it off there is nothing to
+    // resolve, and returning none keeps a stored link from rendering anyway.
+    if (!this.repliesEnabled()) return Object.freeze({ resolved: Object.freeze([]) })
     const seen = new Set<AgentTeamMessageRef>()
     const messageRefs = request.messageRefs.filter(messageRef => {
       if (seen.has(messageRef)) return false
@@ -1872,6 +1892,12 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('reply')
   async reply(request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
     return this.replyAs(this.humanCall(request.workspaceId), request)
+  }
+
+  /** Whether this deployment offers quote-replies; the Client gates its affordance on it. */
+  @Remote('replySettings')
+  replySettings(): AgentTeamReplySettings {
+    return Object.freeze({ enabled: this.repliesEnabled() })
   }
 
   /** Human's personal Attention operation. */
@@ -2768,6 +2794,11 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Shared existing-Thread reply commit: same upload resolution and outcome emission. */
   private async replyAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
+    // The switch is the Host's, not the Client's: hiding the affordance is a
+    // courtesy, and this is what actually decides.
+    if (request.replyToMessageRef !== undefined && !this.repliesEnabled()) {
+      throw new Error('quote-replies are disabled for this Team')
+    }
     try {
       const metadata = await this.resolveMessageAttachments(request)
       const result = await this.requireLedger().reply({
@@ -3433,6 +3464,7 @@ export default class AgentTeam extends TypertRemoteService {
           const detail = ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Channel: ${item.channelRef}`,
             ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
             `Thread: ${item.thread.threadRef}`, `Message ref: ${fact.message.messageRef}`,
+            ...(fact.message.replyToMessageRef === undefined || !this.repliesEnabled() ? [] : [`Replies to: ${fact.message.replyToMessageRef}`]),
             `Message: ${this.boundedNotificationBody(fact.message.body)}`].join('\n')
           if (append(detail)) detailedFactCount += 1
         } else if (fact.kind === 'activity') {

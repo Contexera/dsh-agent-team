@@ -272,10 +272,12 @@
   .messageRow:focus-within .messageActions { opacity: 1; }
 }
 .messageAction {
-  background: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l2);
+  /* Quiet at rest, a surface under the pointer — the identity line states who
+     wrote the Message, and a permanent button there would compete with it. */
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--dsw-radius-sm, 8px);
-  color: var(--dsw-alias-label-secondary);
+  color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
   font-size: 11px;
   /* Exactly the identity line's own height, so revealing the action never
@@ -284,7 +286,10 @@
   line-height: 18px;
   padding: 0 8px;
 }
-.messageAction:hover { color: var(--dsw-alias-label-primary); }
+.messageAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
 .messageAction:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 1px;

@@ -42,7 +42,11 @@ describe('judge endpoint form', () => {
     expect(state.fields.model.text).toBe('jev-1.13.0')
     // The `gate` thresholds and the key environment variable share the row and
     // are not this page's controls; the projection carries no field for them.
-    expect(Object.keys(state.fields)).toEqual(['apiBase', 'model', 'apiKey'])
+    // The reply switch is a row-level control riding the same document, so it
+    // is here while those stay absent.
+    expect(Object.keys(state.fields)).toEqual(['apiBase', 'model', 'apiKey', 'replyEnabled'])
+    // Absent means the Host default, which is on; only an explicit false is off.
+    expect(state.fields.replyEnabled.text).toBe('on')
   })
 
   it('never seeds the key control: the literal does not ride a response', () => {

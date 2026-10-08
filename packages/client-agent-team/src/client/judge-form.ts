@@ -1,5 +1,5 @@
 import {
-  SettingsFormModel, settingsTextField,
+  SettingsFormModel, settingsTextField, type SettingsFieldSpec,
   type SettingsFieldState, type SettingsFormActions, type SettingsFormPathOp, type SettingsFormScope,
   type SettingsFormScopeSnapshot, type SettingsFormShell,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -29,7 +29,21 @@ const FIELD_PATHS = {
   apiBase: [JUDGE_GROUP, 'apiBase'],
   model: [JUDGE_GROUP, 'model'],
   apiKey: [JUDGE_GROUP, 'apiKey'],
+  // The reply switch is a row-level setting, not part of the judge's group:
+  // it decides a collaboration affordance, not an endpoint.
+  replyEnabled: ['replyEnabled'],
 } as const
+
+/**
+ * The reply switch as the staged form sees it. The stored value is a boolean
+ * while the model stages text, so this maps between the two; an absent value
+ * means the Host default, which is on.
+ */
+const REPLY_ENABLED_FIELD: SettingsFieldSpec = {
+  field: 'replyEnabled',
+  format: value => value === false ? 'off' : 'on',
+  parse: text => ({ kind: 'set', value: text === 'on' }),
+}
 
 /** One control this page owns. */
 export type TeamJudgeField = keyof typeof FIELD_PATHS
@@ -129,6 +143,7 @@ export class TeamJudgeForm {
     this.model = new SettingsFormModel<Record<string, unknown>>(this.scope, [
       settingsTextField('apiBase'),
       settingsTextField('model'),
+      REPLY_ENABLED_FIELD,
     ], [{
       field: 'apiKey',
       // The literal never rides a response, so a draft is only ever what the
@@ -149,6 +164,23 @@ export class TeamJudgeForm {
   /** Stage a draft, reset a field, save every staged edit, or discard them. */
   actions(): SettingsFormActions {
     return { ...this.model.actions(), save: () => { void this.save() } }
+  }
+
+  /**
+   * Turn quote-replies on or off.
+   *
+   * Written at once rather than staged, for the same reason `clearKey` is: a
+   * switch that waits for a Save reads as broken, and the reply affordance is
+   * gated on the Host's answer, which this write moves immediately.
+   * @param enabled - whether the Team offers quote-replies.
+   * @returns whether the Host accepted the write.
+   */
+  async setReplyEnabled(enabled: boolean): Promise<boolean> {
+    try {
+      return await this.section.mutate([{ op: 'set', path: [...FIELD_PATHS.replyEnabled], value: enabled }])
+    } catch {
+      return false
+    }
   }
 
   /**
