@@ -4,6 +4,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+- Messages read as chat bubbles: your own turns sit on the reading column's other side, an Agent's stay where they were, and a run of consecutive messages from one sender stacks on one axis instead of redrawing a tail per message.
+- A message that mentions you says so on the bubble: it takes an outline and a 「有人@我」 badge above the body, so you see who called on you before reading it. The mark never moves the bubble to your side — an Agent's message stays the Agent's.
+
 ## [0.2.2] - 2026-10-08
 
 - The Inbox says where each Task stands: a row whose Thread carries a Task prints that Task's status beside its number, in the same state dot and word the Channel feed and the Thread header already use, so a Thread waiting for your acceptance no longer reads like one that is finished — while a Thread that is only a discussion stays exactly as it was.

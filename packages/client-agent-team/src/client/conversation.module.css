@@ -82,10 +82,15 @@
   padding: 2px 0 8px;
 }
 
-.messageRow { display: flex; gap: 10px; padding: 10px 0; }
-.messageRow[data-grouped] { padding-top: 2px; }
-.messageRow[data-grouped] .messageBody > :first-child,
-.messageRow[data-grouped] .messageBody > :first-child > :first-child { margin-top: 0; }
+.messageRow { align-items: flex-start; display: flex; gap: 10px; padding: 4px 0; }
+/* The column order is a chat convention: the reader's own turns sit on the
+   other side from everyone else's. It carries only that — the bubble itself
+   spans the full width, so no message is squeezed into half a reading column. */
+.messageRow[data-side='end'] { flex-direction: row-reverse; }
+.messageRow[data-side='end'] .nameRow { flex-direction: row-reverse; }
+.messageRow[data-grouped] { padding-top: 1px; }
+.messageRow[data-grouped] .messageIdentity,
+.messageRow[data-grouped] .messageIdentityImage { visibility: hidden; }
 .messageIdentity {
   align-items: center;
   background: hsl(var(--team-avatar-hue, 212) 42% 46%);
@@ -98,6 +103,9 @@
   font-weight: 600;
   height: 28px;
   justify-content: center;
+  /* Clears the identity line so the face sits level with the bubble's first
+     line instead of the sender's name. */
+  margin-top: 22px;
 }
 .messageRow[data-human] .messageIdentity {
   background: var(--dsw-alias-state-business-primary);
@@ -109,16 +117,90 @@
   corner-shape: round;
   flex: 0 0 28px;
   height: 28px;
+  margin-top: 22px;
   object-fit: cover;
 }
-.messageRow[data-grouped] .messageIdentity,
-.messageRow[data-grouped] .messageIdentityImage { visibility: hidden; }
-.messageBody { min-width: 0; }
+/* The text column claims the whole track beside the avatar seat, so a long
+   Message may use the full reading width, while `align-items` lets a short one
+   shrink back onto its own content — a four-word reply must not paint a
+   full-width bar. The bubble's own `max-width: 100%` is what stops a long body
+   from overflowing the column, and `min-width: 0` keeps an unbroken token from
+   forcing the flex track wider than the column. */
+.messageBody {
+  align-items: flex-start;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+/* The reader's own turns hug their own edge, so a short reply sits next to the
+   avatar instead of floating at the far end of an empty bar. */
+.messageRow[data-side='end'] .messageBody { align-items: flex-end; }
 .nameRow {
   align-items: baseline;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  padding: 0 4px;
+}
+
+/* ---- The bubble ------------------------------------------------------- */
+/* One Message is one bubble, and every Message has one — a mention mark is
+   added on top of the bubble, never a condition for drawing it.
+   The bubble spans the full column on both sides: the reader wants the whole
+   reading width, so no chat-bubble cap squeezes a long Agent answer into half
+   a column.
+   Every bubble carries one fill and one radius, for every author. Sender
+   attribution rides the side and the identity line alone: a per-author tint
+   makes one person's words look like a different material, and a pointed
+   "tail" corner reads as a rendering fault once the bubble is clamped or
+   expanded. A same-sender run still reads as one turn through its suppressed
+   identity chrome, which is the cue the reader already uses.
+   The fill and the radius are the shipped chat bubble's own recipe
+   (`--dsw-specific-bubble` + `--dsw-radius-xl`, exactly what the Harness
+   conversation paints a bubble with). It is a theme-aware pair — deepseek-50
+   on light, neutral-bluish-850 on dark — so the bubble reads on both. A
+   surface tier such as `bg-layer-1` resolves to pure white on light and would
+   leave the bubble invisible against the page, and invented names such as
+   `bg-base-secondary` exist nowhere in the shipped theme at all. */
+.messageBubble {
+  background: var(--dsw-specific-bubble);
+  border-radius: var(--dsw-radius-xl, 20px);
+  color: var(--dsw-alias-label-primary);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 8px 12px;
+}
+
+/* ---- 「有人@我」 ------------------------------------------------------ */
+/* The mark states one fact — this Message names the reader — and never moves
+   the bubble. An Agent's mention of the reader is still the Agent's Message,
+   and a reader who saw it on their own side would think they wrote it. It
+   leads the bubble as its first line because it is what the reader must know
+   before the body, and it names the recipient rather than the author, so it
+   never belongs on the identity line.
+   The warn pairing is the shipped recipe for "attention, not an error":
+   tertiary fill with the matching label colour (see the environment check's
+   out-of-range block), which reads on both themes without a new token.
+   The label carries its own `@`, so no separate mark glyph is drawn beside it
+   — an icon plus a label that already starts with `@` reads as a double mark. */
+.messageRow[data-mentions-me] .messageBubble {
+  border: 1px solid var(--dsw-alias-state-warn-label);
+}
+.mentionsMeBadge {
+  align-items: center;
+  background: var(--dsw-alias-state-warn-tertiary);
+  border-radius: 999px;
+  color: var(--dsw-alias-state-warn-label);
+  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  /* Right-aligned block leading the bubble: the body starts on the next line,
+     so the badge needs no negative margin to sit against the bubble's edge —
+     which would push a Markdown body's first paragraph under it. */
+  margin: 0 0 6px auto;
+  padding: 1px 8px;
+  width: fit-content;
 }
 /* The sender is the secondary grade of the content axis — one step under the
  * body, 13px/20px at the default content size — so a raised Settings size
@@ -194,11 +276,13 @@
 .entryRow:hover .entryArrow,
 .entryRow:focus-visible .entryArrow { transform: translateX(2px); }
 /* Literal human text: the shared MessageText primitive, or segmented mention
-   spans — both need the same pre-wrap metrics from this container. */
+   spans — both need the same pre-wrap metrics from this container. Inside a
+   bubble the vertical rhythm comes from the bubble's own padding, so the block
+   margins collapse to the first/last-child edges only. */
 .messageText {
   font-size: var(--dsh-content-font-size, 14px);
   line-height: calc(22px + var(--dsh-content-font-delta, 0px));
-  margin: 6px 0;
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -244,6 +328,11 @@
    them, and a broken reset would let the primitive's own root font shorthand
    render the clamped preview larger than the expanded body. */
 .messageBody .messageMarkdown > div:first-child { color: var(--dsw-alias-label-primary); font: inherit; }
+/* Inside the bubble the block grid opens and closes flush with the padding:
+   a leading `6px` on the first paragraph would read as a gap the bubble itself
+   did not ask for, and the same at the tail. */
+.messageBubble .messageMarkdown > div:first-child > :first-child { margin-top: 0; }
+.messageBubble .messageMarkdown > div:first-child > :last-child { margin-bottom: 0; }
 .messageBody .messageMarkdown p { margin: 6px 0; }
 .messageBody .messageMarkdown :where(ul, ol) { margin: 6px 0; padding-left: 22px; }
 .messageBody .messageMarkdown li + li { margin-top: 2px; }
@@ -366,7 +455,10 @@
   .headerActions { flex-wrap: wrap; }
   .backRow { margin-bottom: 6px; }
   .timeline { padding: 8px 12px 16px; scrollbar-gutter: auto; }
-  .messageRow { padding: 8px 0; }
+  .messageRow { gap: 8px; padding: 3px 0; }
+  /* The avatar seat and the bubble's own padding are the whole gutter on a
+     narrow column; the bubble keeps the full remaining width. */
+  .messageBubble { padding: 7px 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -408,6 +500,12 @@
   position: absolute;
 }
 
+/* The reader's own rows mirror that geometry: the hairline and the divider
+   label hug the text column, which is on the other side once the row flips. */
+.messageRow[data-side='end'][data-grouped]:has([data-thread-entry])::before {
+  inset: 0 38px auto 0;
+}
+
 /* Turn divider inside one run: same-sender messages separated by a real
    waiting gap (isRunGap) are separate turns — the hairline restores their
    block boundary and the label below it shows the later message's instant,
@@ -425,6 +523,13 @@
   line-height: 16px;
   margin: 2px 0 0 38px;
   padding: 5px 0 0;
+}
+/* The divider and its label hug the text column, so on the reader's own side
+   they mirror with the column instead of pointing at the avatar gutter. */
+.runDivider[data-side='end'] {
+  margin-left: 0;
+  margin-right: 38px;
+  text-align: right;
 }
 .runDivider + .messageRow[data-grouped]:has([data-thread-entry]) {
   margin-top: 0;

@@ -19,7 +19,7 @@ import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
-import { firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, taskStatusDot, type MentionHandle } from './team-formatters.ts'
+import { firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, mentionsHuman, taskStatusDot, type MentionHandle } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { daySeparatorLabel, isRunGap, timelineDayKey } from './team-separators.ts'
@@ -501,11 +501,21 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       const sender = memberName(fact.message.sender)
       const senderStatus = members.find(candidate => candidate.member.memberId === fact.message.sender)
       const human = fact.message.sender === channelView?.humanMemberId
+      // The mark answers "does this need me now?", so it rides the unread
+      // batch: a mention the reader has already acknowledged keeps its inline
+      // chip in the body but stops asking for attention. Both halves come from
+      // the Host — `mentions` is the delivery fact and `unread` is the read
+      // fact — so a marked bubble is exactly one whose mention reached the
+      // reader and is still unacknowledged. A Message never mentions its own
+      // author, so the reader's own row can never carry it.
+      const mentionedMe = !human && mentionsHuman(fact.mentions) && metadata.get(factKey(fact))?.unread === true
       return <TeamMessage
         key={factKey(fact)}
         senderName={sender}
         memberId={fact.message.sender}
         human={human}
+        mentionsHuman={mentionedMe}
+        readerName={humanName}
         {...(human && humanAvatarUrl !== undefined ? { avatarUrl: humanAvatarUrl } : {})}
         body={fact.message.body}
         attachments={fact.message.attachments}
@@ -539,7 +549,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
               const previous = entryIndex > 0 ? run[entryIndex - 1] : undefined
               const turnGap = entry.kind === 'message' && isRunGap(previous?.kind === 'message' ? previous.message.occurredAt : undefined, entry.message.occurredAt)
               return <Fragment key={factKey(entry)}>
-                {turnGap && <TeamRunDivider occurredAt={entry.message.occurredAt} />}
+                {turnGap && <TeamRunDivider occurredAt={entry.message.occurredAt} side={entry.message.sender === channelView?.humanMemberId ? 'end' : 'start'} />}
                 {renderFact(entry, entryIndex > 0)}
               </Fragment>
             })}

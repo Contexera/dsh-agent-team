@@ -145,7 +145,27 @@ export interface MentionSegment {
   readonly name?: string
 }
 
-/** The Human's handle before they could rename themselves; the Host keeps it as an alias. */
+/**
+ * The Human's durable Member id. It is the ledger's own identity for the
+ * reader (`AGENT_TEAM_HUMAN_MEMBER_ID` on the Host), spelled here because a
+ * client package must not import a Host package. The same literal is already
+ * the reference for the historic handle below and for draft mention
+ * resolution, so there is one spelling in this package, not three.
+ */
+export const HUMAN_MEMBER_ID = 'member:human' as AgentTeamMemberId
+
+/**
+ * Whether one Message's structured mention facts name the Human reader. This is
+ * the Host's delivery fact rather than a scan of the body, so a bubble marked
+ * by it is exactly one whose mention reached the reader. A Message never
+ * mentions its own author, so a Human-authored Message can never qualify.
+ */
+export function mentionsHuman(mentions: readonly AgentTeamMemberId[]): boolean {
+  return mentions.includes(HUMAN_MEMBER_ID)
+}
+
+/**
+ * The Human's handle before they could rename themselves; the Host keeps it as an alias. */
 export const HUMAN_HISTORIC_HANDLE = 'human'
 
 /**
@@ -241,7 +261,7 @@ export function mentionedMemberIds(body: string, members: readonly AgentTeamClie
   // The draft's author is the Human reader, and a Message never mentions its
   // own author: resolving with that sender drops a self-call exactly where
   // delivery would.
-  return resolveBodyMentions(body, candidates, 'member:human' as AgentTeamMemberId).memberIds
+  return resolveBodyMentions(body, candidates, HUMAN_MEMBER_ID).memberIds
 }
 
 /**
@@ -261,7 +281,7 @@ export function mentionNamesOf(
   humanName: string,
 ): MentionHandle[] {
   return mentions
-    .map((memberId): MentionHandle | undefined => memberId === 'member:human'
+    .map((memberId): MentionHandle | undefined => memberId === HUMAN_MEMBER_ID
       ? (humanName.toLowerCase() === HUMAN_HISTORIC_HANDLE ? humanName : { name: humanName, also: [HUMAN_HISTORIC_HANDLE] })
       : handles.get(memberId))
     .filter((name): name is MentionHandle => name !== undefined)
@@ -421,6 +441,9 @@ export function planMessageBody(body: string, options: {
     : undefined
   const fallbackNames = inline !== undefined ? inline.unmatched
     : richAgentBody && options.canOpenRefs && options.mentionNames !== undefined
+      // Rich Markdown with ref navigation chips mentions in place from the
+      // rendered DOM (renderResolvedMarkdownText), so the names it painted must
+      // not also be listed below: the reader would see the same @name twice.
       ? splitMentionNames(displayBody, options.mentionNames).unmatched
       : (options.mentionNames ?? []).map(mentionNameOf)
   const refs = splitBrandedRefs(displayBody).flatMap(segment => segment.ref === undefined ? [] : [segment.ref])

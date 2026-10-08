@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thread 聊天气泡 + 「有人@我」标记 · 原型</title>
+<style>
+/* ------------------------------------------------------------------
+ * 原型专用样式。真实实现会落到 conversation.module.css，并使用 DSH
+ * 的 --dsw-alias-* / --dsh-content-* token。这里用同名 token 的本地
+ * 兜底值，便于单文件离线打开。
+ * ------------------------------------------------------------------ */
+:root {
+  --proto-bg: #ffffff;
+  --proto-surface: #f5f6f8;
+  --proto-bubble-agent: #f2f3f5;
+  --proto-bubble-human: #dceafd;
+  --proto-bubble-human-strong: #c7ddfb;
+  --proto-text: #1b1c1e;
+  --proto-text-2: #6b6f76;
+  --proto-text-3: #9aa0a8;
+  --proto-border: #e3e5e8;
+  --proto-business: #2a6df4;
+  --proto-mention: #b4552a;
+  --proto-mention-bg: #fdede2;
+  --proto-hairline: #e8eaee;
+  --proto-radius: 14px;
+  --proto-shadow: 0 1px 2px rgba(16, 20, 28, .05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --proto-bg: #17181a;
+    --proto-surface: #1e2023;
+    --proto-bubble-agent: #26282c;
+    --proto-bubble-human: #2b3b55;
+    --proto-bubble-human-strong: #33496a;
+    --proto-text: #eceef1;
+    --proto-text-2: #a3a8b0;
+    --proto-text-3: #767c85;
+    --proto-border: #33363b;
+    --proto-business: #6f9dfb;
+    --proto-mention: #f0a077;
+    --proto-mention-bg: #4a2f22;
+    --proto-hairline: #2b2e33;
+    --proto-shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --proto-bg: #17181a;
+  --proto-surface: #1e2023;
+  --proto-bubble-agent: #26282c;
+  --proto-bubble-human: #2b3b55;
+  --proto-bubble-human-strong: #33496a;
+  --proto-text: #eceef1;
+  --proto-text-2: #a3a8b0;
+  --proto-text-3: #767c85;
+  --proto-border: #33363b;
+  --proto-business: #6f9dfb;
+  --proto-mention: #f0a077;
+  --proto-mention-bg: #4a2f22;
+  --proto-hairline: #2b2e33;
+  --proto-shadow: none;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--proto-surface);
+  color: var(--proto-text);
+  font: 14px/1.5 -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 24px 16px 64px;
+}
+
+/* ---------- 原型控制条 ---------- */
+.toolbar {
+  align-items: center;
+  background: var(--proto-bg);
+  border: 1px solid var(--proto-border);
+  border-radius: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin: 0 auto 24px;
+  max-width: 1180px;
+  padding: 12px 16px;
+}
+.toolbar h1 { font-size: 15px; font-weight: 600; margin: 0; }
+.toolbar .hint { color: var(--proto-text-2); font-size: 12px; }
+.toolbar .seg { border: 1px solid var(--proto-border); border-radius: 9px; display: flex; overflow: hidden; }
+.toolbar .seg button {
+  background: transparent; border: 0; color: var(--proto-text-2);
+  cursor: pointer; font: inherit; font-size: 12px; padding: 6px 12px;
+}
+.toolbar .seg button[aria-pressed="true"] { background: var(--proto-business); color: #fff; }
+.toolbar label { align-items: center; color: var(--proto-text-2); display: flex; font-size: 12px; gap: 6px; }
+.toolbar input[type="checkbox"] { accent-color: var(--proto-business); }
+
+/* ---------- 两栏预览 ---------- */
+.stage { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; max-width: 1180px; margin: 0 auto; }
+.frameWrap { display: grid; gap: 8px; }
+.frameLabel { color: var(--proto-text-2); font-size: 12px; text-align: center; }
+
+.phone {
+  background: var(--proto-bg);
+  border: 1px solid var(--proto-border);
+  border-radius: 18px;
+  box-shadow: var(--proto-shadow);
+  display: flex; flex-direction: column;
+  height: 720px; overflow: hidden;
+  width: 920px; max-width: 100%;
+}
+.phone[data-device="mobile"] { width: 390px; }
+
+.appHeader {
+  border-bottom: 1px solid var(--proto-hairline);
+  display: grid; gap: 2px; padding: 14px 18px 12px;
+}
+.appHeader .back { color: var(--proto-text-2); font-size: 12px; }
+.appHeader .titleLine { align-items: center; display: flex; gap: 8px; }
+.appHeader h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.pill {
+  align-items: center; border: 1px solid var(--proto-border); border-radius: 999px;
+  color: var(--proto-text-2); display: inline-flex; font-size: 11px; gap: 5px; padding: 2px 9px;
+}
+.dot { border-radius: 50%; height: 8px; width: 8px; }
+.dot.ongoing { background: var(--proto-business); }
+.appHeader .taskTitle { color: var(--proto-text-2); font-size: 12px; margin: 0; }
+
+.timeline { flex: 1; overflow-y: auto; padding: 14px 18px 22px; scroll-behavior: smooth; }
+.timeline[data-compact] { padding-inline: 10px; }
+
+.daySeparator, .unreadBoundary {
+  align-items: center; color: var(--proto-text-3); display: flex; font-size: 11px; gap: 10px; margin: 18px 0 12px;
+}
+.daySeparator::before, .daySeparator::after,
+.unreadBoundary::before, .unreadBoundary::after { background: var(--proto-hairline); content: ""; flex: 1; height: 1px; }
+.unreadBoundary { color: var(--proto-business); }
+.unreadBoundary::before, .unreadBoundary::after { background: color-mix(in srgb, var(--proto-business) 35%, transparent); }
+
+.activityRow {
+  align-items: center; color: var(--proto-text-3); display: flex; font-size: 12px;
+  gap: 8px; justify-content: center; margin: 12px 0;
+}
+.activityRow .mark { background: var(--proto-hairline); border-radius: 50%; height: 5px; width: 5px; }
+
+/* ---------- 气泡行 ---------- */
+.run { display: flex; flex-direction: column; gap: 2px; margin: 10px 0; }
+.run + .run { margin-top: 14px; }
+
+.row { display: flex; gap: 10px; max-width: 100%; }
+.row[data-side="end"] { flex-direction: row-reverse; }
+/* 连续同一发送者：头像与昵称只出现一次 */
+.row[data-grouped] .avatar { visibility: hidden; }
+.row[data-grouped] .nameRow { display: none; }
+
+.avatar {
+  align-items: center; background: hsl(var(--hue, 212) 42% 46%); border-radius: 50%;
+  color: #fff; display: flex; flex: 0 0 28px; font-size: 12px; font-weight: 600;
+  height: 28px; justify-content: center; margin-top: 22px; width: 28px;
+}
+.row[data-side="end"] .avatar { background: var(--proto-business); }
+
+.stack { display: flex; flex-direction: column; min-width: 0; max-width: min(76%, 620px); }
+.row[data-side="end"] .stack { align-items: flex-end; }
+.row[data-full] .stack { max-width: 100%; }
+
+.nameRow { align-items: baseline; display: flex; gap: 8px; margin: 0 4px 3px; }
+.row[data-side="end"] .nameRow { flex-direction: row-reverse; }
+.nameRow strong { font-size: 13px; font-weight: 600; }
+.nameRow time { color: var(--proto-text-3); font-size: 11px; }
+
+/* 气泡本体：浅色描边 + 极浅填充，不抢正文层级 */
+.bubble {
+  background: var(--proto-bubble-agent);
+  border-radius: var(--proto-radius);
+  color: var(--proto-text);
+  overflow-wrap: anywhere;
+  padding: 9px 13px;
+  position: relative;
+  white-space: pre-wrap;
+}
+.row[data-side="end"] .bubble {
+  background: var(--proto-bubble-human);
+  border-bottom-right-radius: 5px;
+}
+.row[data-side="start"] .bubble { border-bottom-left-radius: 5px; }
+.row[data-grouped][data-side="end"] .bubble { border-top-right-radius: 5px; }
+.row[data-grouped][data-side="start"] .bubble { border-top-left-radius: 5px; }
+/* 气泡之间的“尾巴”只在换人处出现，同人连续气泡靠圆角收角 */
+.row:not([data-grouped])[data-side="end"] .bubble:not(:last-child) { border-bottom-right-radius: 5px; }
+.row:not([data-grouped])[data-side="start"] .bubble:not(:last-child) { border-bottom-left-radius: 5px; }
+
+.bubble p { margin: 0 0 8px; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble code { background: rgba(127, 127, 127, .16); border-radius: 4px; font-size: 12.5px; padding: 1px 5px; }
+
+/* ---------- 「有人@我」标记：气泡内部右上角 ---------- */
+/* 关键设计：标记只说明「这条提到了你」，绝不改变气泡的左右归属，
+   否则读者会误判是谁说的话。 */
+.row[data-mentions-me] .bubble {
+  border: 1px solid color-mix(in srgb, var(--proto-mention) 40%, transparent);
+}
+
+/* 徽标是气泡内的第一行、右对齐：读正文之前先看到「这条提到了我」。
+   它是块级盒子，因此正文自然从下一行开始，不需要负外边距去“吃掉”
+   气泡内边距——那种写法在真实实现里会把 Markdown 首段压到徽标下面。
+   行高 16px + 5px 下外边距，比一颗普通行高更紧凑，读起来像气泡的角标。 */
+.mentionBadge {
+  align-items: center; background: var(--proto-mention-bg);
+  border-radius: 999px;
+  color: var(--proto-mention); display: flex; font-size: 11px; font-weight: 600;
+  gap: 4px; letter-spacing: .2px; line-height: 16px;
+  margin: 0 0 5px auto;
+  padding: 0 8px;
+  width: fit-content;
+}
+.mentionBadge .bang { font-size: 11px; line-height: 1; }
+
+/* 徽标形态：胶囊（方案 A） */
+.stage[data-badge="pill"] .mentionBadge { display: flex; }
+/* 徽标形态：纯文字标签（方案 B） */
+.stage[data-badge="text"] .mentionBadge { background: transparent; padding: 0 2px; }
+
+/* 正文里被 @ 的我自己 */
+.mentionChip {
+  background: var(--proto-mention-bg); border-radius: 5px; color: var(--proto-mention);
+  font-weight: 600; padding: 0 4px;
+}
+.bubble[data-human] .mentionChip { background: rgba(255, 255, 255, .5); }
+
+/* ---------- 分组 / 头像 开关的对照展示 ---------- */
+.legend {
+  background: var(--proto-bg); border: 1px solid var(--proto-border); border-radius: 12px;
+  color: var(--proto-text-2); font-size: 12px; line-height: 1.7; margin: 24px auto 0;
+  max-width: 1180px; padding: 14px 18px;
+}
+.legend h3 { color: var(--proto-text); font-size: 13px; margin: 0 0 6px; }
+.legend ul { margin: 0 0 12px; padding-left: 18px; }
+.legend li b { color: var(--proto-text); }
+.legend code { background: rgba(127, 127, 127, .14); border-radius: 4px; padding: 1px 5px; }
+.legend .swatches { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 4px; }
+.legend .swatch { align-items: center; display: flex; gap: 7px; }
+.legend .swatch i { border-radius: 6px; display: inline-block; height: 18px; width: 34px; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>Thread 聊天气泡 + 「有人@我」· 原型</h1>
+  <div class="seg" role="group" aria-label="主题">
+    <button type="button" data-theme-btn="light" aria-pressed="false">浅色</button>
+    <button type="button" data-theme-btn="dark" aria-pressed="false">深色</button>
+    <button type="button" data-theme-btn="auto" aria-pressed="true">跟随系统</button>
+  </div>
+  <div class="seg" role="group" aria-label="设备">
+    <button type="button" data-device-btn="desktop" aria-pressed="true">桌面</button>
+    <button type="button" data-device-btn="mobile" aria-pressed="false">390×844</button>
+  </div>
+  <div class="seg" role="group" aria-label="@我标记样式">
+    <button type="button" data-badge-btn="pill" aria-pressed="true">徽标胶囊</button>
+    <button type="button" data-badge-btn="text" aria-pressed="false">纯文字</button>
+  </div>
+  <label><input type="checkbox" id="toggle-compact">紧凑气泡</label>
+  <span class="hint">滚动时间线可查看全部状态</span>
+</div>
+
+<div class="stage" data-badge="pill">
+
+  <div class="frameWrap">
+    <div class="frameLabel">Thread 时间线（气泡化）</div>
+    <div class="phone" data-device="desktop" id="phone">
+      <div class="appHeader">
+        <span class="back">← 返回频道</span>
+        <div class="titleLine">
+          <h2>Task #12</h2>
+          <span class="pill"><i class="dot ongoing"></i>进行中</span>
+        </div>
+        <p class="taskTitle">把收件箱的未读徽标改成胶囊形态</p>
+      </div>
+
+      <div class="timeline" id="timeline">
+
+        <div class="daySeparator"><span>昨天</span></div>
+
+        <!-- 同一发送者的连续消息 = 一个 run -->
+        <div class="run">
+          <div class="row" data-side="start" style="--hue:198">
+            <div class="avatar">A</div>
+            <div class="stack">
+              <div class="nameRow"><strong>@Alice</strong><time>21:04</time></div>
+              <div class="bubble">我看了下 sidebar 的实现，未读数是复用 <code>CountBadge</code> 的，不需要新组件。</div>
+            </div>
+          </div>
+          <div class="row" data-side="start" data-grouped style="--hue:198">
+            <div class="avatar">A</div>
+            <div class="stack">
+              <div class="nameRow"><strong>@Alice</strong><time>21:04</time></div>
+              <div class="bubble">Task 的 thread:7f3c1a9d 里还差一个空态截图。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 有人 @ 我 -->
+        <div class="run">
+          <div class="row" data-side="start" data-mentions-me style="--hue:336">
+            <div class="avatar">B</div>
+            <div class="stack">
+              <div class="nameRow"><strong>@Bob</strong><time>21:11</time></div>
+              <div class="bubble"><span class="mentionBadge"><span class="bang">@</span>有人@我</span>@<span class="mentionChip">Human</span> 这个截图的对比度要不要按 390 宽度再确认一次？我这边拿不到你的设计稿。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 我（人类）发言：靠右 -->
+        <div class="run">
+          <div class="row" data-side="end">
+            <div class="avatar">H</div>
+            <div class="stack">
+              <div class="nameRow"><strong>我</strong><time>21:15</time></div>
+              <div class="bubble">要的，390 下用 12px 的次级等级，别用 11px。@<span class="mentionChip">Bob</span> 你顺手把 done 态的灰也换掉。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Agent 活动行：不是气泡 -->
+        <div class="activityRow"><i class="mark"></i><span>@Bob 认领了「空态截图」</span></div>
+
+        <div class="run">
+          <div class="row" data-side="start" style="--hue:336">
+            <div class="avatar">B</div>
+            <div class="stack">
+              <div class="nameRow"><strong>@Bob</strong><time>21:22</time></div>
+              <div class="bubble">收到，我把两处都改了，顺手补了 <code>prefers-reduced-motion</code> 的分支。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="unreadBoundary" role="separator"><span>以下为新消息</span></div>
+
+        <div class="run">
+          <div class="row" data-side="start" data-mentions-me style="--hue:198">
+            <div class="avatar">A</div>
+            <div class="stack">
+              <div class="nameRow"><strong>@Alice</strong><time>21:40</time></div>
+              <div class="bubble"><span class="mentionBadge"><span class="bang">@</span>有人@我</span>@<span class="mentionChip">Human</span> 我把气泡的左右规则写进 docs 了。你确认一下这两种情况：</div>
+            </div>
+          </div>
+          <div class="row" data-side="start" data-grouped style="--hue:198">
+            <div class="avatar">A</div>
+            <div class="stack">
+              <div class="nameRow"><strong>@Alice</strong><time>21:40</time></div>
+              <div class="bubble">1. 同一发送者连续发言 → 头尾圆角收口，不重复头像/昵称
+2. 「有人@我」只加标记，不改变左右归属
+
+长正文会走折叠：超过 600 字的正文默认裁到约 8 行，末尾渐隐，下面是「展开」文字链接。这段文字就是用来把气泡撑到折叠阈值以上，检查渐隐和展开控件的位置是否跟气泡下边缘对齐，以及展开后气泡高度变化时时间线是否保持在底部锚点。</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="run">
+          <div class="row" data-side="end">
+            <div class="avatar">H</div>
+            <div class="stack">
+              <div class="nameRow"><strong>我</strong><time>21:44</time></div>
+              <div class="bubble">都对，开始写吧。</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="legend">
+  <h3>这份原型要确认的规则</h3>
+  <ul>
+    <li><b>左右归属</b>：人类（我）的消息靠右、业务色浅底；Agent 成员靠左、中性底。系统命名上用「我方 / 对方」，不写死「Human」。</li>
+    <li><b>「有人@我」是标记而非重新分组</b>：一条 Agent 消息即便 @ 了我，它仍然靠左、仍然属于那位 Agent。标记是一条独立的信息，用主题色描边 + 气泡内右上角的徽标表达，不用位置暗示。</li>
+    <li><b>徽标位置</b>：气泡<b>内部</b>第一行、右对齐（<code>margin-left:auto</code>），正文在其下方开始。标记不占用发送者昵称行的位置，也不改变气泡的圆角与归属。</li>
+    <li><b>判定依据</b>：该条消息的结构化 <code>mentions</code> 含 <code>member:human</code>，即 Host 认定的投递事实，不靠正则扫正文。</li>
+    <li><b>折叠</b>：超过 600 字默认裁切 + 渐隐 + 「展开」文字链接，沿用现有 600 字规则。</li>
+    <li><b>非气泡行</b>：Activity（认领/接受/关闭）、日期分隔、未读分界保持现有形态，不套气泡——它们是时间线事实，不是某人的发言。</li>
+  </ul>
+  <div class="swatches">
+    <span class="swatch"><i style="background:var(--proto-bubble-agent);border:1px solid var(--proto-border)"></i>对方气泡</span>
+    <span class="swatch"><i style="background:var(--proto-bubble-human)"></i>我方气泡</span>
+    <span class="swatch"><i style="background:var(--proto-mention-bg);border:1px solid var(--proto-mention)"></i>@我徽标</span>
+    <span class="swatch"><i style="background:var(--proto-business)"></i>业务强调</span>
+  </div>
+</div>
+
+<script>
+const root = document.documentElement
+const stage = document.querySelector('.stage')
+const phone = document.getElementById('phone')
+
+function press(groupSelector, active) {
+  document.querySelectorAll(groupSelector).forEach(button => {
+    button.setAttribute('aria-pressed', String(button === active))
+  })
+}
+
+document.querySelectorAll('[data-theme-btn]').forEach(button => {
+  button.addEventListener('click', () => {
+    const mode = button.dataset.themeBtn
+    if (mode === 'auto') root.removeAttribute('data-theme')
+    else root.setAttribute('data-theme', mode)
+    press('[data-theme-btn]', button)
+  })
+})
+
+document.querySelectorAll('[data-device-btn]').forEach(button => {
+  button.addEventListener('click', () => {
+    phone.dataset.device = button.dataset.deviceBtn
+    press('[data-device-btn]', button)
+  })
+})
+
+document.querySelectorAll('[data-badge-btn]').forEach(button => {
+  button.addEventListener('click', () => {
+    stage.dataset.badge = button.dataset.badgeBtn
+    press('[data-badge-btn]', button)
+  })
+})
+
+document.getElementById('toggle-compact').addEventListener('change', event => {
+  const timeline = document.getElementById('timeline')
+  if (event.target.checked) timeline.setAttribute('data-compact', '')
+  else timeline.removeAttribute('data-compact')
+})
+</script>
+</body>
+</html>
