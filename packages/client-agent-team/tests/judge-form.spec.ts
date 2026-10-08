@@ -49,6 +49,27 @@ describe('judge endpoint form', () => {
     expect(state.fields.replyEnabled.text).toBe('on')
   })
 
+  it('reads the row-level switch, including a stored false', () => {
+    const { stub, form } = bench()
+    // The switch sits on the row itself, not inside the judge group: a reader
+    // that only ever looked one level into `jev` could not see it at all, and
+    // would report the control as on whatever the document said.
+    stub.publish({ value: { ...SECTION, replyEnabled: false } })
+    expect(form.getSnapshot().fields.replyEnabled.text).toBe('off')
+    stub.publish({ value: { ...SECTION, replyEnabled: true } })
+    expect(form.getSnapshot().fields.replyEnabled.text).toBe('on')
+    // Absent from the document is the Host default, which is on.
+    stub.publish({ value: SECTION })
+    expect(form.getSnapshot().fields.replyEnabled.text).toBe('on')
+  })
+
+  it('writes the switch at its own path, at once', async () => {
+    const { stub, form } = bench()
+    await form.setReplyEnabled(false)
+    // Written on the click, with no fence: a switch is not a staged draft.
+    expect(stub.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['replyEnabled'], value: false }])
+  })
+
   it('never seeds the key control: the literal does not ride a response', () => {
     const { stub, form } = bench()
     stub.publish({ user: { jev: { apiKey: 'stored-somewhere' } } })

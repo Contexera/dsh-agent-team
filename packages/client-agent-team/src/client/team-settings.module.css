@@ -153,6 +153,16 @@
   line-height: 22px;
 }
 
+/* A group's title row without a disclosure control. It repeats the toggle's
+ * own padding so every group's title sits the same distance below the rule
+ * above it, whether or not it can be collapsed. */
+.groupHeader {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  padding: 14px 0;
+}
+
 /* The row's answer, at the far end of the line it belongs to. The glyph is
  * decorative — the sentence carries the verdict — and only an unreachable
  * endpoint takes a warning color, because a missing key is a step to take

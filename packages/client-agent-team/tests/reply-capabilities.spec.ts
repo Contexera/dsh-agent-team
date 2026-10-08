@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { AgentTeamReplySettings } from '@wowyuarm/dsh-agent-team/types'
 import { TeamReplyCapabilities } from '../src/client/reply-capabilities.ts'
 
 const ok = (enabled: boolean) => async () => ({ ok: true as const, value: { enabled } })
-const failed = async () => ({ ok: false as const, error: { message: 'carrier dropped' } })
+// A rejected Remote call, as the transport reports it: the store only cares
+// that the read did not produce an accepted value.
+const failed = async () => { throw new Error('carrier dropped') }
 
 describe('TeamReplyCapabilities', () => {
   it('starts at the Host default and publishes the Host answer', async () => {
@@ -15,7 +19,7 @@ describe('TeamReplyCapabilities', () => {
   })
 
   it('keeps the last accepted answer when a later read fails', async () => {
-    let answer = ok(false)
+    let answer: () => Promise<RemoteResult<AgentTeamReplySettings>> = ok(false)
     const store = new TeamReplyCapabilities(() => answer())
     await store.refresh()
     expect(store.getSnapshot().enabled).toBe(false)

@@ -299,7 +299,9 @@ function ReplyGroup(props: {
   }
 
   return <div className={css.group}>
-    <span className={css.groupTitle}>{t('teamReplyGroupTitle')}</span>
+    <div className={css.groupHeader}>
+      <span className={css.groupTitle}>{t('teamReplyGroupTitle')}</span>
+    </div>
     <div className={css.groupBody} role="group" aria-label={t('teamReplyGroupTitle')} data-team-reply>
       <Checkbox
         checked={enabled}

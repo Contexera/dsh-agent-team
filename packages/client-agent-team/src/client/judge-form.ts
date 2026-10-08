@@ -48,17 +48,15 @@ const REPLY_ENABLED_FIELD: SettingsFieldSpec = {
 /** One control this page owns. */
 export type TeamJudgeField = keyof typeof FIELD_PATHS
 
-/** The group this form edits, as it sits inside the Team row's section. */
+/**
+ * The Team row's settings section as this form edits it: the judge's group plus
+ * the row-level switch that gates quote-replies.
+ */
 export interface TeamJudgeSection {
   /** The judge's endpoint configuration. */
   readonly jev?: unknown
-}
-
-/** Read the judge group of a section layer as a plain record. */
-function groupOf(layer: unknown): Record<string, unknown> | undefined {
-  if (layer === null || typeof layer !== 'object') return undefined
-  const value = (layer as Record<string, unknown>)[JUDGE_GROUP]
-  return value !== null && typeof value === 'object' ? value as Record<string, unknown> : undefined
+  /** Whether the Team offers quote-replies; absent means the Host default, which is on. */
+  readonly replyEnabled?: unknown
 }
 
 /**
@@ -71,10 +69,19 @@ function groupOf(layer: unknown): Record<string, unknown> | undefined {
  */
 function flatten(layer: unknown): Record<string, unknown> | undefined {
   if (layer === null || typeof layer !== 'object') return undefined
-  const group = groupOf(layer)
   const flat: Record<string, unknown> = {}
   for (const [field, path] of Object.entries(FIELD_PATHS) as [TeamJudgeField, readonly string[]][]) {
-    if (group !== undefined && Object.hasOwn(group, path[1]!)) flat[field] = group[path[1]!]
+    // Each control's own path is walked from the layer's root, because this
+    // page owns both fields inside the judge group and one on the row itself;
+    // assuming a single group silently dropped the row-level control.
+    let node: unknown = layer
+    for (const key of path) {
+      node = node === null || typeof node !== 'object' ? undefined : (node as Record<string, unknown>)[key]
+      if (node === undefined) break
+    }
+    // Only `undefined` is absent: a stored `false` is a value this page reads
+    // back, and dropping it would show the switch as on when it is off.
+    if (node !== undefined) flat[field] = node
   }
   return flat
 }
