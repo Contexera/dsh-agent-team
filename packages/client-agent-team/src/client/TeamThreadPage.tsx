@@ -488,9 +488,14 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
   const messageRefVersion = useResolvedMessageRefVersion()
   useEffect(() => {
+    // Two kinds of Message need context: every reply's parent (for its quote
+    // block) and the composer's current target (for its banner). The target is
+    // usually not itself a reply, so resolving only reply parents would leave
+    // the banner with no author and no excerpt.
     const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
+    if (replyTarget !== undefined && !refs.includes(replyTarget)) refs.push(replyTarget)
     if (refs.length > 0) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
-  }, [currentFacts, lookupMessageRefs, messageRefVersion])
+  }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion])
   useEffect(() => {
     if (flashedMessage === undefined) return
     const timer = setTimeout(() => { setFlashedMessage(undefined) }, 1200)

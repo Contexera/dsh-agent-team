@@ -210,10 +210,24 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
         ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{senderName.replace('@', '').slice(0, 1).toUpperCase()}</div>
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
       <div className={css.messageBody}>
-        {(!grouped || showGroupedTime === true) && (
-          <div className={css.nameRow}>
-            {!grouped && <strong {...(senderTitle === undefined ? {} : { title: senderTitle })}>{senderName}</strong>}
-            {occurredAt !== undefined && <span className={css.messageTime}>{formatMessageTime(occurredAt)}</span>}
+        {((!grouped || showGroupedTime === true) || onReply !== undefined) && (
+          <div className={css.messageHead}>
+            {(!grouped || showGroupedTime === true) && (
+              <div className={css.nameRow}>
+                {!grouped && <strong {...(senderTitle === undefined ? {} : { title: senderTitle })}>{senderName}</strong>}
+                {occurredAt !== undefined && <span className={css.messageTime}>{formatMessageTime(occurredAt)}</span>}
+              </div>
+            )}
+            {/* The action rides the identity line, next to the author it acts
+                on. Positioning it against the row's edge instead would strand
+                it at the far end of the column, because a bubble is only as
+                wide as its own content. */}
+            {onReply !== undefined && <div className={css.messageActions} data-message-actions="">
+              <button type="button" className={css.messageAction} onClick={() => { if (messageRef !== undefined) onReply(messageRef) }}
+                aria-label={t?.('replyToMessage') ?? 'Reply to this message'}>
+                {t?.('replyMessage') ?? 'Reply'}
+              </button>
+            </div>}
           </div>
         )}
         {/* One bubble per Message, for every Message — the mention mark below
@@ -274,16 +288,6 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
           />}
           {children}
         </div>
-        {/* The action trails the bubble and exists only while the row is under
-            the reader's hand or focus: it must never cost the timeline height,
-            and it is never the only way in, so it also shows on any pointer
-            device that has no hover to reveal it. */}
-        {onReply !== undefined && <div className={css.messageActions} data-message-actions="">
-          <button type="button" className={css.messageAction} onClick={() => { if (messageRef !== undefined) onReply(messageRef) }}
-            aria-label={t?.('replyToMessage') ?? 'Reply to this message'}>
-            {t?.('replyMessage') ?? 'Reply'}
-          </button>
-        </div>}
       </div>
     </article>
   )

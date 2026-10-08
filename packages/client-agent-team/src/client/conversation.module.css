@@ -87,7 +87,6 @@
    other side from everyone else's. It carries only that — the bubble itself
    spans the full width, so no message is squeezed into half a reading column. */
 .messageRow[data-side='end'] { flex-direction: row-reverse; }
-.messageRow[data-side='end'] .nameRow { flex-direction: row-reverse; }
 .messageRow[data-grouped] { padding-top: 1px; }
 .messageRow[data-grouped] .messageIdentity,
 .messageRow[data-grouped] .messageIdentityImage { visibility: hidden; }
@@ -132,19 +131,25 @@
   flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
-  /* Anchors the trailing reply action, which overlays rather than occupies the
-     timeline: the action may never cost a row its height. */
-  position: relative;
 }
 /* The reader's own turns hug their own edge, so a short reply sits next to the
    avatar instead of floating at the far end of an empty bar. */
 .messageRow[data-side='end'] .messageBody { align-items: flex-end; }
+/* The identity line: who wrote this, when, and the actions that act on this
+   Message. It is one flex row so the action sits beside the author rather than
+   at the row's far edge, and it stays out of the bubble's reading column. */
+.messageHead {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+}
+.messageRow[data-side='end'] .messageHead { flex-direction: row-reverse; }
 .nameRow {
   align-items: baseline;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 4px;
 }
 
 /* ---- The bubble ------------------------------------------------------- */
@@ -258,12 +263,9 @@
 .messageActions {
   align-items: center;
   display: flex;
+  flex: none;
   gap: 8px;
-  position: absolute;
-  top: 0;
 }
-.messageRow[data-side='start'] .messageActions { right: 0; }
-.messageRow[data-side='end'] .messageActions { left: 0; }
 @media (hover: hover) {
   .messageActions { opacity: 0; transition: opacity 80ms; }
   .messageRow:hover .messageActions,
@@ -276,8 +278,10 @@
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   font-size: 11px;
-  height: 22px;
-  line-height: 20px;
+  /* Exactly the identity line's own height, so revealing the action never
+     grows a row: a run's density must not depend on hover. */
+  height: 20px;
+  line-height: 18px;
   padding: 0 8px;
 }
 .messageAction:hover { color: var(--dsw-alias-label-primary); }

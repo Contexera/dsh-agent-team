@@ -455,6 +455,10 @@ describe('TeamMessage reply quote and action', () => {
     )
     fireEvent.click(getByRole('button', { name: '回复这条消息' }))
     expect(replied).toBe(1)
+    // The action shares the identity line with the author, so it sits beside
+    // the Message it acts on instead of at the row's far edge.
+    const actions = container.querySelector('[data-message-actions]')!
+    expect(actions.parentElement!.textContent).toContain('Builder')
 
     rerender(<TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以"
       messageRef={'message:abc' as never} replyTarget t={t} />)
