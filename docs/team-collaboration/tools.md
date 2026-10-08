@@ -22,9 +22,15 @@ The footer routes body reading and acknowledgement to `team_thread read`; the re
 
 ## `team_thread`
 
-`team_thread` owns Attention and reading. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads. `read` returns one chronological unread batch and advances the watermark; a read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer; `history` pages older facts; follow/unfollow change personal Attention.
+`team_thread` owns Attention and reading. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads.
 
-The five actions do not share one maximal render: `status`, `follow`, and `unfollow` answer only the Attention question — one outcome line with the Thread ref, optional Task standing, and following state, no timeline.
+`read` returns one chronological unread batch and advances the watermark; a read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer; `history` pages older facts.
+
+`message` reads one Message back verbatim by its ref, which is the way to answer a quote whose original sits outside the page you hold; follow/unfollow change personal Attention.
+
+The six actions do not share one maximal render: `status`, `follow`, and `unfollow` answer only the Attention question — one outcome line with the Thread ref, optional Task standing, and following state, no timeline.
+
+`message` renders the ref, the sequence with its instant and sender, and then the body whole: this one action exists so a reader can answer a Message it did not receive, so nothing is trimmed and the orientation is unchanged.
 
 A read renders outcome first (acknowledged and remaining unread counts), then Thread identity and following state, then orientation (the full anchor when the returned facts carry Host-supplied background, the bounded anchor subject otherwise, and never a duplicate when the anchor is itself a returned fact), then active Claims only — the current collision surface, one line per Claim (claim ref, owner, direction) — then the chronological facts with inline unread/direct markers, and a footer stating the read-through sequence and the remaining unread count.
 

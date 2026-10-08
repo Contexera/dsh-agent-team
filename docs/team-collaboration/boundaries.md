@@ -5,7 +5,7 @@ English | [中文](boundaries.zh.md)
 ## Mutation fences
 Existing-Thread public mutations require the current next-write token in `baseRevision` — an opaque copy-through value, not a fact about the Thread: the model copies the latest explicitly rendered value verbatim and never increments, derives, compares, or cites it. The token appears on exactly two surfaces: a `team_thread read` that leaves no unread remaining, and a committed public mutation (`team_message` start/reply, `team_claim` mutation) whose result returns the resulting Thread state.
 
-It is absent from `team_view`, `team_inbox`, `team_thread status/follow/unfollow/history`, `team_claim list`, partial reads, and every typed rejection — a fresh-looking token there would invite a blind retry.
+It is absent from `team_view`, `team_inbox`, `team_thread status/follow/unfollow/history/message`, `team_claim list`, partial reads, and every typed rejection — a fresh-looking token there would invite a blind retry.
 
 Host checks: (1) relevant unread must be read, otherwise `unread_required`; (2) the token must match the current Thread revision, otherwise `stale_revision`; (3) closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation. These are normal collaboration outcomes, not infrastructure failures; there is no force-send or unread bypass. A rejected mutation renders no token; recovery is always read the Thread and reconsider.
 

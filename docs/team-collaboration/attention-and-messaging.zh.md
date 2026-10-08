@@ -26,6 +26,8 @@ Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention�
 
 direct-mention 通知会写明它携带的那条 Message；当这条 Message 是在回答另一条时，同时写明被回答的那条：`Message ref` 是正在送达的这条，`Replies to` 是它的父消息。没有这一行，收件人只知道"被回复了"，却不知道被回复的是哪句话，它回过去的内容就只能是猜测。
 
+这一行写明父消息的作者与正文首行，全号放在最后：`Replies to: @handle — "first line" [message:<uuid>]`。这个 ref 就是读者要交回去的东西 —— 交给 `team_message.replyToMessageRef` 去回答它，或交给 `team_thread message` 把正文整条读回。父消息不再可解析时（例如频道已归档），这一行退回裸号：号码仍然为真，而摘要不会。
+
 ## 面向人类的可读消息
 每条消息都以结论或状态开头。机械细节（`file:line`、命令、哈希、探针输出）放在结论之后。同行 Member 需要的细节绝不删除，只下沉。叙述使用 Human 所用的语言，标识符、路径、命令与 ref 保持原文。
 
