@@ -6,6 +6,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
+import type { TeamReplyCapabilitiesFace } from './reply-capabilities.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
 import { useAvatarImage } from './avatar-image.ts'
@@ -47,6 +48,8 @@ export interface TeamSettingsInjected {
   judgeForm: TeamJudgeFormSource
   /** Whether the settings document holds a key literal for the judge. */
   keyConfigured: () => boolean
+  /** The reply switch's projection; a landed write republishes it so every surface moves at once. */
+  replyCapabilities: TeamReplyCapabilitiesFace
 }
 
 export type TeamSettingsProps =
@@ -231,7 +234,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
             judge={props.judge}
             keyConfigured={props.keyConfigured}
           />
-          <ReplyGroup t={t} form={judgeForm} />
+          <ReplyGroup t={t} form={judgeForm} capabilities={props.replyCapabilities} />
         </Fragment>}
     <div className={css.environment}>
       <EnvironmentCheck t={t} environment={props.environment} />
@@ -275,8 +278,9 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
 function ReplyGroup(props: {
   readonly t: PropsLocale<'team'>['t']
   readonly form: TeamJudgeForm
+  readonly capabilities: TeamReplyCapabilitiesFace
 }) {
-  const { t, form } = props
+  const { t, form, capabilities } = props
   const state = useSyncExternalStore(form.subscribe, form.getSnapshot, form.getSnapshot)
   const [failed, setFailed] = useState(false)
   const [pending, setPending] = useState(false)
@@ -287,6 +291,9 @@ function ReplyGroup(props: {
     setPending(true)
     setFailed(false)
     const landed = await form.setReplyEnabled(next)
+    // Publish the new answer before anything else reads it: the reply
+    // affordance on every open surface follows this one store.
+    if (landed) await capabilities.refresh()
     setPending(false)
     if (!landed) setFailed(true)
   }

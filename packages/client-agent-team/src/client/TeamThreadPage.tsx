@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type {
   AgentTeamClientMemberStatus,
   AgentTeamChannelRef,
@@ -59,6 +59,7 @@ interface TeamThreadPageProps {
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
   readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
+  readonly replyCapabilities: TeamConversationProps['replyCapabilities']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly t: TeamConversationProps['t']
 }
@@ -112,7 +113,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const {
     workspaceId, humanName, humanAvatarUrl, channelRef, taskRef, threadRef, taskNumber, backToWorkspace, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
     loadChannels, readThread, loadThreadHistory, threadObservations,
-    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, resolveMessageRefs, t,
+    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, resolveMessageRefs, replyCapabilities, t,
   } = props
   const threadRequest = { threadRef, ...(taskRef === undefined ? {} : { taskRef }) }
   const [projection, setProjection] = useState<ReadProjection>()
@@ -483,6 +484,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
+  // The switch is the Host's, but the affordance is ours to withhold: showing a
+  // reply button the Host would refuse is worse than showing none.
+  const repliesOffered = useSyncExternalStore(replyCapabilities.subscribe, replyCapabilities.getSnapshot, replyCapabilities.getSnapshot).enabled
+
   // Reply parents resolve through the Host: a quote must fill in even when the
   // Message it answers sits far outside the facts this page has loaded.
   const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
@@ -494,8 +499,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     // the banner with no author and no excerpt.
     const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
     if (replyTarget !== undefined && !refs.includes(replyTarget)) refs.push(replyTarget)
-    if (refs.length > 0) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
-  }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion])
+    if (refs.length > 0 && repliesOffered) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
+  }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion, repliesOffered])
   useEffect(() => {
     if (flashedMessage === undefined) return
     const timer = setTimeout(() => { setFlashedMessage(undefined) }, 1200)
@@ -587,8 +592,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
         messageRef={fact.message.messageRef}
-        {...(replyContexts.has(fact.message.messageRef) ? { replyTo: replyContexts.get(fact.message.messageRef)!, onOpenReplyTo: handleOpenReplyTo } : {})}
-        onReply={handleReply}
+        {...(repliesOffered && replyContexts.has(fact.message.messageRef) ? { replyTo: replyContexts.get(fact.message.messageRef)!, onOpenReplyTo: handleOpenReplyTo } : {})}
+        {...(repliesOffered ? { onReply: handleReply } : {})}
         replyTarget={replyTarget === fact.message.messageRef}
         replyFlash={flashedMessage === fact.message.messageRef}
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
@@ -954,7 +959,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       placeholder={t('replyPlaceholder')}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
-      {...(replyTarget === undefined ? {} : {
+      {...(replyTarget === undefined || !repliesOffered ? {} : {
         replyTo: (() => {
           const target = cachedResolvedMessageRef(replyTarget)
           return target === undefined ? { senderName: t('memberUnknown'), excerpt: '' } : { senderName: memberName(target.sender), excerpt: target.excerpt }

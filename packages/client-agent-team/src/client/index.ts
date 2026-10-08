@@ -45,6 +45,7 @@ import { TeamSettingsSection } from './TeamSettingsSection.tsx'
 import { TeamContextJudgeCheck } from './context-judge.ts'
 import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from './judge-form.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
+import { TeamReplyCapabilities, type TeamReplyCapabilitiesFace } from './reply-capabilities.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
 import { TeamNavigation } from './navigation.ts'
@@ -115,6 +116,7 @@ function registerModeShadow<T extends object>(
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
+  replyCapabilities: TeamReplyCapabilitiesFace,
   name: 'sidebar.workspaces' | 'main' | 'sidebar.settings',
   component: T,
   extraInject?: () => Record<string, unknown>,
@@ -146,6 +148,7 @@ function registerModeShadow<T extends object>(
     subscribeChanges: (scope: TeamChangeScope, listener: TeamChangeListener) => changes.subscribe(scope, listener),
     drafts,
     humanIdentity,
+    replyCapabilities,
     loadMembers: (request: AgentTeamMembersRequest) => ctx.remote.agentTeam.members(request),
     joinChannel: (request: AgentTeamJoinChannelRequest) => ctx.remote.agentTeam.joinChannel(request),
     removeChannelMember: (request: AgentTeamRemoveChannelMemberRequest) => ctx.remote.agentTeam.removeChannelMember(request),
@@ -234,6 +237,10 @@ function applyUi(ctx: ClientContext): void {
   // without a reload. Reads are demand-driven — the first seat that subscribes
   // starts the read. The profile page writes back through the Team Remote, so
   // the Client never names the Host's own profile entry.
+  // One reply-capability store per Client: the settings page moves the switch
+  // and refreshes it, and every surface that offers a reply reads the same
+  // answer, so the affordance appears and disappears immediately.
+  const replyCapabilities = new TeamReplyCapabilities(() => ctx.remote.agentTeam.replySettings())
   const humanIdentity = new TeamHumanIdentity({
     loadProfile: () => ctx.remote.agentTeam.humanProfile({}),
     loadAvatarUrl: async (avatarRef: string) => {
@@ -357,9 +364,9 @@ function applyUi(ctx: ClientContext): void {
     }),
   }, TeamFooterAction as never))
 
-  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
-  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'main', TeamConversation as never, undefined, 'conversation')
-  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
+  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, replyCapabilities, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
+  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, replyCapabilities, 'main', TeamConversation as never, undefined, 'conversation')
+  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, replyCapabilities, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
 
   // The Team's settings page: one settings section, ordered between General (0)
   // and Models (10) so it sits near the top. It holds two groups that write
@@ -390,6 +397,7 @@ function applyUi(ctx: ClientContext): void {
     locale: NS,
     inject: () => ({
       identity: humanIdentity,
+      replyCapabilities,
       environment,
       judge: contextJudge,
       judgeForm,
