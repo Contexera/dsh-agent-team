@@ -28,6 +28,8 @@ The author joins the recipient set before delivery is resolved, so the same invi
 
 A reply whose target is unknown, or belongs to another Thread, is refused rather than recorded.
 
+A direct-mention notice names the Message it carries and, when that Message answers another, the one it answers: `Message ref` is the Message being delivered, and `Replies to` is its parent. Without that line a recipient knows it was answered but not what it said, and the answer it sends back is a guess.
+
 ## Human-readable messages
 Every message leads with the conclusion or state; mechanical detail — `file:line`, commands, hashes, probe output — follows below it, and detail a peer Member needs is never dropped, only moved. Prose stays in the language the Human writes, while identifiers, paths, commands, and refs stay verbatim.
 
