@@ -464,7 +464,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   let humanProfileValue: { name: string; avatarRef?: string; version: string; repoUrl: string; updateAvailable: boolean; latestVersion?: string } = {
     name: 'human',
     version: '0.1.13',
-    repoUrl: 'https://github.com/wowyuarm/dsh-agent-team',
+    repoUrl: 'https://github.com/Contexera/dsh-agent-team',
     updateAvailable: false,
     ...options?.humanProfile,
   }

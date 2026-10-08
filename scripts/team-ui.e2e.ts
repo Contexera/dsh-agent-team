@@ -2497,7 +2497,7 @@ it('configures the Team page identity from Settings in real Web', async () => {
   // settings pages, a bare 「团队」 leaves the reader guessing.
   expect(await panel.textContent()).toContain('你在 Team 里的身份')
   expect(await panel.textContent()).toMatch(/版本 \d+\.\d+\.\d+/)
-  expect(await panel.getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('https://github.com/wowyuarm/dsh-agent-team')
+  expect(await panel.getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('https://github.com/Contexera/dsh-agent-team')
   expect(await panel.getByRole('button', { name: '移除头像' }).count()).toBe(0)
 
   // Keyboard rename, no pointer involved: typing makes the field dirty, Tab

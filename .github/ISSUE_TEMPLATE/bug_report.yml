@@ -9,7 +9,7 @@ body:
       value: |
         Report against the versions you are actually running — most "broken after install"
         reports turn out to be a version mismatch. Compatibility is certified per DSH version:
-        [release compatibility matrix](https://github.com/wowyuarm/dsh-agent-team/blob/master/docs/dsh-release-compatibility.md).
+        [release compatibility matrix](https://github.com/Contexera/dsh-agent-team/blob/master/docs/dsh-release-compatibility.md).
 
   - type: input
     id: versions

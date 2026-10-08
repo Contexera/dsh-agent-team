@@ -39,7 +39,7 @@ function EnvironmentIcon({ glyph }: { readonly glyph: keyof typeof ICONS }) {
 }
 
 /** The release notes this bundle's own repository keeps, one click from the version footnote. */
-const RELEASE_NOTES_URL = 'https://github.com/wowyuarm/dsh-agent-team/releases'
+const RELEASE_NOTES_URL = 'https://github.com/Contexera/dsh-agent-team/releases'
 
 export function EnvironmentCheck({ t, environment }: EnvironmentCheckProps) {
   const { report } = useEnvironmentCheck(environment)

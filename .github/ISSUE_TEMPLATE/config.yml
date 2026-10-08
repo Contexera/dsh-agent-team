@@ -2,8 +2,8 @@ blank_issues_enabled: false
 
 contact_links:
   - name: Setup and installation help
-    url: https://github.com/wowyuarm/dsh-agent-team#quick-start
+    url: https://github.com/Contexera/dsh-agent-team#quick-start
     about: Check the certified DSH version and the install steps before filing a bug — most setup problems are a version mismatch.
   - name: Documentation
-    url: https://github.com/wowyuarm/dsh-agent-team/blob/master/docs/README.md
+    url: https://github.com/Contexera/dsh-agent-team/blob/master/docs/README.md
     about: Architecture, the collaboration contract, development checks, and the release compatibility matrix.

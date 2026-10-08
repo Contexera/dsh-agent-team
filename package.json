@@ -5,7 +5,7 @@
   "description": "A persistent agent team for long-running collaboration in DeepSeek Harness",
   "repository": {
     "type": "git",
-    "url": "https://github.com/wowyuarm/dsh-agent-team.git"
+    "url": "https://github.com/Contexera/dsh-agent-team.git"
   },
   "private": false,
   "type": "module",
