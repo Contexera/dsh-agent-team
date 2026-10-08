@@ -126,6 +126,11 @@ import type {
   AgentTeamRemoveMemberResult,
   AgentTeamReplyRequest,
   AgentTeamReplySettings,
+  AgentTeamMessage,
+  AgentTeamMessageReplyContext,
+  AgentTeamThreadFact,
+  AgentTeamReadMessageRequest,
+  AgentTeamReadMessageResult,
   AgentTeamReplyResult,
   AgentTeamSendMessageRequest,
   AgentTeamSendMessageResult,
@@ -654,6 +659,69 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /** The Host row's judge settings, as one plain config for the mount. */
+  /**
+   * A Member as a reader prints it: the handle, or `human` for the Human.
+   *
+   * The notice's `From:` line already prints the Human this way, and the alias
+   * is what addresses them, so the two agree without a second naming rule.
+   */
+  private printableSender(memberId: AgentTeamMemberId): string {
+    return memberId === AGENT_TEAM_HUMAN_MEMBER_ID
+      ? 'human'
+      : this.requireLedger().getMember(memberId)?.handle ?? memberId
+  }
+
+  /**
+   * What every reply in this window answers, resolved in one pass.
+   *
+   * One call for the whole window rather than one per reply: a read is a
+   * bounded batch and the resolution is a pure ledger lookup, so the cost
+   * belongs to the read, not to each fact in it.
+   */
+  private replyContextsFor(facts: readonly AgentTeamThreadFact[], workspaceId: WorkspaceId): ReadonlyMap<AgentTeamMessageRef, AgentTeamMessageReplyContext> {
+    const contexts = new Map<AgentTeamMessageRef, AgentTeamMessageReplyContext>()
+    if (!this.repliesEnabled()) return contexts
+    const refs = facts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined
+      ? [fact.message.replyToMessageRef]
+      : [])
+    if (refs.length === 0) return contexts
+    for (const parent of this.requireLedger().resolveMessageRefs(workspaceId, refs)) {
+      contexts.set(parent.messageRef, Object.freeze({ sender: this.printableSender(parent.sender), excerpt: parent.excerpt }))
+    }
+    return contexts
+  }
+
+  /**
+   * The same fact with its reply target attached.
+   *
+   * A new object, never an edit in place: these facts are the payload of a
+   * durable read, and writing a read-time projection into one would either
+   * freeze-throw or leave a stored record carrying a field its schema does not
+   * know — which is how a whole domain stops reopening.
+   */
+  private withReplyTo(fact: AgentTeamThreadFact, contexts: ReadonlyMap<AgentTeamMessageRef, AgentTeamMessageReplyContext>): AgentTeamThreadFact {
+    if (fact.kind !== 'message') return fact
+    const ref = fact.message.replyToMessageRef
+    const replyTo = ref === undefined ? undefined : contexts.get(ref)
+    return replyTo === undefined ? fact : Object.freeze({ ...fact, replyTo })
+  }
+
+  /**
+   * The `Replies to:` line for one notice, or nothing when it answers nothing.
+   *
+   * An unresolvable target falls back to the bare ref instead of failing or
+   * inventing a summary: an archived Channel stops resolving, and the ref is
+   * then the only true thing left to say.
+   */
+  private repliesToLine(message: AgentTeamMessage, workspaceId: WorkspaceId): string | undefined {
+    const ref = message.replyToMessageRef
+    if (ref === undefined || !this.repliesEnabled()) return undefined
+    const parent = this.requireLedger().resolveMessageRefs(workspaceId, [ref])[0]
+    return parent === undefined
+      ? `Replies to: ${ref}`
+      : `Replies to: @${this.printableSender(parent.sender)} — "${parent.excerpt}" [${ref}]`
+  }
+
   /** Whether quote-replies are available; the one place the flag is read. */
   private repliesEnabled(): boolean {
     // On unless a deployment states otherwise: the feature is useful out of the
@@ -1894,6 +1962,11 @@ export default class AgentTeam extends TypertRemoteService {
     return this.replyAs(this.humanCall(request.workspaceId), request)
   }
 
+  @Remote('readMessage')
+  readMessage(request: AgentTeamReadMessageRequest): AgentTeamReadMessageResult {
+    return this.readMessageAs(this.humanCall(request.workspaceId), request)
+  }
+
   /** Whether this deployment offers quote-replies; the Client gates its affordance on it. */
   @Remote('replySettings')
   replySettings(): AgentTeamReplySettings {
@@ -1958,6 +2031,11 @@ export default class AgentTeam extends TypertRemoteService {
     return this.replyAs(this.memberCall(agent, request.workspaceId), request)
   }
 
+  /** Read one Message back verbatim, for the reader that has to answer it. */
+  readMessageForAgent(agent: Agent, request: AgentTeamReadMessageRequest): AgentTeamReadMessageResult {
+    return this.readMessageAs(this.memberCall(agent, request.workspaceId), request)
+  }
+
   /** Agent-only personal Attention change. */
   async changeAttentionForAgent(agent: Agent, request: AgentTeamThreadAttentionRequest): Promise<AgentTeamThreadAttentionResult> {
     const actor = this.memberCall(agent, request.workspaceId)
@@ -2006,7 +2084,12 @@ export default class AgentTeam extends TypertRemoteService {
     // persisted, and a measurement failure degrades to an explicit
     // `unavailable` — the committed read is never reversed.
     const advice = await this.acceptanceContextAdvice(agent, value)
-    return advice === undefined ? value : Object.freeze({ ...value, contextAdvice: advice })
+    // Read-time enrichments, neither of them a ledger fact and neither
+    // persisted: the reply target is resolved for this window once, and the
+    // advice is priced from the committed read. The returned objects are new,
+    // so the durable read data keeps the exact shape its schema declares.
+    const enriched = this.withReplyContexts(value, request.workspaceId)
+    return advice === undefined ? enriched : Object.freeze({ ...enriched, contextAdvice: advice })
   }
 
   /**
@@ -2098,7 +2181,36 @@ export default class AgentTeam extends TypertRemoteService {
   threadHistoryForAgent(agent: Agent, request: AgentTeamThreadHistoryRequest): AgentTeamThreadHistory {
     const actor = this.memberActor(agent)
     this.requireAgentWorkspace(actor, request.workspaceId)
-    return this.requireLedger().threadHistory(actor, request)
+    const history = this.requireLedger().threadHistory(actor, request)
+    // Paging back to answer something is exactly when the target may sit
+    // outside the window, so a history page carries the same context a read does.
+    const contexts = this.replyContextsFor(history.facts, request.workspaceId)
+    if (contexts.size === 0) return history
+    const anchorRef = history.anchor.replyToMessageRef
+    const anchorReplyTo = anchorRef === undefined ? undefined : contexts.get(anchorRef)
+    return Object.freeze({
+      ...history,
+      ...(anchorReplyTo === undefined ? {} : { anchor: Object.freeze({ ...history.anchor, replyTo: anchorReplyTo }) }),
+      facts: Object.freeze(history.facts.map(fact => this.withReplyTo(fact, contexts))),
+    })
+  }
+
+  /** Attach every resolved reply target in one read window; one resolution for the window. */
+  private withReplyContexts(value: AgentTeamThreadReadResult, workspaceId: WorkspaceId): AgentTeamThreadReadResult {
+    const contexts = this.replyContextsFor(value.facts.map(entry => entry.fact), workspaceId)
+    if (contexts.size === 0) return value
+    // The anchor is read out of the same window and may itself be a reply, so
+    // it is decorated from the same resolution rather than left out.
+    const anchorRef = value.anchor.replyToMessageRef
+    const anchorReplyTo = anchorRef === undefined ? undefined : contexts.get(anchorRef)
+    return Object.freeze({
+      ...value,
+      ...(anchorReplyTo === undefined ? {} : { anchor: Object.freeze({ ...value.anchor, replyTo: anchorReplyTo }) }),
+      facts: Object.freeze(value.facts.map(entry => {
+        const fact = this.withReplyTo(entry.fact, contexts)
+        return fact === entry.fact ? entry : Object.freeze({ ...entry, fact })
+      })),
+    })
   }
 
   /** Live participation addresses; paths remain owned by the Harness registry. */
@@ -2793,6 +2905,18 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /** Shared existing-Thread reply commit: same upload resolution and outcome emission. */
+  /**
+   * Read one Message back verbatim, whoever is asking.
+   *
+   * A disabled feature refuses rather than answering empty: a caller that asked
+   * for a Message and got nothing back could not tell a switch from a wrong
+   * ref, and would go on to answer a Message it never read.
+   */
+  private readMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReadMessageRequest): AgentTeamReadMessageResult {
+    if (!this.repliesEnabled()) throw new Error('quote-replies are disabled for this Team')
+    return this.requireLedger().readMessage(actor, request)
+  }
+
   private async replyAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
     // The switch is the Host's, not the Client's: hiding the affordance is a
     // courtesy, and this is what actually decides.
@@ -3461,10 +3585,13 @@ export default class AgentTeam extends TypertRemoteService {
         if (direct && fact.kind === 'message') {
           const sender = fact.message.sender === AGENT_TEAM_HUMAN_MEMBER_ID
             ? 'human' : this.requireLedger().getMember(fact.message.sender)?.handle ?? fact.message.sender
+          // Resolved once: the line is optional, and resolving twice would be
+          // two ledger lookups for one sentence.
+          const repliesTo = this.repliesToLine(fact.message, item.workspaceId)
           const detail = ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Channel: ${item.channelRef}`,
             ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
             `Thread: ${item.thread.threadRef}`, `Message ref: ${fact.message.messageRef}`,
-            ...(fact.message.replyToMessageRef === undefined || !this.repliesEnabled() ? [] : [`Replies to: ${fact.message.replyToMessageRef}`]),
+            ...(repliesTo === undefined ? [] : [repliesTo]),
             `Message: ${this.boundedNotificationBody(fact.message.body)}`].join('\n')
           if (append(detail)) detailedFactCount += 1
         } else if (fact.kind === 'activity') {

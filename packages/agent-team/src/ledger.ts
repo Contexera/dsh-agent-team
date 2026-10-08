@@ -81,6 +81,8 @@ import type {
   AgentTeamReplyResult,
   AgentTeamRequestId,
   AgentTeamResolvedMessageRef,
+  AgentTeamReadMessageRequest,
+  AgentTeamReadMessageResult,
   AgentTeamResolvedTaskRef,
   AgentTeamResolvedThreadRef,
   AgentTeamMessageAttachment,
@@ -1850,6 +1852,38 @@ export class AgentTeamLedger {
       }))
     }
     return resolved
+  }
+
+  /**
+   * Read one Message back verbatim, inside the Thread that carries it.
+   *
+   * Authorization comes first and comes from the Thread: a reader must be able
+   * to address the Thread at all, which is where membership and Channel
+   * archival are decided, so this opens no path that reading the Thread did
+   * not already open. The Message is then looked up by identity in the index —
+   * never by position — so a ref resolves the same Message whatever else has
+   * been written since, and an answer can never quietly become a neighbour.
+   *
+   * The body is returned whole. The quote a Message renders is a bounded
+   * summary by design; this is the other thing, for the reader that has to
+   * answer it.
+   */
+  readMessage(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReadMessageRequest): AgentTeamReadMessageResult {
+    // Addressing the Thread is the authorization: unknown, foreign, and
+    // archived all refuse here, and refuse distinguishably.
+    const context = this.threadContextForActor(actor, request.workspaceId, { threadRef: request.threadRef })
+    const message = this.state.messagesByRef.get(request.messageRef)
+    if (message === undefined) throw new Error(`Message '${request.messageRef}' is not a recorded Message`)
+    if (message.threadRef !== context.thread.threadRef) throw new Error(`Message '${request.messageRef}' belongs to another Thread`)
+    return Object.freeze({
+      messageRef: message.messageRef,
+      threadRef: message.threadRef,
+      channelRef: context.channelRef,
+      sender: message.sender,
+      sequence: message.sequence,
+      ...(message.occurredAt === undefined ? {} : { occurredAt: message.occurredAt }),
+      body: message.body,
+    })
   }
 
   /** Navigation facts for message-body Task refs; unknown refs are omitted. */
