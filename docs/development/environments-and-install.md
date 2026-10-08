@@ -82,7 +82,7 @@ Always verify the built publication layout. A source symlink can bypass profile 
 
 Stable and development profiles are intentionally separate:
 
-- **Stable (`--profile web`)** uses the npm release (`^0.1.x`), with the lockfile selecting the installed version. After a release, install the published version by exact number — `dsh plugin --profile web add @contexera/dsh-agent-team@X.Y.Z` — because a plain `update` can report "Already up to date" while the lockfile still pins the old resolution. See [`release-runbook.md`](../release-runbook.md) §6.
+- **Stable (`--profile web`)** uses the npm release, with the lockfile selecting the installed version. After a release, install the published version by exact number — `dsh plugin --profile web add @contexera/dsh-agent-team@X.Y.Z` — because a plain `update` can report "Already up to date" while the lockfile still pins the old resolution. See [`release-runbook.md`](../release-runbook.md) §6.
 - **Development (`--profile web-dev`)** uses a local `link:` checkout. Rebuild before restarting: the Host loads `packages/*/lib/`, so restarting without `npm run build` keeps old tools and behavior.
 
 The runtime must match the installation form. Published `dsh` runs the stable profile from built artifacts; checkout `pnpm dsh` runs source through tsx and paths and should only start a linked profile. Mixing them can create two module instances whose scope Symbols differ and can produce `selected preset is not team-enabled`.
