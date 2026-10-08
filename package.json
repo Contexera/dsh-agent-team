@@ -3,6 +3,7 @@
   "version": "0.2.2",
   "license": "MIT",
   "description": "A persistent agent team for long-running collaboration in DeepSeek Harness",
+  "icon": "assets/icon.svg",
   "repository": {
     "type": "git",
     "url": "https://github.com/Contexera/dsh-agent-team.git"
@@ -12,6 +13,7 @@
   "packageManager": "pnpm@11.7.0",
   "files": [
     "cordis.patch.yml",
+    "assets/icon.svg",
     "packages/agent-team/lib/**/*",
     "packages/agent-team/core-skills/**/*",
     "packages/tool-agent-team/lib/**/*",

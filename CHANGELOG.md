@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+- Team brings its own artwork: the plugin list shows Team's own icon instead of the default placeholder.
+
 ## [0.2.2] - 2026-10-08
 
 - The Inbox says where each Task stands: a row whose Thread carries a Task prints that Task's status beside its number, in the same state dot and word the Channel feed and the Thread header already use, so a Thread waiting for your acceptance no longer reads like one that is finished — while a Thread that is only a discussion stays exactly as it was.
