@@ -45,7 +45,7 @@ import {
   type PressureSurface,
   type RolloverIdentity,
   type TransitionPlan,
-} from '@wowyuarm/dsh-context-continuity'
+} from '@contexera/dsh-context-continuity'
 import { SessionId as SessionIdBrand } from '@deepseek-ai/dsh-session'
 import z from '@deepseek-ai/schemastery'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'

@@ -4,7 +4,7 @@ import { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset, SessionSeq, type S
 
 /** Fixed Session identity for every fold in this spec; checkpoint refs key on it. */
 const SID = 'agent-team-test-session'
-import { continuationDelivered, readContextTimeline, type ContextProjectionState, type ContextTimelineItem } from '@wowyuarm/dsh-context-continuity'
+import { continuationDelivered, readContextTimeline, type ContextProjectionState, type ContextTimelineItem } from '@contexera/dsh-context-continuity'
 import {
   CONTEXT_CHECKPOINT_TOOL_NAME,
   CONTEXT_ROLLOVER_TOOL_NAME,

@@ -29,7 +29,7 @@ import {
   type ContinuityToolAdapter,
   type ContinuityToolText,
   type RolloverToolRequest,
-} from '@wowyuarm/dsh-context-continuity'
+} from '@contexera/dsh-context-continuity'
 import type { AgentTeamContextCheckpointRef } from '@contexera/dsh-agent-team/types'
 import { MAX_TIMELINE_LIMIT, type AgentTeamTimelineItem } from '@contexera/dsh-agent-team/host'
 import type { Agent } from '@deepseek-ai/dsh-agent'

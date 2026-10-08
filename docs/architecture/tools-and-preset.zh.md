@@ -14,7 +14,7 @@ Host 在这些 preset 之上，编排 Member 上下文自主管理。`context_ro
 
 adapter 里只剩一条 Team 规则：引擎在每一行都渲染该行的 `ref`。不可返回的行拿该 ref 的短摘要作答，不给 ref 本身：任何不可选择的行都不会携带可引用的字符串。
 
-唯一的 context-continuity coordinator（`ContextContinuityCoordinator`，来自 `@wowyuarm/dsh-context-continuity`）由 `context-continuity-host.ts` 绑到 Member lifecycle 上。它还拿 Team 的 plugin id 和冻结的 handoff 文案构造引擎的 message codec。它监听各 Member Session 的事件，从 durable 的 `tool/call`+`tool/result` 对折出 rollover 与 checkpoint 意图。再走串行 lifecycle queue 执行换窗。
+唯一的 context-continuity coordinator（`ContextContinuityCoordinator`，来自 `@contexera/dsh-context-continuity`）由 `context-continuity-host.ts` 绑到 Member lifecycle 上。它还拿 Team 的 plugin id 和冻结的 handoff 文案构造引擎的 message codec。它监听各 Member Session 的事件，从 durable 的 `tool/call`+`tool/result` 对折出 rollover 与 checkpoint 意图。再走串行 lifecycle queue 执行换窗。
 
 该折叠即引擎自身的 `contextContinuity` projection unit，在 Team service init 时按 host 注册一次。`context-projection.ts` 只提供 Team 的那一半：
 

@@ -76,7 +76,7 @@ try {
   // only its own manifest and built declarations travel: copying the checkout
   // would drag its node_modules along, and a symlink is the Windows-hostile
   // form the zod comment above already rules out.
-  const engineTarget = join(tempPackage, 'node_modules', '@wowyuarm', 'dsh-context-continuity')
+  const engineTarget = join(tempPackage, 'node_modules', '@contexera', 'dsh-context-continuity')
   await mkdir(engineTarget, { recursive: true })
   await cp(join(continuityDir, 'package.json'), join(engineTarget, 'package.json'))
   await cp(join(continuityDir, 'lib'), join(engineTarget, 'lib'), { recursive: true })
@@ -86,14 +86,14 @@ try {
   // types the `ctx.jev` read beside the mount. A clean install always has it,
   // so the copy is what the analysis package resolves instead of the installed
   // tree, and the emitted declarations stay independent of this checkout.
-  const jevSource = join(projectRoot, 'node_modules', '@wowyuarm', 'dsh-jev')
+  const jevSource = join(projectRoot, 'node_modules', '@contexera', 'dsh-jev')
   if (!existsSync(jevSource)) {
     throw new Error(
-      `Typert analysis resolves the bundle's '@wowyuarm/dsh-jev' dependency at '${jevSource}', which is not installed.`
+      `Typert analysis resolves the bundle's '@contexera/dsh-jev' dependency at '${jevSource}', which is not installed.`
       + ' Run `corepack pnpm install` at the repository root (never npm install: it breaks the workspace links).',
     )
   }
-  const jevTarget = join(tempPackage, 'node_modules', '@wowyuarm', 'dsh-jev')
+  const jevTarget = join(tempPackage, 'node_modules', '@contexera', 'dsh-jev')
   await mkdir(jevTarget, { recursive: true })
   await cp(join(jevSource, 'package.json'), join(jevTarget, 'package.json'))
   await cp(join(jevSource, 'lib'), join(jevTarget, 'lib'), { recursive: true })

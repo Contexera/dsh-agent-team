@@ -16,8 +16,8 @@
  */
 
 import type { Context, Fiber } from '@deepseek-ai/cordis'
-import { DEFAULT_API_KEY_ENV, Jev, type JevPluginConfig } from '@wowyuarm/dsh-jev'
-import type { PressureJudgement } from '@wowyuarm/dsh-context-continuity'
+import { DEFAULT_API_KEY_ENV, Jev, type JevPluginConfig } from '@contexera/dsh-jev'
+import type { PressureJudgement } from '@contexera/dsh-context-continuity'
 
 /** The Host row's `jev` config: where the judge's key, endpoint and model come from. */
 export interface TeamContextJudgeConfig {

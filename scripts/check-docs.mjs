@@ -99,7 +99,7 @@ const BLOCK_CHARACTER_CEILINGS = {
   'architecture/tools-and-preset.md': [616, 540],
   'architecture/workspace-session-storage.md': [576, 584],
   'development/README.md': [105, 64],
-  'development/environments-and-install.md': [595, 571],
+  'development/environments-and-install.md': [597, 569],
   'development/generated-and-seams.md': [515, 362],
   'development/start-and-checks.md': [595, 415],
   'development/storage-and-delivery.md': [585, 583],

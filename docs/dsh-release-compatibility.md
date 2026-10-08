@@ -173,7 +173,7 @@ The DSH peers state exactly that certified line, `>=0.2.0-rc.2 <0.2.1`, so a lin
 
 The removed `@deepseek-ai/dsh-invariants` peer likewise left with the registry row it named when the invariant companion began validating on its own.
 
-One dependency sits outside the DSH line and therefore outside this certification: `@wowyuarm/dsh-jev` ships with the bundle, because the Team Host mounts it as the long-gap relatedness judge from its own row's key. Its declared peers are Cordis and Schemastery alone, so it contributes no DSH peer declaration to the tree; the endpoint, model and key stay the deployment's to state.
+One dependency sits outside the DSH line and therefore outside this certification: `@contexera/dsh-jev` ships with the bundle, because the Team Host mounts it as the long-gap relatedness judge from its own row's key. Its declared peers are Cordis and Schemastery alone, so it contributes no DSH peer declaration to the tree; the endpoint, model and key stay the deployment's to state.
 
 The routed sqlite backend is a vendored fork, not a dependency at all (GitHub issue #28): the upstream package stays a devDependency pinned at the fork source, 0.1.5-rc.2, as the byte-compatibility fixture reference, and every compat round diffs the fork against that version's file before anything else.
 

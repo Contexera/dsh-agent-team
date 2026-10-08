@@ -1,8 +1,8 @@
-// Single source of truth for which `@wowyuarm/dsh-context-continuity` this
+// Single source of truth for which `@contexera/dsh-context-continuity` this
 // repository resolves against.
 //
 // The engine is a separate repository with its own release cadence, published
-// as `@wowyuarm/dsh-context-continuity` and declared by this root package both
+// as `@contexera/dsh-context-continuity` and declared by this root package both
 // as a runtime dependency (what a profile install resolves for the bundle) and
 // as the version floor this bundle is written against. Three shapes are
 // therefore legitimate, and the difference matters to the link step:
@@ -31,7 +31,7 @@
 //
 // A resolution that carries no usable package fails fast here, at its cause,
 // instead of surfacing later as a far-away `Cannot find module
-// '@wowyuarm/dsh-context-continuity'` inside an unrelated test.
+// '@contexera/dsh-context-continuity'` inside an unrelated test.
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,7 +43,7 @@ const DEFAULT_CONTINUITY_NAME = 'dsh-context-continuity'
 // than derived from the package name.
 const MONOREPO_CONTINUITY_DIR = 'context-continuity'
 
-const ENGINE_PACKAGE = '@wowyuarm/dsh-context-continuity'
+const ENGINE_PACKAGE = '@contexera/dsh-context-continuity'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 

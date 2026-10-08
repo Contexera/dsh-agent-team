@@ -6,7 +6,7 @@
  * bare specifier imported against the profile's own base, so it sees the
  * packages the profile links (this bundle among them) and the host closure —
  * and never a package nested inside this bundle's dependency tree. Naming
- * `@wowyuarm/dsh-context-continuity/compaction-engine` directly therefore
+ * `@contexera/dsh-context-continuity/compaction-engine` directly therefore
  * resolves in a working tree and fails in a real profile, where the row is
  * reported as `never started` and every Member is left unavailable.
  *
@@ -16,4 +16,4 @@
  * @module @contexera/dsh-agent-team/compaction-engine
  */
 
-export { default } from '@wowyuarm/dsh-context-continuity/compaction-engine'
+export { default } from '@contexera/dsh-context-continuity/compaction-engine'

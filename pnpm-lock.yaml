@@ -8,12 +8,12 @@ importers:
 
   .:
     dependencies:
-      '@wowyuarm/dsh-context-continuity':
+      '@contexera/dsh-context-continuity':
         specifier: ^0.3.0
-        version: 0.3.0(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))
-      '@wowyuarm/dsh-jev':
+        version: 0.3.1(@contexera/dsh-jev@0.1.2(@deepseek-ai/schemastery@3.18.2))
+      '@contexera/dsh-jev':
         specifier: ^0.1.1
-        version: 0.1.1(@deepseek-ai/schemastery@3.18.2)
+        version: 0.1.2(@deepseek-ai/schemastery@3.18.2)
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
@@ -95,6 +95,33 @@ packages:
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
+
+  '@contexera/dsh-context-continuity@0.3.1':
+    resolution: {integrity: sha512-yGxhf2uRCaBqsmC23BlvPCCWg27TEFT1vAxCH4KZNBveVTUOe0V8+ZIvz1+xKcmZK7ECGhftm0IAfTqA4kbMRA==}
+    peerDependencies:
+      '@contexera/dsh-jev': ^0.1.2
+      '@deepseek-ai/cordis': ^4.0.1
+      '@deepseek-ai/dsh-agent': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-compaction': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-compaction-basic': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-llm': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-session': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-session-persistence': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-session-projection': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-session-query': '>=0.2.0-rc.1 <0.2.1'
+      '@deepseek-ai/dsh-tools': '>=0.2.0-rc.1 <0.2.1'
+    peerDependenciesMeta:
+      '@contexera/dsh-jev':
+        optional: true
+      '@deepseek-ai/dsh-session-query':
+        optional: true
+
+  '@contexera/dsh-jev@0.1.2':
+    resolution: {integrity: sha512-4ZTfonJYq5anDkTKRjCyhoyttRukEsw2T1T/mflikaunMLyadKR6/P9JJ9mcV8/jS6LriFXNcdRda7Nfj4ac3Q==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@deepseek-ai/cordis': ^4.0.1
+      '@deepseek-ai/schemastery': ^3.18.1
 
   '@csstools/color-helpers@6.1.0':
     resolution: {integrity: sha512-064IFJdjTfUqnjpCVpMOdbr8FLQBhinbZj6yRv2An2E41O/pLEXqfFRWqGq/SxlE5PEUYTlvWsG2r8MswAVvkg==}
@@ -533,33 +560,6 @@ packages:
 
   '@vitest/utils@4.1.10':
     resolution: {integrity: sha512-fy9am/HWxbaGt/Sawrp90vt6Y6jQwf1RX77cz3uwoJwJVMli/e1IEwRPnMNJ7vKfPTwo0diXifkpPvwH9v7nGA==}
-
-  '@wowyuarm/dsh-context-continuity@0.3.0':
-    resolution: {integrity: sha512-T4efn6lFBVBcirDFe2nI4VAJxJIpz2HkMBIkyeRqA1Q3ILZCPeX7hBEn0FyCcBymEDPcRquSWOPKehlEWZKQbg==}
-    peerDependencies:
-      '@deepseek-ai/cordis': ^4.0.1
-      '@deepseek-ai/dsh-agent': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-compaction': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-compaction-basic': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-llm': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-session': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-session-persistence': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-session-projection': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-session-query': '>=0.2.0-rc.1 <0.2.1'
-      '@deepseek-ai/dsh-tools': '>=0.2.0-rc.1 <0.2.1'
-      '@wowyuarm/dsh-jev': ^0.1.1
-    peerDependenciesMeta:
-      '@deepseek-ai/dsh-session-query':
-        optional: true
-      '@wowyuarm/dsh-jev':
-        optional: true
-
-  '@wowyuarm/dsh-jev@0.1.1':
-    resolution: {integrity: sha512-6oAOWcCtAELI88dYECKSLHblqKvBOkozRz8TM8VWxZS2eO/0BDzkLmR5827AJT/iTWgkFokvc/MlfnZF3Pm1xw==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      '@deepseek-ai/cordis': ^4.0.1
-      '@deepseek-ai/schemastery': ^3.18.1
 
   ansi-regex@5.0.1:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
@@ -1034,6 +1034,16 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
+  '@contexera/dsh-context-continuity@0.3.1(@contexera/dsh-jev@0.1.2(@deepseek-ai/schemastery@3.18.2))':
+    dependencies:
+      zod: 4.6.5
+    optionalDependencies:
+      '@contexera/dsh-jev': 0.1.2(@deepseek-ai/schemastery@3.18.2)
+
+  '@contexera/dsh-jev@0.1.2(@deepseek-ai/schemastery@3.18.2)':
+    dependencies:
+      '@deepseek-ai/schemastery': 3.18.2
+
   '@csstools/color-helpers@6.1.0': {}
 
   '@csstools/css-calc@3.3.0(@csstools/css-parser-algorithms@4.0.0(@csstools/css-tokenizer@4.0.0))(@csstools/css-tokenizer@4.0.0)':
@@ -1318,16 +1328,6 @@ snapshots:
       '@vitest/pretty-format': 4.1.10
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
-
-  '@wowyuarm/dsh-context-continuity@0.3.0(@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2))':
-    dependencies:
-      zod: 4.6.5
-    optionalDependencies:
-      '@wowyuarm/dsh-jev': 0.1.1(@deepseek-ai/schemastery@3.18.2)
-
-  '@wowyuarm/dsh-jev@0.1.1(@deepseek-ai/schemastery@3.18.2)':
-    dependencies:
-      '@deepseek-ai/schemastery': 3.18.2
 
   ansi-regex@5.0.1: {}
 

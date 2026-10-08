@@ -44,7 +44,7 @@ import {
   type DomainBoundary,
   type DomainBoundaryContribution,
   type DomainBoundaryInput,
-} from '@wowyuarm/dsh-context-continuity'
+} from '@contexera/dsh-context-continuity'
 import { handoffOf, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { TEAM_CONTEXT_CODEC } from './context-continuity-host.ts'
 import type { AgentTeamContextCheckpointRef, AgentTeamTaskRef, AgentTeamThreadRef } from './types/entities.ts'

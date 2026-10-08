@@ -14,7 +14,7 @@ One Team rule stays in the adapter, because the engine renders a row's `ref` on 
 
 Member context self-management is Host-orchestrated on top of that preset. The `context_rollover` and `context_checkpoint` tools only validate and conclude/anchor the turn: at tool time the engine's gate refuses a `checkpointRef` the Member's own `context_status` does not list as restorable, and every ref that passes it is still prevalidated by the Host's seed resolver — the one the swap uses — so a ref that cannot succeed rejects as a model-visible error result instead of a fake `scheduled`, while the mutable guard set (jobs, route limits) is revalidated at the commit seam.
 
-A single context-continuity coordinator (`ContextContinuityCoordinator` from `@wowyuarm/dsh-context-continuity`) is bound to the Member lifecycle by `context-continuity-host.ts`, which also supplies the engine's message codec with Team's plugin id and the frozen handoff prose. It watches each Member Session's events, folds rollover and checkpoint intent from the durable `tool/call`+`tool/result` pairs, and executes the swap through the serialized lifecycle queue.
+A single context-continuity coordinator (`ContextContinuityCoordinator` from `@contexera/dsh-context-continuity`) is bound to the Member lifecycle by `context-continuity-host.ts`, which also supplies the engine's message codec with Team's plugin id and the frozen handoff prose. It watches each Member Session's events, folds rollover and checkpoint intent from the durable `tool/call`+`tool/result` pairs, and executes the swap through the serialized lifecycle queue.
 
 The fold is the engine's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` supplies only the Team half:
 
