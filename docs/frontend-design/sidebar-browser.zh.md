@@ -46,9 +46,11 @@ Agent 行上的破坏性动作按上下文分档。非创建 workspace 显示「
 
 嵌入的 Member Session 输入面就是 shipped composer 本身，不做任何修改。Team 不注册任何 member-session composer surface：没有 shadow、没有 trigger sources、没有 dock strip。键盘契约、命令与引用菜单、附件都与普通会话完全一致。
 
-Team 模式沿同一做法把侧栏的 shipped 全局件一并收起。新建会话按钮与全局面板栏（今天是插件管理入口）指向的是 profile 而不是 Team。模式成立时隐藏，离开即还原。
+Team 是 shell 的一个 global panel，而不是与它们并排的另一个座位。它的行就是 rail 自己的行（`sidebar.panellist`，order 20，在插件入口下一行、与之等高，携带 Team 自己的 16px 单色标记），选中它就是进入 mode；被选中的那一行携带 shell 自己的 `aria-current='page'` 与同款底色，是比叶子标记高一级的 panel 标记。
 
-slot 选举摘不掉别的插件注册的列表行，入口文案又是本地化的。显隐不锚文案而锚模式本身。普通对话保留入口，浏览器测试把转换两端都钉住。进 Team 前可见，进入后仍在 DOM 但已隐藏。
+Team 模式让 rail 与 shipped 新建会话按钮一同让位：两者指向的都是 profile 而不是 Team，而读者既然已经站在「团队」这个名字所指的页上，这一行也不再需要。于是模式成立时整条 rail 隐藏，离开即恢复。显隐不锚文案而锚模式属性与 shipped 的 `panelList` 类名子串，因为 SlotCore 摘不掉别的插件注册的列表行，入口文案又是本地化的；浏览器测试把转换两端都钉住。
+
+mode 的 foot 占用 settings 座位（`sidebar.settings`，单座，priority -100）。模式成立时，shipped 设置行被两行等宽行替代：上「对话」（`data-team-action="leave"`），下「成员」。这个座位底部锚定，所以第二行留在设置行原来的 y 上，退出行紧贴其上方；窄屏 rail 上两行都是 36px 圆钮。
 
 ## 收件箱（Inbox）
 

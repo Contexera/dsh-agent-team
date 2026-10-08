@@ -68,9 +68,6 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }))
   }
   const runtime = await SlotTestRuntime.create()
-  // A selected global panel is part of the state a reload restores: the shipped
-  // plugin page was open, the persisted Team mode comes back with it.
-  if (options?.mainPanelId !== undefined) runtime.panelInfo.set({ activePanelId: options.mainPanelId as never })
   const locale = new LocaleRuntime(runtime.ctx)
   // rc.1: shipped sidebar chrome (brand row) reads the common namespace.
   locale.register(COMMON_NS, { zh: commonZh, en: commonEn })
@@ -85,6 +82,16 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     selectPanel,
     panelInfo: runtime.panelInfo,
   } as never)
+  // The shipped layout store drops a selection once no live `main` entry owns
+  // its key (ui-layout's `retainMainPanels`, subscribed to the main slot): that
+  // is what returns ordinary DSH when a plugin unloads while its panel stands.
+  // The double mirrors the reconciliation instead of keeping a dangling id.
+  const retainMainPanels = (): void => {
+    const keys = runtime.slots.entries('main').flatMap(entry => entry.options.key === undefined ? [] : [entry.options.key])
+    const active = runtime.panelInfo.getSnapshot().activePanelId
+    if (active !== null && !keys.includes(active)) runtime.panelInfo.set({ activePanelId: null })
+  }
+  runtime.slots.subscribe('main', retainMainPanels)
   // rc.2: the shipped layout and sidebar inject 'shortcuts'. The takeover bench
   // mounts both, so it provides an empty command catalog for the sidebar's
   // keycap reads and a registrer that only reports success — no keyboard
@@ -560,6 +567,16 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     sidebar: { kind: 'single', scope: 'root' },
     main: { kind: 'keyed', scope: 'root' },
   } as never, Frame as never)
+  // The shipped store keeps a selection only while a live `main` entry owns that
+  // key, so a requested panel gets a stand-in entry of its own instead of a
+  // dangling id no page backs. The selection itself is set here rather than at
+  // runtime creation: it is the state a reload restores — the shipped plugin
+  // page was open, and the persisted Team mode comes back with it — so it must
+  // stand before the Team mounts and meets the mode's boot restore.
+  if (options?.mainPanelId !== undefined) {
+    runtime.slots.register({ name: 'main', key: options.mainPanelId }, (() => null) as never)
+    runtime.panelInfo.set({ activePanelId: options.mainPanelId as never })
+  }
   await runtime.mount({ inject: [...injectSidebar], apply: applySidebar })
   // The shipped ConversationRoot occupies the conversation seat — the same
   // surface production mounts — so member-session specs assert the

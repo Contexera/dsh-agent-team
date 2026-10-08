@@ -275,23 +275,37 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
   const ordinaryComposer = page.locator('[data-composer-input][contenteditable="true"][data-placeholder="描述你想要构建的内容, / 调用指令, @ 文件或对话"]')
   await expect.poll(() => ordinaryComposer.count()).toBe(1)
+  // The Team browser's own marked row. The shell's rail marks the panel that
+  // owns the column one level above it, so the leaf's "exactly one" invariant is
+  // asserted in the browser's scope rather than across the whole sidebar.
+  const teamCurrentPage = page.locator('[data-slot="sidebar.workspaces"] [aria-current="page"]')
 
   expect(scaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
-  const teamTrigger = page.getByRole('button', { name: '团队' })
+  // The Team entry is the sidebar rail's own row: the same list as the shipped
+  // global panels, one row below the plugin page's, at the same height.
+  const panelRail = page.locator('nav[class*="panelList"]')
+  const pluginsTrigger = panelRail.getByRole('button', { name: '插件' })
+  const teamTrigger = panelRail.getByRole('button', { name: '团队', exact: true })
   const settingsTrigger = page.getByRole('button', { name: '设置' })
-  const [teamBox, settingsBox] = await Promise.all([teamTrigger.boundingBox(), settingsTrigger.boundingBox()])
+  const [teamBox, pluginsBox, settingsBox] = await Promise.all([teamTrigger.boundingBox(), pluginsTrigger.boundingBox(), settingsTrigger.boundingBox()])
   expect(teamBox).not.toBeNull()
+  expect(pluginsBox).not.toBeNull()
   expect(settingsBox).not.toBeNull()
+  expect(teamBox!.height).toBeCloseTo(pluginsBox!.height, 0)
+  expect(teamBox!.y).toBeCloseTo(pluginsBox!.y + pluginsBox!.height + 4, 0)
   await teamTrigger.click()
+  // The mode's foot takes the settings seat, and that seat is bottom-anchored:
+  // the roster row keeps the y the shipped Settings row had, and the way back
+  // to the conversation stands directly above it.
   const conversationTrigger = page.getByRole('button', { name: '对话' })
   const membersTrigger = page.getByRole('button', { name: '成员' })
   const [conversationBox, membersTriggerBox] = await Promise.all([conversationTrigger.boundingBox(), membersTrigger.boundingBox()])
   expect(conversationBox).not.toBeNull()
   expect(membersTriggerBox).not.toBeNull()
-  expect(conversationBox!.y).toBeCloseTo(teamBox!.y, 0)
-  expect(conversationBox!.height).toBeCloseTo(teamBox!.height, 0)
   expect(membersTriggerBox!.y).toBeCloseTo(settingsBox!.y, 0)
   expect(membersTriggerBox!.height).toBeCloseTo(settingsBox!.height, 0)
+  expect(conversationBox!.height).toBeCloseTo(settingsBox!.height, 0)
+  expect(conversationBox!.y).toBeCloseTo(membersTriggerBox!.y - conversationBox!.height - 8, 0)
   const newSessionButtons = page.locator('button[aria-label="新建会话"]')
   const newSessionButton = page.locator('button[class*="newSession"][aria-label="新建会话"]')
   const brandButton = page.locator('button[class*="brand"][aria-label="新建会话"]')
@@ -670,8 +684,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.locator('[class*="agentRow"]').count()).toBeGreaterThan(0)
   // The single positioning highlight sits on the selected Agent card; the
   // workspace overview row stays quiet while the Member view is open.
-  await expect.poll(() => page.locator('[aria-current="page"]').count()).toBe(1)
-  await expect.poll(() => page.locator('[aria-current="page"]').getAttribute('aria-label')).toBe('打开 builder 的会话')
+  await expect.poll(() => teamCurrentPage.count()).toBe(1)
+  await expect.poll(() => teamCurrentPage.getAttribute('aria-label')).toBe('打开 builder 的会话')
   await expect.poll(() => page.getByRole('button', { name: '# delivery' }).count()).toBe(1)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-dm.png'), fullPage: true })
   // Opening the row menu on the selected card must show ONE seamless full-row
@@ -680,7 +694,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await builderRow.getByRole('button', { name: 'builder 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑 Agent' }).waitFor()
   await expect.poll(() => page.evaluate(() => {
-    const el = document.querySelector('[aria-current="page"]')
+    const el = document.querySelector('[data-slot="sidebar.workspaces"] [aria-current="page"]')
     return el === null ? 'missing' : getComputedStyle(el).backgroundColor
   })).toBe('rgba(0, 0, 0, 0)')
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-dm-row-menu.png'), fullPage: true })
@@ -1542,9 +1556,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '对话' }).click()
   await expect.poll(() => page.locator('[data-team-channel]').count()).toBe(0)
 
-  // The shipped global panel rail (the Plugins entry) addresses the profile,
-  // not the Team: ordinary conversations show it, Team mode stands it down —
-  // present in the DOM on both sides, visible only on one.
+  // The shipped global panel rail holds the Team row beside the Plugins one while
+  // it is up: it addresses the profile, and Team mode stands it down with the
+  // rest of the shell chrome — the reader is already on the Team page, and the
+  // mode's own foot row is the way out. It is present in the DOM on both sides,
+  // visible only on one.
   const globalPanelsNav = page.locator('nav[class*="panelList"]')
   await expect.poll(() => globalPanelsNav.count()).toBe(1)
   await expect.poll(() => globalPanelsNav.isVisible()).toBe(true)
@@ -1557,17 +1573,22 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => pluginsEntry.getAttribute('aria-current')).toBe('page')
   const pluginPanel = page.locator('[data-plugin-panel]')
   await pluginPanel.waitFor()
+  // The page renders this bundle's own artwork, read from the manifest's `icon`
+  // field: the artifact the plugin list shows instead of the default mark.
+  await page.screenshot({ path: join(UI01_SHOTS, 'plugin-list-artwork.png'), fullPage: true })
 
   // The plugin page lists this very bundle under a matching name ("智能体团队"),
-  // so the Team entry is addressed exactly while that page is on screen.
-  const enterTeamKeyboard = page.getByRole('button', { name: '团队', exact: true })
+  // so the Team row is addressed exactly while that page is on screen.
+  const enterTeamKeyboard = globalPanelsNav.getByRole('button', { name: '团队', exact: true })
   await enterTeamKeyboard.focus()
   await expect.poll(() => enterTeamKeyboard.evaluate(element => element === document.activeElement)).toBe(true)
-  await expect.poll(() => page.getByRole('button', { name: '团队', exact: true }).getAttribute('data-team-action')).toBe('enter')
   await enterTeamKeyboard.press('Enter')
   await expect.poll(() => page.getByRole('button', { name: '成员', exact: true }).count()).toBe(1)
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
-  // The selected global panel is unmounted, not sitting behind the Team seat.
+  // The selected plugin page is unmounted rather than sitting behind the Team
+  // seat, the rail stands down with the mode (its own Team row included), and the
+  // mode's foot row is what carries the leave action.
+  await expect.poll(() => page.getByRole('button', { name: '对话', exact: true }).getAttribute('data-team-action')).toBe('leave')
   await expect.poll(() => pluginPanel.count()).toBe(0)
   await expect.poll(() => globalPanelsNav.count()).toBe(1)
   await expect.poll(() => globalPanelsNav.isVisible()).toBe(false)
@@ -2303,20 +2324,22 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await liveAgentCard.click()
   await page.locator('[data-team-inbox]').waitFor({ state: 'detached' })
   await page.locator('[data-composer-input][contenteditable="true"]').first().waitFor()
-  await expect.poll(async () => await page.locator('[aria-current="page"]').count()).toBe(1)
-  await expect.poll(async () => await page.locator('[aria-current="page"]').getAttribute('aria-label')).toBe(liveAgentName)
+  await expect.poll(async () => await teamCurrentPage.count()).toBe(1)
+  await expect.poll(async () => await teamCurrentPage.getAttribute('aria-label')).toBe(liveAgentName)
   await expect.poll(async () => await inboxEntry.getAttribute('aria-current')).toBeNull()
   await settleLayout(page)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-under-agent-overlay.png'), fullPage: true })
   // Asking for the Inbox is Team navigation: it closes the overlay and puts the
-  // reader back on the page they were reading, marker included — one marked row
-  // at every step, never two and never none. The seat matters as much as the
+  // reader back on the page they were reading, marker included — one marked leaf
+  // at every step, never two and never none, while the rail's own marker returns
+  // with the panel the overlay had cleared. The seat matters as much as the
   // sidebar here: the shipped composer belongs to the Member Session, so the
   // page the reader asked for is only really back once that composer is gone.
   await inboxEntry.click()
   await page.locator('[data-team-inbox]').waitFor()
-  await expect.poll(async () => await page.locator('[aria-current="page"]').count()).toBe(1)
+  await expect.poll(async () => await teamCurrentPage.count()).toBe(1)
   await expect.poll(async () => await inboxEntry.getAttribute('aria-current')).toBe('page')
+  await expect.poll(async () => await globalPanelsNav.locator('[aria-current="page"]').count()).toBe(1)
   await expect.poll(async () => await page.locator('[data-composer-input]').count()).toBe(0)
 
   const channelKeyboard = page.getByRole('button', { name: '# delivery' })

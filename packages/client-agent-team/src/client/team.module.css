@@ -1,17 +1,18 @@
-.footerStack {
+/* The Team sidebar's own foot: the way back to the conversation, then the
+   roster. Both rows are the mode's global actions and share the shipped
+   settings row's geometry — a 42px wide row, a 36px round button in the rail —
+   so the Team foot reads as the same seat the ordinary sidebar's foot is. */
+.settingsStack {
   display: flex;
-  flex: none;
-  height: 42px;
-  margin: 8px 0 0;
-  width: 100%;
-  /* The band is a flex row sized by its tallest registrant, and the footer is
-     bottom-anchored, so a taller entry from another plugin grows it upward.
-     Bottom-aligning this stack keeps our row seated directly above Settings
-     instead of leaving the growth as a gap between the two. */
-  align-self: flex-end;
+  flex-direction: column;
 }
 
-.footerAction,
+.settingsStack.rail {
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 10px;
+}
+
 .settingsAction {
   align-items: center;
   background: transparent;
@@ -26,52 +27,27 @@
   gap: 8px;
   height: 42px;
   line-height: 22px;
+  margin: 4px -2px;
   overflow: hidden;
   padding: 0 10px 0 8px;
   width: calc(100% + 4px);
 }
 
-.footerAction {
-  margin: 0 -2px;
-}
-
-.settingsAction {
-  margin: 4px -2px;
-}
-
-.footerAction:hover,
-.footerAction:focus-visible,
 .settingsAction:hover,
 .settingsAction:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover);
 }
-.footerAction:focus-visible,
 .settingsAction:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
 }
 
-.footerAction.rail,
 .settingsAction.rail {
   border-radius: 50%;
   corner-shape: round;
   height: 36px;
   justify-content: center;
+  margin: 0;
   padding: 0;
-  width: 36px;
-}
-
-.footerAction.rail {
-  margin: 0;
-}
-
-.settingsAction.rail {
-  margin: 8px 0 10px;
-}
-
-.railStack {
-  align-items: center;
-  height: 36px;
-  margin: 0;
   width: 36px;
 }

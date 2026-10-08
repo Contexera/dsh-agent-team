@@ -1,8 +1,16 @@
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { AgentTeamChannelRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 
 export type TeamMode = 'conversation' | 'team'
+
+/**
+ * The global panel the Team is entered as, addressed by the sidebar's panel
+ * rail. Team mode and this panel selection are one fact: the rail's row selects
+ * it and the mode follows (see the panel-ownership effect in `index.ts`).
+ */
+export const TEAM_PANEL_ID = 'agent-team' as MainPanelId
 
 export interface TeamNavigationSnapshot {
   mode: TeamMode

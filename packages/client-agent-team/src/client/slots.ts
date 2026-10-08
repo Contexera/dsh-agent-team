@@ -163,7 +163,7 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId']) => void
 }
 
-export type TeamSettingsProps = PropsRuntime<'sidebar.settings'> & PropsLocale<'team'> & {
+export type TeamSettingsProps = PropsRuntime<'sidebar.settings'> & PropsLocale<'team'> & TeamNavigationActions & {
   loadMemberGroups: () => Promise<readonly TeamMemberGroup[]>
 }
 
@@ -171,8 +171,4 @@ export interface TeamMemberGroup {
   readonly workspaceId: string
   readonly workspaceTitle: string
   readonly members: readonly AgentTeamClientMemberStatus[]
-}
-
-export type TeamFooterProps = PropsRuntime<'sidebar.footer.action'> & PropsLocale<'team'> & TeamNavigationActions & {
-  navigation: TeamNavigationSource
 }

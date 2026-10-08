@@ -46,10 +46,10 @@ import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from './judge
 import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
-import { TeamNavigation } from './navigation.ts'
+import { TEAM_PANEL_ID, TeamNavigation } from './navigation.ts'
 import { TeamChangeStream, TeamReadStream, type TeamChangeListener, type TeamChangeScope } from './team-changes.ts'
 import { TeamDraftStore } from './drafts.ts'
-import { TeamFooterAction } from './TeamFooterAction.tsx'
+import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamMembersAction } from './TeamMembersAction.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
@@ -107,38 +107,83 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-function registerModeShadow<T extends object>(
+/** Leaving the mode hands the column back: the mode's own exit row, not the rail. */
+function leaveTeamFromUi(ctx: ClientContext, navigation: TeamNavigation): void {
+  navigation.actions().exitMemberSession()
+  // The panel clears first: the mode flip is what the ownership effect reads, and
+  // a still-selected Team panel at that instant would put the mode straight back.
+  ctx.layout.selectPanel(null)
+  navigation.actions().leaveTeam()
+}
+
+/**
+ * Register the Team as a global panel: one row in the sidebar's panel rail —
+ * beside the shipped Plugins and scheduled-task entries — plus the main seat that
+ * row selects. The main seat lives for the life of the client rather than with
+ * the mode, because a rail row can only select a panel whose main entry is live;
+ * the mode follows the selection instead (see the ownership effect in `applyUi`).
+ */
+function registerTeamPanel(
   ctx: ClientContext,
   navigation: TeamNavigation,
   changes: TeamChangeStream,
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
-  name: 'sidebar.workspaces' | 'main' | 'sidebar.settings',
-  component: T,
-  extraInject?: () => Record<string, unknown>,
-  // Keyed seats (`main`) address one panel by key; the reserved 'conversation'
-  // key is where the shipped Conversation registers, so the Team seat shadows
-  // that same panel instead of adding a second one.
-  entryKey?: string,
 ): void {
-  // Stay in Team mode: the conversation shadow stands down for Member Session
-  // views (see registerModeShadow), so the shipped conversation root renders
-  // the selected Member Session inside the Team shell.
-  const openMemberSessionImpl = (sessionId: AgentTeamClientMemberStatus['member']['sessionId']): void => {
-    const snapshot = navigation.getSnapshot()
-    const current = currentMainSessionId(ctx)
-    // The return target is captured on first entry only — switching between
-    // Member Sessions must keep pointing at the Human's original session.
-    const memberSessions = openedMemberSessions.get(ctx) ?? new Set<string>()
-    openedMemberSessions.set(ctx, memberSessions)
-    memberSessions.add(sessionId)
-    const returnTo = snapshot.memberSessionId === undefined && current !== undefined && current !== sessionId && !memberSessions.has(current) ? current : undefined
-    navigation.actions().enterMemberSession(sessionId, returnTo)
-    ctx.uiWorkspace.openSession(sessionId)
-  }
-  // Remote bindings shared by every Team slot; surface-specific entries extend it below.
-  const sharedRemotes = {
+  const sharedRemotes = teamSharedRemotes(ctx, navigation, changes, reads, drafts, humanIdentity)
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+    name: 'sidebar.panellist',
+    id: TEAM_PANEL_ID,
+    order: 20,
+    label: () => ctx.locale.bind(NS)('team'),
+    locale: NS,
+  }, TeamPanelIcon))
+  ctx.slots.inject('main', () => ctx.slots.register({
+    name: 'main',
+    key: TEAM_PANEL_ID,
+    priority: -100,
+    locale: NS,
+    inject: () => teamSeatInject(ctx, navigation, reads, sharedRemotes, 'main'),
+  }, TeamConversation as never))
+}
+
+/**
+ * Embed one Member's Session in the conversation seat while staying in Team
+ * mode: the conversation shadow stands down for Member Session views, so the
+ * shipped conversation root renders the selected Member Session inside the Team
+ * shell. The Team panel yields the column first — a panel that stayed selected
+ * would render the Team page over the Member conversation — and the mode keeps
+ * the sidebar, so the reader comes back to the Team page they left.
+ */
+function openMemberSessionImpl(
+  ctx: ClientContext,
+  navigation: TeamNavigation,
+  sessionId: AgentTeamClientMemberStatus['member']['sessionId'],
+): void {
+  const snapshot = navigation.getSnapshot()
+  const current = currentMainSessionId(ctx)
+  // The return target is captured on first entry only — switching between
+  // Member Sessions must keep pointing at the Human's original session.
+  const memberSessions = openedMemberSessions.get(ctx) ?? new Set<string>()
+  openedMemberSessions.set(ctx, memberSessions)
+  memberSessions.add(sessionId)
+  const returnTo = snapshot.memberSessionId === undefined && current !== undefined && current !== sessionId && !memberSessions.has(current) ? current : undefined
+  navigation.actions().enterMemberSession(sessionId, returnTo)
+  ctx.layout.selectPanel(null)
+  ctx.uiWorkspace.openSession(sessionId)
+}
+
+/** Remote bindings shared by every Team slot; a surface-specific seat extends them below. */
+function teamSharedRemotes(
+  ctx: ClientContext,
+  navigation: TeamNavigation,
+  changes: TeamChangeStream,
+  reads: TeamReadStream,
+  drafts: TeamDraftStore,
+  humanIdentity: TeamHumanIdentity,
+): Record<string, unknown> {
+  return {
     loadChannels: (request: AgentTeamViewRequest) => ctx.remote.agentTeam.view(request),
     loadInbox: (request: AgentTeamInboxRequest) => ctx.remote.agentTeam.inbox(request),
     subscribeReads: (listener: () => void) => reads.subscribe(listener),
@@ -158,8 +203,77 @@ function registerModeShadow<T extends object>(
     leaveWorkspace: (request: AgentTeamLeaveWorkspaceRequest) => ctx.remote.agentTeam.leaveWorkspace(request),
     // The Host-scoped catalog needs no live Member, so suspended ones stay editable too.
     loadModels: () => ctx.remote.session.modelCatalog(),
-    openMemberSession: openMemberSessionImpl,
+    openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId']) => {
+      openMemberSessionImpl(ctx, navigation, sessionId)
+    },
   }
+}
+
+/**
+ * The injected share one Team seat receives: the mode's own state and actions,
+ * every shared remote, and the writes only that seat performs. `main` writes the
+ * conversation, the sidebar's browser seat writes the roster and Channels.
+ */
+function teamSeatInject(
+  ctx: ClientContext,
+  navigation: TeamNavigation,
+  reads: TeamReadStream,
+  sharedRemotes: Record<string, unknown>,
+  name: 'sidebar.workspaces' | 'main' | 'sidebar.settings',
+  extraInject?: () => Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    navigation,
+    ...extraInject?.(),
+    ...navigation.actions(),
+    // Leaving Team mode is also leaving its panel: the rail row is a
+    // destination, and the mode's own exit row hands the column back to the
+    // conversation instead of leaving the Team panel selected behind it.
+    leaveTeam: () => { leaveTeamFromUi(ctx, navigation) },
+    ...sharedRemotes,
+    ...(name === 'main' ? {
+      // A committed durable read consumes this reader's mention markers; the
+      // Host's changes stream never wakes on reads, so the Human's badge
+      // refreshes from the completed read itself.
+      readThread: async (request: AgentTeamThreadReadRequest) => {
+        const result = await ctx.remote.agentTeam.readThread(request)
+        if (result.ok) reads.bump()
+        return result
+      },
+      loadThreadHistory: (request: AgentTeamThreadHistoryRequest) => ctx.remote.agentTeam.threadHistory(request),
+      threadObservations: (request: AgentTeamThreadObservationsRequest) => ctx.remote.agentTeam.threadObservations(request),
+      sendMessage: (request: AgentTeamSendMessageRequest) => ctx.remote.agentTeam.sendMessage(request),
+      putAttachment: (request: AgentTeamPutAttachmentRequest) => ctx.remote.agentTeam.putAttachment(request),
+      getAttachment: (request: AgentTeamGetAttachmentRequest) => ctx.remote.agentTeam.getAttachment(request),
+      reply: (request: AgentTeamReplyRequest) => ctx.remote.agentTeam.reply(request),
+      changeTask: (request: AgentTeamTaskRequest) => ctx.remote.agentTeam.changeTask(request),
+      promoteThread: (request: AgentTeamPromoteThreadRequest) => ctx.remote.agentTeam.promoteThread(request),
+      resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => ctx.remote.agentTeam.resolveTaskRefs(request),
+      resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => ctx.remote.agentTeam.resolveThreadRefs(request),
+    } : {}),
+    ...(name === 'sidebar.workspaces' ? {
+      addMember: (request: AgentTeamAddMemberRequest) => ctx.remote.agentTeam.addMember(request),
+      createChannel: (request: AgentTeamCreateChannelRequest) => ctx.remote.agentTeam.createChannel(request),
+    } : {}),
+  }
+}
+
+function registerModeShadow<T extends object>(
+  ctx: ClientContext,
+  navigation: TeamNavigation,
+  changes: TeamChangeStream,
+  reads: TeamReadStream,
+  drafts: TeamDraftStore,
+  humanIdentity: TeamHumanIdentity,
+  name: 'sidebar.workspaces' | 'main' | 'sidebar.settings',
+  component: T,
+  extraInject?: () => Record<string, unknown>,
+  // Keyed seats (`main`) address one panel by key; the reserved 'conversation'
+  // key is where the shipped Conversation registers, so the Team seat shadows
+  // that same panel instead of adding a second one.
+  entryKey?: string,
+): void {
+  const sharedRemotes = teamSharedRemotes(ctx, navigation, changes, reads, drafts, humanIdentity)
   ctx.slots.inject(name, () => {
     let dispose: (() => void) | undefined
     const reconcile = (): void => {
@@ -174,36 +288,7 @@ function registerModeShadow<T extends object>(
           ...(entryKey === undefined ? {} : { key: entryKey }),
           priority: -100,
           locale: NS,
-          inject: () => ({
-            navigation,
-            ...extraInject?.(),
-            ...navigation.actions(),
-            ...sharedRemotes,
-            ...(name === 'main' ? {
-              // A committed durable read consumes this reader's mention
-              // markers; the Host's changes stream never wakes on reads, so
-              // the Human's badge refreshes from the completed read itself.
-              readThread: async (request: AgentTeamThreadReadRequest) => {
-                const result = await ctx.remote.agentTeam.readThread(request)
-                if (result.ok) reads.bump()
-                return result
-              },
-              loadThreadHistory: (request: AgentTeamThreadHistoryRequest) => ctx.remote.agentTeam.threadHistory(request),
-              threadObservations: (request: AgentTeamThreadObservationsRequest) => ctx.remote.agentTeam.threadObservations(request),
-              sendMessage: (request: AgentTeamSendMessageRequest) => ctx.remote.agentTeam.sendMessage(request),
-              putAttachment: (request: AgentTeamPutAttachmentRequest) => ctx.remote.agentTeam.putAttachment(request),
-              getAttachment: (request: AgentTeamGetAttachmentRequest) => ctx.remote.agentTeam.getAttachment(request),
-              reply: (request: AgentTeamReplyRequest) => ctx.remote.agentTeam.reply(request),
-              changeTask: (request: AgentTeamTaskRequest) => ctx.remote.agentTeam.changeTask(request),
-              promoteThread: (request: AgentTeamPromoteThreadRequest) => ctx.remote.agentTeam.promoteThread(request),
-              resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => ctx.remote.agentTeam.resolveTaskRefs(request),
-              resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => ctx.remote.agentTeam.resolveThreadRefs(request),
-            } : {}),
-            ...(name === 'sidebar.workspaces' ? {
-              addMember: (request: AgentTeamAddMemberRequest) => ctx.remote.agentTeam.addMember(request),
-              createChannel: (request: AgentTeamCreateChannelRequest) => ctx.remote.agentTeam.createChannel(request),
-            } : {}),
-          }),
+          inject: () => teamSeatInject(ctx, navigation, reads, sharedRemotes, name, extraInject),
         } as never, component as never)
       } else if (!active && dispose !== undefined) {
         dispose()
@@ -289,6 +374,9 @@ function applyUi(ctx: ClientContext): void {
       if (departed === undefined || snapshot.memberSessionId !== undefined) return
       if (currentMainSessionId(ctx) !== departed) return
       if (returnTo !== undefined && (ctx.sessions as unknown as ISessions).list.getSnapshot().byId[returnTo] !== undefined) ctx.uiWorkspace.openSession(returnTo)
+      // The Member view owned the column through a cleared panel; the Team page
+      // takes it back, so the mode is entered as the panel it names again.
+      if (snapshot.mode === 'team' && ctx.layout.panelInfo.getSnapshot().activePanelId === null) ctx.layout.selectPanel(TEAM_PANEL_ID)
     }
     const unsubscribe = navigation.subscribe(restore)
     return () => {
@@ -296,24 +384,6 @@ function applyUi(ctx: ClientContext): void {
       restore()
     }
   }, 'agent-team: member session restore')
-
-  // The shell renders one keyed main panel at a time — `activePanelId ?? 'conversation'`
-  // — so a shipped global panel (the plugin manager) stays on screen after Team mode is
-  // entered, and every Team destination then opens behind it: the sidebar moves while the
-  // column keeps rendering the foreign page. Team mode owns the conversation seat, so
-  // entering it, or navigating inside it, hands the column back to that seat. A null
-  // selection — and every mode but Team, where panel choice belongs to the shipped
-  // sidebar — is left untouched, so this never fights the shell's own selection.
-  ctx.effect(() => {
-    const releaseMainPanel = (): void => {
-      if (navigation.getSnapshot().mode !== 'team') return
-      if (ctx.layout.panelInfo.getSnapshot().activePanelId === null) return
-      ctx.layout.selectPanel(null)
-    }
-    const unsubscribe = navigation.subscribe(releaseMainPanel)
-    releaseMainPanel()
-    return unsubscribe
-  }, 'agent-team: main panel ownership')
 
   const changes = new TeamChangeStream(ctx.remote)
   ctx.effect(() => () => changes.dispose(), 'agent-team: change subscriptions')
@@ -336,28 +406,58 @@ function applyUi(ctx: ClientContext): void {
     return groups.filter(group => group.members.length > 0)
   }
 
-  ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
-    name: 'sidebar.footer.action',
-    id: 'agent-team',
-    order: 100,
-    locale: NS,
-    inject: () => ({
-      navigation,
-      ...navigation.actions(),
-      // The footer is the only surface that leaves Team mode; closing the
-      // embedded Member Session view rebinds the underlying selection through
-      // the same root-scope restore owner, so there is exactly one restore
-      // path and no double open.
-      leaveTeam: () => {
-        navigation.actions().exitMemberSession()
-        navigation.actions().leaveTeam()
-      },
-    }),
-  }, TeamFooterAction as never))
+  registerTeamPanel(ctx, navigation, changes, reads, drafts, humanIdentity)
 
   registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
   registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'main', TeamConversation as never, undefined, 'conversation')
   registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
+
+  // The Team entry lives in the sidebar's panel rail beside the shipped Plugins
+  // and scheduled-task entries, so the rail's selection and Team mode are one
+  // fact: selecting the Team panel enters the mode, and another panel taking the
+  // column leaves it. A null selection is left alone — a Member Session view
+  // clears the panel to own the column, and the mode has to survive that — while
+  // the mode's own exit row clears the panel itself.
+  ctx.effect(() => {
+    const sync = (): void => {
+      const active = ctx.layout.panelInfo.getSnapshot().activePanelId
+      const snapshot = navigation.getSnapshot()
+      if (active === TEAM_PANEL_ID) {
+        // Asking for the Team page while a Member Session holds the column is a
+        // request for that page: the embedded view closes, the Team seat stays.
+        if (snapshot.memberSessionId !== undefined) navigation.actions().exitMemberSession()
+        if (snapshot.mode !== 'team') navigation.actions().enterTeam()
+        return
+      }
+      if (active !== null && snapshot.mode === 'team') navigation.actions().leaveTeam()
+    }
+    const unsubscribe = ctx.layout.panelInfo.subscribe(sync)
+    // A reload keeps the mode it was left in, so it re-selects the panel that
+    // mode is entered as. A restored Member Session view owns the column
+    // instead: the panel stays clear until that view closes.
+    const restored = navigation.getSnapshot()
+    if (restored.mode === 'team' && restored.memberSessionId === undefined
+      && ctx.layout.panelInfo.getSnapshot().activePanelId === null) ctx.layout.selectPanel(TEAM_PANEL_ID)
+    sync()
+    return unsubscribe
+  }, 'agent-team: panel ownership')
+
+  // Team mode's own marker on the document: the Team sidebar's CSS keys off it
+  // (the shell's New Session button stands down), and it is the one place that
+  // says the mode rather than the selection.
+  ctx.effect(() => {
+    const apply = (): void => {
+      if (typeof document === 'undefined') return
+      if (navigation.getSnapshot().mode === 'team') document.documentElement.dataset.agentTeamMode = 'team'
+      else delete document.documentElement.dataset.agentTeamMode
+    }
+    const unsubscribe = navigation.subscribe(apply)
+    apply()
+    return () => {
+      unsubscribe()
+      if (typeof document !== 'undefined') delete document.documentElement.dataset.agentTeamMode
+    }
+  }, 'agent-team: mode marker')
 
   // The Team's settings page: one settings section, ordered between General (0)
   // and Models (10) so it sits near the top. It holds two groups that write

@@ -1,14 +1,11 @@
-:global(html[data-agent-team-mode='team']) button[class*='newSession'] {
-  display: none;
-}
-
-/* The shipped panel rail — today the Plugins entry ui-plugin-manager
-   contributes to `sidebar.panellist` — is a global profile surface, and Team
-   mode is a different destination: SlotCore cannot withdraw another plugin's
-   list row, so the rail stands down here the same way the New Session button
-   stands down above. Ordinary conversations keep the entry, and both sides
-   key off the html attribute the Team footer action owns, never off the
-   entry's localized label. */
+/* Team mode stands the shell's global chrome down: the New Session button and
+   the global panel rail both address the profile rather than the Team, so both
+   hide while the mode stands. The rail's own Team row goes with it — the reader
+   is already there, and the mode's exit is the foot row, not a rail row — so the
+   rail is what an ordinary conversation offers, and it comes back the moment the
+   mode is left. Both sides key off the html attribute the Team client owns,
+   never off a localized label. */
+:global(html[data-agent-team-mode='team']) button[class*='newSession'],
 :global(html[data-agent-team-mode='team']) nav[class*='panelList'] {
   display: none;
 }

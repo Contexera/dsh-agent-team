@@ -19,18 +19,19 @@ Generated Remote methods resolve a `RemoteResult`: `{ ok: true, value }` carries
 - Clients branch on `code`, never on message text — the message is a human diagnostic, not contract. Unknown codes and unclassified Host exceptions arrive as `gateway/internal`, so each branch keeps a generic fallback: the attachment preview settles a not-found into the expired chip, caches no other failure, and lets a later render retry the Host.
 
 ## Client plugin and slot composition
-The external Client plugin leaves the shipped Shell as outer-layout owner. Team adds one footer action and shadows three seats:
+The external Client plugin leaves the shipped Shell as outer-layout owner. Team adds one global panel and shadows three seats:
 
 ```text
-sidebar.footer.action       additive Team entry
+sidebar.panellist           additive Team row, order 20
+main (key agent-team)       Team panel, priority -100
 sidebar.workspaces          Team shadow, priority -100
 main (key conversation)     Team shadow, priority -100
 sidebar.settings            Team shadow, priority -100
 ```
 
-Activation mounts `agentTeamRemote`, waits for `remote.agentTeam`, then registers Team footer and mode shadows. `dsh.client.inject` describes the module graph but does not guarantee apply order or service readiness; use `ctx.slots.inject()` when a declaration may appear later.
+Activation mounts `agentTeamRemote`, waits for `remote.agentTeam`, then registers the Team panel, its rail row, and the mode shadows. `dsh.client.inject` describes the module graph but does not guarantee apply order or service readiness; use `ctx.slots.inject()` when a declaration may appear later.
 
-Team mode also owns the shell's main-panel selection: entering it, or navigating inside it, returns the column to the conversation panel — the seat the Team shadows — whenever a shipped global panel (the plugin manager) still holds it. Outside Team mode the Team never touches that selection.
+The panel row and Team mode are one fact: the row is the shell's own rail button, selecting it enters the mode, and another panel taking the column leaves it. A null selection is left alone — an embedded Member Session view clears the panel to own the column and the mode has to survive that — while the mode's own foot row clears the panel itself. A restored mode re-selects its panel unless a panel was already selected at mount, in which case that panel keeps the column and the mode stands down.
 
 A slot parent's `children` declaration is both render site and authority. Team's `sidebar.workspaces` shadow must not redeclare shipped `sidebar.workspaces.directoryFlow`; Harness SlotCore rejects duplicate live declarations. Do not copy private WorkspaceBrowser, ConversationRoot, Shell, or private CSS. Use public Harness services and exports, such as `ctx.workspaces.pickDirectory()`, and record limitations rather than depending silently on private implementation.
 

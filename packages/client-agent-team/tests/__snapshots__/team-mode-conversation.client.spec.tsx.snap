@@ -104,6 +104,43 @@ exports[`Team conversation surfaces > restores persisted Team mode, reconciles a
             新会话
           </span>
         </button>
+        <nav
+          aria-label="全局面板"
+          class="panelList"
+        >
+          <button
+            aria-current="page"
+            aria-label="团队"
+            class="panelRow panelActive"
+            type="button"
+          >
+            <span
+              aria-hidden="true"
+              class="panelGlyph"
+            >
+              <div
+                data-slot="sidebar.panellist"
+                style="display: contents;"
+              >
+                <svg
+                  aria-hidden="true"
+                  data-content="bc2eedd3"
+                  fill="none"
+                  height="16"
+                  stroke-width="1"
+                  viewBox="0 0 16 16"
+                  width="16"
+                  xmlns="http://www.w3.org/2000/svg"
+                />
+              </div>
+            </span>
+            <span
+              class="panelTitle wide"
+            >
+              团队
+            </span>
+          </button>
+        </nav>
         <div
           class="regionArea"
         >
@@ -614,13 +651,21 @@ exports[`Team conversation surfaces > restores persisted Team mode, reconciles a
             <div
               data-slot="sidebar.footer.action"
               style="display: contents;"
+            />
+          </div>
+          <div
+            class="settingsArea"
+          >
+            <div
+              data-slot="sidebar.settings"
+              style="display: contents;"
             >
               <div
-                class="footerStack"
+                class="settingsStack"
               >
                 <button
                   aria-label="对话"
-                  class="footerAction"
+                  class="settingsAction"
                   data-team-action="leave"
                   type="button"
                 >
@@ -638,36 +683,27 @@ exports[`Team conversation surfaces > restores persisted Team mode, reconciles a
                     对话
                   </span>
                 </button>
+                <button
+                  aria-haspopup="dialog"
+                  aria-label="成员"
+                  class="settingsAction"
+                  type="button"
+                >
+                  <svg
+                    aria-hidden="true"
+                    data-content="68b4b343"
+                    fill="none"
+                    height="16"
+                    stroke-width="1"
+                    viewBox="0 0 16 16"
+                    width="16"
+                    xmlns="http://www.w3.org/2000/svg"
+                  />
+                  <span>
+                    成员
+                  </span>
+                </button>
               </div>
-            </div>
-          </div>
-          <div
-            class="settingsArea"
-          >
-            <div
-              data-slot="sidebar.settings"
-              style="display: contents;"
-            >
-              <button
-                aria-haspopup="dialog"
-                aria-label="成员"
-                class="settingsAction"
-                type="button"
-              >
-                <svg
-                  aria-hidden="true"
-                  data-content="68b4b343"
-                  fill="none"
-                  height="16"
-                  stroke-width="1"
-                  viewBox="0 0 16 16"
-                  width="16"
-                  xmlns="http://www.w3.org/2000/svg"
-                />
-                <span>
-                  成员
-                </span>
-              </button>
             </div>
           </div>
         </div>

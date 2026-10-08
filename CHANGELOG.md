@@ -4,7 +4,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-- Team brings its own artwork: the plugin list shows Team's own icon instead of the default placeholder.
+- Team moves into the sidebar's panel rail, beside Plugins: the Team row is the shell's own rail button now, so it stops fighting the shipped row for the same footer band, and the way out of Team mode is a Conversations row in Team's own foot, directly above Members. Team mode still stands the shell's chrome down — the rail and the New Session button address your profile, not the Team, and both return the moment you leave.
+- Team brings its own artwork: the plugin list shows Team's own icon instead of the default placeholder, and the rail row carries a 16px monochrome mark of the same drawing.
 
 ## [0.2.2] - 2026-10-08
 

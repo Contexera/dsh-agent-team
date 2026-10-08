@@ -43,12 +43,15 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
     const backendChannel = await b.view.findByRole('button', { name: '# backend' })
     fireEvent.click(backendChannel)
-    expect(backendChannel.closest('article')?.getAttribute('aria-current')).toBe('page')
-    // Location moves to the leaf: the Channel row is the composition's only
-    // aria-current='page', and the browsed Workspace row yields it.
-    const currentPage = b.view.container.querySelector('[aria-current="page"]')
-    expect(currentPage).toBe(backendChannel.closest('article'))
-    expect(b.view.container.querySelectorAll('[aria-current="page"]')).toHaveLength(1)
+    const channelRow = backendChannel.closest('article')!
+    expect(channelRow.getAttribute('aria-current')).toBe('page')
+    // Location moves to the leaf: the open Channel is the Channel list's only
+    // aria-current='page', and the browsed Workspace row yields it. The panel
+    // rail above keeps its own marker for the selected global panel, so the
+    // two levels are asserted where each one lives.
+    const channelList = channelRow.parentElement!
+    expect([...channelList.querySelectorAll('[aria-current="page"]')]).toEqual([channelRow])
+    expect(b.view.container.querySelector('[data-team-workspace-trigger]')?.getAttribute('aria-current')).toBeNull()
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     const channelPage = b.view.container.querySelector('[data-team-channel]') as HTMLElement
     const manageMembers = within(channelPage).getByRole('button', { name: '管理成员' })
@@ -478,7 +481,7 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     // Let the browser's one-time workspace selection settle first; a late
     // selectWorkspace would strip the channel ref mid-test.
-    await waitFor(() => { expect(b.view.container.querySelector('[aria-current="page"]')?.textContent).toContain('Alpha') })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     const composer = b.view.container
@@ -550,7 +553,7 @@ describe('Team conversation surfaces', () => {
   it('turns pasted clipboard files into composer chips and sends their ids', async () => {
     const b = await runtimeWithTeam({ initialChannels: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    await waitFor(() => { expect(b.view.container.querySelector('[aria-current="page"]')?.textContent).toContain('Alpha') })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     const composer = b.view.container
@@ -887,7 +890,7 @@ describe('Team conversation surfaces', () => {
   it('drops the jump hint the moment the reader returns to the tail', async () => {
     const b = await runtimeWithTeam({ initialChannels: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    await waitFor(() => { expect(b.view.container.querySelector('[aria-current="page"]')?.textContent).toContain('Alpha') })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
@@ -989,7 +992,7 @@ describe('Team conversation surfaces', () => {
       seededMessages: [{ body: '积压任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    await waitFor(() => { expect(b.view.container.querySelector('[aria-current="page"]')?.textContent).toContain('Alpha') })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
@@ -1010,7 +1013,7 @@ describe('Team conversation surfaces', () => {
   it('keeps the jump hint when the automatic acknowledgment read fails', async () => {
     const b = await runtimeWithTeam({ initialChannels: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    await waitFor(() => { expect(b.view.container.querySelector('[aria-current="page"]')?.textContent).toContain('Alpha') })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
