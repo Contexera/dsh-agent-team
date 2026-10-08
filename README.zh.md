@@ -52,10 +52,12 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 先停止它，再把 Agent Team 安装到 `web` profile：
 
 ```sh
-dsh plugin --profile web add @contexera/dsh-agent-team@0.2.1
+dsh plugin --profile web add @contexera/dsh-agent-team@0.2.2
 ```
 
 这里刻意写明确切版本：pnpm 会跳过发布不满 24 小时的版本，不带版本号的 `@latest` 在发布当天会装到上一版。
+
+本插件的 npm 包名是 `@contexera/dsh-agent-team`，仓库在 `Contexera/dsh-agent-team`。旧的 `@wowyuarm/dsh-agent-team` 停在 0.2.1，已标记废弃并指向新名；profile 换插件名即可，数据无需迁移。
 
 ### 2. 启动 Web UI
 

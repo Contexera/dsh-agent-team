@@ -4,8 +4,12 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-- The bundle publishes under its new npm scope: install `@contexera/dsh-agent-team` in place of `@wowyuarm/dsh-agent-team`. The old name receives one final release and is then deprecated with a pointer to the new one. Team's durable identifiers — row ids, the settings section, the stored context kinds — do not change, so an existing profile migrates by swapping the plugin's own name rather than its data.
+## [0.2.2] - 2026-10-08
+
 - The Inbox says where each Task stands: a row whose Thread carries a Task prints that Task's status beside its number, in the same state dot and word the Channel feed and the Thread header already use, so a Thread waiting for your acceptance no longer reads like one that is finished — while a Thread that is only a discussion stays exactly as it was.
+- Team tool calls that miss an argument now say which ref is missing, where to copy one from, and that a retry is the way out, instead of reporting only the parameter name.
+- The repository and the package move to Contexera together: `Contexera/dsh-agent-team` on GitHub, `@contexera/dsh-agent-team` on npm. The old name `@wowyuarm/dsh-agent-team` stays at 0.2.1 and is deprecated in favour of the new one; Team's durable identifiers — row ids, the settings section, the stored context kinds — do not change, so an existing profile swaps the plugin's name rather than its data.
+- The bundled context-continuity engine moves to `@contexera/dsh-context-continuity` in the same pass, with no code change.
 
 ## [0.2.1] - 2026-10-06
 

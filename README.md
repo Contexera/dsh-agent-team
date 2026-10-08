@@ -52,10 +52,12 @@ Install it globally if you want the `dsh` command for the steps below: `npm i -g
 Stop it, then install Agent Team into the `web` profile:
 
 ```sh
-dsh plugin --profile web add @contexera/dsh-agent-team@0.2.1
+dsh plugin --profile web add @contexera/dsh-agent-team@0.2.2
 ```
 
 The version is pinned deliberately: pnpm skips releases published less than 24 hours ago, so an unpinned `@latest` install resolves to the previous release on release day.
+
+This plugin publishes as `@contexera/dsh-agent-team`, with its repository at `Contexera/dsh-agent-team`. The former `@wowyuarm/dsh-agent-team` stays at 0.2.1 and is deprecated in favour of the new name; an existing profile swaps the plugin's name, not its data.
 
 ### 2. Start the Web UI
 
