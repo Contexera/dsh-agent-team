@@ -22,6 +22,12 @@ A top-level Message mentioning Agents makes them follow the new Thread and deliv
 
 Agents may mention the Human without making the Human a follower.
 
+A reply answers one existing Message, so it also carries that Message's author as a recipient: quoting a Member delivers to them exactly as naming them does.
+
+The author joins the recipient set before delivery is resolved, so the same invitation rule, direct markers, and `undeliveredMentions` reporting all apply. An Agent still cannot invite a Member the Thread has never carried, and the Human is never a recipient because they read the Thread directly. A Message's own author is never added to itself, so answering your own Message notifies nobody.
+
+A reply whose target is unknown, or belongs to another Thread, is refused rather than recorded.
+
 ## Human-readable messages
 Every message leads with the conclusion or state; mechanical detail — `file:line`, commands, hashes, probe output — follows below it, and detail a peer Member needs is never dropped, only moved. Prose stays in the language the Human writes, while identifiers, paths, commands, and refs stay verbatim.
 

@@ -418,3 +418,51 @@ describe('TeamMessage bubble and mention mark', () => {
     expect(row!.textContent).toBe('@lead')
   })
 })
+
+describe('TeamMessage reply quote and action', () => {
+  it('renders the resolved quote above the body and jumps through it', () => {
+    let opened = 0
+    const { container } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="我认这个方向"
+        messageRef={'message:self' as never}
+        replyTo={{ senderName: '@架构师', excerpt: '这段逻辑现在有点乱' }} onOpenReplyTo={() => { opened += 1 }} t={t} />,
+    )
+    const quote = container.querySelector('[data-reply-quote]')
+    expect(quote).not.toBeNull()
+    expect(quote!.textContent).toContain('@架构师')
+    expect(quote!.textContent).toContain('这段逻辑现在有点乱')
+    // The quote answers "what is this replying to" before the body is read.
+    const bubble = container.querySelector('[data-bubble]')!
+    expect(bubble.firstElementChild).toBe(quote)
+    fireEvent.click(quote!)
+    expect(opened).toBe(1)
+  })
+
+  it('renders an inert quote when the surface offers no jump', () => {
+    const { container } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="收到"
+        replyTo={{ senderName: '@架构师', excerpt: '一段原文' }} t={t} />,
+    )
+    const quote = container.querySelector('[data-reply-quote]')!
+    expect(quote.tagName).toBe('SPAN')
+  })
+
+  it('offers a reachable reply action and marks the current target', () => {
+    let replied = 0
+    const { container, getByRole, rerender } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以"
+        messageRef={'message:abc' as never} onReply={() => { replied += 1 }} t={t} />,
+    )
+    fireEvent.click(getByRole('button', { name: '回复这条消息' }))
+    expect(replied).toBe(1)
+
+    rerender(<TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以"
+      messageRef={'message:abc' as never} replyTarget t={t} />)
+    const row = container.querySelector('[data-replying-to]')
+    expect(row).not.toBeNull()
+    // A row without the action offers none: the Channel feed passes no onReply.
+    rerender(<TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以" t={t} />)
+    expect(container.querySelector('[data-message-actions]')).toBeNull()
+    expect(container.querySelector('[data-replying-to]')).toBeNull()
+  })
+})

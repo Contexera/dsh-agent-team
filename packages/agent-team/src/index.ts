@@ -97,6 +97,9 @@ import type {
   AgentTeamMemberId,
   AgentTeamMemberResult,
   AgentTeamMembersRequest,
+  AgentTeamMessageRef,
+  AgentTeamResolveMessageRefsRequest,
+  AgentTeamResolveMessageRefsResult,
   AgentTeamResolveTaskRefsRequest,
   AgentTeamResolveTaskRefsResult,
   AgentTeamResolveThreadRefsRequest,
@@ -972,6 +975,19 @@ export default class AgentTeam extends TypertRemoteService {
       return true
     })
     return Object.freeze({ resolved: Object.freeze(this.requireLedger().resolveThreadRefs(request.workspaceId, threadRefs)) })
+  }
+
+  /** Read-only lookup resolving each reply's parent into its author and excerpt. */
+  @Remote('resolveMessageRefs')
+  resolveMessageRefs(request: AgentTeamResolveMessageRefsRequest): AgentTeamResolveMessageRefsResult {
+    this.requireWorkspace(request.workspaceId)
+    const seen = new Set<AgentTeamMessageRef>()
+    const messageRefs = request.messageRefs.filter(messageRef => {
+      if (seen.has(messageRef)) return false
+      seen.add(messageRef)
+      return true
+    })
+    return Object.freeze({ resolved: Object.freeze(this.requireLedger().resolveMessageRefs(request.workspaceId, messageRefs)) })
   }
 
   /** Browser-safe Human roster, optionally filtered to one participation. */

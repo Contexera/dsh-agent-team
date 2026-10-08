@@ -4,6 +4,7 @@ import type {
   AgentTeamChannelRef,
   AgentTeamConfirmationToken,
   AgentTeamMemberId,
+  AgentTeamMessageRef,
   AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
@@ -24,6 +25,7 @@ import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { daySeparatorLabel, isRunGap, timelineDayKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
+import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
 import { rosterChannelName, rosterMember } from './refs.ts'
@@ -56,6 +58,7 @@ interface TeamThreadPageProps {
   readonly selectThread: TeamConversationProps['selectThread']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
+  readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly t: TeamConversationProps['t']
 }
@@ -109,7 +112,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const {
     workspaceId, humanName, humanAvatarUrl, channelRef, taskRef, threadRef, taskNumber, backToWorkspace, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
     loadChannels, readThread, loadThreadHistory, threadObservations,
-    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, t,
+    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, resolveMessageRefs, t,
   } = props
   const threadRequest = { threadRef, ...(taskRef === undefined ? {} : { taskRef }) }
   const [projection, setProjection] = useState<ReadProjection>()
@@ -144,6 +147,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     if (confirmingAccept && projection?.task?.resolution === 'accepted') setConfirmingAccept(false)
   }, [confirmingAccept, projection?.task?.resolution])
   const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
+  // The Message the composer is currently answering, and the parent a reader
+  // just jumped back to (a short pulse, then it clears).
+  const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
+  const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
   const [confirmation, setConfirmation] = useState<AgentTeamConfirmationToken>()
   const [statusMessage, setStatusMessage] = useState<string>()
   const [pending, setPending] = useState(false)
@@ -476,6 +483,30 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
+  // Reply parents resolve through the Host: a quote must fill in even when the
+  // Message it answers sits far outside the facts this page has loaded.
+  const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
+  const messageRefVersion = useResolvedMessageRefVersion()
+  useEffect(() => {
+    const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
+    if (refs.length > 0) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
+  }, [currentFacts, lookupMessageRefs, messageRefVersion])
+  useEffect(() => {
+    if (flashedMessage === undefined) return
+    const timer = setTimeout(() => { setFlashedMessage(undefined) }, 1200)
+    return () => { clearTimeout(timer) }
+  }, [flashedMessage])
+  /** Take the reader to the Message a reply answers, when it is on screen. */
+  const jumpToMessage = useCallback((messageRef: AgentTeamMessageRef): void => {
+    const node = document.querySelector(`[data-message-ref="${messageRef}"]`)
+    if (node === null) return
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlashedMessage(messageRef)
+  }, [])
+  // One stable callback for every row: TeamMessage is memoized, so a fresh
+  // closure per row would re-render the whole timeline on any page render.
+  const handleReply = useCallback((messageRef: AgentTeamMessageRef): void => { setReplyTarget(messageRef) }, [])
+  const handleOpenReplyTo = useCallback((messageRef: AgentTeamMessageRef): void => { jumpToMessage(messageRef) }, [jumpToMessage])
   // Roster chips resolve synchronously from loaded data: channel names from
   // the Channel view, member facts from the member list. Anything outside the
   // loaded window stays plain text — the same rule unresolvable Task/Thread
@@ -495,6 +526,26 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     const humanMemberId = channelView?.humanMemberId
     return (ref: AgentTeamMemberId) => rosterMember(members, humanMemberId, humanName, ref)
   }, [rosterKey, humanName])
+
+  // Reply contexts keyed by the replying Message. Built once per change in the
+  // facts, roster, or resolution cache so each row keeps one stable object:
+  // TeamMessage is memoized and an object literal per render would undo it.
+  const replyContexts = useMemo(() => {
+    const contexts = new Map<AgentTeamMessageRef, { readonly senderName: string; readonly excerpt: string }>()
+    const nameOf = (memberId: AgentTeamMemberId): string => {
+      if (memberId === channelView?.humanMemberId) return humanName
+      const status = members.find(candidate => candidate.member.memberId === memberId)
+      return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
+    }
+    for (const fact of currentFacts) {
+      if (fact.kind !== 'message' || fact.message.replyToMessageRef === undefined) continue
+      const parent = cachedResolvedMessageRef(fact.message.replyToMessageRef)
+      contexts.set(fact.message.messageRef, parent === undefined
+        ? { senderName: t('memberUnknown'), excerpt: '' }
+        : { senderName: nameOf(parent.sender), excerpt: parent.excerpt })
+    }
+    return contexts
+  }, [currentFacts, messageRefVersion, members, channelView, humanName, t])
 
   const renderFact = (fact: AgentTeamThreadFact, grouped = false) => {
     if (fact.kind === 'message') {
@@ -530,6 +581,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         memberOf={memberOf}
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
+        messageRef={fact.message.messageRef}
+        {...(replyContexts.has(fact.message.messageRef) ? { replyTo: replyContexts.get(fact.message.messageRef)!, onOpenReplyTo: handleOpenReplyTo } : {})}
+        onReply={handleReply}
+        replyTarget={replyTarget === fact.message.messageRef}
+        replyFlash={flashedMessage === fact.message.messageRef}
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
       />
     }
@@ -696,7 +752,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return
       }
       const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
+      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
       if (!result.ok) {
         setError(result.error.message)
         return
@@ -714,6 +770,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         })
         setProjection(current => current === undefined ? current : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
         drafts.clear(draftKey)
+        setReplyTarget(undefined)
         setPendingFiles([])
         setReplyRequestId(undefined)
         setConfirmation(undefined)
@@ -892,6 +949,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       placeholder={t('replyPlaceholder')}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
+      {...(replyTarget === undefined ? {} : {
+        replyTo: (() => {
+          const target = cachedResolvedMessageRef(replyTarget)
+          return target === undefined ? { senderName: t('memberUnknown'), excerpt: '' } : { senderName: memberName(target.sender), excerpt: target.excerpt }
+        })(),
+        onCancelReply: () => { setReplyTarget(undefined) },
+      })}
       t={t}
     />
     ) : <div />}

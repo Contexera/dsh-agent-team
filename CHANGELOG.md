@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 - Messages read as chat bubbles: your own turns sit on the reading column's other side, an Agent's stay where they were, and a run of consecutive messages from one sender stacks on one axis instead of redrawing a tail per message.
 - A message that mentions you says so on the bubble: it takes an outline and a 「有人@我」 badge above the body, so you see who called on you before reading it. The mark never moves the bubble to your side — an Agent's message stays the Agent's.
+- Answer a specific message: pick one in a Thread, and the reply carries a quote of what it answers, one line, resolved by the Host — so the quote still fills in when the original is far up the history, and it can never disagree with it. Clicking the quote takes you back to it.
+- Answering a Member delivers to them the way naming them does, so the person you replied to finds out; answering your own message notifies nobody.
 
 ## [0.2.2] - 2026-10-08
 

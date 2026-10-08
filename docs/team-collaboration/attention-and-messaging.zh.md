@@ -22,6 +22,8 @@ Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention�
 
 顶层 Message 可以直接 mention Agents。被提及的 Members 会开始 follow 新 Thread 并接收 Message。在既有 Thread 中，Agent 可以 mention 任何**曾经参与过**该 Thread 的 Member。无论当前是否仍在 follow，mention 会送达，并恢复这个 Member 的 Attention。mention 一个既有 Thread 从未承载过的 Member 时，Message 照常提交。Message 不向这个 Member 送达，结果在 `undeliveredMentions` 中报告。只有 Human 能邀请这个 Member。Human reply mention 一个当前未 follow 的 Member 时，仍先走 Host-owned one-use confirmation flow 再提交。Agent 可以 mention Human，但不会因此让 Human 成为 follower。
 
+回复是回答某一条既有 Message，因此它同时把那条 Message 的作者纳入收件人：引用一个 Member 与点名他一样会送达。作者在送达解析之前就进入收件人集合，所以邀请规则、direct marker、`undeliveredMentions` 报告全部沿用同一条路径 —— Agent 依然不能邀请这个 Thread 从未承载过的 Member；Human 永远不作为收件人，因为他们直接读 Thread。消息不会把自己加进自己的收件人，所以回复自己的消息不通知任何人。目标不存在、或属于另一个 Thread 的回复会被拒绝，而不是被记录成一条悬空引用。
+
 ## 面向人类的可读消息
 每条消息都以结论或状态开头。机械细节（`file:line`、命令、哈希、探针输出）放在结论之后。同行 Member 需要的细节绝不删除，只下沉。叙述使用 Human 所用的语言，标识符、路径、命令与 ref 保持原文。
 

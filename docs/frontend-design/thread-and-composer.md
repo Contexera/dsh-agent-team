@@ -20,6 +20,10 @@ A quiet recipient notice shows who will be notified: the picked recipients union
 
 The 「作为任务」 intent is not persisted and resets off after success. The mode chip keeps its word label at every width and narrows the toolbar gap below 560px rather than hiding the word.
 
+Choosing a Message to answer states the target twice, and both must be visible: the Message itself takes an outline, and the composer carries a banner naming the parent and quoting its first line, with a cancel beside it. The outline is a ring rather than a fill for the same reason the mention mark is — the bubble's material must not change with state. The banner sits inside the composer card above the input, so the target and the draft read as one act, and cancelling clears both the banner and the outline.
+
+The send carries the parent's ref, so the Host records the link and delivers to the parent's author; a successful send clears the target, and so does switching Threads, so a stale quote can never ride along with the next Enter.
+
 Taskless Thread promotion is Human-only, durable, and non-optimistic. On success reread Thread and supplemental Channel/Member projections; on unread/stale fence errors preserve Host error and reread relevant facts.
 
 ## Thread/Task entry rows

@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
@@ -33,6 +33,25 @@ export interface TeamMessageProps {
       the reader back to themselves: the badge already states the mention when it
       needs attention, and their name in the body is chipped in place. */
   readonly readerName?: string
+  /**
+   * Resolved context of the Message this one answers; absent when it is not a
+   * reply. The author and the excerpt come from the Host, never from the body,
+   * so a quote cannot drift from the Message it points at.
+   */
+  readonly replyTo?: { readonly senderName: string; readonly excerpt: string } | undefined
+  /** Opens the named Message as the composer's reply target; absent surfaces offer no reply action.
+      The Message's own ref travels as the argument so the hosting page can pass one
+      identity-stable callback for every row instead of a fresh closure per row —
+      a new function per render would defeat this component's memo. */
+  readonly onReply?: ((messageRef: AgentTeamMessageRef) => void) | undefined
+  /** Jumps to the parent Message this one answers; absent keeps the quote inert. */
+  readonly onOpenReplyTo?: ((messageRef: AgentTeamMessageRef) => void) | undefined
+  /** Stable identity of this Message: the anchor a quote block jumps to. */
+  readonly messageRef?: AgentTeamMessageRef
+  /** This row is the composer's current reply target. */
+  readonly replyTarget?: boolean
+  /** This row is the parent a reader just jumped to. */
+  readonly replyFlash?: boolean
   /** Continuation rows that carry their own footer chip render the time so the
       hairline-separated entry stays self-identifying. */
   readonly showGroupedTime?: boolean
@@ -66,7 +85,7 @@ export interface TeamMessageProps {
  * skipping a render here never detaches it. Callers must therefore keep the
  * props they derive per render (mention names, ref callbacks) identity-stable.
  */
-export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, mentionsHuman, readerName, showGroupedTime, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
+export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, mentionsHuman, readerName, replyTo, onReply, onOpenReplyTo, messageRef, replyTarget, replyFlash, showGroupedTime, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
   // Only the Human's own row may draw a picture: the profile owns those bytes,
   // and one seat painting the reader's face for another author would name two
@@ -186,7 +205,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
       ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)}</div>
       : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} /></div>
   return (
-    <article className={css.messageRow} data-human={human || undefined} data-side={human ? 'end' : 'start'} data-grouped={grouped || undefined} data-mentions-me={mentionsHuman || undefined}>
+    <article className={css.messageRow} data-human={human || undefined} data-side={human ? 'end' : 'start'} data-grouped={grouped || undefined} data-mentions-me={mentionsHuman || undefined} data-message-ref={messageRef} data-replying-to={replyTarget || undefined} data-reply-flash={replyFlash || undefined}>
       {identityImage.src === undefined
         ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{senderName.replace('@', '').slice(0, 1).toUpperCase()}</div>
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
@@ -207,6 +226,25 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
           {mentionsHuman === true && <span className={css.mentionsMeBadge} data-mentions-me-badge="">
             {t?.('mentionsMe') ?? 'You were mentioned'}
           </span>}
+          {/* What this Message answers comes before what it says. The block is
+              one line of resolved context, and the whole of it jumps to the
+              parent, so a long original is never pasted a second time. */}
+          {replyTo !== undefined && (onOpenReplyTo === undefined
+            ? <span className={css.replyQuote} data-reply-quote="">
+                <span className={css.replyQuoteBar} aria-hidden="true" />
+                <span className={css.replyQuoteBody}>
+                  <span className={css.replyQuoteAuthor}>{replyTo.senderName}</span>
+                  <span className={css.replyQuoteText}>{replyTo.excerpt}</span>
+                </span>
+              </span>
+            : <button type="button" className={css.replyQuote} data-reply-quote="" onClick={() => { if (messageRef !== undefined) onOpenReplyTo(messageRef) }}
+                title={t?.('openRepliedMessage') ?? 'Go to the message this answers'}>
+                <span className={css.replyQuoteBar} aria-hidden="true" />
+                <span className={css.replyQuoteBody}>
+                  <span className={css.replyQuoteAuthor}>{replyTo.senderName}</span>
+                  <span className={css.replyQuoteText}>{replyTo.excerpt}</span>
+                </span>
+              </button>)}
           {/* The wrapper stays mounted for every clampable body and only swaps
               its class: appearing/disappearing around bodyNode would remount the
               Markdown subtree and wipe the post-render ref/mention chips that the
@@ -236,6 +274,16 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
           />}
           {children}
         </div>
+        {/* The action trails the bubble and exists only while the row is under
+            the reader's hand or focus: it must never cost the timeline height,
+            and it is never the only way in, so it also shows on any pointer
+            device that has no hover to reveal it. */}
+        {onReply !== undefined && <div className={css.messageActions} data-message-actions="">
+          <button type="button" className={css.messageAction} onClick={() => { if (messageRef !== undefined) onReply(messageRef) }}
+            aria-label={t?.('replyToMessage') ?? 'Reply to this message'}>
+            {t?.('replyMessage') ?? 'Reply'}
+          </button>
+        </div>}
       </div>
     </article>
   )

@@ -33,6 +33,8 @@ import type {
   AgentTeamReplyRequest,
   AgentTeamResolveTaskRefsRequest,
   AgentTeamResolveTaskRefsResult,
+  AgentTeamResolveMessageRefsRequest,
+  AgentTeamResolveMessageRefsResult,
   AgentTeamResolveThreadRefsRequest,
   AgentTeamResolveThreadRefsResult,
   AgentTeamReplyResult,
@@ -154,6 +156,8 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   promoteThread: (request: AgentTeamPromoteThreadRequest) => Promise<RemoteResult<AgentTeamPromoteThreadResult>>
   resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => Promise<RemoteResult<AgentTeamResolveTaskRefsResult>>
   resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => Promise<RemoteResult<AgentTeamResolveThreadRefsResult>>
+  /** Read-only reply-parent lookup; the Thread face fills its quote blocks from it. */
+  resolveMessageRefs: (request: AgentTeamResolveMessageRefsRequest) => Promise<RemoteResult<AgentTeamResolveMessageRefsResult>>
   loadMembers: (request: AgentTeamMembersRequest) => Promise<RemoteResult<readonly AgentTeamClientMemberStatus[]>>
   /** Human direct-only Inbox slice; the Inbox page merges one call per visible Workspace. */
   loadInbox: (request: AgentTeamInboxRequest) => Promise<RemoteResult<AgentTeamInbox>>

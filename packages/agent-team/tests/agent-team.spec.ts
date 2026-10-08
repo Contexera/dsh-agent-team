@@ -618,6 +618,72 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(replayLedger(test).inbox(actor, { workspaceId: alpha })).toMatchObject({ totalUnreadCount: 1, totalDirectCount: 1 })
   })
 
+  it('records the Message a reply answers and delivers to that Message author', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = replayLedger(test)
+    const { member: builder, actor: builderActor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { actor: reviewerActor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:reviewer')
+
+    const sent = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('anchor'), workspaceId: alpha,
+      channelRef: channel.channel.channelRef, body: 'Please investigate this', recipients: [builder.memberId], actor: agentTeamHumanActor() })).value))
+    // The anchor mentions the builder, so the unread fence stands until the
+    // builder acknowledges it; an unread mutation would be refused.
+    await ledger.readThread({ requestId: requestId('builder-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: builderActor })
+    const builderReply = committed((await ledger.reply({ requestId: requestId('builder-reply'), workspaceId: alpha,
+      taskRef: sent.task.taskRef, baseRevision: sent.thread.revision, body: 'Looking now',
+      replyToMessageRef: sent.message.messageRef, actor: builderActor })).value)
+    expect(builderReply.message.replyToMessageRef).toBe(sent.message.messageRef)
+
+    // A fresh replay resolves the parent from the stored operations alone: the
+    // reviewer's write below is refused outright if the link did not survive.
+    const replayed = replayLedger(test)
+    const before = replayed.inbox(builderActor, { workspaceId: alpha })
+    const reviewerReply = committed((await replayed.reply({ requestId: requestId('reviewer-reply'), workspaceId: alpha,
+      taskRef: sent.task.taskRef, baseRevision: builderReply.thread.revision, body: 'One correction',
+      replyToMessageRef: builderReply.message.messageRef, actor: reviewerActor })).value)
+    expect(reviewerReply.message.replyToMessageRef).toBe(builderReply.message.messageRef)
+
+    // Answering a Member reaches them without a hand-written `@handle`.
+    const after = replayed.inbox(builderActor, { workspaceId: alpha })
+    expect(after.totalUnreadCount).toBe(before.totalUnreadCount + 1)
+    expect(after.totalDirectCount).toBe(before.totalDirectCount + 1)
+
+    // The quote block's context is resolved from the ledger, so a parent far
+    // outside the reader's loaded window still resolves; unknown refs are
+    // omitted rather than faked.
+    const resolvable = replayed.resolveMessageRefs(alpha, [sent.message.messageRef, 'message:missing' as never])
+    expect(resolvable).toHaveLength(1)
+    expect(resolvable[0]).toMatchObject({
+      messageRef: sent.message.messageRef,
+      threadRef: sent.thread.threadRef,
+      sender: AGENT_TEAM_HUMAN_MEMBER_ID,
+      excerpt: 'Please investigate this',
+    })
+    replayed.validate()
+  })
+
+  it('refuses a reply target that is unknown or belongs to another Thread', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = replayLedger(test)
+    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const first = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('first'), workspaceId: alpha,
+      channelRef: channel.channel.channelRef, body: 'First thread', actor: agentTeamHumanActor() })).value))
+    const second = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('second'), workspaceId: alpha,
+      channelRef: channel.channel.channelRef, body: 'Second thread', actor: agentTeamHumanActor() })).value))
+
+    await expect(ledger.reply({ requestId: requestId('unknown-target'), workspaceId: alpha, taskRef: first.task.taskRef,
+      baseRevision: first.thread.revision, body: 'Answering nothing', replyToMessageRef: 'message:missing' as never, actor }))
+      .rejects.toThrow(/not a recorded Message/)
+    await expect(ledger.reply({ requestId: requestId('foreign-target'), workspaceId: alpha, taskRef: first.task.taskRef,
+      baseRevision: first.thread.revision, body: 'Answering another thread', replyToMessageRef: second.message.messageRef, actor }))
+      .rejects.toThrow(/another Thread/)
+    // Nothing was written by either refusal.
+    const facts = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: first.task.taskRef, actor })).value.facts
+    expect(facts).toHaveLength(0)
+  })
+
   it('serves the Human Inbox with row previews and whole-unread totals', async () => {
     const test = await harness()
     const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })

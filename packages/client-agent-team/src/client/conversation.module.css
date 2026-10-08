@@ -132,6 +132,9 @@
   flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
+  /* Anchors the trailing reply action, which overlays rather than occupies the
+     timeline: the action may never cost a row its height. */
+  position: relative;
 }
 /* The reader's own turns hug their own edge, so a short reply sits next to the
    avatar instead of floating at the far end of an empty bar. */
@@ -170,6 +173,117 @@
   max-width: 100%;
   overflow-wrap: anywhere;
   padding: 8px 12px;
+}
+
+/* The Message the composer is currently answering: an outline states "this
+   one", which a fill would have to say by becoming a different material. */
+.messageRow[data-replying-to] .messageBubble {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+/* The Message a reader just jumped back to: a short pulse that says "here",
+   then gets out of the way. */
+@keyframes replyFlash {
+  0%, 100% { outline-color: transparent; }
+  30% { outline-color: var(--dsw-alias-state-business-primary); }
+}
+.messageRow[data-reply-flash] .messageBubble {
+  animation: replyFlash 1.2s ease;
+  outline: var(--dsw-focus-ring-width, 2px) solid transparent;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The pulse is decoration; the outline still lands so the target is marked. */
+  .messageRow[data-reply-flash] .messageBubble {
+    animation: none;
+    outline-color: var(--dsw-alias-state-business-primary);
+  }
+}
+
+/* ---- The reply quote -------------------------------------------------- */
+/* What a Message answers, as one line of Host-resolved context. The whole
+   block is the jump target, so a long original is never pasted a second time
+   and the quote can never disagree with the Message it points at. */
+.replyQuote {
+  align-items: stretch;
+  background: var(--dsw-alias-interactive-bg-hover);
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  color: inherit;
+  display: flex;
+  font: inherit;
+  gap: 8px;
+  margin: 0 0 6px;
+  max-width: 100%;
+  padding: 4px 8px 4px 6px;
+  text-align: left;
+  width: 100%;
+}
+.replyQuote:is(button) { cursor: pointer; }
+.replyQuote:is(button):hover { background: var(--dsw-alias-interactive-bg-hover-solid); }
+.replyQuote:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+.replyQuoteBar {
+  background: var(--dsw-alias-state-business-primary);
+  border-radius: 2px;
+  flex: 0 0 2px;
+  opacity: .55;
+}
+.replyQuoteBody { min-width: 0; }
+.replyQuoteAuthor {
+  color: var(--dsw-alias-state-business-primary);
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+/* One line, always: the quote is a handle on the parent, not a copy of it. */
+.replyQuoteText {
+  color: var(--dsw-alias-label-secondary);
+  display: block;
+  font-size: 12px;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- The reply action ------------------------------------------------- */
+/* Trails the bubble on the identity line's own height, so it never shifts a
+   row. It follows the shipped reveal convention exactly: hidden only where a
+   pointer can actually hover, which keeps it reachable on touch (no hover to
+   reveal it) and by keyboard (`:focus-within`). */
+.messageActions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  position: absolute;
+  top: 0;
+}
+.messageRow[data-side='start'] .messageActions { right: 0; }
+.messageRow[data-side='end'] .messageActions { left: 0; }
+@media (hover: hover) {
+  .messageActions { opacity: 0; transition: opacity 80ms; }
+  .messageRow:hover .messageActions,
+  .messageRow:focus-within .messageActions { opacity: 1; }
+}
+.messageAction {
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm, 8px);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  height: 22px;
+  line-height: 20px;
+  padding: 0 8px;
+}
+.messageAction:hover { color: var(--dsw-alias-label-primary); }
+.messageAction:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
 }
 
 /* ---- 「有人@我」 ------------------------------------------------------ */

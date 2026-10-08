@@ -27,6 +27,10 @@ The mark answers “does this need me now?”, so it rides the unread batch and 
 
 The Channel feed knows unread per Thread rather than per Message, so there the mark follows that Thread's newest top-level Message while the Thread stays unread.
 
+A Message that answers another leads its bubble with the resolved quote: the parent's author and one line of its opening text, both resolved by the Host from the ledger rather than read out of the body, so the quote cannot disagree with what it points at and still fills in when the parent sits outside the loaded history. The whole block is the jump target; the excerpt is always a single ellipsised line, because the quote is a handle on the original and never a second copy of it. A Message that is not a reply renders no quote block.
+
+Every Message also trails a reply action, and it follows the shipped reveal convention literally: the action is hidden inside `@media (hover: hover)` only, so a touch device with no hover keeps it on screen, and `:focus-within` reveals it for the keyboard. It is positioned over the row rather than placed in it, so it never costs the timeline height, and it is absent wherever the surface passes no handler — the Channel feed offers no reply.
+
 The trailing fallback row lists mentions the body text does not carry, and it never repeats the reader's own name: that would print a bare `@me` under a bubble that already chips their name in place, or whose badge states the mention outright.
 
 Mention chips are rendered only for handles in the Message's resolved mention list, matching the authored `@Handle` case-insensitively on Unicode word boundaries — a bare name without its `@` is prose and never chipifies, and code stays literal. A chip names the person as they are called today: the Human's pre-rename handle stays an alias the Host still delivers to, so a Message whose body wrote `@human` chips in place as the current profile name instead of landing in the trailing row under a name its body never used.

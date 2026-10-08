@@ -17,6 +17,7 @@ import type {
   AgentTeamMemberCapabilities,
   AgentTeamMemberId,
   AgentTeamMessage,
+  AgentTeamMessageRef,
   AgentTeamModelSelection,
   AgentTeamOperationId,
   AgentTeamRequestId,
@@ -483,6 +484,12 @@ export interface AgentTeamReplyRequest {
   readonly body: string
   readonly baseRevision: number
   readonly recipients?: readonly AgentTeamMemberId[]
+  /**
+   * The Message this reply answers. The Host resolves it against the ledger and
+   * refuses a ref that is unknown or belongs to another Thread; the parent's
+   * author then joins the recipients, so answering a Member reaches them.
+   */
+  readonly replyToMessageRef?: AgentTeamMessageRef
   /** Agent-supplied absolute file paths, resolved like sendMessage's. */
   readonly attachmentPaths?: readonly string[] | undefined
   /** Attachment cache IDs from the Human picker, resolved like sendMessage's. */

@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thread 消息回复（引用回复）· 原型</title>
+<style>
+/* ------------------------------------------------------------------
+ * 原型样式。真实实现会落到 conversation.module.css / composer.module.css，
+ * 并使用 DSH 的 --dsw-* token。这里用同名 token 的本地兜底值。
+ * 气泡配方与已落地的实现一致：specific-bubble 填充 + radius-xl 圆角。
+ * ------------------------------------------------------------------ */
+:root {
+  --page: #ffffff;
+  --bubble: #eef3fd;          /* = --dsw-specific-bubble (light) */
+  --text: #1b1c1e;
+  --text-2: #6b6f76;
+  --text-3: #9aa0a8;
+  --hairline: #e8eaee;
+  --business: #2a6df4;
+  --focus: #2a6df4;
+  --quote-bg: rgba(38, 49, 72, .06);
+  --radius-xl: 20px;
+  --radius-sm: 8px;
+  --surface: #f5f6f8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #17181a;
+    --bubble: #303136;        /* = --dsw-specific-bubble (dark) */
+    --text: #eceef1;
+    --text-2: #a3a8b0;
+    --text-3: #767c85;
+    --hairline: #2b2e33;
+    --business: #6f9dfb;
+    --focus: #6f9dfb;
+    --quote-bg: rgba(255, 255, 255, .08);
+    --surface: #1e2023;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #17181a; --bubble: #303136; --text: #eceef1; --text-2: #a3a8b0;
+  --text-3: #767c85; --hairline: #2b2e33; --business: #6f9dfb; --focus: #6f9dfb;
+  --quote-bg: rgba(255,255,255,.08); --surface: #1e2023;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--surface); color: var(--text);
+  font: 14px/1.6 -apple-system, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+  margin: 0; padding: 24px 16px 72px;
+}
+
+/* ---------- 控制条 ---------- */
+.toolbar {
+  align-items: center; background: var(--page); border: 1px solid var(--hairline);
+  border-radius: 12px; display: flex; flex-wrap: wrap; gap: 10px 18px;
+  margin: 0 auto 22px; max-width: 900px; padding: 12px 16px;
+}
+.toolbar h1 { font-size: 15px; font-weight: 600; margin: 0; }
+.toolbar .seg { border: 1px solid var(--hairline); border-radius: 9px; display: flex; overflow: hidden; }
+.toolbar .seg button {
+  background: transparent; border: 0; color: var(--text-2); cursor: pointer;
+  font: inherit; font-size: 12px; padding: 6px 11px;
+}
+.toolbar .seg button[aria-pressed="true"] { background: var(--business); color: #fff; }
+.toolbar label { align-items: center; color: var(--text-2); display: flex; font-size: 12px; gap: 6px; }
+
+/* ---------- 手机框 ---------- */
+.frame {
+  background: var(--page); border: 1px solid var(--hairline); border-radius: 18px;
+  display: flex; flex-direction: column; height: 760px; margin: 0 auto;
+  max-width: 900px; overflow: hidden;
+}
+.stage[data-device="mobile"] .frame { max-width: 390px; }
+
+.appHeader { border-bottom: 1px solid var(--hairline); display: grid; gap: 2px; padding: 13px 18px 11px; }
+.appHeader .back { color: var(--text-2); font-size: 12px; }
+.appHeader .titleLine { align-items: center; display: flex; gap: 8px; }
+.appHeader h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.pill { border: 1px solid var(--hairline); border-radius: 999px; color: var(--text-2); font-size: 11px; padding: 2px 9px; }
+
+.timeline { flex: 1; overflow-y: auto; padding: 14px 18px 20px; }
+.stage[data-device="mobile"] .timeline { padding: 12px 12px 16px; }
+
+.daySeparator { align-items: center; color: var(--text-3); display: flex; font-size: 11px; gap: 10px; margin: 14px 0 12px; }
+.daySeparator::before, .daySeparator::after { background: var(--hairline); content: ""; flex: 1; height: 1px; }
+
+/* ---------- 消息行（与实现同构） ---------- */
+.row { align-items: flex-start; display: flex; gap: 10px; padding: 4px 0; }
+.row[data-side="end"] { flex-direction: row-reverse; }
+.row[data-grouped] { padding-top: 1px; }
+.row[data-grouped] .avatar { visibility: hidden; }
+
+.avatar {
+  align-items: center; border-radius: 50%; color: #fff; display: flex;
+  flex: 0 0 28px; font-size: 12px; font-weight: 600; height: 28px;
+  justify-content: center; margin-top: 22px; width: 28px;
+  background: hsl(var(--hue, 212) 42% 46%);
+}
+.row[data-side="end"] .avatar { background: var(--business); }
+
+.body { align-items: flex-start; display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.row[data-side="end"] .body { align-items: flex-end; }
+
+.nameRow { align-items: baseline; display: flex; gap: 8px; padding: 0 4px; }
+.row[data-side="end"] .nameRow { flex-direction: row-reverse; }
+.row[data-grouped] .nameRow { display: none; }
+.nameRow strong { font-size: 13px; font-weight: 600; }
+.nameRow time { color: var(--text-3); font-size: 11px; }
+
+.bubble {
+  background: var(--bubble); border-radius: var(--radius-xl); color: var(--text);
+  max-width: 100%; overflow-wrap: anywhere; padding: 8px 12px;
+}
+.bubble > .text { white-space: pre-wrap; }
+
+/* ---------- 消息操作条：hover / focus 显示 ---------- */
+/* 与 shipped 约定一致：只在真正有 hover 的设备上隐藏。
+   触屏没有 hover，隐藏等于不可用，所以在触屏上常显。 */
+.actions { align-items: center; display: flex; gap: 8px; height: 28px; }
+@media (hover: hover) {
+  .row[data-actions-reveal="hover"] .actions { opacity: 0; transition: opacity 80ms; }
+  .row[data-actions-reveal="hover"]:hover .actions,
+  .row[data-actions-reveal="hover"]:focus-within .actions { opacity: 1; }
+  /* 原型用这个开关强制展示 hover 态，方便截图/评审 */
+  .stage[data-hover="on"] .row .actions { opacity: 1 !important; }
+}
+.action {
+  align-items: center; background: transparent; border: 1px solid transparent;
+  border-radius: var(--radius-sm); color: var(--text-2); cursor: pointer;
+  display: inline-flex; font: inherit; font-size: 12px; gap: 4px;
+  height: 28px; padding: 0 8px;
+}
+.action:hover { background: var(--quote-bg); color: var(--text); }
+.action:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* 操作条挂在昵称行尾部：不压正文、不占额外高度 */
+.headLine { align-items: center; display: flex; gap: 8px; padding: 0 4px; }
+.row[data-side="end"] .headLine { flex-direction: row-reverse; }
+
+/* ---------- 引用块（气泡内部顶部） ---------- */
+.quote {
+  align-items: stretch; background: var(--quote-bg); border: 0; border-radius: var(--radius-sm);
+  cursor: pointer; display: flex; gap: 8px; margin: 0 0 6px; max-width: 100%;
+  padding: 4px 8px 4px 6px; text-align: left; width: 100%;
+}
+.quote:hover { filter: brightness(.97); }
+.quote:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.quoteBar { background: var(--business); border-radius: 2px; flex: 0 0 2px; opacity: .55; }
+.quoteBody { min-width: 0; }
+.quoteAuthor { color: var(--business); display: block; font-size: 11px; font-weight: 600; }
+.quoteText {
+  color: var(--text-2); display: block; font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 被回复的那条消息：描边高亮，让「我在回这条」有落点 */
+.row[data-replying-to] .bubble { outline: 2px solid var(--business); outline-offset: 2px; }
+/* 跳到原文时的短暂闪烁 */
+@keyframes flash { 0%, 100% { outline-color: transparent } 30% { outline-color: var(--business) } }
+.row[data-flash] .bubble { animation: flash 1.2s ease; outline: 2px solid transparent; outline-offset: 2px; }
+
+/* ---------- composer ---------- */
+.composer { border-top: 1px solid var(--hairline); padding: 10px 18px 14px; }
+.stage[data-device="mobile"] .composer { padding: 8px 12px 12px; }
+.composerCard {
+  background: var(--page); border: 1px solid var(--hairline);
+  border-radius: 14px; padding: 8px 10px;
+}
+.composerQuote {
+  align-items: flex-start; background: var(--quote-bg); border-radius: var(--radius-sm);
+  display: flex; gap: 8px; margin-bottom: 8px; padding: 6px 8px 6px 6px;
+}
+.cqBar { background: var(--business); border-radius: 2px; flex: 0 0 2px; opacity: .55; align-self: stretch; }
+.cqBody { flex: 1 1 auto; min-width: 0; }
+.cqAuthor { color: var(--business); display: block; font-size: 11px; font-weight: 600; }
+.cqText { color: var(--text-2); display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cqCancel {
+  background: transparent; border: 0; border-radius: 6px; color: var(--text-2);
+  cursor: pointer; flex: none; font-size: 16px; height: 24px; line-height: 1; width: 24px;
+}
+.cqCancel:hover { background: var(--quote-bg); color: var(--text); }
+.input { color: var(--text-3); font-size: 14px; padding: 6px 4px; }
+.sendRow { display: flex; justify-content: flex-end; margin-top: 6px; }
+.send {
+  background: var(--business); border: 0; border-radius: var(--radius-sm); color: #fff;
+  cursor: pointer; font: inherit; font-size: 12px; padding: 5px 14px;
+}
+
+/* ---------- 图例 ---------- */
+.legend {
+  background: var(--page); border: 1px solid var(--hairline); border-radius: 12px;
+  color: var(--text-2); font-size: 12px; line-height: 1.75; margin: 22px auto 0;
+  max-width: 900px; padding: 14px 18px;
+}
+.legend h3 { color: var(--text); font-size: 13px; margin: 0 0 6px; }
+.legend ul { margin: 0 0 12px; padding-left: 18px; }
+.legend li b { color: var(--text); }
+.legend code { background: var(--quote-bg); border-radius: 4px; padding: 1px 5px; }
+.legend .q { color: var(--business); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>Thread 消息回复 · 原型</h1>
+  <div class="seg" role="group" aria-label="主题">
+    <button type="button" data-theme-btn="light" aria-pressed="false">浅色</button>
+    <button type="button" data-theme-btn="dark" aria-pressed="false">深色</button>
+    <button type="button" data-theme-btn="auto" aria-pressed="true">跟随系统</button>
+  </div>
+  <div class="seg" role="group" aria-label="设备">
+    <button type="button" data-device-btn="desktop" aria-pressed="true">桌面</button>
+    <button type="button" data-device-btn="mobile" aria-pressed="false">390×844</button>
+  </div>
+  <div class="seg" role="group" aria-label="操作条">
+    <button type="button" data-hover-btn="off" aria-pressed="false">操作条：hover 才显示</button>
+    <button type="button" data-hover-btn="on" aria-pressed="true">操作条：常显</button>
+  </div>
+</div>
+
+<div class="stage" data-device="desktop" data-hover="on">
+  <div class="frame">
+    <div class="appHeader">
+      <span class="back">← 返回频道</span>
+      <div class="titleLine"><h2>Task #13</h2><span class="pill">进行中</span></div>
+    </div>
+
+    <div class="timeline">
+      <div class="daySeparator"><span>10-07</span></div>
+
+      <!-- ① 被回复的原消息：处于「正在回复」高亮态 -->
+      <div class="row" data-side="start" data-actions-reveal="hover" data-replying-to style="--hue:198">
+        <div class="avatar">软</div>
+        <div class="body">
+          <div class="headLine">
+            <div class="nameRow" style="padding:0"><strong>@软件架构师</strong><time>17:59</time></div>
+            <div class="actions">
+              <button class="action" type="button">回复</button>
+            </div>
+          </div>
+          <div class="bubble">
+            <div class="text">这段逻辑现在有点乱啊。1. 创建或者更新员工 task 的时候会计算 next_fire_at 这个时间，然后记录到表里去；2. 到了 edit 获取 task 的时候，又要把各种命名重新算一遍。我不懂为什么要这么复杂，你们讨论一下，先不改代码。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ② 回复消息：气泡内部顶部的引用块 -->
+      <div class="row" data-side="start" data-actions-reveal="hover" style="--hue:336">
+        <div class="avatar">代</div>
+        <div class="body">
+          <div class="headLine">
+            <div class="nameRow" style="padding:0"><strong>@代码审核</strong><time>18:02</time></div>
+            <div class="actions">
+              <button class="action" type="button">回复</button>
+            </div>
+          </div>
+          <div class="bubble">
+            <button class="quote" type="button" title="跳到这条消息">
+              <span class="quoteBar" aria-hidden="true"></span>
+              <span class="quoteBody">
+                <span class="quoteAuthor">@软件架构师</span>
+                <span class="quoteText">这段逻辑现在有点乱啊。1. 创建或者更新员工 task 的时候会计算 next_fire_at…</span>
+              </span>
+            </button>
+            <div class="text">我认这个方向。先说结论：next_fire_at 不该由 edit 路径重算，它只应该由调度器在真正触发之后推进一次。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ③ 阅读者自己发的短消息：气泡按内容收缩，不再铺满整行 -->
+      <div class="row" data-side="end" data-actions-reveal="hover">
+        <div class="avatar">H</div>
+        <div class="body">
+          <div class="headLine">
+            <div class="nameRow" style="padding:0"><strong>jzp</strong><time>18:04</time></div>
+            <div class="actions">
+              <button class="action" type="button">回复</button>
+            </div>
+          </div>
+          <div class="bubble"><div class="text">同意</div></div>
+        </div>
+      </div>
+
+      <!-- ④ 同人续行：昵称行隐藏，操作条仍在（hover 时出现） -->
+      <div class="row" data-side="end" data-grouped data-actions-reveal="hover">
+        <div class="avatar">H</div>
+        <div class="body">
+          <div class="headLine">
+            <div class="actions">
+              <button class="action" type="button">回复</button>
+            </div>
+          </div>
+          <div class="bubble"><div class="text">这条也要给我留个引用，方便回头对。</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- composer：正在回复 ① -->
+    <div class="composer">
+      <div class="composerCard">
+        <div class="composerQuote">
+          <span class="cqBar" aria-hidden="true"></span>
+          <span class="cqBody">
+            <span class="cqAuthor">回复 @软件架构师</span>
+            <span class="cqText">这段逻辑现在有点乱啊。1. 创建或者更新员工 task 的时候会计算 next_fire_at…</span>
+          </span>
+          <button class="cqCancel" type="button" aria-label="取消回复" title="取消回复">×</button>
+        </div>
+        <div class="input">输入消息，Enter 发送 · Shift+Enter 换行</div>
+        <div class="sendRow"><button class="send" type="button">发送</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <h3>这份原型要确认的规则</h3>
+  <ul>
+    <li><b>选择哪条</b>：每条消息的昵称行尾部有一个 <span class="q">回复</span> 操作（28px 高，与 shipped 消息操作条同规格）。</li>
+    <li><b>操作条的显隐</b>：整体包在 <code>@media (hover: hover)</code> 里 —— 只有真有 hover 的设备才隐藏，<b>触屏常显</b>。隐藏时靠 <code>:hover</code> 与 <code>:focus-within</code> 两个条件显示，所以键盘 Tab 也能到达，不会变成「只有鼠标能用」。</li>
+    <li><b>正在回复哪条</b>：被回复的消息加一圈描边（不是换底色），composer 顶部出现引用条，可随时取消。</li>
+    <li><b>引用块的形态</b>：作者 + 正文摘要，<b>一行截断</b>；点击跳到原文并短暂闪烁。长原文不会被重贴一遍。</li>
+    <li><b>同人续行</b>：昵称行隐藏时，操作条仍随 hover 出现在同一行的尾部，不占额外高度。</li>
+  </ul>
+  <h3>需要你裁决 4 件事（见 spec.md）</h3>
+  <ul>
+    <li><b>O1</b>：Channel 页要不要也能回复？（Thread 独有 / 进 Thread 回复 / 顶层也能互相引用）</li>
+    <li><b>O2</b>：回复是否自动通知原文作者？还是只有写 <code>@作者</code> 才通知？</li>
+    <li><b>O3</b>：引用只存 <code>messageRef</code> 由 Host 解析，还是同时存一份正文快照？</li>
+    <li><b>O4</b>：引用块要不要左侧竖线？（当前有竖线；「有人@我」已改成描边 + 徽标，需确认是否保持一致）</li>
+  </ul>
+</div>
+
+<script>
+const root = document.documentElement
+const stage = document.querySelector('.stage')
+const press = (sel, active) => document.querySelectorAll(sel).forEach(b => b.setAttribute('aria-pressed', String(b === active)))
+
+document.querySelectorAll('[data-theme-btn]').forEach(b => b.addEventListener('click', () => {
+  const m = b.dataset.themeBtn
+  if (m === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', m)
+  press('[data-theme-btn]', b)
+}))
+document.querySelectorAll('[data-device-btn]').forEach(b => b.addEventListener('click', () => {
+  stage.dataset.device = b.dataset.deviceBtn; press('[data-device-btn]', b)
+}))
+document.querySelectorAll('[data-hover-btn]').forEach(b => b.addEventListener('click', () => {
+  stage.dataset.hover = b.dataset.hoverBtn; press('[data-hover-btn]', b)
+}))
+// 点击引用块：让原消息闪一下，模拟「跳到原文」
+document.querySelectorAll('.quote').forEach(q => q.addEventListener('click', () => {
+  const target = document.querySelector('[data-replying-to]')
+  if (!target) return
+  target.removeAttribute('data-flash')
+  void target.offsetWidth
+  target.setAttribute('data-flash', '')
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}))
+// 取消回复：收起引用条
+document.querySelectorAll('.cqCancel').forEach(c => c.addEventListener('click', () => {
+  c.closest('.composerQuote').style.display = 'none'
+  document.querySelectorAll('[data-replying-to]').forEach(r => r.removeAttribute('data-replying-to'))
+}))
+</script>
+</body>
+</html>
