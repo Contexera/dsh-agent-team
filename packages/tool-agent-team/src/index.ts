@@ -188,7 +188,7 @@ function rejectionLines(
 const teamInbox = defineTool({
   name: 'team_inbox',
   description: 'List your bounded Team Inbox across all joined Workspaces for triage: unread Thread summaries with counts, without message bodies and without marking anything read. Read a selected Thread with team_thread read; the inbox itself authorizes no mutation. This is your own unread queue; to see work others have in flight (whether or not you have unread on it), use the active-task-threads section of team_view.',
-  parameters: { limit: { type: 'number' }, workspace: { type: 'string', description: 'Optional Workspace id filter. Omit to triage all your participations together.' } },
+  parameters: { limit: { type: 'number' }, workspace: workspaceParam },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
       totalUnreadCount: { type: 'number', required: true }, totalDirectCount: { type: 'number', required: true },
@@ -237,12 +237,12 @@ const teamInbox = defineTool({
 
 const teamThread = defineTool({
   name: 'team_thread',
-  description: 'Read or manage your Attention on one Thread. read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state; status, follow, and unfollow change or report Attention only and render no Thread timeline. Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task.',
+  description: 'Read or manage your Attention on one Thread. read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state; status, follow, and unfollow change or report Attention only and render no Thread timeline. beforeSequence and limit are history-only: read, status, follow, and unfollow reject them — drop them, or call history to page older facts. Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task.',
   parameters: {
     action: { type: 'string', required: true, enum: ['status', 'follow', 'unfollow', 'read', 'history'] },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for released clients. Prefer threadRef; if both are given they must identify the same Thread." },
-    beforeSequence: { type: 'number' }, limit: { type: 'number' }, workspace: workspaceParam,
+    beforeSequence: { type: 'number', description: 'history only: the oldest fact sequence to page before (exclusive). read, status, follow, and unfollow reject it.' }, limit: { type: 'number', description: 'history only: max older facts to return. read, status, follow, and unfollow reject it.' }, workspace: workspaceParam,
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
@@ -342,7 +342,7 @@ const teamThread = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_thread requires an Agent session')
     const host = service(agent)
-    if (args.threadRef === undefined && args.taskRef === undefined) throw new Error('team_thread requires threadRef')
+    if (args.threadRef === undefined && args.taskRef === undefined) throw new Error('team_thread needs threadRef (or taskRef on a Taskful Thread); copy one from team_inbox or team_view, then retry')
     const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
     const taskNumberOf = (task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } => {
       if (task === undefined) return {}
@@ -350,13 +350,13 @@ const teamThread = defineTool({
       return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
     }
     if (args.action === 'status') {
-      if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error('status does not accept history arguments')
+      if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error('status takes no beforeSequence or limit — drop them and retry')
       const status = host.attentionStatusForAgent(agent, base)
       const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
       return threadResult('status', base.workspaceId, snapshot, status.attention, [], taskNumberOf(snapshot.task))
     }
     if (args.action === 'follow' || args.action === 'unfollow') {
-      if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(`${args.action} does not accept history arguments`)
+      if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(`${args.action} takes no beforeSequence or limit — drop them and retry`)
       const result = await host.changeAttentionForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action })
       const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
       return threadResult(args.action, base.workspaceId, snapshot, result.attention, [], taskNumberOf(snapshot.task))
@@ -368,7 +368,7 @@ const teamThread = defineTool({
           ? { sequence: fact.sequence, kind: 'message', body: fact.message.body, sender: fact.message.sender, mentions: [...fact.mentions], occurredAt: fact.occurredAt }
           : activityFactView(fact.sequence, fact.activity, undefined, fact.occurredAt)), { cursor: history.cursor, hasMore: history.hasMore, ...taskNumberOf(history.task) })
     }
-    if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error('read does not accept history arguments')
+    if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error('read takes no beforeSequence or limit — drop them and retry; use action history to page older facts')
     const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base })
     return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => entry.fact.kind === 'message'
         ? { sequence: entry.fact.sequence, kind: 'message', body: entry.fact.message.body, sender: entry.fact.message.sender, mentions: [...entry.fact.mentions], unread: entry.unread, direct: entry.direct, occurredAt: entry.fact.occurredAt }
@@ -583,7 +583,7 @@ const teamClaim = defineTool({
     const host = service(agent)
     const base = { workspaceId: workspaceOf(args, agent), taskRef: args.taskRef as AgentTeamTaskRef }
     if (args.action === 'list') {
-      if (args.baseRevision !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error('list accepts only taskRef')
+      if (args.baseRevision !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error('list takes only taskRef — drop baseRevision, direction, and claimRef, then retry')
       const listed = host.listClaimsForAgent(agent, base)
       return { kind: 'listed', taskRef: listed.task.taskRef, threadRef: listed.thread.threadRef, revision: listed.thread.revision, status: listed.task.status,
         claims: listed.claims.map(claimView) }
