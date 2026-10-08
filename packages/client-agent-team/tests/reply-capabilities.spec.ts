@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamReplySettings } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamReplySettings } from '@contexera/dsh-agent-team/types'
 import { TeamReplyCapabilities } from '../src/client/reply-capabilities.ts'
 
 const ok = (enabled: boolean) => async () => ({ ok: true as const, value: { enabled } })

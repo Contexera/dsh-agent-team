@@ -1,5 +1,5 @@
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import type { AgentTeamReplySettings } from '@wowyuarm/dsh-agent-team/types'
+import type { AgentTeamReplySettings } from '@contexera/dsh-agent-team/types'
 
 /**
  * Whether this deployment offers quote-replies, as one Client-side projection.
