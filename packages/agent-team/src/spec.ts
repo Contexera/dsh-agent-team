@@ -117,6 +117,15 @@ const messageSchema = z.object({
   sender: memberIdSchema,
   body: z.string().min(1),
   attachments: z.array(attachmentSchema).optional(),
+  /**
+   * The Message this one answers, when it is a reply.
+   *
+   * Durable records are parsed strictly at every open, so a field the write
+   * path stores and this schema does not name makes the whole domain fail to
+   * reopen — the record is on disk, and every later mount dies on it. Adding a
+   * durable field therefore means adding it here in the same change.
+   */
+  replyToMessageRef: messageRefSchema.optional(),
   topLevel: z.boolean(),
   sequence: z.number().int().positive(),
   occurredAt: z.string().datetime().optional(),
