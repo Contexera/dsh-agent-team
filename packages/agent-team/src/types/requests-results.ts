@@ -997,10 +997,8 @@ export interface AgentTeamView {
   readonly taskNumbers: readonly { readonly taskRef: AgentTeamTaskRef; readonly taskNumber: number }[]
   readonly items: readonly AgentTeamViewItem[]
   /**
-   * The「活跃 task thread」radar: the in_progress / in_review Task Threads of the
-   * response's scope, newest activity first. With `includeCatalog` that is every
-   * such Task Thread in the reader's authorized Channels of this Workspace;
-   * without it, only those the catalog above carries.
+   * The「活跃 task thread」radar: every in_progress / in_review Task Thread in
+   * the reader's authorized Channels of this Workspace, newest activity first.
    * Independent of the reader's participation and unread state — its job is to
    * surface who is already on what, so re-entry and pre-claim/pre-commit checks
    * do not mistake in-flight work for a conflict.
