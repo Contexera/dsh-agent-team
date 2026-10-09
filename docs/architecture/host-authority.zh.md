@@ -24,6 +24,9 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - Host 对 Member Session 的 projection 改为增量折叠。context intent、clock baseline 与一次性 pressure notice 都派生自同一个 Session 自身的 events。现在三者都经 Session event cursor 读取。cursor 把折叠出的值记在自己消费到的日志位置旁边。`context-projection.ts` 提供折叠，`session-event-cursor.ts` 提供位置。因此一个日志第一次被读取时折一次，之后每次只折新追加的 events。cursor 假定日志只 append，并只校验能校验的部分。cursor 记住自己停在哪个事件的 sequence 与 type。fork 前缀变动、日志变短、这个事件被替换，都会触发从头重折。fork / resume / rollover 最坏只退回一次冷折，不会给出错画面。模块里点名记下这条残留，不掩盖。同一 sequence、同一 type 但内容被就地替换的事件，校验守卫看不见。这种情况只有违反 append-only 契约才可达。内容敏感的锚点也堵不住这个缺口：只有锚点位置被重读，更早已折位置被换掉同样放行。
 
   以下冷路径仍全量折叠：activation、transition、timeline、carried-input 重放。这些路径读取完整被检视日志或外来日志。三项各自按 Member 保存一个 cursor，该 Member 的 Session 变化时替换。因此保留的折叠状态以 roster 为界，不随 Member 经历过的代数增长。
+- 读取投影按用途定界。`view` 只回答它自己那一页 fact 加上请求点名的 Thread：catalog 字段带的是这一页的 Task、Thread、显示序号与 Claim。只有 `includeCatalog` 才返回整个请求 scope 的 Task/Thread/Claim catalog，也就是模型侧 `team_view` 渲染的 address book 投影。
+- 一页读取沿 fact ledger 走到超出 limit 的第一个匹配为止；catalog 读取再多一次对 scope 内 Thread 的目录过滤，以及每个 Task 行一次活 Claim 查询。这些分量必须分开报告，不合并成一个总数：只报返回行数看不出这次读取走过了什么。
+- Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、`active task threads` 雷达）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
 
 ## Session 持久化与重放
 - Bundle 目标为 DSH `0.2.0-rc.2`。Bundle 的 Session persistence 使用当前 DSH schema。随附的 JSONL backend 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4），旧格式 Session 数据无需手动处置。这个 DSH Session-schema 策略不会抹掉 Team operation history。Team 有意保留针对旧版、Message-level `occurredAt` 之前 records 的窄 replay normalization。
@@ -33,6 +36,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 
 ## Attention 与 Inbox 权威
 - Thread Attention 是 private Member x Thread state。ordinary unread 来自当前 Attention。structured mentions 创建 direct markers。terminal Task changes 在 Attention 结束后仍可能保留稀疏 Activity markers。Host 是唯一 Inbox authority。Session history 可以保留有界 notification context，包括 direct Message bodies 和 Task/Claim transition summaries。但 Session history 不能形成 parallel unread projection。
+- Inbox 读取先对读者的整条未读队列排序，只为自己返回的行准备 preview 文本、instant 的署名者与活 Claim owner；总计仍针对整条队列，所以只取一行的角标也报告全部未读 Thread。`threadObservations` 返回最新的 `limit` 条 observation 并带 `hasMore`，follower 集合始终是完整当前状态。
 
 ## Session 策略与上下文压力
 - Team 管理的 Agent sessions 使用显式 Team preset 和可信的 `danger-full-access` policy。这是面向可信 Workspace 的有意产品边界。

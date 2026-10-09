@@ -12,7 +12,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
-import type { AgentTeamChannelRef, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
+import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
 /**
  * Issue #21: the read projections must keep byte-identical semantics while
@@ -159,11 +159,11 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     expect(threads.reduce((sum, thread) => sum + thread.factSequences.length, 0)).toBeGreaterThanOrEqual(100)
 
     // ---- taskNumbers: per-Channel creation ordinals, workspace-filtered. ----
-    const viewA = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, limit: 1 })
+    const viewA = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, limit: 1, includeCatalog: true })
     expect(viewA.taskNumbers).toEqual(threads.filter(thread => thread.channelRef === channelA.channelRef).map(thread => ({ taskRef: thread.taskRef, taskNumber: thread.taskNumber })))
-    const viewB = ledger.view({ workspaceId: alpha, channelRef: channelB.channelRef, limit: 1 })
+    const viewB = ledger.view({ workspaceId: alpha, channelRef: channelB.channelRef, limit: 1, includeCatalog: true })
     expect(viewB.taskNumbers).toEqual(threads.filter(thread => thread.channelRef === channelB.channelRef).map(thread => ({ taskRef: thread.taskRef, taskNumber: thread.taskNumber })))
-    const viewWhole = ledger.view({ workspaceId: alpha, limit: 1 })
+    const viewWhole = ledger.view({ workspaceId: alpha, limit: 1, includeCatalog: true })
     expect(viewWhole.taskNumbers).toHaveLength(55)
     // limit bounds only items; the catalog slices stay complete.
     expect(viewWhole.channels).toHaveLength(2)
@@ -293,7 +293,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
   })
 
   function projectionSnapshot(source: AgentTeamLedger, channelRef: AgentTeamChannelRef): Record<string, unknown> {
-    const thread = source.view({ workspaceId: alpha, channelRef, limit: 1 }).threads[0]!
+    const thread = source.view({ workspaceId: alpha, channelRef, limit: 1, includeCatalog: true }).threads[0]!
     return {
       inboxA: source.inbox(memberActor('member:agent-a', 'scout'), { workspaceId: alpha, limit: 100 }),
       inboxHuman: source.inbox(human, { workspaceId: alpha, limit: 100 }),
@@ -301,7 +301,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       viewTail: source.view({ workspaceId: alpha, channelRef, direction: 'before', limit: 5 }),
       observationsA0: source.threadObservations(human, { workspaceId: alpha, taskRef: thread.taskRef! }),
       observationsA5: source.threadObservations(human, { workspaceId: alpha, threadRef: thread.threadRef }),
-      taskNumbers: source.view({ workspaceId: alpha, limit: 1 }).taskNumbers,
+      taskNumbers: source.view({ workspaceId: alpha, limit: 1, includeCatalog: true }).taskNumbers,
     }
   }
 
@@ -338,5 +338,92 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     expect(fresh.previousSessionForMember(memberId)).toBe(session('2'))
     // An unknown Member owns nothing rather than failing the read.
     expect(fresh.previousSessionForMember('member:unknown' as AgentTeamMemberId)).toBeUndefined()
+  })
+
+  // State-requests 04: a per-Task Claim read is a bucket lookup, not a walk
+  // over every Claim in the ledger. The bucket is derived like the other
+  // indexes — first-write order, a state change rewrites the Claim in place —
+  // and a replay rebuilds it from the operation table alone.
+  it('answers per-Task Claim reads from a replay-derived Task bucket', async () => {
+    const { ledger, table } = await openLedger()
+    await ledger.initialize()
+    const channel = (await ledger.createChannel({ requestId: requestId('bucket-channel'), workspaceId: alpha, name: 'bucket', description: 'Bucket', memberIds: [], actor: human })).value.channel
+    const memberId = 'member:bucket-owner' as AgentTeamMemberId
+    const actor = memberActor(memberId, 'bucket-owner')
+    await ledger.addMember({
+      requestId: requestId('bucket-member'), workspaceId: alpha, handle: 'bucket-owner', description: 'Bucket owner', presetId: 'team-member',
+      channelRefs: [channel.channelRef], actor: human,
+      member: { memberId, sessionId: SessionId('session:bucket-owner'), workspaceId: alpha, handle: 'bucket-owner', description: 'Bucket owner',
+        presetId: 'team-member', privateMemoryPath: '/tmp/bucket-owner', state: 'enabled' },
+    })
+
+    // 24 in-flight Tasks with two Claims each: enough shared Claim history
+    // that a per-Task read walking every Claim would show cross-Task leakage.
+    const expected = new Map<AgentTeamTaskRef, AgentTeamClaimRef[]>()
+    const revisions = new Map<AgentTeamTaskRef, number>()
+    for (let index = 0; index < 24; index += 1) {
+      const started = await ledger.sendMessage({ asTask: true, requestId: requestId(`bucket-task-${index}`), workspaceId: alpha, channelRef: channel.channelRef,
+        body: `Claim bucket task ${index}`, actor: human })
+      if (started.value.kind !== 'committed') throw new Error(`expected committed Task start ${index}`)
+      const taskRef = started.value.task!.taskRef
+      let revision = started.value.thread.revision
+      const refs: AgentTeamClaimRef[] = []
+      for (const direction of ['first pass', 'second pass']) {
+        const claimed = await ledger.changeClaim({ requestId: requestId(`bucket-claim-${index}-${direction}`), workspaceId: alpha, taskRef,
+          action: 'claim', direction, baseRevision: revision, actor })
+        if (claimed.value.kind !== 'committed') throw new Error(`expected committed Claim on Task ${index}`)
+        revision = claimed.value.thread.revision
+        refs.push(claimed.value.claim.claimRef)
+      }
+      expected.set(taskRef, refs)
+      revisions.set(taskRef, revision)
+    }
+    const taskRefs = [...expected.keys()]
+    const described = (source: AgentTeamLedger): Map<AgentTeamTaskRef, AgentTeamClaimRef[]> => new Map(taskRefs.map(taskRef =>
+      [taskRef, source.listClaims(human, { workspaceId: alpha, taskRef }).claims.map(claim => claim.claimRef)]))
+
+    // The Human started these Threads, so the Members' Claim activities leave
+    // the Human unread: the mutation fence requires the read before accepting.
+    for (const taskRef of taskRefs.slice(0, 3)) {
+      const read = await ledger.readThread({ requestId: requestId(`bucket-read-${taskRef}`), workspaceId: alpha, taskRef, actor: human })
+      revisions.set(taskRef, read.value.thread.revision)
+    }
+
+    // A state change must not move the Claim: completing the first of two
+    // Claims, accepting a Task and closing one all rewrite Claims in place.
+    const done = await ledger.changeClaim({ requestId: requestId('bucket-done'), workspaceId: alpha, taskRef: taskRefs[0]!, action: 'done',
+      claimRef: expected.get(taskRefs[0]!)![0]!, baseRevision: revisions.get(taskRefs[0]!)!, actor })
+    if (done.value.kind !== 'committed') throw new Error('expected committed Claim completion')
+    const accepted = await ledger.changeTask({ requestId: requestId('bucket-accept'), workspaceId: alpha, taskRef: taskRefs[1]!, action: 'accept',
+      baseRevision: revisions.get(taskRefs[1]!)!, actor: human })
+    if (accepted.value.kind !== 'committed') throw new Error('expected committed acceptance')
+    const closed = await ledger.changeTask({ requestId: requestId('bucket-close'), workspaceId: alpha, taskRef: taskRefs[2]!, action: 'close',
+      baseRevision: revisions.get(taskRefs[2]!)!, actor: human })
+    if (closed.value.kind !== 'committed') throw new Error('expected committed close')
+
+    const live = described(ledger)
+    for (const taskRef of taskRefs) expect(live.get(taskRef)).toEqual(expected.get(taskRef))
+
+    // The same bucket feeds 「who is on this Task」: the radar names the owner
+    // while a live Claim exists, and stops naming a Task whose Claims are all
+    // finished, released, or closed.
+    const radarOwners = (taskRef: AgentTeamTaskRef): string[] => ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true })
+      .activeTaskThreads.find(row => row.taskRef === taskRef)?.members.map(member => member.memberId) ?? []
+    expect(radarOwners(taskRefs[0]!)).toEqual([memberId])
+    expect(radarOwners(taskRefs[1]!)).toEqual([])
+    expect(radarOwners(taskRefs[3]!)).toEqual([memberId])
+
+    // Removing the Member replays the departure snapshot, which rewrites every
+    // remaining Claim of that Member through the same bucket.
+    const removed = await ledger.removeMember({ requestId: requestId('bucket-remove'), memberId, actor: human })
+    if (removed.committed !== true) throw new Error('expected committed Member removal')
+    for (const taskRef of taskRefs) expect(described(ledger).get(taskRef)).toEqual(expected.get(taskRef))
+    expect(described(ledger).get(taskRefs[3]!)!.every(ref => ledger.getClaim(ref)?.state === 'released')).toBe(true)
+    expect(radarOwners(taskRefs[3]!)).toEqual([])
+
+    // Independent replay over the same table rebuilds the identical bucket.
+    expect(() => ledger.validate()).not.toThrow()
+    const fresh = new AgentTeamLedger(table)
+    expect(described(fresh)).toEqual(described(ledger))
   })
 })

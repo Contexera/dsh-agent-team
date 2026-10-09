@@ -894,9 +894,12 @@ export interface AgentTeamThreadObservationsRequest {
 }
 
 export interface AgentTeamThreadObservations {
+  /** The newest observations up to `limit` (default 50, at most 100); `hasMore` says whether older ones exist. */
   readonly items: readonly AgentTeamThreadAttentionObservation[]
   /** Members whose Attention currently follows the Thread — the state the replayed observations lead to. */
   readonly followers: readonly AgentTeamMemberId[]
+  /** Older observations than `items` exist. The follower set is always complete. */
+  readonly hasMore: boolean
 }
 
 /** One bounded Workspace view item. */
@@ -958,6 +961,14 @@ export interface AgentTeamViewRequest {
   readonly topLevelOnly?: boolean
   /** Include public Claim and Task activities in the bounded stream (default true). */
   readonly includeActivities?: boolean
+  /**
+   * Return the durable Task/Thread/Claim catalog of the request's whole scope —
+   * the address-book projection `team_view` renders. Omitted, the catalog
+   * fields describe this response's own fact page plus the Thread the request
+   * names, so a small read never carries every Task, Thread and Claim the
+   * Workspace ever had.
+   */
+  readonly includeCatalog?: boolean
 }
 
 /** Bounded public collaboration facts plus a continuation sequence. */
@@ -967,6 +978,12 @@ export interface AgentTeamView {
   readonly workspaces: readonly AgentTeamWorkspaceParticipation[]
   readonly channels: readonly AgentTeamChannel[]
   readonly members: readonly AgentTeamChannelMembership[]
+  /**
+   * Catalog of the response's scope: every visible Task, its Thread, its display
+   * ordinal, the live-Claim radar rows and the Claims themselves. With
+   * `includeCatalog` this is the whole request scope; without it, only the Tasks
+   * and Threads this fact page and the named Thread carry.
+   */
   readonly tasks: readonly AgentTeamTask[]
   readonly threads: readonly AgentTeamThread[]
   readonly taskNumbers: readonly { readonly taskRef: AgentTeamTaskRef; readonly taskNumber: number }[]

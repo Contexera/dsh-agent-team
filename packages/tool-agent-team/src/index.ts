@@ -676,7 +676,10 @@ const teamView = defineTool({
     if (agent === undefined) throw new Error('team_view requires an Agent session')
     const host = service(agent)
     const workspaceId = workspaceOf(args, agent)
-    const view = host.viewForAgent(agent, { workspaceId, ...(args.channelRef === undefined ? {} : { channelRef: args.channelRef as never }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.cursor === undefined ? {} : { cursor: args.cursor }), topLevelOnly: true, includeActivities: false, direction: 'before' })
+    // `includeCatalog` is what makes this the address book: the radar and the
+    // Task/Thread catalog of the whole Workspace scope, not just this page's own
+    // Threads. Every other `view` caller stays on the bounded page projection.
+    const view = host.viewForAgent(agent, { workspaceId, ...(args.channelRef === undefined ? {} : { channelRef: args.channelRef as never }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.cursor === undefined ? {} : { cursor: args.cursor }), topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true })
     const visibleMemberIds = new Set(view.members.map(membership => membership.memberId))
     return {
       workspaceId,

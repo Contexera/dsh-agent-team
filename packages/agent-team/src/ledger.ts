@@ -370,6 +370,8 @@ interface Projection {
   readonly activityMarkers: Map<string, AgentTeamActivityMarker>
   /** Derived read indexes; rebuilt by replay, never a second durable authority. */
   readonly orderedFacts: AgentTeamThreadFact[]
+  /** Claims per Task, in the order `claims` first took them: the bucket that keeps a per-Task read from walking every Claim. */
+  readonly claimsByTask: Map<AgentTeamTaskRef, AgentTeamClaim[]>
   readonly factsByThread: Map<AgentTeamThreadRef, AgentTeamThreadFact[]>
   /** Owning Channel of each Thread, established by the anchor Message and immutable afterwards. */
   readonly channelRefByThread: Map<AgentTeamThreadRef, AgentTeamChannelRef>
@@ -410,7 +412,7 @@ interface AgentTeamAttentionObservation {
 function emptyProjection(): Projection {
   return { byRequest: new Map(), byOperation: new Map(), ordered: [], channels: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
     claims: new Map(), tasks: new Map(), threads: new Map(), attention: new Map(), directMarkers: new Map(), activityMarkers: new Map(),
-    orderedFacts: [], factsByThread: new Map(), channelRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
+    orderedFacts: [], claimsByTask: new Map(), factsByThread: new Map(), channelRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
     messagesByRef: new Map(),
     attentionByThread: new Map(), previousSessions: new Map(), rolloverSeeds: new Map(),
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByChannel: new Map(), attentionThreadsByMember: new Map(),
@@ -1206,8 +1208,8 @@ export class AgentTeamLedger {
         const direction = request.direction?.trim() ?? ''
         const normalizedDirection = this.normalizeDirection(direction)
         if (normalizedDirection === '') throw new Error('claim direction must not be empty')
-        if ([...this.state.claims.values()].some(candidate => candidate.taskRef === task.taskRef
-          && candidate.state === 'active' && candidate.normalizedDirection === normalizedDirection)) {
+        if ((this.state.claimsByTask.get(task.taskRef) ?? []).some(candidate =>
+          candidate.state === 'active' && candidate.normalizedDirection === normalizedDirection)) {
           throw new Error(`Direction '${direction}' already has an active Claim`)
         }
         claim = Object.freeze({ claimRef: this.ref('claim'), taskRef: task.taskRef, threadRef: task.threadRef,
@@ -1271,13 +1273,13 @@ export class AgentTeamLedger {
       if (request.action === 'accept' && task.status !== 'in_review' && task.status !== 'in_progress' && task.status !== 'todo') {
         throw new Error(`Task '${task.taskRef}' must be in_review, in_progress, or todo before acceptance`)
       }
-      const priorActiveClaims = [...this.state.claims.values()].filter(claim => claim.taskRef === task.taskRef && claim.state === 'active')
+      const priorActiveClaims = (this.state.claimsByTask.get(task.taskRef) ?? []).filter(claim => claim.state === 'active')
       if (request.action === 'accept' && task.status === 'in_progress' && priorActiveClaims.length === 0) {
         throw new Error(`Task '${task.taskRef}' has no active Claims to complete for early acceptance`)
       }
       if (request.action === 'reopen' && task.resolution === 'open') throw new Error(`Task '${task.taskRef}' is already open`)
       const sequence = this.nextSequence()
-      const claims = [...this.state.claims.values()].filter(claim => claim.taskRef === task.taskRef).map(claim =>
+      const claims = (this.state.claimsByTask.get(task.taskRef) ?? []).map(claim =>
         request.action === 'close' && claim.state === 'active' ? Object.freeze({ ...claim, state: 'released' as const })
           : request.action === 'accept' && claim.state === 'active' ? Object.freeze({ ...claim, state: 'done' as const })
             : claim)
@@ -1529,8 +1531,16 @@ export class AgentTeamLedger {
     // `items` stays exactly the unread queue for every reader, so the badge
     // totals and the agent-facing `team_inbox` result cannot drift with it.
     const taskNumbers = new Map(workspaceIds.flatMap(workspaceId => [...this.taskNumbers(workspaceId)]))
-    const items: AgentTeamInboxItem[] = []
     const unreadThreads = new Set<AgentTeamThreadRef>()
+    // Candidates carry only what ranking and the totals need. A row's preview
+    // text, actor and live Claim owners are materialized for the rows this
+    // response actually returns, so an Inbox badge of one item no longer builds
+    // a preview and a Claim-owner lookup per unread Thread it is about to drop.
+    type Candidate = { readonly workspaceId: WorkspaceId; readonly channelRef: AgentTeamChannelRef; readonly channelName: string
+      readonly task?: AgentTeamTask; readonly taskNumber?: number; readonly thread: AgentTeamThread
+      readonly unreadCount: number; readonly directCount: number; readonly newest: AgentTeamThreadFact
+      readonly attention?: AgentTeamThreadAttention }
+    const candidates: Candidate[] = []
     for (const threadRef of this.inboxCandidateThreads(authorized.memberId)) {
       const thread = this.state.threads.get(threadRef)
       if (thread === undefined) continue
@@ -1554,24 +1564,26 @@ export class AgentTeamLedger {
       // observe a different commit between the two reads.
       const newest = unread.at(-1)!.fact
       const taskNumber = task === undefined ? undefined : taskNumbers.get(task.taskRef)
-      items.push(Object.freeze({ workspaceId, channelRef,
-        channelName: this.state.channels.get(channelRef)?.name ?? '',
+      candidates.push({ workspaceId, channelRef, channelName: channel.name,
         ...(task === undefined ? {} : { task }), ...(taskNumber === undefined ? {} : { taskNumber }), thread,
-        unreadCount: unread.length, directCount,
-        previewText: boundedInboxPreview(this.threadAnchor(thread.threadRef).body),
-        newestSequence: newest.sequence, newestOccurredAt: newest.occurredAt,
-        newestActor: this.inboxActorFor(newest), claimOwners: this.liveClaimOwners(task),
-        ...(attention === undefined ? {} : { attention }) }))
+        unreadCount: unread.length, directCount, newest, ...(attention === undefined ? {} : { attention }) })
     }
-    items.sort((left, right) => right.directCount - left.directCount || right.newestSequence - left.newestSequence || left.thread.threadRef.localeCompare(right.thread.threadRef))
-    const selected = items.slice(0, limit)
+    candidates.sort((left, right) => right.directCount - left.directCount || right.newest.sequence - left.newest.sequence || left.thread.threadRef.localeCompare(right.thread.threadRef))
+    const selected = candidates.slice(0, limit).map(candidate => Object.freeze({ workspaceId: candidate.workspaceId, channelRef: candidate.channelRef,
+      channelName: candidate.channelName, ...(candidate.task === undefined ? {} : { task: candidate.task }),
+      ...(candidate.taskNumber === undefined ? {} : { taskNumber: candidate.taskNumber }), thread: candidate.thread,
+      unreadCount: candidate.unreadCount, directCount: candidate.directCount,
+      previewText: boundedInboxPreview(this.threadAnchor(candidate.thread.threadRef).body),
+      newestSequence: candidate.newest.sequence, newestOccurredAt: candidate.newest.occurredAt,
+      newestActor: this.inboxActorFor(candidate.newest), claimOwners: this.liveClaimOwners(candidate.task),
+      ...(candidate.attention === undefined ? {} : { attention: candidate.attention }) }))
     const recent = authorized.kind === 'human'
       ? this.recentInboxItems(authorized.memberId, workspaceIds[0]!, unreadThreads, taskNumbers)
       : Object.freeze([] as AgentTeamInboxItem[])
     return Object.freeze({ humanMemberId: this.initialization().data.humanMemberId,
       items: Object.freeze(selected), recent,
-      totalUnreadCount: items.reduce((sum, item) => sum + item.unreadCount, 0),
-      totalDirectCount: items.reduce((sum, item) => sum + item.directCount, 0) })
+      totalUnreadCount: candidates.reduce((sum, item) => sum + item.unreadCount, 0),
+      totalDirectCount: candidates.reduce((sum, item) => sum + item.directCount, 0) })
   }
 
   /**
@@ -1729,10 +1741,12 @@ export class AgentTeamLedger {
     // Both slices are replay-derived: the observation log is appended by
     // committed Inbox deltas in ledger order, and the live follower set is
     // the same Attention index the follow history converges to.
-    const observations = (this.state.observationsByThread.get(threadRef) ?? []).slice(-limit)
+    const log = this.state.observationsByThread.get(threadRef) ?? []
+    const observations = log.slice(-limit)
       .map(event => Object.freeze({ sequence: event.sequence, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }),
         memberId: event.memberId, action: event.action }))
-    return Object.freeze({ items: Object.freeze(observations), followers: Object.freeze([...this.state.attentionByThread.get(threadRef) ?? []]) })
+    return Object.freeze({ items: Object.freeze(observations), hasMore: log.length > observations.length,
+      followers: Object.freeze([...this.state.attentionByThread.get(threadRef) ?? []]) })
   }
 
   /** Every operation carrying an inbox delta drives the Inbox projection; the payload shape decides, not a per-kind list. */
@@ -1888,9 +1902,38 @@ export class AgentTeamLedger {
         else { hasMore = true; break }
       }
     }
-    const visibleTasks = [...this.state.tasks.values()].filter(task => channelRefs.has(task.channelRef)
-      && (channelRefFilter === undefined || task.channelRef === channelRefFilter)
-      && (threadRefFilter === undefined || task.threadRef === threadRefFilter))
+    // What this response's catalog describes. A caller that asked for the
+    // catalog wants the whole request scope — the address-book radar. Every
+    // other read describes its own facts: the Threads this page's facts belong
+    // to plus the Thread it names, so a sidebar asking for one item no longer
+    // carries every Task, Thread and Claim the Workspace ever had. Resolving
+    // those Threads by ref also replaces a per-Thread directory walk with the
+    // page's own lookups.
+    const catalogThreadRefs = new Set<AgentTeamThreadRef>()
+    if (request.includeCatalog === true) {
+      for (const thread of this.state.threads.values()) catalogThreadRefs.add(thread.threadRef)
+    } else {
+      if (threadRefFilter !== undefined) catalogThreadRefs.add(threadRefFilter)
+      for (const fact of selected) catalogThreadRefs.add(fact.kind === 'message' ? fact.message.threadRef : fact.activity.threadRef)
+    }
+    const scopeCache = new Map<AgentTeamThreadRef, boolean>()
+    const inScope = (threadRef: AgentTeamThreadRef): boolean => {
+      const cached = scopeCache.get(threadRef)
+      if (cached !== undefined) return cached
+      const channelRef = this.channelRefForThread(threadRef)
+      const scoped = channelRef !== undefined && channelRefs.has(channelRef)
+        && (channelRefFilter === undefined || channelRef === channelRefFilter)
+        && (threadRefFilter === undefined || threadRef === threadRefFilter)
+      scopeCache.set(threadRef, scoped)
+      return scoped
+    }
+    const catalogThreads = request.includeCatalog === true
+      ? [...this.state.threads.values()].filter(thread => inScope(thread.threadRef))
+      : [...catalogThreadRefs].map(threadRef => this.state.threads.get(threadRef)).filter((thread): thread is AgentTeamThread => thread !== undefined && inScope(thread.threadRef))
+    const catalogTasks = request.includeCatalog === true
+      ? [...this.state.tasks.values()].filter(task => inScope(task.threadRef))
+      : catalogThreads.flatMap(thread => thread.taskRef === undefined ? [] : [this.state.tasks.get(thread.taskRef)])
+        .filter((task): task is AgentTeamTask => task !== undefined)
     const taskNumbers = this.taskNumbers(request.workspaceId)
     const items = selected.filter((fact): fact is Extract<AgentTeamThreadFact, { kind: 'message' }> => fact.kind === 'message').map(fact => {
       const message = fact.message
@@ -1914,17 +1957,12 @@ export class AgentTeamLedger {
           const state = this.state.members.get(id)?.state
           return state !== 'inactive' && state !== 'archived'
         }).sort().map(memberId => Object.freeze({ channelRef, memberId })))),
-      tasks: Object.freeze(visibleTasks),
-      threads: Object.freeze([...this.state.threads.values()].filter(thread => {
-        const channelRef = this.channelRefForThread(thread.threadRef)
-        return channelRef !== undefined && channelRefs.has(channelRef)
-          && (channelRefFilter === undefined || channelRef === channelRefFilter)
-          && (threadRefFilter === undefined || thread.threadRef === threadRefFilter)
-      })),
-      taskNumbers: Object.freeze(visibleTasks.map(task => Object.freeze({ taskRef: task.taskRef, taskNumber: taskNumbers.get(task.taskRef) ?? 0 }))),
+      tasks: Object.freeze(catalogTasks),
+      threads: Object.freeze(catalogThreads),
+      taskNumbers: Object.freeze(catalogTasks.map(task => Object.freeze({ taskRef: task.taskRef, taskNumber: taskNumbers.get(task.taskRef) ?? 0 }))),
       items: Object.freeze(items),
-      activeTaskThreads: this.activeTaskThreads(visibleTasks, taskNumbers),
-      claims: this.claimsForVisibleTasks(visibleTasks),
+      activeTaskThreads: this.activeTaskThreads(catalogTasks, taskNumbers),
+      claims: this.claimsForVisibleTasks(catalogTasks),
       activities: Object.freeze(selected.filter((fact): fact is Extract<AgentTeamThreadFact, { kind: 'activity' }> => fact.kind === 'activity').map(fact => fact.activity)),
       cursor: nextCursor,
       hasMore,
@@ -2543,7 +2581,7 @@ export class AgentTeamLedger {
           && !this.sameList(activity.acceptedClaimRefs, expectedAcceptedClaimRefs))) {
         throw new Error('invalid Task state transition')
       }
-      const priorClaims = [...projection.claims.values()].filter(claim => claim.taskRef === task.taskRef).sort((left, right) => left.claimRef.localeCompare(right.claimRef))
+      const priorClaims = [...(projection.claimsByTask.get(task.taskRef) ?? [])].sort((left, right) => left.claimRef.localeCompare(right.claimRef))
       const operationClaims = [...operation.data.claims].sort((left, right) => left.claimRef.localeCompare(right.claimRef))
       if (priorClaims.length !== operationClaims.length || priorClaims.some((claim, index) => claim.claimRef !== operationClaims[index]?.claimRef)) throw new Error('invalid Task Claim set')
       for (const claim of operationClaims) {
@@ -2930,7 +2968,7 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/claim-created' || operation.kind === 'team/claim-done' || operation.kind === 'team/claim-released') {
-      target.claims.set(operation.data.claim.claimRef, operation.data.claim)
+      this.recordClaim(target, operation.data.claim)
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       target.tasks.set(operation.data.task.taskRef, operation.data.task)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
@@ -2939,7 +2977,7 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/task-changed') {
-      for (const claim of operation.data.claims) target.claims.set(claim.claimRef, claim)
+      for (const claim of operation.data.claims) this.recordClaim(target, claim)
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       target.tasks.set(operation.data.task.taskRef, operation.data.task)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
@@ -2979,7 +3017,7 @@ export class AgentTeamLedger {
     },
     occurredAt: string,
   ): void {
-    for (const claim of data.claims) target.claims.set(claim.claimRef, claim)
+    for (const claim of data.claims) this.recordClaim(target, claim)
     for (const activity of data.activities) this.appendActivityFact(target, activity, occurredAt)
     for (const task of data.tasks) target.tasks.set(task.taskRef, task)
     for (const thread of data.threads) target.threads.set(thread.threadRef, thread)
@@ -3023,6 +3061,20 @@ export class AgentTeamLedger {
     const ordinal = (target.taskCountByChannel.get(task.channelRef) ?? 0) + 1
     target.taskCountByChannel.set(task.channelRef, ordinal)
     target.taskNumberByTask.set(task.taskRef, ordinal)
+  }
+
+  /**
+   * One Claim into the projection and its per-Task bucket. A Claim whose state
+   * changes keeps the position its first write gave it: the bucket answers in
+   * the order the full `claims` scan it replaces did, so a durable list stays
+   * ordered by first write rather than by the latest transition.
+   */
+  private recordClaim(target: Projection, claim: AgentTeamClaim): void {
+    target.claims.set(claim.claimRef, claim)
+    const bucket = target.claimsByTask.get(claim.taskRef)
+    if (bucket === undefined) { target.claimsByTask.set(claim.taskRef, [claim]); return }
+    const known = bucket.findIndex(entry => entry.claimRef === claim.claimRef)
+    if (known === -1) bucket.push(claim); else bucket[known] = claim
   }
 
   /**
@@ -3564,12 +3616,11 @@ export class AgentTeamLedger {
   }
 
   private claimsForTaskFrom(projection: Projection, taskRef: AgentTeamTaskRef): readonly AgentTeamClaim[] {
-    return Object.freeze([...projection.claims.values()].filter(claim => claim.taskRef === taskRef))
+    return Object.freeze([...(projection.claimsByTask.get(taskRef) ?? [])])
   }
 
   private claimsForVisibleTasks(tasks: readonly AgentTeamTask[]): readonly AgentTeamClaim[] {
-    const refs = new Set(tasks.map(task => task.taskRef))
-    return Object.freeze([...this.state.claims.values()].filter(claim => refs.has(claim.taskRef)))
+    return Object.freeze(tasks.flatMap(task => [...(this.state.claimsByTask.get(task.taskRef) ?? [])]))
   }
 
   /**

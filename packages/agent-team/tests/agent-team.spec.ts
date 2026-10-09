@@ -807,7 +807,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('idle'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Idle work', actor: agentTeamHumanActor() })).value))
     // The bystander never wrote in either active Thread, yet the radar surfaces
     // both to them: admission is the Task being active, not participation.
-    const radar = ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before' }, bystander.memberId).activeTaskThreads
+    const radar = ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true }, bystander.memberId).activeTaskThreads
     expect(radar.map(row => row.threadRef).sort()).toEqual([claimed.task.threadRef, reviewed.task.threadRef].sort())
     const claimedRow = radar.find(row => row.threadRef === claimed.task.threadRef)!
     expect(claimedRow).toMatchObject({ status: 'in_progress', subject: 'Claimed work', taskNumber: 1 })
@@ -827,7 +827,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // queue carries it, and so does the radar, independently.
     const inbox = ledger.inbox(reader, { workspaceId: alpha })
     expect(inbox.items.some(item => item.thread.threadRef === started.task.threadRef)).toBe(true)
-    const radar = ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before' }, reader.memberId).activeTaskThreads
+    const radar = ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true }, reader.memberId).activeTaskThreads
     expect(radar.map(row => row.threadRef)).toEqual([started.task.threadRef])
   })
 
@@ -841,13 +841,13 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const betaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('beta-task'), workspaceId: beta, channelRef: betaChannel.channelRef, body: 'Beta work', actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('beta-claim'), workspaceId: beta, taskRef: betaTask.task.taskRef, action: 'claim', direction: 'beta angle', baseRevision: betaTask.thread.revision, actor })).value)
     // Beta's active Task does not leak into the alpha radar.
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before' }, member.memberId).activeTaskThreads).toEqual([])
+    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads).toEqual([])
     // An active Task whose Channel is then archived leaves the radar.
     const alphaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('alpha-task'), workspaceId: alpha, channelRef: alphaChannel.channelRef, body: 'Alpha work', actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('alpha-claim'), workspaceId: alpha, taskRef: alphaTask.task.taskRef, action: 'claim', direction: 'alpha angle', baseRevision: alphaTask.thread.revision, actor })).value)
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before' }, member.memberId).activeTaskThreads.map(row => row.threadRef)).toEqual([alphaTask.task.threadRef])
+    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads.map(row => row.threadRef)).toEqual([alphaTask.task.threadRef])
     await ledger.archiveChannel({ requestId: requestId('alpha-arch'), workspaceId: alpha, channelRef: alphaChannel.channelRef, actor: agentTeamHumanActor() })
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before' }, member.memberId).activeTaskThreads).toEqual([])
+    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads).toEqual([])
   })
 
   it('leaves the view radar empty when no Task has an active Claim', async () => {
@@ -857,7 +857,77 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
     // A taskful Thread with no Claim stays at todo and never enters the radar.
     withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('todo'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Unclaimed task', actor })).value))
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before' }, actor.memberId).activeTaskThreads).toEqual([])
+    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, actor.memberId).activeTaskThreads).toEqual([])
+  })
+
+  // State-requests 04: a bounded read returns the catalog of what it shows, not
+  // the Workspace's whole Task/Thread/Claim history. `includeCatalog` is the one
+  // way to ask for the address-book projection `team_view` renders.
+  it('bounds the view catalog to the page unless the caller asks for the whole scope', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = replayLedger(test)
+    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'First task', actor: agentTeamHumanActor() })).value))
+    committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'claim', direction: 'on it', baseRevision: started.thread.revision, actor })).value)
+    // 39 more Tasks behind it: a newest-first page of one cannot cover them.
+    let newest = started
+    for (let index = 1; index < 40; index += 1) {
+      newest = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`task-${index}`), workspaceId: alpha,
+        channelRef: channel.channel.channelRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
+      committed((await ledger.changeClaim({ requestId: requestId(`claim-${index}`), workspaceId: alpha, taskRef: newest.task.taskRef, action: 'claim',
+        direction: `on ${index}`, baseRevision: newest.thread.revision, actor })).value)
+    }
+
+    // A one-item catalog read describes that item's own Thread and Task, and
+    // still names the requested Thread even when the page shows no fact of it.
+    const page = ledger.view({ workspaceId: alpha, limit: 1 })
+    expect(page.items).toHaveLength(1)
+    const shown = page.items[0]!
+    expect(page.threads.map(thread => thread.threadRef)).toEqual([shown.thread.threadRef])
+    expect(page.tasks.map(task => task.taskRef)).toEqual([shown.task!.taskRef])
+    expect(page.taskNumbers).toEqual([{ taskRef: shown.task!.taskRef, taskNumber: shown.taskNumber }])
+    expect(page.activeTaskThreads.map(row => row.taskRef)).toEqual([shown.task!.taskRef])
+    expect(page.claims.map(claim => claim.taskRef)).toEqual([shown.task!.taskRef])
+    const named = ledger.view({ workspaceId: alpha, threadRef: started.thread.threadRef, limit: 1 })
+    expect(named.threads.map(thread => thread.threadRef)).toEqual([started.thread.threadRef])
+    expect(named.taskNumbers).toEqual([{ taskRef: started.task.taskRef, taskNumber: 1 }])
+
+    // The whole-scope catalog is one explicit request away, and it is complete.
+    const catalog = ledger.view({ workspaceId: alpha, limit: 1, includeCatalog: true })
+    expect(catalog.items).toHaveLength(1)
+    expect(catalog.threads).toHaveLength(40)
+    expect(catalog.tasks).toHaveLength(40)
+    expect(catalog.taskNumbers).toHaveLength(40)
+    expect(catalog.activeTaskThreads).toHaveLength(40)
+    expect(catalog.claims).toHaveLength(40)
+    expect(catalog.claims.every(claim => claim.owner === member.memberId)).toBe(true)
+  })
+
+  // The Inbox totals rank and count every unread Thread, while only the rows the
+  // response returns are materialized: a one-row badge still reports the whole
+  // unread queue instead of the slice it happened to keep.
+  it('reports whole-queue Inbox totals from a bounded one-row read', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = replayLedger(test)
+    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    for (let index = 0; index < 6; index += 1) {
+      const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`task-${index}`), workspaceId: alpha,
+        channelRef: channel.channel.channelRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
+      await ledger.reply({ requestId: requestId(`reply-${index}`), workspaceId: alpha, taskRef: started.task.taskRef,
+        body: `Update ${index}`, baseRevision: started.thread.revision, actor })
+    }
+    const badge = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha, limit: 1 })
+    expect(badge.items).toHaveLength(1)
+    expect(badge.totalUnreadCount).toBe(6)
+    expect(badge.totalDirectCount).toBe(0)
+    expect(badge.items[0]!.unreadCount).toBe(1)
+    // The returned row is still the ranked first row of the whole queue.
+    const full = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha, limit: 100 })
+    expect(full.items).toHaveLength(6)
+    expect(badge.items[0]!.thread.threadRef).toBe(full.items[0]!.thread.threadRef)
+    expect(badge.items[0]!.previewText).toBe(full.items[0]!.previewText)
   })
 
   it('does not duplicate a direct marker when follow starts after the marker', async () => {
@@ -893,6 +963,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       ],
       // The observation history keeps both transitions; followers is the current state they lead to.
       followers: [AGENT_TEAM_HUMAN_MEMBER_ID],
+      // Both transitions fit the default window, so nothing older is hidden.
+      hasMore: false,
     })
     expect(test.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef }).activities).toEqual([])
     // Observations are Inbox-invisible: they change who gets notified, never

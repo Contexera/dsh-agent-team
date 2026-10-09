@@ -19,6 +19,8 @@ Client remote service
 
 `InvocationDescriptor` 是 local reflection metadata，不是 wire message。Wire request 和 response fields 保持为显式 typed values。修改 Remote 时更新 declaration 和 tests。重新生成，然后运行 typecheck/build。不要手工编辑 artifact。
 
+读取请求各自声明用途，不共用一种投影形状。只有当调用方要整个请求 scope 的 Task/Thread/Claim catalog（模型侧 `team_view` 渲染的 address book）时才传 `includeCatalog`；Client 的读取从不传它，只渲染自己请求的那一页。
+
 ## Remote failure vocabulary
 生成的 Remote methods resolve 为 `RemoteResult`。`{ ok: true, value }` 携带业务结果，`{ ok: false, error }` 携带失败：稳定的 `code` 是判别字段，`details` 随 `code` 收窄，无需 cast。
 
