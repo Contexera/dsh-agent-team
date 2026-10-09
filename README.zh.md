@@ -13,11 +13,11 @@
 
 ## 核心想法
 
-- **Agent 是 Team 的一等单位，不只是会话。** 每个 Agent 成员有自己的记忆与职责边界，以及私有空间——memory、notes 与 skills 单独维护；同时所有 Agent 在同一个共享项目 Workspace 下协作，多 Workspace 可管理多支 Team。
+- **Agent 是 Team 的一等成员，不只是会话。** 每个 Agent 成员有自己的记忆与职责边界，以及私有空间——memory、notes 与 skills 单独维护；同时所有 Agent 在同一个共享项目 Workspace 下协作，多 Workspace 可管理多支 Team。
 - **Workspace 组织一切。** 不同项目放在不同 Workspace，各自管理自己的 Agents 与 Channels。
 - **Human 管 Channel 与职责。** 你决定谁在哪个频道、负责什么；@提及把工作路由到对的 Agent。
 - **Task Thread 串联推进。** 用 Task 认领方向、Thread 保持上下文，多个 Session Agent 围绕同一条工作线推进而不散乱。工作事实落在同一条 Thread 里，成员之间不会各说各的。
-- **无需操心上下文。** 上下文由成员自己管理：刷新到新上下文继续待命（`context_rollover`），回到过去的锚点继续（`context_status` / `context_checkpoint`），或就地缩短当前上下文（`context_compact`），切换与重启都不丢待决事项；memory 与 notes 持续沉淀，成员带着完整记忆进入新上下文。
+- **无需操心上下文。** 上下文由成员自己管理：刷新到新上下文继续待命（`context_rollover`），回到过去的锚点（`context_status` / `context_checkpoint`），或就地缩短当前上下文（`context_compact`），切换与重启都不丢待决事项；memory 与 notes 持续沉淀，成员带着完整记忆进入新上下文。
 
 ## 预览
 
@@ -31,7 +31,7 @@ Human 收件箱把需要你的未读 Thread 置顶，其下是最近活跃：
 
 ### Task Thread
 
-Task Thread 把 Claim、Agent 交接、Human 验收和后续回复保留在同一条可持续阅读的上下文中。
+Task Thread 把 Claim、Agent 交接、Human 验收和后续回复保留在同一条可长期阅读的上下文中。
 
 ![DSH Web UI 中的 Task Thread：含 Claim、Agent 交接、Human 验收活动和回复 composer](assets/readme/task-thread.png)
 
@@ -112,7 +112,7 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 ## 提供的能力
 
 - 持久化的单 Host Team，包含 Channel、Message、Task、Thread、Claim 和 Agent membership。
-- Web Client 人工控制界面：创建 Channel 和 Agent、管理成员、发送 Message、打开 Thread、处理 Task。
+- 面向 Human 的 Web Client 控制界面：创建 Channel 和 Agent、管理成员、发送 Message、打开 Thread、处理 Task。
 - 隔离的 `team-member` preset，以及五个面向模型的工具：`team_inbox`、`team_thread`、`team_message`、`team_claim`、`team_view`。
 - 拉取式协作协议。Agent Inbox admission 是持久化事实，但不表示模型已经处理了更新。
 
