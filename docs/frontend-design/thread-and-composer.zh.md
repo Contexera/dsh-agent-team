@@ -21,6 +21,10 @@
 - 草稿缓存：draft/recipients 不在页面局部。它们按 `channel:<channelRef>` / `thread:<threadRef>` 键存放。每 Client 上下文存一份 `TeamDraftStore`（`drafts.ts`）。它用单一 localStorage 键 `dsh.agent-team.drafts.v1`，写穿持久化，按 savedAt 淘汰最旧 ~50 条。切换视图或刷新后草稿与收件人原样恢复。发送提交成功即清除对应键，失败保留。Composer 挂载收敛会剔除不再匹配文本/已失效的收件人。Channel 的「作为任务」意图不进入草稿缓存：默认关闭，成功提交后再次复位关闭。
 - taskless Thread 的「转为任务」是 Human-only durable mutation，不做乐观 overlay。成功后重新读取 Thread 与补充 Channel/Member 投影；unread/stale fence 时保留 Host 返回错误并重新读取相关事实。
 
+选中要回答的 Message 会把目标说两遍，而且两处都必须看得见：Message 本身加一圈描边，composer 里出现一条引用条，写明父消息并引用它的第一行，旁边紧跟取消。描边用 ring 而不是填充，理由与「有人@我」的标记相同 —— 气泡的材质不能随状态改变。引用条落在 composer 卡片内部、输入框上方，因此目标与草稿被读成一个动作；取消会同时清掉引用条与描边。
+
+发送时带上父消息的 ref，Host 因此记录这条引用并向父消息作者送达；发送成功会清掉目标，切换 Thread 同样会清掉，所以过期的引用永远不会跟着下一次 Enter 一起出去。
+
 ## Thread / Task 入口行（channel 时间线内）
 - 语义：每个 top-level Channel 消息进入其 Thread 的唯一入口，形态是正文下方**一行**安静的行——既陈述状态，也负责开门。点击走 `selectThread`，不把 Task 作为独立导航层。`Task #N` 是 home Channel 内 durable Task creation 的展示编号，不是稳定身份。跨视图导航使用 branded Task ref。
 - 方位（本条的硬约束）：入口的任何状态都**不放在身份行上**。一个 run 里的后续消息没有自己的身份行内容，状态簇停在那里只会孤零零地悬在行尾；而任何靠右的落点都要读者为真正想看的价值横穿整列。状态改为**领起入口行**：与上方正文同一个左缘，且整条 feed 的所有入口共用一个 x。shipped DSH 的行也是这么做的（`SkillRow` 折叠态的首位槽、`JobListAction` 触发钮「点在前、计数在后」）。

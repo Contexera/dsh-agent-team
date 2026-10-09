@@ -310,3 +310,163 @@ describe('TeamMessage long-body clamp', () => {
     expect(chipCount()).toBe(1)
   })
 })
+
+describe('TeamMessage bubble and mention mark', () => {
+  it('wraps every Message in one bubble and sides it by the sender', () => {
+    const own = render(
+      <TeamMessage senderName="human" memberId={'member:human' as AgentTeamMemberId} human body="ping" />,
+    )
+    expect(own.container.querySelector('[data-side="end"]')).not.toBeNull()
+    expect(own.container.querySelector('[data-side="start"]')).toBeNull()
+    expect(own.container.querySelectorAll('[data-bubble]')).toHaveLength(1)
+    expect(own.container.querySelector('[data-bubble]')!.textContent).toContain('ping')
+    cleanup()
+
+    const other = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="pong" />,
+    )
+    expect(other.container.querySelector('[data-side="start"]')).not.toBeNull()
+    expect(other.container.querySelector('[data-side="end"]')).toBeNull()
+    expect(other.container.querySelectorAll('[data-bubble]')).toHaveLength(1)
+  })
+
+  it('marks a bubble only when the Message mentions the reader', () => {
+    const plain = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="no call here" t={t} />,
+    )
+    expect(plain.container.querySelector('[data-mentions-me]')).toBeNull()
+    expect(plain.container.textContent).not.toContain('有人@我')
+    // A Message nobody was called into still draws its bubble: the mark is an
+    // addition, never the reason a bubble exists.
+    expect(plain.container.querySelectorAll('[data-bubble]')).toHaveLength(1)
+    cleanup()
+
+    const marked = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@human look" mentionsHuman t={t} />,
+    )
+    const row = marked.container.querySelector('[data-mentions-me]')
+    expect(row).not.toBeNull()
+    // The mark is decoration on the author's own bubble: it must never move the
+    // bubble to the reader's column, or a reader would think they wrote it.
+    expect(row!.getAttribute('data-side')).toBe('start')
+    const badge = marked.container.querySelector('[data-mentions-me-badge]')
+    expect(badge).not.toBeNull()
+    // The label is the whole badge: no glyph is drawn beside it, or the reader
+    // sees a doubled `@`.
+    expect(badge!.textContent).toBe('有人@我')
+    // The badge is a child of the bubble, not of the identity line.
+    expect(row!.querySelector('[data-bubble]')!.contains(badge!)).toBe(true)
+  })
+
+  it('keeps the body, the clamp toggle, and the mention row inside the bubble', () => {
+    const longBody = '长正文段落。'.repeat(120)
+    const { container, getByRole } = render(
+      <TeamMessage
+        senderName="Builder"
+        memberId={'member:builder' as AgentTeamMemberId}
+        human={false}
+        body={`${longBody} @lead`}
+        mentionNames={['lead']}
+        mentionsHuman
+        t={t}
+      />,
+    )
+    const bubble = container.querySelector('[data-bubble]')!
+    expect(bubble.querySelector('[data-document]')).not.toBeNull()
+    expect(bubble.contains(getByRole('button', { name: '展开全文' }))).toBe(true)
+    const badge = bubble.querySelector('[data-mentions-me-badge]')
+    expect(badge).not.toBeNull()
+    // The mark leads the bubble: the reader learns the Message names them
+    // before reading the body they were called into.
+    expect(bubble.firstElementChild).toBe(badge)
+  })
+
+  it('never repeats the reader back to themselves in the trailing row', () => {
+    // A mention the body text does not carry — here only inside a code span,
+    // which the chip pass deliberately leaves literal — used to print a bare
+    // `@me` chip under the bubble, duplicating the name already chipped above.
+    const { container } = render(
+      <TeamMessage
+        senderName="Builder"
+        memberId={'member:builder' as AgentTeamMemberId}
+        human={false}
+        body={'看这段：`@human` 是历史 handle。\n\n1. 列表项\n2. 另一项'}
+        mentionNames={['human']}
+        readerName="human"
+        onOpenRef={() => {}}
+        t={t}
+      />,
+    )
+    expect([...container.querySelectorAll('div')].some(div => hasClassToken(div, 'mentionsRow'))).toBe(false)
+  })
+
+  it('still lists a mention of somebody else that the body text does not carry', () => {
+    const { container } = render(
+      <TeamMessage
+        senderName="Builder"
+        memberId={'member:builder' as AgentTeamMemberId}
+        human={false}
+        body="只在正文里说了一句话，没有写出任何名字"
+        mentionNames={['lead']}
+        readerName="human"
+        onOpenRef={() => {}}
+        t={t}
+      />,
+    )
+    const row = [...container.querySelectorAll('div')].find(div => hasClassToken(div, 'mentionsRow'))
+    expect(row).toBeTruthy()
+    expect(row!.textContent).toBe('@lead')
+  })
+})
+
+describe('TeamMessage reply quote and action', () => {
+  it('renders the resolved quote above the body and jumps through it', () => {
+    let opened = 0
+    const { container } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="我认这个方向"
+        messageRef={'message:self' as never}
+        replyTo={{ senderName: '@架构师', excerpt: '这段逻辑现在有点乱' }} onOpenReplyTo={() => { opened += 1 }} t={t} />,
+    )
+    const quote = container.querySelector('[data-reply-quote]')
+    expect(quote).not.toBeNull()
+    expect(quote!.textContent).toContain('@架构师')
+    expect(quote!.textContent).toContain('这段逻辑现在有点乱')
+    // The quote answers "what is this replying to" before the body is read.
+    const bubble = container.querySelector('[data-bubble]')!
+    expect(bubble.firstElementChild).toBe(quote)
+    fireEvent.click(quote!)
+    expect(opened).toBe(1)
+  })
+
+  it('renders an inert quote when the surface offers no jump', () => {
+    const { container } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="收到"
+        replyTo={{ senderName: '@架构师', excerpt: '一段原文' }} t={t} />,
+    )
+    const quote = container.querySelector('[data-reply-quote]')!
+    expect(quote.tagName).toBe('SPAN')
+  })
+
+  it('offers a reachable reply action and marks the current target', () => {
+    let replied = 0
+    const { container, getByRole, rerender } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以"
+        messageRef={'message:abc' as never} onReply={() => { replied += 1 }} t={t} />,
+    )
+    fireEvent.click(getByRole('button', { name: '回复这条消息' }))
+    expect(replied).toBe(1)
+    // The action shares the identity line with the author, so it sits beside
+    // the Message it acts on instead of at the row's far edge.
+    const actions = container.querySelector('[data-message-actions]')!
+    expect(actions.parentElement!.textContent).toContain('Builder')
+
+    rerender(<TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以"
+      messageRef={'message:abc' as never} replyTarget t={t} />)
+    const row = container.querySelector('[data-replying-to]')
+    expect(row).not.toBeNull()
+    // A row without the action offers none: the Channel feed passes no onReply.
+    rerender(<TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以" t={t} />)
+    expect(container.querySelector('[data-message-actions]')).toBeNull()
+    expect(container.querySelector('[data-replying-to]')).toBeNull()
+  })
+})

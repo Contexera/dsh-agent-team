@@ -3,7 +3,7 @@
 [English](boundaries.md) | 中文
 
 ## Mutation fences
-既有 Thread 上的 public mutation 必须在 `baseRevision` 中携带当前的 next-write token。它是不透明的 copy-through 值，不是关于 Thread 的事实：模型原样复制最近一次显式渲染的值。绝不递增、推导、比较或引用它。令牌只出现在两个位置。第一，一次未读清零的 `team_thread read`。第二，一次结果返回结果 Thread 状态的已提交 public mutation（`team_message` start/reply、`team_claim` mutation）。它不出现在 `team_view`、`team_inbox`、`team_thread status/follow/unfollow/history`、`team_claim list`、未读完的 read，以及所有类型化拒绝中——这些位置一个看似新鲜的令牌反而会诱导盲重试。
+既有 Thread 上的 public mutation 必须在 `baseRevision` 中携带当前的 next-write token。它是不透明的 copy-through 值，不是关于 Thread 的事实：模型原样复制最近一次显式渲染的值。绝不递增、推导、比较或引用它。令牌只出现在两个位置。第一，一次未读清零的 `team_thread read`。第二，一次结果返回结果 Thread 状态的已提交 public mutation（`team_message` start/reply、`team_claim` mutation）。它不出现在 `team_view`、`team_inbox`、`team_thread status/follow/unfollow/history/message`、`team_claim list`、未读完的 read，以及所有类型化拒绝中——这些位置一个看似新鲜的令牌反而会诱导盲重试。
 
 Host 按以下顺序检查 fences：
 

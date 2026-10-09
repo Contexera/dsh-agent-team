@@ -4,7 +4,7 @@ import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
-import { allMentionMembers, containsAllMention, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatClaimState, formatInboxTime, formatMessageTime, formatTaskStatus, HUMAN_HISTORIC_HANDLE, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
+import { allMentionMembers, containsAllMention, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatClaimState, formatInboxTime, formatMessageTime, formatTaskStatus, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, mentionsHuman, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -392,5 +392,16 @@ describe('Team presentation formatters', () => {
     expect(shouldClampMessage('短消息')).toBe(false)
     expect(shouldClampMessage('字'.repeat(600))).toBe(false)
     expect(shouldClampMessage('字'.repeat(601))).toBe(true)
+  })
+
+  it('recognizes the reader in one Message structured mentions', () => {
+    // The client spells the Human's durable id locally because a client package
+    // must not import a Host package; the handle the Host exposes is the same
+    // identity, so the two spellings have to agree.
+    expect(HUMAN_MEMBER_ID).toBe(`member:${AGENT_TEAM_HUMAN_HANDLE}`)
+    expect(mentionsHuman([HUMAN_MEMBER_ID])).toBe(true)
+    expect(mentionsHuman(['member:builder' as AgentTeamMemberId])).toBe(false)
+    expect(mentionsHuman([])).toBe(false)
+    expect(mentionsHuman(['member:builder' as AgentTeamMemberId, HUMAN_MEMBER_ID])).toBe(true)
   })
 })

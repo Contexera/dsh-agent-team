@@ -1,9 +1,10 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type {
   AgentTeamClientMemberStatus,
   AgentTeamChannelRef,
   AgentTeamConfirmationToken,
   AgentTeamMemberId,
+  AgentTeamMessageRef,
   AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
@@ -19,11 +20,12 @@ import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
-import { firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, taskStatusDot, type MentionHandle } from './team-formatters.ts'
+import { firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, mentionsHuman, taskStatusDot, type MentionHandle } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { daySeparatorLabel, isRunGap, timelineDayKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
+import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
 import { rosterChannelName, rosterMember } from './refs.ts'
@@ -56,6 +58,8 @@ interface TeamThreadPageProps {
   readonly selectThread: TeamConversationProps['selectThread']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
+  readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
+  readonly replyCapabilities: TeamConversationProps['replyCapabilities']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly t: TeamConversationProps['t']
 }
@@ -109,7 +113,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const {
     workspaceId, humanName, humanAvatarUrl, channelRef, taskRef, threadRef, taskNumber, backToWorkspace, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
     loadChannels, readThread, loadThreadHistory, threadObservations,
-    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, t,
+    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, resolveMessageRefs, replyCapabilities, t,
   } = props
   const threadRequest = { threadRef, ...(taskRef === undefined ? {} : { taskRef }) }
   const [projection, setProjection] = useState<ReadProjection>()
@@ -144,6 +148,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     if (confirmingAccept && projection?.task?.resolution === 'accepted') setConfirmingAccept(false)
   }, [confirmingAccept, projection?.task?.resolution])
   const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
+  // The Message the composer is currently answering, and the parent a reader
+  // just jumped back to (a short pulse, then it clears).
+  const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
+  const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
   const [confirmation, setConfirmation] = useState<AgentTeamConfirmationToken>()
   const [statusMessage, setStatusMessage] = useState<string>()
   const [pending, setPending] = useState(false)
@@ -476,6 +484,39 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
+  // The switch is the Host's, but the affordance is ours to withhold: showing a
+  // reply button the Host would refuse is worse than showing none.
+  const repliesOffered = useSyncExternalStore(replyCapabilities.subscribe, replyCapabilities.getSnapshot, replyCapabilities.getSnapshot).enabled
+
+  // Reply parents resolve through the Host: a quote must fill in even when the
+  // Message it answers sits far outside the facts this page has loaded.
+  const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
+  const messageRefVersion = useResolvedMessageRefVersion()
+  useEffect(() => {
+    // Two kinds of Message need context: every reply's parent (for its quote
+    // block) and the composer's current target (for its banner). The target is
+    // usually not itself a reply, so resolving only reply parents would leave
+    // the banner with no author and no excerpt.
+    const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
+    if (replyTarget !== undefined && !refs.includes(replyTarget)) refs.push(replyTarget)
+    if (refs.length > 0 && repliesOffered) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
+  }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion, repliesOffered])
+  useEffect(() => {
+    if (flashedMessage === undefined) return
+    const timer = setTimeout(() => { setFlashedMessage(undefined) }, 1200)
+    return () => { clearTimeout(timer) }
+  }, [flashedMessage])
+  /** Take the reader to the Message a reply answers, when it is on screen. */
+  const jumpToMessage = useCallback((messageRef: AgentTeamMessageRef): void => {
+    const node = document.querySelector(`[data-message-ref="${messageRef}"]`)
+    if (node === null) return
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlashedMessage(messageRef)
+  }, [])
+  // One stable callback for every row: TeamMessage is memoized, so a fresh
+  // closure per row would re-render the whole timeline on any page render.
+  const handleReply = useCallback((messageRef: AgentTeamMessageRef): void => { setReplyTarget(messageRef) }, [])
+  const handleOpenReplyTo = useCallback((messageRef: AgentTeamMessageRef): void => { jumpToMessage(messageRef) }, [jumpToMessage])
   // Roster chips resolve synchronously from loaded data: channel names from
   // the Channel view, member facts from the member list. Anything outside the
   // loaded window stays plain text — the same rule unresolvable Task/Thread
@@ -496,16 +537,46 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return (ref: AgentTeamMemberId) => rosterMember(members, humanMemberId, humanName, ref)
   }, [rosterKey, humanName])
 
+  // Reply contexts keyed by the replying Message. Built once per change in the
+  // facts, roster, or resolution cache so each row keeps one stable object:
+  // TeamMessage is memoized and an object literal per render would undo it.
+  const replyContexts = useMemo(() => {
+    const contexts = new Map<AgentTeamMessageRef, { readonly senderName: string; readonly excerpt: string }>()
+    const nameOf = (memberId: AgentTeamMemberId): string => {
+      if (memberId === channelView?.humanMemberId) return humanName
+      const status = members.find(candidate => candidate.member.memberId === memberId)
+      return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
+    }
+    for (const fact of currentFacts) {
+      if (fact.kind !== 'message' || fact.message.replyToMessageRef === undefined) continue
+      const parent = cachedResolvedMessageRef(fact.message.replyToMessageRef)
+      contexts.set(fact.message.messageRef, parent === undefined
+        ? { senderName: t('memberUnknown'), excerpt: '' }
+        : { senderName: nameOf(parent.sender), excerpt: parent.excerpt })
+    }
+    return contexts
+  }, [currentFacts, messageRefVersion, members, channelView, humanName, t])
+
   const renderFact = (fact: AgentTeamThreadFact, grouped = false) => {
     if (fact.kind === 'message') {
       const sender = memberName(fact.message.sender)
       const senderStatus = members.find(candidate => candidate.member.memberId === fact.message.sender)
       const human = fact.message.sender === channelView?.humanMemberId
+      // The mark answers "does this need me now?", so it rides the unread
+      // batch: a mention the reader has already acknowledged keeps its inline
+      // chip in the body but stops asking for attention. Both halves come from
+      // the Host — `mentions` is the delivery fact and `unread` is the read
+      // fact — so a marked bubble is exactly one whose mention reached the
+      // reader and is still unacknowledged. A Message never mentions its own
+      // author, so the reader's own row can never carry it.
+      const mentionedMe = !human && mentionsHuman(fact.mentions) && metadata.get(factKey(fact))?.unread === true
       return <TeamMessage
         key={factKey(fact)}
         senderName={sender}
         memberId={fact.message.sender}
         human={human}
+        mentionsHuman={mentionedMe}
+        readerName={humanName}
         {...(human && humanAvatarUrl !== undefined ? { avatarUrl: humanAvatarUrl } : {})}
         body={fact.message.body}
         attachments={fact.message.attachments}
@@ -520,6 +591,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         memberOf={memberOf}
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
+        messageRef={fact.message.messageRef}
+        {...(repliesOffered && replyContexts.has(fact.message.messageRef) ? { replyTo: replyContexts.get(fact.message.messageRef)!, onOpenReplyTo: handleOpenReplyTo } : {})}
+        {...(repliesOffered ? { onReply: handleReply } : {})}
+        replyTarget={replyTarget === fact.message.messageRef}
+        replyFlash={flashedMessage === fact.message.messageRef}
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
       />
     }
@@ -539,7 +615,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
               const previous = entryIndex > 0 ? run[entryIndex - 1] : undefined
               const turnGap = entry.kind === 'message' && isRunGap(previous?.kind === 'message' ? previous.message.occurredAt : undefined, entry.message.occurredAt)
               return <Fragment key={factKey(entry)}>
-                {turnGap && <TeamRunDivider occurredAt={entry.message.occurredAt} />}
+                {turnGap && <TeamRunDivider occurredAt={entry.message.occurredAt} side={entry.message.sender === channelView?.humanMemberId ? 'end' : 'start'} />}
                 {renderFact(entry, entryIndex > 0)}
               </Fragment>
             })}
@@ -686,7 +762,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return
       }
       const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
+      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
       if (!result.ok) {
         setError(result.error.message)
         return
@@ -704,6 +780,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         })
         setProjection(current => current === undefined ? current : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
         drafts.clear(draftKey)
+        setReplyTarget(undefined)
         setPendingFiles([])
         setReplyRequestId(undefined)
         setConfirmation(undefined)
@@ -882,6 +959,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       placeholder={t('replyPlaceholder')}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
+      {...(replyTarget === undefined || !repliesOffered ? {} : {
+        replyTo: (() => {
+          const target = cachedResolvedMessageRef(replyTarget)
+          return target === undefined ? { senderName: t('memberUnknown'), excerpt: '' } : { senderName: memberName(target.sender), excerpt: target.excerpt }
+        })(),
+        onCancelReply: () => { setReplyTarget(undefined) },
+      })}
       t={t}
     />
     ) : <div />}

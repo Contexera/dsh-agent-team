@@ -10,8 +10,12 @@
 - `children`：渲染进 messageBody 尾部，承载入口行等扩展。
 - 分组规则：相邻两条同为消息、sender 相同，才折叠。活动行会打断 run。折叠行隐藏头像与名字。`visibility:hidden` 保持栅格对齐，padding 收紧为 `2px`。
 - 头像座位只替一位作者画图片：资料头像只在**这一行就是 Human 本人**时才落座。Agent 行无论上层传下来什么，都保持共享色相 + 发送者首字母。同一个座位替别的作者画读者的脸，等于把两个人画成一个人。头像首字母取 senderName 去掉 `@` 后首个字符大写。
+
+每条消息的正文都渲染在一个气泡里，**每一条都有**：「有人@我」是加在气泡之上的标记，而不是画出气泡的前提。气泡按自身内容收缩、最多长到整个阅读列：短回复就是一个小气泡，不会铺成一条整行色带；而一段很长的 Agent 回答保留全部宽度，不会被挤进半列。
+
+`data-side` 决定列序：读者自己的发言与其他人分列两侧。所有气泡共用同一种填充与同一种圆角（直接复用 shipped 聊天气泡的那套配方，明暗主题都成立），发送者归属只由列序与昵称行承载 —— 按作者区分底色会让某个人的话看起来是另一种材质，带尖角的「尾巴」在气泡被折叠或展开后会读成渲染故障；同人 run 改由被省略的昵称装饰来体现。
 - 超长正文折叠看 display 字符数。超过 `MESSAGE_COLLAPSE_CHARS`（`team-formatters.ts` 单一权威，600）的正文默认收进限高预览。预览约 8 行 / 176px，底部 alpha 渐隐遮罩，不涂主题底色。预览下方「展开全文」安静文本钮负责展开，展开后同位置「收起」收回。`aria-expanded` 随之翻转。
-- 按钮独占一行。反馈是文字级的：变色 + 下划线，无底色框。markdown 根节点的 `font: inherit` 重置选择器按后代匹配（`.messageBody .messageMarkdown > div:first-child`）。夹具容器不得隔断这个选择器，否则预览字号会大于展开态。夹具容器对可折叠正文**常驻**、展开/收起只切换类名。不能出现/消失式包裹。那会重挂载 Markdown 子树，丢掉渲染后注入的 ref 链接与 mention chip。是否折叠只由正文本身决定。这是确定性默认，无需持久化，也不构成 Host 事实。夹具只包正文分支。run 分组、附件条、兜底 chip 行与 children 都在夹具外照常渲染，预览内 ref/mention 照常可点。
+- 按钮独占一行。反馈是文字级的：变色 + 下划线，无底色框。markdown 根节点的 `font: inherit` 重置选择器按后代匹配（`.messageBody .messageMarkdown > div:first-child`）。夹具容器不得隔断这个选择器，否则预览字号会大于展开态。夹具容器对可折叠正文**常驻**、展开/收起只切换类名。不能出现/消失式包裹。那会重挂载 Markdown 子树，丢掉渲染后注入的 ref 链接与 mention chip。是否折叠只由正文本身决定。这是确定性默认，无需持久化，也不构成 Host 事实。夹具只包正文分支。run 分组、附件条、兜底 chip 行与 children 都在气泡内照常渲染；只有夹具与它的展开钮会折叠。
 
   **折叠阈值同时是节奏开关**。夹具容器带 `data-document`。超过 600 字符的 markdown 按文档节奏渲染，短消息保持聊天刻度。节奏的具体刻度是：块间距 16px、列表项 6px、行高 24px、标题边距 24px 0 8px 且 h2 18px、h3 17px，pre/blockquote 外边距 16px。限高也按字号轴 `calc(176px + 8 × delta)` 维持 8 行。
 
@@ -23,6 +27,10 @@
 - run 是纯分组块：无 hover 边框/底色/阴影，无常驻边框。回合分隔线、日界锚与未读线承担全部消息边界感。run 自身只保留块间 2px 垂直空隙（`margin: 2px` + `padding: 3px`），不给内容"加笼子"。
 
 ## Mention 与 Task ref 强调
+- 结构化 mention 列表里点名了 Human 读者的**未读**消息，会在自己气泡的顶部先亮出「有人@我」标记：气泡加一道 warn 层级描边，徽标作为气泡的第一行右对齐落在正文上方，读者在读到正文之前就知道这条消息在叫自己。徽标本身就是完整标签，旁边不再画 `@` 图标 —— 标签已经含 `@`，再加图标会读成双重标记。标记是**作者自己气泡**上的装饰，绝不让气泡换列——Agent 提到读者，这条消息仍然是 Agent 的；读者若在自己那一列看到它，会以为是自己写的。它也不会出现在昵称行上，那一行承载作者而不是收件人。标记回答的是「这条现在需要我吗」，所以它跟随未读批次、读过即退场：已被确认的提及在正文里保留内联 chip，但不再索取注意力。两半都是 Host 事实 —— `mentions` 是送达事实、`unread` 是已读事实 —— 所以带标记的气泡恰好就是提及已送达且尚未确认的那条。消息永不提及自己的作者，因此读者自己那一行永远不会带这个标记。Channel feed 只知道 Thread 级未读、不知道单条消息的未读，所以在那里标记跟随该 Thread 最新的顶层消息，直到该 Thread 被读完。
+- 尾部兜底行列出正文没有携带的提及，但它永不重复读者自己的名字 —— 那会在一个已经把名字 chip 在正文里、或已经用徽标明说「有人@我」的气泡下面再印一个光秃秃的 `@me`。
+- 回答另一条消息的 Message 会在气泡顶部先给出**已解析的引用**：父消息作者 + 一行开头文字。两者都由 Host 从 ledger 解析，而不是从正文里读出来，因此引用永不与它所指向的内容不一致，父消息落在已加载历史窗口之外时也照样填得上。整块引用就是跳转目标；摘要永远只有一行并带省略号，因为引用是原文的把手，不是它的第二份拷贝。不是回复的 Message 不渲染引用块。
+- 每条 Message 尾部还带一个回复操作，它**照字面**沿用 shipped 的显隐约定：只在 `@media (hover: hover)` 内隐藏，因此没有 hover 的触屏设备上它常显，键盘则由 `:focus-within` 唤起。它是**浮在**行之上而不是排在行里，因此永不占用时间线高度；凡是上层没有传处理函数的地方它就不存在 —— Channel feed 不提供回复。
 - mention chip 挂三处。Human 字面正文在字面分段时挂 chip。Agent plain-prose 正文复用同一条 `splitMentionNames` 分段。Agent 富 Markdown 正文在公共 `MarkdownText` 渲染完成后，于普通文字节点原位替换出 chip。三种路径都只挂 Message 已解析 mention 列表内的 handle。大小写不敏感，书写必须带 `@`。裸名是正文，永不挂 chip。代码段落保持原文。effect 重跑不会对已生成的 chip 再包层。正文未出现的名字才落到尾部兜底 chip 行，不与内联 chip 重复。**chip 按「今天怎么称呼这个人」显示**。Human 改名前的 `human` 是 Host 仍会送达的别名。所以正文写着 `@human` 的旧消息在原位挂 chip，显示当前名。正文从没写过的名字不会掉进尾部兜底行。这与 member ref 一律按当前 handle 命名是同一条规则。
 - 已知的 branded Task ref（`task:*`）通过 Host 的 `resolveTaskRefs` 批量解析。Task ref 在 Human 字面文本、Agent plain-prose 和 Agent 富 Markdown 的原出现位置渲染为可点击的 `Task #N`。富 Markdown 正文下方不再重复补入口。富 Markdown 在公共 `MarkdownText` 完成渲染后替换普通文字节点和"整段恰好是一个 ref"的行内代码。模型把 ref 当标识符加反引号样式是常态。代码围栏、缩进代码、混合内容的行内代码和已有链接保留原文。模型输出的双冒号/大写拼写（如 `task::…`）在 `splitBrandedRefs` 解析口统一归一化为 ledger 铸造的单冒号小写 ref 后再解析与导航。
 - 点击当前视图未加载的 Task ref，Client 解析 Task ref 所属 Workspace、Channel 和 Thread，再跨 Channel 跳转。解析失败的 ref 保留为非导航原文。已解析链接用原始 ref 作为 tooltip。Task number（如 `Task #12`）是 Task 在其 home Channel 内的创建序号。Host 侧单一派生（`taskNumbers`）。Channel 任务卡、Thread 标题、跨 Channel ref 解析与 Agent inbox 标注共用同一口径。序号跨 Channel 不唯一，稳定导航身份始终是 branded Task ref。

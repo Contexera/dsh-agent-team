@@ -28,6 +28,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import { AgentTeamLedger } from '../src/ledger.ts'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_TOOL_NAMES, isTsxDevMode, markAgentTeamPreset, teamPresetScopeMismatchMessage } from '../src/index.ts'
@@ -1356,6 +1357,83 @@ describe('Agent Team Member lifecycle', () => {
     const hints = agent.session.ownEvents().filter(event => event.type === 'user/message'
       && JSON.stringify(event.data).includes('Team Inbox has unread work'))
     expect(hints).toHaveLength(1)
+  })
+
+  it('resolves what a reply answers from outside the reader window, once per read', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('reply-window-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+    const builder = await ctx.agentTeam.addMember({ requestId: requestId('reply-window-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const agent = ctx.agents.get(builder.status.member.sessionId)!
+    const anchor = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('reply-window-anchor'), workspaceId,
+      channelRef: channel.channel.channelRef, body: 'Please investigate the anchored path', recipients: [builder.status.member.memberId] })
+    if (anchor.kind !== 'committed') throw new Error('expected committed anchor')
+
+    // The reader drains the anchor first, so both replies below arrive in one
+    // batch whose answering target is already behind them.
+    await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('reply-window-read-1'), workspaceId, taskRef: anchor.task!.taskRef })
+    const first = await ctx.agentTeam.reply({ requestId: requestId('reply-window-reply-1'), workspaceId, taskRef: anchor.task!.taskRef,
+      baseRevision: anchor.thread.revision, body: 'Looking now', recipients: [builder.status.member.memberId], replyToMessageRef: anchor.message.messageRef })
+    if (first.kind !== 'committed') throw new Error('expected committed first reply')
+    const second = await ctx.agentTeam.reply({ requestId: requestId('reply-window-reply-2'), workspaceId, taskRef: anchor.task!.taskRef,
+      baseRevision: first.thread.revision, body: 'One correction', recipients: [builder.status.member.memberId], replyToMessageRef: anchor.message.messageRef })
+    if (second.kind !== 'committed') throw new Error('expected committed second reply')
+
+    const spy = vi.spyOn(AgentTeamLedger.prototype, 'resolveMessageRefs')
+    const read = await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('reply-window-read-2'), workspaceId, taskRef: anchor.task!.taskRef })
+    const resolving = spy.mock.calls.filter(([, refs]) => refs.length > 0)
+    spy.mockRestore()
+    // The parent is asked for once for the whole window, not once per reply.
+    expect(resolving).toHaveLength(1)
+
+    const answered = read.facts.filter(entry => entry.fact.kind === 'message' && entry.fact.replyTo !== undefined)
+    expect(answered).toHaveLength(2)
+    for (const entry of answered) {
+      if (entry.fact.kind !== 'message') continue
+      // Resolved through the ledger, not out of the window: the anchor is not in it.
+      expect(entry.fact.replyTo).toEqual({ sender: 'human', excerpt: 'Please investigate the anchored path' })
+    }
+    expect(read.facts.some(entry => entry.fact.kind === 'message' && entry.fact.message.messageRef === anchor.message.messageRef)).toBe(false)
+
+    // The context is a projection this read added, not a durable fact: the
+    // stored records keep the shape their schema declares. Writing it into a
+    // record is what stops a whole domain from reopening.
+    const records = JSON.stringify([...(ctx.get('storageDomain') as DomainFacility)
+      .get('agent_team')!.table('operations').entries()])
+    expect(records).toContain('Looking now')
+    // The durable link is `replyToMessageRef`; the resolved `replyTo` is not.
+    expect(records).toContain('replyToMessageRef')
+    expect(records).not.toContain('"replyTo":')
+  })
+
+  it('names what a reply answers in the mention notice, with the ref it hands back', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('replies-to-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+    const builder = await ctx.agentTeam.addMember({ requestId: requestId('replies-to-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const agent = ctx.agents.get(builder.status.member.sessionId)!
+    // The anchor mentions nobody, so the only wake below is the reply's.
+    const anchor = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('replies-to-anchor'), workspaceId,
+      channelRef: channel.channel.channelRef, body: 'Please investigate the anchored path' })
+    if (anchor.kind !== 'committed') throw new Error('expected committed anchor')
+    // Following first: a Human reply naming a Member who is not yet following
+    // goes through the one-use confirmation, which is a different test's subject.
+    await ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('replies-to-follow'), workspaceId, taskRef: anchor.task!.taskRef, action: 'follow' })
+    const answer = await ctx.agentTeam.reply({ requestId: requestId('replies-to-reply'), workspaceId, taskRef: anchor.task!.taskRef,
+      baseRevision: anchor.thread.revision, body: 'Answering the anchored path', recipients: [builder.status.member.memberId],
+      replyToMessageRef: anchor.message.messageRef })
+    if (answer.kind !== 'committed') throw new Error('expected committed reply')
+
+    adapter.enqueue(textResponse('Reading the answer.'))
+    await agent.whenIdle()
+    expect(adapter.requests).toHaveLength(1)
+    const request = JSON.stringify(adapter.requests[0]!.messages)
+    expect(request).toContain('Direct Team mention')
+    // Author, the original's first line, and the full ref last — the ref is
+    // what the reader hands back to team_message.replyToMessageRef.
+    // The request is inspected as JSON, so the quoted summary arrives escaped.
+    expect(request).toContain('Replies to: @human — \\"Please investigate the anchored path\\"')
+    expect(request).toContain(`[${anchor.message.messageRef}]`)
   })
 
   it('wakes an idle Member with a direct mention body and source', async () => {

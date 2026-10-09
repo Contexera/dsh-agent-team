@@ -13,7 +13,7 @@ import { TeamMessage } from './TeamMessage.tsx'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, taskStatusDot, mentionNamesOf } from './team-formatters.ts'
+import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, taskStatusDot, mentionNamesOf, mentionsHuman } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { useChannelMembership } from './team-membership.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
@@ -441,11 +441,16 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
             const unread = unreadByThread.get(item.thread.threadRef) ?? 0
             // A turn divider already labels the gapped entry; its row stays chrome-free.
             return <Fragment key={item.message.messageRef}>
-              {turnGap && <TeamRunDivider occurredAt={item.message.occurredAt} />}
+              {turnGap && <TeamRunDivider occurredAt={item.message.occurredAt} side={human ? 'end' : 'start'} />}
               <TeamMessage
                 senderName={sender}
                 memberId={item.message.sender}
                 human={human}
+                // The feed knows unread per Thread, not per Message: the newest
+                // top-level Message is where a Thread's unread batch sits, so
+                // the mark follows that Message while the Thread is unread.
+                mentionsHuman={!human && mentionsHuman(item.mentions) && item.message.topLevel === true && unread > 0}
+                readerName={humanName}
                 {...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl })}
                 body={item.message.body}
                 attachments={item.message.attachments}

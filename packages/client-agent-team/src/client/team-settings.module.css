@@ -153,6 +153,16 @@
   line-height: 22px;
 }
 
+/* A group's title row without a disclosure control. It repeats the toggle's
+ * own padding so every group's title sits the same distance below the rule
+ * above it, whether or not it can be collapsed. */
+.groupHeader {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  padding: 14px 0;
+}
+
 /* The row's answer, at the far end of the line it belongs to. The glyph is
  * decorative — the sentence carries the verdict — and only an unreachable
  * endpoint takes a warning color, because a missing key is a step to take
@@ -331,4 +341,13 @@
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+/* A refused settings write, stated under the control that made it: the switch
+   must not sit in a state the Host never accepted without saying so. */
+.groupNotice {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
 }

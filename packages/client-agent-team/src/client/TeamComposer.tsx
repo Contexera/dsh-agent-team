@@ -56,7 +56,7 @@ function draftPreviewUrl(file: File): string | undefined {
   return url
 }
 
-export function TeamComposer({ members, followerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, asTask, onAsTaskChange, t }: {
+export function TeamComposer({ members, followerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, asTask, onAsTaskChange, t }: {
   readonly members: readonly AgentTeamClientMemberStatus[]
   /** Current Thread followers; the Thread surface passes them so they rank above other candidates. */
   readonly followerMemberIds?: ReadonlySet<AgentTeamMemberId>
@@ -78,6 +78,13 @@ export function TeamComposer({ members, followerMemberIds, drafts, draftKey, pen
   /** Upload-capable surfaces pass this to enable the "+" file picker; the reply path omits it. */
   readonly pendingFiles?: readonly File[]
   readonly onFilesChange?: (files: readonly File[]) => void
+  /**
+   * The Message this send answers. Present, the composer states what is being
+   * answered and offers a way out, because a reply the reader cannot cancel is
+   * a trap: the next Enter would quote something they had moved past.
+   */
+  readonly replyTo?: { readonly senderName: string; readonly excerpt: string } | undefined
+  readonly onCancelReply?: (() => void) | undefined
   /** Channel-only: create a real Task with the top-level Message. Default off. */
   readonly asTask?: boolean
   readonly onAsTaskChange?: (asTask: boolean) => void
@@ -280,6 +287,15 @@ export function TeamComposer({ members, followerMemberIds, drafts, draftKey, pen
   }}>
     <div className={css.card} data-team-composer>
       {confirmation !== undefined && <p className={css.confirmation} role="status">{confirmation}</p>}
+      {replyTo !== undefined && <div className={css.replyBanner} data-reply-banner="">
+        <span className={css.replyBannerBar} aria-hidden="true" />
+        <span className={css.replyBannerBody}>
+          <span className={css.replyBannerAuthor}>{t('replyingTo', { name: replyTo.senderName })}</span>
+          <span className={css.replyBannerText}>{replyTo.excerpt}</span>
+        </span>
+        {onCancelReply !== undefined && <button type="button" className={css.replyBannerCancel} onClick={onCancelReply}
+          aria-label={t('cancelReply')} title={t('cancelReply')}>×</button>}
+      </div>}
       <div className={css.inputArea}>
         {menuOpen && <div id={listId} ref={menuRef} className={css.mentionMenu} role="listbox" aria-label={t('mentionSuggestions')} style={{ maxHeight: menuMaxHeight }}>
           {options.map((option, index) => {

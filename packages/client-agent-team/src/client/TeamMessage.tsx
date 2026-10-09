@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
@@ -24,6 +24,34 @@ export interface TeamMessageProps {
   readonly senderTitle?: string
   /** Continuation of one same-sender run: suppress repeated identity chrome. */
   readonly grouped?: boolean
+  /** This Message carries a structured direct mention of the Human reader, so
+      the bubble marks it. The flag never moves the bubble: an Agent's mention
+      of the reader is still the Agent's Message, and a reader who saw it on
+      their own side would think they wrote it. */
+  readonly mentionsHuman?: boolean
+  /** The reader's own display name, so the trailing fallback row never repeats
+      the reader back to themselves: the badge already states the mention when it
+      needs attention, and their name in the body is chipped in place. */
+  readonly readerName?: string
+  /**
+   * Resolved context of the Message this one answers; absent when it is not a
+   * reply. The author and the excerpt come from the Host, never from the body,
+   * so a quote cannot drift from the Message it points at.
+   */
+  readonly replyTo?: { readonly senderName: string; readonly excerpt: string } | undefined
+  /** Opens the named Message as the composer's reply target; absent surfaces offer no reply action.
+      The Message's own ref travels as the argument so the hosting page can pass one
+      identity-stable callback for every row instead of a fresh closure per row —
+      a new function per render would defeat this component's memo. */
+  readonly onReply?: ((messageRef: AgentTeamMessageRef) => void) | undefined
+  /** Jumps to the parent Message this one answers; absent keeps the quote inert. */
+  readonly onOpenReplyTo?: ((messageRef: AgentTeamMessageRef) => void) | undefined
+  /** Stable identity of this Message: the anchor a quote block jumps to. */
+  readonly messageRef?: AgentTeamMessageRef
+  /** This row is the composer's current reply target. */
+  readonly replyTarget?: boolean
+  /** This row is the parent a reader just jumped to. */
+  readonly replyFlash?: boolean
   /** Continuation rows that carry their own footer chip render the time so the
       hairline-separated entry stays self-identifying. */
   readonly showGroupedTime?: boolean
@@ -57,7 +85,7 @@ export interface TeamMessageProps {
  * skipping a render here never detaches it. Callers must therefore keep the
  * props they derive per render (mention names, ref callbacks) identity-stable.
  */
-export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, showGroupedTime, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
+export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, mentionsHuman, readerName, replyTo, onReply, onOpenReplyTo, messageRef, replyTarget, replyFlash, showGroupedTime, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
   // Only the Human's own row may draw a picture: the profile owns those bytes,
   // and one seat painting the reader's face for another author would name two
@@ -72,6 +100,10 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   // One pure plan resolves the stored body into the rendering branch, the
   // trailing fallback rows, and the literal Task/Thread refs that resolve in place.
   const plan = planMessageBody(body, { human, ...(mentionNames === undefined ? {} : { mentionNames }), canOpenRefs: onOpenRef !== undefined })
+  // The fallback row lists mentions the body text does not carry. The reader's
+  // own name never belongs there: it would print `@me` under a bubble that
+  // already chips their name in place, or that says so in the badge above.
+  const fallbackNames = readerName === undefined ? plan.fallbackNames : plan.fallbackNames.filter(name => name !== readerName)
   const displayBody = plan.displayBody
   const { richAgentBody } = plan
   // Resolved refs re-label once the Host lookup lands; the version tokens
@@ -173,45 +205,89 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
       ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)}</div>
       : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} /></div>
   return (
-    <article className={css.messageRow} data-human={human || undefined} data-grouped={grouped || undefined}>
+    <article className={css.messageRow} data-human={human || undefined} data-side={human ? 'end' : 'start'} data-grouped={grouped || undefined} data-mentions-me={mentionsHuman || undefined} data-message-ref={messageRef} data-replying-to={replyTarget || undefined} data-reply-flash={replyFlash || undefined}>
       {identityImage.src === undefined
         ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{senderName.replace('@', '').slice(0, 1).toUpperCase()}</div>
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
       <div className={css.messageBody}>
-        {(!grouped || showGroupedTime === true) && (
-          <div className={css.nameRow}>
-            {!grouped && <strong {...(senderTitle === undefined ? {} : { title: senderTitle })}>{senderName}</strong>}
-            {occurredAt !== undefined && <span className={css.messageTime}>{formatMessageTime(occurredAt)}</span>}
+        {((!grouped || showGroupedTime === true) || onReply !== undefined) && (
+          <div className={css.messageHead}>
+            {(!grouped || showGroupedTime === true) && (
+              <div className={css.nameRow}>
+                {!grouped && <strong {...(senderTitle === undefined ? {} : { title: senderTitle })}>{senderName}</strong>}
+                {occurredAt !== undefined && <span className={css.messageTime}>{formatMessageTime(occurredAt)}</span>}
+              </div>
+            )}
+            {/* The action rides the identity line, next to the author it acts
+                on. Positioning it against the row's edge instead would strand
+                it at the far end of the column, because a bubble is only as
+                wide as its own content. */}
+            {onReply !== undefined && <div className={css.messageActions} data-message-actions="">
+              <button type="button" className={css.messageAction} onClick={() => { if (messageRef !== undefined) onReply(messageRef) }}
+                aria-label={t?.('replyToMessage') ?? 'Reply to this message'}>
+                {t?.('replyMessage') ?? 'Reply'}
+              </button>
+            </div>}
           </div>
         )}
-        {/* The wrapper stays mounted for every clampable body and only swaps
-            its class: appearing/disappearing around bodyNode would remount the
-            Markdown subtree and wipe the post-render ref/mention chips that the
-            layout effects painted into it. It also carries data-document —
-            the same >600-character rule that folds the body marks it for the
-            document reading rhythm (conversation.module.css). */}
-        {clampable ? <div data-document="" className={clamped ? css.messageClamp : undefined}>{bodyNode}</div> : bodyNode}
-        {clampable && (
-          <button type="button" className={css.messageExpand} data-message-expand="true" aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
-            {expanded ? (t?.('collapseMessage') ?? 'Show less') : (t?.('expandMessage') ?? 'Show more')}
-          </button>
-        )}
-        {(plan.fallbackNames.length > 0 || plan.fallbackRefs.length > 0) && (
-          <div className={css.mentionsRow}>
-            {plan.fallbackNames.map(name => <span key={name} className={css.mention}>@{name}</span>)}
-            {plan.fallbackRefs.map(ref => {
-              const resolved = cachedResolvedTaskRef(ref as AgentTeamTaskRef)
-              const label = resolved !== undefined && ref.startsWith('task:') ? taskLabel(resolved.taskNumber) : ref
-              return <button key={ref} type="button" className={css.refLink} title={ref} onClick={() => { onOpenRef!(ref) }}>{label}</button>
-            })}
-          </div>
-        )}
-        {attachments !== undefined && attachments.length > 0 && <TeamAttachmentStrip
-          attachments={attachments}
-          {...(loadAttachment === undefined ? {} : { loadAttachment })}
-          {...(t === undefined ? {} : { t })}
-        />}
-        {children}
+        {/* One bubble per Message, for every Message — the mention mark below
+            is added on top of it, never a condition for drawing it. */}
+        <div className={css.messageBubble} data-bubble="">
+          {/* The mark leads the bubble as its first line: it is what the reader
+              has to know before the body, and it names the recipient rather
+              than the author, so it never belongs on the identity line. The
+              label carries its own `@`, so no glyph is drawn beside it. */}
+          {mentionsHuman === true && <span className={css.mentionsMeBadge} data-mentions-me-badge="">
+            {t?.('mentionsMe') ?? 'You were mentioned'}
+          </span>}
+          {/* What this Message answers comes before what it says. The block is
+              one line of resolved context, and the whole of it jumps to the
+              parent, so a long original is never pasted a second time. */}
+          {replyTo !== undefined && (onOpenReplyTo === undefined
+            ? <span className={css.replyQuote} data-reply-quote="">
+                <span className={css.replyQuoteBar} aria-hidden="true" />
+                <span className={css.replyQuoteBody}>
+                  <span className={css.replyQuoteAuthor}>{replyTo.senderName}</span>
+                  <span className={css.replyQuoteText}>{replyTo.excerpt}</span>
+                </span>
+              </span>
+            : <button type="button" className={css.replyQuote} data-reply-quote="" onClick={() => { if (messageRef !== undefined) onOpenReplyTo(messageRef) }}
+                title={t?.('openRepliedMessage') ?? 'Go to the message this answers'}>
+                <span className={css.replyQuoteBar} aria-hidden="true" />
+                <span className={css.replyQuoteBody}>
+                  <span className={css.replyQuoteAuthor}>{replyTo.senderName}</span>
+                  <span className={css.replyQuoteText}>{replyTo.excerpt}</span>
+                </span>
+              </button>)}
+          {/* The wrapper stays mounted for every clampable body and only swaps
+              its class: appearing/disappearing around bodyNode would remount the
+              Markdown subtree and wipe the post-render ref/mention chips that the
+              layout effects painted into it. It also carries data-document —
+              the same >600-character rule that folds the body marks it for the
+              document reading rhythm (conversation.module.css). */}
+          {clampable ? <div data-document="" className={clamped ? css.messageClamp : undefined}>{bodyNode}</div> : bodyNode}
+          {clampable && (
+            <button type="button" className={css.messageExpand} data-message-expand="true" aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
+              {expanded ? (t?.('collapseMessage') ?? 'Show less') : (t?.('expandMessage') ?? 'Show more')}
+            </button>
+          )}
+          {(fallbackNames.length > 0 || plan.fallbackRefs.length > 0) && (
+            <div className={css.mentionsRow}>
+              {fallbackNames.map(name => <span key={name} className={css.mention}>@{name}</span>)}
+              {plan.fallbackRefs.map(ref => {
+                const resolved = cachedResolvedTaskRef(ref as AgentTeamTaskRef)
+                const label = resolved !== undefined && ref.startsWith('task:') ? taskLabel(resolved.taskNumber) : ref
+                return <button key={ref} type="button" className={css.refLink} title={ref} onClick={() => { onOpenRef!(ref) }}>{label}</button>
+              })}
+            </div>
+          )}
+          {attachments !== undefined && attachments.length > 0 && <TeamAttachmentStrip
+            attachments={attachments}
+            {...(loadAttachment === undefined ? {} : { loadAttachment })}
+            {...(t === undefined ? {} : { t })}
+          />}
+          {children}
+        </div>
       </div>
     </article>
   )

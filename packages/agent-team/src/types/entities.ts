@@ -218,6 +218,69 @@ export interface AgentTeamResolveThreadRefsResult {
   readonly resolved: readonly AgentTeamResolvedThreadRef[]
 }
 
+/** Whether this deployment offers quote-replies. */
+export interface AgentTeamReplySettings {
+  /** On unless the Team Host row turns it off. */
+  readonly enabled: boolean
+}
+
+/** One Message's answer target, as a reader sees it. */
+export interface AgentTeamMessageReplyContext {
+  /** Printable author handle of the Message being answered; `human` for the Human. */
+  readonly sender: string
+  /** Bounded first line of that Message; display only, never the body. */
+  readonly excerpt: string
+}
+
+/** Read one Message back verbatim, inside the Thread that carries it. */
+export interface AgentTeamReadMessageRequest {
+  readonly workspaceId: WorkspaceId
+  readonly threadRef: AgentTeamThreadRef
+  readonly messageRef: AgentTeamMessageRef
+}
+
+/**
+ * One Message read back in full.
+ *
+ * The body is verbatim: a reader that needs the whole of what it is answering
+ * gets the whole of it, not a summary. The quote a Message renders is
+ * deliberately not this — see `AgentTeamResolvedMessageRef`.
+ */
+export interface AgentTeamReadMessageResult {
+  readonly messageRef: AgentTeamMessageRef
+  readonly threadRef: AgentTeamThreadRef
+  readonly channelRef: AgentTeamChannelRef
+  readonly sender: AgentTeamMemberId
+  readonly sequence: number
+  readonly occurredAt?: string | undefined
+  readonly body: string
+}
+
+/**
+ * Look up the context of Messages cited by `replyToMessageRef`. A reply stores
+ * only its parent's identity, so the author and the excerpt a reader sees are
+ * resolved here from the ledger's own record — the quote can never disagree
+ * with the Message it points at, and a parent outside the reader's loaded
+ * history window still resolves.
+ */
+export interface AgentTeamResolveMessageRefsRequest {
+  readonly workspaceId: WorkspaceId
+  readonly messageRefs: readonly AgentTeamMessageRef[]
+}
+
+/** One resolved Message; refs the workspace cannot resolve are omitted. */
+export interface AgentTeamResolvedMessageRef {
+  readonly messageRef: AgentTeamMessageRef
+  readonly threadRef: AgentTeamThreadRef
+  readonly sender: AgentTeamMemberId
+  /** Body gist for the quote block: first line, trimmed, capped at 120 characters. */
+  readonly excerpt: string
+}
+
+export interface AgentTeamResolveMessageRefsResult {
+  readonly resolved: readonly AgentTeamResolvedMessageRef[]
+}
+
 export interface AgentTeamOperationBase {
   readonly sequence: number
   readonly operationId: AgentTeamOperationId
@@ -267,6 +330,15 @@ export interface AgentTeamMessage {
   readonly sender: AgentTeamMemberId
   readonly body: string
   readonly attachments?: readonly AgentTeamMessageAttachment[] | undefined
+  /**
+   * The Message this one answers, when it was written as a reply. Absent on
+   * every Message that is not a reply, including every Message recorded before
+   * replies existed, so an older ledger reads back unchanged and needs no
+   * normalization. It stores the parent's identity only: the author and the
+   * excerpt are resolved at read time from the ledger's own ref index, so a
+   * reply can never disagree with the Message it quotes.
+   */
+  readonly replyToMessageRef?: AgentTeamMessageRef
   readonly topLevel: boolean
   readonly sequence: number
   /** Wall-clock instant of the wrapping ledger operation; pre-occurredAt ledgers normalize on replay. */
@@ -401,6 +473,15 @@ export type AgentTeamThreadFact =
     readonly message: AgentTeamMessage
     /** Structured Member refs from the originating send operation; empty when the Message mentions nobody. */
     readonly mentions: readonly AgentTeamMemberId[]
+    /**
+     * What this Message answers, resolved for a reader at read time.
+     *
+     * Deliberately outside `AgentTeamStoredThreadFact`: this is a projection a
+     * read adds, never a durable fact, so a stored record never carries it and
+     * the storage schema is untouched. `sender` is a printable handle (`human`
+     * for the Human), not a Member ref, because the consumer renders it.
+     */
+    readonly replyTo?: AgentTeamMessageReplyContext | undefined
     /** Wall-clock instant of the committing ledger operation; message facts read through to their Message. */
     readonly occurredAt: string
   }

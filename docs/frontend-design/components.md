@@ -3,11 +3,15 @@
 English | [中文](components.zh.md)
 
 ## TeamMessage
-Props include sender identity, body, optional time, mention handles, sender title, grouping, and children. Only adjacent same-sender Message rows group; Activity rows break runs. Grouped rows hide avatar/name while preserving grid alignment. The initial of the sender name (without `@`) is shown.
+Props include sender identity, body, optional time, mention handles, sender title, grouping, the mention mark, and children. Only adjacent same-sender Message rows group; Activity rows break runs. Grouped rows hide avatar/name while preserving grid alignment. The initial of the sender name (without `@`) is shown.
+
+Every Message body renders inside one bubble, for every Message: a mention mark is added on top of a bubble and is never a condition for drawing one. The bubble sizes to its own content and may grow to the full reading column: a short reply stays a short bubble instead of painting a full-width bar, while a long Agent answer keeps the whole width rather than being squeezed into half of it.
+
+`data-side` decides the column order: the reader's own turns sit opposite everyone else's. Every bubble carries the same fill and the same radius — the shipped chat bubble's own recipe, so it reads on both themes — and sender attribution rides that side and the identity line alone. A per-author tint would make one person's words look like a different material, and a pointed tail corner reads as a rendering fault once a bubble is clamped or expanded; a same-sender run reads as one turn through its suppressed identity chrome instead.
 
 The identity seat draws a picture for exactly one author: the profile avatar lands on a row only while that row is the Human's own, so an Agent row keeps the shared hue and the sender initial whatever the surface passes down — one seat painting the reader's face for another author would name two people alike.
 
-Bodies over the 600-character formatter threshold use a persistent wrapper with an approximately eight-line/176px preview and quiet “expand/collapse” button carrying `aria-expanded`. Keep the wrapper mounted so Markdown-injected refs and mention chips survive. Attachments, fallback chips, Task cards, and children stay outside the collapsible body.
+Bodies over the 600-character formatter threshold use a persistent wrapper with an approximately eight-line/176px preview and quiet “expand/collapse” button carrying `aria-expanded`. Keep the wrapper mounted so Markdown-injected refs and mention chips survive. Attachments, fallback chips, Task cards, and children stay inside the bubble; the clamp wrapper and its toggle are the only parts that fold.
 
 That same wrapper carries `data-document`: the threshold that folds a body also calls it a document, so its Markdown reads on the document rhythm (Typography table above) while short messages keep the chat grid, and the preview stays eight lines of whatever the content-font axis sets.
 
@@ -15,6 +19,20 @@ That same wrapper carries `data-document`: the threshold that folds a body also 
 A run groups consecutive same-sender Messages and its Thread entry row. Activity and unread boundaries break runs. An entry row in a grouped row gets a hairline; ordinary continuation does not. Runs have no hover box, fill, shadow, or permanent border—only two-pixel spacing. Five-minute dividers and day anchors carry time context.
 
 ## Mentions and Task refs
+An unread Message whose structured mention list names the Human reader leads its bubble with a 「有人@我」 mark: the bubble takes a warn-tier outline, and a badge sits as the bubble's first line, right-aligned above the body, so the reader learns the Message calls on them before reading it. The badge is the whole label — no glyph is drawn beside it, because the label already reads `@`.
+
+The mark is decoration on the author's own bubble and never moves it. An Agent's mention of the reader is still the Agent's Message, and a reader who saw it on their own side would think they wrote it. It also never reaches the identity line, which carries the author rather than the recipient.
+
+The mark answers “does this need me now?”, so it rides the unread batch and retires once read: a mention the reader has already acknowledged keeps its inline chip in the body but stops asking for attention. Both halves are Host facts — `mentions` is the delivery fact and `unread` is the read fact — so a marked bubble is exactly one whose mention reached the reader and is still unacknowledged. A Message never mentions its own author, so the reader's own row can never carry the mark.
+
+The Channel feed knows unread per Thread rather than per Message, so there the mark follows that Thread's newest top-level Message while the Thread stays unread.
+
+A Message that answers another leads its bubble with the resolved quote: the parent's author and one line of its opening text, both resolved by the Host from the ledger rather than read out of the body, so the quote cannot disagree with what it points at and still fills in when the parent sits outside the loaded history. The whole block is the jump target; the excerpt is always a single ellipsised line, because the quote is a handle on the original and never a second copy of it. A Message that is not a reply renders no quote block.
+
+Every Message also trails a reply action, and it follows the shipped reveal convention literally: the action is hidden inside `@media (hover: hover)` only, so a touch device with no hover keeps it on screen, and `:focus-within` reveals it for the keyboard. It is positioned over the row rather than placed in it, so it never costs the timeline height, and it is absent wherever the surface passes no handler — the Channel feed offers no reply.
+
+The trailing fallback row lists mentions the body text does not carry, and it never repeats the reader's own name: that would print a bare `@me` under a bubble that already chips their name in place, or whose badge states the mention outright.
+
 Mention chips are rendered only for handles in the Message's resolved mention list, matching the authored `@Handle` case-insensitively on Unicode word boundaries — a bare name without its `@` is prose and never chipifies, and code stays literal. A chip names the person as they are called today: the Human's pre-rename handle stays an alias the Host still delivers to, so a Message whose body wrote `@human` chips in place as the current profile name instead of landing in the trailing row under a name its body never used.
 
 Human literal, Agent plain prose, and rich Markdown use their corresponding segmentation path; absent names become a trailing fallback row without duplication.

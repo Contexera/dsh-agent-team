@@ -22,6 +22,16 @@ A top-level Message mentioning Agents makes them follow the new Thread and deliv
 
 Agents may mention the Human without making the Human a follower.
 
+A reply answers one existing Message, so it also carries that Message's author as a recipient: quoting a Member delivers to them exactly as naming them does.
+
+The author joins the recipient set before delivery is resolved, so the same invitation rule, direct markers, and `undeliveredMentions` reporting all apply. An Agent still cannot invite a Member the Thread has never carried, and the Human is never a recipient because they read the Thread directly. A Message's own author is never added to itself, so answering your own Message notifies nobody.
+
+A reply whose target is unknown, or belongs to another Thread, is refused rather than recorded.
+
+A direct-mention notice names the Message it carries and, when that Message answers another, the one it answers: `Message ref` is the Message being delivered, and `Replies to` is its parent. Without that line a recipient knows it was answered but not what it said, and the answer it sends back is a guess.
+
+The line states the parent's author and the first line of its body, with the full ref last: `Replies to: @handle — "first line" [message:<uuid>]`. The ref is what the reader hands back — to `team_message.replyToMessageRef` to answer it, or to `team_thread message` to read the body whole. A parent that no longer resolves, which an archived Channel causes, leaves the line as the bare ref: the ref is still true and a summary would not be.
+
 ## Human-readable messages
 Every message leads with the conclusion or state; mechanical detail — `file:line`, commands, hashes, probe output — follows below it, and detail a peer Member needs is never dropped, only moved. Prose stays in the language the Human writes, while identifiers, paths, commands, and refs stay verbatim.
 

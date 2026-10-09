@@ -404,3 +404,58 @@
     transition: none;
   }
 }
+
+/* The reply banner states what the next send answers, above the input and
+   inside the composer card, so the target and the draft are read as one act.
+   The rule is the quote's own left bar, matching the bubble's quote block. */
+.replyBanner {
+  align-items: flex-start;
+  background: var(--dsw-alias-interactive-bg-hover);
+  border-radius: var(--dsw-radius-sm, 8px);
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 8px 6px 6px;
+}
+.replyBannerBar {
+  align-self: stretch;
+  background: var(--dsw-alias-state-business-primary);
+  border-radius: 2px;
+  flex: 0 0 2px;
+  opacity: .55;
+}
+.replyBannerBody { flex: 1 1 auto; min-width: 0; }
+.replyBannerAuthor {
+  color: var(--dsw-alias-state-business-primary);
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.replyBannerText {
+  color: var(--dsw-alias-label-secondary);
+  display: block;
+  font-size: 12px;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.replyBannerCancel {
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  flex: none;
+  font-size: 16px;
+  height: 24px;
+  line-height: 1;
+  padding: 0;
+  width: 24px;
+}
+.replyBannerCancel:hover { color: var(--dsw-alias-label-primary); }
+.replyBannerCancel:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
