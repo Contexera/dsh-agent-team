@@ -1587,6 +1587,58 @@ describe('Agent Team Member lifecycle', () => {
     }
   })
 
+  it('reports automatic recovery classification, wakeup, and stand-down with stable ids', async () => {
+    vi.useFakeTimers()
+    try {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId } = await realHarness(adapter)
+      const builder = await ctx.agentTeam.addMember({ requestId: requestId('recovery-trace-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [] })
+      const memberId = builder.status.member.memberId
+      const sessionId = builder.status.member.sessionId
+      const agent = ctx.agents.get(sessionId)!
+      await agent.whenIdle()
+      const info = vi.spyOn(ctx.logger, 'info')
+      const warn = vi.spyOn(ctx.logger, 'warn')
+      const lines = (spy: typeof info): string[] => spy.mock.calls.map(args => String(args[0]))
+
+      // One recoverable failure: the classification, the occurrence count, and
+      // the armed wait are readable before any wakeup happens.
+      ctx.emit('agent/error', { agent, turn: 1, step: 1, error: new Error('fetch failed') })
+      const scheduled = lines(info).find(line => line.includes('automatic recovery scheduled'))
+      expect(scheduled).toBeDefined()
+      expect(scheduled).toContain(`memberId '${memberId}'`)
+      expect(scheduled).toContain(`session '${sessionId}'`)
+      expect(scheduled).toContain("errorKind 'transient network'")
+      expect(scheduled).toContain('occurrence 1/3')
+      expect(scheduled).toContain(`wait ${RECOVERY_DELAY_MS}ms`)
+
+      adapter.enqueue(textResponse('I will continue the interrupted work.'))
+      await vi.advanceTimersByTimeAsync(RECOVERY_DELAY_MS)
+      await agent.whenIdle()
+      const steered = lines(info).find(line => line.includes('automatic recovery continuation steered'))
+      expect(steered).toBeDefined()
+      expect(steered).toContain(`memberId '${memberId}'`)
+      expect(steered).toContain(`session '${sessionId}'`)
+      expect(steered).toContain('not yet read by the model')
+
+      // Three consecutive occurrences with no clean turn between them stand the
+      // episode down, and the stop says how many failures it counted.
+      ctx.emit('agent/error', { agent, turn: 2, step: 1, error: new Error('HTTP 429') })
+      ctx.emit('agent/error', { agent, turn: 3, step: 1, error: new Error('HTTP 429') })
+      ctx.emit('agent/error', { agent, turn: 4, step: 1, error: new Error('ETIMEDOUT') })
+      const stoodDown = lines(warn).find(line => line.includes('automatic recovery stood down'))
+      expect(stoodDown).toBeDefined()
+      expect(stoodDown).toContain(`memberId '${memberId}'`)
+      expect(stoodDown).toContain(`session '${sessionId}'`)
+      expect(stoodDown).toContain('3/3')
+      expect(stoodDown).toContain('no further automatic wakeup')
+      info.mockRestore()
+      warn.mockRestore()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('cancels an automatic wakeup when a Member is suspended before the delay', async () => {
     vi.useFakeTimers()
     try {
@@ -1664,9 +1716,20 @@ describe('Agent Team Member lifecycle', () => {
       await agent.whenIdle()
 
       adapter.enqueue(textResponse('I will continue the interrupted work.'))
+      const info = vi.spyOn(ctx.logger, 'info')
       await ctx.agentTeam.recoverMember({ requestId: requestId('manual-recovery'), workspaceId, memberId: builder.status.member.memberId })
       await agent.whenIdle()
       await vi.advanceTimersByTimeAsync(RECOVERY_DELAY_MS)
+
+      // The operator action is traceable to the Member and Session it steered
+      // into, and claims a queue — not that the model has read anything.
+      const steered = info.mock.calls.map(args => String(args[0])).find(line => line.includes('operator recovery continuation steered'))
+      expect(steered).toBeDefined()
+      expect(steered).toContain(`memberId '${builder.status.member.memberId}'`)
+      expect(steered).toContain(`session '${builder.status.member.sessionId}'`)
+      expect(steered).toContain('carrying 1 unread Thread(s)')
+      expect(steered).toContain('not yet read by the model')
+      info.mockRestore()
 
       expect(adapter.requests).toHaveLength(2)
       const request = JSON.stringify(adapter.requests.at(-1)!.messages)
@@ -1721,6 +1784,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId }).totalUnreadCount).toBe(1)
 
     adapter.enqueue(textResponse('I will inspect remounted Inbox work.'))
+    const info = vi.spyOn(ctx.logger, 'info')
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
     const restored = ctx.agents.get(builder.status.member.sessionId)!
@@ -1728,6 +1792,53 @@ describe('Agent Team Member lifecycle', () => {
     const lastRequest = JSON.stringify(adapter.requests.at(-1)!.messages)
     expect(lastRequest).toContain('Team Inbox has unread work')
     expect(lastRequest).not.toContain('Unread across Host remount')
+
+    // The catch-up wake states the lifecycle step that caused it, with the
+    // stable Member and Session ids, and claims no more than a queue.
+    const queued = info.mock.calls.map(args => String(args[0])).find(line => line.includes('Team Inbox notice queued'))
+    expect(queued).toBeDefined()
+    expect(queued).toContain(`memberId '${builder.status.member.memberId}'`)
+    expect(queued).toContain(`session '${builder.status.member.sessionId}'`)
+    expect(queued).toContain('cause Member activation')
+    expect(queued).toContain('not yet read by the model')
+    info.mockRestore()
+  })
+
+  it('reports a renewed generation with the retired Session and the current one', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('renewal-trace-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+    const builder = await ctx.agentTeam.addMember({ requestId: requestId('renewal-trace-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const memberId = builder.status.member.memberId
+    const retiredSessionId = builder.status.member.sessionId
+    const agent = ctx.agents.get(retiredSessionId)!
+    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('renewal-trace-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Investigate renewal tracing' })
+    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
+    await ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('renewal-trace-follow'), workspaceId, taskRef: started.task!.taskRef, action: 'follow' })
+    const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('renewal-trace-read'), workspaceId, taskRef: started.task!.taskRef })
+    // The mention wakes the Member: give its turn a response, so the Member
+    // stays free of a runtime failure that a running transition would clear by
+    // re-deriving the notice.
+    adapter.enqueue(textResponse('Noted.'))
+    const update = await ctx.agentTeam.reply({ requestId: requestId('renewal-trace-update'), workspaceId, taskRef: started.task!.taskRef, body: 'Unread across the renewal', baseRevision: humanRead.thread.revision })
+    if (update.kind !== 'committed') throw new Error(`expected committed update, received ${update.kind}`)
+    await agent.whenIdle()
+
+    const info = vi.spyOn(ctx.logger, 'info')
+    adapter.enqueue(textResponse('I will continue in the new context.'))
+    const renewed = await ctx.agentTeam.clearMemberContext({ requestId: requestId('renewal-trace-clear'), workspaceId, memberId })
+    const currentSessionId = renewed.status.member.sessionId
+    await ctx.agents.get(currentSessionId)!.whenIdle()
+
+    // One line locates the current generation and the one it replaced, under
+    // the Member id — never the renameable handle alone.
+    const queued = info.mock.calls.map(args => String(args[0])).find(line => line.includes('Team Inbox notice queued') && line.includes('cause Member activation'))
+    expect(queued).toBeDefined()
+    expect(queued).toContain(`memberId '${memberId}'`)
+    expect(queued).toContain(`session '${currentSessionId}'`)
+    expect(queued).toContain(`previousSession '${retiredSessionId}'`)
+    expect(currentSessionId).not.toBe(retiredSessionId)
+    info.mockRestore()
   })
 
   it('validates the final Team tool marker during unpublished setup', async () => {

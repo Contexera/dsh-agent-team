@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { classifyRecoverableError, RecoveryCoordinator, RECOVERY_DELAY_MS, RECOVERY_MAX_CONSECUTIVE_ERRORS } from '../src/recovery.ts'
+import { classifyRecoverableError, RecoveryCoordinator, RECOVERY_DELAY_MS, RECOVERY_MAX_CONSECUTIVE_ERRORS, type RecoveryFact } from '../src/recovery.ts'
 import type { AgentTeamMemberId } from '../src/types.ts'
 
 describe('recoverable error classification', () => {
@@ -64,12 +64,15 @@ describe('RecoveryCoordinator', () => {
 
   const memberId = 'member:builder' as AgentTeamMemberId
 
-  function harness() {
+  function harness(options?: { readonly wake?: (memberId: AgentTeamMemberId) => void; readonly maxConsecutiveErrors?: number }) {
     const wakeups: AgentTeamMemberId[] = []
+    const facts: RecoveryFact[] = []
     const coordinator = new RecoveryCoordinator({
-      wake: id => { wakeups.push(id) },
+      wake: id => { wakeups.push(id); options?.wake?.(id) },
+      report: fact => { facts.push(fact) },
+      ...(options?.maxConsecutiveErrors === undefined ? {} : { maxConsecutiveErrors: options.maxConsecutiveErrors }),
     })
-    return { coordinator, wakeups }
+    return { coordinator, wakeups, facts }
   }
 
   it('wakes once after each of the first two consecutive recoverable errors', () => {
@@ -83,17 +86,16 @@ describe('RecoveryCoordinator', () => {
   })
 
   it('counts every agent/error occurrence, including repeated equal errors', () => {
-    const standDowns: Array<{ memberId: AgentTeamMemberId; failures: number }> = []
-    const coordinator = new RecoveryCoordinator({
-      wake: () => {},
-      onStandDown: (id, failures) => { standDowns.push({ memberId: id, failures }) },
-    })
+    const { coordinator, facts } = harness()
     coordinator.onError(memberId, 'fetch failed')
     coordinator.onError(memberId, 'fetch failed')
     expect(vi.getTimerCount()).toBe(2)
 
     coordinator.onError(memberId, 'fetch failed')
-    expect(standDowns).toEqual([{ memberId, failures: RECOVERY_MAX_CONSECUTIVE_ERRORS }])
+    expect(facts.filter(fact => fact.kind === 'stood-down')).toEqual([{
+      kind: 'stood-down', memberId, errorKind: 'transient network',
+      consecutiveFailures: RECOVERY_MAX_CONSECUTIVE_ERRORS, maxConsecutiveErrors: RECOVERY_MAX_CONSECUTIVE_ERRORS,
+    }])
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -152,17 +154,14 @@ describe('RecoveryCoordinator', () => {
   })
 
   it('notifies stand-down exactly once per error run', () => {
-    const standDowns: Array<{ memberId: AgentTeamMemberId; failures: number }> = []
-    const coordinator = new RecoveryCoordinator({
-      wake: () => {},
-      onStandDown: (id, failures) => { standDowns.push({ memberId: id, failures }) },
-      maxConsecutiveErrors: 2,
-    })
+    const { coordinator, facts } = harness({ maxConsecutiveErrors: 2 })
     coordinator.onError(memberId, 'HTTP 429')
     vi.advanceTimersByTime(RECOVERY_DELAY_MS)
     coordinator.onError(memberId, 'HTTP 429')
     coordinator.onError(memberId, 'HTTP 429')
-    expect(standDowns).toEqual([{ memberId, failures: 2 }])
+    expect(facts.filter(fact => fact.kind === 'stood-down')).toEqual([{
+      kind: 'stood-down', memberId, errorKind: 'rate limiting', consecutiveFailures: 2, maxConsecutiveErrors: 2,
+    }])
   })
 
   it('dispose cancels every pending timer', () => {
@@ -187,5 +186,66 @@ describe('RecoveryCoordinator', () => {
     coordinator.onError(memberId, new LlmError('upstream answered 429 while settling quota', 'QUOTA', { status: 402 }))
     vi.advanceTimersByTime(RECOVERY_DELAY_MS * 3)
     expect(wakeups).toEqual([])
+  })
+
+  it('reports the classification, count, wait, wakeup, and clean-turn clear of one episode', () => {
+    const { coordinator, facts } = harness()
+    coordinator.onError(memberId, 'fetch failed')
+    expect(facts).toEqual([{
+      kind: 'scheduled', memberId, errorKind: 'transient network',
+      consecutiveFailures: 1, maxConsecutiveErrors: RECOVERY_MAX_CONSECUTIVE_ERRORS, delayMs: RECOVERY_DELAY_MS,
+    }])
+
+    vi.advanceTimersByTime(RECOVERY_DELAY_MS)
+    expect(facts.at(-1)).toEqual({ kind: 'woke', memberId, consecutiveFailures: 1 })
+
+    coordinator.onCleanTurnEnd(memberId)
+    expect(facts.at(-1)).toEqual({
+      kind: 'cleared', memberId, reason: 'clean-turn', consecutiveFailures: 1, pendingWakes: 0, stoodDown: false,
+    })
+  })
+
+  it('reports a wake whose target is gone instead of stopping silently', () => {
+    const { coordinator, facts } = harness({ wake: () => { throw new Error('member disposed') } })
+    coordinator.onError(memberId, 'fetch failed')
+    vi.advanceTimersByTime(RECOVERY_DELAY_MS)
+
+    expect(facts.at(-1)).toEqual({
+      kind: 'cleared', memberId, reason: 'wake-failed', consecutiveFailures: 1, pendingWakes: 0, stoodDown: false,
+      detail: 'Error: member disposed',
+    })
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('reports a non-recoverable error as a clear only when it cancels a live episode', () => {
+    const idle = harness()
+    idle.coordinator.onError(memberId, 'context length exceeded')
+    expect(idle.facts).toEqual([])
+
+    const live = harness()
+    live.coordinator.onError(memberId, 'fetch failed')
+    live.coordinator.onError(memberId, 'context length exceeded')
+    expect(live.facts.at(-1)).toEqual({
+      kind: 'cleared', memberId, reason: 'non-recoverable', consecutiveFailures: 1, pendingWakes: 1, stoodDown: false,
+    })
+  })
+
+  it('reports a stood-down episode when a clean turn clears it', () => {
+    const { coordinator, facts } = harness({ maxConsecutiveErrors: 2 })
+    coordinator.onError(memberId, 'HTTP 429')
+    coordinator.onError(memberId, 'HTTP 429')
+    coordinator.onCleanTurnEnd(memberId)
+    expect(facts.at(-1)).toEqual({
+      kind: 'cleared', memberId, reason: 'clean-turn', consecutiveFailures: 2, pendingWakes: 0, stoodDown: true,
+    })
+  })
+
+  it('reports one host-disposed clear per tracked Member', () => {
+    const { coordinator, facts } = harness()
+    coordinator.onError(memberId, 'fetch failed')
+    coordinator.onError('member:other' as AgentTeamMemberId, 'fetch failed')
+    coordinator.dispose()
+    const cleared = facts.filter(fact => fact.kind === 'cleared')
+    expect(cleared.map(fact => fact.kind === 'cleared' ? fact.reason : '')).toEqual(['host-disposed', 'host-disposed'])
   })
 })

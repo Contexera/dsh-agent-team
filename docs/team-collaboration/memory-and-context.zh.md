@@ -31,6 +31,8 @@ Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 tur
 
 对于可恢复的临时 service errors，Host 按 Member 的连续 `agent/error` occurrences 计数。计数依据不是 recovery wakeups 或 error text。前两次 errors 各自在延迟后 wake 一次。第 3 次立即停止自动 recovery，并保留 error 交给 operator。不同 recoverable kinds 不中断连续 error 的计数。只有 clean turn end 清零，non-recoverable error 取消 tracking。Recovery notice 自带合并内容：continuation 与当前 durable Inbox facts。所以 ordinary Inbox notification 不会覆盖 Recovery notice，也不会追加第二条提示。
 
+每次投递与恢复决定都通过 Host logger 留下一行有界记录：Inbox 唤醒写明 Member id、Session、引发它的 requestId 与 operationId，以及本次执行尝试，并说明已排队的通知尚未被模型读取。未读事实未变时不消耗新的执行尝试，也不产生诊断级别以上的行。投递失败记 warn，业务提交仍是最终结果，同时清除签名，让下一次触及该 Member 的提交重新派生同样的未读事实；自动恢复记录其分类、次数、等待、触发、停止与跟踪结束的原因。
+
 Web Client 的 Agent-row menu 提供两个 runtime recovery entrances，都不写 ledger。有 live session 的 error Member 显示「恢复」，Host 向 session 注入 continuation prompt。孤儿 composition 原地重建。activation failed 的 Member 显示「重启」，Host 重新执行这个 Member 的 activation。再次失败，仍以 diagnostic 显示在 sidebar。
 
 历史上的第三个入口「从全新上下文开始」已经移除。Member 现在用 `context_rollover` 工具自行管理上下文（见八工具协议）。Host 侧 clear-context Remote 保留为无可见入口的 hidden migration escape hatch。这个 Remote 保留 `team/member-session-renewed` operation schema，replay validation 一并保留。旧 ledger 仍可 replay。模型发起的 rollover 有一段中间态：ledger 绑定已迁移，新 Session 尚未就绪。这段时间内 Member 状态短暂显示为 unavailable。同时带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。跟随有两个条件：旧→新绑定发生变化，当前页面正是被观察的旧 live Session。归档视图不会跳转。

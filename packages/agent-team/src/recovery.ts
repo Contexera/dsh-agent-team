@@ -46,6 +46,19 @@ function failureMessage(error: unknown): string {
 }
 
 /**
+ * One thrown value as the diagnostic detail a report carries: the error name,
+ * its stable code when it has one, and its message. A stack or a cause chain
+ * stays with the Harness exporter that owns the events carrying them, so a
+ * single-line report keeps the part an operator can act on and nothing private.
+ */
+export function failureDetail(error: unknown): string {
+  const message = failureMessage(error)
+  if (!(error instanceof Error)) return message
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && code.length > 0 ? `${error.name} code '${code}': ${message}` : `${error.name}: ${message}`
+}
+
+/**
  * Classify one `agent/error` occurrence. Structured data outranks wording: a
  * Harness code decides alone (a message can never upgrade a terminal failure
  * back to recoverable), and the narrow message signatures run only when no
@@ -66,11 +79,62 @@ export function classifyRecoverableError(error: unknown): RecoverableErrorKind |
   return undefined
 }
 
+/** Why one Member's automatic recovery episode ended. */
+export type RecoveryClearReason =
+  | 'clean-turn'
+  | 'non-recoverable'
+  | 'wake-failed'
+  | 'session-disposed'
+  | 'manual'
+  | 'host-disposed'
+
+/**
+ * One observable step of one Member's automatic recovery. Every decision the
+ * coordinator makes is reported — the family it classified, how many
+ * consecutive occurrences count, the wait it armed, the wakeup that fired, the
+ * stand-down at the limit, and why tracking ended — because none of it is
+ * reconstructible from the `agent/error` events alone: a terminal error cancels
+ * a pending wakeup, a stood-down episode suppresses later ones, and a wake
+ * whose target is gone ends tracking without a failure of its own.
+ */
+export type RecoveryFact =
+  | {
+      readonly kind: 'scheduled'
+      readonly memberId: AgentTeamMemberId
+      readonly errorKind: RecoverableErrorKind
+      readonly consecutiveFailures: number
+      readonly maxConsecutiveErrors: number
+      readonly delayMs: number
+    }
+  | {
+      readonly kind: 'woke'
+      readonly memberId: AgentTeamMemberId
+      readonly consecutiveFailures: number
+    }
+  | {
+      readonly kind: 'stood-down'
+      readonly memberId: AgentTeamMemberId
+      readonly errorKind: RecoverableErrorKind
+      readonly consecutiveFailures: number
+      readonly maxConsecutiveErrors: number
+    }
+  | {
+      readonly kind: 'cleared'
+      readonly memberId: AgentTeamMemberId
+      readonly reason: RecoveryClearReason
+      readonly consecutiveFailures: number
+      /** Wakeups the clear cancelled; with `stoodDown` this is what a silent stop would have hidden. */
+      readonly pendingWakes: number
+      readonly stoodDown: boolean
+      /** The wake failure that ended tracking, for `wake-failed`; never a stack. */
+      readonly detail?: string
+    }
+
 export interface RecoveryCoordinatorOptions {
   /** Performs a delayed recovery wakeup; throwing means the Member is gone and tracking stops. */
   readonly wake: (memberId: AgentTeamMemberId) => void
-  /** Called once when an episode reaches its failure limit and tracking stands down. */
-  readonly onStandDown?: (memberId: AgentTeamMemberId, consecutiveFailures: number) => void
+  /** Every recovery state change, once per change: the only way a decision here leaves the coordinator. */
+  readonly report?: (fact: RecoveryFact) => void
   /** Delay between a recoverable error and its automatic recovery wakeup. */
   readonly delayMs?: number
   /** Consecutive recoverable errors allowed before automatic recovery stands down. */
@@ -94,22 +158,23 @@ export const RECOVERY_MAX_CONSECUTIVE_ERRORS = 3
 export class RecoveryCoordinator {
   private readonly episodes = new Map<AgentTeamMemberId, EpisodeState>()
   private readonly wake: RecoveryCoordinatorOptions['wake']
-  private readonly onStandDown: RecoveryCoordinatorOptions['onStandDown']
+  private readonly report: RecoveryCoordinatorOptions['report']
   private readonly delayMs: number
   private readonly maxConsecutiveErrors: number
 
   constructor(options: RecoveryCoordinatorOptions) {
     this.wake = options.wake
-    this.onStandDown = options.onStandDown
+    this.report = options.report
     this.delayMs = options.delayMs ?? RECOVERY_DELAY_MS
     this.maxConsecutiveErrors = options.maxConsecutiveErrors ?? RECOVERY_MAX_CONSECUTIVE_ERRORS
   }
 
   /** Observe one `agent/error` occurrence for a Member; `error` is the raw event payload. */
   onError(memberId: AgentTeamMemberId, error: unknown): void {
-    if (classifyRecoverableError(error) === undefined) {
+    const errorKind = classifyRecoverableError(error)
+    if (errorKind === undefined) {
       // A non-recoverable failure cancels anything pending: retrying cannot help.
-      this.stopTracking(memberId)
+      this.stopTracking(memberId, 'non-recoverable')
       return
     }
 
@@ -124,36 +189,60 @@ export class RecoveryCoordinator {
     if (episode.consecutiveFailures >= this.maxConsecutiveErrors) {
       this.cancelTimers(episode)
       episode.stoodDown = true
-      this.onStandDown?.(memberId, episode.consecutiveFailures)
+      this.emit({
+        kind: 'stood-down', memberId, errorKind,
+        consecutiveFailures: episode.consecutiveFailures, maxConsecutiveErrors: this.maxConsecutiveErrors,
+      })
       return
     }
 
     const timer = setTimeout(() => {
       episode!.timers.delete(timer)
+      this.emit({ kind: 'woke', memberId, consecutiveFailures: episode!.consecutiveFailures })
       try {
         this.wake(memberId)
-      } catch {
-        this.stopTracking(memberId)
+      } catch (error) {
+        // The target is gone: the operator gets the reason instead of a silent
+        // end, and the message is the only part of the failure worth keeping.
+        this.stopTracking(memberId, 'wake-failed', failureDetail(error))
       }
     }, this.delayMs)
     episode.timers.add(timer)
+    this.emit({
+      kind: 'scheduled', memberId, errorKind,
+      consecutiveFailures: episode.consecutiveFailures, maxConsecutiveErrors: this.maxConsecutiveErrors, delayMs: this.delayMs,
+    })
   }
 
   /** A turn ended cleanly (running→idle without an error): the episode is over. */
   onCleanTurnEnd(memberId: AgentTeamMemberId): void {
-    this.stopTracking(memberId)
+    this.stopTracking(memberId, 'clean-turn')
   }
 
-  stopTracking(memberId: AgentTeamMemberId): void {
+  /** End one Member's episode; `reason` says who ended it, and only a live episode reports. */
+  stopTracking(memberId: AgentTeamMemberId, reason: RecoveryClearReason, detail?: string): void {
     const episode = this.episodes.get(memberId)
     if (episode === undefined) return
+    const pendingWakes = episode.timers.size
     this.cancelTimers(episode)
     this.episodes.delete(memberId)
+    this.emit({
+      kind: 'cleared', memberId, reason,
+      consecutiveFailures: episode.consecutiveFailures,
+      pendingWakes,
+      stoodDown: episode.stoodDown === true,
+      ...(detail === undefined ? {} : { detail }),
+    })
   }
 
   dispose(): void {
-    for (const episode of this.episodes.values()) this.cancelTimers(episode)
-    this.episodes.clear()
+    // Deleting the entry the iterator is standing on is safe, and each Member's
+    // clear is reported before the next one is visited.
+    for (const memberId of this.episodes.keys()) this.stopTracking(memberId, 'host-disposed')
+  }
+
+  private emit(fact: RecoveryFact): void {
+    this.report?.(fact)
   }
 
   private cancelTimers(episode: EpisodeState): void {

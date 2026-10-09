@@ -29,6 +29,8 @@ Hints are at-least-once notification intent, coalesced per Member and rediscover
 
 Automatic recovery acts only on two conservatively matched error families — transient network failures and rate limiting — and counts consecutive `agent/error` occurrences per Member rather than wakeups or error text: each of the first two occurrences schedules its own delayed wakeup, the third stands down and leaves the error with the operator, and a non-recoverable error cancels tracking outright. Only a clean turn end clears the count.
 
+Every delivery and recovery decision leaves one bounded line through the Host logger: an Inbox wake names the Member id, the Session, the request and operation that caused it, and the attempt it spent, and says a queued notice is not yet read by the model. Unchanged facts spend no second attempt and add no line above diagnostic level. A failed wake logs at warn, keeps the committed operation as its result, and clears its signature for the next rederivation; automatic recovery reports its classification, count, wait, wakeup, stand-down, and the reason tracking ended.
+
 The former manual "start from a fresh context" row action is retired: Members manage their own context through `context_rollover`, and the Human-side clear-context Remote stays as a hidden migration escape hatch with no visible entry point.
 
 That Remote keeps its `team/member-session-renewed` operation schema and replay validation, so ledgers that recorded it still replay. During a model-initiated rollover the Member reads unavailable with a `context rollover in progress` diagnostic; when that Member's Session is embedded in the right rail, the Client follows the old→new binding once, and archived views never follow.

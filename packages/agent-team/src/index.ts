@@ -43,7 +43,7 @@ import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, creat
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor, type AgentTeamDurableMemberResult } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime } from './member-runtime.ts'
 import type { MemberSkillSelectionRef } from './member-skills.ts'
-import { classifyRecoverableError, RecoveryCoordinator, RECOVERY_MAX_CONSECUTIVE_ERRORS } from './recovery.ts'
+import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf } from './stored-session-reader.ts'
 import { agentTeamDomainSpec } from './spec.ts'
 import { formatTeamTimestamp } from './time-format.ts'
@@ -104,6 +104,7 @@ import type {
   AgentTeamResolveThreadRefsResult,
   AgentTeamTaskRef,
   AgentTeamThreadRef,
+  AgentTeamOperation,
   AgentTeamOperationReceipt,
   AgentTeamPromoteThreadRequest,
   AgentTeamPromoteThreadResult,
@@ -209,6 +210,20 @@ interface ChangeWaiter {
   readonly scope: AgentTeamChangeScope | undefined
   wake(version: number): void
 }
+
+/**
+ * Why one Inbox wake ran. The business identity that caused it — the committed
+ * operation with its request id, or the lifecycle step rederiving the same
+ * durable facts — stays separate from the delivery attempt the wake spends: a
+ * retry after a failed wake is a new attempt over the same facts, never a new
+ * request. A lifecycle cause names the previous Session when the line covers a
+ * transition, so both generations stay locatable.
+ */
+type NotificationCause =
+  | { readonly kind: 'commit'; readonly receipt: AgentTeamOperationReceipt; readonly operationKind: AgentTeamOperation['kind'] }
+  | { readonly kind: 'transition'; readonly requestId: AgentTeamRequestId; readonly previousSessionId: SessionId }
+  | { readonly kind: 'activation'; readonly previousSessionId?: SessionId }
+  | { readonly kind: 'running' }
 
 function sameChangeScope(left: AgentTeamChangeScope, right: AgentTeamChangeScope): boolean {
   if (left.kind === 'workspace' && right.kind === 'workspace') return left.workspaceId === right.workspaceId
@@ -523,6 +538,12 @@ export default class AgentTeam extends TypertRemoteService {
   /** The long-gap gate's judge: this Host's own `jev` mount, reconciled with the row. */
   private readonly contextJudge: TeamContextJudge
   private readonly notifiedInbox = new Map<AgentTeamMemberId, string>()
+  /**
+   * Per-Member notice delivery attempts, counted apart from the business
+   * request ids that reveal unread facts: a retry after a failed wake is the
+   * next attempt over the same durable facts, never a second operation.
+   */
+  private readonly notificationAttempts = new Map<AgentTeamMemberId, number>()
   private attachmentGcTimer?: ReturnType<typeof setInterval> | undefined
   /**
    * New-release check behind the settings footnote. Memory-only and
@@ -532,13 +553,8 @@ export default class AgentTeam extends TypertRemoteService {
   private readonly humanUpdateCheck = createHumanUpdateChecker({ currentVersion: HUMAN_PROFILE_VERSION })
 
   private readonly recovery = new RecoveryCoordinator({
-    wake: memberId => {
-      this.ctx.logger.info(`agent-team: automatic recovery wakeup for member '${this.memberLabel(memberId)}' after consecutive recoverable failures`)
-      this.injectRecovery(memberId)
-    },
-    onStandDown: (memberId, consecutiveFailures) => {
-      this.ctx.logger.warn(`agent-team: member '${this.memberLabel(memberId)}' reached ${consecutiveFailures}/${RECOVERY_MAX_CONSECUTIVE_ERRORS} consecutive recoverable failures; leaving it in error for the operator`)
-    },
+    wake: memberId => { this.injectRecovery(memberId) },
+    report: fact => { this.reportRecovery(fact) },
   })
   /**
    * Team's domain half of the continuity projection: the durable ref naming,
@@ -813,8 +829,13 @@ export default class AgentTeam extends TypertRemoteService {
       if (member === undefined) return
       const message = error instanceof Error ? error.message : String(error)
       this.setMemberFailure(member.memberId, 'runtime', message)
+      // Every occurrence is classified here, including the two verdicts the
+      // coordinator then reports no state change for (a terminal error with no
+      // episode to cancel, and a repeat after standing down). Those belong at
+      // diagnostic level: they explain why no automatic recovery was scheduled,
+      // while the coordinator's own lines stay bounded by state changes.
       const kind = classifyRecoverableError(error)
-      if (kind !== undefined) this.ctx.logger.warn(`agent-team: member '${member.handle}' hit a recoverable ${kind} error; recording a consecutive error occurrence`)
+      this.ctx.logger.debug(`agent-team: ${this.memberScope(member.memberId, agent.id)} reported an error classified as ${kind === undefined ? 'not automatically recoverable' : `recoverable ${kind}`}: ${message}`)
       this.recovery.onError(member.memberId, error)
       this.emitMemberPresenceChanged(member)
     })
@@ -830,7 +851,7 @@ export default class AgentTeam extends TypertRemoteService {
         // rederived Inbox after the handoff and carried input; a status-driven
         // steer here would claim the handoff turn's next step and leapfrog
         // the carried messages.
-        if (!this.contextManagement.isTransitioning(member.memberId)) this.notifyMember(agent)
+        if (!this.contextManagement.isTransitioning(member.memberId)) this.notifyMember(agent, { kind: 'running' })
       }
       // A turn that ends without an error closes any automatic recovery episode.
       // The idle transition is itself presence-affecting (working → available),
@@ -1164,7 +1185,7 @@ export default class AgentTeam extends TypertRemoteService {
     this.requireAccepting()
     const member = this.requireLedger().getMember(request.memberId)
     if (member === undefined || !this.requireLedger().participatesIn(request.memberId, request.workspaceId)) throw new Error(`unknown Member '${request.memberId}' in workspace '${request.workspaceId}'`)
-    this.recovery.stopTracking(request.memberId)
+    this.recovery.stopTracking(request.memberId, 'manual')
     const handle = this.handles.get(request.memberId)
     // A committed renewal or rollover whose retire or activation never finished
     // is what leaves a Member with no live generation on its binding, or with
@@ -1172,8 +1193,9 @@ export default class AgentTeam extends TypertRemoteService {
     // that recorded transition rather than restarting a Session the ledger has
     // already moved off. Every other stranded case keeps its old behavior.
     const stranded = handle === undefined || handle.agent.id !== member.sessionId
-    if (stranded && member.state === 'enabled' && this.requireLedger().lastTransitionForMember(request.memberId) !== undefined) {
-      this.ctx.logger.info(`agent-team: finishing the recorded Session transition for member '${member.handle}'`)
+    const recordedTransition = this.requireLedger().lastTransitionForMember(request.memberId)
+    if (stranded && member.state === 'enabled' && recordedTransition !== undefined) {
+      this.ctx.logger.info(`agent-team: finishing the recorded Session transition for ${this.memberScope(request.memberId, recordedTransition.targetSessionId)} previousSession '${recordedTransition.previousSessionId}'`)
       const settled = await this.enqueueLifecycle(request.memberId, async () => {
         await this.finishMemberTransition(request.memberId)
         return this.requireLedger().getMember(request.memberId) ?? member
@@ -1186,7 +1208,7 @@ export default class AgentTeam extends TypertRemoteService {
     // re-runs that state's effects rather than feeding the stray generation
     // a resume prompt or rebuilding it as if it were enabled.
     if (member.state !== 'enabled' && handle !== undefined) {
-      this.ctx.logger.info(`agent-team: finishing the interrupted ${member.state} cleanup for member '${member.handle}'`)
+      this.ctx.logger.info(`agent-team: finishing the interrupted ${member.state} cleanup for ${this.memberScope(request.memberId)}`)
       const settled = await this.enqueueLifecycle(request.memberId, async () => {
         await this.convergeMemberEffects(member)
         return this.requireLedger().getMember(request.memberId) ?? member
@@ -1196,7 +1218,7 @@ export default class AgentTeam extends TypertRemoteService {
     // An orphaned composition cannot be steered: its tools are gone, so a
     // continuation prompt reaches an inert Member. Rebuild the Agent in place.
     if (handle !== undefined && this.ctx.agentPresets.composedPreset(handle.agent.ctx) === undefined) {
-      this.ctx.logger.info(`agent-team: rebuilding member '${member.handle}' after its preset composition was orphaned by a reload`)
+      this.ctx.logger.info(`agent-team: rebuilding ${this.memberScope(request.memberId)} after its preset composition was orphaned by a reload`)
       await this.reactivateMember(request.memberId)
       return Object.freeze({ status: this.memberStatus(member) })
     }
@@ -1205,7 +1227,7 @@ export default class AgentTeam extends TypertRemoteService {
     // status carries the activation diagnostic for the sidebar.
     if (handle === undefined) {
       if (member.state !== 'enabled') throw new Error(`Agent Member '${member.handle}' is ${member.state}; only enabled Members can be restarted`)
-      this.ctx.logger.info(`agent-team: restarting member '${member.handle}' after a failed activation`)
+      this.ctx.logger.info(`agent-team: restarting ${this.memberScope(request.memberId)} after a failed activation`)
       // There is no write-side repair pass anymore: dsh 0.1.7 converts the
       // released V3 history at read time, and this bundle no longer authors
       // the old wrapper shape, so a refusal stays a deterministic failure the
@@ -1213,8 +1235,7 @@ export default class AgentTeam extends TypertRemoteService {
       await this.reactivateMember(request.memberId)
       return Object.freeze({ status: this.memberStatus(member) })
     }
-    this.ctx.logger.info(`agent-team: operator asked member '${member.handle}' to resume`)
-    this.steerResume(member, this.manualResumeText())
+    this.steerResume(member, this.manualResumeText(), 'operator recovery')
     return Object.freeze({ status: this.memberStatus(member) })
   }
 
@@ -1373,7 +1394,7 @@ export default class AgentTeam extends TypertRemoteService {
   private async retireMemberGeneration(memberId: AgentTeamMemberId, active: AgentHandle, previousSessionId: SessionId): Promise<void> {
     // Drop the old handle's transient state: pending recovery episodes and
     // error markers belong to the disposed agent, not to the Member.
-    this.recovery.stopTracking(memberId)
+    this.recovery.stopTracking(memberId, 'session-disposed')
     // The context admission gate stays armed through disposal: input racing
     // the retire window must still be captured for the new generation, and
     // the coordinator drops its own bookkeeping only after the swap settles.
@@ -1485,7 +1506,14 @@ export default class AgentTeam extends TypertRemoteService {
       reactivated.agent.steer(this.contextManagement.handoffMessageFor(plan))
       for (const message of carriedInput) reactivated.agent.followup(message)
       const notifications = this.requireLedger().notificationFacts(rolled.member.memberId)
-      if (notifications.length > 0) this.notifyMember(reactivated.agent, carriedInput.length > 0)
+      if (notifications.length > 0) {
+        this.notifyMember(reactivated.agent, {
+          kind: 'transition',
+          // The engine plan carries the host-derived request id as a plain string.
+          requestId: plan.requestId as AgentTeamRequestId,
+          previousSessionId: plan.previousSessionId,
+        }, carriedInput.length > 0)
+      }
     })
   }
 
@@ -1539,11 +1567,14 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Steer one continuation message into a Member's live session. Throws when
-   * no handle exists so the coordinator stops tracking; appends the inbox
-   * snapshot whenever there is anything new to read.
+   * Steer one continuation message into a Member's live session and report the
+   * delivery with the same correlation group as every other Member-scoped
+   * line. Throws when no handle exists so the coordinator stops tracking;
+   * appends the inbox snapshot whenever there is anything new to read, and says
+   * so — a steered continuation is queued for the Member's next step, which is
+   * not the same claim as the model having read it.
    */
-  private steerResume(member: AgentTeamAgentMember, text: string): void {
+  private steerResume(member: AgentTeamAgentMember, text: string, trigger: 'automatic recovery' | 'operator recovery'): void {
     const handle = this.handles.get(member.memberId)
     if (handle === undefined) throw new Error(`member '${member.handle}' has no active session`)
     const notifications = this.requireLedger().notificationFacts(member.memberId)
@@ -1556,6 +1587,7 @@ export default class AgentTeam extends TypertRemoteService {
       if (this.isInboxNotice(pending)) handle.agent.inbox.remove(pending.id)
     }
     handle.agent.steer(hint)
+    this.ctx.logger.info(`agent-team: ${trigger} continuation steered for ${this.memberScope(member.memberId, handle.agent.session.id)}${notifications.length === 0 ? '' : ` carrying ${this.notificationIdentity(notifications)}`}: it is queued for the Member's next step, not yet read by the model`)
   }
 
   /** Automatic-recovery wakeup; throwing tells the coordinator the target is gone. */
@@ -1564,7 +1596,7 @@ export default class AgentTeam extends TypertRemoteService {
     const agent = handle?.agent
     const member = agent !== undefined ? this.memberForAgent(agent) : undefined
     if (agent === undefined || member === undefined || member.state !== 'enabled') throw new Error(`member '${memberId}' cannot be recovered automatically`)
-    this.steerResume(member, this.automaticResumeText())
+    this.steerResume(member, this.automaticResumeText(), 'automatic recovery')
   }
 
   /**
@@ -3181,7 +3213,12 @@ export default class AgentTeam extends TypertRemoteService {
       // never leapfrog the carried messages. A rollover activation defers the
       // wake entirely — its caller delivers the handoff (and carried input)
       // first and rederives the Inbox afterwards.
-      if (options?.deferNotify !== true) this.notifyMember(created.agent, recoveryCarried > 0)
+      if (options?.deferNotify !== true) {
+        this.notifyMember(created.agent, {
+          kind: 'activation',
+          ...(lineageParent === undefined ? {} : { previousSessionId: lineageParent }),
+        }, recoveryCarried > 0)
+      }
     } catch (error) {
       await created?.dispose()
       this.modelSelections.delete(member.memberId)
@@ -3393,7 +3430,10 @@ export default class AgentTeam extends TypertRemoteService {
     }
     for (const memberId of ledger.affectedMembersOf(operation)) {
       const handle = this.handles.get(memberId)
-      if (handle !== undefined) this.afterCommit(`notification for '${this.memberLabel(memberId)}'`, () => this.notifyMember(handle.agent))
+      if (handle !== undefined) {
+        this.afterCommit(`notification for '${this.memberLabel(memberId)}'`,
+          () => this.notifyMember(handle.agent, { kind: 'commit', receipt, operationKind: operation.kind }))
+      }
     }
     // Task acceptance no longer schedules standalone auto compaction: it is
     // a semantic checkpoint/context cue (delivered as ordinary Team
@@ -3462,13 +3502,72 @@ export default class AgentTeam extends TypertRemoteService {
     for (const workspaceId of this.requireLedger().workspacesOf(member.memberId)) this.emitPresenceChanged(workspaceId)
   }
 
-  /** Wake from durable unread state with bounded facts for direct and state-changing work. */
-  private notifyMember(agent: Agent, sequenced = false): void {
+  /**
+   * The stable correlation group every Member-scoped diagnostic line carries:
+   * the ledger's Member id and the Session that owns the effect, with the
+   * renameable handle as readable context only. The Session resolves from the
+   * live generation first and from the ledger binding second, so a line about
+   * a disposed or failed generation still names the Session it concerns.
+   */
+  private memberScope(memberId: AgentTeamMemberId, sessionId?: SessionId): string {
+    const handle = this.ledger?.getMember(memberId)?.handle
+    const session = sessionId ?? this.handles.get(memberId)?.agent.session.id ?? this.ledger?.getMember(memberId)?.sessionId
+    return `member '${handle ?? memberId}' memberId '${memberId}'${session === undefined ? '' : ` session '${session}'`}`
+  }
+
+  /** The business identity one notification line states, so a wake is traceable to what caused it. */
+  private notificationCauseText(cause: NotificationCause): string {
+    if (cause.kind === 'commit') {
+      return `requestId '${cause.receipt.requestId}' operationId '${cause.receipt.operationId}' operation '${cause.operationKind}' sequence ${cause.receipt.sequence}`
+    }
+    if (cause.kind === 'transition') {
+      return `session transition requestId '${cause.requestId}' previousSession '${cause.previousSessionId}'`
+    }
+    if (cause.kind === 'activation') {
+      return cause.previousSessionId === undefined
+        ? 'Member activation'
+        : `Member activation previousSession '${cause.previousSessionId}'`
+    }
+    return 'running transition'
+  }
+
+  /** The unread facts one notice covers, bounded to what identifies them durably. */
+  private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>): string {
+    let newest = 0
+    for (const { item } of notifications) newest = Math.max(newest, item.newestSequence)
+    return `${notifications.length} unread Thread(s), newest unread fact sequence ${newest}`
+  }
+
+  /**
+   * Wake from durable unread state with bounded facts for direct and
+   * state-changing work. One correlated line states what the wake did: which
+   * business operation or lifecycle step caused it, which delivery attempt it
+   * spent, and whether the notice was queued, already carried by a recovery
+   * instruction, skipped, or failed. A queued notice is delivery intent —
+   * never evidence that the model read it.
+   *
+   * A delivery failure is contained here instead of escaping to the commit
+   * boundary: the operation is already durable, so a failed wake must not read
+   * as a failed write, and this line names the Member, Session, and attempt the
+   * generic post-commit warning could not. Only an invariant divergence still
+   * leaves on the caller's frame.
+   */
+  private notifyMember(agent: Agent, cause: NotificationCause, sequenced = false): void {
     const member = this.memberForAgent(agent)
-    if (member === undefined || member.state !== 'enabled') return
+    if (member === undefined) {
+      this.ctx.logger.debug(`agent-team: Team Inbox notice not attempted for session '${agent.id}' cause ${this.notificationCauseText(cause)}: the Agent is not a Team Member`)
+      return
+    }
+    if (member.state !== 'enabled') {
+      this.ctx.logger.debug(`agent-team: Team Inbox notice not attempted for ${this.memberScope(member.memberId, agent.id)} cause ${this.notificationCauseText(cause)}: the Member is ${member.state}`)
+      return
+    }
     const notifications = this.requireLedger().notificationFacts(member.memberId)
+    const scope = this.memberScope(member.memberId, agent.id)
+    const causeText = this.notificationCauseText(cause)
     if (notifications.length === 0) {
       this.notifiedInbox.delete(member.memberId)
+      this.ctx.logger.debug(`agent-team: Team Inbox notice not attempted for ${scope} cause ${causeText}: the Member has no unread Team facts`)
       return
     }
     // Any ordinary next-turn input already queued (a rollover's or recovery's
@@ -3480,12 +3579,20 @@ export default class AgentTeam extends TypertRemoteService {
     const signature = JSON.stringify(notifications.map(({ item }) => [
       item.thread.threadRef, item.thread.revision, item.unreadCount, item.directCount, item.newestSequence,
     ]))
-    if (this.notifiedInbox.get(member.memberId) === signature) return
+    const facts = this.notificationIdentity(notifications)
+    // An unchanged rederivation spends no attempt: the delivery already made
+    // for these facts stands, which is what keeps a repeated commit's logging
+    // bounded.
+    if (this.notifiedInbox.get(member.memberId) === signature) {
+      this.ctx.logger.debug(`agent-team: Team Inbox notice not attempted for ${scope} cause ${causeText}: the same unread facts (${facts}) already have a delivery attempt`)
+      return
+    }
     const pending = [...agent.inbox.nextStep, ...agent.inbox.nextTurn]
     // steerResume already combines the recovery instruction and these durable
     // facts. Its synchronous running transition must not replace that notice.
     if (pending.some(message => this.isRecoveryNotice(message))) {
       this.notifiedInbox.set(member.memberId, signature)
+      this.ctx.logger.info(`agent-team: Team Inbox notice carried by the queued recovery instruction for ${scope} cause ${causeText} (${facts}): queued with that recovery instruction, not yet read by the model`)
       return
     }
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
@@ -3495,6 +3602,11 @@ export default class AgentTeam extends TypertRemoteService {
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: INBOX_NOTICE_SUMMARY },
     })
     this.notifiedInbox.set(member.memberId, signature)
+    // The attempt is this delivery, counted apart from the business request
+    // that revealed the facts: a later retry after a failure is the next
+    // attempt over the same durable facts, not a second operation.
+    const attempt = (this.notificationAttempts.get(member.memberId) ?? 0) + 1
+    this.notificationAttempts.set(member.memberId, attempt)
     try {
       // Steer normally claims the nearest step boundary — which would
       // preempt carried input that a rollover or crash recovery queued as
@@ -3505,8 +3617,36 @@ export default class AgentTeam extends TypertRemoteService {
       else agent.steer(hint)
     } catch (error) {
       this.clearMemberNotificationState(member.memberId)
-      throw error
+      if (error instanceof AgentTeamInvariantError) throw error
+      this.ctx.logger.warn(`agent-team: Team Inbox notice delivery failed for ${scope} cause ${causeText} attempt ${attempt} (${facts}): ${failureDetail(error)}; the operation is committed and stands, and the notice state was cleared so the next fact touching this Member rederives and retries it`)
+      return
     }
+    this.ctx.logger.info(`agent-team: Team Inbox notice queued for ${scope} cause ${causeText} attempt ${attempt} lane '${sequenced ? 'follow-up turn' : 'next step'}' (${facts}): queued for the Member's next step, not yet read by the model`)
+  }
+
+  /**
+   * One line per automatic-recovery state change — the family it classified,
+   * the consecutive occurrence that counts, the wait it armed, the wakeup that
+   * fired, the stand-down at the limit, and why tracking ended. Each is
+   * reported once per change, so the automatic path stays explainable without
+   * turning on debug output, and no stop is silent: not a canceled wakeup, not
+   * a stand-down, and not a wake whose target is gone.
+   */
+  private reportRecovery(fact: RecoveryFact): void {
+    const scope = this.memberScope(fact.memberId)
+    if (fact.kind === 'scheduled') {
+      this.ctx.logger.info(`agent-team: automatic recovery scheduled for ${scope} errorKind '${fact.errorKind}' occurrence ${fact.consecutiveFailures}/${fact.maxConsecutiveErrors} wait ${fact.delayMs}ms`)
+      return
+    }
+    if (fact.kind === 'woke') {
+      this.ctx.logger.debug(`agent-team: automatic recovery wait elapsed for ${scope} after ${fact.consecutiveFailures} consecutive recoverable error(s): attempting the automatic continuation`)
+      return
+    }
+    if (fact.kind === 'stood-down') {
+      this.ctx.logger.warn(`agent-team: automatic recovery stood down for ${scope} after ${fact.consecutiveFailures}/${fact.maxConsecutiveErrors} consecutive '${fact.errorKind}' errors: leaving the Member in error for the operator, with no further automatic wakeup until a clean turn or a manual recovery`)
+      return
+    }
+    this.ctx.logger.info(`agent-team: automatic recovery cleared for ${scope} reason '${fact.reason}' after ${fact.consecutiveFailures} consecutive recoverable error(s) with ${fact.pendingWakes} pending wakeup(s)${fact.stoodDown ? ', stood down' : ''}${fact.detail === undefined ? '' : `: ${fact.detail}`}`)
   }
 
   private isInboxNotice(message: UserMessage): boolean {
@@ -3632,9 +3772,10 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   private clearMemberRecoveryState(member: Pick<AgentTeamAgentMember, 'memberId' | 'sessionId'>): void {
-    this.recovery.stopTracking(member.memberId)
+    this.recovery.stopTracking(member.memberId, 'session-disposed')
     this.clearMemberFailure(member.memberId, 'runtime')
     this.clearMemberNotificationState(member.memberId)
+    this.notificationAttempts.delete(member.memberId)
   }
 
   private clearMemberNotificationState(memberId: AgentTeamMemberId): void {
