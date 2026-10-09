@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+- Member configuration edits report their effect: the Remote response says whether the accepted row was applied now, already in force, or saved for the next activation (and why), every roster row carries whether the stored configuration is actually in effect on the live surface, and a failed apply is kept as a routable member diagnostic carrying its request, operation, session, and stage ids — the same correlation group goes to the log — while the call itself still rejects loudly.
+- A failed capability edit no longer widens a Member's surface: when the new tool restriction cannot be installed, the previous one stays in force (restored when it was already released), the Remote call reports the failure while the edit keeps its ledger commit, and retrying the same request finishes the pending effect instead of silently skipping it.
 - Team moves into the sidebar's panel rail, beside Plugins: the Team row is the shell's own rail button now, so it stops fighting the shipped row for the same footer band, and the way out of Team mode is a Conversations row in Team's own foot, directly above Members. Team mode still stands the shell's chrome down — the rail and the New Session button address your profile, not the Team, and both return the moment you leave.
 - Team brings its own artwork: the plugin list shows Team's own icon instead of the default placeholder, and the rail row carries a 16px monochrome mark of the same drawing.
 

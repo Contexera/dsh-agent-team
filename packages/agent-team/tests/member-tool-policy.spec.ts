@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -29,6 +29,7 @@ import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
@@ -113,6 +114,11 @@ function toolNames(ctx: Context, agent: Agent): readonly string[] {
   return ctx.tools.schemas(agent as never).map(schema => schema.name).sort()
 }
 
+async function catalogNames(ctx: Context, agent: Agent): Promise<readonly string[]> {
+  const skills = await ctx.skills.list({ scope: agent as never })
+  return skills.map(skill => skill.name).sort()
+}
+
 function waitForIdle(ctx: Context, agent: Agent): Promise<void> {
   return new Promise(resolve => {
     const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
@@ -176,6 +182,7 @@ async function buildSharedHarness(): Promise<{
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(SkillRegistry)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
@@ -220,6 +227,7 @@ function useAdapter(adapter: LlmAdapter): void {
 interface MemberFacts {
   readonly memberId: AgentTeamMemberId
   readonly sessionId: SessionId
+  readonly privateMemoryPath: string
 }
 
 async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string, capabilities?: AgentTeamMemberCapabilities): Promise<MemberFacts> {
@@ -228,7 +236,7 @@ async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string,
     presetId: 'team-member', channelRefs: [], ...(capabilities === undefined ? {} : { capabilities }),
   })
   expect(added.status.availability).toBe('active')
-  return { memberId: added.status.member.memberId, sessionId: added.status.member.sessionId }
+  return { memberId: added.status.member.memberId, sessionId: added.status.member.sessionId, privateMemoryPath: added.status.member.privateMemoryPath }
 }
 
 function liveAgent(ctx: Context, facts: MemberFacts): Agent {
@@ -292,6 +300,9 @@ describe('Agent Team member tool policy', () => {
     // Carry the full status (diagnostic included) into the failure text: a
     // lifecycle race here is otherwise invisible in CI logs.
     expect(resumed.status.availability, JSON.stringify(resumed.status)).toBe('active')
+    // Reactivation re-applied the stored intent: the roster says so from the
+    // same real surface the schema read below verifies.
+    expect(resumed.status.capabilityState).toBe('applied')
     expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool'].sort())
     // The sibling never moved.
     expect(toolNames(ctx, liveAgent(ctx, other))).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
@@ -302,6 +313,7 @@ describe('Agent Team member tool policy', () => {
     await ctx.plugin(AgentTeam)
     const restored = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === narrow.memberId)
     expect(restored?.availability, JSON.stringify(restored)).toBe('active')
+    expect(restored?.capabilityState).toBe('applied')
     expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool'].sort())
   })
 
@@ -453,5 +465,287 @@ describe('Agent Team member tool policy', () => {
     })
     expect(standIn.searches).toEqual(['sessions'])
     expect(result).toBeDefined()
+  })
+
+  it('reports the stored configuration warnings after a failed apply, not the restored leftover', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    // Activation with a drifted name: stored intent already carries a warning.
+    const member = await addMember(ctx, workspaceId, 't9-warn', { tools: { allow: ['tool-renamed-away', 'ordinary_tool'] } })
+    const agent = liveAgent(ctx, member)
+    const baseline = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
+    expect(baseline?.capabilityWarnings?.map(warning => warning.name)).toEqual(['tool-renamed-away'])
+
+    const restrict = vi.spyOn(agent.ctx.tools, 'restrict').mockImplementationOnce(() => {
+      throw new Error('temporary restriction failure (test)')
+    })
+    try {
+      await expect(ctx.agentTeam.updateMember({
+        requestId: requestId('t9-ghost'), memberId: member.memberId, handle: 't9-warn', description: 'Policy member',
+        capabilities: { tools: { allow: ['ghost_tool', 'ordinary_tool'] } },
+      })).rejects.toThrow('temporary restriction failure')
+
+      // Warnings always describe the STORED configuration: the failed apply
+      // restores the enforced surface, but the reported divergence is the one
+      // the accepted edit carries — never a leftover from the restored state.
+      const failed = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
+      expect(failed?.capabilityWarnings?.map(warning => warning.name)).toEqual(['ghost_tool'])
+    } finally {
+      restrict.mockRestore()
+    }
+  })
+
+  it('does not let a stale retry roll a newer accepted configuration back', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    const member = await addMember(ctx, workspaceId, 't10-race', { tools: { allow: ['ordinary_tool'] } })
+    const agent = liveAgent(ctx, member)
+
+    // Edit A commits durably, but its runtime apply fails once.
+    const restrict = vi.spyOn(agent.ctx.tools, 'restrict').mockImplementationOnce(() => {
+      throw new Error('temporary restriction failure (test)')
+    })
+    const stale = {
+      requestId: requestId('t10-stale'), memberId: member.memberId, handle: 't10-race',
+      description: 'Policy member', capabilities: { tools: { allow: ['spare_tool'] } },
+    }
+    await expect(ctx.agentTeam.updateMember(stale)).rejects.toThrow('temporary restriction failure')
+    restrict.mockRestore()
+
+    // Edit B is accepted afterwards and applies fully.
+    const current = await ctx.agentTeam.updateMember({
+      requestId: requestId('t10-current'), memberId: member.memberId, handle: 't10-race',
+      description: 'Policy member', capabilities: { tools: { allow: ['ordinary_tool', 'spare_tool'] } },
+    })
+    expect(current.status.member.capabilities?.tools?.allow).toEqual(['ordinary_tool', 'spare_tool'])
+    expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+
+    // Retrying the stale request is idempotent in effect: it replays its own
+    // receipt but must neither re-apply its own historical configuration over
+    // the newer accepted one nor report the historical state back.
+    const replayed = await ctx.agentTeam.updateMember(stale)
+    expect(replayed.status.member.capabilities?.tools?.allow).toEqual(['ordinary_tool', 'spare_tool'])
+    expect(replayed.status.availability).toBe('active')
+    expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    ctx.agentTeam.validateLedger()
+  })
+
+  it('keeps the pre-edit tool surface when an apply fails, then lets a retry finish the pending effect', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    const member = await addMember(ctx, workspaceId, 't8-tighten', { tools: { allow: ['ordinary_tool'] } })
+    const agent = liveAgent(ctx, member)
+    const before = toolNames(ctx, agent)
+
+    // The edit's ledger commit succeeds; only the first runtime apply of the
+    // new restriction fails once.
+    const restrict = vi.spyOn(agent.ctx.tools, 'restrict').mockImplementationOnce(() => {
+      throw new Error('temporary restriction failure (test)')
+    })
+    const request = {
+      requestId: requestId('t8-tighten'), memberId: member.memberId, handle: 't8-tighten',
+      description: 'Policy member', capabilities: { tools: { allow: ['spare_tool'] } },
+    }
+    try {
+      await expect(ctx.agentTeam.updateMember(request)).rejects.toThrow('temporary restriction failure')
+
+      // A failed apply never widens the surface: the pre-edit restriction
+      // stays in force until a new one is actually installed.
+      expect(toolNames(ctx, agent)).toEqual(before)
+
+      // The same-request retry performs no second business commit, yet it
+      // completes the effect the first attempt left undone: one coherent
+      // surface matching the currently accepted configuration.
+      const retried = await ctx.agentTeam.updateMember(request)
+      expect(retried.status.member.capabilities?.tools?.allow).toEqual(['spare_tool'])
+      expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'spare_tool'].sort())
+      ctx.agentTeam.validateLedger()
+    } finally {
+      restrict.mockRestore()
+    }
+  })
+
+  it('distinguishes applied, already-applied, and deferred edits on the response and the roster', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    const member = await addMember(ctx, workspaceId, 't11-effect', { tools: { allow: ['ordinary_tool'] } })
+    const roster = () => ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
+    expect(ctx.agentTeam.members().find(item => item.member.memberId === member.memberId)?.capabilityState).toBe('applied')
+    expect(roster()?.capabilityState).toBe('applied')
+
+    // A live edit that installs effects reports them as applied.
+    const first = await ctx.agentTeam.updateMember({
+      requestId: requestId('t11-widen'), memberId: member.memberId, handle: 't11-effect',
+      description: 'Policy member', capabilities: { tools: { allow: ['ordinary_tool', 'spare_tool'] } },
+    })
+    expect(first.effect).toBe('applied')
+    expect(first.status.capabilityState).toBe('applied')
+
+    // Re-submitting the accepted configuration under a new id changes nothing.
+    const again = await ctx.agentTeam.updateMember({
+      requestId: requestId('t11-same'), memberId: member.memberId, handle: 't11-effect',
+      description: 'Policy member', capabilities: { tools: { allow: ['ordinary_tool', 'spare_tool'] } },
+    })
+    expect(again.effect).toBe('already-applied')
+    expect(again.status.capabilityState).toBe('applied')
+
+    // A suspended Member has no live surface: the edit is saved and deferred
+    // explicitly, and both the response and the roster report pending.
+    await ctx.agentTeam.suspendMember({ requestId: requestId('t11-suspend'), memberId: member.memberId })
+    expect(roster()?.capabilityState).toBe('pending')
+    const deferred = await ctx.agentTeam.updateMember({
+      requestId: requestId('t11-deferred'), memberId: member.memberId, handle: 't11-effect',
+      description: 'Policy member', capabilities: { tools: { allow: ['spare_tool'] } },
+    })
+    expect(deferred.effect).toBe('deferred:no-live-handle')
+    expect(deferred.status.capabilityState).toBe('pending')
+    expect(roster()?.capabilityState).toBe('pending')
+    expect(roster()?.availability).toBe('suspended')
+  })
+
+  it('surfaces a failed apply as a routable diagnostic with correlation ids, cleared when the effect lands', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    const member = await addMember(ctx, workspaceId, 't12-diag', { tools: { allow: ['ordinary_tool'] } })
+    const agent = liveAgent(ctx, member)
+    const restrict = vi.spyOn(agent.ctx.tools, 'restrict').mockImplementationOnce(() => {
+      throw new Error('temporary restriction failure (test)')
+    })
+    const request = {
+      requestId: requestId('t12-fail'), memberId: member.memberId, handle: 't12-diag',
+      description: 'Policy member', capabilities: { tools: { allow: ['ordinary_tool', 'spare_tool'] } },
+    }
+    try {
+      await expect(ctx.agentTeam.updateMember(request)).rejects.toThrow('temporary restriction failure')
+
+      // The failure stays a loud rejection for the caller, and is also kept as
+      // a routable, member-visible diagnostic carrying the correlation ids.
+      const failed = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
+      expect(failed?.diagnostic?.class).toBe('capability-apply')
+      expect(failed?.diagnostic?.detail).toContain('t12-fail')
+      expect(failed?.diagnostic?.detail).toMatch(/operationId=\S+/)
+      expect(failed?.diagnostic?.detail).toContain('temporary restriction failure (test)')
+      expect(failed?.capabilityState).toBe('pending')
+      expect(failed?.availability).toBe('active')
+      expect(failed?.presence).toBe('error')
+
+      // The same-request retry finishes the effect and retires the diagnostic.
+      const retried = await ctx.agentTeam.updateMember(request)
+      expect(retried.effect).toBe('applied')
+      expect(retried.status.diagnostic).toBeUndefined()
+      expect(retried.status.capabilityState).toBe('applied')
+      const cleared = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
+      expect(cleared?.diagnostic).toBeUndefined()
+      expect(cleared?.capabilityState).toBe('applied')
+      ctx.agentTeam.validateLedger()
+    } finally {
+      restrict.mockRestore()
+    }
+  })
+
+  it('pins a model edit onto the live turn route and clears it back to the Host default', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const member = await addMember(ctx, workspaceId, 't13-model')
+    const agent = liveAgent(ctx, member)
+
+    // Pinning a model is a live effect: the stored override is accepted, the
+    // response says the effect landed, and the same Session's next turn runs
+    // the pinned route.
+    const pinned = await ctx.agentTeam.updateMember({
+      requestId: requestId('t13-pin'), memberId: member.memberId, handle: 't13-model',
+      description: 'Policy member', model: { provider: 'mock', model: 'pinned' },
+    })
+    expect(pinned.effect).toBe('applied')
+    expect(pinned.status.member.model).toEqual({ provider: 'mock', model: 'pinned' })
+    expect(pinned.status.member.sessionId).toBe(member.sessionId)
+    expect(pinned.status.capabilityState).toBe('applied')
+
+    adapter.enqueue([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'done' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'done' } },
+      { type: 'usage', usage: { inputTokens: 10, outputTokens: 4 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+    const firstIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'run' }], source: { kind: 'user' } }))
+    await firstIdle
+    const firstRequest = adapter.requests.at(-1)
+    expect(firstRequest?.provider).toBe('mock')
+    expect(firstRequest?.model).toBe('pinned')
+    expect(firstRequest?.sessionId).toBe(member.sessionId)
+
+    // Dropping the pin clears the stored override and returns the next turn
+    // to the Host default, still in the same Session.
+    const cleared = await ctx.agentTeam.updateMember({
+      requestId: requestId('t13-unpin'), memberId: member.memberId, handle: 't13-model',
+      description: 'Policy member',
+    })
+    expect(cleared.effect).toBe('applied')
+    expect(cleared.status.member.model).toBeUndefined()
+
+    adapter.enqueue([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'again' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'again' } },
+      { type: 'usage', usage: { inputTokens: 10, outputTokens: 4 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+    const secondIdle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'again' }], source: { kind: 'user' } }))
+    await secondIdle
+    expect(adapter.requests.at(-1)?.provider).toBe('mock')
+    expect(adapter.requests.at(-1)?.model).toBe('mock')
+    expect(adapter.requests.at(-1)?.sessionId).toBe(member.sessionId)
+  })
+
+  it('defers a skills edit to the turn boundary without interrupting the running turn', async () => {
+    const adapter = new GatedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const member = await addMember(ctx, workspaceId, 't14-skills')
+    const agent = liveAgent(ctx, member)
+    const skillsDir = join(member.privateMemoryPath, 'skills')
+    await mkdir(skillsDir, { recursive: true })
+    await writeFile(join(skillsDir, 'alpha.md'), '---\nname: alpha\ndescription: Alpha skill\n---\n\nAlpha body.\n')
+    await writeFile(join(skillsDir, 'beta.md'), '---\nname: beta\ndescription: Beta skill\n---\n\nBeta body.\n')
+    await vi.waitFor(async () => {
+      const names = await catalogNames(ctx, agent)
+      expect(names).toContain('alpha')
+      expect(names).toContain('beta')
+    })
+
+    // Selecting while idle applies immediately: the live catalog narrows.
+    const selected = await ctx.agentTeam.updateMember({
+      requestId: requestId('t14-select'), memberId: member.memberId, handle: 't14-skills',
+      description: 'Policy member', capabilities: { skills: { allow: ['alpha'] } },
+    })
+    expect(selected.effect).toBe('applied')
+    expect(await catalogNames(ctx, agent)).toEqual(['alpha'])
+
+    // Widen while a turn is running: the edit parks at the boundary, the
+    // running turn keeps its pre-edit catalog, and nothing interrupts it.
+    const turnDone = waitForIdle(ctx, agent)
+    const running = waitForRunning(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'run' }], source: { kind: 'user' } }))
+    await running
+    const edit = ctx.agentTeam.updateMember({
+      requestId: requestId('t14-widen'), memberId: member.memberId, handle: 't14-skills',
+      description: 'Policy member', capabilities: { skills: { allow: ['alpha', 'beta'] } },
+    })
+    const raced = await Promise.race([edit.then(() => 'settled'), new Promise<string>(resolve => { setTimeout(() => resolve('pending'), 50) })])
+    expect(raced).toBe('pending')
+    expect(await catalogNames(ctx, agent)).toEqual(['alpha'])
+
+    adapter.release()
+    const settled = await edit
+    expect(settled.effect).toBe('applied')
+    expect(settled.status.capabilityState).toBe('applied')
+    expect(settled.status.member.sessionId).toBe(member.sessionId)
+    await turnDone
+    expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta'])
+    ctx.agentTeam.validateLedger()
   })
 })

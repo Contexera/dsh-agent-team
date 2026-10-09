@@ -152,6 +152,22 @@ export interface AgentTeamMemberResult {
   readonly status: AgentTeamAgentMemberStatus
 }
 
+/**
+ * How a configuration edit's committed runtime effects landed: installed now,
+ * already in force, or saved but deferred to the next activation (with the
+ * reason). A failed apply never appears here — it stays a rejection.
+ */
+export type AgentTeamMemberEffect =
+  | 'applied'
+  | 'already-applied'
+  | 'deferred:no-live-handle'
+  | 'deferred:generation-changed'
+
+/** Result of a configuration edit: lifecycle status plus its effect outcome. */
+export interface AgentTeamUpdateMemberResult extends AgentTeamMemberResult {
+  readonly effect: AgentTeamMemberEffect
+}
+
 /** Result of creating a Member: lifecycle status plus the participation set the Host seeded at creation. */
 export interface AgentTeamAddMemberResult extends AgentTeamMemberResult {
   /** Workspaces the new Member participates in — creation always seeds exactly the creation Workspace. */

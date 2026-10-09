@@ -94,6 +94,7 @@ import type {
   AgentTeamHumanActor,
   AgentTeamMemberActor,
   AgentTeamMessageAttachment,
+  AgentTeamMemberEffect,
   AgentTeamMemberId,
   AgentTeamMemberResult,
   AgentTeamMembersRequest,
@@ -146,6 +147,7 @@ import type {
   AgentTeamUpdateChannelRequest,
   AgentTeamUpdateChannelResult,
   AgentTeamUpdateMemberRequest,
+  AgentTeamUpdateMemberResult,
   AgentTeamView,
   AgentTeamViewRequest,
 } from './types.ts'
@@ -506,6 +508,8 @@ export default class AgentTeam extends TypertRemoteService {
     runtime?: string
     /** Last non-busy automatic-compaction failure; entered transactions retain additional Session history. */
     compaction?: string
+    /** The post-commit configuration apply failed; the stored row is ahead of the live surface. */
+    capabilityApply?: AgentTeamMemberDiagnostic
   }>()
   private readonly pressurePolicy: TeamPressurePolicy
   /**
@@ -1511,23 +1515,53 @@ export default class AgentTeam extends TypertRemoteService {
    * Team immediately recreates it.
    */
   @Remote('updateMember')
-  async updateMember(request: AgentTeamUpdateMemberRequest): Promise<AgentTeamMemberResult> {
+  async updateMember(request: AgentTeamUpdateMemberRequest): Promise<AgentTeamUpdateMemberResult> {
     return this.enqueueLifecycle(async () => {
       await this.assertModelRoute(request.model)
       const previous = this.requireLedger().getMember(request.memberId)
       const result = await this.requireLedger().updateMember({ ...request, actor: agentTeamHumanActor() })
       if (result.committed) this.emitCommitted(result.value.receipt)
-      const stored = result.value.member
+      // A replayed request resolves to the member AS IT WAS at its own commit;
+      // driving the runtime or the reported status from that history would let
+      // a late retry roll back a configuration accepted in the meantime. Apply
+      // and report the currently accepted member instead — lifecycle calls
+      // serialize, so for a fresh commit it is the row just written.
+      const current = this.requireLedger().getMember(request.memberId)
+      if (current === undefined) throw new Error(`Agent Member '${request.memberId}' no longer exists`)
       const active = this.handles.get(request.memberId)
-      if (active !== undefined && !isDeepStrictEqual(previous?.model ?? undefined, stored.model ?? undefined)) {
-        const selection = this.modelSelections.get(request.memberId)
-        if (selection === undefined) throw new Error(`Agent Member '${stored.handle}' has no live model selection`)
-        selection.current = stored.model ?? this.ctx.agentDefaultModel.currentSelection()
+      let effect: AgentTeamMemberEffect = 'deferred:no-live-handle'
+      if (active !== undefined) {
+        effect = 'already-applied'
+        if (!isDeepStrictEqual(previous?.model ?? undefined, current.model ?? undefined)) {
+          const selection = this.modelSelections.get(request.memberId)
+          if (selection === undefined) throw new Error(`Agent Member '${current.handle}' has no live model selection`)
+          selection.current = current.model ?? this.ctx.agentDefaultModel.currentSelection()
+          effect = 'applied'
+        }
+        if (!this.memberRuntime.appliedCapabilitiesMatch(current.memberId, current.capabilities)) {
+          try {
+            effect = await this.applyCapabilityEdit(active, current)
+          } catch (error) {
+            // The rejection stays loud for the caller; the same failure is
+            // kept as a routable, member-visible diagnostic (ids in detail)
+            // and logged with the same correlation group before it escapes.
+            const message = error instanceof Error ? error.message : String(error)
+            this.setCapabilityApplyDiagnostic(current.memberId, Object.freeze({
+              class: 'capability-apply' as const,
+              sessionId: active.agent.session.id,
+              detail: `requestId=${request.requestId} operationId=${result.value.receipt.operationId} stage=apply error=${message}`,
+            }))
+            this.ctx.logger.warn(`agent-team: capability apply failed for member '${this.memberLabel(current.memberId)}' session '${active.agent.session.id}' requestId '${request.requestId}' operationId '${result.value.receipt.operationId}' stage 'apply': ${message}`)
+            throw error
+          }
+        }
+        // The failure slot exists to bridge the gap until the stored intent is
+        // actually in force; an already-applied row retires a stale one too.
+        if (this.memberRuntime.appliedCapabilitiesMatch(current.memberId, current.capabilities)) {
+          this.clearMemberFailure(current.memberId, 'capabilityApply')
+        }
       }
-      if (active !== undefined && !isDeepStrictEqual(previous?.capabilities ?? undefined, stored.capabilities ?? undefined)) {
-        await this.applyCapabilityEdit(active, stored)
-      }
-      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(stored) })
+      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(current), effect })
     })
   }
 
@@ -1540,17 +1574,21 @@ export default class AgentTeam extends TypertRemoteService {
    * the swap — the disposed handle released the old restriction already and
    * no disposer leaks.
    */
-  private async applyCapabilityEdit(active: AgentHandle, stored: AgentTeamAgentMember): Promise<void> {
+  private async applyCapabilityEdit(active: AgentHandle, stored: AgentTeamAgentMember): Promise<'applied' | 'deferred:generation-changed'> {
     const memberId = stored.memberId
     const waited = await this.memberRuntime.awaitTurnBoundary(active)
     if (waited && this.handles.get(memberId) !== active) {
       // The wait resolved because the old generation was disposed, not
       // because the turn ended; the ledger intent applies at the next
-      // activation instead.
-      return
+      // activation instead. Unreachable while handle slots only ever change
+      // inside this same lifecycle queue (a parked edit holds it) — kept as
+      // the guard for any future out-of-queue swap, not as dead weight.
+      return 'deferred:generation-changed'
     }
     this.memberRuntime.reapplyMemberToolPolicy(stored)
     this.memberRuntime.swapSkillSelection(memberId, stored.capabilities?.skills?.allow)
+    this.memberRuntime.recordAppliedCapabilities(memberId, stored.capabilities)
+    return 'applied'
   }
 
   /** Irreversibly remove one Member, archive its Session, and delete its private namespace. */
@@ -3006,11 +3044,17 @@ export default class AgentTeam extends TypertRemoteService {
             setup,
           })
       this.memberRuntime.mountMemberSkillProvider(member, created.agent.ctx, skillSelection)
+      // Both capability effects are now live (the tool restriction inside
+      // `setup`, the skill selection here): record the intent the surface
+      // reflects so a later edit or retry compares against reality instead
+      // of against this request's own history.
+      this.memberRuntime.recordAppliedCapabilities(member.memberId, member.capabilities)
       await workspace.attachSession(member.sessionId)
       this.handles.set(member.memberId, created)
       this.memberBySessionId.set(member.sessionId, member.memberId)
       this.modelSelections.set(member.memberId, selected)
       this.clearMemberFailure(member.memberId, 'activation')
+      this.clearMemberFailure(member.memberId, 'capabilityApply')
       this.nameMemberSession(member, created.agent)
       // The one-shot pressure notice needs no explicit re-arm here: it latches
       // on durable Session evidence, and a fresh generation's own event span
@@ -3151,29 +3195,45 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   private memberStatus(member: AgentTeamAgentMember): AgentTeamAgentMemberStatus {
-    if (member.state === 'inactive') return Object.freeze({ member, availability: 'inactive', presence: 'unavailable' })
-    if (member.state === 'archived') return Object.freeze({ member, availability: 'archived', presence: 'unavailable' })
-    if (member.state === 'suspended') return Object.freeze({ member, availability: 'suspended', presence: 'unavailable' })
+    // The five states with no live surface report 'pending' literally: no
+    // apply can be in force there, and a literal cannot inherit a stale
+    // applied-record left behind by a torn-down surface.
+    if (member.state === 'inactive') return Object.freeze({ member, availability: 'inactive', presence: 'unavailable', capabilityState: 'pending' })
+    if (member.state === 'archived') return Object.freeze({ member, availability: 'archived', presence: 'unavailable', capabilityState: 'pending' })
+    if (member.state === 'suspended') return Object.freeze({ member, availability: 'suspended', presence: 'unavailable', capabilityState: 'pending' })
     const failures = this.memberFailures.get(member.memberId)
-    if (failures?.activation !== undefined) return Object.freeze({ member, availability: 'unavailable', presence: 'unavailable', diagnostic: failures.activation })
+    if (failures?.activation !== undefined) return Object.freeze({ member, availability: 'unavailable', presence: 'unavailable', capabilityState: 'pending', diagnostic: failures.activation })
     const handle = this.handles.get(member.memberId)
-    if (handle === undefined) return Object.freeze({ member, availability: 'unavailable', presence: 'unavailable' })
+    if (handle === undefined) return Object.freeze({ member, availability: 'unavailable', presence: 'unavailable', capabilityState: 'pending' })
+    const capabilityState: 'applied' | 'pending' = this.memberRuntime.appliedCapabilitiesMatch(member.memberId, member.capabilities) ? 'applied' : 'pending'
     // A rollover commits its ledger binding before the old generation retires
     // and the new one activates; during that window the live handle still runs
     // the previous Session. The Member stays visible but must not report the
     // new binding as active — a Client following the row would otherwise open
     // a Session that does not exist yet.
-    if (handle.agent.id !== member.sessionId) return Object.freeze({ member, availability: 'unavailable', presence: 'unavailable', diagnostic: { class: 'rollover' as const, detail: 'context rollover in progress' } })
+    if (handle.agent.id !== member.sessionId) return Object.freeze({ member, availability: 'unavailable', presence: 'unavailable', capabilityState, diagnostic: { class: 'rollover' as const, detail: 'context rollover in progress' } })
     if (this.ctx.agentPresets.composedPreset(handle.agent.ctx) === undefined) {
-      return Object.freeze({ member, availability: 'active', presence: 'error', diagnostic: { class: 'preset-composition' as const, detail: ORPHANED_MEMBER_DIAGNOSTIC } })
+      return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: { class: 'preset-composition' as const, detail: ORPHANED_MEMBER_DIAGNOSTIC } })
     }
     const runtimeError = failures?.runtime ?? failures?.compaction
-    if (runtimeError !== undefined) return Object.freeze({ member, availability: 'active', presence: 'error', diagnostic: { class: 'runtime' as const, detail: runtimeError } })
+    if (runtimeError !== undefined) return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: { class: 'runtime' as const, detail: runtimeError } })
+    // A failed apply outranks the plain success row but not a live runtime
+    // error: the Member runs, yet its stored configuration is ahead of the
+    // surface until the effect lands. The warning digest rides along — the
+    // unknown-name signal and the apply failure answer different questions.
+    if (failures?.capabilityApply !== undefined) {
+      const capabilityWarnings = this.memberRuntime.capabilityWarningsFor(member.memberId)
+      return Object.freeze({
+        member, availability: 'active', presence: 'error', capabilityState, diagnostic: failures.capabilityApply,
+        ...(capabilityWarnings === undefined ? {} : { capabilityWarnings }),
+      })
+    }
     // Capability warnings are runtime-derived at activation (handles-scoped,
     // like failures): absent while capabilities resolve cleanly.
     const capabilityWarnings = this.memberRuntime.capabilityWarningsFor(member.memberId)
     return Object.freeze({
       member, availability: 'active', presence: handle.agent.status === 'running' ? 'working' : 'available',
+      capabilityState,
       ...(capabilityWarnings === undefined ? {} : { capabilityWarnings }),
     })
   }
@@ -3188,6 +3248,13 @@ export default class AgentTeam extends TypertRemoteService {
   private setActivationDiagnostic(memberId: AgentTeamMemberId, diagnostic: AgentTeamMemberDiagnostic): void {
     const failures = this.memberFailures.get(memberId) ?? {}
     failures.activation = Object.freeze(diagnostic)
+    this.memberFailures.set(memberId, failures)
+  }
+
+  /** Store the post-commit configuration apply failure; cleared when the effect lands or a later activation succeeds. */
+  private setCapabilityApplyDiagnostic(memberId: AgentTeamMemberId, diagnostic: AgentTeamMemberDiagnostic): void {
+    const failures = this.memberFailures.get(memberId) ?? {}
+    failures.capabilityApply = Object.freeze(diagnostic)
     this.memberFailures.set(memberId, failures)
   }
 
@@ -3208,7 +3275,7 @@ export default class AgentTeam extends TypertRemoteService {
     return { class: 'activation' as const, detail: error instanceof Error ? error.message : String(error) }
   }
 
-  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'compaction'): boolean {
+  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'compaction' | 'capabilityApply'): boolean {
     const failures = this.memberFailures.get(memberId)
     if (failures === undefined || failures[slot] === undefined) return false
     if (Object.keys(failures).length === 1) this.memberFailures.delete(memberId)

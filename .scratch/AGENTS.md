@@ -26,7 +26,7 @@ Each `issues/NN-<slug>.md` uses a fixed skeleton, numbered from `01` in dependen
 
 **What to build:** the end-to-end behavior this ticket demonstrably delivers once done (user perspective, not a layered task list)
 **Blocked by:** the tickets blocking it, or "None — can start immediately"
-**Status:** ready | in-progress | complete
+**Status:** pending | ready | in-progress | complete
 
 - [ ] acceptance criterion 1
 - [ ] acceptance criterion 2
@@ -34,7 +34,7 @@ Each `issues/NN-<slug>.md` uses a fixed skeleton, numbered from `01` in dependen
 
 - **Vertical slices**: each ticket cuts one narrow, complete path through every layer (schema → API → UI → tests), independently verifiable when done; no horizontal division of labor by layer.
 - **Self-contained tickets**: each ticket can start in a new context without reading the whole work-item history. Avoid concrete file paths and code snippets (they go stale); exception: decision-dense fragments from prototypes (state machines, type shapes) may be inlined with their source noted.
-- **Frontier workflow**: tickets whose blockers are all done form the frontier and are ready to start; a serial chain runs top to bottom.
+- **Frontier workflow**: tickets whose blockers are all done form the frontier and are ready to start; a serial chain runs top to bottom. Tickets that are written but still carry unfinished blockers stay **pending**, so `ready` always means startable now.
 - **Wide-refactor exception**: when one mechanical change's blast radius covers the whole repository, do not force it into a tracer bullet — order it as expand–contract: expand first (old and new coexist), migrate in batches, then contract (delete the old form).
 
 ## Lifecycle

@@ -15,6 +15,7 @@
  */
 
 import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { isDeepStrictEqual } from 'node:util'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
@@ -109,6 +110,19 @@ export class MemberRuntime {
    */
   private readonly memberRestrictions = new Map<AgentTeamMemberId, () => void>()
   /**
+   * The allow-list currently enforced behind `memberRestrictions`: the
+   * rollback source when a swap's new restriction fails to install, so a
+   * failed apply never leaves the Member less restricted than before.
+   */
+  private readonly enforcedToolAllow = new Map<AgentTeamMemberId, readonly string[]>()
+  /**
+   * Capability intent the live surface is known to reflect (`null` = applied
+   * with no capabilities): runtime-derived like `capabilityWarnings`, never
+   * persisted, and absent whenever the runtime cannot prove it — an unknown
+   * surface re-applies rather than trusting a guess.
+   */
+  private readonly appliedCapabilities = new Map<AgentTeamMemberId, AgentTeamMemberCapabilities | null>()
+  /**
    * Runtime-derived capability warnings, recomputed at every activation (like
    * memberFailures, keyed by Member and never persisted): persisted warnings
    * would lie after a Host restart or a Harness upgrade renames tools.
@@ -157,12 +171,53 @@ export class MemberRuntime {
     // failure without touching any other Member.
     const dispose = agentCtx.tools.restrict({ allow })
     this.memberRestrictions.set(member.memberId, dispose)
+    this.enforcedToolAllow.set(member.memberId, Object.freeze([...allow]))
   }
 
-  /** Swap a live Member's tool policy at a turn boundary: dispose the old restriction, apply the new. */
+  /** Whether the live surface is known to reflect exactly this capability intent; an absent record never matches. */
+  appliedCapabilitiesMatch(memberId: AgentTeamMemberId, capabilities: AgentTeamMemberCapabilities | undefined): boolean {
+    if (!this.appliedCapabilities.has(memberId)) return false
+    return isDeepStrictEqual(this.appliedCapabilities.get(memberId) ?? undefined, capabilities ?? undefined)
+  }
+
+  /** Record the capability intent the live surface now reflects; callers invoke it only after every effect of the apply succeeded. */
+  recordAppliedCapabilities(memberId: AgentTeamMemberId, capabilities: AgentTeamMemberCapabilities | undefined): void {
+    this.appliedCapabilities.set(memberId, capabilities ?? null)
+  }
+
+  /**
+   * Swap a live Member's tool policy at a turn boundary: dispose the old
+   * restriction, apply the new one, and when the new install fails restore
+   * the previous allow-list before rethrowing — the swap must never leave the
+   * Member wider than the surface it started from.
+   */
   reapplyMemberToolPolicy(member: AgentTeamAgentMember): void {
+    const agentCtx = this.deps.liveMemberContext(member.memberId)
+    const previousAllow = this.enforcedToolAllow.get(member.memberId)
     this.releaseMemberToolPolicy(member.memberId)
-    this.applyMemberToolPolicy(this.deps.liveMemberContext(member.memberId), member)
+    try {
+      this.applyMemberToolPolicy(agentCtx, member)
+    } catch (error) {
+      if (previousAllow !== undefined) {
+        try {
+          const dispose = agentCtx.tools.restrict({ allow: [...previousAllow] })
+          this.memberRestrictions.set(member.memberId, dispose)
+          this.enforcedToolAllow.set(member.memberId, previousAllow)
+          // Capability warnings are deliberately NOT restored: they describe
+          // the STORED configuration's divergence from the tool surface (the
+          // input `applyMemberToolPolicy` derives from), and the accepted
+          // edit is stored even though its runtime apply failed — reporting
+          // the restored leftover here would make one stored configuration
+          // render two different warnings depending on the prior state. When
+          // the failure precedes the derivation itself (schemas throws),
+          // warnings stay empty rather than inventing a known-name digest;
+          // the next successful apply or activation re-derives them.
+        } catch (restore) {
+          this.deps.ctx.logger.warn(`agent-team: failed to restore the previous tool restriction for member '${member.memberId}' after a failed apply: ${restore instanceof Error ? restore.message : String(restore)}`)
+        }
+      }
+      throw error
+    }
   }
 
   /** Release one Member's restriction disposer and warning state; safe to call twice. */
@@ -172,7 +227,9 @@ export class MemberRuntime {
       this.memberRestrictions.delete(memberId)
       dispose()
     }
+    this.enforcedToolAllow.delete(memberId)
     this.capabilityWarnings.delete(memberId)
+    this.appliedCapabilities.delete(memberId)
   }
 
   private setCapabilityWarnings(memberId: AgentTeamMemberId, warnings: readonly AgentTeamCapabilityWarning[]): void {

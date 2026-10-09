@@ -145,6 +145,13 @@ export interface AgentTeamAgentMemberStatus {
    * AgentTeamCapabilityWarning); empty while capabilities resolve cleanly.
    */
   readonly capabilityWarnings?: readonly AgentTeamCapabilityWarning[] | undefined
+  /**
+   * Whether the live runtime surface reflects the stored configuration:
+   * 'applied' after a successful apply (edit or activation), 'pending' while
+   * there is no proof of effect (no live handle, a deferred edit, or a failed
+   * apply). Always present so readers never mistake absence for applied.
+   */
+  readonly capabilityState: 'applied' | 'pending'
 }
 
 /** Which action actually helps an unavailable or erroring Member; the diagnostic's policy axis. */
@@ -155,6 +162,7 @@ export type AgentTeamMemberDiagnosticClass =
   | 'rollover' // transient context-rollover window
   | 'runtime' // live runtime or compaction failure
   | 'activation' // unclassified activation failure
+  | 'capability-apply' // post-commit configuration apply failed at the runtime
 
 /** One Member failure's structured reason; rendered, never persisted. */
 export interface AgentTeamMemberDiagnostic {
