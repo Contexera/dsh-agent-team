@@ -53,6 +53,7 @@ git diff --check HEAD
 - `npm run check:versions`：把已认证版本一致性变成机械检查。CI tag、setup tag、开发指南、README、架构文档、兼容性基线、bug 报告占位符必须声明同一个 DSH 基线，双语都要。该基线必须是每个 `@deepseek-ai/dsh-*` peer 区间的下界。它只断言互相一致，从不写死版本号。在任何 release lane 上都不用改门。动过任何版本字符串后单独跑它。
 - `npm run check:facades`：只比不写。按相邻 Harness checkout 重算 path facades。已提交的 `tsconfig*.json` 或 `.generated-harness` 标记只要与生成结果不同就报错。给 `scripts/sync-paths.mjs` 加了 subpath，就不可能不带上重新生成的 facades。它由 `npm test` 捆绑执行。全新 clone 必须先重新生成 facades，见 [`environments-and-install.zh.md`](./environments-and-install.zh.md)。
 - `npm test`：先生成 Typert、跑 `check:facades`、`check:docs`、`check:core-skills`、`check:boundaries` 与 `check:versions`。再运行 Vitest。
+- Client 测试台（`packages/client-agent-team/tests/harness.tsx`）会让「渲染中的 shipped slot entry 崩过」的 spec 直接失败：shipped error boundary 会把异常吞掉、只经 `console.error` 报告，没有这道护栏时页面已经消失而套件仍然全绿。该测试台同时补齐 jsdom 缺的浏览器 API（`ResizeObserver`、`document.fonts`）与完整的 `conversation` service 面：缺一个 observable 成员不是「少一个方法」，而是 renderer hook cache 里的 `WeakMap.set(undefined)` 抛错。
 - Vitest 通过 `scripts/isolate-dsh-home.setup.ts` 给每个测试文件一次性 `DSH_HOME`。隔离的是各 Member activation 的 `$DSH_HOME/agent-team/members/member:*` 私有 memory。需要特定 home 的测试自行保存/恢复该变量（见 `member-lifecycle.spec.ts`）。启动不会自动清理账本不认识的 Member 目录。显式 Member remove 才删除该 Member 的私有 memory。介质重置后的旧目录须由操作者手动删除 `member:` 目录。
 - `npm run build`：先由受限 Node cleaner 清空 Host、tools 与 Client 三个 package 的 `lib/`。再生成 Typert、构建三个源码目录，并用 Harness 的 `tsdown` 构建 Client bundle。这样删除源码后遗留的旧产物不会进入 pack。最终发布物仍是一个根 npm 包。
 - `npm run lint`：运行 oxlint。

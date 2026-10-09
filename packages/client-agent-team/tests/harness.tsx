@@ -1,6 +1,6 @@
 import { RemoteStream, RemoteStreamCarrierError } from '@deepseek-ai/dsh-api-gateway/client'
 import type { AgentTeamChangesRequest } from '@contexera/dsh-agent-team/types'
-import { vi } from 'vitest'
+import { afterEach, expect, vi } from 'vitest'
 import { useState } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { AgentTeamAddMemberRequest, AgentTeamCreateChannelRequest, AgentTeamMemberDiagnostic, AgentTeamReplyRequest, AgentTeamSendMessageRequest, AgentTeamTask } from '@contexera/dsh-agent-team/types'
@@ -21,6 +21,34 @@ class ResizeObserverStub {
   disconnect(): void {}
 }
 vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+
+// jsdom 30 implements no FontFaceSet at all, so `document.fonts` is absent
+// while every real browser has one; the shipped composer control row subscribes
+// to its 'loadingdone' event when it measures the two control groups.
+if (document.fonts === undefined) {
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: { addEventListener: () => {}, removeEventListener: () => {} },
+  })
+}
+
+// A throwing slot entry is contained by the shipped SlotErrorBoundary and only
+// reported through console.error: the surface disappears and the suite stays
+// green. An incomplete `conversation` stub produced exactly that — 34 passing
+// tests beside 51 `Invalid value used as weak map key` reports from
+// 'conversation.composer.bar' — so a passing exit code is not evidence the page
+// rendered. Collect those reports and fail the spec file that mounted them.
+const slotCrashes: string[] = []
+const consoleError = console.error.bind(console)
+console.error = (...args: unknown[]): void => {
+  const text = args.map(value => value instanceof Error ? `${value.name}: ${value.message}` : String(value)).join(' ')
+  if (text.includes('slot entry crashed')) slotCrashes.push(text)
+  consoleError(...args)
+}
+afterEach(() => {
+  const crashes = slotCrashes.splice(0)
+  expect(crashes, `slot entries crashed:\n${crashes.join('\n')}`).toEqual([])
+})
 
 type FrameProps = PropsRuntime<'root'> & PropsRenderSlots<'sidebar' | 'main'>
 function Frame({ renderSlot, usePanelInfo }: FrameProps) {
@@ -120,16 +148,25 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     },
     get: () => stubConfigForm().scope,
   } as never)
+  // The shipped Conversation core reads its whole outward face here, and two of
+  // those reads are not calls: the composer bar injects `fileUploads` as a live
+  // observable hook, which the renderer caches by identity — an absent member
+  // therefore crashes the entry instead of failing a call. Mirror the published
+  // controller face (verbs, draft attachments, upload states), not just the
+  // verbs our own surfaces use.
   runtime.ctx.provide('conversation', {
     input: { for: () => ({ submit: vi.fn() }) },
-    createDraftImages: () => [],
-    draftImages: () => [],
-    releaseDraftImage: () => {},
-    releaseDraftImages: () => {},
+    send: vi.fn(async () => {}),
     updateQueue: vi.fn(async () => {}),
     cancel: vi.fn(async () => {}),
     loadOlder: vi.fn(async () => {}),
-    send: vi.fn(async () => {}),
+    fileUploads: createSnapshotStore<Record<string, unknown>>({}),
+    createDrafts: () => [],
+    resolveDraftAttachments: () => [],
+    retryFileUpload: () => {},
+    releaseDraftAttachment: () => {},
+    releaseDraftAttachments: () => {},
+    rebindDraftFiles: () => {},
   } as never)
   const status = (memberId: string, workspaceId: string, handle: string, presence: 'available' | 'working' | 'error' | 'unavailable', diagnostic?: AgentTeamMemberDiagnostic) => ({
     member: {
