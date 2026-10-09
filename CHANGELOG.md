@@ -8,8 +8,10 @@ All notable changes to this project are documented in this file. The format foll
 - A failed capability edit no longer widens a Member's surface: when the new tool restriction cannot be installed, the previous one stays in force (restored when it was already released), the Remote call reports the failure while the edit keeps its ledger commit, and retrying the same request finishes the pending effect instead of silently skipping it.
 - Team moves into the sidebar's panel rail, beside Plugins: the Team row is the shell's own rail button now, so it stops fighting the shipped row for the same footer band, and the way out of Team mode is a Conversations row in Team's own foot, directly above Members. Team mode still stands the shell's chrome down — the rail and the New Session button address your profile, not the Team, and both return the moment you leave.
 - Team brings its own artwork: the plugin list shows Team's own icon instead of the default placeholder, and the rail row carries a 16px monochrome mark of the same drawing.
-- A Thread whose history read fails keeps its 「加载更早消息」 action: older facts stay reachable, and that same action is the retry.
+- A Thread whose history read fails keeps its action for loading older messages: older facts stay reachable, and that same action is the retry.
 - The Inbox says when the unread queue continues past the rows it shows, instead of letting a full page read as all of it, and the `team_inbox` line stops promising a larger page than the queue's own cap can serve.
+- Members stop queueing behind each other: a long wait on one Member — a model call, a turn boundary — no longer holds up another Member's pause, removal, or configuration edit, while one Member's own operations still land in the order they were submitted. Stopping a Member cancels its in-flight turn and keeps the configuration it already committed, to take effect on the next activation, and closing the Host no longer waits for a turn to end.
+- Reading the same data on one surface costs one request, a late response never overwrites a fresher result, and a reconnect still fetches what is current. A read that fails keeps the last number it had and says so: the Inbox badge, the Channel's unread count and the Inbox page's Workspace slice no longer fold to empty or zero.
 
 ## [0.2.2] - 2026-10-08
 

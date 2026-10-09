@@ -32,12 +32,12 @@
 
 以下行号仅对应上述基线；接续时以当前源码为准。
 
-- S1：[`updateMember` 与能力应用](../../../../packages/agent-team/src/index.ts#L1514)、[`MemberRuntime` 工具限制替换](../../../../packages/agent-team/src/member-runtime.ts#L164)。提交前后的配置比较决定是否应用，无法证明上一次效果已成功。
-- S2：[`enqueueLifecycle`](../../../../packages/agent-team/src/index.ts#L3550)、[`awaitTurnBoundary`](../../../../packages/agent-team/src/member-runtime.ts#L192)。全局队列的任务包含等待 Member 回合结束的过程。
-- D1/D2：[`view`](../../../../packages/agent-team/src/ledger.ts#L1823)、[`claimsForTaskFrom`](../../../../packages/agent-team/src/ledger.ts#L3566)、[`activeTaskThreads`](../../../../packages/agent-team/src/ledger.ts#L3590)。
-- D3/D4：[`TeamAgentsPanel` 刷新](../../../../packages/client-agent-team/src/client/TeamAgentsPanel.tsx#L129)、[`TeamThreadPage` supplemental 读取](../../../../packages/client-agent-team/src/client/TeamThreadPage.tsx#L224)、[`TeamWorkspaceBrowser` Inbox 摘要读取](../../../../packages/client-agent-team/src/client/TeamWorkspaceBrowser.tsx#L61)。范围共享本身由 [`TeamChangeStream`](../../../../packages/client-agent-team/src/client/team-changes.ts) 提供，不能据此假定查询也已共享。
-- L1：[`emitCommitted` / `afterCommit`](../../../../packages/agent-team/src/index.ts#L3232)。另有 [`RecoveryCoordinator`](../../../../packages/agent-team/src/recovery.ts#L130) 捕获 wake 异常后停止跟踪的路径，后续需验证能否说明停止原因。
-- 规模验收还需检查 [`invariant`](../../../../packages/agent-team/src/invariant.ts#L58)：提交合并后仍在同一进程执行全量账本校验。延后执行不是减少 CPU；是否构成目标负载瓶颈尚未确定，不据此直接删除独立校验或引入快照。
+- S1：[`updateMember` 与能力应用](../../../../../packages/agent-team/src/index.ts#L1514)、[`MemberRuntime` 工具限制替换](../../../../../packages/agent-team/src/member-runtime.ts#L164)。提交前后的配置比较决定是否应用，无法证明上一次效果已成功。
+- S2：[`enqueueLifecycle`](../../../../../packages/agent-team/src/index.ts#L3550)、[`awaitTurnBoundary`](../../../../../packages/agent-team/src/member-runtime.ts#L192)。全局队列的任务包含等待 Member 回合结束的过程。
+- D1/D2：[`view`](../../../../../packages/agent-team/src/ledger.ts#L1823)、[`claimsForTaskFrom`](../../../../../packages/agent-team/src/ledger.ts#L3566)、[`activeTaskThreads`](../../../../../packages/agent-team/src/ledger.ts#L3590)。
+- D3/D4：[`TeamAgentsPanel` 刷新](../../../../../packages/client-agent-team/src/client/TeamAgentsPanel.tsx#L129)、[`TeamThreadPage` supplemental 读取](../../../../../packages/client-agent-team/src/client/TeamThreadPage.tsx#L224)、[`TeamWorkspaceBrowser` Inbox 摘要读取](../../../../../packages/client-agent-team/src/client/TeamWorkspaceBrowser.tsx#L61)。范围共享本身由 [`TeamChangeStream`](../../../../../packages/client-agent-team/src/client/team-changes.ts) 提供，不能据此假定查询也已共享。
+- L1：[`emitCommitted` / `afterCommit`](../../../../../packages/agent-team/src/index.ts#L3232)。另有 [`RecoveryCoordinator`](../../../../../packages/agent-team/src/recovery.ts#L130) 捕获 wake 异常后停止跟踪的路径，后续需验证能否说明停止原因。
+- 规模验收还需检查 [`invariant`](../../../../../packages/agent-team/src/invariant.ts#L58)：提交合并后仍在同一进程执行全量账本校验。延后执行不是减少 CPU；是否构成目标负载瓶颈尚未确定，不据此直接删除独立校验或引入快照。
 
 ## 实验输入与结果
 
@@ -83,7 +83,7 @@ node --import tsx .scratch/local/state-requests-diagnostics/2026-10-09/ledger-pr
 node node_modules/vitest/vitest.mjs run --config .scratch/local/state-requests-diagnostics/2026-10-09/vitest.config.mts
 ```
 
-新 checkout 没有本机目录时，根据上面的输入与故障步骤重新构造实验；正式验证命令以 [开发检查指南](../../../../docs/development/start-and-checks.md) 和仓库配置为准。V1 的原始输出在本机 `baseline-tests.log`；在原因查明并验证前，不能写“完整 UI 验收通过”。
+新 checkout 没有本机目录时，根据上面的输入与故障步骤重新构造实验；正式验证命令以 [开发检查指南](../../../../../docs/development/start-and-checks.md) 和仓库配置为准。V1 的原始输出在本机 `baseline-tests.log`；在原因查明并验证前，不能写“完整 UI 验收通过”。
 
 ## 设计参考与适用边界
 

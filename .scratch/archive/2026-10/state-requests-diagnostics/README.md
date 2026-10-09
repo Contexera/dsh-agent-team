@@ -1,8 +1,8 @@
 # 状态机、数据请求与诊断日志
 
-**Status:** in-progress — 6 票中 01、02、03、04、05 已完成（票面 Status=complete）；06 可开工（依赖 02／04／05 已到位）。
-**Last checked:** 2026-10-09，代码尖端 `63a9e623`（树 `1fd385f632596a31eb8f5ae36c8c820b019576b0`，05 完成后；04 完成基线 `e02f2862`／树 `55e8cb15b2fede6086988784fed4cadb7a426180`；02 完成基线 `07083c48`／树 `eab0126afc217248ac807aa1f2e73f071a6d9435`；01/03 验收基线 `25c5d571`／树 `1bb8603eb669d077e97264dd11b047af4a2107b6`；均本地未推）。
-**Current frontier:** [05 通知与恢复追踪](issues/05-notification-recovery-trace.md)已 complete（一笔 `63a9e623`：通知带 cause 与 per-Member attempt、投递失败就地 warn 而不再抛给提交边界、`RecoveryCoordinator` 新增 `report(fact)` 覆盖分类／次数／等待／触发／停止／清除、人工恢复与转换行改用 `memberId`＋`sessionId`；维护文档在 [memory-and-context](../../../docs/team-collaboration/memory-and-context.md) 的 Agent notification boundary），等 Vera 终审。下一步 [06 规模验收](issues/06-scale-and-failure-acceptance.md)：除票面判据外还要接收 04 的两条（address book（`includeCatalog: true`）返回体 ∝ 活跃 Task 数、票 03 的 view/线程读未收编与查询键无 Thread 维度）与 Vera 已给出的三份材料——真实 sqlite 介质上的 06 装置与基线读数（Thread 消息 `65278140`，装置 `vera-real-storage-cost.mjs`／`vera-claims-bucket-equivalence.mjs`）、判据 4 的 WeakMap 根因与对照实验（`61fcf478`：补 `tests/harness.tsx` 的 `conversation` 桩四个成员，别为它改产品代码）、以及"我的读取成本装置只能当分量记账、不能冒充 06 端到端负载证据"这条口径（`703aa9b3`）。02 的四片与各票记录见其完成记录。本目录是续接入口。
+**Status:** closed — 6 票全部完成（票面 Status=complete），2026-10-09 归档为 `archive/2026-10/state-requests-diagnostics/`；Vera 的工作项级一次性终审在进行中（只读，不改代码树）。
+**Last checked:** 2026-10-09，代码尖端 `12e83f13`（树 `85d9072f5b5a670f4d9cc63c6494fc87e34ff662`，06 完成后；05 完成基线 `63a9e623`／树 `1fd385f632596a31eb8f5ae36c8c820b019576b0`；04 完成基线 `e02f2862`／树 `55e8cb15b2fede6086988784fed4cadb7a426180`；02 完成基线 `07083c48`／树 `eab0126afc217248ac807aa1f2e73f071a6d9435`；01/03 验收基线 `25c5d571`／树 `1bb8603eb669d077e97264dd11b047af4a2107b6`；均本地未推）。
+**Current frontier:** [06 规模与故障验收](issues/06-scale-and-failure-acceptance.md)已 complete（装置 `aster-host-scale-acceptance.mjs`：真实 sqlite 介质＋真实 Host，2 Workspace／6 Member／1000 Task／24 活跃／40 积压 Thread／长 Thread 补到 20,000 笔；读数与决定见票面完成记录）。三条实现修复：`04096133` 客户端 bench 补 `conversation` 桩与 jsdom `document.fonts` 并把「渲染出的随包 slot entry 崩溃」变成失败、`d4289ffb` Inbox 有界队列补 `hasMore` 与三处可见性、`c15c4a33` Thread 页补充读取失败后仍保留「加载更早消息」入口、`12e83f13` 修正 `activeTaskThreads` 注释。重要决定：提交后全量校验**保留**（不加快照／worker／存储迁移，20 万笔为复查阈值）、Inbox **不加游标**、地址簿目录范围与工具侧映射**保留**并记复查阈值；`WeakMap` 根因在夹具侧（含第二个潜在崩溃 `document.fonts`），未改产品代码。剩余：工作项已归档（本笔），结果与预期效果汇报在工作项级总结里交；Vera 的一次性终审进行中（对着代码树 `85d9072f…`）。
 **Completion conditions:**
 
 - [x] 已提交的配置与实际执行结果可以区分；失败重试补做未完成效果，不重复提交业务事实。
@@ -10,10 +10,10 @@
 - [x] 相同查询共享读取，过期响应不能覆盖新结果，断线重连后仍能取得当前事实。
 - [x] 频道目录、消息分页、成员状态和 Inbox 摘要各自只读取需要的数据；规模实验验证请求数、返回量和扫描成本。
 - [x] 一次操作能关联账本提交、执行结果、通知失败与重试；日志不包含凭据、私有记忆或重复的完整消息正文。
-- [ ] 初始验证中的 Harness `WeakMap` 错误已查明；受影响的定向测试和浏览器流程通过，剩余成本与限制有明确结论。
-- [ ] 实现后的公开行为和维护流程已移入正式文档，所有 ticket 已完成或明确关闭，再归档本工作项。
+- [x] 初始验证中的 Harness `WeakMap` 错误已查明；受影响的定向测试和浏览器流程通过，剩余成本与限制有明确结论。
+- [x] 实现后的公开行为和维护流程已移入正式文档，所有 ticket 已完成或明确关闭，再归档本工作项。
 
-**Formal-doc exit:** Host 执行语义进入 [Host authority](../../../docs/architecture/host-authority.md) 与 [domain model](../../../docs/domain-model.md)；读取与 Remote 契约进入 [Client and Remote](../../../docs/architecture/client-and-remote.md)；刷新和错误呈现进入 [refresh / accessibility](../../../docs/frontend-design/refresh-copy-accessibility.md)。同步受影响的 package README、测试与中英文文档；只有实际实现的行为进入正式文档。
+**Formal-doc exit:** Host 执行语义进入 [Host authority](../../../../docs/architecture/host-authority.md) 与 [domain model](../../../../docs/domain-model.md)；读取与 Remote 契约进入 [Client and Remote](../../../../docs/architecture/client-and-remote.md)；刷新和错误呈现进入 [refresh / accessibility](../../../../docs/frontend-design/refresh-copy-accessibility.md)。同步受影响的 package README、测试与中英文文档；只有实际实现的行为进入正式文档。
 
 ## 范围
 
@@ -25,7 +25,7 @@
 
 保留现有账本单一权威、Task 状态推导、Host 权限与 revision 检查、非乐观持久修改、范围变化订阅。Client 缓存不是第二份业务权威；不预设新状态机库、查询库、日志平台或存储迁移。
 
-01、03、02（四片 `6cbd0285`、`fc6af976`、`4bb66b58`、`07083c48`）与 04（`e02f2862`）已落在本地提交（未推）；05/06 尚未开始，接口与并发策略仍随各票收敛，因此暂不建立 `spec.md`；发布未发生。
+01、03、02（四片 `6cbd0285`、`fc6af976`、`4bb66b58`、`07083c48`）、04（`e02f2862`）、05（`63a9e623`）与 06 的三条修复（`04096133`、`d4289ffb`、`c15c4a33`、`12e83f13`）已落在本地提交（未推）；接口在各票收敛后未再变动，因此全程未建立 `spec.md`；发布未发生。
 
 ## 推进顺序
 
