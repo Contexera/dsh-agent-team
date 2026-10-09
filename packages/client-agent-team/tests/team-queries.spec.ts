@@ -25,6 +25,16 @@ function hub() {
 const workspace = { kind: 'workspace' as const, workspaceId: 'w1' as never }
 const presence = { kind: 'presence' as const, workspaceId: 'w1' as never }
 
+/**
+ * Drive the continuations a resolved response queues — its landing, and the
+ * guard that landing runs through — to quiescence. Both are microtasks, so
+ * draining the queue is deterministic on any machine; a wall-clock wait is not,
+ * and a loaded machine ends it before the landing it was waiting for.
+ */
+const drainContinuations = async (): Promise<void> => {
+  for (let turn = 0; turn < 64; turn += 1) await Promise.resolve()
+}
+
 /** The production roster identity, mirrored: one key per Workspace. */
 const roster = (): TeamQueryIdentity => ({
   key: 'members:w1',
@@ -200,7 +210,7 @@ describe('TeamQueries', () => {
     // The superseded response lands first, with nothing newer applied yet: it
     // must not become state, and its waiters must not see its payload.
     expired.resolve('expired payload')
-    await new Promise(resolve => { setTimeout(resolve, 0) })
+    await drainContinuations()
     expect(queries.diagnostics()['members:w1']).toMatchObject({ droppedSuperseded: 1, droppedStale: 0 })
     fresh.resolve('fresh roster')
     expect(await freshRead).toBe('fresh roster')
@@ -227,7 +237,7 @@ describe('TeamQueries', () => {
     // post-change data, never the expired payload and never the pre-change
     // result they would keep showing forever.
     expired.resolve('expired payload')
-    await new Promise(resolve => { setTimeout(resolve, 0) })
+    await drainContinuations()
     expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 3, droppedSuperseded: 1, droppedStale: 0 })
     fresh.resolve('post-change roster')
     expect(await pending).toBe('post-change roster')
@@ -244,7 +254,7 @@ describe('TeamQueries', () => {
     emit(workspace, { type: 'changed', version: 3, baseline: true })
     queries.dispose()
     held.resolve('expired payload')
-    await new Promise(resolve => { setTimeout(resolve, 0) })
+    await drainContinuations()
     expect(calls).toBe(1)
     expect(await pending).toBe('landed roster')
   })
@@ -263,7 +273,7 @@ describe('TeamQueries', () => {
     // nothing newer has landed, so only the superseded guard stands between
     // that payload and a post-reset reader.
     oldGeneration.resolve('old generation payload')
-    await new Promise(resolve => { setTimeout(resolve, 0) })
+    await drainContinuations()
     expect(queries.diagnostics()['members:w1']).toMatchObject({ droppedSuperseded: 1, droppedStale: 0 })
     reissuedLoad.resolve('post-reset roster')
     expect(await reissued).toBe('post-reset roster')
