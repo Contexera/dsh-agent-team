@@ -1581,7 +1581,7 @@ export class AgentTeamLedger {
       ? this.recentInboxItems(authorized.memberId, workspaceIds[0]!, unreadThreads, taskNumbers)
       : Object.freeze([] as AgentTeamInboxItem[])
     return Object.freeze({ humanMemberId: this.initialization().data.humanMemberId,
-      items: Object.freeze(selected), recent,
+      items: Object.freeze(selected), hasMore: candidates.length > selected.length, recent,
       totalUnreadCount: candidates.reduce((sum, item) => sum + item.unreadCount, 0),
       totalDirectCount: candidates.reduce((sum, item) => sum + item.directCount, 0) })
   }

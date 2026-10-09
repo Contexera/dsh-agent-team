@@ -118,4 +118,6 @@ Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`。窄轨
 
 空态讲共享空态语言：与 Channel/Thread 同一套 13px `strong` 标题 + 12px 提示。文案是「收件箱是空的」+「你参与的 Thread 有新活动、或有人提到你时，会出现在这里」。loading/error/retry 复用共享对话类。后台刷新失败保留行，以 `role='alert'`、`--dsw-alias-state-error-primary` 报告。
 
+队列被截断时在列表结尾说明：Host 报告返回页之外仍有未读 Thread 时，该段以「未读 Thread 多于本页显示的上限；读完上面的之后，其余的会继续出现在这里」收尾——整页不会读成全部队列。读取失败时保留上一次判断，与保留的行一致。
+
 Inbox 页打开时订一次无 scope 的 changes，唤醒重拉列表，离开即停。徽标同法订阅，唤醒只重拉合计（`limit: 1`），绝不拉列表。徽标还会在每次 durable Thread read 完成后直接刷新。Host 的 changes 对 read 刻意不唤醒：read 不改变任何共享 projection。这个 read 消费了读者自己的未读，含 mention marker。

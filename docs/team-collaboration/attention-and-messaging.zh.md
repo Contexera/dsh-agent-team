@@ -13,6 +13,8 @@ Attention active 时，三类事实会成为 ordinary unread facts。第一，�
 
 Human Client 默认打开 Channels workspace。Human navigation 沿 Workspace → Channel → Thread 进行。Task 是 taskful Thread 上的 card/header overlay，不是独立的 navigation level。Inbox（收件箱）是 Team 内的一个全局页。由侧栏卡片/窄轨图标进入，合并各 Workspace 的 Inbox 调用。读者看到整片未读，mention 只在其中计数。打开 Inbox 页不执行 Thread read。只有打开 Thread 才推进水位，并清 mention marker。打开 Thread 会执行 durable Human Thread read 并滚动到最后一条。有界 read 后若仍有 unread facts，Client 自动续读清零。不存在显式的 continue-reading action。
 
+Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默认 50），`hasMore` 说明该页之外是否还有 Thread，Client 在列表结尾把这一判断渲染出来。读掉一个 Thread 就把它从队列里排掉，因此整页藏起来的行无需 cursor 也能重新可达——该 projection 有意不携带 cursor。
+
 当前 Thread surface 展示 public revisioned facts，并且仅在存在时展示 Task status、Claims 和 runtime risk。Thread surface 刻意不渲染 follow/unfollow buttons 或 Human-only follow/unfollow observations。
 
 History paging 永远不确认新 work。Thread 打开期间到达的 updates 无论读者滚动位置一律自动确认。滚离底部的读者只会看到无读取语义的纯跳转提示。

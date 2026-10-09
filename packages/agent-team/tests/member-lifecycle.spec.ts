@@ -952,7 +952,7 @@ describe('Agent Team Member lifecycle', () => {
     const channel = await ctx.agentTeam.createChannel({ requestId: requestId('bare-channel'), workspaceId, name: 'ops', description: 'Ops work' })
     const before = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('pre-join'), workspaceId, channelRef: channel.channel.channelRef, body: 'Posted before anyone joined' })
     expect(before.kind).toBe('committed')
-    expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
 
     // Joining a Channel lights the whole delivery chain for later mentions.
     await ctx.agentTeam.joinChannel({ requestId: requestId('join'), workspaceId, channelRef: channel.channel.channelRef, memberId: bare.status.member.memberId })
@@ -1186,7 +1186,7 @@ describe('Agent Team Member lifecycle', () => {
     const view = ctx.agentTeam.view({ workspaceId })
     expect(view.threads).toHaveLength(0)
     expect(view.items).toHaveLength(0)
-    expect(ctx.agentTeam.inboxForAgent(recipient, { workspaceId })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ctx.agentTeam.inboxForAgent(recipient, { workspaceId })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
 
     // A second DM carries the bounded adjacent context of the first exchange:

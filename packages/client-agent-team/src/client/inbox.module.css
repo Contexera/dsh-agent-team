@@ -248,3 +248,13 @@
   font-variant-numeric: tabular-nums;
   margin-left: 6px;
 }
+
+/* The bounded-queue footnote: the page shows the newest unread Threads up to the
+   Host's cap, so this line is what keeps a full page from reading as the whole
+   queue. It sits with the list it qualifies, not in the header. */
+.queueMore {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 6px 0 0;
+}

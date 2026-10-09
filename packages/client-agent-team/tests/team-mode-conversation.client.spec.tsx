@@ -750,6 +750,27 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('keeps the older-facts affordance when the history read fails, and recovers through it', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true,
+      seededMessages: [{ body: 'capped history', occurredAt: '2026-09-13T03:00:00.000Z' }] })
+    // The first paint's history read is the only source of the older-facts
+    // cursor: a failed one must not take the affordance down with it, or the
+    // Thread's older facts stay unreachable for the life of the page.
+    b.failThreadHistory('history unavailable (spec)')
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
+    expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
+    const affordance = await b.view.findByRole('button', { name: '加载更早消息' })
+    // The affordance stands and is itself the retry: its failure is loud...
+    fireEvent.click(affordance)
+    expect(await b.view.findByText('history unavailable (spec)')).toBeTruthy()
+    // ...and a successful press retires it, so the page never strands the reader.
+    b.failThreadHistory(undefined)
+    fireEvent.click(b.view.getByRole('button', { name: '加载更早消息' }))
+    await waitFor(() => expect(b.view.queryByRole('button', { name: '加载更早消息' })).toBeNull())
+    await b.runtime.dispose()
+  })
+
   it('ranks Thread followers first among mention candidates and scrolls the highlighted row into view', async () => {
     const taskRef = 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e71'
     const b = await runtimeWithTeam({

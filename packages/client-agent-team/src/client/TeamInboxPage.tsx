@@ -75,6 +75,10 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
   const [humanMemberId, setHumanMemberId] = useState<AgentTeamMemberId>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
+  // The Host caps the unread queue and reports whether it did; keeping that
+  // verdict is what stops a full page from reading as the whole queue. A failed
+  // read keeps the last verdict, matching the kept slices below it.
+  const [truncated, setTruncated] = useState(false)
   // Only the first refresh owns the loading surface; later wakes refresh the
   // rendered rows in place instead of flashing them back to skeleton.
   const loadedRef = useRef(false)
@@ -90,7 +94,7 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
       const result = await loadInbox({ workspaceId: workspace.workspaceId, limit: 100 })
       if (result.ok) {
         keptSlicesRef.current.set(workspace.workspaceId, { items: result.value.items, recent: result.value.recent })
-        return { ok: true as const, workspaceId: workspace.workspaceId, workspaceTitle: workspace.title, items: result.value.items, recent: result.value.recent, humanMemberId: result.value.humanMemberId }
+        return { ok: true as const, workspaceId: workspace.workspaceId, workspaceTitle: workspace.title, items: result.value.items, recent: result.value.recent, hasMore: result.value.hasMore, humanMemberId: result.value.humanMemberId }
       }
       const kept = keptSlicesRef.current.get(workspace.workspaceId)
       return { ok: false as const, workspaceId: workspace.workspaceId, workspaceTitle: workspace.title, items: kept?.items ?? [], recent: kept?.recent ?? [], message: result.error.message }
@@ -106,6 +110,9 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
     setRecentRows(results.flatMap(result => asRows(result.recent, result.workspaceId, result.workspaceTitle))
       .sort(compareInboxRows).slice(0, RECENT_ROWS_LIMIT))
     setError(failure?.ok === false ? failure.message : undefined)
+    // Only a successful read carries a verdict: a kept slice must not clear the
+    // footnote it was rendered with.
+    if (results.some(result => result.ok)) setTruncated(results.some(result => result.ok && result.hasMore))
     loadedRef.current = true
     setLoading(false)
   }, [loadInbox, workspaces])
@@ -178,6 +185,9 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
                 <div className={inboxCss.list}>
                   {rows.map(row => <InboxQueueRow key={`${row.workspaceId} ${row.item.thread.threadRef}`} row={row} t={t} showWorkspace={showWorkspace} human={human} onOpen={() => { open(row) }} />)}
                 </div>
+                {/* A capped queue says so where the list ends: the rows above are
+                    the newest unread Threads, never a claim to be all of them. */}
+                {truncated && <p className={inboxCss.queueMore} role="status">{t('inboxQueueMore')}</p>}
               </section>}
               {recentRows.length > 0 && <section className={inboxCss.section}>
                 <h2 className={inboxCss.sectionTitle}>{t('inboxSectionRecent')}<span className={inboxCss.sectionCount}>{recentRows.length}</span></h2>

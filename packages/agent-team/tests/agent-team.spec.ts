@@ -437,7 +437,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(after.claims).toHaveLength(before.claims.length)
     // No Inbox semantics: unread/direct counts stay untouched for both sides.
     expect(ledger.inbox(receiver.actor, { workspaceId: alpha })).toEqual(beforeInbox)
-    expect(ledger.inbox(sender.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(sender.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
 
     // Idempotent retry: same requestId resolves the same receipt, no second append.
     const retry = (await ledger.sendDm({ requestId: requestId('dm-1'), workspaceId: alpha,
@@ -669,6 +669,28 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(after.totalDirectCount).toBe(1)
   })
 
+  it('discloses a capped unread queue instead of letting a full page read as all of it', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = replayLedger(test)
+    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    let lastTaskRef: AgentTeamTaskRef | undefined
+    for (const [index, body] of ['First thread anchor', 'Second thread anchor'].entries()) {
+      const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`capped-${index}`), workspaceId: alpha, channelRef: channel.channel.channelRef, body, actor: agentTeamHumanActor() })).value))
+      committed((await ledger.reply({ requestId: requestId(`capped-reply-${index}`), workspaceId: alpha, taskRef: started.task.taskRef, body: `Progress on thread ${index}`, baseRevision: started.thread.revision, actor })).value)
+      lastTaskRef = started.task.taskRef
+    }
+    // Two Threads hold unread; a page with room for one must say the queue goes on.
+    const capped = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha, limit: 1 })
+    expect(capped.items).toHaveLength(1)
+    expect(capped.hasMore).toBe(true)
+    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha, limit: 2 })).toMatchObject({ hasMore: false })
+    // Reading a Thread drains it from the queue, which is the way back to the
+    // row the capped page hid — no cursor, no guessing.
+    await ledger.readThread({ requestId: requestId('capped-read'), workspaceId: alpha, taskRef: lastTaskRef!, actor: agentTeamHumanActor() })
+    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha, limit: 1 }).hasMore).toBe(false)
+  })
+
   it('serves pure follow unread on the same data', async () => {
     const test = await harness()
     const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
@@ -710,11 +732,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(read.consumedDirectMarkers).toEqual([expect.objectContaining({ messageRef: mentioned.message.messageRef })])
     expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [],
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.task.threadRef }), unreadCount: 0, directCount: 0 })],
-      totalUnreadCount: 0, totalDirectCount: 0 })
+      hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
     const replay = replayLedger(test)
     expect(replay.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [],
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.task.threadRef }), unreadCount: 0, directCount: 0 })],
-      totalUnreadCount: 0, totalDirectCount: 0 })
+      hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
   })
 
   it('moves a participated Thread from the unread queue into the Human recent slice once it is read', async () => {
@@ -1411,7 +1433,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await first.fiber.dispose(); await first.facility.closeAll()
     const second = await sqliteHarness(path)
     const replay = replayLedger(second)
-    expect(replay.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(replay.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
     expect(second.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef }).items.map(item => item.message.body)).toEqual(['Persistent task', 'Persistent update'])
     expect(replay.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toMatchObject({ readThroughSequence: update.thread.revision })
     replay.validate()
@@ -2121,10 +2143,10 @@ describe('AgentTeam archived read surfaces', () => {
     // Archived Channels do not exist on Team API surfaces: neither the unread
     // queue nor the Human recent tail names their Threads, for the Human or
     // for a Member, and the picture survives a cold restart.
-    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledger.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledger.memberInbox(actor, {})).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(replayLedger(test).inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.memberInbox(actor, {})).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(replayLedger(test).inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
   })
 })
 
@@ -2544,7 +2566,7 @@ describe('body-authored mentions', () => {
     expect(reply.undeliveredMentions).toEqual([stranger.member.memberId])
     expect(reply.directMarkers).toEqual([])
     expect(ledger.attentionStatus(stranger.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeUndefined()
-    expect(ledger.inbox(stranger.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(stranger.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
   })
 
   it('delivers to a Member the Thread already carried, even after it unfollowed', async () => {
@@ -2601,7 +2623,7 @@ describe('body-authored mentions', () => {
     // The expansion is snapshotted into the operation: a Member who joins the
     // Channel afterwards is not retroactively addressed by this write.
     expect(sent.directMarkers.map(marker => marker.memberId).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
-    expect(ledger.inbox(late.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(late.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
   })
 
   it('merges explicit recipients with body mentions without duplicating a Member', async () => {

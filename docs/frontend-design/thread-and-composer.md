@@ -7,6 +7,8 @@ When the reader is within 48px of the bottom, follow new content; away from the 
 
 Opening a Thread scrolls to the latest fact, and a bounded read with a remaining unread count continues automatically: a serial drain loop issues fresh-requestId reads until the remainder is zero (50-round cap surfaces an error). Compensate `scrollTop` by the `scrollHeight` delta when prepending history. Rendering keys change with facts; a current length plus last fact key is used.
 
+Older facts are paged by the timeline's own 「加载更早消息」 action, so the first paint's history read is what decides whether it is offered: a read that was refused or rejected leaves the action standing, paging back from the oldest fact on screen under its own error surface, rather than stranding older facts behind a control that never appears.
+
 ## Composer and mentions
 The textarea grows to 336px, autofocuses without moving the timeline, sends on Enter, and inserts a newline on Shift+Enter. IME composition suppresses send. During submit it stays focused and read-only; buttons do not steal focus. Confirmation for an unfollowed recipient preserves draft and focus for the second Enter.
 

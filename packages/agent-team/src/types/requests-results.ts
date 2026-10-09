@@ -718,6 +718,7 @@ export interface AgentTeamClaimList {
 /** Read-only, personal Workspace Inbox projection. */
 export interface AgentTeamInboxRequest {
   readonly workspaceId: WorkspaceId
+  /** Unread Threads to return: an integer from 1 to 100, default 50. */
   readonly limit?: number
 }
 
@@ -782,8 +783,15 @@ export interface AgentTeamInbox {
    * record.
    */
   readonly humanMemberId: AgentTeamMemberId
-  /** The unread queue: every Thread holding at least one unread fact for this reader. */
+  /**
+   * The unread queue, mentions first then newest: the Threads holding at least
+   * one unread fact for this reader, at most `limit` of them. `hasMore` says
+   * whether the queue continues past this page; reading a Thread drains it from
+   * the queue, which is how a reader reaches the rows a full page hides.
+   */
   readonly items: readonly AgentTeamInboxItem[]
+  /** Whether unread Threads exist beyond `items` — the queue is bounded, this is its disclosure. */
+  readonly hasMore: boolean
   /**
    * Human readers only: the 「最近活跃」 slice — Threads this reader took part in,
    * newest activity first, at most ten, excluding every Thread the queue above
@@ -989,8 +997,10 @@ export interface AgentTeamView {
   readonly taskNumbers: readonly { readonly taskRef: AgentTeamTaskRef; readonly taskNumber: number }[]
   readonly items: readonly AgentTeamViewItem[]
   /**
-   * The「活跃 task thread」radar: every in_progress / in_review Task Thread in
-   * the reader's authorized Channels of this Workspace, newest activity first.
+   * The「活跃 task thread」radar: the in_progress / in_review Task Threads of the
+   * response's scope, newest activity first. With `includeCatalog` that is every
+   * such Task Thread in the reader's authorized Channels of this Workspace;
+   * without it, only those the catalog above carries.
    * Independent of the reader's participation and unread state — its job is to
    * surface who is already on what, so re-entry and pre-claim/pre-commit checks
    * do not mistake in-flight work for a conflict.

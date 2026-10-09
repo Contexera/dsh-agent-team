@@ -192,6 +192,7 @@ const teamInbox = defineTool({
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
       totalUnreadCount: { type: 'number', required: true }, totalDirectCount: { type: 'number', required: true },
+      hasMore: { type: 'boolean', required: true },
       items: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         workspaceId: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, channelRef: { type: 'string', required: true },
         taskRef: { type: 'string' }, status: { type: 'string' }, revision: { type: 'number', required: true }, unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true },
@@ -206,12 +207,14 @@ const teamInbox = defineTool({
     render: (_args, value) => {
       if (value.items.length === 0) {
         return [{ type: 'text', text: value.totalUnreadCount > 0
-          ? `Inbox — ${value.totalUnreadCount} unread update(s) on Threads beyond this bounded list — call again with a larger limit.`
+          ? `Inbox — ${value.totalUnreadCount} unread update(s) on Threads beyond this bounded page — read these Threads to drain the queue.`
           : 'Inbox empty — no unread Team work.' }]
       }
-      const shown = value.items.reduce((sum, item) => sum + item.unreadCount, 0)
+      const more = value.hasMore
+        ? '; the unread queue is bounded and more Threads sit beyond this page — read these to drain it, or ask for up to 100 rows.'
+        : '.'
       return [{ type: 'text', text: [
-        `Inbox — ${value.totalUnreadCount} unread update(s) total, ${value.totalDirectCount} direct, across ${value.items.length} Thread(s) shown${value.totalUnreadCount > shown ? `; ${value.totalUnreadCount - shown} more on Threads beyond this bounded list — call again with a larger limit.` : '.'}`,
+        `Inbox — ${value.totalUnreadCount} unread update(s) total, ${value.totalDirectCount} direct, across ${value.items.length} Thread(s) shown${more}`,
         ...value.items.map(item => `${item.workspaceId} · ${item.threadRef}${item.channelRef === undefined ? '' : ` · ${item.channelRef}`}${item.taskRef === undefined ? '' : ` · ${taskStanding(item)}`} · ${item.unreadCount} unread, ${item.directCount} direct${item.newestOccurredAt === undefined ? '' : ` · newest ${formatTeamTimestamp(item.newestOccurredAt)}`}`),
         'Read a selected Thread with team_thread read. Listing changes no read state and supplies no write token.',
       ].join('\n') }]
@@ -223,7 +226,7 @@ const teamInbox = defineTool({
     const host = service(agent)
     const inbox = host.inboxForAgent(agent, { ...(args.workspace === undefined ? {} : { workspaceId: workspaceOf(args, agent) }), ...(args.limit === undefined ? {} : { limit: args.limit }) })
     return {
-      totalUnreadCount: inbox.totalUnreadCount, totalDirectCount: inbox.totalDirectCount,
+      totalUnreadCount: inbox.totalUnreadCount, totalDirectCount: inbox.totalDirectCount, hasMore: inbox.hasMore,
       items: inbox.items.map(item => {
         const taskNumber = item.taskNumber
         return { workspaceId: item.workspaceId, threadRef: item.thread.threadRef, channelRef: item.channelRef,

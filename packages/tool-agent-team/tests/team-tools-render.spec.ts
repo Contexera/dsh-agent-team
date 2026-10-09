@@ -104,7 +104,7 @@ describe('team_view renders one address book', () => {
 describe('team_inbox renders triage, not a read', () => {
   it('header totals, both per-row counters (including zero direct), truncation conclusion, and a read route', () => {
     const text = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 9, totalDirectCount: 2,
+      totalUnreadCount: 9, totalDirectCount: 2, hasMore: false,
       items: [
         { threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 2, taskNumber: 7 },
         { threadRef: 'thread:bbbb2222-0000-4000-8000-000000000002', channelRef: CHANNEL, revision: 101, unreadCount: 3, directCount: 0 },
@@ -117,27 +117,30 @@ describe('team_inbox renders triage, not a read', () => {
     expect(text).toContain('no write token')
   })
 
-  it('a truncated bounded list says more exists; a drained list does not', () => {
-    const truncated = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 12, totalDirectCount: 5,
+  it('a capped page says the queue goes on; a complete one does not', () => {
+    // The Host's own verdict drives the conclusion, not a comparison the model
+    // would have to reconstruct from two differently-shaped numbers.
+    const capped = renderText(teamTools().get('team_inbox')!, {}, {
+      totalUnreadCount: 12, totalDirectCount: 5, hasMore: true,
       items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, revision: 100, unreadCount: 7, directCount: 3 }],
     })
-    expect(truncated).toContain('beyond this bounded list')
-    const drained = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 2, totalDirectCount: 0,
+    expect(capped).toContain('more Threads sit beyond this page')
+    expect(capped).toContain('up to 100 rows')
+    const complete = renderText(teamTools().get('team_inbox')!, {}, {
+      totalUnreadCount: 2, totalDirectCount: 0, hasMore: false,
       items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, revision: 100, unreadCount: 2, directCount: 0 }],
     })
-    expect(drained).not.toContain('beyond this bounded list')
+    expect(complete).not.toContain('beyond this page')
   })
 
   it('empty inbox states there is no unread Team work', () => {
-    const text = renderText(teamTools().get('team_inbox')!, {}, { totalUnreadCount: 0, totalDirectCount: 0, items: [] })
+    const text = renderText(teamTools().get('team_inbox')!, {}, { totalUnreadCount: 0, totalDirectCount: 0, hasMore: false, items: [] })
     expect(text).toContain('Inbox empty — no unread Team work.')
   })
 
   it('renders no subject, body, revision label, or write token', () => {
     const text = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 1, totalDirectCount: 1,
+      totalUnreadCount: 1, totalDirectCount: 1, hasMore: false,
       items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, revision: 100, unreadCount: 1, directCount: 1 }],
     })
     expect(text).not.toContain('revision')
@@ -585,7 +588,7 @@ describe('team tools render absolute event instants in UTC+8', () => {
 
   it('inbox rows carry the newest unread instant; view rows carry last activity', () => {
     const inbox = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 4, totalDirectCount: 1,
+      totalUnreadCount: 4, totalDirectCount: 1, hasMore: false,
       items: [{ threadRef: THREAD, channelRef: CHANNEL, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 1, taskNumber: 7, newestOccurredAt: '2026-09-08T08:58:41.000Z' }],
     })
     expect(inbox).toContain(`4 unread, 1 direct · newest 2026-09-08T16:58:41+08:00`)

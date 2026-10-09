@@ -408,9 +408,12 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const loadThreadHistory = vi.fn(async ({ taskRef, threadRef }: { taskRef?: string; threadRef?: string }) => {
     const top = viewItems.find(item => (threadRef !== undefined && (item.thread as { threadRef: string }).threadRef === threadRef)
       || (taskRef !== undefined && (item.task as { taskRef?: string } | undefined)?.taskRef === taskRef)) ?? viewItems[0]
+    if (threadHistoryFailure !== undefined) return { ok: false as const, error: { message: threadHistoryFailure } }
     if (top === undefined) return { ok: false as const, error: { message: 'thread missing' } }
     return { ok: true as const, value: { task: top.task, thread: top.thread, anchor: top.message, anchorMentions: [], claims: viewClaims, facts: [], cursor: 0, hasMore: false } }
   })
+  /** One-shot history-read failure; cleared by the next successful read. */
+  let threadHistoryFailure: string | undefined
   // The Human author follows every seeded Thread; tests override the set to
   // drive the mention-candidate ranking.
   const threadFollowers = [...(options?.seedFollowers ?? ['member:human'])]
@@ -452,6 +455,9 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // own mention count), and a row seeded with no unread stands for the
   // 「最近活跃」 tail the Host admits by participation instead.
   let inboxRows: Array<{ readonly workspaceId: string; readonly item: Record<string, unknown> }> = []
+  // The Host's own verdict on the bounded unread queue; specs flip it to prove
+  // the page discloses a capped page instead of reading as the whole queue.
+  let inboxHasMore = false
   const inbox = vi.fn(async ({ workspaceId }: { workspaceId: string }) => {
     const scoped = inboxRows.filter(row => row.workspaceId === workspaceId)
     const holdsUnread = (row: { readonly item: Record<string, unknown> }): boolean => ((row.item as { unreadCount?: number }).unreadCount ?? 0) > 0
@@ -459,10 +465,11 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const recent = scoped.filter(row => !holdsUnread(row)).map(row => row.item)
     const unread = items.reduce((sum, item) => sum + ((item as { unreadCount?: number }).unreadCount ?? 0), 0)
     const direct = items.reduce((sum, item) => sum + ((item as { directCount?: number }).directCount ?? 0), 0)
-    return { ok: true as const, value: { humanMemberId: 'member:human', items, recent, totalUnreadCount: unread, totalDirectCount: direct } }
+    return { ok: true as const, value: { humanMemberId: 'member:human', items, recent, hasMore: inboxHasMore, totalUnreadCount: unread, totalDirectCount: direct } }
   })
-  const seedInbox = (rows: ReadonlyArray<{ readonly workspaceId: string } & Record<string, unknown>>): void => {
+  const seedInbox = (rows: ReadonlyArray<{ readonly workspaceId: string } & Record<string, unknown>>, options?: { readonly hasMore?: boolean }): void => {
     inboxRows = rows.map(row => ({ workspaceId: row.workspaceId, item: row as Record<string, unknown> }))
+    inboxHasMore = options?.hasMore ?? false
     wakeAll()
   }
   const changes = vi.fn(async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
@@ -637,5 +644,6 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const disposeSettings = runtime.slots.register({ name: 'sidebar.settings', priority: 0 }, BaselineSettings as never)
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
-  return { runtime, team, view, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, clearMemberContext, archiveMember, modelCatalog, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession }
+  const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
+  return { runtime, team, view, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, clearMemberContext, archiveMember, modelCatalog, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory }
 }

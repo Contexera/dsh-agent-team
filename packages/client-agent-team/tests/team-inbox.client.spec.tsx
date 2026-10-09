@@ -367,6 +367,16 @@ describe('Team Inbox surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('says the unread queue continues past a capped page, and stays quiet on a complete one', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    fireEvent.click(await b.view.findByRole('button', { name: '收件箱' }))
+    // The Host caps the queue and says so; a capped page must not read as all
+    // of it — the rows above are the newest unread Threads, nothing more.
+    b.seedInbox([inboxRow('w1', 'thread:capped')], { hasMore: true })
+    expect(await b.view.findByText('未读 Thread 多于本页显示的上限；读完上面的之后，其余的会继续出现在这里')).toBeTruthy()
+    await b.runtime.dispose()
+  })
+
   it('opens the row Thread through selectWorkspace + selectThread, drops the unread dot, and lands Back on its Channel', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', seededMessages: [{ body: 'Thread opener', occurredAt: '2026-09-13T03:00:00.000Z' }], remainingUnreadCounts: [0], initialChannels: true, seedThreadRef: 'thread:w2' })
     const card = await b.view.findByRole('button', { name: '收件箱' })

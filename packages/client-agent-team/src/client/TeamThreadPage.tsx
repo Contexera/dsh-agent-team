@@ -364,6 +364,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         })
         setHistoryCursor(history.value.cursor)
         setHistoryHasMore(history.value.hasMore)
+      } else {
+        // A history read that rejected or was refused must not take the only way
+        // back to older facts with it: the affordance stands, and pressing it
+        // pages from the oldest fact on screen under its own error surface.
+        setHistoryHasMore(true)
       }
       if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
       setError(undefined)
