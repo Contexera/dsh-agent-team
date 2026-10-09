@@ -1,12 +1,12 @@
 # 状态机、数据请求与诊断日志
 
-**Status:** in-progress — 6 票中 01、03 已完成并验收（票面 Status=complete）；02/04/05 依赖已解除、尚未认领；06 等 02/04/05。
-**Last checked:** 2026-10-09，代码基线 `25c5d571`（树 `1bb8603eb669d077e97264dd11b047af4a2107b6`，本地未推）。
-**Current frontier:** 下一步可开工 [02 成员执行隔离](issues/02-member-execution-isolation.md)、[04 有界投影](issues/04-bounded-projections.md)、[05 通知与恢复追踪](issues/05-notification-recovery-trace.md)（依赖均已在 01/03 解除），完成后 [06 规模验收](issues/06-scale-and-failure-acceptance.md)。票 03 的未解决限制（view/线程读未收编、查询键无 Thread 维度、WeakMap 根因在 Harness）记在其票面完成记录，修/避归 06。nmem 当前不可用，本目录是续接入口。
+**Status:** in-progress — 6 票中 01、03 已完成并验收（票面 Status=complete）；02 已完成、待终审（7 条判据全勾）；04/05 依赖已解除、尚未认领；06 等 02/04/05。
+**Last checked:** 2026-10-09，代码尖端 `07083c48`（树 `eab0126afc217248ac807aa1f2e73f071a6d9435`，02 完成后；01/03 验收基线 `25c5d571`/树 `1bb8603eb669d077e97264dd11b047af4a2107b6`；均本地未推）。
+**Current frontier:** [02 成员执行隔离](issues/02-member-execution-isolation.md)已 complete（四片：`6cbd0285` 按 Member 拆生命周期链、`fc6af976` 顺序与并发新增证据、`4bb66b58` 关闭/取消等待出口、`07083c48` 等待类日志与双语文档同步），等 Vera 终审；可开工 [04 有界投影](issues/04-bounded-projections.md)、[05 通知与恢复追踪](issues/05-notification-recovery-trace.md)（依赖均已在 01/03 解除），完成后 [06 规模验收](issues/06-scale-and-failure-acceptance.md)。票 03 的未解决限制（view/线程读未收编、查询键无 Thread 维度、WeakMap 根因在 Harness）记在其票面完成记录，修/避归 06。nmem 当前不可用，本目录是续接入口。
 **Completion conditions:**
 
 - [x] 已提交的配置与实际执行结果可以区分；失败重试补做未完成效果，不重复提交业务事实。
-- [ ] 一个 Member 的长时等待不阻塞其他 Member；同一 Member 的顺序、停止与关闭语义明确。
+- [x] 一个 Member 的长时等待不阻塞其他 Member；同一 Member 的顺序、停止与关闭语义明确。
 - [x] 相同查询共享读取，过期响应不能覆盖新结果，断线重连后仍能取得当前事实。
 - [ ] 频道目录、消息分页、成员状态和 Inbox 摘要各自只读取需要的数据；规模实验验证请求数、返回量和扫描成本。
 - [ ] 一次操作能关联账本提交、执行结果、通知失败与重试；日志不包含凭据、私有记忆或重复的完整消息正文。
@@ -25,7 +25,7 @@
 
 保留现有账本单一权威、Task 状态推导、Host 权限与 revision 检查、非乐观持久修改、范围变化订阅。Client 缓存不是第二份业务权威；不预设新状态机库、查询库、日志平台或存储迁移。
 
-01 与 03 的实现已落在本地提交（未推）；02/04/05/06 尚未开始，接口与并发策略仍随各票收敛，因此暂不建立 `spec.md`；发布未发生。
+01、03 与 02 的四片（`6cbd0285`、`fc6af976`、`4bb66b58`、`07083c48`）已落在本地提交（未推）；04/05/06 尚未开始，接口与并发策略仍随各票收敛，因此暂不建立 `spec.md`；发布未发生。
 
 ## 推进顺序
 

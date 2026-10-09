@@ -573,7 +573,27 @@ export default class AgentTeam extends TypertRemoteService {
     executeTransition: (memberId, plan) => this.executeMemberTransition(memberId, plan),
     log: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
   })
-  private lifecycleTail: Promise<void> = Promise.resolve()
+  /**
+   * Per-Member lifecycle chains: one Member's long waits (its turn boundary,
+   * its idle) hold only that Member's later operations, so managing another
+   * Member never queues behind them. Order within a chain is submission
+   * order, preserving same-Member edit/stop/archive/remove/transition
+   * sequencing; cross-Member commits stay totally ordered by the ledger's own
+   * single writer queue.
+   */
+  private readonly memberLifecycleTails = new Map<AgentTeamMemberId, Promise<void>>()
+  /**
+   * addMember chains by request id: the Member id does not exist until the
+   * commit answers, and concurrent duplicates of one request must serialize
+   * so exactly one of them activates the replayed id.
+   */
+  private readonly additionLifecycleTails = new Map<AgentTeamRequestId, Promise<void>>()
+  /** Resolves when Host teardown starts: in-chain idle waits release on it instead of outliving the Host. */
+  private readonly shutdown = (() => {
+    let resolve!: () => void
+    const promise = new Promise<void>(finish => { resolve = finish })
+    return Object.freeze({ promise, resolve })
+  })()
   private accepting = true
   /** One adoption attempt per boot: the two readiness edges fire once each, and this keeps their attempt single. */
   private legacyAdoptionStarted = false
@@ -846,13 +866,21 @@ export default class AgentTeam extends TypertRemoteService {
     const domain = await this.ctx.storageDomain.open(agentTeamDomainSpec)
     this.ctx.effect(() => async () => {
       this.accepting = false
+      // Host shutdown must not depend on a turn that may never end: release
+      // every wait (in-chain idle waits through the gate, boundary waits
+      // through the runtime), so the chains below can drain to zero first.
+      this.shutdown.resolve()
+      this.memberRuntime.releaseTurnWaits()
       this.recovery.dispose()
       this.contextManagement.dispose()
       this.pressurePolicy.dispose()
       if (this.attachmentGcTimer !== undefined) clearInterval(this.attachmentGcTimer)
       this.attachmentGcTimer = undefined
       this.emitChanged()
-      await this.lifecycleTail
+      // Every lifecycle operation enqueued before `accepting` flipped is in
+      // one of the two maps (new ones reject at enqueue), so this snapshot
+      // drains them all.
+      await Promise.all([...this.memberLifecycleTails.values(), ...this.additionLifecycleTails.values()])
       await Promise.all([...this.handles.values()].map(handle => handle.dispose()))
       this.handles.clear()
       this.modelSelections.clear()
@@ -1068,7 +1096,7 @@ export default class AgentTeam extends TypertRemoteService {
   /** Create a durable Member and atomically grant its declared initial Channels. */
   @Remote('addMember')
   async addMember(request: AgentTeamAddMemberRequest): Promise<AgentTeamAddMemberResult> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueAddition(request.requestId, async () => {
       const workspace = this.requireWorkspace(request.workspaceId)
       await this.assertModelRoute(request.model)
       const memberId = `member:${randomUUID()}` as AgentTeamMemberId
@@ -1097,7 +1125,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Commit suspended intent, then run the suspended row of the effect table: the owned AgentHandle is disposed, the Session stays. */
   async suspendMember(request: AgentTeamSetMemberStateRequest): Promise<AgentTeamMemberResult> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueLifecycle(request.memberId, async () => {
       const result = await this.requireLedger().suspendMember({ ...request, actor: agentTeamHumanActor() })
       if (result.committed) this.emitCommitted(result.value.receipt)
       await this.convergeMemberEffects(result.value.member)
@@ -1107,7 +1135,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Commit enabled intent and restore the exact persisted Session. */
   async resumeMember(request: AgentTeamSetMemberStateRequest): Promise<AgentTeamMemberResult> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueLifecycle(request.memberId, async () => {
       const result = await this.requireLedger().resumeMember({ ...request, actor: agentTeamHumanActor() })
       if (result.committed) this.emitCommitted(result.value.receipt)
       this.clearMemberNotificationState(result.value.member.memberId)
@@ -1146,7 +1174,7 @@ export default class AgentTeam extends TypertRemoteService {
     const stranded = handle === undefined || handle.agent.id !== member.sessionId
     if (stranded && member.state === 'enabled' && this.requireLedger().lastTransitionForMember(request.memberId) !== undefined) {
       this.ctx.logger.info(`agent-team: finishing the recorded Session transition for member '${member.handle}'`)
-      const settled = await this.enqueueLifecycle(async () => {
+      const settled = await this.enqueueLifecycle(request.memberId, async () => {
         await this.finishMemberTransition(request.memberId)
         return this.requireLedger().getMember(request.memberId) ?? member
       })
@@ -1159,7 +1187,7 @@ export default class AgentTeam extends TypertRemoteService {
     // a resume prompt or rebuilding it as if it were enabled.
     if (member.state !== 'enabled' && handle !== undefined) {
       this.ctx.logger.info(`agent-team: finishing the interrupted ${member.state} cleanup for member '${member.handle}'`)
-      const settled = await this.enqueueLifecycle(async () => {
+      const settled = await this.enqueueLifecycle(request.memberId, async () => {
         await this.convergeMemberEffects(member)
         return this.requireLedger().getMember(request.memberId) ?? member
       })
@@ -1203,7 +1231,7 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('clearMemberContext')
   async clearMemberContext(request: AgentTeamClearMemberContextRequest): Promise<AgentTeamClearMemberContextResult> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueLifecycle(request.memberId, async () => {
       this.requireAccepting()
       this.requireWorkspace(request.workspaceId)
       const stored = this.requireLedger().getMember(request.memberId)
@@ -1350,7 +1378,9 @@ export default class AgentTeam extends TypertRemoteService {
     // the retire window must still be captured for the new generation, and
     // the coordinator drops its own bookkeeping only after the swap settles.
     this.memberBySessionId.delete(previousSessionId)
-    await active.dispose()
+    await this.waitLogged('wait-external', { label: this.memberLabel(memberId), sessionId: previousSessionId },
+      'for the retired Agent to release its Session write path',
+      () => active.dispose())
     this.handles.delete(memberId)
     this.modelSelections.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
@@ -1358,7 +1388,9 @@ export default class AgentTeam extends TypertRemoteService {
     this.clearMemberNotificationState(memberId)
     // The previous log survives on disk; archiving hides it from every
     // grouping surface so one Member keeps exactly one visible Session.
-    await this.ctx.workspaceRegistry.archiveSession(previousSessionId)
+    await this.waitLogged('wait-external', { label: this.memberLabel(memberId), sessionId: previousSessionId },
+      'for the Workspace registry to archive the retired Session',
+      () => this.ctx.workspaceRegistry.archiveSession(previousSessionId))
   }
 
   /**
@@ -1370,7 +1402,7 @@ export default class AgentTeam extends TypertRemoteService {
    * ledger, never copied.
    */
   private async executeMemberTransition(memberId: AgentTeamMemberId, plan: TransitionPlan): Promise<void> {
-    await this.enqueueLifecycle(async () => {
+    await this.enqueueLifecycle(memberId, async () => {
       this.requireAccepting()
       const stored = this.requireLedger().getMember(memberId)
       if (stored === undefined || stored.state !== 'enabled') throw new Error(`Agent Member '${memberId}' cannot roll over: not enabled`)
@@ -1379,8 +1411,14 @@ export default class AgentTeam extends TypertRemoteService {
       if (active === undefined) throw new Error(`Agent Member '${stored.handle}' has no active session to roll over`)
       // A racing turn the admission gate rejects still leaves the Agent
       // momentarily running; wait for its convergence instead of failing the
-      // swap — the gate guarantees it spends no model request.
-      if (this.runningAgents.has(active.agent.id)) await active.agent.whenIdle()
+      // swap — the gate guarantees it spends no model request. Host shutdown
+      // resolves this wait too; the running recheck below still refuses the
+      // swap instead of committing against a turn that never idled.
+      if (this.runningAgents.has(active.agent.id)) {
+        await this.waitLogged('wait-turn', { label: stored.handle, sessionId: stored.sessionId },
+          'for the turn to converge before the Session transition',
+          () => Promise.race([active.agent.whenIdle(), this.shutdown.promise]))
+      }
       if (this.runningAgents.has(active.agent.id)) throw new Error(`Agent Member '${stored.handle}' is still running; the rollover must wait for idle`)
       // Checkpoint return: resolve the seed before committing anything. A
       // violation found here fails the whole swap with the old generation
@@ -1457,6 +1495,27 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
+   * Run one lifecycle wait and log its class, subject, and duration. Waits are
+   * the only lifecycle step whose latency is not the commit's own: with these
+   * lines an operator can tell a Member parked on its own turn (`wait-turn`)
+   * from one parked on an external service (`wait-external`), while a real
+   * failure keeps its own warn line with the same member/session correlation.
+   */
+  private async waitLogged<T>(
+    stage: 'wait-turn' | 'wait-external',
+    subject: { readonly label: string; readonly sessionId: SessionId },
+    detail: string,
+    wait: () => Promise<T>,
+  ): Promise<T> {
+    const started = Date.now()
+    try {
+      return await wait()
+    } finally {
+      this.ctx.logger.info(`agent-team: member '${subject.label}' session '${subject.sessionId}' stage '${stage}' waited ${Date.now() - started}ms ${detail}`)
+    }
+  }
+
+  /**
    * Cache GC: uploads referenced by a Message survive 72h from upload so
    * Member agents keep a consumption window; orphans (never sent) go after
    * 24h. Runs once at startup and then daily — in-process only, because the
@@ -1516,7 +1575,7 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('updateMember')
   async updateMember(request: AgentTeamUpdateMemberRequest): Promise<AgentTeamUpdateMemberResult> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueLifecycle(request.memberId, async () => {
       await this.assertModelRoute(request.model)
       const previous = this.requireLedger().getMember(request.memberId)
       const result = await this.requireLedger().updateMember({ ...request, actor: agentTeamHumanActor() })
@@ -1576,7 +1635,13 @@ export default class AgentTeam extends TypertRemoteService {
    */
   private async applyCapabilityEdit(active: AgentHandle, stored: AgentTeamAgentMember): Promise<'applied' | 'deferred:generation-changed'> {
     const memberId = stored.memberId
+    const started = Date.now()
     const waited = await this.memberRuntime.awaitTurnBoundary(active)
+    if (waited) {
+      // Only real waits are logged: an edit applied to an already-idle Member
+      // spends no time here and would only add noise.
+      this.ctx.logger.info(`agent-team: member '${stored.handle}' session '${stored.sessionId}' stage 'wait-turn' waited ${Date.now() - started}ms for its turn boundary before applying the stored configuration`)
+    }
     if (waited && this.handles.get(memberId) !== active) {
       // The wait resolved because the old generation was disposed, not
       // because the turn ended; the ledger intent applies at the next
@@ -1593,7 +1658,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Irreversibly remove one Member, archive its Session, and delete its private namespace. */
   async removeMember(request: AgentTeamRemoveMemberRequest): Promise<AgentTeamRemoveMemberResult> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueLifecycle(request.memberId, async () => {
       const result = await this.requireLedger().removeMember({ ...request, actor: agentTeamHumanActor() })
       if (result.committed) this.emitCommitted(result.value.receipt)
       await this.convergeMemberEffects(result.value.member)
@@ -1609,7 +1674,7 @@ export default class AgentTeam extends TypertRemoteService {
    */
   @Remote('archiveMember')
   async archiveMember(request: AgentTeamArchiveMemberRequest): Promise<AgentTeamArchiveMemberResult> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueLifecycle(request.memberId, async () => {
       const result = await this.requireLedger().archiveMember({ ...request, actor: agentTeamHumanActor() })
       if (result.committed) this.emitCommitted(result.value.receipt)
       await this.convergeMemberEffects(result.value.member)
@@ -3142,7 +3207,7 @@ export default class AgentTeam extends TypertRemoteService {
    * is reopened, the same trade the shipped suspend/resume cycle makes.
    */
   private reactivateMember(memberId: AgentTeamMemberId): Promise<boolean> {
-    return this.enqueueLifecycle(async () => {
+    return this.enqueueLifecycle(memberId, async () => {
       const member = this.requireLedger().getMember(memberId)
       if (member === undefined || member.state !== 'enabled') return false
       const stale = this.handles.get(memberId)
@@ -3552,7 +3617,12 @@ export default class AgentTeam extends TypertRemoteService {
     this.clearMemberRecoveryState(member)
     const handle = this.handles.get(memberId)
     if (handle !== undefined) {
-      await handle.dispose()
+      // Disposal cancels the Member's turn and then waits for the Agent to
+      // quiesce, session write path included: that is external execution, not
+      // the Member's own turn, so it logs under its own stage.
+      await this.waitLogged('wait-external', { label: this.memberLabel(memberId), sessionId: member.sessionId },
+        'for the Agent to release its Session write path',
+        () => handle.dispose())
       this.handles.delete(memberId)
     }
     this.memberBySessionId.delete(member.sessionId)
@@ -3614,10 +3684,25 @@ export default class AgentTeam extends TypertRemoteService {
     return scope
   }
 
-  private enqueueLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+  /** Serialize one Member's lifecycle operations in submission order; a long wait inside one holds only this chain. */
+  private enqueueLifecycle<T>(memberId: AgentTeamMemberId, operation: () => Promise<T>): Promise<T> {
+    return this.chainLifecycle(this.memberLifecycleTails, memberId, operation)
+  }
+
+  /** Serialize lifecycle operations against a Member id that does not exist until the commit answers: concurrent duplicates of one add request. */
+  private enqueueAddition<T>(requestId: AgentTeamRequestId, operation: () => Promise<T>): Promise<T> {
+    return this.chainLifecycle(this.additionLifecycleTails, requestId, operation)
+  }
+
+  private chainLifecycle<K extends string, T>(tails: Map<K, Promise<void>>, key: K, operation: () => Promise<T>): Promise<T> {
     this.requireAccepting()
-    const result = this.lifecycleTail.then(operation)
-    this.lifecycleTail = result.then(() => {}, () => {})
+    const previous = tails.get(key) ?? Promise.resolve()
+    const result = previous.then(operation)
+    const tail = result.then(() => {}, () => {})
+    tails.set(key, tail)
+    // Prune settled chains so a removed Member leaves nothing behind; a newer
+    // chain on the same key keeps its own entry.
+    void tail.then(() => { if (tails.get(key) === tail) tails.delete(key) })
     return result
   }
 }

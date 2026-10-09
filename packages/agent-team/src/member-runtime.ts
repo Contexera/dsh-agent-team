@@ -237,6 +237,9 @@ export class MemberRuntime {
     else this.capabilityWarnings.set(memberId, Object.freeze([...warnings]))
   }
 
+  /** Outstanding boundary waits, held so Host shutdown can release them all. */
+  private readonly turnWaitResolvers = new Set<() => void>()
+
   /**
    * Wait until one live Member's current turn ends or its Session is
    * disposed. While the Agent runs, the current turn keeps its schemas and
@@ -244,17 +247,21 @@ export class MemberRuntime {
    * from the new restriction and the durable replacement skill catalog from
    * the new selection, with the same Session and history surviving.
    * Suspend/remove during the wait resolves it — the disposed handle released
-   * the old restriction already and no disposer leaks. Returns whether any
-   * wait happened, so the caller can re-check the handle afterwards.
+   * the old restriction already and no disposer leaks. Host shutdown resolves
+   * every wait through `releaseTurnWaits` instead of waiting out a turn that
+   * may never end. Returns whether any wait happened, so the caller can
+   * re-check the handle afterwards.
    */
   async awaitTurnBoundary(active: AgentHandle): Promise<boolean> {
     if (!this.deps.runningAgents.has(active.agent.id)) return false
     await new Promise<void>(resolve => {
       const disposers: Array<() => void> = []
       const settle = (): void => {
+        this.turnWaitResolvers.delete(settle)
         for (const dispose of disposers.splice(0)) dispose()
         resolve()
       }
+      this.turnWaitResolvers.add(settle)
       disposers.push(
         this.deps.ctx.on('agent/status', (payload: { agent: Agent; status: string }) => {
           if (payload.agent !== active.agent) return
@@ -271,6 +278,17 @@ export class MemberRuntime {
       )
     })
     return true
+  }
+
+  /**
+   * Host-shutdown exit for every boundary wait: resolve them all so the
+   * Member's lifecycle chain drains without depending on a turn that may
+   * never end. `settle` removes each wait's listeners, so no subscription,
+   * waiter, or model request survives the shutdown.
+   */
+  releaseTurnWaits(): void {
+    // Snapshot: every `settle` removes its own entry from the set.
+    for (const settle of Array.from(this.turnWaitResolvers)) settle()
   }
 
   /**
