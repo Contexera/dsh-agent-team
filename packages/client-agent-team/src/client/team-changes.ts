@@ -6,7 +6,8 @@ import type { AgentTeamChangeScope, AgentTeamChangesResult } from '@contexera/ds
 export type TeamChangeScope = AgentTeamChangeScope | undefined
 
 export type TeamChangeUpdate =
-  | { readonly type: 'changed'; readonly version: number }
+  /** `baseline` marks the first item of a stream (re)open: it invalidates no matter its version. */
+  | { readonly type: 'changed'; readonly version: number; readonly baseline?: true }
   | { readonly type: 'failed'; readonly message: string }
 
 export type TeamChangeListener = (update: TeamChangeUpdate) => void
@@ -24,6 +25,8 @@ interface ScopeSubscription {
   readonly stream: RemoteStream<AgentTeamChangesResult>
   readonly listeners: Set<TeamChangeListener>
   failure: string | undefined
+  /** Set on failure: the retried stream's first item is a reopening baseline even though the run loop never restarted. */
+  pendingBaseline: boolean
 }
 
 /** One logical stream per scope per page; Harness owns the shared transport and recovery. */
@@ -83,7 +86,7 @@ export class TeamChangeStream {
         : new Error('Team change subscription ended before its opening baseline'),
       carrierFailed: error => this.fail(key, error.message),
     })
-    return { scope, stream, listeners, failure: undefined }
+    return { scope, stream, listeners, failure: undefined, pendingBaseline: false }
   }
 
   async dispose(): Promise<void> {
@@ -96,18 +99,28 @@ export class TeamChangeStream {
     const subscription = this.subscriptions.get(key)
     if (subscription === undefined || subscription.failure !== undefined) return
     subscription.failure = message
+    subscription.pendingBaseline = true
     for (const listener of subscription.listeners) listener({ type: 'failed', message })
   }
 
   private async run(key: string, subscription: ScopeSubscription): Promise<void> {
     try {
+      // One update object per dispatch: every co-subscriber of this scope
+      // receives the identical value, which is what lets the read layer fold
+      // one dispatch into one invalidation. A baseline marks the stream's
+      // opening — its start, or its first item after a carrier outage the
+      // Harness retried inside this same loop — so readers can tell a fresh
+      // stream position from a version that merely repeats.
+      let opening = true
       for await (const item of subscription.stream) {
         if (this.subscriptions.get(key) !== subscription) return
         item.accept()
         subscription.failure = undefined
-        // Every opening baseline invalidates too: this closes the initial-read
-        // race and recovers failed reads even when nothing changed while offline.
-        for (const listener of subscription.listeners) listener({ type: 'changed', version: item.value.version })
+        const baseline = opening || subscription.pendingBaseline
+        subscription.pendingBaseline = false
+        opening = false
+        const update: TeamChangeUpdate = { type: 'changed', version: item.value.version, ...(baseline ? { baseline: true as const } : {}) }
+        for (const listener of subscription.listeners) listener(update)
       }
     } catch (error) {
       if (this.subscriptions.get(key) === subscription) this.fail(key, error instanceof Error ? error.message : String(error))

@@ -221,10 +221,12 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       if (!mountedRef.current || sequence !== refreshSequenceRef.current) return false
       if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeChannelView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
       if (loadedMembers.ok) setMembers(loadedMembers.value); else setLoadError(loadedMembers.error.message)
-      // A failed unread read drops the badges instead of leaving counts the
-      // reader can no longer trust; the failure surfaces like any other read.
+      // A failed inbox read keeps the last successful counts — a read failure
+      // must not render as "everything was consumed" (the sidebar badge holds
+      // the same policy) — while the failure itself surfaces through the
+      // error face below.
       if (loadedInbox.ok) setUnreadByThread(unreadCounts(loadedInbox.value))
-      else { setUnreadByThread(new Map()); setLoadError(loadedInbox.error.message) }
+      else setLoadError(loadedInbox.error.message)
       if (loaded.ok && loadedMembers.ok && loadedInbox.ok) setLoadError(undefined)
       return loaded.ok && loadedMembers.ok && loadedInbox.ok
     } catch (cause) {

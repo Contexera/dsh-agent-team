@@ -252,6 +252,19 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return round
   }
 
+  // Presence and roster live in the workspace projection; they never need
+  // the channel view that the supplemental fetch performs.
+  const refreshMembers = async (): Promise<void> => {
+    if (!mountedRef.current) return
+    try {
+      const loaded = await loadMembers({ workspaceId })
+      if (!mountedRef.current) return
+      if (loaded.ok) setMembers(loaded.value); else setError(loaded.error.message)
+    } catch (cause) {
+      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause))
+    }
+  }
+
   const refreshPassiveFacts = async (): Promise<void> => {
     try {
       const result = await loadThreadHistory({ workspaceId, ...threadRequest, limit: 100 })
@@ -372,12 +385,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         void refreshSupplemental()
       }),
       // Presence transitions commit nothing: only the member rows move, so
-      // the roster refresh rides the same supplemental fetch as workspace
-      // membership changes, leaving the timeline untouched.
+      // the roster refreshes alone — the supplemental fetch's channel view
+      // stays reserved for workspace membership changes that can move it.
       subscribeChanges({ kind: 'presence', workspaceId }, update => {
         if (!mountedRef.current) return
         if (update.type === 'failed') { setError(update.message); return }
-        void refreshSupplemental()
+        void refreshMembers()
       }),
     ]
     return () => {

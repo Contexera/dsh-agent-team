@@ -117,9 +117,14 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   // Only the first refresh owns the loading surface; presence wakes (Agent
   // running/idle) ride the dedicated scope and refresh rows in place.
   const loadedRef = useRef(false)
+  const mountedRef = useRef(false)
   const refresh = useCallback(async () => {
     if (!loadedRef.current) setLoading(true)
     const result = await loadMembers({ workspaceId })
+    // A response for a panel the user has already left changes nothing: the
+    // key-remounted successor owns the roster state — and the seat-follow
+    // side effects — now.
+    if (!mountedRef.current) return
     if (result.ok) {
       // Archived Members are hidden from every surface; the row disappears
       // the moment the workspace-scope wake delivers the archived state.
@@ -134,6 +139,10 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
     setLoading(false)
   }, [loadMembers, workspaceId, followRollover])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   useEffect(() => { void refresh() }, [refresh])
   // Warm the Host model catalog while the roster loads, so the create and
   // edit pickers open with rows instead of paying the first read on open.

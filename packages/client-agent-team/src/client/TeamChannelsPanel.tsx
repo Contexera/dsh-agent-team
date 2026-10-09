@@ -74,29 +74,49 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
   // Only the first refresh owns the loading surface; later wakes (workspace
   // catalog changes, member creation) refresh the rendered rows in place.
   const loadedRef = useRef(false)
+  const mountedRef = useRef(false)
+  // The three wake sources below can overlap; only the newest issuance may
+  // apply, so a late answer from a superseded refresh is dropped instead of
+  // painting stale rows over a landed result.
+  const refreshSequenceRef = useRef(0)
   const refresh = useCallback(async () => {
+    const sequence = refreshSequenceRef.current + 1
+    refreshSequenceRef.current = sequence
     if (!loadedRef.current) setLoading(true)
     const [channelResult, memberResult] = await Promise.all([
       loadChannels({ workspaceId, limit: 1 }),
       loadMembers({ workspaceId }),
     ])
-    if (channelResult.ok && memberResult.ok) {
+    // A response for a panel the user has already left changes nothing: the
+    // key-remounted successor owns the roster and selection state now.
+    if (!mountedRef.current || sequence !== refreshSequenceRef.current) return
+    // The two legs carry independent freshness (the roster rides the shared
+    // read layer, the catalog is still a direct read), so each applies on its
+    // own; one leg's failure must not freeze the other leg's landed value.
+    if (channelResult.ok) {
       setView(channelResult.value)
+      loadedRef.current = true
+    }
+    if (memberResult.ok) {
       const visibleMembers = memberResult.value.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
       setMembers(visibleMembers)
       const selectable = new Set(visibleMembers.filter(status => status.presence !== 'unavailable')
         .map(status => status.member.memberId))
       setSelected(current => new Set([...current].filter(memberId => selectable.has(memberId))))
-      setError(undefined)
-      loadedRef.current = true
-    } else if (!channelResult.ok) {
-      setError(channelResult.error.message)
-    } else if (!memberResult.ok) {
-      setError(memberResult.error.message)
     }
+    if (!channelResult.ok) setError(channelResult.error.message)
+    else if (!memberResult.ok) setError(memberResult.error.message)
+    else setError(undefined)
     setLoading(false)
   }, [loadChannels, loadMembers, workspaceId])
 
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      refreshSequenceRef.current += 1
+    }
+  }, [])
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => subscribeChanges({ kind: 'workspace', workspaceId }, update => {
     if (update.type === 'failed') {

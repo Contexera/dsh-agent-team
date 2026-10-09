@@ -486,4 +486,79 @@ describe('Team Inbox surfaces', () => {
     expect(olderTime?.getAttribute('dateTime')).toBe(older.toISOString())
     await b.runtime.dispose()
   })
+
+  it('keeps the last successful unread total when a background refresh fails', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    const card = await b.view.findByRole('button', { name: '收件箱' })
+    const seeded = (): ReturnType<typeof inboxRow>[] => [
+      inboxRow('w1', 'thread:w1', { unreadCount: 2 }),
+      inboxRow('w2', 'thread:w2', { unreadCount: 1 }),
+    ]
+    b.seedInbox(seeded())
+    b.seedInbox(seeded())
+    await waitForEntryUnread(card, 3)
+
+    // A background refresh failure is not data: the badge keeps the last
+    // successful total instead of folding the failure into zero (issue 03,
+    // criterion 6 — a read that did not land must never read as "no
+    // unread"). The failure stays inspectable on the read layer's per-key
+    // counters, not on a new visual state.
+    const healthy = b.inbox.getMockImplementation()
+    ;(b.inbox as unknown as { mockImplementation(fn: () => Promise<unknown>): void })
+      .mockImplementation(async () => ({ ok: false, error: { message: 'inbox down' } }))
+    const callsBeforeFailure = b.inbox.mock.calls.length
+    b.publishWorkspaceUpdate()
+    // The badge debounces, so wait past that window before reading the result.
+    await new Promise(resolve => { setTimeout(resolve, 300) })
+    // Positive control: the failing refresh really ran against both Workspaces.
+    expect(b.inbox.mock.calls.length).toBeGreaterThan(callsBeforeFailure)
+    await waitForEntryUnread(card, 3)
+    const diagnostics = b.runtime.ctx.teamQueries.diagnostics()['inbox:w1:1']
+    expect(diagnostics?.failed).toBeGreaterThanOrEqual(1)
+
+    // Recovery follows up: the next successful read overwrites the kept
+    // value — a failure must freeze nothing.
+    ;(b.inbox as unknown as { mockImplementation(fn: () => Promise<unknown>): void })
+      .mockImplementation(healthy as unknown as () => Promise<unknown>)
+    const grown = (): ReturnType<typeof inboxRow>[] => [
+      inboxRow('w1', 'thread:w1', { unreadCount: 4, directCount: 0 }),
+      inboxRow('w2', 'thread:w2', { unreadCount: 2, directCount: 0 }),
+    ]
+    b.seedInbox(grown())
+    b.seedInbox(grown())
+    await waitForEntryUnread(card, 6)
+    await b.runtime.dispose()
+  })
+
+  it('keeps a failed Workspace slice on the Inbox page instead of dropping it', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    const card = await b.view.findByRole('button', { name: '收件箱' })
+    const seeded = (): ReturnType<typeof inboxRow>[] => [
+      inboxRow('w1', 'thread:w1', { previewText: 'w1 waiting' }),
+      inboxRow('w2', 'thread:w2', { previewText: 'w2 waiting' }),
+    ]
+    b.seedInbox(seeded())
+    b.seedInbox(seeded())
+    await waitForEntryUnread(card, 2)
+    fireEvent.click(card)
+    await b.view.findByRole('button', { name: /w1 waiting/ })
+    await b.view.findByRole('button', { name: /w2 waiting/ })
+
+    // One Workspace's read now fails: this action queue keeps that slice's
+    // last successful rows — the same keep-last-good policy the badge holds —
+    // while the failure surfaces on the error face. A failed read must not
+    // empty the queue for that Workspace.
+    const healthy = b.inbox.getMockImplementation()!
+    ;(b.inbox as unknown as { mockImplementation(fn: (request: { workspaceId: string }) => Promise<unknown>): void })
+      .mockImplementation(async request => request.workspaceId === 'w2'
+        ? { ok: false, error: { message: 'inbox w2 down' } }
+        : await healthy(request))
+    b.publishGlobalUpdate()
+
+    const alerts = await b.view.findAllByRole('alert')
+    expect(alerts.some(node => node.textContent?.includes('inbox w2 down'))).toBe(true)
+    await b.view.findByRole('button', { name: /w1 waiting/ })
+    await b.view.findByRole('button', { name: /w2 waiting/ })
+    await b.runtime.dispose()
+  })
 })

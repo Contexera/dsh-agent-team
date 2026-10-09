@@ -301,6 +301,19 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     changeVersion += 1
     for (const waiter of changeWaiters) if (waiter.request.scope?.kind === 'presence') waiter.wake()
   }
+  // One projection-domain wake shaped like a workspace commit: workspace and
+  // scope-less projection waiters wake, presence waiters stay parked (the Host
+  // only advances the presence epoch for presence scopes).
+  const publishWorkspaceUpdate = (): void => {
+    changeVersion += 1
+    for (const waiter of changeWaiters) if (waiter.request.scope === undefined || waiter.request.scope.kind === 'workspace') waiter.wake()
+  }
+  // One projection wake whose narrow scopes match nothing this app subscribed
+  // to — a commit in another Workspace: only the scope-less waiters wake.
+  const publishGlobalUpdate = (): void => {
+    changeVersion += 1
+    for (const waiter of changeWaiters) if (waiter.request.scope === undefined) waiter.wake()
+  }
   const connection = {
     generation: {
       getSnapshot: () => changeFailure === undefined ? {} as never : undefined,
@@ -587,5 +600,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const disposeSettings = runtime.slots.register({ name: 'sidebar.settings', priority: 0 }, BaselineSettings as never)
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
-  return { runtime, team, view, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, clearMemberContext, archiveMember, modelCatalog, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, publishAgentReply, publishPresence, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession }
+  return { runtime, team, view, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, clearMemberContext, archiveMember, modelCatalog, joinChannel, removeChannelMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession }
 }

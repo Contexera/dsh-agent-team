@@ -51,6 +51,9 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   // coalesce behind a short debounce; the number is whatever the Host's whole
   // unread slice returns, mentions included rather than alone.
   const [inboxTotal, setInboxTotal] = useState(0)
+  // The last successful total per Workspace, kept across failed refreshes so
+  // the badge never folds an unread read into zero.
+  const keptTotalsRef = useRef(new Map<string, number>())
   // One name for both entries: what the control is, and how much waits behind
   // it. The rail repeats it as its hover hint, which is the only place a reader
   // still meets the quantity without opening the page.
@@ -59,9 +62,23 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
     let disposed = false
     let scheduled: ReturnType<typeof setTimeout> | undefined
     const refresh = async (): Promise<void> => {
-      const results = await Promise.all(workspaces.map(workspace => loadInbox({ workspaceId: workspace.workspaceId, limit: 1 })))
+      const results = await Promise.all(workspaces.map(async workspace => ({
+        workspaceId: workspace.workspaceId,
+        result: await loadInbox({ workspaceId: workspace.workspaceId, limit: 1 }),
+      })))
       if (disposed) return
-      setInboxTotal(results.reduce((sum, result) => result.ok ? sum + result.value.totalUnreadCount : sum, 0))
+      // A failed refresh keeps that Workspace's last successful total: a read
+      // that did not land must never fold into zero and read as "no unread"
+      // (issue 03 criterion 6). Recovery overwrites the kept value — a
+      // failure freezes nothing — and the read layer's per-key failed
+      // counter is where the failure stays inspectable; the badge gains no
+      // new visual state for it.
+      const totals = new Map<string, number>()
+      for (const { workspaceId, result } of results) {
+        totals.set(workspaceId, result.ok ? result.value.totalUnreadCount : keptTotalsRef.current.get(workspaceId) ?? 0)
+      }
+      keptTotalsRef.current = totals
+      setInboxTotal([...totals.values()].reduce((sum, total) => sum + total, 0))
     }
     const schedule = (): void => {
       if (scheduled !== undefined) return

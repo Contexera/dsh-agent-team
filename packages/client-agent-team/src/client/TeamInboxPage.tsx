@@ -78,24 +78,32 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
   // Only the first refresh owns the loading surface; later wakes refresh the
   // rendered rows in place instead of flashing them back to skeleton.
   const loadedRef = useRef(false)
+  // Per-Workspace last successful slice: a Workspace whose read fails keeps
+  // its rows — a failed read must not empty this action queue for that
+  // Workspace (the sidebar badge holds the same keep-last-good policy) — and
+  // the next success overwrites the kept slice.
+  const keptSlicesRef = useRef(new Map<string, { readonly items: readonly AgentTeamInboxItem[]; readonly recent: readonly AgentTeamInboxItem[] }>())
 
   const refresh = useCallback(async () => {
     if (!loadedRef.current) setLoading(true)
     const results = await Promise.all(workspaces.map(async workspace => {
       const result = await loadInbox({ workspaceId: workspace.workspaceId, limit: 100 })
-      return result.ok
-        ? { ok: true as const, workspaceId: workspace.workspaceId, workspaceTitle: workspace.title, items: result.value.items, recent: result.value.recent, humanMemberId: result.value.humanMemberId }
-        : { ok: false as const, message: result.error.message }
+      if (result.ok) {
+        keptSlicesRef.current.set(workspace.workspaceId, { items: result.value.items, recent: result.value.recent })
+        return { ok: true as const, workspaceId: workspace.workspaceId, workspaceTitle: workspace.title, items: result.value.items, recent: result.value.recent, humanMemberId: result.value.humanMemberId }
+      }
+      const kept = keptSlicesRef.current.get(workspace.workspaceId)
+      return { ok: false as const, workspaceId: workspace.workspaceId, workspaceTitle: workspace.title, items: kept?.items ?? [], recent: kept?.recent ?? [], message: result.error.message }
     }))
     const failure = results.find(result => !result.ok)
     setHumanMemberId(results.find(result => result.ok)?.humanMemberId)
     const asRows = (items: readonly AgentTeamInboxItem[], workspaceId: WorkspaceId, workspaceTitle: string): TeamInboxRow[] =>
       items.map(item => ({ workspaceId, workspaceTitle, item }))
-    setRows(results.flatMap(result => result.ok ? asRows(result.items, result.workspaceId, result.workspaceTitle) : []).sort(compareInboxRows))
+    setRows(results.flatMap(result => asRows(result.items, result.workspaceId, result.workspaceTitle)).sort(compareInboxRows))
     // The tail is one global bound rather than one per Workspace: the reader was
     // promised five Threads to step back into, and every Workspace's slice is
     // already capped on its own, so the merged list is trimmed here.
-    setRecentRows(results.flatMap(result => result.ok ? asRows(result.recent, result.workspaceId, result.workspaceTitle) : [])
+    setRecentRows(results.flatMap(result => asRows(result.recent, result.workspaceId, result.workspaceTitle))
       .sort(compareInboxRows).slice(0, RECENT_ROWS_LIMIT))
     setError(failure?.ok === false ? failure.message : undefined)
     loadedRef.current = true

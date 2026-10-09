@@ -48,6 +48,7 @@ import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
 import { TEAM_PANEL_ID, TeamNavigation } from './navigation.ts'
 import { TeamChangeStream, TeamReadStream, type TeamChangeListener, type TeamChangeScope } from './team-changes.ts'
+import { TeamQueries, type TeamQueryIdentity } from './team-queries.ts'
 import { TeamDraftStore } from './drafts.ts'
 import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamMembersAction } from './TeamMembersAction.tsx'
@@ -104,6 +105,7 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     teamNavigation: TeamNavigation
     teamDrafts: TeamDraftStore
+    teamQueries: TeamQueries
   }
 }
 
@@ -126,12 +128,12 @@ function leaveTeamFromUi(ctx: ClientContext, navigation: TeamNavigation): void {
 function registerTeamPanel(
   ctx: ClientContext,
   navigation: TeamNavigation,
-  changes: TeamChangeStream,
+  queries: TeamQueries,
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
 ): void {
-  const sharedRemotes = teamSharedRemotes(ctx, navigation, changes, reads, drafts, humanIdentity)
+  const sharedRemotes = teamSharedRemotes(ctx, navigation, queries, reads, drafts, humanIdentity)
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist',
     id: TEAM_PANEL_ID,
@@ -174,23 +176,57 @@ function openMemberSessionImpl(
   ctx.uiWorkspace.openSession(sessionId)
 }
 
+/** The roster query's identity: one key per Workspace, invalidated by presence and workspace changes. */
+function membersQuery(request: AgentTeamMembersRequest): TeamQueryIdentity {
+  return {
+    key: `members:${request.workspaceId}`,
+    // Only the scopes that actually carry roster facts: the Host wakes this
+    // Workspace scope for every member-level commit and presence scopes for
+    // run state. The scope-less stream is a superset of projection wakes —
+    // every scope-less delivery that touches this roster has also woken this
+    // Workspace — so letting it in adds no needed invalidation, only
+    // unrelated ones that cost a redundant read (issue 03 criterion 4).
+    covers: scope => scope !== undefined
+      && (scope.kind === 'presence' || scope.kind === 'workspace') && scope.workspaceId === request.workspaceId,
+  }
+}
+
+/**
+ * The Inbox query's identity: one key per Workspace and page size. Its data
+ * moves with any shared-projection commit — a mention can land in any Thread —
+ * so the scope-less stream is this query's home surface, not an exception to
+ * the narrow-scope rule; presence wakes never reach it because they change no
+ * inbox fact.
+ */
+function inboxQuery(request: AgentTeamInboxRequest): TeamQueryIdentity {
+  return {
+    key: `inbox:${request.workspaceId}:${request.limit ?? 'all'}`,
+    covers: scope => scope === undefined
+      || (scope.kind === 'workspace' && scope.workspaceId === request.workspaceId)
+      || scope.kind === 'channel'
+      || scope.kind === 'thread',
+  }
+}
+
 /** Remote bindings shared by every Team slot; a surface-specific seat extends them below. */
 function teamSharedRemotes(
   ctx: ClientContext,
   navigation: TeamNavigation,
-  changes: TeamChangeStream,
+  queries: TeamQueries,
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
 ): Record<string, unknown> {
   return {
     loadChannels: (request: AgentTeamViewRequest) => ctx.remote.agentTeam.view(request),
-    loadInbox: (request: AgentTeamInboxRequest) => ctx.remote.agentTeam.inbox(request),
+    loadInbox: (request: AgentTeamInboxRequest) => queries.read(inboxQuery(request), () => ctx.remote.agentTeam.inbox(request)),
     subscribeReads: (listener: () => void) => reads.subscribe(listener),
-    subscribeChanges: (scope: TeamChangeScope, listener: TeamChangeListener) => changes.subscribe(scope, listener),
+    // Change subscriptions fold through the read layer so each dispatch
+    // invalidates the queries it covers before any consumer re-reads.
+    subscribeChanges: (scope: TeamChangeScope, listener: TeamChangeListener) => queries.subscribeChanges(scope, listener),
     drafts,
     humanIdentity,
-    loadMembers: (request: AgentTeamMembersRequest) => ctx.remote.agentTeam.members(request),
+    loadMembers: (request: AgentTeamMembersRequest) => queries.read(membersQuery(request), () => ctx.remote.agentTeam.members(request)),
     joinChannel: (request: AgentTeamJoinChannelRequest) => ctx.remote.agentTeam.joinChannel(request),
     removeChannelMember: (request: AgentTeamRemoveChannelMemberRequest) => ctx.remote.agentTeam.removeChannelMember(request),
     updateChannel: (request: AgentTeamUpdateChannelRequest) => ctx.remote.agentTeam.updateChannel(request),
@@ -261,7 +297,7 @@ function teamSeatInject(
 function registerModeShadow<T extends object>(
   ctx: ClientContext,
   navigation: TeamNavigation,
-  changes: TeamChangeStream,
+  queries: TeamQueries,
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
@@ -273,7 +309,7 @@ function registerModeShadow<T extends object>(
   // that same panel instead of adding a second one.
   entryKey?: string,
 ): void {
-  const sharedRemotes = teamSharedRemotes(ctx, navigation, changes, reads, drafts, humanIdentity)
+  const sharedRemotes = teamSharedRemotes(ctx, navigation, queries, reads, drafts, humanIdentity)
   ctx.slots.inject(name, () => {
     let dispose: (() => void) | undefined
     const reconcile = (): void => {
@@ -387,10 +423,19 @@ function applyUi(ctx: ClientContext): void {
 
   const changes = new TeamChangeStream(ctx.remote)
   ctx.effect(() => () => changes.dispose(), 'agent-team: change subscriptions')
+  // Every consumer's data read funnels through this one owner: it shares an
+  // in-flight read per query identity, folds each change dispatch into query
+  // invalidations before consumers re-read, and drops responses a newer
+  // response has superseded (counters only — no response body ever logged).
+  const queries = new TeamQueries(changes)
+  const disposeQueries = ctx.reflect.provide('teamQueries', queries)
+  ctx.effect(() => () => { void disposeQueries(); queries.dispose() }, 'agent-team: shared reads')
   // The Harness resumes a live generation across reconnects, but a stream that
   // already ended for good is this layer's to rebuild — and a new Host generation
-  // is the one moment the scope it was waiting for can be there again.
-  ctx.on('connection/reset', () => { changes.recover() })
+  // is the one moment the scope it was waiting for can be there again. A new
+  // generation also restarts the presence epoch, so the read layer's watermarks
+  // reset and in-flight reads stop being joinable.
+  ctx.on('connection/reset', () => { changes.recover(); queries.newGeneration() })
   const reads = new TeamReadStream()
 
   const loadMemberGroups = async () => {
@@ -406,11 +451,11 @@ function applyUi(ctx: ClientContext): void {
     return groups.filter(group => group.members.length > 0)
   }
 
-  registerTeamPanel(ctx, navigation, changes, reads, drafts, humanIdentity)
+  registerTeamPanel(ctx, navigation, queries, reads, drafts, humanIdentity)
 
-  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
-  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'main', TeamConversation as never, undefined, 'conversation')
-  registerModeShadow(ctx, navigation, changes, reads, drafts, humanIdentity, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
+  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
+  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'main', TeamConversation as never, undefined, 'conversation')
+  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
 
   // The Team entry lives in the sidebar's panel rail beside the shipped Plugins
   // and scheduled-task entries, so the rail's selection and Team mode are one

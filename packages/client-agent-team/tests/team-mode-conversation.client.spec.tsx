@@ -172,6 +172,34 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('keeps the last successful unread counts when the inbox read fails', async () => {
+    const b = await runtimeWithTeam({
+      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      seededMessages: [{ body: '开工任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
+    })
+    b.seedInbox([{
+      workspaceId: 'w1', channelRef: 'channel:engineering',
+      thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 4 },
+      unreadCount: 150, directCount: 1, newestSequence: 9, newestOccurredAt: '2026-08-21T09:30:00.000Z',
+    }])
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    await b.view.findByRole('button', { name: '打开 Task #1（150 条新动态）' })
+
+    // The next wake's inbox read fails: a read failure must not read as
+    // "everything was consumed". The counts keep the last successful slice —
+    // the same policy the sidebar badge holds — while the failure itself
+    // surfaces on the error face.
+    ;(b.inbox as unknown as { mockImplementation(fn: () => Promise<unknown>): void })
+      .mockImplementation(async () => ({ ok: false, error: { message: 'inbox read failed' } }))
+    b.publishChannelUpdate()
+
+    const alerts = await b.view.findAllByRole('alert')
+    expect(alerts.some(node => node.textContent?.includes('inbox read failed'))).toBe(true)
+    const entry = await b.view.findByRole('button', { name: '打开 Task #1（150 条新动态）' })
+    expect(within(entry.closest('article')!).getByText('99+')).toBeTruthy()
+    await b.runtime.dispose()
+  })
+
   it('stops printing activity on a resolved Task door', async () => {
     const b = await runtimeWithTeam({
       mode: 'team', workspaceId: 'w1', initialChannels: true,
