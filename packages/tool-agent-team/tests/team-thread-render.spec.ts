@@ -207,3 +207,80 @@ describe('team_thread renders the model-facing decision surface', () => {
     expect(legacy).toContain('Read through sequence 12')
   })
 })
+
+/**
+ * The reply link as the model sees it: a bare ref says a Message answers
+ * something, and nothing about what. These renders are the only place that
+ * becomes legible, so the discriminating assertion is the one that fails when
+ * only the ref is printed.
+ */
+describe('team_thread shows what a reply answers', () => {
+  const READ_BASE = {
+    workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
+    kind: 'read', threadRef: 'thread:cb7e5eca-9a73-4fa6-9fdf-260996597e7d',
+    revision: 9, following: true,
+    anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor body', sequence: 1 },
+    claims: [], readThroughSequence: 9, remainingUnreadCount: 0,
+  }
+  const ANSWER = { sender: 'architect', excerpt: 'The stored schema never named the field' }
+
+  it('names the author and the summary, not just the ref', () => {
+    const text = renderText(teamTools().get('team_thread')!, {}, {
+      ...READ_BASE,
+      facts: [{ sequence: 9, kind: 'message', sender: 'member:builder', body: 'Looking now', mentions: [],
+        replyToMessageRef: 'message:parent', replyTo: ANSWER, unread: true, direct: false }],
+    })
+    expect(text).toContain('(replies to @architect — "The stored schema never named the field")')
+    // The ref alone is what the model could not read; it must not be the answer.
+    expect(text).not.toContain('(replies to message:parent)')
+  })
+
+  it('falls back to the bare ref when the target could not be resolved', () => {
+    const text = renderText(teamTools().get('team_thread')!, {}, {
+      ...READ_BASE,
+      facts: [{ sequence: 9, kind: 'message', sender: 'member:builder', body: 'Looking now', mentions: [],
+        replyToMessageRef: 'message:parent', unread: true, direct: false }],
+    })
+    expect(text).toContain('(replies to message:parent)')
+  })
+
+  it('says it for the anchor too, which is a Message like any other', () => {
+    const text = renderText(teamTools().get('team_thread')!, {}, {
+      ...READ_BASE,
+      anchor: { messageRef: 'message:anchor', sender: 'member:builder', body: 'anchor body', sequence: 1,
+        replyToMessageRef: 'message:parent', replyTo: ANSWER },
+      // Background already read is what makes the render orient on the anchor.
+      facts: [{ sequence: 2, kind: 'message', sender: 'human', body: 'earlier context', mentions: [], unread: false, direct: false }],
+    })
+    expect(text).toContain('(replies to @architect — "The stored schema never named the field")')
+  })
+
+  it('prints the whole body for the message action, never a summary', () => {
+    const body = `First line is short\n第二行 @reviewer 提到别人\n${'z'.repeat(200)}`
+    const text = renderText(teamTools().get('team_thread')!, {}, {
+      ...READ_BASE,
+      kind: 'message', facts: [],
+      message: { messageRef: 'message:parent', sender: 'human', sequence: 1, body },
+    })
+    expect(text).toContain(body)
+    expect(text).not.toContain('…')
+    expect(text.length).toBeGreaterThan(200)
+  })
+
+  it('declares every field those renders read, because an undeclared value throws', () => {
+    const tool = teamTools().get('team_thread')!
+    const schema = tool.output.schema as Record<string, any>
+    // `additionalProperties: false` is enforced against the returned value, so a
+    // field a render reads and the schema does not name fails the whole call.
+    expect(schema.properties.message.required).toContain('body')
+    expect(schema.properties.message.required).toContain('messageRef')
+    expect(schema.properties.facts.items.properties.replyTo).toBeDefined()
+    expect(schema.properties.anchor.properties.replyTo).toBeDefined()
+    expect(schema.properties.anchor.properties.replyToMessageRef).toBeDefined()
+    // and the action is addressable at all (registered parameters are one
+    // JSON-Schema object, not the flat map the definition is written as)
+    const parameters = tool.parameters as Record<string, any>
+    expect(parameters.properties.action.enum).toContain('message')
+    expect(parameters.properties.messageRef).toBeDefined()
+  })
+})

@@ -17,6 +17,8 @@ import type {
   AgentTeamMemberCapabilities,
   AgentTeamMemberId,
   AgentTeamMessage,
+  AgentTeamMessageRef,
+  AgentTeamMessageReplyContext,
   AgentTeamModelSelection,
   AgentTeamOperationId,
   AgentTeamRequestId,
@@ -502,6 +504,12 @@ export interface AgentTeamReplyRequest {
   readonly body: string
   readonly baseRevision: number
   readonly recipients?: readonly AgentTeamMemberId[]
+  /**
+   * The Message this reply answers. The Host resolves it against the ledger and
+   * refuses a ref that is unknown or belongs to another Thread; the parent's
+   * author then joins the recipients, so answering a Member reaches them.
+   */
+  readonly replyToMessageRef?: AgentTeamMessageRef
   /** Agent-supplied absolute file paths, resolved like sendMessage's. */
   readonly attachmentPaths?: readonly string[] | undefined
   /** Attachment cache IDs from the Human picker, resolved like sendMessage's. */
@@ -844,7 +852,8 @@ export interface AgentTeamThreadReadResult {
   readonly task?: AgentTeamTask
   readonly thread: AgentTeamThread
   readonly claims: readonly AgentTeamClaim[]
-  readonly anchor: AgentTeamMessage
+  /** The same Message, with what it answers attached when it is a reply. */
+  readonly anchor: AgentTeamMessage & { readonly replyTo?: AgentTeamMessageReplyContext | undefined }
   /** Structured Member refs of the anchor Message, from its originating send operation. */
   readonly anchorMentions: readonly AgentTeamMemberId[]
   readonly facts: readonly AgentTeamThreadReadFact[]
@@ -879,7 +888,8 @@ export interface AgentTeamThreadHistoryRequest {
 export interface AgentTeamThreadHistory {
   readonly task?: AgentTeamTask
   readonly thread: AgentTeamThread
-  readonly anchor: AgentTeamMessage
+  /** The same Message, with what it answers attached when it is a reply. */
+  readonly anchor: AgentTeamMessage & { readonly replyTo?: AgentTeamMessageReplyContext | undefined }
   /** Structured Member refs of the anchor Message, from its originating send operation. */
   readonly anchorMentions: readonly AgentTeamMemberId[]
   readonly claims: readonly AgentTeamClaim[]

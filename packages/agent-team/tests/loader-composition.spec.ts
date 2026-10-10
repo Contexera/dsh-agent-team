@@ -12,6 +12,8 @@ import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as storageDomain from '@deepseek-ai/dsh-storage-domain'
 import AgentTeam from '../src/index.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { AgentTeamRequestId } from '../src/types.ts'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
 const roots: string[] = []
@@ -104,6 +106,14 @@ async function load(pool: MemoryMediaPool): Promise<Context> {
   return ctx
 }
 
+const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
+
+/** One committed value, or a failure naming what came back instead. */
+function committed<T extends { readonly kind: string }>(result: T): Extract<T, { readonly kind: 'committed' }> {
+  if (result.kind !== 'committed') throw new Error(`expected committed result, received ${result.kind}`)
+  return result as Extract<T, { readonly kind: 'committed' }>
+}
+
 describe('Agent Team real composition', () => {
   it('boots, reports status, disposes, and replays through Loader rows', async () => {
     const pool = new MemoryMediaPool()
@@ -120,5 +130,27 @@ describe('Agent Team real composition', () => {
     const second = await load(pool)
     expect(second.agentTeam.status()).toEqual(expect.objectContaining({ sequence: 1, operationCount: 1 }))
     expect(pool.media.get('agent_team')!.tables.get('operations')!.size).toBe(1)
+  })
+
+  it('reopens a domain holding a reply, so a stored link cannot outgrow its record', async () => {
+    const pool = new MemoryMediaPool()
+    const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000aa' as WorkspaceId
+    const first = await load(pool)
+    const channel = await first.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+    const anchor = committed(await first.agentTeam.sendMessage({ requestId: requestId('anchor'), workspaceId,
+      channelRef: channel.channel.channelRef, body: 'Please investigate this' }))
+    const reply = committed(await first.agentTeam.reply({ requestId: requestId('reply'), workspaceId,
+      threadRef: anchor.thread.threadRef, baseRevision: anchor.thread.revision, body: 'Looking now',
+      replyToMessageRef: anchor.message.messageRef }))
+    expect(reply.message.replyToMessageRef).toBe(anchor.message.messageRef)
+    await first.fiber.dispose()
+
+    // Every stored record is parsed strictly as the domain opens, so a durable
+    // field the write path stores and the record schema does not name fails
+    // here — as a failed Host activation — rather than in a unit test.
+    const second = await load(pool)
+    const resolved = second.agentTeam.resolveMessageRefs({ workspaceId, messageRefs: [anchor.message.messageRef] })
+    expect(resolved.resolved).toHaveLength(1)
+    expect(resolved.resolved[0]).toMatchObject({ messageRef: anchor.message.messageRef, excerpt: 'Please investigate this' })
   })
 })
