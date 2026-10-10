@@ -95,9 +95,13 @@ class ScriptedAdapter extends EmptyAdapter {
     this.responses.push(response)
   }
 
+  /** When set, every model call throws this instead of consuming the queue. */
+  failWith: unknown = undefined
+
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
     this.requestSessions.push((options as { sessionId?: string }).sessionId)
+    if (this.failWith !== undefined) throw this.failWith
     const response = this.responses.shift()
     if (response === undefined) throw new Error('ScriptedAdapter response queue is empty')
     for (const chunk of response) yield chunk
@@ -866,6 +870,40 @@ describe('Agent Team Member lifecycle', () => {
     expect(renewed).not.toBe(live)
     expect(ctx.agentPresets.serviceFor(renewed, 'compaction')).toBeDefined()
     expect(ctx.tools.schemas(renewed).length).toBeGreaterThan(0)
+  })
+
+  it('re-derives a Member\u2019s failed last turn when the Host restarts', async () => {
+    // The runtime failure slot is process-local memory, so nothing of it
+    // survives a restart. Its durable source is the Session log, and a
+    // restart re-runs the failure: the wake leaves facts to deliver, so the
+    // Member reports the same failure again from the same durable origin.
+    const adapter = new ScriptedAdapter()
+    adapter.failWith = new LlmError('gateway answered 401', 'AUTH')
+    const { ctx, workspaceId, teamFiber } = await realHarness(adapter)
+    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('restart-channel'), workspaceId, name: 'engineering', description: '' })
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('restart-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const memberId = added.status.member.memberId
+    await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('restart-send'), workspaceId, channelRef: channel.channel.channelRef, body: '@builder go' })
+    await ctx.agents.get(added.status.member.sessionId)!.whenIdle()
+    const before = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
+    expect(before?.presence).toBe('error')
+    expect(before?.diagnostic?.detail).toContain('401')
+
+    await teamFiber.dispose()
+    await ctx.plugin(AgentTeam)
+
+    // Straight after the boot the Member has already been woken by the
+    // restart, so it is working rather than still marked failed — the error
+    // presence returns once that turn settles on the same durable failure.
+    const booting = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
+    expect(booting?.availability).toBe('active')
+    expect(booting?.presence).toBe('working')
+    const agent = ctx.agents.get(booting!.member.sessionId)!
+    await agent.whenIdle()
+    const after = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
+    expect(after?.presence).toBe('error')
+    expect(after?.diagnostic).toMatchObject({ class: 'runtime' })
+    expect(after?.diagnostic?.detail).toContain('401')
   })
 
   it('restarts a Member whose activation failed and rejects restart for suspended Members', async () => {
@@ -5240,6 +5278,7 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     info.mockRestore()
   })
 })
+
 describe('Agent Team model route rejection (issue #43 #6)', () => {
   it('rejects an unregistered provider at creation instead of deferring to the first turn', async () => {
     const { ctx, workspaceId } = await realHarness(new ScriptedAdapter())
