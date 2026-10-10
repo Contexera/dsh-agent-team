@@ -8,6 +8,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 
 ## Ledger 权威与提交
 - mutation 进入 Host authority，并提交一条 durable operation。
+- 回复把被回答的 Message 记为自身 Message 上的 `replyToMessageRef`，Host 在提交前用 ledger 解析这个 ref：未知的 ref、或属于别的 Thread 的 ref 一律拒绝，不会被存下。父消息作者在提交时加入收件人，邀请规则、direct markers 与 `undeliveredMentions` 报告与 mention 完全一致。被引用的画面 —— 父消息作者与其正文一行 —— 是读取期派生（`replyTo`），绝不是第二份存储副本，因此它不可能与父消息不一致，父消息不在本次读取这一页里时也照样填得上；ref 不再可解析时只留裸 ref。这个参数是否可用由 Host 一个开关决定（`replySettings`），开关关闭时携带 ref 的回复会被拒绝。
 - Projections、Inbox results、tools、commands、Remote responses 和 UI 都从已提交的 operations 派生。
 - Client code 不得解释 ledger records，也不得创建 parallel authority。
 

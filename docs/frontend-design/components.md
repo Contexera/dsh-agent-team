@@ -7,17 +7,23 @@ Props include sender identity, body, optional time, mention handles, sender titl
 
 The identity seat draws a picture for exactly one author: the profile avatar lands on a row only while that row is the Human's own, so an Agent row keeps the shared hue and the sender initial whatever the surface passes down — one seat painting the reader's face for another author would name two people alike.
 
+Row actions float beside the Message in a card rather than living on it: copy, the quote action, and — when the body itself names the reader — the 「有人@我」 notice. The card belongs to the row rather than to the quoting switch, so withholding quotes (`rowActions` without `onReply`) keeps copy and the notice and drops only the quote button; a surface that passes neither offers no card at all, which is what the Channel feed does. The row itself stays flat, so one hovered Message gains a layer instead of the whole timeline gaining texture.
+
+A Message that answers another leads its body with the resolved quote (`data-quote-line`): the parent's author and one ellipsised line of its opening text, both resolved by the Host from the ledger rather than read out of the body, so the quote cannot disagree with what it points at and still fills in when the parent sits outside the loaded history. The whole block jumps to the original wherever the surface can reach it and is inert text otherwise; a Message that is not a reply renders none.
+
 Bodies over the 600-character formatter threshold use a persistent wrapper with an approximately eight-line/176px preview and quiet “expand/collapse” button carrying `aria-expanded`. Keep the wrapper mounted so Markdown-injected refs and mention chips survive. Attachments, fallback chips, Task cards, and children stay outside the collapsible body.
 
 That same wrapper carries `data-document`: the threshold that folds a body also calls it a document, so its Markdown reads on the document rhythm (Typography table above) while short messages keep the chat grid, and the preview stays eight lines of whatever the content-font axis sets.
 
 ## Message runs
-A run groups consecutive same-sender Messages and its Thread entry row. Activity and unread boundaries break runs. An entry row in a grouped row gets a hairline; ordinary continuation does not. Runs have no hover box, fill, shadow, or permanent border—only two-pixel spacing. Five-minute dividers and day anchors carry time context.
+A run groups consecutive same-sender Messages and its Thread entry row. Activity and unread boundaries break runs. An entry row in a grouped row gets a hairline; ordinary continuation does not. Runs have no hover box, fill, shadow, or permanent border—only two-pixel spacing. Five-minute dividers and day anchors carry time context, and a divider's instant is the only statement of it: the continuation row below does not repeat that time in the avatar seat.
 
 ## Mentions and Task refs
 Mention chips are rendered only for handles in the Message's resolved mention list, matching the authored `@Handle` case-insensitively on Unicode word boundaries — a bare name without its `@` is prose and never chipifies, and code stays literal. A chip names the person as they are called today: the Human's pre-rename handle stays an alias the Host still delivers to, so a Message whose body wrote `@human` chips in place as the current profile name instead of landing in the trailing row under a name its body never used.
 
 Human literal, Agent plain prose, and rich Markdown use their corresponding segmentation path; absent names become a trailing fallback row without duplication.
+
+The reader's own handle is the one chip that leaves the business family: `[data-mention-human]` paints it in the success alias, because the error and warn families mean a failure and a caution while every other chip stays business. The trailing fallback row never repeats the reader's own name — that would print a bare `@me` under a body that already chips it in place — nor an author the quote line above it already names, since that line states the delivery itself. A quote that no longer resolves names nobody, so there the chip is the only place the delivery still shows.
 
 Known branded `task:*` refs are resolved in batches and rendered at their original position as clickable `Task #N` in Human, plain Agent, and rich Markdown text. Code fences, indented code, mixed inline code, and existing links stay literal. Normalize malformed double-colon or uppercase spellings before resolution. Resolved refs can navigate across Workspace, Channel, and Thread; failed refs remain plain text. Task numbers are home-Channel creation ordinals, while branded refs remain stable identity.
 

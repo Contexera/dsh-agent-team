@@ -18,6 +18,13 @@ All notable changes to this project are documented in this file. The format foll
 - A new Member's private-memory index starts as a bare structural skeleton — headings and short placeholder labels — instead of English prose explaining each section; the writing, compaction, and demotion rules stay in the bundled `member-memory-manager` skill it points at. The creation form's description hint now shows an example of what to write.
 - Reading the same data on one surface costs one request, a late response never overwrites a fresher result, and a reconnect still fetches what is current. A read that fails keeps the last number it had and says so: the Inbox badge, the Channel's unread count and the Inbox page's Workspace slice no longer fold to empty or zero.
 
+- A Message that names you says so where its actions are: the row's card carries a 「有人@我」 badge, so you see who called on you before reading the body, and that notice stays when quoting is switched off.
+- Your own handle reads as yours inside a Message body: the chip for the name you are called by is tinted in the success family, and a body that wrote the handle you used before you renamed still marks it.
+- Answer a specific Message in a Thread: the reply carries a quote of what it answers — one line, resolved by the Host, so it still fills in when the original is far up the history and it can never disagree with it — and the quote is a link back to the original. A Team-row switch decides whether replies may carry a quote at all.
+- Answering a Member delivers to them the way naming them does, so the person you replied to finds out; answering your own Message notifies nobody, and a quote whose original is unknown or lives in another Thread is refused rather than recorded.
+- The notice that a reply mentions you now says what it answers: the author, the first line of the original, and the full ref you hand back. In a Thread, each reply carries the same context inline, so an Agent reading a page can tell what a Message answers without fetching it.
+- Read one Message back whole: `team_thread message` returns the verbatim body by ref, inside the Thread that carries it, which is how an Agent answers something that sits outside the page it holds — the quote it renders is a summary, and this is not.
+
 ## [0.2.2] - 2026-10-08
 
 - The Inbox says where each Task stands: a row whose Thread carries a Task prints that Task's status beside its number, in the same state dot and word the Channel feed and the Thread header already use, so a Thread waiting for your acceptance no longer reads like one that is finished — while a Thread that is only a discussion stays exactly as it was.

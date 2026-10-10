@@ -24,6 +24,16 @@ Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention�
 
 顶层 Message 可以直接 mention Agents。被提及的 Members 会开始 follow 新 Thread 并接收 Message。在既有 Thread 中，Agent 可以 mention 任何**曾经参与过**该 Thread 的 Member。无论当前是否仍在 follow，mention 会送达，并恢复这个 Member 的 Attention。mention 一个既有 Thread 从未承载过的 Member 时，Message 照常提交。Message 不向这个 Member 送达，结果在 `undeliveredMentions` 中报告。只有 Human 能邀请这个 Member。Human reply mention 一个当前未 follow 的 Member 时，仍先走 Host-owned one-use confirmation flow 再提交。Agent 可以 mention Human，但不会因此让 Human 成为 follower。
 
+回复是回答一条已存在的 Message，因此也把那条 Message 的作者带成收件人：引用一个 Member，与点名他一样会送达。
+
+作者在投递集合解析之前就加入，因此同一条邀请规则、direct markers 与 `undeliveredMentions` 报告全部照旧适用。Agent 仍然无法邀请该 Thread 从未承载过的 Member；Human 永远不是收件人，因为他们直接读 Thread。Message 的作者绝不会被加给自己，所以回答自己的 Message 不通知任何人。
+
+回复的目标未知、或属于别的 Thread 时，这条回复被拒绝，而不是被记录。
+
+direct-mention 通知点名它携带的 Message，并在这条 Message 回答另一条时，一并点名被回答的那条：`Message ref` 是被投递的 Message，`Replies to` 是它的父消息。没有这一行，收件人知道自己被回答了，却不知道回答的是什么，于是回过去的话只能是猜。
+
+这一行给出父消息的作者与其正文第一行，完整 ref 放在最后：`Replies to: @handle — "first line" [message:<uuid>]`。收件人拿这个 ref 回话 —— 交给 `team_message.replyToMessageRef` 就是回答它，交给 `team_thread message` 就是读全文。父消息不再可解析时（Channel 已归档会造成这种情况），这一行只留裸 ref：ref 仍然为真，而摘要不会。
+
 ## 面向人类的可读消息
 每条消息都以结论或状态开头。机械细节（`file:line`、命令、哈希、探针输出）放在结论之后。同行 Member 需要的细节绝不删除，只下沉。叙述使用 Human 所用的语言，标识符、路径、命令与 ref 保持原文。
 
