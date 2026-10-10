@@ -162,6 +162,8 @@ function openMemberSessionImpl(
   ctx: ClientContext,
   navigation: TeamNavigation,
   sessionId: AgentTeamClientMemberStatus['member']['sessionId'],
+  /** Surfaces a failure to the row instead of leaving the click silent. */
+  reportFailure?: (message: string) => void,
 ): void {
   const snapshot = navigation.getSnapshot()
   const current = currentMainSessionId(ctx)
@@ -173,7 +175,17 @@ function openMemberSessionImpl(
   const returnTo = snapshot.memberSessionId === undefined && current !== undefined && current !== sessionId && !memberSessions.has(current) ? current : undefined
   navigation.actions().enterMemberSession(sessionId, returnTo)
   ctx.layout.selectPanel(null)
-  ctx.uiWorkspace.openSession(sessionId)
+  // `openSession` is a synchronous void: its failure (an id the Client's
+  // Session catalog does not carry yet — the window right after a Member is
+  // created) would otherwise vanish, leaving the sidebar marking a Session
+  // the seat never showed. Undo the navigation and let the caller say so.
+  try {
+    ctx.uiWorkspace.openSession(sessionId)
+  } catch (cause) {
+    if (snapshot.memberSessionId !== undefined) navigation.actions().enterMemberSession(snapshot.memberSessionId, undefined)
+    else navigation.actions().exitMemberSession()
+    reportFailure?.(cause instanceof Error ? cause.message : String(cause))
+  }
 }
 
 /** The roster query's identity: one key per Workspace, invalidated by presence and workspace changes. */
@@ -239,8 +251,8 @@ function teamSharedRemotes(
     leaveWorkspace: (request: AgentTeamLeaveWorkspaceRequest) => ctx.remote.agentTeam.leaveWorkspace(request),
     // The Host-scoped catalog needs no live Member, so suspended ones stay editable too.
     loadModels: () => ctx.remote.session.modelCatalog(),
-    openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId']) => {
-      openMemberSessionImpl(ctx, navigation, sessionId)
+    openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => {
+      openMemberSessionImpl(ctx, navigation, sessionId, reportFailure)
     },
   }
 }

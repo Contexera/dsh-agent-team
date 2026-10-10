@@ -130,7 +130,7 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     /** Session-independent Host model catalog (`llm.models`); needs no live Member. */
     loadModels: () => Promise<RemoteResult<TeamModelCatalog>>
     /** Embed the Member's Session conversation in the Team conversation seat. */
-    openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId']) => void
+    openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => void
     selectedChannelRef?: AgentTeamChannelRef
   }
 
@@ -160,7 +160,7 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   /** Human-only Thread Attention observations; the Thread composer ranks the returned followers first. */
   threadObservations: (request: AgentTeamThreadObservationsRequest) => Promise<RemoteResult<AgentTeamThreadObservations>>
   /** Agent-card session jump, shared by every slot; message member chips reuse it. */
-  openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId']) => void
+  openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => void
 }
 
 export type TeamSettingsProps = PropsRuntime<'sidebar.settings'> & PropsLocale<'team'> & TeamNavigationActions & {

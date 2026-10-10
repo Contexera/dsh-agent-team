@@ -361,7 +361,11 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
   return (
     <>
       <div className={css.agentRow} data-agent-row data-menu-open={menuOpen || undefined}>
-        <button type="button" className={css.agentSelect} aria-label={t('openAgentSession', { name: status.member.handle })} aria-current={current ? 'page' : undefined} disabled={status.availability !== 'active'} onClick={() => { openMemberSession(status.member.sessionId) }}>
+        <button type="button" className={css.agentSelect} aria-label={t('openAgentSession', { name: status.member.handle })} aria-current={current ? 'page' : undefined} disabled={status.availability !== 'active'} onClick={() => {
+          openMemberSession(status.member.sessionId, message => {
+            setRowAlert(t('openAgentSessionFailed', { name: status.member.handle.replace(/^@/, ''), message }))
+          })
+        }}>
           <TeamMemberIdentity status={status} name={status.member.handle.replace(/^@/, '')} className={css.agentCopy} t={t} />
         </button>
         <span className={css.rowMenu}>
