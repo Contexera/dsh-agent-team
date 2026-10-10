@@ -196,8 +196,8 @@ describe('Team agent surfaces', () => {
     await b.view.findByText('builder')
     fireEvent.click(b.view.getByRole('button', { name: '添加 Agent' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'bare' } })
-    // Description stays empty; the placeholder marks it optional.
-    expect(b.view.getByPlaceholderText('留空则暂无描述')).toBeTruthy()
+    // Description stays optional; the hint shows an example instead of saying so.
+    expect(b.view.getByPlaceholderText('例如：负责后端接口与数据模型')).toBeTruthy()
     // Pick a model through the capped menu; pinning reveals the effort row.
     fireEvent.click(await b.view.findByRole('button', { name: '模型' }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: 'DeepSeek Chat' }))
