@@ -909,6 +909,36 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await channelComposer.fill('这是带附件的验收消息')
   await page.screenshot({ path: join(UI04_SHOTS, 'composer-attachment-chip.png'), fullPage: true })
   await page.getByRole('button', { name: '发送' }).click()
+  // One column, and no reading language in the Channel: the feed's rows all
+  // start their words on the same x — the reader's own turns included — and a
+  // row under the pointer gains neither a layer nor a card, because that
+  // language belongs to the Thread and the feed's entry rows own their own.
+  const channelRows = page.locator('[data-team-channel] article')
+  await expect.poll(() => channelRows.count()).toBeGreaterThanOrEqual(2)
+  const channelColumns = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('[data-team-channel] article')]
+    const columnOf = (row: Element): number => {
+      const body = row.querySelector('[class*="messageBody"]')
+      return body === null ? -1 : Math.round(body.getBoundingClientRect().left)
+    }
+    return {
+      columns: [...new Set(rows.map(columnOf))],
+      sides: rows.filter(row => row.hasAttribute('data-side')).length,
+      cards: document.querySelectorAll('[data-team-channel] [data-message-card]').length,
+      seats: document.querySelectorAll('[data-team-channel] [data-card-time]').length,
+    }
+  })
+  // Every row shares one text column: the human's own Message reads on the same
+  // left edge as the Agents'.
+  expect(channelColumns.columns.length).toBe(1)
+  expect(channelColumns.sides).toBe(0)
+  expect(channelColumns.cards).toBe(0)
+  expect(channelColumns.seats).toBe(0)
+  const feedRow = channelRows.filter({ hasText: '这是一条超长验收消息' }).first()
+  await feedRow.hover()
+  await settleAnimations(page)
+  expect(await feedRow.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+
   const attachmentMessage = page.locator('[data-team-channel] article').filter({ hasText: '这是带附件的验收消息' })
   await attachmentMessage.waitFor()
   await expect.poll(() => page.locator('[data-team-channel] article img[src^="data:image/png"]').count()).toBeGreaterThanOrEqual(1)
@@ -1311,6 +1341,275 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const replayedThread = scaffold.ctx.agentTeam.threadHistory({ workspaceId: workspace.id, taskRef: task.taskRef, limit: 100 })
   expect(JSON.stringify(replayedThread)).toContain('请 @reviewer 加入这个已有 Thread 并回复 Human @reviewer')
   expect(JSON.stringify(replayedThread)).toContain('reviewer 已读取邀请并回复 @human')
+
+  // ---- The reading language: hover layer, seat time, action card, quote -----
+  // The row under the pointer gains one flat layer, its own time appears in the
+  // empty avatar seat when it is a continuation, and the actions float beside it.
+  // All three are hover-revealed, so what a reader sees at rest stays quiet.
+  const hoveredRow = page.locator('article').filter({ hasText: '离线期间的批量更新 二' })
+  await hoveredRow.scrollIntoViewIfNeeded()
+  const actionCard = hoveredRow.locator('[data-message-card]')
+  await expect.poll(() => actionCard.count()).toBe(1)
+  // At rest: no layer on the row, no card, no time.
+  expect(await hoveredRow.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+  expect(await actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
+  const seatTime = hoveredRow.locator('[data-gutter-time]')
+  await expect.poll(() => seatTime.count()).toBe(1)
+  expect(await seatTime.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
+  await hoveredRow.hover()
+  await settleAnimations(page)
+  await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
+  await expect.poll(() => seatTime.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
+  const hoverFacts = await hoveredRow.evaluate(element => {
+    const row = getComputedStyle(element)
+    const cardElement = element.querySelector('[data-message-card]') as HTMLElement
+    const card = getComputedStyle(cardElement)
+    const action = getComputedStyle(cardElement.querySelector('[data-copy-message]')!)
+    return {
+      rowFill: row.backgroundColor, rowRadius: row.borderRadius, rowShadow: row.boxShadow,
+      cardRadius: card.borderRadius, cardShadow: card.boxShadow, cardFill: card.backgroundColor,
+      cardHeight: Math.round(cardElement.getBoundingClientRect().height),
+      cardTransition: `${card.transitionDuration} ${card.transitionTimingFunction}`,
+      actionHeight: Math.round(Number.parseFloat(action.height)),
+      seatWidth: Math.round(Number.parseFloat(getComputedStyle(cardElement.parentElement!.querySelector('[data-gutter-time]')!).width)),
+    }
+  })
+  // The row's layer is the shipped hovered-row fill: the shipped radius tier,
+  // no shadow, no border.
+  expect(hoverFacts.rowFill).not.toBe('rgba(0, 0, 0, 0)')
+  expect(hoverFacts.rowRadius).toBe('12px')
+  expect(hoverFacts.rowShadow).toBe('none')
+  // The card is the one raised surface: the shipped floating-card shadow on an
+  // opaque surface (its radius is pinned against the live 验收 control below).
+  expect(hoverFacts.cardShadow).not.toBe('none')
+  expect(hoverFacts.cardFill).not.toBe('rgba(0, 0, 0, 0)')
+  // The card is the header 验收 Button's own tier, measured against the live
+  // control in this same render: the reader compares the two, so they must
+  // agree — the same 28px height and the same corner radius.
+  const acceptButton = page.getByRole('button', { name: '验收' }).first()
+  const acceptFacts = await acceptButton.evaluate(element => {
+    const style = getComputedStyle(element)
+    return { height: Math.round(element.getBoundingClientRect().height), radius: style.borderRadius }
+  })
+  expect(hoverFacts.cardHeight).toBe(acceptFacts.height)
+  expect(hoverFacts.cardRadius).toBe(acceptFacts.radius)
+  expect(hoverFacts.actionHeight).toBe(28)
+  expect(hoverFacts.cardTransition).toBe('0.16s ease-out')
+  // The seat keeps its 28px: revealing a time never pushes the text column.
+  expect(hoverFacts.seatWidth).toBe(28)
+  // The card floats beside the reading path, level with the identity line, so it
+  // covers neither the author it names nor the words it acts on.
+  const cardPlacement = await hoveredRow.evaluate(element => {
+    const row = element.getBoundingClientRect()
+    const card = element.querySelector('[data-message-card]')!.getBoundingClientRect()
+    const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
+    return {
+      gapToBodyEdge: Math.round(body.right - card.right),
+      topInRow: Math.round(card.top - row.top),
+      // Clearance between the card's lower edge and the row's own content edge:
+      // the one number that says "the card covers no word of this Message".
+      clearanceToContent: Math.round(body.top - card.bottom),
+    }
+  })
+  expect(Math.abs(cardPlacement.gapToBodyEdge)).toBeLessThanOrEqual(1)
+  // The card's lower edge stops above the row's content the rise is computed for.
+  // A continuation row carries no identity line, so its content starts 8px higher
+  // and the rise grows with it — this number is the invariant, not the rise.
+  expect(cardPlacement.clearanceToContent).toBe(2)
+  // The hovered row continues an earlier one, so its content starts at the 2px
+  // grouped inset and the card rises the full 28px to clear it.
+  expect(cardPlacement.topInRow).toBe(-28)
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-row-hover.png') })
+  // The reveal belongs to the pointer and the focus ring, never to a sticky
+  // state: moving the pointer off the row puts the row back at rest...
+  await page.mouse.move(4, 4)
+  await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
+  // ...and a keyboard reader gets the same card by focusing into the row, since
+  // the reveal is a :focus-visible rule and not a :focus-within one.
+  await hoveredRow.locator('[data-quote-message]').focus()
+  await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
+  await page.mouse.move(4, 4)
+  // Pressing an action is not a way to keep the row lit: the pressed button holds
+  // DOM focus, so a :focus-within layer would stay shaded until the reader
+  // clicked elsewhere. With the pointer off the row, the layer is gone.
+  await hoveredRow.locator('[data-copy-message]').click()
+  await page.mouse.move(4, 4)
+  await settleAnimations(page)
+  expect(await hoveredRow.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+  expect(await seatTime.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
+  await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-row-after-action.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await hoveredRow.scrollIntoViewIfNeeded()
+  await hoveredRow.hover()
+  await settleAnimations(page)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-row-hover-narrow.png') })
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+
+  // Quote: the card's action puts the Message in the composer, the banner states
+  // who the quote reaches before send, and the sent Message leads with the quoted
+  // line — which jumps back to the original.
+  // First match on purpose: the Message this one quotes carries the same text
+  // inside its quote line, and the original always precedes its answers.
+  const quotedRow = page.locator('article').filter({ hasText: '离线期间的批量更新 一' }).first()
+  await quotedRow.hover()
+  await quotedRow.locator('[data-quote-message]').click()
+  const quoteBanner = page.locator('[data-reply-banner]')
+  await expect.poll(() => quoteBanner.count()).toBe(1)
+  await expect.poll(async () => await quoteBanner.textContent() ?? '').toContain('引用')
+  await expect.poll(async () => await quoteBanner.textContent() ?? '').toContain('离线期间的批量更新 一')
+  // The banner does not restate the delivery: the quoted author takes their
+  // place in the same 「将通知」 row as any other recipient, so one delivery is
+  // stated once, where the reader already looks for it.
+  const quoteNotify = page.locator('[data-team-notify]')
+  await expect.poll(async () => await quoteNotify.textContent() ?? '').toContain('@reviewer')
+  // The banner is a line, not a panel: no fill, no border, no radius, and no
+  // rule of its own — the card frames it, and the quote's own 2px bar belongs
+  // where it separates a Message from the body it answers.
+  const bannerFacts = await quoteBanner.evaluate(element => {
+    const style = getComputedStyle(element)
+    const author = element.querySelector('[class*="replyBannerAuthor"]')!.getBoundingClientRect()
+    const cancel = element.querySelector('[class*="replyBannerCancel"]')!.getBoundingClientRect()
+    const draft = element.parentElement!.querySelector('textarea')!.getBoundingClientRect()
+    const draftStyle = getComputedStyle(element.parentElement!.querySelector('textarea')!)
+    const notify = getComputedStyle(document.querySelector('[data-team-notify]')!)
+    const body = element.querySelector('[class*="replyBannerBody"]')!.getBoundingClientRect()
+    return {
+      fill: style.backgroundColor, border: style.borderTopWidth, radius: style.borderTopLeftRadius,
+      bar: element.querySelector('[class*="replyBannerBar"]') === null,
+      // The words sit in the composer's text column: the same left inset the
+      // draft is typed at and the same right inset the notify row keeps.
+      leftInset: Math.round(body.left - element.getBoundingClientRect().left),
+      draftLeftInset: Math.round(Number.parseFloat(draftStyle.paddingLeft)),
+      rightInset: Math.round(Number.parseFloat(style.paddingRight)),
+      notifyRightInset: Math.round(Number.parseFloat(notify.paddingRight)),
+      // The cancel is a control on that line, so its centre is the line's centre.
+      centerDelta: Math.abs((cancel.top + cancel.height / 2) - (author.top + author.height / 2)),
+      cancelRight: Math.round(draft.right - cancel.right),
+    }
+  })
+  expect(bannerFacts.fill).toBe('rgba(0, 0, 0, 0)')
+  expect(bannerFacts.border).toBe('0px')
+  expect(bannerFacts.radius).toBe('0px')
+  expect(bannerFacts.bar).toBe(true)
+  expect(bannerFacts.leftInset).toBe(bannerFacts.draftLeftInset)
+  expect(bannerFacts.rightInset).toBe(bannerFacts.notifyRightInset)
+  expect(bannerFacts.centerDelta).toBeLessThanOrEqual(0.5)
+  expect(bannerFacts.cancelRight).toBe(bannerFacts.rightInset)
+  await page.screenshot({ path: join(UI05_SHOTS, 'composer-quote-banner.png') })
+  const bannerBox = (await quoteBanner.boundingBox())!
+  await page.screenshot({ path: join(UI05_SHOTS, 'composer-quote-banner-crop.png'), clip: {
+    x: Math.max(0, bannerBox.x - 8), y: Math.max(0, bannerBox.y - 8), width: bannerBox.width + 16, height: bannerBox.height + 16,
+  } })
+  await page.getByRole('textbox', { name: '消息内容' }).fill('引用这条，确认引用管道')
+  await page.getByRole('button', { name: '发送' }).click()
+  const quotedMessage = page.locator('article').filter({ hasText: '引用这条，确认引用管道' })
+  await quotedMessage.waitFor()
+  const quoteLine = quotedMessage.locator('[data-quote-line]')
+  await expect.poll(() => quoteLine.count()).toBe(1)
+  await expect.poll(async () => await quoteLine.textContent() ?? '').toContain('离线期间的批量更新 一')
+  // It is the Message's first line under the identity line, in the reference form
+  // a reader already knows from Markdown.
+  expect(await quotedMessage.evaluate(element =>
+    [...element.querySelector('[class*="messageBody"]')!.children].indexOf(element.querySelector('[data-quote-line]')!))).toBe(1)
+  // ...and it is the same rule-and-line idea inside a Message: muted 2px bar,
+  // quiet words, no fill of its own.
+  const quoteLineFacts = await quoteLine.evaluate(element => {
+    const style = getComputedStyle(element)
+    const bar = getComputedStyle(element.querySelector('[class*="quoteLineBar"]')!)
+    return {
+      fill: style.backgroundColor, radius: style.borderTopLeftRadius,
+      barWidth: Math.round(Number.parseFloat(bar.width)), barOpacity: Number(bar.opacity),
+    }
+  })
+  expect(quoteLineFacts.fill).toBe('rgba(0, 0, 0, 0)')
+  expect(quoteLineFacts.radius).toBe('0px')
+  expect(quoteLineFacts.barWidth).toBe(2)
+  expect(quoteLineFacts.barOpacity).toBeLessThan(1)
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-quote.png') })
+  // The quote survives the narrow column: still one line of text behind the same
+  // 2px rule, and it never widens the timeline it sits in.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await quotedMessage.scrollIntoViewIfNeeded()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  expect(await quoteLine.evaluate(element =>
+    Math.round(Number.parseFloat(getComputedStyle(element.querySelector('[class*="quoteLineBar"]')!).width)))).toBe(2)
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-quote-narrow.png') })
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+  // The quoted line is the jump back to what it points at.
+  await quoteLine.click()
+  await expect.poll(async () => await quotedRow.getAttribute('data-reply-flash')).toBe('true')
+
+  // Opening onto a mention: while the Human is away an agent names them, so the
+  // Thread opens centred on that Message with one pulse of the row layer — not on
+  // the latest fact, and never again once the mention has been read.
+  await page.getByRole('button', { name: '返回频道' }).click()
+  const mentionRead = await scaffold.ctx.agentTeam.readThreadForAgent(agent, {
+    requestId: 'm2-06-mention-read' as never, workspaceId: workspace.id, taskRef: task.taskRef,
+  })
+  const mentionReply = await scaffold.ctx.agentTeam.replyForAgent(agent, {
+    requestId: 'm2-06-mention-reply' as never, workspaceId: workspace.id, taskRef: task.taskRef,
+    body: '需要你拍板：@human 这条要你定方向', baseRevision: mentionRead.thread.revision,
+  })
+  if (mentionReply.kind !== 'committed') throw new Error(`mention reply rejected: ${mentionReply.kind}`)
+  // A run of Messages after it, naming nobody: the mention is still what the
+  // Thread opens on, and centring needs half a viewport of content below the
+  // target — a Message at the very end can only be clamped to the bottom, which
+  // is the browser's own limit rather than the jump's intent.
+  for (const label of ['一', '二', '三', '四', '五', '六', '七', '八']) {
+    const afterRead = await scaffold.ctx.agentTeam.readThreadForAgent(agent, {
+      requestId: `m2-06-mention-after-read-${label}` as never, workspaceId: workspace.id, taskRef: task.taskRef,
+    })
+    const afterReply = await scaffold.ctx.agentTeam.replyForAgent(agent, {
+      requestId: `m2-06-mention-after-${label}` as never, workspaceId: workspace.id, taskRef: task.taskRef,
+      body: `跳转留白 ${label}：这条不点名，只用来给居中留出下方空间。`, baseRevision: afterRead.thread.revision,
+    })
+    if (afterReply.kind !== 'committed') throw new Error(`trailing reply rejected: ${afterReply.kind}`)
+  }
+  await taskEntryRow(page, 1).click()
+  const addressedRow = page.locator('article').filter({ hasText: '需要你拍板' })
+  await addressedRow.waitFor()
+  await expect.poll(async () => await addressedRow.getAttribute('data-reply-flash')).toBe('true')
+  // The mention is stated on the row's card, in its own words, and the card is
+  // where it lives — never on the reading path.
+  await addressedRow.hover()
+  await settleAnimations(page)
+  const mentionLine = addressedRow.locator('[data-mentions-you]')
+  await expect.poll(() => mentionLine.count()).toBe(1)
+  await expect.poll(async () => await mentionLine.textContent()).toBe('提到了你')
+  // The notice reads at the card's own type tier, never smaller than the actions
+  // it sits between, and the card carries the lighter elevation tier.
+  const noticeFacts = await addressedRow.evaluate(element => {
+    const card = element.querySelector('[data-message-card]')!
+    return {
+      noticeSize: Math.round(Number.parseFloat(getComputedStyle(element.querySelector('[data-mentions-you]')!).fontSize)),
+      actionSize: Math.round(Number.parseFloat(getComputedStyle(card.querySelector('[data-copy-message]')!).fontSize)),
+      cardShadow: getComputedStyle(card).boxShadow,
+    }
+  })
+  expect(noticeFacts.noticeSize).toBe(noticeFacts.actionSize)
+  // The declared tier: --dsw-shadow-lv1, one step below the floating panels.
+  expect(noticeFacts.cardShadow).toBe('rgba(0, 0, 0, 0.05) 0px 2px 4px 0px')
+  const cardBox = (await addressedRow.locator('[data-message-card]').boundingBox())!
+  await page.screenshot({ path: join(UI05_SHOTS, 'message-card.png'), clip: {
+    x: Math.max(0, cardBox.x - 28), y: Math.max(0, cardBox.y - 28), width: cardBox.width + 56, height: cardBox.height + 56,
+  } })
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-open-on-mention.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await addressedRow.scrollIntoViewIfNeeded()
+  await addressedRow.hover()
+  await settleAnimations(page)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-open-on-mention-narrow.png') })
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+
 
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('button', { name: '# delivery' }).click()

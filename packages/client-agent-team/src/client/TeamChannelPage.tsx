@@ -448,6 +448,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
                 senderName={sender}
                 memberId={item.message.sender}
                 human={human}
+                readerName={humanName}
                 {...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl })}
                 body={item.message.body}
                 attachments={item.message.attachments}

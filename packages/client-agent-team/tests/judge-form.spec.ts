@@ -42,7 +42,32 @@ describe('judge endpoint form', () => {
     expect(state.fields.model.text).toBe('jev-1.13.0')
     // The `gate` thresholds and the key environment variable share the row and
     // are not this page's controls; the projection carries no field for them.
-    expect(Object.keys(state.fields)).toEqual(['apiBase', 'model', 'apiKey'])
+    // The reply switch is a row-level control riding the same document, so it
+    // is here while those stay absent.
+    expect(Object.keys(state.fields)).toEqual(['apiBase', 'model', 'apiKey', 'replyEnabled'])
+    // Absent means the Host default, which is on; only an explicit false is off.
+    expect(state.fields.replyEnabled.text).toBe('on')
+  })
+
+  it('reads the row-level switch, including a stored false', () => {
+    const { stub, form } = bench()
+    // The switch sits on the row itself, not inside the judge group: a reader
+    // that only ever looked one level into `jev` could not see it at all, and
+    // would report the control as on whatever the document said.
+    stub.publish({ value: { ...SECTION, replyEnabled: false } })
+    expect(form.getSnapshot().fields.replyEnabled.text).toBe('off')
+    stub.publish({ value: { ...SECTION, replyEnabled: true } })
+    expect(form.getSnapshot().fields.replyEnabled.text).toBe('on')
+    // Absent from the document is the Host default, which is on.
+    stub.publish({ value: SECTION })
+    expect(form.getSnapshot().fields.replyEnabled.text).toBe('on')
+  })
+
+  it('writes the switch at its own path, at once', async () => {
+    const { stub, form } = bench()
+    await form.setReplyEnabled(false)
+    // Written on the click, with no fence: a switch is not a staged draft.
+    expect(stub.mutate).toHaveBeenCalledWith([{ op: 'set', path: ['replyEnabled'], value: false }])
   })
 
   it('never seeds the key control: the literal does not ride a response', () => {

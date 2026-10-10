@@ -82,10 +82,45 @@
   padding: 2px 0 8px;
 }
 
-.messageRow { display: flex; gap: 10px; padding: 10px 0; }
+/* One Message is one row on the reading path — one column for everyone, no
+   per-message surface, no per-message width. The row's own layer appears only
+   while the reader is on it, and only in the Thread: that is what gives a busy
+   Thread its hierarchy without painting every turn as a card, spending the
+   reading column on decoration, or lending the Channel feed a language its own
+   entry rows already own. */
+.messageRow { align-items: flex-start; display: flex; gap: 10px; padding: 10px 0; position: relative; }
 .messageRow[data-grouped] { padding-top: 2px; }
-.messageRow[data-grouped] .messageBody > :first-child,
-.messageRow[data-grouped] .messageBody > :first-child > :first-child { margin-top: 0; }
+.messageRow[data-grouped] .messageIdentity,
+.messageRow[data-grouped] .messageIdentityImage { visibility: hidden; }
+/* The row under the pointer (or holding the caret) gains one flat layer — the
+   shipped interactive fill, the material a hovered list row already uses, at the
+   radius a hovered full-width row already carries (`--dsw-radius-md`, the
+   shipped settings-row selector) — and nothing else: no shadow, no border.
+   The layer answers the pointer, never a click: `:focus-within` would keep a row
+   lit after its own actions were pressed (the button holds focus), so a clicked
+   row would stay shaded until the reader clicked elsewhere. Keyboard readers get
+   the layer from `:has(:focus-visible)` instead — same statement, and it ends
+   when the caret leaves. */
+[data-team-thread] .messageRow[data-reply-flash] { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
+/* The Message the composer is answering holds that same layer, so the choice
+   stays visible after the pointer leaves and until it is sent or cancelled —
+   the banner names the parent, and this says which row on screen it is. */
+[data-team-thread] .messageRow[data-replying-to] { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
+@media (hover: hover) {
+  [data-team-thread] .messageRow:hover,
+  [data-team-thread] .messageRow:has(:focus-visible) { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
+}
+/* The Message a reader just jumped to: one short pulse of that same layer, which
+   says "here" and then gets out of the way. */
+@keyframes rowFlash {
+  0%, 100% { background-color: transparent; }
+  20%, 70% { border-radius: var(--dsw-radius-md); background-color: var(--dsw-alias-interactive-bg-hover); }
+}
+[data-team-thread] .messageRow[data-reply-flash] { animation: rowFlash 1.2s ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+  /* The pulse is decoration; the layer still lands so the target is marked. */
+  [data-team-thread] .messageRow[data-reply-flash] { animation: none; background: var(--dsw-alias-interactive-bg-hover); }
+}
 .messageIdentity {
   align-items: center;
   background: hsl(var(--team-avatar-hue, 212) 42% 46%);
@@ -111,14 +146,215 @@
   height: 28px;
   object-fit: cover;
 }
-.messageRow[data-grouped] .messageIdentity,
-.messageRow[data-grouped] .messageIdentityImage { visibility: hidden; }
-.messageBody { min-width: 0; }
+/* The text column claims the whole track beside the avatar seat, so a long
+   Message may use the full reading width, while `align-items` lets a short one
+   shrink back onto its own content — a four-word reply must not paint a
+   full-width bar. The bubble's own `max-width: 100%` is what stops a long body
+   from overflowing the column, and `min-width: 0` keeps an unbroken token from
+   forcing the flex track wider than the column. */
+.messageBody {
+  align-items: flex-start;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Who wrote this Message, and when. It leads the body's own reading path, so
+   the author sits at the same x as the words it introduces. */
 .nameRow {
   align-items: baseline;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* ---- The row's own time ------------------------------------------------ */
+/* A continuation row has no identity line, so its time goes in the avatar seat,
+   on the face's own first line: the seat keeps its 28px and the time is placed
+   absolutely inside it, so revealing a time can never push the text column —
+   the one thing a reader would notice while reading. */
+.gutterTime {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  left: 0;
+  line-height: 20px;
+  opacity: 0;
+  position: absolute;
+  text-align: center;
+  top: 0;
+  transition: opacity 160ms ease-out;
+  white-space: nowrap;
+  width: 28px;
+}
+@media (hover: hover) {
+  [data-team-thread] .messageRow:hover .gutterTime,
+  [data-team-thread] .messageRow:has(:focus-visible) .gutterTime { opacity: 1; }
+}
+/* Where no pointer can hover, a permanent time on every row would undo the quiet
+   default: the tap that opens the row's actions opens its time with them. */
+@media (hover: none) {
+  [data-team-thread] .messageRow[data-card-open] .gutterTime { opacity: 1; }
+}
+
+/* ---- The row's actions ------------------------------------------------- */
+/* The actions float beside the Message rather than living on it: they are about
+   the row, not part of it, and the reader asks for them only while the row is
+   under the pointer or holds the caret. The card is the only raised surface in a
+   Message row — the row itself stays flat, so one hovered Message gains a layer
+   instead of the whole timeline gaining texture.
+   Its geometry is the shipped small control's own — the same 28px height and
+   `--dsw-radius-sm` the header's 验收 Button renders at (`size="sm"`), which is
+   the control a reader compares it with — and its shadow is the shipped
+   floating-card tier: a Message row never invents a radius, a stroke, or a
+   shadow. It rises clear of the row's own first line (`--team-card-rise`): only
+   the card's lower edge can touch a Message, and never the words. */
+/* How far the actions card rises above its row. The rule is one equation, not a
+   nudge: the card is 28px tall, so the rise is what puts its LOWER edge exactly
+   2px above the row's own content edge — the card then covers no word of the
+   Message it acts on, whatever that Message's first line is. A turn opens with
+   its identity line 10px down, and a continuation row carries no identity line
+   at all, so its content starts 8px higher: the card rises those 8px with it
+   instead of sinking into the words. (Reading the rise as a fixed number is what
+   let the card graze a continuation row's first line.)
+   The timeline's own top padding is 12px, so the first row gets the rest of its
+   rise back rather than clipping the card at the scroll edge. */
+[data-team-thread] { --team-card-rise: 20px; }
+[data-team-thread] .messageRow[data-grouped] { --team-card-rise: 28px; }
+[data-team-thread] .timelineContent > .messageRow:first-child { margin-top: calc(var(--team-card-rise) - 12px); }
+.messageCard {
+  align-items: center;
+  background: var(--dsw-alias-bg-layer-1);
+  border-radius: var(--dsw-radius-sm, 8px);
+  /* One tier below the shipped floating panels: this is a 28px chip beside a
+     row, not a menu or a hover card, so the lighter elevation separates it from
+     the timeline without drawing a second surface under the words. */
+  box-shadow: var(--dsw-shadow-lv1);
+  display: flex;
+  height: 28px;
+  position: absolute;
+  right: 0;
+  top: calc(-1 * var(--team-card-rise, 22px));
+  z-index: 2;
+}
+.cardAction {
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  height: 28px;
+  line-height: 28px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+.cardAction:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.cardAction:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
+/* "This Message names you" is a fact about the Message, so it leads the card and
+   survives being read — unlike the unread batch, which is about the reader. The
+   warn label is the shipped "attention, not an error" colour, and it is a line of
+   text here rather than a filled badge: the card is already a surface, and a
+   second surface inside it would read as a control. */
+.cardMention {
+  color: var(--dsw-alias-state-warn-label);
+  /* The card's own type tier, shared with the actions beside it: the notice is
+     read at the size of the things it sits between, never smaller than them. */
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 28px;
+  padding: 0 8px 0 10px;
+  white-space: nowrap;
+}
+/* Success feedback is announced, not painted twice: the button's own label is
+   what changes, and this line is what a screen reader hears. */
+.cardStatus {
+  clip: rect(0 0 0 0);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+/* Hidden only where a pointer can actually hover — a reveal that depends on
+   hover alone would leave the actions unreachable on touch, so there a tap on
+   the row opens the card. Keyboard focus reveals it on both, which is why the
+   buttons stay mounted and focusable instead of leaving the tree. */
+@media (hover: hover) {
+  .messageCard { opacity: 0; transition: opacity 160ms ease-out; }
+  [data-team-thread] .messageRow:hover .messageCard,
+  [data-team-thread] .messageRow:has(:focus-visible) .messageCard { opacity: 1; }
+}
+@media (hover: none) {
+  .messageCard { opacity: 0; pointer-events: none; transition: opacity 160ms ease-out; }
+  [data-team-thread] .messageRow[data-card-open] .messageCard,
+  [data-team-thread] .messageRow:has(:focus-visible) .messageCard { opacity: 1; pointer-events: auto; }
+}
+
+/* ---- The quote line ---------------------------------------------------- */
+/* What this Message quotes, in the one reference form the reader already knows
+   from Markdown: a muted rule and the original's own words, leading the Message
+   it belongs to. No panel, no fill, no label — a quote is a pointer at an
+   original, and dressing it as a card would make it compete with the words it
+   introduces. The whole line is the jump target, so a long original is never
+   pasted a second time and the quote can never disagree with its source. */
+.quoteLine {
+  align-items: baseline;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 8px;
+  margin: 0 0 4px;
+  max-width: 100%;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+.quoteLineBar {
+  align-self: stretch;
+  background: var(--dsw-alias-label-caption);
+  border-radius: 1px;
+  flex: 0 0 2px;
+  opacity: .5;
+}
+.quoteLineBody {
+  align-items: baseline;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+.quoteLineAuthor {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+/* One line, always: the quote is a handle on the original, not a copy of it. */
+.quoteLineText {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The line is a control, so it answers the pointer and the caret the way one
+   does — the rule brightens and the words step up one grade, nothing moves. */
+.quoteLine:hover .quoteLineBar { background: var(--dsw-alias-label-secondary); opacity: .8; }
+.quoteLine:hover .quoteLineText { color: var(--dsw-alias-label-secondary); }
+.quoteLine:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
 }
 /* The sender is the secondary grade of the content axis — one step under the
  * body, 13px/20px at the default content size — so a raised Settings size
@@ -168,6 +404,13 @@
   margin: 4px 0 0;
   max-width: 100%;
 }
+/* The line sits outside the bubble, and the body hugs a short bubble to its own
+   side (`align-items`), so the line takes the whole column back: the state has
+   to open the entry at the column's left edge on either side, or the reader
+   loses the one column they scan down the feed. */
+.messageRow .entryLine {
+  align-self: stretch;
+}
 .entryRow {
   align-items: center;
   background: none;
@@ -194,11 +437,13 @@
 .entryRow:hover .entryArrow,
 .entryRow:focus-visible .entryArrow { transform: translateX(2px); }
 /* Literal human text: the shared MessageText primitive, or segmented mention
-   spans — both need the same pre-wrap metrics from this container. */
+   spans — both need the same pre-wrap metrics from this container. Inside a
+   bubble the vertical rhythm comes from the bubble's own padding, so the block
+   margins collapse to the first/last-child edges only. */
 .messageText {
   font-size: var(--dsh-content-font-size, 14px);
   line-height: calc(22px + var(--dsh-content-font-delta, 0px));
-  margin: 6px 0;
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -244,6 +489,11 @@
    them, and a broken reset would let the primitive's own root font shorthand
    render the clamped preview larger than the expanded body. */
 .messageBody .messageMarkdown > div:first-child { color: var(--dsw-alias-label-primary); font: inherit; }
+/* Inside the bubble the block grid opens and closes flush with the padding:
+   a leading `6px` on the first paragraph would read as a gap the bubble itself
+   did not ask for, and the same at the tail. */
+.messageBody .messageMarkdown > div:first-child > :first-child { margin-top: 0; }
+.messageBody .messageMarkdown > div:first-child > :last-child { margin-bottom: 0; }
 .messageBody .messageMarkdown p { margin: 6px 0; }
 .messageBody .messageMarkdown :where(ul, ol) { margin: 6px 0; padding-left: 22px; }
 .messageBody .messageMarkdown li + li { margin-top: 2px; }
@@ -366,7 +616,7 @@
   .headerActions { flex-wrap: wrap; }
   .backRow { margin-bottom: 6px; }
   .timeline { padding: 8px 12px 16px; scrollbar-gutter: auto; }
-  .messageRow { padding: 8px 0; }
+  .messageRow { gap: 8px; padding: 8px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -426,6 +676,13 @@
   margin: 2px 0 0 38px;
   padding: 5px 0 0;
 }
+/* The divider and its label hug the text column, so on the reader's own side
+   they mirror with the column instead of pointing at the avatar gutter. */
+.runDivider[data-side='end'] {
+  margin-left: 0;
+  margin-right: 38px;
+  text-align: right;
+}
 .runDivider + .messageRow[data-grouped]:has([data-thread-entry]) {
   margin-top: 0;
 }
@@ -443,6 +700,14 @@
   color: var(--dsw-alias-state-business-primary);
   font-weight: 500;
   padding: 0 4px;
+}
+/* The reader's own handle is the one chip they need to find without reading:
+   every other chip stays business, so a second family is what separates "this
+   one is you" from "someone was named". Success carries "for you" without the
+   alarm of the error and warn families, which mean a failure and a caution. */
+.mention[data-mention-human] {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 /* Trailing row for structured mentions that the body text does not carry:

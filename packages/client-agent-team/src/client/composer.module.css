@@ -404,3 +404,69 @@
     transition: none;
   }
 }
+
+/* The reply banner states what the next send answers, above the input and
+   inside the composer card, so the target and the draft are read as one act. It
+   carries no rule of its own: the card already frames it, and the line belongs
+   to the composer's text column — the same inset the notify row under the input
+   uses — so the words line up with the draft they will send with. The quote's
+   left bar stays where it separates a Message from the body it answers, which a
+   framed banner never has to do. */
+.replyBanner {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 0 16px;
+}
+.replyBannerBody {
+  align-items: baseline;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 6px;
+  min-width: 0;
+}
+.replyBannerAuthor {
+  color: var(--dsw-alias-label-secondary);
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.replyBannerText {
+  color: var(--dsw-alias-label-caption);
+  flex: 0 1 auto;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* What pressing send will do is a fact about the action, not part of the quote:
+   the shared "will notify" row already states it, so the banner never repeats
+   it a second time. */
+.replyBannerCancel {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 8px);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  flex: none;
+  font-size: 16px;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 20px;
+}
+.replyBannerCancel:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+.replyBannerCancel:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}

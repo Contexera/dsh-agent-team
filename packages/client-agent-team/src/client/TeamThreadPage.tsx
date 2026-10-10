@@ -1,9 +1,10 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type {
   AgentTeamClientMemberStatus,
   AgentTeamChannelRef,
   AgentTeamConfirmationToken,
   AgentTeamMemberId,
+  AgentTeamMessageRef,
   AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
@@ -19,11 +20,12 @@ import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
-import { firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, taskStatusDot, type MentionHandle } from './team-formatters.ts'
+import { bodyMentionsHuman, firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, taskStatusDot, type MentionHandle } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { daySeparatorLabel, isRunGap, timelineDayKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
+import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
 import { rosterChannelName, rosterMember } from './refs.ts'
@@ -56,6 +58,8 @@ interface TeamThreadPageProps {
   readonly selectThread: TeamConversationProps['selectThread']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
+  readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
+  readonly replyCapabilities: TeamConversationProps['replyCapabilities']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly t: TeamConversationProps['t']
 }
@@ -105,11 +109,28 @@ function readMeta(facts: readonly AgentTeamThreadReadFact[]): ReadonlyMap<Thread
   return new Map(facts.map(fact => [factKey(fact.fact), fact]))
 }
 
+/**
+ * The first Message in read order that names the Human reader and is still
+ * unread — where a Thread opens when the Inbox just said something here is for
+ * them. The flags come from the read that produced these facts, not from the
+ * live projection, because opening a Thread acknowledges what it read.
+ */
+function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], handles: ReadonlyMap<AgentTeamMemberId, string>, humanName: string): AgentTeamMessageRef | undefined {
+  for (const entry of facts) {
+    if (entry.unread !== true || entry.fact.kind !== 'message') continue
+    // The same body scan the card chip answers by: a Thread reaches its Human
+    // in every row, so "delivered" cannot decide where an opening lands.
+    if (!bodyMentionsHuman(entry.fact.message.body, stableMentionNames(entry.fact.mentions, handles, humanName))) continue
+    return entry.fact.message.messageRef
+  }
+  return undefined
+}
+
 export function TeamThreadPage(props: TeamThreadPageProps) {
   const {
     workspaceId, humanName, humanAvatarUrl, channelRef, taskRef, threadRef, taskNumber, backToWorkspace, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
     loadChannels, readThread, loadThreadHistory, threadObservations,
-    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, t,
+    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, resolveMessageRefs, replyCapabilities, t,
   } = props
   const threadRequest = { threadRef, ...(taskRef === undefined ? {} : { taskRef }) }
   const [projection, setProjection] = useState<ReadProjection>()
@@ -144,6 +165,15 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     if (confirmingAccept && projection?.task?.resolution === 'accepted') setConfirmingAccept(false)
   }, [confirmingAccept, projection?.task?.resolution])
   const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
+  // The Message the composer is currently answering, and the parent a reader
+  // just jumped back to (a short pulse, then it clears).
+  const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
+  const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
+  /** The one row whose actions a reader opened by hand; hover reveals the rest. */
+  const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
+  // The Message this opening lands on, held until its row exists: the jump is
+  // decided from the first read, and rows render a paint later.
+  const [pendingJump, setPendingJump] = useState<AgentTeamMessageRef>()
   const [confirmation, setConfirmation] = useState<AgentTeamConfirmationToken>()
   const [statusMessage, setStatusMessage] = useState<string>()
   const [pending, setPending] = useState(false)
@@ -160,6 +190,9 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const mutationRequests = useRef(new Map<string, AgentTeamRequestId>())
   const threadLastFact = currentFacts[currentFacts.length - 1]
   const timeline = useTimelineScroll(`${currentFacts.length}:${olderFacts.length}:${threadLastFact === undefined ? '' : factKey(threadLastFact)}`)
+  // The hook returns a fresh object per render, but this callback is stable: the
+  // opening jump depends on it without re-running on every render.
+  const timelineOnScroll = timeline.onScroll
 
   const updateProjection = (next: ReadProjection): void => {
     projectionRef.current = next
@@ -332,6 +365,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     setHistoryHasMore(false)
     setAutoReadExhausted(false)
     setNewFactsCount(0)
+    setPendingJump(undefined)
+    setOpenCard(undefined)
     setError(undefined)
     setStatusMessage(undefined)
     const sequence = sequenceRef.current + 1
@@ -353,9 +388,16 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return
       }
       updateProjection(read.value)
-      // The Thread opens at the latest fact; the unread boundary stays
-      // rendered as information, but reading is automatic from here on.
-      timeline.scrollToBottom()
+      // Opening a Thread parks the reader on the first Message that names them
+      // and has not been read yet: the Inbox already said something here is for
+      // them, so the page opens where that is instead of at the latest fact. It
+      // is decided from this first read, before the acknowledgement below clears
+      // the flags — a mention the reader has already seen never pulls the view
+      // again. With nothing unread and addressed to them, the Thread still opens
+      // at its latest fact.
+      const addressed = firstUnreadMention(read.value.facts, mentionHandlesMap, humanName)
+      if (addressed === undefined) timeline.scrollToBottom()
+      else setPendingJump(addressed)
       if (history !== undefined && history.ok) {
         setCurrentFacts(current => {
           const merged = mergeFacts(current, history.value.facts)
@@ -494,6 +536,63 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
+  // The switch is the Host's, but the affordance is ours to withhold: showing a
+  // reply button the Host would refuse is worse than showing none.
+  const repliesOffered = useSyncExternalStore(replyCapabilities.subscribe, replyCapabilities.getSnapshot, replyCapabilities.getSnapshot).enabled
+
+  // Reply parents resolve through the Host: a quote must fill in even when the
+  // Message it answers sits far outside the facts this page has loaded.
+  const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
+  const messageRefVersion = useResolvedMessageRefVersion()
+  useEffect(() => {
+    // Two kinds of Message need context: every reply's parent (for its quote
+    // block) and the composer's current target (for its banner). The target is
+    // usually not itself a reply, so resolving only reply parents would leave
+    // the banner with no author and no excerpt.
+    const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
+    if (replyTarget !== undefined && !refs.includes(replyTarget)) refs.push(replyTarget)
+    if (refs.length > 0 && repliesOffered) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
+  }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion, repliesOffered])
+  useEffect(() => {
+    if (flashedMessage === undefined) return
+    // The pulse is also the opening jump's lifetime: releasing it releases the
+    // target, so a jump that is still settling can never outlive the mark that
+    // explains it — and never pulls a reader who has moved on.
+    const timer = setTimeout(() => { setFlashedMessage(undefined); setPendingJump(undefined) }, 1200)
+    return () => { clearTimeout(timer) }
+  }, [flashedMessage])
+  // The opening jump centres the Message that names the reader and pulses its row
+  // layer once — the reader lands on what addresses them instead of hunting for
+  // it. An instant scroll, not a smooth one: this is where the page opens, not a
+  // move the reader asked for. The target stays pending while the pulse lasts
+  // because the first paint can still be growing: a jump made against a timeline
+  // that has not finished laying out would be undone by the pin-to-bottom policy,
+  // so every later commit re-centres it until the pulse releases the target.
+  useLayoutEffect(() => {
+    if (pendingJump === undefined) return
+    const node = document.querySelector(`[data-message-ref="${pendingJump}"]`)
+    if (node === null) return
+    node.scrollIntoView({ block: 'center' })
+    // The reader now sits on one Message rather than at the tail, so the shared
+    // scroll policy has to hear it: otherwise the next arriving fact counts them
+    // as pinned and pulls the view back to the bottom, undoing the jump.
+    timelineOnScroll()
+    setFlashedMessage(pendingJump)
+  }, [pendingJump, currentFacts, readFacts, timelineOnScroll])
+  /** Take the reader to the Message a reply answers, when it is on screen. */
+  const jumpToMessage = useCallback((messageRef: AgentTeamMessageRef): void => {
+    const node = document.querySelector(`[data-message-ref="${messageRef}"]`)
+    if (node === null) return
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlashedMessage(messageRef)
+  }, [])
+  // One stable callback for every row: TeamMessage is memoized, so a fresh
+  // closure per row would re-render the whole timeline on any page render.
+  const handleReply = useCallback((messageRef: AgentTeamMessageRef): void => { setReplyTarget(messageRef) }, [])
+  const handleToggleCard = useCallback((messageRef: AgentTeamMessageRef): void => {
+    setOpenCard(current => current === messageRef ? undefined : messageRef)
+  }, [])
+  const handleOpenReplyTo = useCallback((messageRef: AgentTeamMessageRef): void => { jumpToMessage(messageRef) }, [jumpToMessage])
   // Roster chips resolve synchronously from loaded data: channel names from
   // the Channel view, member facts from the member list. Anything outside the
   // loaded window stays plain text — the same rule unresolvable Task/Thread
@@ -514,16 +613,41 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return (ref: AgentTeamMemberId) => rosterMember(members, humanMemberId, humanName, ref)
   }, [rosterKey, humanName])
 
-  const renderFact = (fact: AgentTeamThreadFact, grouped = false) => {
+  // Reply contexts keyed by the replying Message. Built once per change in the
+  // facts, roster, or resolution cache so each row keeps one stable object:
+  // TeamMessage is memoized and an object literal per render would undo it.
+  const replyContexts = useMemo(() => {
+    const contexts = new Map<AgentTeamMessageRef, { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef }>()
+    const nameOf = (memberId: AgentTeamMemberId): string => {
+      if (memberId === channelView?.humanMemberId) return humanName
+      const status = members.find(candidate => candidate.member.memberId === memberId)
+      return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
+    }
+    for (const fact of currentFacts) {
+      if (fact.kind !== 'message' || fact.message.replyToMessageRef === undefined) continue
+      const parent = cachedResolvedMessageRef(fact.message.replyToMessageRef)
+      // The ref travels whether or not the parent is resolved: it is the fact's
+      // own pointer, so the quote line can always name where it goes.
+      contexts.set(fact.message.messageRef, parent === undefined
+        ? { senderName: t('memberUnknown'), excerpt: '', messageRef: fact.message.replyToMessageRef }
+        : { senderName: nameOf(parent.sender), excerpt: parent.excerpt, messageRef: parent.messageRef })
+    }
+    return contexts
+  }, [currentFacts, messageRefVersion, members, channelView, humanName, t])
+
+  const renderFact = (fact: AgentTeamThreadFact, grouped = false, timeStatedAbove = false) => {
     if (fact.kind === 'message') {
       const sender = memberName(fact.message.sender)
       const senderStatus = members.find(candidate => candidate.member.memberId === fact.message.sender)
       const human = fact.message.sender === channelView?.humanMemberId
+      // The card states one fact — this Message names the reader — and states it
+      // for good: the mention belongs to the Message, not to the reader's read
       return <TeamMessage
         key={factKey(fact)}
         senderName={sender}
         memberId={fact.message.sender}
         human={human}
+        readerName={humanName}
         {...(human && humanAvatarUrl !== undefined ? { avatarUrl: humanAvatarUrl } : {})}
         body={fact.message.body}
         attachments={fact.message.attachments}
@@ -538,6 +662,20 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         memberOf={memberOf}
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
+        // The run divider above already states this instant; a continuation row
+        // repeats it only when nothing above it did.
+        showGroupedTime={!timeStatedAbove}
+        cardOpen={openCard === fact.message.messageRef}
+        onToggleCard={handleToggleCard}
+        messageRef={fact.message.messageRef}
+        {...(repliesOffered && replyContexts.has(fact.message.messageRef) ? { replyTo: replyContexts.get(fact.message.messageRef)!, onOpenReplyTo: handleOpenReplyTo } : {})}
+        {...(repliesOffered ? { onReply: handleReply } : {})}
+        // The row's actions are the row's, not the switch's: copy and the
+        // reader's own mention notice stay when quoting is turned off, and only
+        // the quote action goes with the switch.
+        rowActions
+        replyTarget={replyTarget === fact.message.messageRef}
+        replyFlash={flashedMessage === fact.message.messageRef}
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
       />
     }
@@ -558,7 +696,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
               const turnGap = entry.kind === 'message' && isRunGap(previous?.kind === 'message' ? previous.message.occurredAt : undefined, entry.message.occurredAt)
               return <Fragment key={factKey(entry)}>
                 {turnGap && <TeamRunDivider occurredAt={entry.message.occurredAt} />}
-                {renderFact(entry, entryIndex > 0)}
+                {renderFact(entry, entryIndex > 0, turnGap)}
               </Fragment>
             })}
           </div>,
@@ -704,7 +842,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return
       }
       const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
+      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
       if (!result.ok) {
         setError(result.error.message)
         return
@@ -722,6 +860,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         })
         setProjection(current => current === undefined ? current : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
         drafts.clear(draftKey)
+        setReplyTarget(undefined)
         setPendingFiles([])
         setReplyRequestId(undefined)
         setConfirmation(undefined)
@@ -900,6 +1039,18 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       placeholder={t('replyPlaceholder')}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
+      {...(replyTarget === undefined || !repliesOffered ? {} : {
+        replyTo: (() => {
+          const target = cachedResolvedMessageRef(replyTarget)
+          // The member id travels so the author joins the composer's ordinary
+          // "will notify" row; an unresolved parent cannot name one, and the
+          // Host still delivers without it.
+          return target === undefined
+            ? { senderName: t('memberUnknown'), excerpt: '' }
+            : { memberId: target.sender, senderName: memberName(target.sender), excerpt: target.excerpt }
+        })(),
+        onCancelReply: () => { setReplyTarget(undefined) },
+      })}
       t={t}
     />
     ) : <div />}

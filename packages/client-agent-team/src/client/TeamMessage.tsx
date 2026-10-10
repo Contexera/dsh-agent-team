@@ -1,14 +1,14 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { MarkdownText, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { MarkdownText, Modal, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
 import { cachedResolvedTaskRef, resolveUnknownTaskRefs, useResolvedTaskRefVersion, type ResolvedTaskRef } from './refs.ts'
 import { cachedResolvedThreadRef, resolveUnknownThreadRefs, useResolvedThreadRefVersion, type ResolvedThreadRef } from './refs.ts'
-import { formatMessageTime, isSingleBrandedRef, memberHue, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, type MentionHandle } from './team-formatters.ts'
+import { bodyMentionsHuman, formatMessageTime, isSingleBrandedRef, memberHue, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, type MentionHandle } from './team-formatters.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import css from './conversation.module.css'
 
@@ -24,9 +24,50 @@ export interface TeamMessageProps {
   readonly senderTitle?: string
   /** Continuation of one same-sender run: suppress repeated identity chrome. */
   readonly grouped?: boolean
-  /** Continuation rows that carry their own footer chip render the time so the
-      hairline-separated entry stays self-identifying. */
+  /** This Message carries a structured mention of the Human reader. The hover
+      card states it on a line of its own: the fact belongs to the Message, not
+      to the reader's read state, so it survives being read. It never moves the
+      row — an Agent's mention of the reader is still the Agent's Message, and a
+      reader who saw it on their own side would think they wrote it. */
+  /** The reader's own display name, so the trailing fallback row never repeats
+      the reader back to themselves: the badge already states the mention when it
+      needs attention, and their name in the body is chipped in place. */
+  readonly readerName?: string
+  /**
+   * Resolved context of the Message this one quotes; absent when it quotes
+   * nothing. The author and the excerpt come from the Host, never from the body,
+   * so a quote cannot drift from the Message it points at.
+   */
+  readonly replyTo?: { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef } | undefined
+  /** Opens the named Message as the composer's quote target; absent surfaces offer no quote action.
+      The Message's own ref travels as the argument so the hosting page can pass one
+      identity-stable callback for every row instead of a fresh closure per row —
+      a new function per render would defeat this component's memo. */
+  readonly onReply?: ((messageRef: AgentTeamMessageRef) => void) | undefined
+  /** Jumps to the Message this one quotes, which travels as the argument; absent keeps the quote inert. */
+  readonly onOpenReplyTo?: ((messageRef: AgentTeamMessageRef) => void) | undefined
+  /** Stable identity of this Message: the anchor a quote line jumps to. */
+  readonly messageRef?: AgentTeamMessageRef
+  /** This row is the composer's current quote target. */
+  readonly replyTarget?: boolean
+  /** This row is the one a reader just jumped to. */
+  readonly replyFlash?: boolean
+  /** A continuation row carries its own time in the empty avatar seat; only the
+   * Thread asks for it, where the reading language lives. */
   readonly showGroupedTime?: boolean
+  /** This row's actions are open on a surface without hover; the hosting page
+   * owns the flag so only one row can hold it. */
+  readonly cardOpen?: boolean
+  /** Opens or closes this row's actions; absent surfaces offer none. */
+  readonly onToggleCard?: ((messageRef: AgentTeamMessageRef) => void) | undefined
+  /**
+   * Whether this surface offers the row's actions at all — copy, and the
+   * reader's own mention notice. Absent, the surface offers them exactly when it
+   * offers a quote, which is how a row without this prop has always behaved.
+   * It is separate because withholding quotes is a policy about one action, and
+   * it must not take the others with it.
+   */
+  readonly rowActions?: boolean
   readonly attachments?: readonly AgentTeamMessageAttachment[] | undefined
   /** The Human's uploaded avatar; only the Human's own row draws it, and absent
    * or undecodable bytes draw the initial on the business-tinted chip. */
@@ -57,7 +98,7 @@ export interface TeamMessageProps {
  * skipping a render here never detaches it. Callers must therefore keep the
  * props they derive per render (mention names, ref callbacks) identity-stable.
  */
-export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, showGroupedTime, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
+export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
   // Only the Human's own row may draw a picture: the profile owns those bytes,
   // and one seat painting the reader's face for another author would name two
@@ -72,6 +113,17 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   // One pure plan resolves the stored body into the rendering branch, the
   // trailing fallback rows, and the literal Task/Thread refs that resolve in place.
   const plan = planMessageBody(body, { human, ...(mentionNames === undefined ? {} : { mentionNames }), canOpenRefs: onOpenRef !== undefined })
+  // The chip names what the body names, not what the Host delivered to: a
+  // Thread reaches its Human in every row, and only the words can mention them.
+  const mentionedInBody = bodyMentionsHuman(body, mentionNames)
+  // The fallback row lists mentions the body text does not carry. The reader's
+  // own name never belongs there: their name is either chipped in place or not
+  // named at all. Neither does an author the quote line already names — the
+  // quote states that delivery itself, and a bare chip under it would read as a
+  // mention the body never wrote. A quote that no longer resolves names nobody,
+  // so there the chip is the only place the delivery still shows.
+  const quoteAuthor = replyTo === undefined ? undefined : replyTo.senderName.replace(/^@/, '')
+  const fallbackNames = plan.fallbackNames.filter(name => name !== readerName && name !== quoteAuthor)
   const displayBody = plan.displayBody
   const { richAgentBody } = plan
   // Resolved refs re-label once the Host lookup lands; the version tokens
@@ -109,6 +161,30 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   // from the body alone; the toggle itself is per-mount view state nothing
   // persists.
   const [expanded, setExpanded] = useState(false)
+  // Copy feedback is per row and self-clearing: the label states success for a
+  // moment, then goes back to naming the action.
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => { setCopied(false) }, 1200)
+    return () => { clearTimeout(timer) }
+  }, [copied])
+  // The body travels as the stored Markdown, never as the rendered text: a
+  // reader pasting an Agent's answer somewhere else wants the source it was
+  // written in, not the styling this page gave it.
+  const copyMessage = useCallback((): void => {
+    void writeClipboard(body).then(accepted => { if (accepted) setCopied(true) })
+  }, [body])
+  // A touch surface has no hover to reveal the actions, so a tap on the row
+  // opens its card; hover-capable surfaces ignore the flag (see the CSS), and a
+  // press on the card itself never toggles it. The page owns the flag because
+  // only one row may hold it at a time.
+  const toggleCard = useCallback((event: MouseEvent<HTMLElement>): void => {
+    if (onToggleCard === undefined || messageRef === undefined) return
+    const target = event.target
+    if (target instanceof Element && target.closest('[data-message-card], button, a[href]') !== null) return
+    onToggleCard(messageRef)
+  }, [messageRef, onToggleCard])
   const clampable = shouldClampMessage(displayBody)
   const clamped = clampable && !expanded
   const markdownRef = useRef<HTMLDivElement>(null)
@@ -166,24 +242,48 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   const bodyNode = plan.render === 'inline' && plan.inline !== undefined
     ? <div className={css.messageText}>
         {plan.inline.segments.map((segment, index) => segment.mention
-          ? <span key={index} className={css.mention}>{segment.text}</span>
+          ? <span key={index} className={css.mention} data-mention-human={readerName !== undefined && segment.name === readerName ? '' : undefined}>{segment.text}</span>
           : <Fragment key={index}>{renderRefs(segment.text, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)}</Fragment>)}
       </div>
     : plan.render === 'literal'
       ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)}</div>
       : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} /></div>
   return (
-    <article className={css.messageRow} data-human={human || undefined} data-grouped={grouped || undefined}>
+    <article className={css.messageRow} data-human={human || undefined} data-grouped={grouped || undefined} data-mentions-me={mentionedInBody || undefined} data-message-ref={messageRef} data-replying-to={replyTarget || undefined} data-reply-flash={replyFlash || undefined} data-card-open={cardOpen || undefined} onClick={onToggleCard === undefined ? undefined : toggleCard}>
       {identityImage.src === undefined
         ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{senderName.replace('@', '').slice(0, 1).toUpperCase()}</div>
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
+      {/* A continuation row has no identity line for its own time, so the time
+          sits in the avatar seat under where the face would be — out of the
+          reading path, and off the row's right edge where the words live. */}
+      {grouped === true && showGroupedTime === true && occurredAt !== undefined && <span className={css.gutterTime} data-gutter-time="" aria-hidden="true">{formatMessageTime(occurredAt)}</span>}
       <div className={css.messageBody}>
-        {(!grouped || showGroupedTime === true) && (
+        {!grouped && (
           <div className={css.nameRow}>
-            {!grouped && <strong {...(senderTitle === undefined ? {} : { title: senderTitle })}>{senderName}</strong>}
+            <strong {...(senderTitle === undefined ? {} : { title: senderTitle })}>{senderName}</strong>
             {occurredAt !== undefined && <span className={css.messageTime}>{formatMessageTime(occurredAt)}</span>}
           </div>
         )}
+        {/* What this Message quotes leads it, in the Markdown reference form the
+            reader already knows: one muted line behind a rule, the whole of it a
+            jump to the original, so a long parent is never pasted a second time
+            and the quote can never disagree with the Message it points at. */}
+        {replyTo !== undefined && (onOpenReplyTo === undefined
+          ? <span className={css.quoteLine} data-quote-line="">
+              <span className={css.quoteLineBar} aria-hidden="true" />
+              <span className={css.quoteLineBody}>
+                <span className={css.quoteLineAuthor}>{replyTo.senderName}</span>
+                <span className={css.quoteLineText}>{replyTo.excerpt}</span>
+              </span>
+            </span>
+          : <button type="button" className={css.quoteLine} data-quote-line="" onClick={() => { onOpenReplyTo(replyTo.messageRef) }}
+              title={t?.('openRepliedMessage') ?? 'Go to the quoted message'}>
+              <span className={css.quoteLineBar} aria-hidden="true" />
+              <span className={css.quoteLineBody}>
+                <span className={css.quoteLineAuthor}>{replyTo.senderName}</span>
+                <span className={css.quoteLineText}>{replyTo.excerpt}</span>
+              </span>
+            </button>)}
         {/* The wrapper stays mounted for every clampable body and only swaps
             its class: appearing/disappearing around bodyNode would remount the
             Markdown subtree and wipe the post-render ref/mention chips that the
@@ -196,9 +296,9 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
             {expanded ? (t?.('collapseMessage') ?? 'Show less') : (t?.('expandMessage') ?? 'Show more')}
           </button>
         )}
-        {(plan.fallbackNames.length > 0 || plan.fallbackRefs.length > 0) && (
+        {(fallbackNames.length > 0 || plan.fallbackRefs.length > 0) && (
           <div className={css.mentionsRow}>
-            {plan.fallbackNames.map(name => <span key={name} className={css.mention}>@{name}</span>)}
+            {fallbackNames.map(name => <span key={name} className={css.mention}>@{name}</span>)}
             {plan.fallbackRefs.map(ref => {
               const resolved = cachedResolvedTaskRef(ref as AgentTeamTaskRef)
               const label = resolved !== undefined && ref.startsWith('task:') ? taskLabel(resolved.taskNumber) : ref
@@ -211,8 +311,28 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
           {...(loadAttachment === undefined ? {} : { loadAttachment })}
           {...(t === undefined ? {} : { t })}
         />}
+        {/* The entry line a feed passes in is the row's own chrome, not its
+            words: it opens the entry (state, door) and stays on the row's own
+            reading path rather than inside any per-message surface. */}
         {children}
       </div>
+      {/* The actions float beside the Message instead of living on it: they are
+          about the row, not part of it, and the reader asks for them only when
+          the row is under the pointer or the caret. The card is the only raised
+          surface in a Message row — the row itself stays flat, so one hovered
+          Message gains a layer instead of the whole timeline gaining texture. */}
+      {(rowActions ?? onReply !== undefined) && <div className={css.messageCard} data-message-card="">
+        {mentionedInBody && <span className={css.cardMention} data-mentions-you="">{t?.('mentionsMe') ?? 'Mentioned you'}</span>}
+        <button type="button" className={css.cardAction} data-copy-message="" onClick={copyMessage}
+          aria-label={t?.('copyMessageLabel') ?? 'Copy this message'}>
+          {copied ? (t?.('copiedMessage') ?? 'Copied') : (t?.('copyMessage') ?? 'Copy')}
+        </button>
+        {onReply !== undefined && <button type="button" className={css.cardAction} data-quote-message="" onClick={() => { if (messageRef !== undefined) onReply(messageRef) }}
+          aria-label={t?.('replyToMessage') ?? 'Quote this message'}>
+          {t?.('replyMessage') ?? 'Quote'}
+        </button>}
+        <span className={css.cardStatus} role="status" aria-live="polite">{copied ? (t?.('copiedMessage') ?? 'Copied') : ''}</span>
+      </div>}
     </article>
   )
 })

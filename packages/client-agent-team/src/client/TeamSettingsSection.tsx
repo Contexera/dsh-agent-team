@@ -1,11 +1,12 @@
-import { useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useRef, useState, useSyncExternalStore } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  Button, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, Input,
+  Button, Checkbox, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, Input,
   SettingsForm, SettingsSecretField, SettingsValueField, type SettingsFieldState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
+import type { TeamReplyCapabilitiesFace } from './reply-capabilities.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
 import { useAvatarImage } from './avatar-image.ts'
@@ -47,6 +48,8 @@ export interface TeamSettingsInjected {
   judgeForm: TeamJudgeFormSource
   /** Whether the settings document holds a key literal for the judge. */
   keyConfigured: () => boolean
+  /** The reply switch's projection; a landed write republishes it so every surface moves at once. */
+  replyCapabilities: TeamReplyCapabilitiesFace
 }
 
 export type TeamSettingsProps =
@@ -224,12 +227,15 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
     </div>
     {judgeForm === undefined
       ? null
-      : <JudgeGroup
-          t={t}
-          form={judgeForm}
-          judge={props.judge}
-          keyConfigured={props.keyConfigured}
-        />}
+      : <Fragment>
+          <JudgeGroup
+            t={t}
+            form={judgeForm}
+            judge={props.judge}
+            keyConfigured={props.keyConfigured}
+          />
+          <ReplyGroup t={t} form={judgeForm} capabilities={props.replyCapabilities} />
+        </Fragment>}
     <div className={css.environment}>
       <EnvironmentCheck t={t} environment={props.environment} />
     </div>
@@ -261,6 +267,54 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
  * derived, because a deployment may mount a judge from configuration this page
  * cannot see, and it states what the Host answered rather than predicting it.
  */
+/**
+ * The quote-reply switch.
+ *
+ * It rides the same settings document as the judge's endpoint — one section,
+ * one revision — but writes on the click instead of on a Save, because a
+ * switch that appears to do nothing until something else is pressed reads as
+ * broken. The Host is what actually gates the feature; this control only asks.
+ */
+function ReplyGroup(props: {
+  readonly t: PropsLocale<'team'>['t']
+  readonly form: TeamJudgeForm
+  readonly capabilities: TeamReplyCapabilitiesFace
+}) {
+  const { t, form, capabilities } = props
+  const state = useSyncExternalStore(form.subscribe, form.getSnapshot, form.getSnapshot)
+  const [failed, setFailed] = useState(false)
+  const [pending, setPending] = useState(false)
+  // An absent value is the Host's own default, which is on.
+  const enabled = state.fields.replyEnabled.text !== 'off'
+
+  const toggle = async (next: boolean): Promise<void> => {
+    setPending(true)
+    setFailed(false)
+    const landed = await form.setReplyEnabled(next)
+    // Publish the new answer before anything else reads it: the reply
+    // affordance on every open surface follows this one store.
+    if (landed) await capabilities.refresh()
+    setPending(false)
+    if (!landed) setFailed(true)
+  }
+
+  return <div className={css.group}>
+    <div className={css.groupHeader}>
+      <span className={css.groupTitle}>{t('teamReplyGroupTitle')}</span>
+    </div>
+    <div className={css.groupBody} role="group" aria-label={t('teamReplyGroupTitle')} data-team-reply>
+      <Checkbox
+        checked={enabled}
+        disabled={!state.shell.writable || pending}
+        label={t('teamReplyEnabled')}
+        onChange={(next) => { void toggle(next) }}
+      />
+      <p className={css.groupHint}>{t('teamReplyGroupHint')}</p>
+      {failed && <p className={css.groupNotice} role="alert">{t('teamReplyWriteFailed')}</p>}
+    </div>
+  </div>
+}
+
 function JudgeGroup(props: {
   readonly t: PropsLocale<'team'>['t']
   readonly form: TeamJudgeForm

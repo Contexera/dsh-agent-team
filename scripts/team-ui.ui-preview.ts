@@ -1,12 +1,35 @@
 import { cp, mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, it } from 'vitest'
+import { chromium, type Browser } from 'playwright'
 import { launchWebScaffold, type WebScaffold } from './scaffold.ts'
 
 const TEAM_ROOT = '__TEAM_ROOT__'
 const HOME = '__HOME__'
 const STAGED_BUNDLE = join(HOME, 'profiles', 'node_modules', '@contexera', 'dsh-agent-team')
+const CHROME = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
 let scaffold: WebScaffold
+let browser: Browser | undefined
+
+// PR #42 preview fixture: both sides of a conversation, two runs of consecutive
+// messages, a mention of the reader, quotes in both directions, a clamped body,
+// and a Task thread whose claims give the feed's entry row owners and a state.
+// Every write goes through the real Host paths (read → reply with baseRevision),
+// so the preview shows stored ledger state rather than markup painted by hand.
+const AGENTS = [
+  { handle: 'aster', description: '功能开发、修复与测试' },
+  { handle: 'vera', description: '独立验收、测试执行与证据' },
+] as const
+
+const LONG_BODY = `长文样本（一条 Agent 回答超过 600 字的折叠阈值）：${'这段话会被反复续写，直到超过阈值，读者因此先看到裁切后的预览与底部渐隐，再决定要不要展开全文。'.repeat(16)}`
+
+const wait = async (predicate: () => boolean, timeoutMs = 30_000): Promise<void> => {
+  const started = Date.now()
+  while (!predicate()) {
+    if (Date.now() - started > timeoutMs) throw new Error('preview fixture timed out waiting for a live Agent handle')
+    await new Promise(resolve => { setTimeout(resolve, 250) })
+  }
+}
 
 beforeAll(async () => {
   await rm(HOME, { recursive: true, force: true })
@@ -27,23 +50,183 @@ beforeAll(async () => {
   const workspacePath = join(scaffold.workspaceCwd, 'team-ui-preview')
   await mkdir(workspacePath, { recursive: true })
   const workspace = await scaffold.ctx.workspaceRegistry.create(workspacePath, 'Team UI Preview')
-  const channel = await scaffold.ctx.agentTeam.createChannel({
+  const team = scaffold.ctx.agentTeam
+  const humanMemberId = team.status().humanMemberId
+
+  // Members are provisioned through the Client's own dialog, because a direct
+  // `agentTeam.addMember` call resolves this lane's shipped presets only: the
+  // Member would exist with no live Agent answering for it, and the whole left
+  // side of the conversation — plus every mention of the reader — would be
+  // missing from the preview. The dialog provisions them the way an operator
+  // does, and the headless page is closed again before the preview is served.
+  browser = await chromium.launch({ headless: true, executablePath: CHROME })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+  try {
+    await page.goto(scaffold.authenticatedUrl)
+    await page.locator('nav[class*="panelList"]').getByRole('button', { name: '团队', exact: true }).click()
+    await page.getByText('Team UI Preview', { exact: true }).first().click()
+    for (const agent of AGENTS) {
+      await page.getByRole('button', { name: '添加 Agent' }).click()
+      const dialog = page.getByRole('dialog', { name: '添加 Agent' })
+      await dialog.getByLabel('名称').fill(agent.handle)
+      await dialog.getByLabel('说明').fill(agent.description)
+      await dialog.getByRole('button', { name: '创建 Agent' }).click()
+      await page.getByText(agent.handle, { exact: true }).first().waitFor({ timeout: 30_000 })
+      process.stdout.write(`UI-only preview: provisioned ${agent.handle} through the Client dialog\n`)
+    }
+  } finally {
+    await page.close()
+    await browser.close()
+    browser = undefined
+  }
+
+  const memberOf = (handle: string) => team.members({ workspaceId: workspace.id }).find(candidate => candidate.member.handle === handle)
+  const agentFor = (handle: string) => {
+    const entry = memberOf(handle)
+    return entry === undefined ? undefined : scaffold.ctx.agents.get(entry.member.sessionId)
+  }
+  // Activation lands asynchronously (handle-based persistence, then the awaited
+  // AgentLoop create), so the handle is polled for rather than assumed.
+  for (const agent of AGENTS) await wait(() => agentFor(agent.handle) !== undefined)
+
+  // Fixture seam, not a fixture bug: this lane resolves no model route for a
+  // Member, so the pressure policy fails closed and every Member row would
+  // carry a runtime-fault banner over a preview that never runs a turn. The
+  // canonical durable route record — the same `request/context` event a real
+  // first request appends — makes the route priceable and the rows read clean.
+  {
+    const selection = scaffold.ctx.agentDefaultModel.currentSelection()
+    for (const agent of AGENTS) {
+      agentFor(agent.handle)!.session.append('request/context', {
+        provider: selection.provider,
+        model: selection.model,
+        contextWindow: 128_000,
+      })
+    }
+  }
+
+  const channel = await team.createChannel({
     requestId: 'ui-preview-channel' as never,
     workspaceId: workspace.id,
     name: 'delivery',
-    description: 'Model-free fixture state',
+    description: '预览样本：气泡、分组、有人@我、引用回复、长文折叠、Task 条目',
   })
-  await scaffold.ctx.agentTeam.sendMessage({
+  const channelRef = channel.channel.channelRef
+  for (const agent of AGENTS) {
+    await team.joinChannel({
+      requestId: `ui-preview-join-${agent.handle}` as never,
+      workspaceId: workspace.id,
+      channelRef,
+      memberId: memberOf(agent.handle)!.member.memberId,
+    })
+  }
+
+  const opener = await team.sendMessage({
+    requestId: 'ui-preview-opener' as never,
+    workspaceId: workspace.id,
+    channelRef,
+    asTask: false,
+    body: '预览样本 Thread：气泡两侧、同人分组、有人@我、引用回复、长文折叠都在这一条里。',
+  })
+  if (opener.kind !== 'committed') throw new Error(`preview opener was rejected: ${opener.kind}`)
+  const threadRef = opener.thread.threadRef
+
+  /** Every Thread write drains its own read first: a reply carries the revision it is based on. */
+  const asHuman = async (id: string, body: string, replyToMessageRef?: string) => {
+    const read = await team.readThread({ requestId: `${id}-read` as never, workspaceId: workspace.id, threadRef })
+    const write = (confirmationToken?: string) => team.reply({
+      requestId: id as never,
+      workspaceId: workspace.id,
+      threadRef,
+      body,
+      baseRevision: read.thread.revision,
+      ...(replyToMessageRef === undefined ? {} : { replyToMessageRef: replyToMessageRef as never }),
+      ...(confirmationToken === undefined ? {} : { confirmationToken: confirmationToken as never }),
+    })
+    // Answering a Member delivers to them, and a Human hand-delivering to a
+    // Member is the Host's own confirmation case: the same invitation goes out
+    // again carrying the token it returned.
+    let written = await write()
+    if (written.kind === 'confirmation_required') written = await write(written.confirmationToken)
+    if (written.kind !== 'committed') throw new Error(`${id} was rejected: ${written.kind}`)
+    return written
+  }
+  const asAgent = async (handle: string, id: string, body: string, options: { recipients?: readonly string[]; replyTo?: string } = {}) => {
+    const agent = agentFor(handle)!
+    const read = await team.readThreadForAgent(agent, { requestId: `${id}-read` as never, workspaceId: workspace.id, threadRef })
+    const written = await team.replyForAgent(agent, {
+      requestId: id as never,
+      workspaceId: workspace.id,
+      threadRef,
+      body,
+      baseRevision: read.thread.revision,
+      ...(options.recipients === undefined ? {} : { recipients: options.recipients as never }),
+      ...(options.replyTo === undefined ? {} : { replyToMessageRef: options.replyTo as never }),
+    })
+    if (written.kind !== 'committed') throw new Error(`${id} was rejected: ${written.kind}`)
+    return written
+  }
+  const claim = async (handle: string, id: string, taskRef: string, direction: string) => {
+    const agent = agentFor(handle)!
+    const read = await team.readThreadForAgent(agent, { requestId: `${id}-read` as never, workspaceId: workspace.id, taskRef: taskRef as never })
+    const claimed = await team.changeClaimForAgent(agent, {
+      requestId: id as never, workspaceId: workspace.id, taskRef: taskRef as never,
+      action: 'claim', direction, baseRevision: read.thread.revision,
+    })
+    if (claimed.kind !== 'committed') throw new Error(`${id} was rejected: ${claimed.kind}`)
+  }
+
+  // A run of the reader's own messages, then a longer run from one Agent: the
+  // two grouping cases the reading language has to tell apart.
+  await asHuman('ui-preview-h2', '同一个人的连续两条合成一组：头像与昵称只出现一次，行距收紧；hover 时时间落在头像那一列的空白处。')
+  const mentioned = await asAgent('aster', 'ui-preview-a1', '收到。这条我点名 @human：hover 时卡片上会多一行「提到了你」，打开 Thread 时视图会自动跳到这条。', { recipients: [humanMemberId] })
+  const grouped = await asAgent('aster', 'ui-preview-a2', '同一发送者的连续第二条：昵称被抑制，它自己的时间只在 hover 时出现在头像那一列。')
+  await asAgent('aster', 'ui-preview-a3', LONG_BODY)
+  const quoted = await asAgent('vera', 'ui-preview-a4', '我引用上面 aster 那条分组消息：引用显示在这条消息的首行，作者与一行摘要，点它能跳回原文。', { replyTo: grouped.message.messageRef })
+  await asHuman('ui-preview-h3', '我也引用同一条，只是列序镜像到右侧。', quoted.message.messageRef)
+  await asHuman('ui-preview-h4', '这条是普通消息，用来看分组之外的行距。')
+
+  // A Task thread: its entry row in the Channel feed carries the state cluster
+  // and the owner stack this preview is meant to show, and the claims land as
+  // activity rows inside the Thread.
+  const taskStart = await team.sendMessageForAgent(agentFor('aster')!, {
     requestId: 'ui-preview-task' as never,
     workspaceId: workspace.id,
-    channelRef: channel.channel.channelRef,
-    body: '检查无模型 UI 预览的频道和 Thread 布局',
+    channelRef,
+    asTask: true,
+    body: '叠放校验：这条 Task 用来验证 feed 条目行的状态列与所有者叠放。',
+    recipients: [humanMemberId],
   })
-  process.stdout.write(`AGENT_TEAM_UI_PREVIEW_URL=${scaffold.baseUrl}\n`)
+  if (taskStart.kind !== 'committed') throw new Error(`preview Task was rejected: ${taskStart.kind}`)
+  const taskRef = taskStart.task!.taskRef
+  await claim('aster', 'ui-preview-claim-1', taskRef, '实现 hover 阅读语言')
+  await claim('vera', 'ui-preview-claim-2', taskRef, '独立验收引用与跳转')
+
+  // Answering a Member delivers to them — the feature's own rule — so every
+  // quote in this fixture wakes the parent's author, and in a lane with no model
+  // that turn faults. The product's own remedy clears it: the preview is meant
+  // to show the surfaces, not a fault banner the lane cannot avoid.
+  for (const agent of AGENTS) {
+    await team.recoverMember({
+      requestId: `ui-preview-recover-${agent.handle}` as never,
+      workspaceId: workspace.id,
+      memberId: memberOf(agent.handle)!.member.memberId,
+    })
+  }
+
+  // The bare origin refuses a browser that carries no session cookie; the
+  // token URL is what a Human actually opens.
+  process.stdout.write(`AGENT_TEAM_UI_PREVIEW_URL=${scaffold.authenticatedUrl}\n`)
+  process.stdout.write(`AGENT_TEAM_UI_PREVIEW_ORIGIN=${scaffold.baseUrl}\n`)
   process.stdout.write('UI-only preview: fixture state is loaded; model calls are disabled and fail explicitly if triggered.\n')
+  process.stdout.write(`UI-only preview: fixture thread ${threadRef} carries ${mentioned === undefined ? 'no' : 'one'} mention row.\n`)
+  process.stdout.write(`UI-only preview: fixture Task ${taskRef} carries two claims.\n`)
 })
 
-afterAll(async () => { await scaffold.close() })
+afterAll(async () => {
+  await browser?.close()
+  await scaffold.close()
+})
 
 it('serves the model-free Agent Team UI preview until stopped', async () => {
   await new Promise<void>(() => {})

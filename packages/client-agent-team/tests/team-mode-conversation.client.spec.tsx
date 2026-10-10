@@ -874,6 +874,109 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('opens a Thread on the first unread Message that names the reader', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seededMessages: [
+      { body: '开篇', occurredAt: '2026-08-21T09:00:00.000Z' },
+    ] })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    const entry = await b.view.findByRole('button', { name: '打开 Task #1' })
+    const originalRead = b.readThread.getMockImplementation()!
+    const addressed = { messageRef: 'message:addressed', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1', sender: 'member:builder', body: '@human 这条要你看', topLevel: false, sequence: 3, occurredAt: '2026-08-21T09:03:00.000Z' }
+    const quiet = { ...addressed, messageRef: 'message:quiet', body: '不点名的进展', sequence: 2, occurredAt: '2026-08-21T09:02:00.000Z' }
+    // The first read decides where the page opens, so the read itself is what
+    // the test moves: one wide fact no one is called into, then the call.
+    const readWith = (mentionUnread: boolean) => b.readThread.mockImplementation(async request => {
+      const result = await originalRead(request)
+      if (!result.ok) return result
+      return { ...result, value: { ...result.value, facts: [
+        { fact: { kind: 'message' as const, sequence: 2, message: quiet, mentions: [] }, unread: true, direct: false },
+        { fact: { kind: 'message' as const, sequence: 3, message: addressed, mentions: ['member:human'] }, unread: mentionUnread, direct: mentionUnread },
+      ] } }
+    })
+    // jsdom has no layout engine, so the opening jump is observed through the
+    // call the addressed row makes, not through real offsets.
+    const prototype = window.HTMLElement.prototype as { scrollIntoView?: (options?: { block?: string }) => void }
+    const originalScrollIntoView = prototype.scrollIntoView
+    const jumps: Array<{ ref: string | undefined; options: { block?: string } | undefined }> = []
+    prototype.scrollIntoView = function (this: HTMLElement, options?: { block?: string }) { jumps.push({ ref: this.dataset.messageRef, options }) }
+    const centred = () => jumps.filter(jump => jump.options?.block === 'center')
+    try {
+      // The Inbox already said something here is for the reader, so the page
+      // opens on the Message that names them instead of at the latest fact.
+      readWith(true)
+      fireEvent.click(entry)
+      await waitFor(() => expect(centred().map(jump => jump.ref)).toContain('message:addressed'))
+
+      // A call the reader has already seen never pulls the view again: with
+      // nothing unread naming them the Thread opens at its latest fact.
+      jumps.length = 0
+      fireEvent.click(b.view.getByRole('button', { name: '返回频道' }))
+      const readsBefore = b.readThread.mock.calls.length
+      readWith(false)
+      fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
+      await waitFor(() => expect(b.readThread.mock.calls.length).toBeGreaterThan(readsBefore))
+      await waitFor(() => expect(document.querySelector('[data-message-ref="message:addressed"]')).not.toBeNull())
+      expect(centred()).toEqual([])
+    } finally {
+      if (originalScrollIntoView === undefined) delete prototype.scrollIntoView
+      else prototype.scrollIntoView = originalScrollIntoView
+      await b.runtime.dispose()
+    }
+  })
+
+  it('states a continuation row\u2019s instant once, in whichever mark above it carries it', async () => {
+    const b = await runtimeWithTeam()
+    fireEvent.click(b.view.getByRole('button', { name: '团队' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
+    fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
+    fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
+    expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
+    const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
+    fireEvent.change(messageInput, { target: { value: 'first task' } })
+    fireEvent.click(b.view.getByRole('button', { name: '作为任务' }))
+    fireEvent.click(b.view.getByRole('button', { name: '发送' }))
+    expect(await b.view.findByText('first task')).toBeTruthy()
+    fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
+    expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
+    await waitFor(() => expect(b.loadThreadHistory).toHaveBeenCalled())
+
+    const anchor = { messageRef: 'message:anchor', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+      sender: 'member:human', body: 'first task', topLevel: true, sequence: 2, occurredAt: '2026-08-21T09:00:00.000Z' }
+    const turn = (ref: string, body: string, occurredAt: string, sequence: number) => ({ kind: 'message', sequence, mentions: [], message: {
+      messageRef: ref, channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+      sender: 'member:builder', body, topLevel: false, sequence, occurredAt } })
+    const historyWith = (facts: unknown[]) => b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
+      task: { taskRef: 'task:1', channelRef: 'channel:1', status: 'todo', resolution: 'open' },
+      thread: { threadRef: 'thread:1', revision: 2 }, anchor, claims: [], facts, cursor: 0, hasMore: false,
+    } } as never))
+    const row = (ref: string) => document.querySelector(`[data-message-ref="${ref}"]`)
+
+    // A real waiting gap: the divider states the instant, and the continuation
+    // row below it must not state the same instant a second time.
+    historyWith([turn('message:a', '先做一半', '2026-08-21T09:10:00.000Z', 3), turn('message:b', '再做一半', '2026-08-21T09:20:00.000Z', 4)])
+    b.publishChannelUpdate()
+    await waitFor(() => expect(row('message:b')).not.toBeNull())
+    const divider = document.querySelector('[role="separator"]')
+    expect(divider).not.toBeNull()
+    const dividerTime = divider!.textContent
+    expect(dividerTime).toBeTruthy()
+    expect(row('message:b')!.querySelector('[data-gutter-time]')).toBeNull()
+
+    // The same two Messages inside one turn's flow: no divider, so the seat is
+    // what states the instant — the same one, once.
+    historyWith([turn('message:a', '先做一半', '2026-08-21T09:19:00.000Z', 3), turn('message:b', '再做一半', '2026-08-21T09:20:00.000Z', 4)])
+    b.publishChannelUpdate()
+    await waitFor(() => expect(row('message:b')!.querySelector('[data-gutter-time]')).not.toBeNull())
+    expect(document.querySelector('[role="separator"]')).toBeNull()
+    expect(row('message:b')!.querySelector('[data-gutter-time]')!.textContent).toBe(dividerTime)
+
+    await b.runtime.dispose()
+  })
+
   it('acknowledges off-screen arrivals automatically and keeps only a pure jump hint', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
