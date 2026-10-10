@@ -22,6 +22,7 @@ import type {
   AgentTeamClearMemberContextRequest,
   AgentTeamRemoveChannelMemberRequest,
   AgentTeamReplyRequest,
+  AgentTeamResolveMessageRefsRequest,
   AgentTeamResolveTaskRefsRequest,
   AgentTeamResolveThreadRefsRequest,
   AgentTeamTaskRequest,
@@ -44,6 +45,7 @@ import { TeamSettingsSection } from './TeamSettingsSection.tsx'
 import { TeamContextJudgeCheck } from './context-judge.ts'
 import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from './judge-form.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
+import { TeamReplyCapabilities, type TeamReplyCapabilitiesFace } from './reply-capabilities.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
 import { TEAM_PANEL_ID, TeamNavigation } from './navigation.ts'
@@ -132,8 +134,9 @@ function registerTeamPanel(
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
+  replyCapabilities: TeamReplyCapabilitiesFace,
 ): void {
-  const sharedRemotes = teamSharedRemotes(ctx, navigation, queries, reads, drafts, humanIdentity)
+  const sharedRemotes = teamSharedRemotes(ctx, navigation, queries, reads, drafts, humanIdentity, replyCapabilities)
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
     name: 'sidebar.panellist',
     id: TEAM_PANEL_ID,
@@ -228,6 +231,7 @@ function teamSharedRemotes(
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
+  replyCapabilities: TeamReplyCapabilitiesFace,
 ): Record<string, unknown> {
   return {
     loadChannels: (request: AgentTeamViewRequest) => ctx.remote.agentTeam.view(request),
@@ -238,6 +242,7 @@ function teamSharedRemotes(
     subscribeChanges: (scope: TeamChangeScope, listener: TeamChangeListener) => queries.subscribeChanges(scope, listener),
     drafts,
     humanIdentity,
+    replyCapabilities,
     loadMembers: (request: AgentTeamMembersRequest) => queries.read(membersQuery(request), () => ctx.remote.agentTeam.members(request)),
     joinChannel: (request: AgentTeamJoinChannelRequest) => ctx.remote.agentTeam.joinChannel(request),
     removeChannelMember: (request: AgentTeamRemoveChannelMemberRequest) => ctx.remote.agentTeam.removeChannelMember(request),
@@ -298,6 +303,7 @@ function teamSeatInject(
       promoteThread: (request: AgentTeamPromoteThreadRequest) => ctx.remote.agentTeam.promoteThread(request),
       resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => ctx.remote.agentTeam.resolveTaskRefs(request),
       resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => ctx.remote.agentTeam.resolveThreadRefs(request),
+      resolveMessageRefs: (request: AgentTeamResolveMessageRefsRequest) => ctx.remote.agentTeam.resolveMessageRefs(request),
     } : {}),
     ...(name === 'sidebar.workspaces' ? {
       addMember: (request: AgentTeamAddMemberRequest) => ctx.remote.agentTeam.addMember(request),
@@ -313,6 +319,7 @@ function registerModeShadow<T extends object>(
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
+  replyCapabilities: TeamReplyCapabilitiesFace,
   name: 'sidebar.workspaces' | 'main' | 'sidebar.settings',
   component: T,
   extraInject?: () => Record<string, unknown>,
@@ -321,7 +328,7 @@ function registerModeShadow<T extends object>(
   // that same panel instead of adding a second one.
   entryKey?: string,
 ): void {
-  const sharedRemotes = teamSharedRemotes(ctx, navigation, queries, reads, drafts, humanIdentity)
+  const sharedRemotes = teamSharedRemotes(ctx, navigation, queries, reads, drafts, humanIdentity, replyCapabilities)
   ctx.slots.inject(name, () => {
     let dispose: (() => void) | undefined
     const reconcile = (): void => {
@@ -375,6 +382,10 @@ function applyUi(ctx: ClientContext): void {
       return `data:${result.value.mediaType};base64,${result.value.bytesBase64}`
     },
   })
+  // One reply-capability store per Client: the settings page moves the switch
+  // and refreshes it, and every surface that offers a reply reads the same
+  // answer, so the affordance appears and disappears without a reload.
+  const replyCapabilities = new TeamReplyCapabilities(() => ctx.remote.agentTeam.replySettings())
   // The local environment check: a fact about this installation rather than
   // about the Human, so it is its own projection and never a field of the
   // identity above. Read once, on the first subscriber, and never written back.
@@ -463,11 +474,11 @@ function applyUi(ctx: ClientContext): void {
     return groups.filter(group => group.members.length > 0)
   }
 
-  registerTeamPanel(ctx, navigation, queries, reads, drafts, humanIdentity)
+  registerTeamPanel(ctx, navigation, queries, reads, drafts, humanIdentity, replyCapabilities)
 
-  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
-  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'main', TeamConversation as never, undefined, 'conversation')
-  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
+  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, replyCapabilities, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
+  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, replyCapabilities, 'main', TeamConversation as never, undefined, 'conversation')
+  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, replyCapabilities, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
 
   // The Team entry lives in the sidebar's panel rail beside the shipped Plugins
   // and scheduled-task entries, so the rail's selection and Team mode are one
@@ -545,6 +556,7 @@ function applyUi(ctx: ClientContext): void {
     locale: NS,
     inject: () => ({
       identity: humanIdentity,
+      replyCapabilities,
       environment,
       judge: contextJudge,
       judgeForm,
