@@ -81,6 +81,17 @@ When changing a Host capability, read package source/tests first and then the ma
 
   `skills.allow` filters `list()` output through a live selection ref (edits swap the filter and invalidate the catalog at the same turn boundary as tool edits); filtering is a visibility semantic, not a security boundary — both roots stay scanned and watched. Member removal deletes the private directory with its skills; suspend/resume and Host restart restore the identical catalog.
 
+## Host service surface (`ctx.agentTeam`)
+
+The Host row publishes one service, `ctx.agentTeam`, consumed in two distinct ways with different stability promises. There is no CLI, no `bin`, and no loopback HTTP entry: the Web Client is the only Human control surface, and every change reaches the Host through the typed Remote.
+
+- **Remote methods** (the `@Remote`-decorated ones, e.g. `members`, `view`, `addMember`, `updateMember`, `sendMessage`, `readThread`, `inbox`, `humanProfile`) are the Client contract. They are typed through Typert artefacts generated from the declarations, so the Client, the model-facing tools, and any other consumer compile against the same shape; changing one is a contract change.
+- **Host-only service methods** (e.g. `memberForAgent`, `membersForClient`, `status`, and the activation/lifecycle internals) exist for in-process Host callers — the preset row, commit listeners, and startup derivation. They carry no compatibility promise and may move between releases.
+
+Only the Remote set is a contract. Everything else on `ctx.agentTeam` is internal and may change shape without a migration note.
+
+A preset row must resolve `ctx.agentTeam` while it runs, never capture it statically at declaration time: the service is provided when the Host plugin starts, so a row that closed over it at import time sees nothing. The same applies to `ctx.get('agentTeam')` in external code, which is undocumented use of an internal surface rather than a supported integration point.
+
 ## Composer attachments (cache, not archive)
 
 Attachments live in the bounded cache `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/`, with a sanitized original name and `meta.json`; they are never ledger bytes or an archive. `putAttachment` enforces a 10 MB file cap and sanitizes names; `getAttachment` serves Client display. Messages record metadata while the stored body contains machine-facing `[attachment] <absolute path>` lines. The Client strips those lines and renders thumbnails/chips.
