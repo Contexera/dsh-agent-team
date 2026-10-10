@@ -692,14 +692,21 @@ export class AgentTeamLedger {
       if (handle !== prior.handle) for (const workspaceId of this.workspacesOf(prior.memberId)) this.assertHandleAvailable(workspaceId, handle, prior.memberId)
       this.assertModelSelection(request.model)
       this.assertCapabilities(request.capabilities)
-      // An absent model or capabilities field must CLEAR any override
-      // (inherit the Host default / full standard capability surface);
-      // spreading `prior` verbatim would silently keep the pinned value.
+      // Partial update: an absent field keeps what the Member already has, and
+      // an explicit null clears the override. Spreading `prior` verbatim
+      // handles the first case; the second must drop the resolved field so the
+      // Member inherits the Host default / full standard capability surface.
+      const nextModel = request.model === undefined ? prior.model
+        : request.model === null ? undefined : Object.freeze({ ...request.model })
+      const nextCapabilities = request.capabilities === undefined ? prior.capabilities
+        : request.capabilities === null ? undefined : request.capabilities
+      // Both overlays come off `prior` before being re-added, or a cleared field
+      // would survive in the spread and the null branch would do nothing.
       const { model: _priorModel, capabilities: _priorCapabilities, ...priorWithoutOverlays } = prior
       const member = Object.freeze({
         ...priorWithoutOverlays, handle, description,
-        ...(request.model === undefined ? {} : { model: Object.freeze({ ...request.model }) }),
-        ...freezeCapabilities(request.capabilities),
+        ...(nextModel === undefined ? {} : { model: nextModel }),
+        ...freezeCapabilities(nextCapabilities),
       })
       const operation: AgentTeamMemberUpdatedOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/member-updated',
@@ -1074,7 +1081,7 @@ export class AgentTeamLedger {
       // Human-gated (reply path).
       const sequence = this.nextSequence()
       const base = this.operationBase(request, sequence)
-      const asTask = request.asTask !== false
+      const asTask = request.asTask === true
       const threadRef = this.ref('thread')
       const taskRef = asTask ? this.ref('task') : undefined
       const task = taskRef === undefined ? undefined
@@ -4131,7 +4138,7 @@ export class AgentTeamLedger {
 
   /** Provider route and model id are exact identifiers; only whitespace-only values are rejected. */
   private assertModelSelection(model: AgentTeamUpdateMemberRequest['model']): void {
-    if (model === undefined) return
+    if (model === undefined || model === null) return
     if (model.provider.trim() === '' || model.model.trim() === '') throw new Error('member model selection must name a provider route and a model id')
   }
 
@@ -4211,8 +4218,11 @@ export class AgentTeamLedger {
     if (operation.kind !== 'team/member-updated' || !this.sameActor(operation.actor, request.actor)
       || operation.data.member.memberId !== request.memberId || operation.data.member.handle !== request.handle.trim()
       || operation.data.member.description !== request.description.trim()
-      || !isDeepStrictEqual(operation.data.member.model ?? undefined, request.model ?? undefined)
-      || !isDeepStrictEqual(operation.data.member.capabilities ?? undefined, request.capabilities ?? undefined)) this.throwRequestCollision(request.requestId)
+      // Only fields the request actually states are comparable: an absent one
+      // means "keep the stored value", which the record cannot distinguish from
+      // a request that stated the same value.
+      || (request.model !== undefined && !isDeepStrictEqual(operation.data.member.model ?? undefined, request.model ?? undefined))
+      || (request.capabilities !== undefined && !isDeepStrictEqual(operation.data.member.capabilities ?? undefined, request.capabilities ?? undefined))) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameChannelJoin(operation: AgentTeamOperation, request: AgentTeamAuthorizedJoinChannelRequest): asserts operation is AgentTeamChannelMemberAddedOperation {
@@ -4258,7 +4268,7 @@ export class AgentTeamLedger {
       || operation.data.message.body !== request.body.trim() || !this.sameList(operation.data.mentions, recipients)
       || !this.sameList(operation.data.message.attachments?.map(attachment => attachment.attachmentId) ?? [],
         request.resolvedAttachments?.map(attachment => attachment.attachmentId) ?? [])
-      || (request.asTask !== false) !== (operation.data.task !== undefined)) this.throwRequestCollision(request.requestId)
+      || (request.asTask === true) !== (operation.data.task !== undefined)) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameReply(operation: AgentTeamOperation, request: AgentTeamAuthorizedReplyRequest, recipients: readonly AgentTeamMemberId[]): asserts operation is AgentTeamThreadRepliedOperation {

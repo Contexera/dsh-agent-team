@@ -671,3 +671,22 @@ describe('Team archival surfaces', () => {
     await b.runtime.dispose()
   })
 })
+
+describe('Team member editor partial update payload', () => {
+  it('states the model explicitly and leaves capabilities alone', async () => {
+    const b = await runtimeWithTeam({ initialChannels: true })
+    fireEvent.click(b.view.getByRole('button', { name: '团队' }))
+    await b.view.findByText('builder')
+    fireEvent.click(b.view.getByRole('button', { name: 'builder 的操作' }))
+    fireEvent.click(await b.view.findByRole('menuitem', { name: '编辑 Agent' }))
+    const editor = b.view.getByRole('dialog', { name: '编辑 Agent' })
+    fireEvent.change(within(editor).getByLabelText('名称'), { target: { value: 'architect' } })
+    fireEvent.click(within(editor).getByRole('button', { name: '保存' }))
+    await waitFor(() => { expect(b.updateMember).toHaveBeenCalled() })
+    const payload = b.updateMember.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    // "Follow global default" is an explicit clear now; an omitted field would
+    // keep a stuck pin. Capabilities stay out: an absent field no longer clears.
+    expect(payload.model).toBeNull()
+    expect('capabilities' in payload).toBe(false)
+  })
+})

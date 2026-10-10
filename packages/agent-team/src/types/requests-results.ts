@@ -107,9 +107,11 @@ export interface AgentTeamArchiveChannelResult {
 }
 
 /**
- * Human intent to edit one Member's mutable facts; absent optional facts
- * clear any override. Callers that do not manage capabilities must echo the
- * stored value back, or their edit would silently clear it.
+ * Human intent to edit one Member's mutable facts. This is a partial update:
+ * an absent optional field keeps the value the Member already has, and an
+ * explicit `null` clears that override (inheriting the Host default model /
+ * the full standard capability surface). Callers only state what they mean to
+ * change, so they never have to echo stored values back.
  */
 export interface AgentTeamUpdateMemberRequest {
   readonly requestId: AgentTeamRequestId
@@ -117,9 +119,10 @@ export interface AgentTeamUpdateMemberRequest {
   readonly handle: string
   /** Display purpose text; may be empty, matching creation. */
   readonly description: string
-  readonly model?: AgentTeamModelSelection
-  /** Absent clears any capability override, matching `model`. */
-  readonly capabilities?: AgentTeamMemberCapabilities
+  /** Absent keeps the current selection; `null` clears it back to the Host default. */
+  readonly model?: AgentTeamModelSelection | null
+  /** Absent keeps the current override; `null` clears it back to the full surface. */
+  readonly capabilities?: AgentTeamMemberCapabilities | null
 }
 
 /** Human intent to suspend or resume one Agent Member. */
@@ -309,8 +312,8 @@ export interface AgentTeamSendMessageRequest {
   readonly attachmentPaths?: readonly string[] | undefined
   readonly confirmationToken?: AgentTeamConfirmationToken
   /**
-   * When false, create a taskless Thread. Omitted/true keeps the released-client
-   * atomic Message+Thread+Task path. New composer/tool seams pass false explicitly.
+   * When true, create a Task over the new Thread. Omitted/false sends a plain
+   * message. Callers that want the Task overlay must ask for it.
    */
   readonly asTask?: boolean
 }

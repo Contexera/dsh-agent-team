@@ -1970,7 +1970,7 @@ describe('Agent Team Member lifecycle', () => {
 
     // Clearing the override updates the same live Agent back to the Host default.
     clearActivationSpies()
-    const cleared = await ctx.agentTeam.updateMember({ requestId: requestId('clear-model'), memberId: added.status.member.memberId, handle: 'builder', description: 'Builds things' })
+    const cleared = await ctx.agentTeam.updateMember({ requestId: requestId('clear-model'), memberId: added.status.member.memberId, handle: 'builder', description: 'Builds things', model: null })
     expect(cleared.status.member.model).toBeUndefined()
     expect(cleared.status.availability).toBe('active')
     expect(createSpy).not.toHaveBeenCalled()

@@ -64,7 +64,7 @@ When changing a Host capability, read package source/tests first and then the ma
 ## Member capabilities and skills
 - Member capabilities (`capabilities` on the Member entity: reserved `tools.allow`, `skills.allow`) are durable intent carried verbatim by every lifecycle operation. Committing performs no known-name validation so old ledgers stay replayable across Harness upgrades; divergence is derived at activation as non-persisted `capabilityWarnings`. `tools.allow` is a deliberate interface reservation (no UI write path) that future Runtime Revision manifest orchestration depends on; do not remove during cleanup.
 
-  Edits follow the absent-clears semantics of `model`; callers that do not manage capabilities must echo the stored value back.
+  Edits follow the partial-update semantics of `model`: an omitted field keeps the stored value and an explicit `null` clears it, so a caller that does not manage capabilities can leave the field out and any Remote-written override survives.
 - Activation applies `tools.allow` as a scoped restriction on the composed preset surface before preset validation (mount → restrict → validate), force-unioning the eight Team tools over the configured list. Unknown names drop with a warning instead of failing activation.
 
   Editing the allow-list on a live Member swaps the restriction at a turn boundary in the same Session: idle Members apply immediately, and a running Member's edit waits for that Member's turn to end. Each Member owns one lifecycle chain, so the wait holds only that Member's later operations, still in submission order, while managing another Member never queues behind it and the ledger keeps its single ordered writer.

@@ -283,7 +283,7 @@ describe('Agent Team member tool policy', () => {
       }),
     ])
     // A clean re-edit clears the warnings together with the override.
-    const edited = await ctx.agentTeam.updateMember({ requestId: requestId('clear-drift'), memberId: drifted.memberId, handle: 't2-drifted', description: 'Cleaned up' })
+    const edited = await ctx.agentTeam.updateMember({ requestId: requestId('clear-drift'), memberId: drifted.memberId, handle: 't2-drifted', description: 'Cleaned up', capabilities: null })
     expect(edited.status.member.capabilities).toBeUndefined()
     expect(edited.status.capabilityWarnings).toBeUndefined()
   })
@@ -681,7 +681,7 @@ describe('Agent Team member tool policy', () => {
     // to the Host default, still in the same Session.
     const cleared = await ctx.agentTeam.updateMember({
       requestId: requestId('t13-unpin'), memberId: member.memberId, handle: 't13-model',
-      description: 'Policy member',
+      description: 'Policy member', model: null,
     })
     expect(cleared.effect).toBe('applied')
     expect(cleared.status.member.model).toBeUndefined()

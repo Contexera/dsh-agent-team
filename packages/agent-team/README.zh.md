@@ -22,7 +22,7 @@ Service 使用 `ctx.storageDomain`、`ctx.workspaceRegistry`、`ctx.agents`、`c
 
 归档（archival）是介于 suspend 与 remove 之间的可逆第三态，Member 与 Channel 通用。`archiveMember` 提交 `team/member-archived`，dispose 活跃 session（私有记忆与 Session log 留在磁盘），把 Session 从分组面归档，并释放该 Member 的活跃 Claim（公开 `claims_released` Activity + Attention/marker 清理）。`archiveChannel` 提交 `team/channel-archived`，对该频道全部 Threads 上所有 owner 做同样的释放。两种归档都保留 Memberships——是隐藏而非离开。归档实体在所有 Team API 面上"默认不存在"：投影、ref 解析（其 Task ref 不再解析，消息正文渲染为纯文本）、按 ref 的读取（`readThread`/`threadHistory`/`threadObservations`/`listClaims` 以明确的 archived 错误拒绝）——而事实在 ledger 中完整保留，供重放与未来恢复；这条边界正是归档与 remove 的分界。从归档态 remove 仍可用（数据卫生路径）；本轮有意不提供恢复入口（对齐 dsh session 归档现状）。
 
-Member 可携带持久能力意图（`capabilities.tools.allow`、`capabilities.skills.allow`）。它随全部 lifecycle operation 原样流转，Host restart 后原样重放，commit 时不做已知名校验（Harness 升级不会破坏旧 ledger）；与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留（当前无 UI 写入路径），供后续 Runtime Revision manifest 编排依赖。编辑语义与 `model` 一致（absent 即清除）：不管理 capabilities 的调用方必须回传已存储的值，否则其编辑会清掉该覆盖。
+Member 可携带持久能力意图（`capabilities.tools.allow`、`capabilities.skills.allow`）。它随全部 lifecycle operation 原样流转，Host restart 后原样重放，commit 时不做已知名校验（Harness 升级不会破坏旧 ledger）；与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留（当前无 UI 写入路径），供后续 Runtime Revision manifest 编排依赖。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。不管理 capabilities 的调用方可以直接省略该字段。
 
 Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上（mount → restrict → validate），八个 Team tools 在配置之上强制并集；未知名 drop + warning，不使 Member 失败。对 live Member 的 allow-list 编辑在 turn 边界同 Session 换装 restriction——idle 立即生效，与 running turn 竞争的编辑等待其结束，后续 lifecycle 操作在该等待之后排队。restriction 失败只隔离为该 Member 的 activation diagnostic。
 

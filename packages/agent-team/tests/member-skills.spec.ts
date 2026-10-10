@@ -240,6 +240,7 @@ describe('Agent Team member-private skills', () => {
     // Clearing the override returns to auto (bundled plus discovered).
     await ctx.agentTeam.updateMember({
       requestId: requestId('select-auto'), memberId: member.memberId, handle: 'picky', description: 'Skills member',
+      capabilities: null,
     })
     expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager'])
   })

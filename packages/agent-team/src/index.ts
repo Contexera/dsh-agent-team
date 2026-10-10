@@ -2893,8 +2893,10 @@ export default class AgentTeam extends TypertRemoteService {
    * metadata when the LLM service is reachable; unknown routes defer to the
    * LLM layer's runtime check at call time.
    */
-  private async assertModelRoute(model: AgentTeamModelSelection | undefined): Promise<void> {
-    if (model === undefined || model.reasoningEffort === undefined) return
+  private async assertModelRoute(model: AgentTeamModelSelection | null | undefined): Promise<void> {
+    // No route to check: absent keeps the stored selection and null clears it.
+    if (model === undefined || model === null) return
+    if (model.reasoningEffort === undefined) return
     try {
       const resolved = await this.ctx.llm.resolveModelInfo(model.provider, model.model)
       const efforts = resolved.reasoning?.efforts ?? []

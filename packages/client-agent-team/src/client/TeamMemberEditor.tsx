@@ -257,10 +257,11 @@ export function AgentEditorDialog({ status, updateMember, loadModels, onCommitte
       memberId,
       handle: normalizedHandle,
       description: normalizedDescription,
-      ...(model === undefined ? {} : { model }),
-      // The editor owns no capabilities UI, but an absent field would clear a
-      // Remote-written override; echo the stored intent through the edit.
-      ...(status.member.capabilities === undefined ? {} : { capabilities: status.member.capabilities }),
+      // Only the model is stated: an absent model would keep the stored
+      // override, so following the Host default has to say `null` explicitly.
+      // Capabilities stay out of the payload — the editor owns no UI for them,
+      // and an absent field now leaves any Remote-written override alone.
+      model: model ?? null,
     }
     const samePending = pendingRequest.current !== undefined && pendingRequest.current.memberId === payload.memberId
       && pendingRequest.current.handle === payload.handle && pendingRequest.current.description === payload.description
@@ -298,8 +299,10 @@ export function AgentEditorDialog({ status, updateMember, loadModels, onCommitte
   )
 }
 
-export function sameModel(left: AgentTeamModelSelection | undefined, right: AgentTeamModelSelection | undefined): boolean {
-  if (left === undefined && right === undefined) return true
-  if (left === undefined || right === undefined) return false
+export function sameModel(left: AgentTeamModelSelection | null | undefined, right: AgentTeamModelSelection | null | undefined): boolean {
+  // `null` and an absent field both mean "no override", so they are the same
+  // state even though the update request distinguishes them.
+  if (left === undefined || left === null) return right === undefined || right === null
+  if (right === undefined || right === null) return false
   return left.provider === right.provider && left.model === right.model && left.reasoningEffort === right.reasoningEffort
 }

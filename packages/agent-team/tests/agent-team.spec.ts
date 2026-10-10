@@ -1711,8 +1711,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       ref: kind => `${kind}:aaaaaa${String(refs++).padStart(2, '0')}-0000-0000-0000-000000000000` as never,
     })
     const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    await ledger.sendMessage({ requestId: requestId('first'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'First', actor })
-    await ledger.sendMessage({ requestId: requestId('second'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Second', actor })
+    await ledger.sendMessage({ requestId: requestId('first'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'First', asTask: true, actor })
+    await ledger.sendMessage({ requestId: requestId('second'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Second', asTask: true, actor })
     await expect(ledger.readThread({ requestId: requestId('amb'), workspaceId: alpha, taskRef: 'task:aaaaaa' as never, actor }))
       .rejects.toThrow(/ambiguous Task ref 'task:aaaaaa' matches 'task:aaaaaa\d\d-0000-0000-0000-000000000000', 'task:aaaaaa\d\d-0000-0000-0000-000000000000'; reuse a longer prefix or the full ref exactly as returned by Team tools/)
     await expect(ledger.readThread({ requestId: requestId('amb-thread'), workspaceId: alpha, threadRef: 'thread:aaaaaa' as never, actor }))
@@ -2020,7 +2020,7 @@ describe('AgentTeam Channel archival ledger', () => {
       body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
     // A taskful Thread keeps the archival snapshot meaningful (claim release).
     const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('taskless-arch-start'), workspaceId: alpha, channelRef,
-      body: 'Task', actor: agentTeamHumanActor() })).value))
+      body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('taskless-arch-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
 
@@ -2072,7 +2072,7 @@ describe('AgentTeam Channel archival ledger', () => {
     committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-chat'), workspaceId: alpha, channelRef: channel.channel.channelRef,
       body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
     const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-start'), workspaceId: alpha, channelRef: channel.channel.channelRef,
-      body: 'Task', actor: agentTeamHumanActor() })).value))
+      body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('forged-inbox-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
     await ledger.archiveChannel({ requestId: requestId('forged-inbox-archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
@@ -2694,5 +2694,28 @@ describe('AgentTeam gate thresholds as the settings surface reports them', () =>
     const stated = await harness(undefined, undefined, { gate: { tokens: 64_000, idleMs: 60_000, judgeTimeoutMs: 3_000 } })
 
     expect(stated.ctx.agentTeam.contextJudgeForClient({}).gate).toEqual({ tokens: 64_000, idleMs: 60_000, judgeTimeoutMs: 3_000 })
+  })
+})
+
+describe('AgentTeam sendMessage asTask is explicit (issue #43 #9)', () => {
+  it('creates no Task when asTask is omitted', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('explicit-omit'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = replayLedger(test)
+    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-omit-send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      body: 'plain conversation', actor: agentTeamHumanActor() })).value)
+    expect(sent.task).toBeUndefined()
+  })
+
+  it('creates a Task only when asTask is true', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('explicit-true'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = replayLedger(test)
+    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-true-send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value)
+    expect(sent.task?.taskRef).toBeTruthy()
+    const plain = committed((await ledger.sendMessage({ requestId: requestId('explicit-false-send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      body: 'no task', asTask: false, actor: agentTeamHumanActor() })).value)
+    expect(plain.task).toBeUndefined()
   })
 })
