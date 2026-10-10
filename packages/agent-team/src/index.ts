@@ -36,10 +36,10 @@ import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar 
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
 import { createTeamContextManagement, TeamPressurePolicy, TEAM_CONTEXT_CODEC, TEAM_JUDGE_TIMEOUT_DEFAULT_MS, TEAM_PRESSURE_GATE_SCHEMA } from './context-continuity-host.ts'
-import { CONTEXT_CONTINUITY_PROJECTION_KEY, DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_TOKENS, readContextTimeline, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type TransitionPlan } from '@contexera/dsh-context-continuity'
+import { CONTEXT_CONTINUITY_PROJECTION_KEY, DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_TOKENS, anchorCandidates, anchorRejection, readContextTimeline, retainedPrice, type ContextProjectionConfig, type ContextTimelineItem, type ContextTimelineSource, type PressureGate, type SurfaceMeasurement, type TransitionPlan } from '@contexera/dsh-context-continuity'
 import { TeamContextJudge, type TeamContextJudgeConfig } from './context-judge.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
-import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, createTeamContextProjectionConfig, createTeamContextProjectionDefinition, foldTeamContextProjection, retainedTopicsThrough, TeamContextProjectionHost } from './context-projection.ts'
+import { boundaryByRef, carriedInputOf, checkpointByRef, checkpointRefFor, createTeamContextProjectionConfig, createTeamContextProjectionDefinition, foldTeamContextProjection, TeamContextProjectionHost } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor, type AgentTeamDurableMemberResult } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime } from './member-runtime.ts'
 import type { MemberSkillSelectionRef } from './member-skills.ts'
@@ -2338,55 +2338,38 @@ export default class AgentTeam extends TypertRemoteService {
       // are resolved history in that source, never fresh intent; checkpoints
       // recorded in this source's own span are the selectable targets.
       const state = foldTeamContextProjection(events, { sessionId, inheritedEventCount }, this.contextProjectionHost)
-      // A Team-boundary default checkpoint: the boundary's completed-turn
-      // anchor is the seed cut, and it is selectable exactly when one
-      // Thread's facts entered the context through it — the same proof the
-      // timeline requires, revalidated here because the model may cite a
-      // boundary the timeline never surfaced.
-      const boundary = checkpointRef.startsWith('team-boundary-')
-        ? boundaryByRef(state, checkpointRef)
-        : undefined
-      const entry = checkpointByRef(state, checkpointRef)
-      const anchorTurnEndSeq = boundary !== undefined ? boundary.turnEndSeq : entry?.turnEndSeq
-      if (anchorTurnEndSeq !== undefined && anchorTurnEndSeq !== -1) {
-        if (boundary !== undefined && boundary.kind !== 'team-boundary') {
-          throw new Error(`checkpoint '${checkpointRef}' is not a restorable boundary`)
-        }
-        // The seed is the exact contiguous prefix through the anchor's
-        // completed turn end. Balanced by construction — the turn ended.
-        const throughSeq = anchorTurnEndSeq + 1
-        const prefix = events.slice(0, throughSeq)
-        if (boundary !== undefined) {
-          // The seed must stay inside one Thread's context: the retained
-          // prefix through the anchor holds exactly one Thread's facts, read
-          // from the fold's own boundary attributions — the same accumulated
-          // set the timeline shows, so a ref the timeline offered is never
-          // refused here for a reason it did not state.
-          const threads = retainedTopicsThrough(state, anchorTurnEndSeq)
-          if (threads.length !== 1) {
-            throw new Error(threads.length === 0
-              ? `boundary '${checkpointRef}' has no single attributable Thread; write a fresh handoff instead`
-              : `boundary '${checkpointRef}' spans multiple Threads; write a fresh handoff instead`)
-          }
-        }
-        // Nonshrinking guard, priced by the SAME source-replayed measurement
-        // the timeline shows: the seed's retained cost is the SOURCE's own
-        // token count scaled by the anchor share — a small current generation
-        // never disguises a large ancestor seed. An unmeasurable source fails
-        // closed: pricing the unknown as zero would wave an oversized seed
-        // through.
+      // A Team-boundary default checkpoint: the boundary's completed-turn anchor
+      // is the seed cut. The verdict is the engine's shared return-anchor rule
+      // asked once, from the same fold the timeline folds — so a ref the
+      // timeline offered is never refused here for a reason it did not state,
+      // and Team's one domain rule (`boundaryRestorableFor`) sits inside it
+      // rather than beside it.
+      const candidate = anchorCandidates(state, this.contextProjectionHost, false)
+        .find(anchor => anchor.ref === checkpointRef)
+      if (candidate !== undefined && candidate.turnEndSeq !== -1) {
+        // Priced by the SAME source-replayed measurement the timeline shows, so
+        // a small current generation never disguises a large ancestor seed. An
+        // unmeasurable source fails closed: pricing the unknown as zero would
+        // wave an oversized seed through.
         const limits = await this.routeLimitsForAgent(agent)
         const handoffAt = limits?.handoffAt ?? CONTEXT_HANDOFF_AT_CAP
-        const sourceUsage = await this.sourceUsageTokens(sessionId, sourceIsCurrent, agent)
-        if (sourceUsage === undefined) {
-          throw new Error(`checkpoint '${checkpointRef}' could not be priced: its source Session's context cost cannot be measured; write a fresh handoff instead`)
+        const measurement = await this.sourceMeasurement(sessionId, sourceIsCurrent, agent)
+        const rejection = anchorRejection(
+          candidate,
+          retainedPrice(measurement, candidate.turnEndSeq) ?? 0,
+          measurement?.totalTokens,
+          handoffAt,
+          { host: this.contextProjectionHost, text: { topicNoun: 'Thread', topicNounPlural: 'Threads' } },
+        )
+        if (rejection !== undefined) {
+          throw new Error(`checkpoint '${checkpointRef}' is not a restorable anchor: ${rejection}`)
         }
-        const retained = this.retainedEstimate(sourceUsage, events.length, anchorTurnEndSeq)
+        // The seed is the exact contiguous prefix through the anchor's completed
+        // turn end. Balanced by construction — the turn ended.
+        const throughSeq = candidate.turnEndSeq + 1
+        const prefix = events.slice(0, throughSeq)
         if (prefix.length >= events.length) {
           throw new Error('checkpoint return does not shrink the working set; use a fresh handoff instead')
-        }
-        if (retained >= handoffAt) {
-          throw new Error('checkpoint return would retain a context at or above the handoff budget; use a fresh handoff instead')
         }
         // Single-Thread coverage guard: with more than one active Claim the
         // Host cannot prove a rewind stays inside one Thread's context.
@@ -2614,11 +2597,6 @@ export default class AgentTeam extends TypertRemoteService {
     const limits = await this.routeLimitsForAgent(agent)
     const hardLimit = limits?.hardLimit ?? CONTEXT_HARD_LIMIT_CAP
     const handoffAt = limits?.handoffAt ?? CONTEXT_HANDOFF_AT_CAP
-    // One measurement per lineage source, memoized by Session: the engine
-    // measures a source once before pricing its anchors, and the boundary
-    // overlay below reads the same map to tell an unprovable budget (never
-    // priced as free) from a real budget rejection.
-    const measurements = new Map<string, number | undefined>()
     const timeline = await readContextTimeline({
       current: {
         sessionId: agent.session.id,
@@ -2628,13 +2606,10 @@ export default class AgentTeam extends TypertRemoteService {
       },
       config: this.contextFoldConfig(),
       readAncestor: sessionId => this.sessionReader.read(sessionId),
-      measureSource: source => {
-        const key = String(source.sessionId)
-        if (!measurements.has(key)) measurements.set(key, this.measureContextSourceForAgent(agent, source))
-        return measurements.get(key)
-      },
+      measureSource: source => this.measureContextSourceForAgent(agent, source),
       currentUsageTokens: usageTokens,
       handoffAt,
+      anchorText: { topicNoun: 'Thread', topicNounPlural: 'Threads' },
       limit,
       // Archived ancestors the engine walks; the seed guard resolves a cited
       // ref through the same depth, so the timeline never offers a ref the
@@ -2645,63 +2620,33 @@ export default class AgentTeam extends TypertRemoteService {
       usageTokens,
       hardLimit,
       handoffAt,
-      items: timeline.items.map(item => this.teamTimelineItemFor(item, agent.session.id, handoffAt, measurements)),
+      items: timeline.items.map(item => this.teamTimelineItemFor(item, agent.session.id)),
       ...(timeline.incompleteFrom === undefined ? {} : { incompleteFrom: timeline.incompleteFrom }),
     }
   }
 
   /**
    * Map one engine timeline item onto the model-facing Team item. The engine
-   * decided the walk, the fold, the pricing, and the head, checkpoint, and
-   * measurable-source verdicts; Team restates exactly one policy of its own: a
-   * Team boundary is selectable only when the RETAINED PREFIX through it stays
-   * inside one Thread — the same proof the seed guard revalidates before it
-   * swaps a generation. The engine judges a boundary by its OWN attribution
-   * instead, so a boundary that arrived after a second Thread's facts would be
-   * offered here and refused by `context_rollover`; Team's stricter rule is
-   * what keeps the two surfaces answering one question.
+   * decided the walk, the fold, the pricing, and every restorable verdict — the
+   * shared anchors, the shared topic rule over the prefix a return would keep,
+   * and Team's own `boundaryRestorableFor` for the kinds only Team can judge.
+   * This mapping therefore restates no policy of its own: a ref this list offers
+   * is a ref `context_rollover` accepts, by construction rather than by two
+   * copies of one rule staying in step.
    */
-  private teamTimelineItemFor(item: ContextTimelineItem, currentSessionId: SessionId, handoffAt: number, measurements: ReadonlyMap<string, number | undefined>): AgentTeamTimelineItem {
+  private teamTimelineItemFor(item: ContextTimelineItem, currentSessionId: SessionId): AgentTeamTimelineItem {
     const source: AgentTeamTimelineItem['source'] = item.source === 'boundary'
       ? item.kind === 'handoff' || item.kind === 'compaction' ? item.kind : 'team-boundary'
       : item.source === 'checkpoint' ? 'agent' : 'head'
-    const affectedThreads = item.affectedTopics
-    let restorable = item.restorable
-    let reason = item.reason
-    // A boundary's verdict is Team's to make, but only once its source is
-    // measurable: "the budget cannot be proven" is the engine's first
-    // rejection and stays first — an unmeasurable boundary is not selectable
-    // even when its prefix holds exactly one Thread.
-    if (item.source === 'boundary' && measurements.get(String(item.sourceSessionId ?? currentSessionId)) !== undefined) {
-      if (source === 'handoff' || source === 'compaction') {
-        // A handoff opens a generation and a compaction rewrites the visible
-        // surface: rewinding into either is not a proven-safe target. The
-        // engine has no vocabulary for that and would answer "no single topic
-        // is attributable", which misdescribes why.
-        restorable = false
-        reason = `source '${source}' is not a restorable checkpoint`
-      } else if (affectedThreads.length !== 1) {
-        restorable = false
-        reason = affectedThreads.length === 0
-          ? 'no single Thread is attributable to this boundary'
-          : 'multiple Threads entered the context through this boundary; write a fresh handoff instead'
-      } else if (item.retainedTokens >= handoffAt) {
-        restorable = false
-        reason = 'retained context would not materially shrink the working set'
-      } else {
-        restorable = true
-        reason = undefined
-      }
-    }
     return {
       checkpointRef: item.ref,
       name: item.label,
       source,
       retainedTokens: item.retainedTokens,
       discardedTokens: item.discardedTokens,
-      affectedThreads,
-      restorable,
-      ...(reason === undefined ? {} : { reason }),
+      affectedThreads: item.affectedTopics,
+      restorable: item.restorable,
+      ...(item.reason === undefined ? {} : { reason: item.reason }),
       // Team's field semantics, unchanged: every item that is not a
       // checkpoint names the Session it anchors in — an ancestor generation's
       // boundary is how a lineage reads — and a checkpoint is keyed to its own
@@ -2711,17 +2656,18 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Replayed measurement of one lineage source: the live current Session
-   * measures directly; an archived ancestor measures through a detached
+   * Replayed measurement of one lineage source, node by node: the live current
+   * Session measures directly; an archived ancestor measures through a detached
    * Session rebuilt from the source's own log, so a seed's retained cost is
-   * priced in the SOURCE's own tokens — never the current generation's.
-   * Returns undefined when no meter is available or the source cannot be
-   * replayed; callers fail closed on the unknown.
+   * priced by the SOURCE's own replay — never the current generation's. The
+   * engine prices a return anchor off these nodes, which is what entering that
+   * anchor would actually cost. Undefined when no meter is available or the
+   * source cannot be replayed; callers fail closed on the unknown.
    */
-  private async sourceUsageTokens(sessionId: SessionId, live: boolean, agent: Agent): Promise<number | undefined> {
+  private async sourceMeasurement(sessionId: SessionId, live: boolean, agent: Agent): Promise<SurfaceMeasurement | undefined> {
     const meter = agent.ctx.get('tokenMeter')
     if (meter === undefined) return undefined
-    if (live) return meter.measure(agent.session)?.totalTokens
+    if (live) return meter.measure(agent.session) ?? undefined
     // 0.1.5 removed borrowSession: rebuild a detached Session from the
     // stored log so the seed's retained cost is priced by the SOURCE's own
     // replay, never the current generation's. An unreadable source or a
@@ -2738,29 +2684,29 @@ export default class AgentTeam extends TypertRemoteService {
 
   /**
    * One already-read source's replayed measurement: an archived generation is
-   * rebuilt as a detached Session and measured in its own tokens. Undefined
-   * means unmeasurable, never free.
+   * rebuilt as a detached Session and measured in its own tokens, node by node.
+   * Undefined means unmeasurable, never free.
    */
-  private measureDetachedSource(agent: Agent, source: ContextTimelineSource): number | undefined {
+  private measureDetachedSource(agent: Agent, source: ContextTimelineSource): SurfaceMeasurement | undefined {
     const meter = agent.ctx.get('tokenMeter')
     if (meter === undefined) return undefined
     try {
       const session = Session.create(source.sessionId, source.events, source.header, source.inheritedEventCount)
-      return meter.measure(session)?.totalTokens
+      return meter.measure(session) ?? undefined
     } catch {
       return undefined
     }
   }
 
   /**
-   * One source's replayed measurement, in that source's own tokens, for a
-   * caller that already holds the source: the live generation measures
-   * directly, an archived one is rebuilt from the log it came with. Undefined
-   * means unmeasurable — a caller must never price an unknown source as free.
+   * One source's replayed measurement for a caller that already holds the
+   * source: the live generation measures directly, an archived one is rebuilt
+   * from the log it came with. Undefined means unmeasurable — a caller must
+   * never price an unknown source as free.
    */
-  measureContextSourceForAgent(agent: Agent, source: ContextTimelineSource): number | undefined {
+  measureContextSourceForAgent(agent: Agent, source: ContextTimelineSource): SurfaceMeasurement | undefined {
     if (String(source.sessionId) === String(agent.session.id)) {
-      return agent.ctx.get('tokenMeter')?.measure(agent.session)?.totalTokens
+      return agent.ctx.get('tokenMeter')?.measure(agent.session) ?? undefined
     }
     return this.measureDetachedSource(agent, source)
   }
@@ -2772,21 +2718,6 @@ export default class AgentTeam extends TypertRemoteService {
    */
   contextFoldConfig(): ContextProjectionConfig {
     return createTeamContextProjectionConfig(this.contextProjectionHost)
-  }
-
-  /**
-   * Monotonic anchor-share estimate of a seed's retained cost, priced in the
-   * SOURCE Session's own measurement: the fraction of the source log the
-   * seed prefix covers, scaled to the source's replayed token count. The
-   * anchor position is exact and the share grows monotonically toward the
-   * source's head (100%). A large ancestor's anchor therefore prices at the
-   * ancestor's real size even inside a small current generation — the
-   * timeline display and the return guard share this one estimate.
-   */
-  private retainedEstimate(sourceUsageTokens: number, sourceLength: number, anchorTurnEndSeq: number): number {
-    if (sourceLength <= 0) return sourceUsageTokens
-    const share = Math.min(1, Math.max(0, (anchorTurnEndSeq + 1) / sourceLength))
-    return Math.round(sourceUsageTokens * share)
   }
 
   /**

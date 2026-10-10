@@ -36,6 +36,7 @@ import {
   CONTEXT_ROLLOVER_TOOL_NAME,
   createContextProjectionDefinition,
   foldContextProjection as foldEngineContextProjection,
+  type AnchorCandidate,
   type ContextCheckpointEntry,
   type ContextFoldTarget,
   type ContextProjectionConfig,
@@ -259,6 +260,20 @@ export class TeamContextProjectionHost implements ContextProjectionHost {
   }
 
   /**
+   * A handoff opens a generation and a compaction rewrites the visible surface,
+   * so rewinding into either is not a proven-safe return target. Only Team's
+   * own vocabulary can say that: the engine reads `kind` as an opaque string,
+   * and asks this for every boundary it judges. Both surfaces that offer a
+   * return anchor — the timeline read and the rollover guard — ask it, so a
+   * boundary this list offers is a boundary `context_rollover` accepts.
+   */
+  boundaryRestorableFor(candidate: AnchorCandidate): string | undefined {
+    return candidate.kind === 'handoff' || candidate.kind === 'compaction'
+      ? `source '${candidate.kind}' is not a restorable checkpoint`
+      : undefined
+  }
+
+  /**
    * Structural boundary from one delivered user message: a rollover handoff
    * starts a generation; a compaction notice rewrites the visible surface. A
    * structured Team notification is a boundary ONLY on the first arrival of
@@ -363,28 +378,6 @@ export function foldTeamContextProjection(
  */
 export function createTeamContextProjectionDefinition(host: ContextProjectionHost): ReturnType<typeof createContextProjectionDefinition> {
   return createContextProjectionDefinition(createTeamContextProjectionConfig(host))
-}
-
-/**
- * The Threads Team's own fold attributed to boundaries resolved by one
- * completed turn, order-stable and deduplicated: a delivered notice's first
- * arrival, a claim mutation's Task→Thread binding, a committed Thread effect.
- *
- * This is the accumulated attribution of the RETAINED PREFIX through that
- * turn, and it is one set with two readers — the timeline publishes it as the
- * item's affected Threads, and the rollover guard refuses a boundary whose
- * prefix spans more than one Thread, so a ref the timeline offers is a ref
- * `context_rollover` accepts.
- */
-export function retainedTopicsThrough(state: ContextProjectionState, turnEndSeq: number): readonly string[] {
-  const topics: string[] = []
-  for (const boundary of state.boundaries) {
-    if (boundary.turnEndSeq === -1 || boundary.turnEndSeq > turnEndSeq) continue
-    for (const topic of boundary.attributions) {
-      if (!topics.includes(topic)) topics.push(topic)
-    }
-  }
-  return topics
 }
 
 /** Find one resolved checkpoint entry by its stable ref, if it exists. */

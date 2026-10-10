@@ -96,7 +96,9 @@ On the push side, only a Thread's FIRST delivered notice anchors — the preserv
 
 A Team boundary is a selectable default checkpoint exactly when the retained prefix through it stays inside one Thread — exactly one Thread's facts entered the Member's context by that anchor — and the return would shrink the working set below the handoff budget; Thread attribution comes from delivered notice bodies, claim mutations' Task overlays resolved through the ledger, and committed message calls' refs, and a prefix that spans several Threads (or holds none) carries its reason instead.
 
-The rule is judged on the retained prefix, never on the boundary's own contribution, which is the same proof `context_rollover` revalidates before it seeds a generation. Default-boundary refs are session-scoped, so consecutive generations anchoring at the same event seq never collide. Structural only — no transcript content.
+A handoff or a compaction boundary is never a return target: it closed a context rather than opened a topic. The rule is judged on the retained prefix, never on the boundary's own contribution.
+
+The rule itself is the engine's shared anchor policy, applied once for both surfaces. Team declares only the part its own vocabulary can state — which of its boundary kinds close a context rather than open a topic (`boundaryRestorableFor`) — and the nouns its reasons are worded in. So a ref the timeline offers is a ref `context_rollover` accepts, rather than two copies of one rule agreeing by accident. Default-boundary refs are session-scoped, so consecutive generations anchoring at the same event seq never collide. Structural only — no transcript content.
 
 Every row is rendered by the engine. On a row that is not restorable the Team answers with a short stable `anchor` digest of that row's own ref instead of the ref itself: rows that share a name and a price stay distinguishable, and no non-selectable row ever carries a citable string — only the `ref` printed on a restorable row may be cited to `context_rollover`.
 
@@ -104,7 +106,9 @@ A `context_rollover` call with a `checkpointRef` rolls the Member back to that c
 
 Return is rejected under the same conditions the `context_rollover` tool prevalidates — unresolved, nonshrinking, over-budget, or multiple active Claims (a rewind cannot be proven to stay inside one Thread); in every rejection case a fresh handoff is the documented alternative. A context return re-reads history; it never claims to revert external effects.
 
-Seed costs are priced from the source Session's own replayed measurement — a source whose cost cannot be measured is not selectable (the budget cannot be proven); the discarded figure for an ancestor anchor approximates the current generation's whole usage. When an ancestor cannot be read, the walk stops there and the result carries `incompleteFrom` (the ancestor's id and the failure reason): history is complete through the last listed source and provably absent beyond it, which is a fact about history, never about Member availability.
+Seed costs are priced node by node from the source Session's own replayed measurement, so the retained figure is the exact cost of the kept prefix rather than a share of the log — an oversized tool result inside that prefix prices as what it is. A source whose cost cannot be measured is not selectable (the budget cannot be proven); the discarded figure for an ancestor anchor approximates the current generation's whole usage.
+
+When an ancestor cannot be read, the walk stops there and the result carries `incompleteFrom` (the ancestor's id and the failure reason): history is complete through the last listed source and provably absent beyond it, which is a fact about history, never about Member availability.
 
 ## `context_compact`
 

@@ -188,7 +188,7 @@ async function buildSharedHarness(): Promise<{
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
   // The Team pressure policy reads the token meter at every Member pre-step;
   // these tests exercise tool policy, so a zero-usage fake keeps it quiet.
-  ctx.provide('tokenMeter', { measure: () => ({ totalTokens: 0 }) })
+  ctx.provide('tokenMeter', { measure: () => ({ totalTokens: 0, nodes: [] }) })
   await ctx.plugin(JsonlSessionPersistence, { root: persistence })
   await ctx.plugin(AgentPresetRegistry, { default: 'team-member' })
   await ctx.plugin(AgentPreset, { id: 'team-member', plugins: teamMemberPlugins })

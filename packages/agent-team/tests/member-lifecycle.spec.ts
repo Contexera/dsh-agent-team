@@ -261,9 +261,13 @@ async function realHarness(
   // The Team pressure policy reads the token meter at every Member pre-step;
   // tests that need pressure control override this with a writable fake.
   const pressureState = { usageTokens: 0, bySession: new Map<string, number>(), failFor: new Set<string>() }
-  ctx.provide('tokenMeter', { measure: (session: { id: string }): { totalTokens: number } => {
+  ctx.provide('tokenMeter', { measure: (session: { id: string }): { totalTokens: number; nodes: { seq: number; tokens: number }[] } => {
     if (pressureState.failFor.has(session.id)) throw new Error('meter unavailable for this session')
-    return { totalTokens: pressureState.bySession.get(session.id) ?? pressureState.usageTokens }
+    // One node at the head of the surface, so any retained prefix through an
+    // anchor prices at the whole source's measured size - the shape the real
+    // meter reports, and what the engine prices a return off.
+    const totalTokens = pressureState.bySession.get(session.id) ?? pressureState.usageTokens
+    return { totalTokens, nodes: [{ seq: 0, tokens: totalTokens }] }
   } })
   // The rollover job guard reads the member-scoped jobs registry; a writable
   // fake lets tests drive owned-job states.
@@ -2072,8 +2076,8 @@ describe('Agent Team fresh context_rollover rollover (ticket 01)', () => {
       header: liveAfter.session.header,
       inheritedEventCount: liveAfter.session.inheritedEventCount,
       events: liveAfter.session.ownEvents(),
-    })).toBe(777)
-    expect(ctx.agentTeam.measureContextSourceForAgent(liveAfter, retiredSource)).toBe(4242)
+    })).toMatchObject({ totalTokens: 777 })
+    expect(ctx.agentTeam.measureContextSourceForAgent(liveAfter, retiredSource)).toMatchObject({ totalTokens: 4242 })
   })
 
   it('an ordinary Session never receives the context_rollover tool', async () => {

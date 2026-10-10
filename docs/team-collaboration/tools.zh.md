@@ -66,11 +66,11 @@ fresh 的 `context_rollover`（不带 `checkpointRef`）从不需要先读 statu
 
 Team 边界锚定在效果而非推送上。committed 的 `team_message` 里，start 的 Thread 从结果持久化的 presentation meta 归属，reply 从 call arguments 归属。成功的 `team_claim` 变更、成功的 follow/unfollow 各锚定一个边界。label 按动作类别：`Team message`、`Team task claim change`、`Team attention change`。typed rejection（`unread_required`、`stale_revision`）、失败调用、dm、读路径（`team_inbox`、`team_view`、`team_thread read`）从不产边界。推送侧仅锚定每个 Thread 首次送达的通知。保留的「工作刚到手」锚点的 label 是该次送达首次引入的 Thread refs（`First arrival: …`），而非 notice 自身的泛化文案。同 Thread 的后续重发与纯提醒（recovery notice，以及 progress-nudge 系统移除前记录的历史 notice）不产出任何边界。
 
-同时满足两个条件，Team 边界才是可选择的默认 checkpoint。第一，经锚点保留的前缀仍停留在单一 Thread 内：恰好一个 Thread 的事实经锚点进入 Member 上下文。第二，回返能把工作集缩到 handoff 预算之下。Thread 归属来自已送达通知正文、claim 变更经 ledger 解析的 Task overlay、以及 committed 消息调用的 ref。前缀跨多 Thread、或不含任何 Thread 的边界，以 reason 说明。判定依据是保留前缀，而非边界自身的贡献。这正是 `context_rollover` 在 seed 新一代之前复查的同一证明。默认边界的 ref 带 Session 作用域，连续代际在同一事件 seq 锚定也不会碰撞。仅结构信息，不含任何 transcript 正文。
+同时满足两个条件，Team 边界才是可选择的默认 checkpoint。第一，经锚点保留的前缀仍停留在单一 Thread 内：恰好一个 Thread 的事实经锚点进入 Member 上下文。第二，回返能把工作集缩到 handoff 预算之下。Thread 归属来自已送达通知正文、claim 变更经 ledger 解析的 Task overlay、以及 committed 消息调用的 ref。前缀跨多 Thread、或不含任何 Thread 的边界，以 reason 说明。handoff 与 compaction 边界永远不是回返目标：它们关闭的是上下文，不是开启话题。判定依据是保留前缀，而非边界自身的贡献。规则本身是引擎的共享锚点策略，两个界面共用同一次判定；Team 只声明只有自己的词汇能说清的那部分——它的哪些边界类型关闭的是上下文而非话题（`boundaryRestorableFor`）——以及 reason 使用的名词。因此时间线给出的 ref 就是 `context_rollover` 接受的 ref，而不是两份相同规则碰巧一致。默认边界的 ref 带 Session 作用域，连续代际在同一事件 seq 锚定也不会碰撞。仅结构信息，不含任何 transcript 正文。
 
 渲染由引擎负责。对不可返回的行，Team 以不可返回行自身 ref 的短稳定 `anchor` 摘要作答，而不给出 ref 本身。名称与价格相同的行仍可区分，且任何不可选择的行都不会携带可引用的字符串。只有 restorable 行上打印的 `ref` 才能交给 `context_rollover`。带 `checkpointRef` 的 `context_rollover` 调用会把 Member 回返到 checkpointRef 所指 checkpoint 的精确 completed-turn 前缀。seed 是截至 checkpoint 的 `turn/end` 的 durable 前缀，构造上即平衡。子 Session 在 seed 来源处 parent，继承的 checkpoints 保持为惰性历史。子代不会触发继承的 intent。回返在 `context_rollover` 工具 prevalidation 的相同条件下被拒绝：未 resolve、无法实质缩减工作集、超预算，或多个 active Claim（即无法证明回退停留在单一 Thread 内）。每种拒绝情形下，fresh handoff 都是文档化的替代路径。上下文回返只是重读历史，绝不声称回滚外部影响。
 
-seed 成本按来源 Session 自身重放的测量定价。无法测量成本的来源不可选择，预算无法证明。祖先锚点的 discarded 数值近似为当前代的全部 usage。当某一级祖先无法读取，遍历就在这一级停止。结果携带 `incompleteFrom`：这一级的 id 与失败原因。历史完整到最后一个列出的来源，且可证明在此之外不存在。这只是关于历史的事实，绝不是关于 Member 可用性的事实。
+seed 成本按来源 Session 自身重放的测量逐节点定价，retained 数值是所保留前缀的真实成本，而非日志的占比——前缀里一次超大的 tool result 就按它本身计价。无法测量成本的来源不可选择，预算无法证明。祖先锚点的 discarded 数值近似为当前代的全部 usage。当某一级祖先无法读取，遍历就在这一级停止。结果携带 `incompleteFrom`：这一级的 id 与失败原因。历史完整到最后一个列出的来源，且可证明在此之外不存在。这只是关于历史的事实，绝不是关于 Member 可用性的事实。
 
 ## `context_compact`
 

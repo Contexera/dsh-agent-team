@@ -260,7 +260,7 @@ function pressureAgent(options?: {
 }): { readonly agent: Agent; readonly steered: UserMessage[] } {
   const steered: UserMessage[] = []
   const agent = {
-    ctx: { get: (name: string) => (name === 'tokenMeter' ? { measure: () => ({ totalTokens: options?.tokens ?? 1_000 }) } : undefined) },
+    ctx: { get: (name: string) => (name === 'tokenMeter' ? { measure: () => ({ totalTokens: options?.tokens ?? 1_000, nodes: [{ seq: 0, tokens: options?.tokens ?? 1_000 }] }) } : undefined) },
     session: {
       id: options?.sessionId ?? 'session:one',
       inheritedEventCount: options?.inheritedEventCount ?? 0,
