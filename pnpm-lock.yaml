@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@contexera/dsh-context-continuity':
-        specifier: ^0.3.0
-        version: 0.3.1(@contexera/dsh-jev@0.1.2(@deepseek-ai/schemastery@3.18.2))
+        specifier: ^0.4.0
+        version: 0.4.0(@contexera/dsh-jev@0.1.2(@deepseek-ai/schemastery@3.18.2))
       '@contexera/dsh-jev':
         specifier: ^0.1.1
         version: 0.1.2(@deepseek-ai/schemastery@3.18.2)
@@ -96,8 +96,8 @@ packages:
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
 
-  '@contexera/dsh-context-continuity@0.3.1':
-    resolution: {integrity: sha512-yGxhf2uRCaBqsmC23BlvPCCWg27TEFT1vAxCH4KZNBveVTUOe0V8+ZIvz1+xKcmZK7ECGhftm0IAfTqA4kbMRA==}
+  '@contexera/dsh-context-continuity@0.4.0':
+    resolution: {integrity: sha512-iFCyugNmLoNAiMjujXJa0Ndj6DwStZMfLcmpQ02SsjcUhRn1ptwND84rumlmFlx0UwPQWaOgQA8k89lNJUdLgg==}
     peerDependencies:
       '@contexera/dsh-jev': ^0.1.2
       '@deepseek-ai/cordis': ^4.0.1
@@ -1034,7 +1034,7 @@ snapshots:
     dependencies:
       css-tree: 3.2.1
 
-  '@contexera/dsh-context-continuity@0.3.1(@contexera/dsh-jev@0.1.2(@deepseek-ai/schemastery@3.18.2))':
+  '@contexera/dsh-context-continuity@0.4.0(@contexera/dsh-jev@0.1.2(@deepseek-ai/schemastery@3.18.2))':
     dependencies:
       zod: 4.6.5
     optionalDependencies:
