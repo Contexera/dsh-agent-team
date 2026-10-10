@@ -2889,13 +2889,22 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Validate a pinned model route's reasoning effort against the adapter's own
-   * metadata when the LLM service is reachable; unknown routes defer to the
-   * LLM layer's runtime check at call time.
+   * Reject a model route the Host cannot serve: an unregistered provider has no
+   * adapter at all, so the Member would be created and fail its first turn with
+   * an unrelated message. Checked here so the caller sees the real reason.
    */
   private async assertModelRoute(model: AgentTeamModelSelection | null | undefined): Promise<void> {
     // No route to check: absent keeps the stored selection and null clears it.
     if (model === undefined || model === null) return
+    // No LLM service means no adapter to check against; the reasoning-effort
+    // branch below already defers in that case, and so does this one.
+    const providers = this.ctx.llm?.listProviders()
+    if (providers !== undefined && !providers.some(provider => provider.id === model.provider)) {
+      throw new Error(`provider '${model.provider}' is not registered`)
+    }
+    // Validate a pinned route's reasoning effort against the adapter's own
+    // metadata when the LLM service is reachable; unknown routes defer to the
+    // LLM layer's runtime check at call time.
     if (model.reasoningEffort === undefined) return
     try {
       const resolved = await this.ctx.llm.resolveModelInfo(model.provider, model.model)
