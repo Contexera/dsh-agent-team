@@ -42,5 +42,13 @@ export default defineConfig({
     // Every test file gets a throwaway DSH home so Agent Team boots can never
     // prune the developer's real Member memory directories.
     setupFiles: ['./scripts/isolate-dsh-home.setup.ts'],
+    // Time rendering is zone-dependent by contract — a seat states the reader's
+    // own clock, not the instant — so the suite needs one zone to mean anything.
+    // Left to the runner, the same expectation reads as three different hours:
+    // UTC in CI, UTC+8 on the machines this is maintained on. Pinning a zone
+    // that is NOT UTC is the point: a formatter that reaches for `getUTCHours`
+    // then renders a different time than the reader's clock and fails here,
+    // which is exactly the bug the real literals below are meant to catch.
+    env: { TZ: 'Asia/Shanghai' },
   },
 })

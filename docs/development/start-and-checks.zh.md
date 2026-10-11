@@ -55,6 +55,7 @@ git diff --check HEAD
 - `npm test`：先生成 Typert、跑 `check:facades`、`check:docs`、`check:core-skills`、`check:boundaries` 与 `check:versions`。再运行 Vitest。
 - Client 测试台（`packages/client-agent-team/tests/harness.tsx`）会让「渲染中的 shipped slot entry 崩过」的 spec 直接失败：shipped error boundary 会把异常吞掉、只经 `console.error` 报告，没有这道护栏时页面已经消失而套件仍然全绿。该测试台同时补齐 jsdom 缺的浏览器 API（`ResizeObserver`、`document.fonts`）与完整的 `conversation` service 面：缺一个 observable 成员不是「少一个方法」，而是 renderer hook cache 里的 `WeakMap.set(undefined)` 抛错。
 - Vitest 通过 `scripts/isolate-dsh-home.setup.ts` 给每个测试文件一次性 `DSH_HOME`。隔离的是各 Member activation 的 `$DSH_HOME/agent-team/members/member:*` 私有 memory。需要特定 home 的测试自行保存/恢复该变量（见 `member-lifecycle.spec.ts`）。启动不会自动清理账本不认识的 Member 目录。显式 Member remove 才删除该 Member 的私有 memory。介质重置后的旧目录须由操作者手动删除 `member:` 目录。
+- 测试套件钉死一个时区（`Asia/Shanghai`，在 `vitest.config.ts` 里），因为时间渲染按契约就是**依赖时区**的：座位陈述的是读者自己的钟，同一条期望否则会在不同 runner 上读成不同的钟点——CI 是 UTC，维护它的机器是 UTC+8。钉的时区**刻意不是 UTC**，这正是断言保持锋利的原因：一个伸手去拿 `getUTCHours` 的 formatter 会渲染出不是读者钟点的时刻，就在这里红。因此涉及时日的测试可以直接断言字面钟点，而**不必**去读 runner 的时区来凑自己的期望值。
 - `npm run build`：先由受限 Node cleaner 清空 Host、tools 与 Client 三个 package 的 `lib/`。再生成 Typert、构建三个源码目录，并用 Harness 的 `tsdown` 构建 Client bundle。这样删除源码后遗留的旧产物不会进入 pack。最终发布物仍是一个根 npm 包。
 - `npm run lint`：运行 oxlint。
 - `npm run duplication`：用 `.jscpd.json` 对 `packages` 与 `scripts` 跑 jscpd。它的输出只是"值得看一眼的地方"，不是结论。移动或重构过的代码同样会被报成重复。
