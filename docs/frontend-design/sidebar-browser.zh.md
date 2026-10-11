@@ -34,7 +34,7 @@ Agent 卡片会话视图里，Agent 行的头像与文案整体是选择按钮�
 
 Member 经 `context_rollover` 换新上下文时，Agents 面板观察这个 Member 的旧→新 Session 绑定。Agents 面板仅在嵌入页正是被观察的旧 live Session id 时恰好跟随一次。归档视图不跳转。
 
-窄屏 rail 三个图标按钮自上而下：收件箱（`IconQueueOutline14`，16px）→ 频道（`IconListPenOutline16`）→ Agents（`IconAgentPresetOutline16`）。不复用 checklist（任务）或 user（成员）图标。收件箱图标是目的地。点击打开 Inbox 页并请求展开侧栏。频道/Agents 图标点击请求展开侧栏，并聚焦对应分区头部。
+窄屏 rail 三个图标按钮自上而下：收件箱（`IconQueueOutlineRegular`）→ 频道（`IconListPenOutlineRegular`）→ Agents（`IconAgentPresetOutlineRegular`），均为 16px。不复用 checklist（任务）或 user（成员）图标。收件箱图标是目的地。点击打开 Inbox 页并请求展开侧栏。频道/Agents 图标点击请求展开侧栏，并聚焦对应分区头部。
 
 Agent 创建流程没有频道选择页，Agent 编辑器没有成员区块。Channel 成员只在 Channel 侧管理（创建对话框初始 Member、频道编辑器成员行、成员管理对话框）。未入 Channel 的 Member 仍可经 DM 触达。
 

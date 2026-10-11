@@ -9,6 +9,8 @@
 - **先把环境契约装起来。** 开发与验证都需要相邻的 Harness checkout（`../deepseek-harness`），安装一律走 `corepack pnpm`——不要用 `npm install`，它会破坏 workspace 的符号链接。安装步骤、生成产物与钉住 tag 的规矩见 [`docs/development/README.zh.md`](docs/development/README.zh.md)。
 - **改边界先对齐。** Host authority、Team ledger、面向模型的工具面、Client slot 接线由 [`AGENTS.md`](AGENTS.md) 与 [`docs/architecture/README.zh.md`](docs/architecture/README.zh.md) 守住。先开 issue 把形状谈定，比写完再重来便宜。
 - **只想报告问题？** 用 issue 模板。它会把安装问题先引到版本核对上——「装完就坏」的报告大多是 DSH 版本不匹配。
+- **动手前先说清楚给谁用。** 开一个 issue，写明你要的结果、这结果是给谁的、以及**已经存在**的那个问题——不要拿着一个方案来找 merge。
+- **自动化或 AI 辅助的贡献者？** 动手之前先读 [`AGENTS.md`](AGENTS.md) 与 [`docs/README.md`](docs/README.md)——规则和这个仓库强制的架构都在那里，被拒的 PR 大多是漏了其中之一。驱动 agent 的人来回答上面那些问题、并对结果负责；agent 不替他回答，缺上下文时要问清楚再等，而不是猜。
 
 ## 开 PR 之前先验证
 
@@ -42,6 +44,20 @@
 - **不要改动相邻的 Harness checkout。** 需要改它的改动属于上游，或者走公开扩展点。
 - **偶发失败的测试**：把竞态说清楚并证明它——确定性复现胜过重试；用重试盖住真实的丢失，等于把造成它的缺陷藏起来。
 - **别夹带**：credentials、临时 profile、浏览器 overlay、生成的测试文件、浏览器产物、构建残留都不要进提交；提交前保证 `git diff --check` 干净。
+
+## 什么样的改动不会被合并
+
+这些会被最先挡下，所以先自己核一遍：
+
+- **改动了相邻的 Harness checkout。** 这类改动属于上游，或者走公开扩展点。
+- **投机的 registry、兼容层、兜底权威或重复的 store。** 每个领域概念只保留一个权威的 formatter/projection。
+- **手改了生成文件**——`packages/agent-team/lib/typert.*` 或生成的 `tsconfig*.json` path facade。改生成器后重新生成。
+- **把无关改动捆在一起**，或者正文只覆盖了一部分 diff。
+- **只改了双语文档配对的一半**——改了 `foo.md` 却没改 `foo.zh.md`，或反过来。
+- **用重试盖住偶发失败的测试。** 把竞态说清楚、用确定性复现证明它；用重试盖住真实的丢失，等于把造成它的缺陷藏起来。
+- **夹带残留**——credentials、临时 profile、浏览器 overlay、生成的测试文件、浏览器产物、构建残留。提交前让 `git diff --check` 保持干净。
+
+修 bug 的 PR 要链接**已经发生过的那次失败的证据**——一个 issue、一段失败日志，或一个复现。这里的 review 要的是证据不是风格，一个无从复现的修复，看起来就是一个在找理由的改动。
 
 ## 这里怎么做 review
 

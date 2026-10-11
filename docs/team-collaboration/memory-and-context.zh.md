@@ -35,7 +35,7 @@ Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 tur
 
 Web Client 的 Agent-row menu 提供两个 runtime recovery entrances，都不写 ledger。有 live session 的 error Member 显示「恢复」，Host 向 session 注入 continuation prompt。孤儿 composition 原地重建。activation failed 的 Member 显示「重启」，Host 重新执行这个 Member 的 activation。再次失败，仍以 diagnostic 显示在 sidebar。
 
-历史上的第三个入口「从全新上下文开始」已经移除。Member 现在用 `context_rollover` 工具自行管理上下文（见八工具协议）。Host 侧 clear-context Remote 保留为无可见入口的 hidden migration escape hatch。这个 Remote 保留 `team/member-session-renewed` operation schema，replay validation 一并保留。旧 ledger 仍可 replay。模型发起的 rollover 有一段中间态：ledger 绑定已迁移，新 Session 尚未就绪。这段时间内 Member 状态短暂显示为 unavailable。同时带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。跟随有两个条件：旧→新绑定发生变化，当前页面正是被观察的旧 live Session。归档视图不会跳转。
+历史上的第三个入口「从全新上下文开始」已经移除。Member 现在用 `context_rollover` 工具自行管理上下文（见九工具协议）。Host 侧 clear-context Remote 保留为无可见入口的 hidden migration escape hatch。这个 Remote 保留 `team/member-session-renewed` operation schema，replay validation 一并保留。旧 ledger 仍可 replay。模型发起的 rollover 有一段中间态：ledger 绑定已迁移，新 Session 尚未就绪。这段时间内 Member 状态短暂显示为 unavailable。同时带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。跟随有两个条件：旧→新绑定发生变化，当前页面正是被观察的旧 live Session。归档视图不会跳转。
 
 ## Assembled acceptance
 `npm run test:browser` 用 credential-free Harness Web scaffold 验证 public Client 与 Host chain。代表性 trace 执行以下动作：

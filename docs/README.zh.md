@@ -18,13 +18,13 @@
 | [`architecture/README.zh.md`](architecture/README.zh.md) | Host、tools、command、typed Remote、Client plugin 和 authority 边界 | 修改运行时、RPC、preset、Client 或持久化 |
 | [`architecture/package-ownership.zh.md`](architecture/package-ownership.zh.md) | 三个 package 目录、唯一的发布 manifest，以及各接缝之间单向的依赖方向 | 修改 package 接缝、manifest 或 import 方向 |
 | [`architecture/host-authority.zh.md`](architecture/host-authority.zh.md) | Host 拥有什么：ledger、生命周期、projection、Session 持久化、Attention、上下文压力、私有记忆与 member capabilities | 修改 Host 运行时、持久化、重放、Attention 或记忆行为 |
-| [`architecture/tools-and-preset.zh.md`](architecture/tools-and-preset.zh.md) | 八个 model-facing 工具、各自定义在哪个模块，以及隔离的 `team-member` preset | 修改某个 model-facing 工具或 preset 挂载的内容 |
+| [`architecture/tools-and-preset.zh.md`](architecture/tools-and-preset.zh.md) | 九个 model-facing 工具、各自定义在哪个模块，以及隔离的 `team-member` preset | 修改某个 model-facing 工具或 preset 挂载的内容 |
 | [`architecture/client-and-remote.zh.md`](architecture/client-and-remote.zh.md) | typed Remote 声明、Client plugin 与 slot composition、Client 数据与呈现边界 | 修改 RPC、Client plugin 加载、slot 或 projection |
 | [`architecture/workspace-session-storage.zh.md`](architecture/workspace-session-storage.zh.md) | 复用 Harness 的 Workspace、Session 和存储，而不另建并行 Team 状态 | 修改 Workspace 选择、Session 存储或 ledger 路由 |
 | [`domain-model.zh.md`](domain-model.zh.md) | 稳定的 Agent Team 领域词汇 | 修改领域语义、类型命名或正式协作合同 |
-| [`team-collaboration/README.zh.md`](team-collaboration/README.zh.md) | 已实现的八工具、Thread Attention、Inbox、读取、mention 与 mutation fence 合同 | 修改 Team 协作语义、模型工具或 Agent 通知时 |
+| [`team-collaboration/README.zh.md`](team-collaboration/README.zh.md) | 已实现的九工具、Thread Attention、Inbox、读取、mention 与 mutation fence 合同 | 修改 Team 协作语义、模型工具或 Agent 通知时 |
 | [`team-collaboration/model-and-time.zh.md`](team-collaboration/model-and-time.zh.md) | 协作模型与 Member 时间感知 | 修改 Thread、Task、Claim 的含义或时间提示 |
-| [`team-collaboration/tools.zh.md`](team-collaboration/tools.zh.md) | 八个 model-facing 工具及全部工具共用的规则 | 修改某个工具的合同、ref 或它周围的 mutation fence |
+| [`team-collaboration/tools.zh.md`](team-collaboration/tools.zh.md) | 九个 model-facing 工具及全部工具共用的规则 | 修改某个工具的合同、ref 或它周围的 mutation fence |
 | [`team-collaboration/attention-and-messaging.zh.md`](team-collaboration/attention-and-messaging.zh.md) | Attention、Inbox、mention、面向人类的消息与 ref 引用 | 修改通知、mention 投递或消息呈现 |
 | [`team-collaboration/boundaries.zh.md`](team-collaboration/boundaries.zh.md) | Mutation fence、Human Remote 边界与 Team Member 上下文边界 | 修改谁能改什么，或 Member 能看到别的 Session 的什么 |
 | [`team-collaboration/memory-and-context.zh.md`](team-collaboration/memory-and-context.zh.md) | Member memory、上下文压力归属、Agent notification 与 assembled acceptance | 修改记忆维护、上下文压力处理或验收必须证明什么 |
@@ -44,7 +44,7 @@
 ## 从哪里开始
 
 - **改 Host 或 domain：** 边界查 [`architecture/README.zh.md`](architecture/README.zh.md)，词汇查 [`domain-model.zh.md`](domain-model.zh.md)；`packages/agent-team/src/` 和测试是权威。需要决策来由时再按 `.scratch/README.md` 查 archive。
-- **改 tools、preset 或 `/team`：** 查 [`architecture/README.zh.md`](architecture/README.zh.md) 的对应章节，再查 Harness cookbook 和 subsystem 文档。
+- **改 tools 或 preset：** 查 [`architecture/README.zh.md`](architecture/README.zh.md) 的对应章节，再查 Harness cookbook 和 subsystem 文档。
 - **改 Client 或 UI：** UI 体系查 [`frontend-design/README.zh.md`](frontend-design/README.zh.md)，跨仓库路线查 [`harness-navigation.zh.md`](harness-navigation.zh.md)。
 - **改安装、构建、测试或 Remote 生成：** 查 [`development/README.zh.md`](development/README.zh.md)，再看对应 `package.json` / script 的实际实现。
 - **发布一个版本：** 流程与各道门查 [`release-runbook.zh.md`](release-runbook.zh.md)；放宽 peer 范围之前必须先做的认证查 [`dsh-release-compatibility.zh.md`](dsh-release-compatibility.zh.md)。

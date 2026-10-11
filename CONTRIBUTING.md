@@ -9,6 +9,8 @@ Thanks for taking the time to contribute. This repository is an external, opt-in
 - **Set up the environment contract.** Development and verification need the adjacent Harness checkout at `../deepseek-harness`, and installs go through `corepack pnpm` — never `npm install`, which breaks the workspace symlinks. Setup, generated artifacts, and the certified-tag rule: [`docs/development/README.md`](docs/development/README.md).
 - **Agree on boundary changes first.** Host authority, the Team ledger, the model-facing tool surface, and Client slot wiring are guarded by [`AGENTS.md`](AGENTS.md) and [`docs/architecture/README.md`](docs/architecture/README.md). An issue that settles the shape up front is cheaper than a rewritten pull request.
 - **Reporting instead of fixing?** Use the issue templates. They route installation problems through the certified-version check, because most "broken after install" reports are a DSH version mismatch.
+- **Say who benefits before you build.** Open an issue that names the outcome you want, who it is for, and the problem that already exists — not a solution looking for a merge.
+- **Automated or AI-assisted contributor?** Read [`AGENTS.md`](AGENTS.md) and [`docs/README.md`](docs/README.md) before you open anything — they carry the rules and the architecture this repo enforces, and most rejected pull requests miss one of them. The person running the agent answers the questions above and owns the result; the agent does not answer them on its own, and when context is missing it asks and waits rather than guessing.
 
 ## Verify before you open the pull request
 
@@ -42,6 +44,20 @@ A pull request runs two lanes, `ubuntu-latest` and `windows-latest`. Each lane e
 - **Do not modify the adjacent Harness checkout.** A change that needs one belongs upstream, or behind a public extension point.
 - **Flaky tests**: name the race and prove it — a deterministic reproduction beats a retry, and a retry over a genuine loss hides the defect that caused it.
 - **Nothing incidental**: no credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue. Keep `git diff --check` clean.
+
+## What we don't merge
+
+Checked before anything else, so check them yourself first:
+
+- **A change to the adjacent Harness checkout.** It belongs upstream, or behind a public extension point.
+- **A speculative registry, compatibility layer, fallback authority, or duplicate store.** One authoritative formatter/projection per domain concept.
+- **A hand-edited generated file** — `packages/agent-team/lib/typert.*` or a generated `tsconfig*.json` path facade. Change the generator and regenerate.
+- **Unrelated changes bundled together**, or a body that covers only part of the diff.
+- **Half of a bilingual doc pair** — `foo.md` without its `foo.zh.md`, or the reverse.
+- **A retry that papers over a flaky test.** Name the race and prove it with a deterministic reproduction; a retry over a genuine loss hides the defect that caused it.
+- **Incidental residue** — credentials, temporary profiles, browser overlays, generated test files, browser artifacts, build output. Keep `git diff --check` clean.
+
+A bug fix links evidence of a failure that already happened — an issue, a failing log, or a reproduction. Reviews here ask for evidence, not style, so a fix with nothing to reproduce reads as a change looking for a reason.
 
 ## How review works here
 

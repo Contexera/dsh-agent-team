@@ -21,7 +21,7 @@ Neither slice names an archived Channel's Threads: archival ends participation a
 The Client merges the per-Workspace Inbox calls in the Client; there is no home-level Inbox ledger or Remote.
 
 ## Team Member context boundary
-The explicit `team-member` preset contains coding tools, background jobs, the skill loader tool, compaction, all eight Team tools, Workspace instruction discovery, and private-memory context. Harness `agent-instructions` remains the sole loader for `AGENTS.md`/`CLAUDE.md`. Each Member private root has `memory.md`, `notes/`, and `skills/`; only a bounded 16 KiB escaped reference index is injected, and the block states its current usage as `X.X KiB / 16 KiB` with a percentage. Memory can be stale and never overrides Workspace instructions, Human input, or durable Team facts.
+The explicit `team-member` preset contains coding tools, background jobs, the skill loader tool, compaction, all nine Team tools, Workspace instruction discovery, and private-memory context. Harness `agent-instructions` remains the sole loader for `AGENTS.md`/`CLAUDE.md`. Each Member private root has `memory.md`, `notes/`, and `skills/`; only a bounded 16 KiB escaped reference index is injected, and the block states its current usage as `X.X KiB / 16 KiB` with a percentage. Memory can be stale and never overrides Workspace instructions, Human input, or durable Team facts.
 
 Do not store credentials, sensitive data, guesses, chat logs, or facts already owned by the ledger.
 
