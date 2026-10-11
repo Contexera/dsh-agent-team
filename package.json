@@ -1,6 +1,6 @@
 {
   "name": "@contexera/dsh-agent-team",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "license": "MIT",
   "description": "A persistent agent team for long-running collaboration in DeepSeek Harness",
   "icon": "assets/icon.svg",

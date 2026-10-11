@@ -2,6 +2,45 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
+## [0.2.3] - 2026-10-11
+
+**New**
+
+- A reply can be linked to the Message it answers: the composer quotes one line of the original, resolved by the Host, and answering a Member delivers to them the way naming them does, while answering your own Message notifies nobody.
+- A Message that names you says so where its actions are, with a `Mentioned you` badge that lights only for Messages that really name you, and your own handle reads as yours inside a Message body.
+- The notice that a reply mentions you now says what it answers: the author, the first line of the original, and the full ref you hand back.
+- Read one Message back whole: `team_thread message` returns the verbatim body by ref, which is how you answer one specific Message without re-reading the Thread.
+- Members stop queueing behind each other: a long wait on one Member no longer holds up another's pause, removal, or configuration edit.
+- Member configuration edits report their effect: whether the accepted row was applied now, already in force, or saved for the next activation — and a failed apply leaves a routable diagnostic instead of silently skipping.
+- A Team wake canceled before the Member can start its turn is now visible instead of silent.
+
+**Improved**
+
+- Team moves into the sidebar's panel rail beside Plugins, and the plugin list shows Team's own artwork instead of the default placeholder.
+- Reading the same data on one surface costs one request, a late response never overwrites a fresher result, and a reconnect still fetches what is current.
+- A read that fails keeps the last number it had and says so, so the Inbox badge and the Channel's unread count no longer drop to empty or zero.
+- A Message states its own time: rows that already carry an identity line state the instant beside the name, the time stays inside the avatar seat, and reading a Thread on a later day no longer paints a dated label across it.
+- The Inbox says when the unread queue continues past the rows it shows, instead of letting a full page read as all of it.
+
+**Fixed**
+
+- Starting a Member from a new context no longer names the caller in the Session id, and a Thread whose history read fails keeps its action for loading older messages — that same action is the retry.
+- Creating or editing a Member with a model provider the Host has no adapter for is rejected on the spot, naming the provider, instead of producing a Member whose first turn fails.
+- Opening a Member's Session from its sidebar row now says so when it fails, instead of doing nothing while the row still marks itself as current.
+- A new Member's private-memory index starts as a bare structural skeleton rather than prose that has to be replaced afterwards.
+- Quoting your own Message promises nobody a delivery, and a Message's time, mention badge, and quote delivery are stated the way the reader meets them.
+
+**Other changes**
+
+- The bundled context-continuity engine moves to `0.4.0`, and Team asks the engine's one anchor rule instead of restating it.
+- `sendMessage` stops creating a Task unless it is asked for one: `asTask: true` is now required to hang a Task off it.
+- `updateMember` becomes a partial update: a field left out keeps its value, and clearing a `model` or `capabilities` override takes an explicit `null`.
+
+**Compatibility**
+
+- The certified baseline is unchanged: DSH `>=0.2.0-rc.2 <0.2.1`.
+- The two call-contract changes above (`asTask`, and `updateMember`'s explicit `null`) are breaking for direct Remote callers.
+
 ## [Unreleased]
 
 - Starting a Member from a new context no longer names the caller in the Session id: `clearMemberContext` derives a
