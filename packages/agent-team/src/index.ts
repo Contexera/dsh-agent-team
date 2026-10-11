@@ -2954,11 +2954,25 @@ export default class AgentTeam extends TypertRemoteService {
     }
   }
 
-  /** Shared Task-creation commit: resolve uploads into metadata lines and append through the ledger. */
-  private async sendMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamSendMessageRequest): Promise<AgentTeamSendMessageResult> {
+  /**
+   * Shared append envelope for both message commits: resolve uploads into
+   * metadata lines, append through the chosen ledger method, emit the committed
+   * receipt, and on any failure drop whatever cache entries this attempt
+   * prepared. `commit` only selects which ledger call runs — the ordering of
+   * resolution, emission, and failure cleanup is identical for send and reply
+   * and lives here once so the two can never drift apart.
+   */
+  private async commitMessageAs<
+    Req extends { readonly requestId: AgentTeamRequestId; readonly body: string; readonly attachmentPaths?: readonly string[] | undefined },
+    Res extends { readonly kind: string; readonly receipt?: AgentTeamOperationReceipt },
+  >(
+    actor: AgentTeamHumanActor | AgentTeamMemberActor,
+    request: Req,
+    commit: (authorized: Req & { readonly actor: AgentTeamHumanActor | AgentTeamMemberActor; readonly body: string; readonly resolvedAttachments?: readonly AgentTeamMessageAttachment[] }) => Promise<{ readonly committed: boolean; readonly value: Res }>,
+  ): Promise<Res> {
     try {
       const metadata = await this.resolveMessageAttachments(request)
-      const result = await this.requireLedger().sendMessage({
+      const result = await commit({
         ...request, body: this.appendAttachmentLines(request.body, metadata),
         ...(metadata.length === 0 ? {} : { resolvedAttachments: metadata }),
         actor,
@@ -2969,6 +2983,11 @@ export default class AgentTeam extends TypertRemoteService {
       await this.dropUnreferencedPrepared(request, error)
       throw error
     }
+  }
+
+  /** Task-creation commit (new Thread): the shared envelope over the ledger's sendMessage. */
+  private sendMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamSendMessageRequest): Promise<AgentTeamSendMessageResult> {
+    return this.commitMessageAs(actor, request, authorized => this.requireLedger().sendMessage(authorized))
   }
 
   /** Read one Message back verbatim, whoever is asking. */
@@ -2976,21 +2995,9 @@ export default class AgentTeam extends TypertRemoteService {
     return this.requireLedger().readMessage(actor, request)
   }
 
-  /** Shared existing-Thread reply commit: same upload resolution and outcome emission. */
-  private async replyAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
-    try {
-      const metadata = await this.resolveMessageAttachments(request)
-      const result = await this.requireLedger().reply({
-        ...request, body: this.appendAttachmentLines(request.body, metadata),
-        ...(metadata.length === 0 ? {} : { resolvedAttachments: metadata }),
-        actor,
-      })
-      this.emitCommittedOutcome(result)
-      return result.value
-    } catch (error) {
-      await this.dropUnreferencedPrepared(request, error)
-      throw error
-    }
+  /** Existing-Thread reply commit: the shared envelope over the ledger's reply. */
+  private replyAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
+    return this.commitMessageAs(actor, request, authorized => this.requireLedger().reply(authorized))
   }
 
   /**
