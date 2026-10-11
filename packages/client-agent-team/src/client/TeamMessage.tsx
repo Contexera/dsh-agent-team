@@ -8,7 +8,7 @@ import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
 import { cachedResolvedTaskRef, resolveUnknownTaskRefs, useResolvedTaskRefVersion, type ResolvedTaskRef } from './refs.ts'
 import { cachedResolvedThreadRef, resolveUnknownThreadRefs, useResolvedThreadRefVersion, type ResolvedThreadRef } from './refs.ts'
-import { bodyMentionsHuman, formatMessageTime, isSingleBrandedRef, memberHue, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, type MentionHandle } from './team-formatters.ts'
+import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, isSingleBrandedRef, memberHue, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, type MentionHandle } from './team-formatters.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import css from './conversation.module.css'
 
@@ -115,7 +115,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   const plan = planMessageBody(body, { human, ...(mentionNames === undefined ? {} : { mentionNames }), canOpenRefs: onOpenRef !== undefined })
   // The chip names what the body names, not what the Host delivered to: a
   // Thread reaches its Human in every row, and only the words can mention them.
-  const mentionedInBody = bodyMentionsHuman(body, mentionNames)
+  const mentionedInBody = bodyMentionsHuman(body, readerName)
   // The fallback row lists mentions the body text does not carry. The reader's
   // own name never belongs there: their name is either chipped in place or not
   // named at all. Neither does an author the quote line already names — the
@@ -255,8 +255,12 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
       {/* A continuation row has no identity line for its own time, so the time
           sits in the avatar seat under where the face would be — out of the
-          reading path, and off the row's right edge where the words live. */}
-      {grouped === true && showGroupedTime === true && occurredAt !== undefined && <span className={css.gutterTime} data-gutter-time="" aria-hidden="true">{formatMessageTime(occurredAt)}</span>}
+          reading path, and off the row's right edge where the words live. The
+          seat is 28px and does not clip, so it states the time of day only: the
+          date belongs to the identity line that opened this run and to the day
+          separator above it, and the exact instant stays one hover away on the
+          row's own title. */}
+      {grouped === true && showGroupedTime === true && occurredAt !== undefined && <span className={css.gutterTime} data-gutter-time="" aria-hidden="true" title={formatAbsoluteTime(occurredAt)}>{formatClockTime(occurredAt)}</span>}
       <div className={css.messageBody}>
         {!grouped && (
           <div className={css.nameRow}>

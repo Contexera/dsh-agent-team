@@ -10,7 +10,7 @@
 - `children`：渲染进 messageBody 尾部，承载入口行等扩展。
 - 分组规则：相邻两条同为消息、sender 相同，才折叠。活动行会打断 run。折叠行隐藏头像与名字。`visibility:hidden` 保持栅格对齐，padding 收紧为 `2px`。
 - 头像座位只替一位作者画图片：资料头像只在**这一行就是 Human 本人**时才落座。Agent 行无论上层传下来什么，都保持共享色相 + 发送者首字母。同一个座位替别的作者画读者的脸，等于把两个人画成一个人。头像首字母取 senderName 去掉 `@` 后首个字符大写。
-- 行的操作**浮在** Message 旁边的一张卡上，而不是长在行里：复制、引用，以及正文点名读者时的那枚「有人@我」提示。这张卡属于**行**而不是属于引用开关，所以收起引用（只传 `rowActions`、不传 `onReply`）会保留复制与提示、只去掉引用钮；两者都不传的表面则完全没有卡，Channel feed 就是如此。行本身保持扁平，因此一次 hover 只让一条 Message 得到一层底色，而不是让整条时间线长出纹理。
+- 行的操作**浮在** Message 旁边的一张卡上，而不是长在行里：复制、引用，以及正文点名读者时的那枚「提到了你」提示。这张卡属于**行**而不是属于引用开关，所以收起引用（只传 `rowActions`、不传 `onReply`）会保留复制与提示、只去掉引用钮；两者都不传的表面则完全没有卡，Channel feed 就是如此。行本身保持扁平，因此一次 hover 只让一条 Message 得到一层底色，而不是让整条时间线长出纹理。
 - 回答另一条 Message 的正文，先给出**已解析的引用**（`data-quote-line`）：父消息作者 + 一行带省略号的开头文字。两者都由 Host 从 ledger 解析，而不是从正文里读出来，因此引用永不与它所指向的内容不一致，父消息落在已加载历史窗口之外时也照样填得上。凡是能到达原文的表面，整块引用都是跳转入口；到不了就是惰性文字。不是回复的 Message 不渲染引用。
 - 超长正文折叠看 display 字符数。超过 `MESSAGE_COLLAPSE_CHARS`（`team-formatters.ts` 单一权威，600）的正文默认收进限高预览。预览约 8 行 / 176px，底部 alpha 渐隐遮罩，不涂主题底色。预览下方「展开全文」安静文本钮负责展开，展开后同位置「收起」收回。`aria-expanded` 随之翻转。
 - 按钮独占一行。反馈是文字级的：变色 + 下划线，无底色框。markdown 根节点的 `font: inherit` 重置选择器按后代匹配（`.messageBody .messageMarkdown > div:first-child`）。夹具容器不得隔断这个选择器，否则预览字号会大于展开态。夹具容器对可折叠正文**常驻**、展开/收起只切换类名。不能出现/消失式包裹。那会重挂载 Markdown 子树，丢掉渲染后注入的 ref 链接与 mention chip。是否折叠只由正文本身决定。这是确定性默认，无需持久化，也不构成 Host 事实。夹具只包正文分支。run 分组、附件条、兜底 chip 行与 children 都在夹具外照常渲染，预览内 ref/mention 照常可点。
@@ -21,8 +21,10 @@
 - 一个 run = 一次发言。同一 sender 连续的消息与其 Thread 入口行包进一个 `.messageRun` 块。活动行与未读边界打断 run。
 - 日界同样打断 run。跨天的相邻消息之间插入居中的日期锚：`.daySeparator`，`MM-DD` 格式，跨年用完整 `YYYY-MM-DD`。锚的数字风格与消息时间一致。活动没有自己的时钟 instant。活动继承前一条消息的日界，不触发锚。时间线的第一条消息不带头部锚。分块逻辑统一在 `team-separators.ts` 的 `chunkRunsWithDays`（单一权威实现）。
 - 块内分界看折叠行是否自带 Thread 入口行。自带时上方画一条 border-l2 发丝线并稍增间距。自带的判定是 `.messageRow[data-grouped]` 且 `:has([data-thread-entry])`。普通文字接续不加线，避免整块被切碎。锚点是入口行自己的 `data-thread-entry`，不是「正文里的某个 button」。长文折叠的展开/收起钮与正文里渲染出的 Task ref 链接都是 button，按 button 认边界会误判。
-- 回合分隔线是 `TeamRunDivider`。同一 sender 的相邻消息间隔 ≥5 分钟，即视为两次独立发言。agent 长发布常间隔小时级，纯折叠会抹掉层次与时刻。run 本身保持一块。两者之间渲染全宽 border-l2 发丝线，线下首行标注后一条消息的时间：`formatMessageTime` 同款格式，`role="separator"`，缩进对齐正文列（38px = 头像 28 + 间距 10）。这条线替代其后折叠行自带的入口行发丝线，相邻选择器覆盖，不叠双线。Channel 页与 Thread 页共用同一判断与组件。这条线已经说出了后一条消息的时刻，其下的折叠行就不再在头像座重复同一时刻——两页同样如此。
-- run 是纯分组块：无 hover 边框/底色/阴影，无常驻边框。回合分隔线、日界锚与未读线承担全部消息边界感。run 自身只保留块间 2px 垂直空隙（`margin: 2px` + `padding: 3px`），不给内容"加笼子"。
+- 回合边界线是 `TeamRunDivider`。同一 sender 的相邻消息间隔 ≥5 分钟，即视为两次独立发言；agent 长发布常间隔小时级，纯折叠会抹掉层次。**只有 Channel feed 画这条线**——feed 陈述的是「块」，Thread 读的是一条连续流，所以 Thread 侧不画。形态是全宽 border-l2 发丝线，`role="separator"`，缩进对齐正文列（38px = 头像 28 + 间距 10），**线上不写任何时刻**。这条线替代其后折叠行自带的入口行发丝线，相邻选择器覆盖，不叠双线。
+- run 是纯分组块：无 hover 边框/底色/阴影，无常驻边框。run 自身只保留块间 2px 垂直空隙（`margin: 2px` + `padding: 3px`），不给内容"加笼子"。Thread 侧不再有任何 run 级分隔线，边界感只剩日界锚与未读线。
+- **时刻由行自己说，从不由线说**：有身份行的在名字旁常驻；续行（没有身份行）在头像座（`[data-gutter-time]`）hover 或键盘焦点时出现，同一行永远只说一次。时间线里没有常驻的时刻标签。
+- **座位只写时刻**：它 28px 且不裁剪，而带日期的形态同年 57px、跨年 87px——日期留给开这一 run 的身份行与其上的日分隔条，精确瞬间挂在标签的 `title` 上。
 
 ## Mention 与 Task ref 强调
 - mention chip 挂三处。Human 字面正文在字面分段时挂 chip。Agent plain-prose 正文复用同一条 `splitMentionNames` 分段。Agent 富 Markdown 正文在公共 `MarkdownText` 渲染完成后，于普通文字节点原位替换出 chip。三种路径都只挂 Message 已解析 mention 列表内的 handle。大小写不敏感，书写必须带 `@`。裸名是正文，永不挂 chip。代码段落保持原文。effect 重跑不会对已生成的 chip 再包层。正文未出现的名字才落到尾部兜底 chip 行，不与内联 chip 重复。**chip 按「今天怎么称呼这个人」显示**。Human 改名前的 `human` 是 Host 仍会送达的别名。所以正文写着 `@human` 的旧消息在原位挂 chip，显示当前名。正文从没写过的名字不会掉进尾部兜底行。这与 member ref 一律按当前 handle 命名是同一条规则。

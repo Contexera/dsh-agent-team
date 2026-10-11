@@ -5,7 +5,7 @@ import { IconChecklistOutlineMedium, IconPaperclipOutlineMedium, IconSendOutline
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { allMentionMembers, containsAllMention, containsMention, mentionedMemberIds } from './team-formatters.ts'
+import { allMentionMembers, containsAllMention, containsMention, HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
 
@@ -190,10 +190,18 @@ export function TeamComposer({ members, followerMemberIds, drafts, draftKey, pen
   // pick, and `@all` stands for the menu's expansion. A quote's author belongs
   // here for the same reason — the Host merges them into the recipients — so
   // answering someone reads as the one delivery it is.
+  //
+  // The Human is the one author the Host never delivers to, so they are the one
+  // author this row must never name: they read the Thread directly and hold no
+  // session, which is why the Host drops a quoted Human — and with them a
+  // Message the reader quotes from themselves — out of the recipient set
+  // entirely. Promising it here would name a delivery that never happens, and
+  // this composer always writes as the Human, so quoting their own Message
+  // would promise it to the one person reading the row.
   const notifiedIds = [...new Set<AgentTeamMemberId>([
     ...recipients,
     ...mentionedMemberIds(draft, members),
-    ...(replyTo?.memberId === undefined ? [] : [replyTo.memberId]),
+    ...(replyTo?.memberId === undefined || replyTo.memberId === HUMAN_MEMBER_ID ? [] : [replyTo.memberId]),
   ])].sort()
 
   const updateMention = (nextDraft: string, caret: number): void => {

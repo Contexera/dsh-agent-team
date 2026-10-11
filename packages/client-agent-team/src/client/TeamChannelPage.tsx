@@ -441,9 +441,11 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
             // where they are already reading. A reply inside a Thread has none
             // of it — the Thread page owns that surface.
             const unread = unreadByThread.get(item.thread.threadRef) ?? 0
-            // A turn divider already labels the gapped entry; its row stays chrome-free.
+            // A turn boundary on this level keeps its hairline — the feed states
+            // blocks, where the Thread reads as one flow — but never the instant:
+            // every row states its own time under the pointer.
             return <Fragment key={item.message.messageRef}>
-              {turnGap && <TeamRunDivider occurredAt={item.message.occurredAt} />}
+              {turnGap && <TeamRunDivider />}
               <TeamMessage
                 senderName={sender}
                 memberId={item.message.sender}
@@ -463,7 +465,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
                 memberOf={memberOf}
                 onOpenMemberSession={openMemberSession}
                 grouped={index > 0}
-                showGroupedTime={item.message.topLevel === true && !turnGap}
+                showGroupedTime={item.message.topLevel === true}
                 {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
               >
                 {item.message.topLevel && <ThreadEntryRow

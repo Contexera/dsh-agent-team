@@ -4,7 +4,7 @@ import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
-import { allMentionMembers, containsAllMention, bodyMentionsHuman, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatClaimState, formatInboxTime, formatMessageTime, formatTaskStatus, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
+import { allMentionMembers, containsAllMention, bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatClaimState, formatInboxTime, formatMessageTime, formatTaskStatus, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -90,6 +90,20 @@ describe('Team presentation formatters', () => {
     expect(formatMessageTime('2026-02-01T08:30:00', now)).toBe('02-01 08:30')
     expect(formatMessageTime('2025-12-31T23:59:00', now)).toBe('2025-12-31 23:59')
     expect(formatMessageTime('not-a-date', now)).toBe('')
+  })
+
+  it('states a clock time alone for the 28px seat, never a date', () => {
+    // The dated forms are the ones that overrun the seat: 59px within the year
+    // and 87px across it, against 28px of box that does not clip.
+    expect(formatClockTime('2026-10-09T12:34:00.000Z')).toBe('20:34')
+    expect(formatClockTime('2025-12-31T23:59:00')).toBe('23:59')
+    expect(formatClockTime('2026-01-01T00:00:00')).toBe('00:00')
+    expect(formatClockTime('not-a-date')).toBe('')
+    // Length is the invariant the seat needs, so pin it on the label itself
+    // rather than on any one date's spelling.
+    for (const at of ['2026-10-09T12:34:00.000Z', '2025-12-31T23:59:00', '2026-01-01T00:00:00']) {
+      expect(formatClockTime(at)).toHaveLength(5)
+    }
   })
 
   it('shows today as a bare clock time, names yesterday, and dates everything older', () => {
@@ -402,13 +416,20 @@ describe('Team presentation formatters', () => {
     // The question is what the words say, not who the Message was delivered to:
     // a Thread delivers to its Human without ever naming them, so a
     // delivery-based answer would chip Messages that never addressed the reader.
-    expect(bodyMentionsHuman('@builder 再看一眼', ['builder'])).toBe(true)
-    expect(bodyMentionsHuman('再看一眼', ['builder'])).toBe(false)
-    expect(bodyMentionsHuman('@builders 再看一眼', ['builder'])).toBe(false)
+    expect(bodyMentionsHuman('@builder 再看一眼', 'builder')).toBe(true)
+    expect(bodyMentionsHuman('再看一眼', 'builder')).toBe(false)
+    expect(bodyMentionsHuman('@builders 再看一眼', 'builder')).toBe(false)
     expect(bodyMentionsHuman('@builder', undefined)).toBe(false)
-    expect(bodyMentionsHuman('@builder 看这里', [])).toBe(false)
+    // The scan is about the reader and nobody else. Naming another Member is the
+    // one thing that must never raise this: a Message that calls someone else is
+    // not about the person reading it, and the same answer decides where opening
+    // the Thread lands.
+    expect(bodyMentionsHuman('@builder 看这里', 'Iris')).toBe(false)
+    expect(bodyMentionsHuman('@builder 和 @lead 都看这里', 'Iris')).toBe(false)
     // A body written before the reader renamed themselves still addresses them.
-    expect(bodyMentionsHuman('@human 看这里', [{ name: 'Iris', also: ['human'] }])).toBe(true)
-    expect(bodyMentionsHuman('Iris 看一下', [{ name: 'Iris', also: ['human'] }])).toBe(false)
+    expect(bodyMentionsHuman('@human 看这里', 'Iris')).toBe(true)
+    expect(bodyMentionsHuman('Iris 看一下', 'Iris')).toBe(false)
+    expect(bodyMentionsHuman('@human 看这里', 'human')).toBe(true)
+    expect(bodyMentionsHuman('@Iris 看这里', 'human')).toBe(false)
   })
 })

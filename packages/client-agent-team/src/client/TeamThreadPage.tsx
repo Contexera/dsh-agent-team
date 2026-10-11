@@ -19,11 +19,10 @@ import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { TeamRunDivider } from './TeamRunDivider.tsx'
 import { bodyMentionsHuman, firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, taskStatusDot, type MentionHandle } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
-import { daySeparatorLabel, isRunGap, timelineDayKey } from './team-separators.ts'
+import { daySeparatorLabel, timelineDayKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
@@ -115,12 +114,13 @@ function readMeta(facts: readonly AgentTeamThreadReadFact[]): ReadonlyMap<Thread
  * them. The flags come from the read that produced these facts, not from the
  * live projection, because opening a Thread acknowledges what it read.
  */
-function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], handles: ReadonlyMap<AgentTeamMemberId, string>, humanName: string): AgentTeamMessageRef | undefined {
+function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], humanName: string): AgentTeamMessageRef | undefined {
   for (const entry of facts) {
     if (entry.unread !== true || entry.fact.kind !== 'message') continue
     // The same body scan the card chip answers by: a Thread reaches its Human
-    // in every row, so "delivered" cannot decide where an opening lands.
-    if (!bodyMentionsHuman(entry.fact.message.body, stableMentionNames(entry.fact.mentions, handles, humanName))) continue
+    // in every row, so "delivered" cannot decide where an opening lands — and a
+    // Message that named somebody else must not claim the opening either.
+    if (!bodyMentionsHuman(entry.fact.message.body, humanName)) continue
     return entry.fact.message.messageRef
   }
   return undefined
@@ -395,7 +395,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       // the flags — a mention the reader has already seen never pulls the view
       // again. With nothing unread and addressed to them, the Thread still opens
       // at its latest fact.
-      const addressed = firstUnreadMention(read.value.facts, mentionHandlesMap, humanName)
+      const addressed = firstUnreadMention(read.value.facts, humanName)
       if (addressed === undefined) timeline.scrollToBottom()
       else setPendingJump(addressed)
       if (history !== undefined && history.ok) {
@@ -635,7 +635,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return contexts
   }, [currentFacts, messageRefVersion, members, channelView, humanName, t])
 
-  const renderFact = (fact: AgentTeamThreadFact, grouped = false, timeStatedAbove = false) => {
+  const renderFact = (fact: AgentTeamThreadFact, grouped = false) => {
     if (fact.kind === 'message') {
       const sender = memberName(fact.message.sender)
       const senderStatus = members.find(candidate => candidate.member.memberId === fact.message.sender)
@@ -662,9 +662,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         memberOf={memberOf}
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
-        // The run divider above already states this instant; a continuation row
-        // repeats it only when nothing above it did.
-        showGroupedTime={!timeStatedAbove}
+        showGroupedTime
         cardOpen={openCard === fact.message.messageRef}
         onToggleCard={handleToggleCard}
         messageRef={fact.message.messageRef}
@@ -691,14 +689,9 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       if (run.length > 0) {
         nodes.push(
           <div className={css.messageRun} key={`run-${factKey(run[0]!)}`}>
-            {run.map((entry, entryIndex) => {
-              const previous = entryIndex > 0 ? run[entryIndex - 1] : undefined
-              const turnGap = entry.kind === 'message' && isRunGap(previous?.kind === 'message' ? previous.message.occurredAt : undefined, entry.message.occurredAt)
-              return <Fragment key={factKey(entry)}>
-                {turnGap && <TeamRunDivider occurredAt={entry.message.occurredAt} />}
-                {renderFact(entry, entryIndex > 0, turnGap)}
-              </Fragment>
-            })}
+            {run.map((entry, entryIndex) => <Fragment key={factKey(entry)}>
+              {renderFact(entry, entryIndex > 0)}
+            </Fragment>)}
           </div>,
         )
       }

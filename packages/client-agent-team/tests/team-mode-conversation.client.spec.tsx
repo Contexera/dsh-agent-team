@@ -380,6 +380,48 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('quotes an author the Host delivers to, and nobody when the reader quotes themselves', async () => {
+    const b = await runtimeWithTeam({
+      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      seededMessages: [{ body: 'human opener', occurredAt: '2026-08-21T09:00:00.000Z', sender: 'human' }],
+    })
+    // The Agent's Message is a reply, not a second top-level seed: the feed
+    // would otherwise show one entry row per seed and the door would be ambiguous.
+    b.publishAgentReply()
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
+    await b.view.findByRole('heading', { name: 'Task #1' })
+    // Scoped to the timeline: the same body can also be named outside a row —
+    // the composer's quote banner does exactly that — and only a row owns the
+    // actions. The published reply re-states the opener's item, so the opener
+    // renders as two facts of one Message; either row is the same Message.
+    const timeline = b.view.container.querySelector('section[aria-label="消息时间线"]')!
+    const quoteButton = (body: string) => {
+      const row = Array.from(timeline.querySelectorAll('article')).find(candidate => candidate.textContent?.includes(body))
+      if (row === undefined) throw new Error(`no Message row for ${body}`)
+      return within(row).getByRole('button', { name: '引用这条消息' })
+    }
+
+    // Quoting an Agent is a delivery, and the composer states it exactly once:
+    // the banner names what is answered, the notify row names who hears about it.
+    fireEvent.click(await waitFor(() => quoteButton('agent reply')))
+    await waitFor(() => expect(b.view.getByText(/将通知/).textContent).toContain('@builder'))
+
+    // Quoting the reader's own Message is not: the Host refuses to deliver a
+    // Message to its own author, and the Human is never a delivery target at all.
+    // The row is the promise, so it has to say nothing — it used to name the
+    // reader back at themselves, spelled as the raw `member:human` ref.
+    fireEvent.click(await waitFor(() => quoteButton('human opener')))
+    // Wait for the quote to land before reading the silence. The banner carries
+    // the author and the gist only once the Host has answered the lookup, so
+    // this is what makes the absence below a decision the row made rather than
+    // a race the assertion won: asked too early, "no notify row" is true of a
+    // composer that has not finished resolving anything at all.
+    await waitFor(() => expect(b.view.container.querySelector('[data-reply-banner]')?.textContent).toContain('human opener'))
+    expect(b.view.container.querySelector('[data-team-notify]')).toBeNull()
+    await b.runtime.dispose()
+  })
+
   it('previews a hand-typed mention without turning it into an explicit recipient', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
@@ -924,7 +966,7 @@ describe('Team conversation surfaces', () => {
     }
   })
 
-  it('states a continuation row\u2019s instant once, in whichever mark above it carries it', async () => {
+  it('states a continuation row\u2019s time under the pointer, with no line of its own', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
@@ -955,24 +997,21 @@ describe('Team conversation surfaces', () => {
     } } as never))
     const row = (ref: string) => document.querySelector(`[data-message-ref="${ref}"]`)
 
-    // A real waiting gap: the divider states the instant, and the continuation
-    // row below it must not state the same instant a second time.
+    // A real waiting gap states nothing of its own in a Thread: the flow keeps
+    // its spacing and the row states its own instant under the pointer.
     historyWith([turn('message:a', '先做一半', '2026-08-21T09:10:00.000Z', 3), turn('message:b', '再做一半', '2026-08-21T09:20:00.000Z', 4)])
     b.publishChannelUpdate()
     await waitFor(() => expect(row('message:b')).not.toBeNull())
-    const divider = document.querySelector('[role="separator"]')
-    expect(divider).not.toBeNull()
-    const dividerTime = divider!.textContent
-    expect(dividerTime).toBeTruthy()
-    expect(row('message:b')!.querySelector('[data-gutter-time]')).toBeNull()
-
-    // The same two Messages inside one turn's flow: no divider, so the seat is
-    // what states the instant — the same one, once.
-    historyWith([turn('message:a', '先做一半', '2026-08-21T09:19:00.000Z', 3), turn('message:b', '再做一半', '2026-08-21T09:20:00.000Z', 4)])
-    b.publishChannelUpdate()
-    await waitFor(() => expect(row('message:b')!.querySelector('[data-gutter-time]')).not.toBeNull())
     expect(document.querySelector('[role="separator"]')).toBeNull()
-    expect(row('message:b')!.querySelector('[data-gutter-time]')!.textContent).toBe(dividerTime)
+    const gapTime = row('message:b')!.querySelector('[data-gutter-time]')!.textContent
+    expect(gapTime).toBeTruthy()
+
+    // The same pair inside one turn's flow: the same one statement, from the
+    // same seat, and still no line.
+    historyWith([turn('message:a', '先做一半', '2026-08-21T09:19:00.000Z', 3), turn('message:b', '再做一半', '2026-08-21T09:21:00.000Z', 4)])
+    b.publishChannelUpdate()
+    await waitFor(() => expect(row('message:b')!.querySelector('[data-gutter-time]')!.textContent).not.toBe(gapTime))
+    expect(document.querySelector('[role="separator"]')).toBeNull()
 
     await b.runtime.dispose()
   })
@@ -1234,7 +1273,7 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('separates wide same-sender gaps with a turn divider on both timelines', async () => {
+  it('states a wide same-sender gap in the row itself, not on a line', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seededMessages: [
       { body: 'burst one', occurredAt: '2026-08-21T09:00:00.000Z' },
       { body: 'burst two', occurredAt: '2026-08-21T09:01:00.000Z' },
@@ -1242,17 +1281,21 @@ describe('Team conversation surfaces', () => {
     ] })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByText('later publication')).toBeTruthy()
-    // Only the two-hour gap earns a divider; the one-minute burst stays a
-    // seamless run, and the label carries the later message's instant.
+    // Only the two-hour gap earns a boundary, the one-minute burst stays one
+    // run, and the boundary is bare: the instant lives in the seat of the row
+    // it separates.
+    const rowOf = (body: string) => b.view.getByText(body).closest('article')
     const channelDividers = b.view.getAllByRole('separator')
     expect(channelDividers).toHaveLength(1)
-    expect(channelDividers[0]!.querySelector('time')?.getAttribute('datetime')).toBe('2026-08-21T11:30:00.000Z')
+    expect(channelDividers[0]!.querySelector('time')).toBeNull()
+    expect(rowOf('later publication')!.querySelector('[data-gutter-time]')?.textContent).toBeTruthy()
 
     fireEvent.click(b.view.getAllByRole('button', { name: '打开 Task #1' })[0]!)
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
-    const threadDividers = b.view.getAllByRole('separator')
-    expect(threadDividers).toHaveLength(1)
-    expect(threadDividers[0]!.querySelector('time')?.getAttribute('datetime')).toBe('2026-08-21T11:30:00.000Z')
+    // The Thread reads as one flow: whatever boundary this page keeps states no
+    // instant, and the two-hour gap shows up only where the reader points.
+    expect(rowOf('later publication')!.querySelector('[data-gutter-time]')?.textContent).toBeTruthy()
+    for (const separator of b.view.queryAllByRole('separator')) expect(separator.querySelector('time')).toBeNull()
     await b.runtime.dispose()
   })
 

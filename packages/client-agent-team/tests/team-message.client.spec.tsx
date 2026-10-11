@@ -6,9 +6,7 @@ import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
 import { rememberResolvedThreadRef, type ResolvedThreadRef } from '../src/client/refs.ts'
 import { TeamMessage } from '../src/client/TeamMessage.tsx'
-import { formatMessageTime, type MentionHandle } from '../src/client/team-formatters.ts'
-
-const humanMention: MentionHandle = { name: 'human', also: ['human'] }
+import { formatAbsoluteTime, formatClockTime, formatMessageTime } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -374,7 +372,7 @@ describe('TeamMessage reading row and mention line', () => {
     cleanup()
 
     const marked = render(
-      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@human look" mentionNames={[humanMention]} t={t} onReply={() => {}} />,
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@human look" mentionNames={['human']} readerName="human" t={t} onReply={() => {}} />,
     )
     const row = marked.container.querySelector('[data-mentions-me]')
     expect(row).not.toBeNull()
@@ -392,7 +390,7 @@ describe('TeamMessage reading row and mention line', () => {
     // mention: a body that never spells `@human` renders no chip even when the
     // Host delivered the Message to them.
     const delivered = render(
-      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="这条交付给你，但没有点名" mentionNames={[humanMention]} t={t} onReply={() => {}} />,
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="这条交付给你，但没有点名" mentionNames={['human']} readerName="human" t={t} onReply={() => {}} />,
     )
     expect(delivered.container.querySelector('[data-mentions-you]')).toBeNull()
     cleanup()
@@ -400,9 +398,26 @@ describe('TeamMessage reading row and mention line', () => {
     // An alias of the reader counts (a rename must not orphan old bodies), while
     // a handle inside code quotes is not a call.
     const aliased = render(
-      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@human 旧写法也认；`@human` 在代码里不算" mentionNames={[humanMention]} t={t} onReply={() => {}} />,
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@human 旧写法也认；`@human` 在代码里不算" mentionNames={['human']} readerName="Iris" t={t} onReply={() => {}} />,
     )
     expect(aliased.container.querySelector('[data-mentions-you]')).not.toBeNull()
+    cleanup()
+
+    // Calling somebody else is not calling the reader: the chip states what the
+    // words say to *this* reader, so a Message that names another Member says
+    // nothing about them. The same answer decides where opening the Thread lands
+    // (`firstUnreadMention`), so both surfaces have to agree that naming another
+    // Member is not a mention of the reader.
+    const elsewhere = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@Iris 这条点名的是别人" mentionNames={[{ name: 'Iris', also: ['human'] }]} readerName="Iris" t={t} onReply={() => {}} />,
+    )
+    expect(elsewhere.container.querySelector('[data-mentions-me]')).not.toBeNull()
+    // Naming Iris while the reader is somebody else draws no chip at all.
+    const otherReader = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@Iris 这条点名的是别人" mentionNames={[{ name: 'Iris', also: ['human'] }]} readerName="wowyuarm" t={t} onReply={() => {}} />,
+    )
+    expect(otherReader.container.querySelector('[data-mentions-me]')).toBeNull()
+    expect(otherReader.container.querySelector('[data-mentions-you]')).toBeNull()
   })
 
   it('keeps the body, the clamp toggle, and the mention row on the reading path', () => {
@@ -437,8 +452,24 @@ describe('TeamMessage reading row and mention line', () => {
     expect(container.querySelector('strong')).toBeNull()
     const seatTime = container.querySelector('[data-gutter-time]')
     expect(seatTime).not.toBeNull()
-    expect(seatTime!.textContent).toBe(formatMessageTime('2026-10-09T12:34:00.000Z'))
+    // The seat is 28px and does not clip, so it states the time of day alone: a
+    // dated label runs to 59px within the year and 87px across it, which would
+    // paint over the words beside it. The date is the identity line's and the
+    // day separator's business; the exact instant stays on the element's title.
+    expect(seatTime!.textContent).toBe(formatClockTime('2026-10-09T12:34:00.000Z'))
+    expect(seatTime!.textContent).toBe('20:34')
+    expect(seatTime!.textContent).not.toBe(formatMessageTime('2026-10-09T12:34:00.000Z'))
+    expect(seatTime!.getAttribute('title')).toBe(formatAbsoluteTime('2026-10-09T12:34:00.000Z'))
     expect(container.querySelector('[data-avatar]')).not.toBeNull()
+    cleanup()
+
+    // The identity line that opens the run still carries the whole wall-clock
+    // form: the date is not lost, it moved to the row that has room for it.
+    const head = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="起一条" occurredAt="2026-10-09T12:34:00.000Z" t={t} onReply={() => {}} />,
+    )
+    expect(head.container.querySelector('[data-gutter-time]')).toBeNull()
+    expect(head.container.querySelector('strong')!.parentElement!.textContent).toContain(formatMessageTime('2026-10-09T12:34:00.000Z'))
     cleanup()
 
     // A surface that never asked for the reading language — the Channel feed —

@@ -155,6 +155,19 @@ export interface MentionSegment {
  */
 export const HUMAN_MEMBER_ID = 'member:human' as AgentTeamMemberId
 
+/** The Human's handle before they could rename themselves; the Host keeps it as an alias. */
+export const HUMAN_HISTORIC_HANDLE = 'human'
+
+/**
+ * Every handle that still addresses the Human reader: the name their profile
+ * answers to today, plus the historic handle their older mentions were written
+ * with. One spelling for the reader's own identity, so the mention scan and the
+ * mention chips cannot disagree about who the reader is.
+ */
+export function humanMentionHandle(humanName: string): MentionHandle {
+  return humanName.toLowerCase() === HUMAN_HISTORIC_HANDLE ? humanName : { name: humanName, also: [HUMAN_HISTORIC_HANDLE] }
+}
+
 /**
  * Whether one Message's body itself spells a handle of the reader: the same
  * shared scan the mention chips render by, so the card's "mentioned you" says
@@ -162,15 +175,16 @@ export const HUMAN_MEMBER_ID = 'member:human' as AgentTeamMemberId
  * delivers to its Human without ever naming them, and a delivery is not a
  * mention, so a delivery-based answer would light the card on Messages that
  * never addressed the reader.
+ *
+ * The question is about the reader and nobody else, so the scan runs over the
+ * reader's own handles rather than over the Message's mentioned Members: naming
+ * someone else is the one thing that must never raise this. An unknown reader
+ * is named by nothing.
  */
-export function bodyMentionsHuman(body: string, mentionNames: readonly MentionHandle[] | undefined): boolean {
-  if (mentionNames === undefined || mentionNames.length === 0) return false
-  const handles = mentionNames.flatMap(mention => mentionHandlesOf(mention).handles)
-  return scanBodyHandles(body, handles).length > 0
+export function bodyMentionsHuman(body: string, humanName: string | undefined): boolean {
+  if (humanName === undefined) return false
+  return scanBodyHandles(body, mentionHandlesOf(humanMentionHandle(humanName)).handles).length > 0
 }
-
-/** The Human's handle before they could rename themselves; the Host keeps it as an alias. */
-export const HUMAN_HISTORIC_HANDLE = 'human'
 
 /**
  * One mentioned Member as a Message renders them: the display name the seat
@@ -286,7 +300,7 @@ export function mentionNamesOf(
 ): MentionHandle[] {
   return mentions
     .map((memberId): MentionHandle | undefined => memberId === HUMAN_MEMBER_ID
-      ? (humanName.toLowerCase() === HUMAN_HISTORIC_HANDLE ? humanName : { name: humanName, also: [HUMAN_HISTORIC_HANDLE] })
+      ? humanMentionHandle(humanName)
       : handles.get(memberId))
     .filter((name): name is MentionHandle => name !== undefined)
 }
@@ -330,6 +344,22 @@ export function formatMessageTime(occurredAt: string, now = new Date()): string 
   if (sameDay) return `${pad(at.getHours())}:${pad(at.getMinutes())}`
   const absolute = formatAbsoluteTime(occurredAt)
   return at.getFullYear() === now.getFullYear() ? absolute.slice(5) : absolute
+}
+
+/**
+ * Clock-only label for one Message instant, with no date at all. The avatar
+ * seat a continuation row draws its time in is 28px wide and does not clip, so
+ * the date forms `formatMessageTime` returns — 57px within the year and 87px
+ * across it, measured in the shipped stack — would paint over the words beside
+ * them. The seat states the time of day; the date is stated once per run by the
+ * identity line that opens it and once per day by the separator above it, and
+ * the precise instant stays available on the row's `title`. Callers that have
+ * room for a date keep using `formatMessageTime`.
+ */
+export function formatClockTime(occurredAt: string): string {
+  const at = new Date(occurredAt)
+  if (Number.isNaN(at.getTime())) return ''
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}`
 }
 
 /**

@@ -149,9 +149,9 @@
 /* The text column claims the whole track beside the avatar seat, so a long
    Message may use the full reading width, while `align-items` lets a short one
    shrink back onto its own content — a four-word reply must not paint a
-   full-width bar. The bubble's own `max-width: 100%` is what stops a long body
-   from overflowing the column, and `min-width: 0` keeps an unbroken token from
-   forcing the flex track wider than the column. */
+   full-width bar. `max-width: 100%` here stops a long Message from overflowing
+   the column, and `min-width: 0` keeps an unbroken token from forcing the flex
+   track wider than the column. */
 .messageBody {
   align-items: flex-start;
   display: flex;
@@ -172,7 +172,13 @@
 /* A continuation row has no identity line, so its time goes in the avatar seat,
    on the face's own first line: the seat keeps its 28px and the time is placed
    absolutely inside it, so revealing a time can never push the text column —
-   the one thing a reader would notice while reading. */
+   the one thing a reader would notice while reading. Because the box neither
+   clips (`overflow` would cut a label rather than move it) nor grows, its label
+   states the time of day alone — 28px is the `HH:mm` the seat was sized for,
+   measured at 27.5px in the shipped stack, while the dated forms run to 57px
+   within the year and 87px across it (57px is the browser's own ink for the
+   dated label on a real row, and the box does not clip it). The date is the
+   identity line's and the day separator's; the instant rides this `title`. */
 .gutterTime {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
@@ -225,10 +231,13 @@
   align-items: center;
   background: var(--dsw-alias-bg-layer-1);
   border-radius: var(--dsw-radius-sm, 8px);
-  /* One tier below the shipped floating panels: this is a 28px chip beside a
-     row, not a menu or a hover card, so the lighter elevation separates it from
-     the timeline without drawing a second surface under the words. */
-  box-shadow: var(--dsw-shadow-lv1);
+  /* The card-surface recipe (principles-and-language.md): the chip's fill is the
+     same white as a code block and as a screenshot, so the elevation hairline —
+     not the glow — is what keeps it legible where it floats across them. It
+     takes the stroke at the composer card's tier, and the lightest shipped
+     elevation, so the two surfaces on this timeline stay one step apart. */
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
+  box-shadow: var(--dsw-elevation-panel);
   display: flex;
   height: 28px;
   position: absolute;
@@ -404,8 +413,8 @@
   margin: 4px 0 0;
   max-width: 100%;
 }
-/* The line sits outside the bubble, and the body hugs a short bubble to its own
-   side (`align-items`), so the line takes the whole column back: the state has
+/* The line sits outside the body column, and a short Message hugs its own
+   content (`align-items`), so the line takes the whole column back: the state has
    to open the entry at the column's left edge on either side, or the reader
    loses the one column they scan down the feed. */
 .messageRow .entryLine {
@@ -437,8 +446,8 @@
 .entryRow:hover .entryArrow,
 .entryRow:focus-visible .entryArrow { transform: translateX(2px); }
 /* Literal human text: the shared MessageText primitive, or segmented mention
-   spans — both need the same pre-wrap metrics from this container. Inside a
-   bubble the vertical rhythm comes from the bubble's own padding, so the block
+   spans — both need the same pre-wrap metrics from this container. The vertical
+   rhythm comes from the row's padding and this column's gaps, so the block
    margins collapse to the first/last-child edges only. */
 .messageText {
   font-size: var(--dsh-content-font-size, 14px);
@@ -489,9 +498,9 @@
    them, and a broken reset would let the primitive's own root font shorthand
    render the clamped preview larger than the expanded body. */
 .messageBody .messageMarkdown > div:first-child { color: var(--dsw-alias-label-primary); font: inherit; }
-/* Inside the bubble the block grid opens and closes flush with the padding:
-   a leading `6px` on the first paragraph would read as a gap the bubble itself
-   did not ask for, and the same at the tail. */
+/* The block grid opens and closes flush with this column's edges: a leading
+   `6px` on the first paragraph would read as a gap nobody asked for, and the
+   same at the tail. */
 .messageBody .messageMarkdown > div:first-child > :first-child { margin-top: 0; }
 .messageBody .messageMarkdown > div:first-child > :last-child { margin-bottom: 0; }
 .messageBody .messageMarkdown p { margin: 6px 0; }
@@ -670,18 +679,10 @@
    focus/attention tier and an always-on divider must not outrank page chrome. */
 .runDivider {
   border-top: 1px solid var(--dsw-alias-border-l2);
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 16px;
+  /* The hairline hugs the text column (avatar 28px + gap 10px) and states no
+     instant of its own: the row it separates states its time under the
+     pointer, so one line is a line and never a second time. */
   margin: 2px 0 0 38px;
-  padding: 5px 0 0;
-}
-/* The divider and its label hug the text column, so on the reader's own side
-   they mirror with the column instead of pointing at the avatar gutter. */
-.runDivider[data-side='end'] {
-  margin-left: 0;
-  margin-right: 38px;
-  text-align: right;
 }
 .runDivider + .messageRow[data-grouped]:has([data-thread-entry]) {
   margin-top: 0;

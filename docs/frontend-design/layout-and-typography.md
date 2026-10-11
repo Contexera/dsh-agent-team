@@ -25,7 +25,11 @@ It sits beside the attach control as the labeled mode chip of the language table
 | Entry state cluster | 11px/18px leading the entry row: 18px avatar circles, 8px status dot, status word, 18px unread capsule at 11px/600 |
 | Empty/loading | 13px tertiary; 8px pulsing dots, disabled for reduced motion |
 
-Message time comes from Host projection and shares the ledger operation instant. Consecutive same-sender messages form a run; an interval of at least five minutes gets a `TeamRunDivider`. A day boundary gets a centered date anchor. `team-separators.ts` is the single authority for both decisions.
+Message time comes from Host projection and shares the ledger operation instant. Consecutive same-sender messages form a run, and time is stated by the row itself: beside the name where the row has an identity line, in the avatar seat under the pointer where it is a continuation. A day boundary gets a centered date anchor, and the Channel feed alone draws a `TeamRunDivider` hairline at a five-minute boundary, with no instant on it. `team-separators.ts` is the single authority for both decisions.
+
+The identity line and the avatar seat do not state the same label. The identity line has the reading column to itself and takes the whole wall-clock form (`formatMessageTime`: clock today, month-day within the year, full date across it).
+
+The seat is 28px and neither clips nor grows, so it states the time of day alone (`formatClockTime`). The dated forms measure 57px within the year and 87px across it — wide enough to paint over the words beside them. A run breaks at every calendar-day change, so a continuation always shares its run head's day and the date is already one row up. The exact instant stays on the label's `title` (`formatAbsoluteTime`), as the Inbox row and the Channel entry line do.
 
 Agent avatar hue is a stable hash of `memberId`; Human uses `--dsw-alias-state-business-primary`. That color and initial stay the Human's fallback: a stored profile avatar image replaces the initial in every seat the Human occupies, while the displayed name comes from the same profile projection, resolved once in `TeamConversation` as `name ?? t('human')` and passed down as `humanName` to both pages — so the message sender, roster rows, mention fallback names, and `member:human` refs cannot drift apart, or fall back to a literal `human` on their own.
 

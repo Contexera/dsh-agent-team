@@ -1360,6 +1360,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
   await expect.poll(() => seatTime.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
+  // No line on this page states an instant: the boundary it does keep (the
+  // unread one) is information, and a waiting gap is stated by the row itself.
+  expect(await page.locator('[role="separator"] time').count()).toBe(0)
   const hoverFacts = await hoveredRow.evaluate(element => {
     const row = getComputedStyle(element)
     const cardElement = element.querySelector('[data-message-card]') as HTMLElement
@@ -1372,6 +1375,18 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       cardTransition: `${card.transitionDuration} ${card.transitionTimingFunction}`,
       actionHeight: Math.round(Number.parseFloat(action.height)),
       seatWidth: Math.round(Number.parseFloat(getComputedStyle(cardElement.parentElement!.querySelector('[data-gutter-time]')!).width)),
+      // What the label actually paints, not what its box claims: the box is 28px
+      // by construction, so only a Range over the text sees an overflow the box
+      // does not clip.
+      seatInk: (() => {
+        const label = element.querySelector('[data-gutter-time]')!
+        const range = document.createRange()
+        range.selectNodeContents(label)
+        return Math.round(range.getBoundingClientRect().width)
+      })(),
+      seatText: element.querySelector('[data-gutter-time]')!.textContent,
+      seatScrollWidth: (element.querySelector('[data-gutter-time]') as HTMLElement).scrollWidth,
+      seatClientWidth: (element.querySelector('[data-gutter-time]') as HTMLElement).clientWidth,
     }
   })
   // The row's layer is the shipped hovered-row fill: the shipped radius tier,
@@ -1397,6 +1412,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(hoverFacts.cardTransition).toBe('0.16s ease-out')
   // The seat keeps its 28px: revealing a time never pushes the text column.
   expect(hoverFacts.seatWidth).toBe(28)
+  // ...and the time inside it stays inside it. A dated label is wider than the
+  // seat (57px within the year, 87px across it), and the box does not clip, so
+  // it would paint across the words beside it. The label states the time of day;
+  // the dated form belongs to the identity line that opened the run, and the
+  // precise instant rides the element's title.
+  expect(hoverFacts.seatText).toMatch(/^\d{2}:\d{2}$/)
+  expect(hoverFacts.seatInk).toBeLessThanOrEqual(hoverFacts.seatWidth)
+  expect(hoverFacts.seatScrollWidth).toBeLessThanOrEqual(hoverFacts.seatClientWidth)
   // The card floats beside the reading path, level with the identity line, so it
   // covers neither the author it names nor the words it acts on.
   const cardPlacement = await hoveredRow.evaluate(element => {
@@ -1448,6 +1471,64 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-row-hover-narrow.png') })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
+
+  // The seat's label must hold whatever the calendar says: a Thread read a day
+  // later — the ordinary case, and the one that first showed this — turns every
+  // Message on screen into a dated one. The page's own clock is the only lever
+  // that reaches the Client's `now`, so shift it a day on, read the same row
+  // again, and put it back. What the seat draws is measured, not assumed: a
+  // dated label is 57px against a 28px box that does not clip, so a regression
+  // that hands the seat a dated form paints across the words and fails here.
+  const pageNow = await page.evaluate(() => Date.now())
+  await page.clock.setFixedTime(pageNow + 86_400_000)
+  await page.getByRole('button', { name: '返回频道' }).click()
+  await page.getByRole('button', { name: /Task #1/ }).waitFor()
+  await taskEntryRow(page, 1).click()
+  const agedRow = page.locator('article').filter({ hasText: '离线期间的批量更新 二' })
+  await agedRow.waitFor()
+  await agedRow.scrollIntoViewIfNeeded()
+  await agedRow.hover()
+  await settleAnimations(page)
+  const agedSeat = await agedRow.evaluate(element => {
+    const label = element.querySelector('[data-gutter-time]')!
+    const range = document.createRange()
+    range.selectNodeContents(label)
+    const style = getComputedStyle(label)
+    return {
+      text: label.textContent,
+      title: label.getAttribute('title'),
+      ink: Math.round(range.getBoundingClientRect().width * 100) / 100,
+      width: Math.round(Number.parseFloat(style.width) * 100) / 100,
+    }
+  })
+  // The whole instant stays reachable, on the element the reader is pointing at.
+  expect(agedSeat.title).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+  // ...while the label itself states the time of day and fits the seat it sits in.
+  expect(agedSeat.text).toMatch(/^\d{2}:\d{2}$/)
+  expect(agedSeat.width).toBe(28)
+  expect(agedSeat.ink).toBeLessThanOrEqual(agedSeat.width)
+  // And it never reaches the words: the seat's right edge is left of the body
+  // column's left edge, so the label ends before the text begins.
+  const seatToBody = await agedRow.evaluate(element => {
+    const seat = element.querySelector('[data-gutter-time]')!.getBoundingClientRect()
+    const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
+    return Math.round(body.left - seat.right)
+  })
+  expect(seatToBody).toBeGreaterThan(0)
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-seat-time-aged.png') })
+  // The identity line that opens the run still states the date, so nothing is
+  // lost by the seat keeping to the clock: the reader gets it one row up.
+  const agedHead = await page.locator('article').filter({ hasText: '离线期间的批量更新 一' }).first().evaluate(element => {
+    const time = element.querySelector('[class*="messageTime"]')
+    return time === null ? null : time.textContent
+  })
+  expect(agedHead).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}$/)
+  // Put the world back the way the rest of this journey expects to find it.
+  await page.clock.setFixedTime(pageNow)
+  await page.getByRole('button', { name: '返回频道' }).click()
+  await page.getByRole('button', { name: /Task #1/ }).waitFor()
+  await taskEntryRow(page, 1).click()
+  await page.getByText('离线期间的批量更新 二', { exact: false }).first().waitFor()
 
   // Quote: the card's action puts the Message in the composer, the banner states
   // who the quote reaches before send, and the sent Message leads with the quoted
@@ -1504,6 +1585,23 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'composer-quote-banner-crop.png'), clip: {
     x: Math.max(0, bannerBox.x - 8), y: Math.max(0, bannerBox.y - 8), width: bannerBox.width + 16, height: bannerBox.height + 16,
   } })
+  // The one author the Host never delivers to is the reader, so quoting their own
+  // Message promises nothing: the banner still names what is answered, and the
+  // notify row falls silent rather than naming the reader back at themselves.
+  // The banner is read first because it only carries the author and the gist once
+  // the Host has answered the lookup — asked earlier, "no notify row" would also
+  // be true of a composer that had not resolved anything yet.
+  const ownRow = page.locator('article').filter({ hasText: '这是带附件的 Thread 回复' }).first()
+  await ownRow.scrollIntoViewIfNeeded()
+  await ownRow.hover()
+  await ownRow.locator('[data-quote-message]').click()
+  await expect.poll(async () => await quoteBanner.textContent() ?? '').toContain('这是带附件的 Thread 回复')
+  expect(await quoteNotify.count()).toBe(0)
+  await page.screenshot({ path: join(UI05_SHOTS, 'composer-quote-self.png') })
+  // Put the reviewer quote back: the send below asserts the line it produces.
+  await quotedRow.hover()
+  await quotedRow.locator('[data-quote-message]').click()
+  await expect.poll(async () => await quoteNotify.textContent() ?? '').toContain('@reviewer')
   await page.getByRole('textbox', { name: '消息内容' }).fill('引用这条，确认引用管道')
   await page.getByRole('button', { name: '发送' }).click()
   const quotedMessage = page.locator('article').filter({ hasText: '引用这条，确认引用管道' })
@@ -1583,7 +1681,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => mentionLine.count()).toBe(1)
   await expect.poll(async () => await mentionLine.textContent()).toBe('提到了你')
   // The notice reads at the card's own type tier, never smaller than the actions
-  // it sits between, and the card carries the lighter elevation tier.
+  // it sits between; the card states its edge itself, in two declared layers.
   const noticeFacts = await addressedRow.evaluate(element => {
     const card = element.querySelector('[data-message-card]')!
     return {
@@ -1593,8 +1691,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     }
   })
   expect(noticeFacts.noticeSize).toBe(noticeFacts.actionSize)
-  // The declared tier: --dsw-shadow-lv1, one step below the floating panels.
-  expect(noticeFacts.cardShadow).toBe('rgba(0, 0, 0, 0.05) 0px 2px 4px 0px')
+  // The elevation hairline is what keeps the chip legible on the white code
+  // block and the screenshots it floats across; underneath it the lightest
+  // shipped elevation (--dsw-elevation-panel), one step below the composer
+  // card's (--dsw-elevation-soft).
+  expect(noticeFacts.cardShadow).toContain('0px 0px 0px 0.5px')
+  expect(noticeFacts.cardShadow).not.toContain('rgba(0, 0, 0, 0) 0px 0px 0px 0.5px')
+  expect(noticeFacts.cardShadow).toContain('rgba(0, 0, 0, 0.03) 0px 3px 8px 0px')
+  expect(noticeFacts.cardShadow).toContain('rgba(0, 0, 0, 0.02) 0px 0px 16px 0px')
   const cardBox = (await addressedRow.locator('[data-message-card]').boundingBox())!
   await page.screenshot({ path: join(UI05_SHOTS, 'message-card.png'), clip: {
     x: Math.max(0, cardBox.x - 28), y: Math.max(0, cardBox.y - 28), width: cardBox.width + 56, height: cardBox.height + 56,
@@ -1610,6 +1714,19 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 
+  // The badge answers for the reader alone, so a Message that named somebody
+  // else raises its card without one. This is the row the reader wrote
+  // themselves, calling on @reviewer: the badge once lit here for every reader,
+  // because the scan asked whether the Message named anybody at all. The card
+  // is what carries the badge, so it is proven up before its absence means
+  // anything.
+  const otherRow = page.locator('article').filter({ hasText: '请 @reviewer 加入这个已有 Thread' }).first()
+  await otherRow.scrollIntoViewIfNeeded()
+  await otherRow.hover()
+  await settleAnimations(page)
+  await expect.poll(async () => await otherRow.locator('[data-message-card]').count()).toBe(1)
+  expect(await otherRow.locator('[data-mentions-you]').count()).toBe(0)
+  await page.screenshot({ path: join(UI05_SHOTS, 'message-card-other-mention.png') })
 
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('button', { name: '# delivery' }).click()
