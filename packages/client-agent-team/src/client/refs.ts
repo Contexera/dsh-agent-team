@@ -146,7 +146,7 @@ const messageStore = createRefStore((entry: ResolvedMessageRef) => entry.message
 export const useResolvedTaskRefVersion = taskStore.useVersion
 export const cachedResolvedTaskRef = taskStore.cached
 /** Store one Task resolution (click path) and wake every rendered link. */
-export const rememberResolvedTaskRef = taskStore.remember
+const rememberResolvedTaskRef = taskStore.remember
 export const resolveUnknownTaskRefs = taskStore.resolveUnknown
 
 /** React binding: re-renders the caller when any Thread ref resolution lands. */
@@ -160,7 +160,7 @@ export const resolveUnknownThreadRefs = threadStore.resolveUnknown
 export const useResolvedMessageRefVersion = messageStore.useVersion
 export const cachedResolvedMessageRef = messageStore.cached
 /** Store one reply-parent resolution and wake every rendered quote. */
-export const rememberResolvedMessageRef = messageStore.remember
+const rememberResolvedMessageRef = messageStore.remember
 export const resolveUnknownMessageRefs = messageStore.resolveUnknown
 
 /**
