@@ -434,14 +434,15 @@ describe('Agent Team Member lifecycle', () => {
     const added = await ctx.agentTeam.addMember({ requestId: requestId('clear-retry-add'), workspaceId,
       handle: 'builder', description: '', presetId: 'team-member', channelRefs: [] })
     const memberId = added.status.member.memberId
-    const target = SessionId(`agent-team-${requestId('clear-retry')}`)
     archiveFailures.remaining = 1
 
     await expect(ctx.agentTeam.clearMemberContext({ requestId: requestId('clear-retry'), workspaceId, memberId }))
       .rejects.toThrow('workspace archive failed')
     const stranded = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
-    expect(stranded?.member.sessionId).toBe(target)
     expect(stranded?.availability).toBe('unavailable')
+    // The renewal mints its own Session id: read it back from the recorded
+    // binding rather than predicting what the caller asked for.
+    const target = stranded!.member.sessionId
     // The retire half disposed the old generation but never archived it, so
     // the recorded binding and the live effects disagree until it is finished.
     expect(archived).toEqual([])
@@ -466,18 +467,46 @@ describe('Agent Team Member lifecycle', () => {
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
+  it('mints an opaque Session id instead of one derived from the requestId', async () => {
+    const { ctx, workspaceId } = await realHarness()
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('opaque-add'), workspaceId,
+      handle: 'builder', description: '', presetId: 'team-member', channelRefs: [] })
+    const memberId = added.status.member.memberId
+    // A caller-shaped request id: the colons it carries, and the escaping they
+    // attract, are what a fresh mint keeps out of the Session directory name
+    // and the Client's Session list.
+    const callerId = requestId('team-bridge:clear:cl1')
+
+    const renewed = await ctx.agentTeam.clearMemberContext({ requestId: callerId, workspaceId, memberId })
+    const sessionId = renewed.status.member.sessionId
+
+    expect(sessionId).not.toBe(added.status.member.sessionId)
+    expect(sessionId).toMatch(/^agent-team-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(sessionId).not.toContain('team-bridge')
+    expect(sessionId).not.toContain('~')
+
+    // An exact retry still resolves to the recorded binding: the mint is not
+    // restatable by the caller, so the ledger's requestId record answers.
+    const again = await ctx.agentTeam.clearMemberContext({ requestId: callerId, workspaceId, memberId })
+    expect(again.receipt.operationId).toBe(renewed.receipt.operationId)
+    expect(again.status.member.sessionId).toBe(sessionId)
+    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+  })
+
   it('finishes an interrupted context renewal during startup', async () => {
     const { ctx, workspaceId, archived, archiveFailures, teamFiber } = await realHarness()
     const added = await ctx.agentTeam.addMember({ requestId: requestId('clear-boot-add'), workspaceId,
       handle: 'builder', description: '', presetId: 'team-member', channelRefs: [] })
     const memberId = added.status.member.memberId
-    const target = SessionId(`agent-team-${requestId('clear-boot')}`)
     archiveFailures.remaining = 1
 
     await expect(ctx.agentTeam.clearMemberContext({ requestId: requestId('clear-boot'), workspaceId, memberId }))
       .rejects.toThrow('workspace archive failed')
     expect(archived).toEqual([])
     expect(ctx.agentTeam.members().find(item => item.member.memberId === memberId)?.availability).toBe('unavailable')
+    // The renewal mints its own Session id; read it back from the recorded
+    // binding rather than predicting what the caller asked for.
+    const target = ctx.agentTeam.members().find(item => item.member.memberId === memberId)!.member.sessionId
 
     // Restarting replays the same ledger through the boot path: no live handle
     // survives a restart, so startup itself must archive the retired Session
@@ -498,14 +527,15 @@ describe('Agent Team Member lifecycle', () => {
     const added = await ctx.agentTeam.addMember({ requestId: requestId('clear-activation-add'), workspaceId,
       handle: 'builder', description: '', presetId: 'team-member', channelRefs: [] })
     const memberId = added.status.member.memberId
-    const target = SessionId(`agent-team-${requestId('clear-activation')}`)
     presets.failingMount = true
 
     await expect(ctx.agentTeam.clearMemberContext({ requestId: requestId('clear-activation'), workspaceId, memberId }))
       .rejects.toThrow('failed to start a new context')
     const stranded = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
-    expect(stranded?.member.sessionId).toBe(target)
     expect(stranded?.availability).toBe('unavailable')
+    // The renewal mints its own Session id; read it back from the recorded
+    // binding rather than predicting what the caller asked for.
+    const target = stranded!.member.sessionId
     // Here the retire half completed and the target never started — the two
     // failure windows are distinguishable, which is what reconciliation reads.
     expect(archived).toEqual([added.status.member.sessionId])

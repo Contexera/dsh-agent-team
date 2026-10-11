@@ -4,6 +4,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+- Starting a Member from a new context no longer names the caller in the Session id: `clearMemberContext` derives a
+  uuid-shaped digest of its request id, so the id keeps `agent-team-<uuid>` shape and the same retry behaviour — an
+  identical request restates it and resolves against the recorded binding — while nothing the caller wrote reaches a
+  Session directory name, the Client's Session list, or a log path. Existing renewals keep the id they recorded.
 - `sendMessage` stops creating a Task unless it is asked for one: omitting `asTask` now sends a plain message, and `asTask: true` is required to hang a Task off it. Callers that relied on the old default — direct Remote callers, not the Web composer or the model-facing tool, which already passed it explicitly — add `asTask: true` to keep the old behavior.
 - `updateMember` becomes a partial update: a field left out keeps the value it already has, and clearing a `model` or `capabilities` override takes an explicit `null`. Callers that used to clear an override by omitting the field now pass `null` for it; callers that echoed stored values back to avoid the old clearing no longer need to.
 - Member configuration edits report their effect: the Remote response says whether the accepted row was applied now, already in force, or saved for the next activation (and why), every roster row carries whether the stored configuration is actually in effect on the live surface, and a failed apply is kept as a routable member diagnostic carrying its request, operation, session, and stage ids — the same correlation group goes to the log — while the call itself still rejects loudly.

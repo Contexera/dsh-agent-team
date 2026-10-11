@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
+import { requestScopedUuid } from './request-scoped-id.ts'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { AgentTeamAttachmentId } from './types.ts'
 
@@ -31,26 +32,13 @@ export function newAttachmentId(): AgentTeamAttachmentId {
 }
 
 /**
- * Request-stable cache identity for one upload of an idempotent request: the
- * same `requestId` always derives the same id, so a retried upload converges
- * on the entry the first attempt wrote instead of minting a second one, while
- * a different payload for that id is caught by the byte comparison at write
- * time. Pure and namespaced, so it is restart-safe without a second durable
- * store or an in-memory map. `scope` separates several attachments prepared
- * by one request (path copies) from the request's upload itself.
+ * Request-stable cache identity for one upload of an idempotent request: see
+ * [`requestScopedUuid`](./request-scoped-id.ts) for why the id is derived
+ * rather than fresh. `scope` separates several attachments prepared by one
+ * request (path copies) from the request's upload itself.
  */
 export function requestScopedAttachmentId(requestId: string, scope?: string): AgentTeamAttachmentId {
-  const uuid = createHash('sha256')
-    .update(`agent-team:attachment-request:${requestId}${scope === undefined ? '' : `#${scope}`}`)
-    .digest()
-    .subarray(0, 16)
-  const shaped = Buffer.from(uuid)
-  // Present the digest as an ordinary uuid so cache directory names keep the
-  // shape `newAttachmentId()` produces: version 4, RFC 4122 variant bits.
-  shaped[6] = (shaped[6]! & 0x0f) | 0x40
-  shaped[8] = (shaped[8]! & 0x3f) | 0x80
-  const hex = shaped.toString('hex')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}` as AgentTeamAttachmentId
+  return requestScopedUuid('attachment-request', requestId, scope) as AgentTeamAttachmentId
 }
 
 /** The request-stable id of the `index`-th path copy one message or reply request prepares. */

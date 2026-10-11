@@ -7,6 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { requestScopedUuid } from './request-scoped-id.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -1362,10 +1363,12 @@ export default class AgentTeam extends TypertRemoteService {
       const stored = this.requireLedger().getMember(request.memberId)
       if (stored === undefined || !this.requireLedger().participatesIn(request.memberId, request.workspaceId)) throw new Error(`unknown Member '${request.memberId}' in workspace '${request.workspaceId}'`)
       if (stored.state !== 'enabled') throw new Error(`Agent Member '${stored.handle}' is ${stored.state}; only enabled Members can start from a new context`)
-      // The fresh id derives from the requestId, so a retried identical
-      // request mints the same id and the ledger dedupes it instead of
-      // colliding; the format matches addMember's `agent-team-<uuid>`.
-      const sessionId = SessionId(`agent-team-${request.requestId}`)
+      // Derived from the requestId, not fresh, so an exact retry restates this
+      // same id and the ledger resolves it instead of colliding. It is a
+      // uuid-shaped digest rather than the caller's text: nothing a caller
+      // wrote reaches a Session directory name, the Client's Session list, or a
+      // log path, and no escaping is involved.
+      const sessionId = SessionId(`agent-team-${requestScopedUuid('member-session-renewal', request.requestId)}`)
 
       // A renewal this request already committed IS the desired binding: its
       // retire or activation effects may still be outstanding, so finish them
