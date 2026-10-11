@@ -19,6 +19,33 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - startup 绝不把非 enabled Member 激活为 enabled。启动阶段失败的 effect 只记日志，下一次 boot 重试，不让 boot 失败。同一 Member 的 lifecycle operation 按提交序串行；不同 Member 从不排在彼此的等待之后。
 - ledger append 之后剩下的是 delivery 效果：commit listeners、Client change invalidation、participation notice。每个受影响的 Member 还会收到一次 wake。每一项都经过同一条边界：失败只记日志，不让操作本身失败。失败的 listener 或 wake 仍以 committed result 作答，而不是虚假的回滚。只有 invariant divergence 继续 reject。失败的 Inbox wake 清掉这个 wake 记录的 notice state。因此，下一次触及该 Member 的 commit 重新推导同一批 durable Inbox facts 并重试，不追加第二次操作。DM 保留显式的 recorded-but-not-delivered 错误。
 
+## 哪些操作会唤醒 Member，以及成员卡住时怎么选
+
+唤醒是 Host 经四种 cause 之一投递的一条**有界合并通知**，每条都带上产生它的持久事实：
+
+| Cause | 产生它的事实 |
+| --- | --- |
+| `commit` | 任何触及该 Member 的已提交操作：提及、DM、Task 活动、promotion、被接受的回答 |
+| `transition` | 一条已记录的 `team/member-session-renewed` 或 `team/member-session-rolled-over`，其 retire 与 activation 效果没有按序完成；并按顺序排在 handoff 之后重新派生 Inbox |
+| `activation` | 一次新的 activation，有 carried input 时带上旧 Session id |
+| `running` | Member 自身 `agent/status` 转为 `running`——每次转换一次，不是每步一次 |
+
+唤醒不是第二权威，也不承诺恰好一次被模型处理。一次投递失败会清掉它记录的 notice 状态，于是下一条触及该 Member 的提交会重新派生同样持久事实并重试，不会追加第二次通知。
+
+`recoverMember` 是人工入口，按顺序且只选一个：
+
+| 条件 | 动作 | 适用场景 |
+| --- | --- | --- |
+| handle 缺失，或活动 handle 的 Session id 不是记录中的绑定，且存在已记录的 transition | 完成这条已记录的 transition | 崩溃或某个效果失败，使一次 Session transition 只执行了一半 |
+| 持久状态不是 `enabled`，但仍有活动 handle | 完成该状态的效果 | suspend/archive/removal 已提交，但它的 disposal 失败 |
+| 活动 handle 的 preset 组合已丢失 | 原地 reactivate | 一次 reload 丢了 preset 组合，Member 的工具不可用 |
+| 完全没有活动 handle | reactivate | activation 本身就失败了 |
+| 其余情况 | steer 一条 resume 提示 | Member 活着、组合完成、绑定正常——其余状态都已被上面几行接走 |
+
+带活动 handle 的 error 态 Member 落在最后一行：`recoverMember` 会 steer 它，而如果原因仍在，下一轮会再失败一次。选之前先分清两件事：模型路由坏了或网关拒收，要改的是路由而不是恢复 Member，在路由通之前 steer 什么也救不回来；真正需要 `clearMemberContext` 的是无法自行收尾的上下文世代——它会让下一条 Session 不带历史。
+
+Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲染。它由活动 surface 派生、不落盘：Host 重启后只有在有东西唤醒该 Member 时才会重新派生，所以一个没有被唤醒的 Member 在下次被操作触及前不显示原因。
+
 ## 变更流与 Projection
 - `changes()` 是流式 Remote，可声明一个 scope（workspace/channel/thread/presence）。省略 scope 时观察共享 Team 投影变化，不包含 presence。Host 先注册监听，再发送当前基线，之后只发送匹配的变更通知。消费者暂停期间，只保留最新待发送版本。取消或 Host 释放时关闭订阅。Thread read 与 `team/dm-sent` 不改变共享投影：既不推进版本，也不唤醒订阅者。Presence 使用进程内 epoch，其他 scope 使用最近一次共享投影提交的 ledger sequence。版本只在同一 scope 和 Host 生命周期内有意义。Host 只为受 operation 影响的 Members 重算 Inbox hints。
 - `TeamChangeStream` 在每个页面内通过 `ctx.remote.$stream()` 按 scope 共享一个逻辑流。Harness 管理共享的 `/api/remote.mux` WebSocket 和连接恢复。每次开场基线都会触发重新读取 Host，包括重连后的相同或更低版本。开场基线既补上首次读取与订阅之间的变化，也在没有新提交时恢复失败的读取。最后一个 listener 离开时释放这个 scope，插件释放时关闭所有 scope。传输失败在恢复前只报告一次。终止性错误直接报告，不走 Team 自有重试循环。没有长轮询回退、跨页面主从选举或单活跃页面限制。并发的补充读取合并通知。读取期间再收到通知，保留后续一轮读取，不用旧版本过滤重连基线。Human Inbox 徽标订阅无 scope 通知。订阅经 debounce 重拉 Inbox 合计，在本页 Thread read 后刷新。Presence 订阅更新 Member 可用状态，不唤醒 Inbox。通知只是重新读取的提示，不是第二份事实存储。

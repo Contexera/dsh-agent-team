@@ -19,6 +19,33 @@ When changing a Host capability, read package source/tests first and then the ma
 - Startup never activates a non-enabled Member: an effect that fails during startup is logged and retried at the next boot instead of failing the boot. Lifecycle operations for one Member stay serialized in submission order, while different Members never queue behind each other's waits.
 - After the ledger append, delivery effects follow — commit listeners, Client change invalidation, the participation notice, and one wake per affected Member. Each runs in a boundary that logs a failure instead of failing the operation, so a failed listener or wake still answers with the committed result, not a false rollback; only invariant divergence still rejects. A failed Inbox wake clears its recorded notice state, so the next commit touching that Member rederives the same durable Inbox facts and retries without a second append. DM keeps its explicit recorded-but-not-delivered error.
 
+## Which operations wake a Member, and how recovery is chosen
+
+A wake is one bounded coalesced notice the Host delivers over one of four causes, each carrying the durable fact that produced it:
+
+| Cause | What produced it |
+| --- | --- |
+| `commit` | any committed operation touching the Member: a mention, a DM, a Task activity, a promotion, an accepted answer |
+| `transition` | a recorded `team/member-session-renewed` or `team/member-session-rolled-over` whose retire and activation effects complete out of order; the rederived Inbox is sequenced after the handoff |
+| `activation` | a fresh activation, carrying the previous Session id when input was carried forward |
+| `running` | the Member's own `agent/status` going `running` — one wake per transition, not per step |
+
+Waking is not a second authority and never promises exactly-once model processing. A wake that fails delivery clears its recorded notice state, so the next commit touching that Member rederives the same durable facts and retries without a second append.
+
+`recoverMember` is the manual path and picks exactly one of these, in order:
+
+| Condition | Action | Use it when |
+| --- | --- | --- |
+| handle absent, or the live handle's Session id is not the recorded binding, and a recorded transition exists | finish the recorded transition | a crash or a failed effect left a Session transition half-applied |
+| durable state is not `enabled` but a live handle survives | finish that state's effects | a suspend, archive, or removal committed but its disposal failed |
+| a live handle whose preset composition is gone | reactivate in place | a reload lost the preset composition, so the Member's tools are unavailable |
+| no live handle at all | reactivate | the activation itself failed |
+| otherwise | steer a resume prompt | the Member is alive, composed, and bound — every other state has already been handled |
+
+An error-state Member with a live handle is the last row: `recoverMember` steers it, and a cause that is still present makes the next turn fail again. Distinguish the two before choosing: a broken model route or a rejecting gateway is fixed by changing the route, not by recovering the Member, and steering recovers nothing until the route answers. A context generation that cannot finish on its own is the case for `clearMemberContext`, which renews the Session so the next turn carries no history.
+
+A Member's current failure reason is carried on its status as a `diagnostic` and rendered by the Client. It is derived from the live surface, not persisted: after a Host restart it is re-derived only if something wakes the Member, so an un-woken Member shows no reason until the next operation touches it.
+
 ## Projections and the change stream
 - Host projections over a Member Session fold incrementally. Context intent, the clock baseline, and the one-shot pressure notice each derive from one Session's own events, and all three read through a Session event cursor that keeps the folded value beside the log position it consumed — `context-projection.ts` supplies the fold, `session-event-cursor.ts` the position — so the first read of a log folds it once and every later read folds only the events appended since.
 
