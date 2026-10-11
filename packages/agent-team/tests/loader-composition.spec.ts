@@ -10,6 +10,8 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Storage, { storageBackendServiceKey } from '@deepseek-ai/dsh-storage'
 import * as storageDomain from '@deepseek-ai/dsh-storage-domain'
+import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import AgentTeam from '../src/index.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -24,7 +26,24 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-async function load(pool: MemoryMediaPool): Promise<Context> {
+/** Adapter whose only route reports one reasoning effort and a large window. */
+class RoutedAdapter extends LlmAdapter {
+  readonly effortIds: readonly string[]
+  constructor(effortIds: readonly string[] = ['low', 'high']) {
+    super()
+    this.effortIds = effortIds
+  }
+  override resolveModel(provider: string, model: string) {
+    return Promise.resolve({
+      provider, id: model, name: model,
+      context: { contextWindow: 320_000 },
+      reasoning: { efforts: this.effortIds.map(id => ({ id, name: id })) },
+    } as never)
+  }
+  async * stream(_options: GenerateOptions): AsyncIterable<StreamChunk> { yield* [] }
+}
+
+async function load(pool: MemoryMediaPool, adapter?: LlmAdapter | null): Promise<Context> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-agent-team-composition-'))
   roots.push(root)
   const configPath = join(root, 'cordis.yml')
@@ -81,6 +100,12 @@ async function load(pool: MemoryMediaPool): Promise<Context> {
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessions', { flush: async () => true })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  // `undefined` leaves the LLM runtime unmounted: a Host row that does not
+  // hard-inject the service must still save a model when the service is absent.
+  if (adapter !== null) {
+    await ctx.plugin(LlmRuntime)
+    if (adapter !== undefined) ctx.llm.registerAdapter(['mock'], adapter)
+  }
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
@@ -152,5 +177,59 @@ describe('Agent Team real composition', () => {
     const resolved = second.agentTeam.resolveMessageRefs({ workspaceId, messageRefs: [anchor.message.messageRef] })
     expect(resolved.resolved).toHaveLength(1)
     expect(resolved.resolved[0]).toMatchObject({ messageRef: anchor.message.messageRef, excerpt: 'Please investigate this' })
+  })
+
+  // A real profile mounts the Host as a Loader row, where the undeclared
+  // `ctx.llm` property read throws instead of yielding `undefined`. Saving a
+  // Member's model must not fail on that: the Host reads the service lazily.
+  it('validates a Member model against the lazily resolved LLM service, not an injected property', async () => {
+    const pool = new MemoryMediaPool()
+    const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000bb' as WorkspaceId
+    const ctx = await load(pool, new RoutedAdapter())
+    const added = await ctx.agentTeam.addMember({
+      requestId: requestId('add-pinned'), workspaceId, handle: 'builder',
+      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      model: { provider: 'mock', model: 'routed', reasoningEffort: 'high' as never },
+    })
+    // A committed creation is the point: the old undeclared property read
+    // rejected this with "cannot get property \"llm\" without inject".
+    expect(added.status.member.model).toEqual({ provider: 'mock', model: 'routed', reasoningEffort: 'high' })
+    expect(ctx.agentTeam.status().agentMemberCount).toBe(1)
+  })
+
+  it('still rejects an unregistered provider when the Host is mounted as a Loader row', async () => {
+    const pool = new MemoryMediaPool()
+    const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000cc' as WorkspaceId
+    const ctx = await load(pool, new RoutedAdapter())
+    await expect(ctx.agentTeam.addMember({
+      requestId: requestId('add-bad-provider'), workspaceId, handle: 'builder',
+      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      model: { provider: 'no-such-provider', model: 'whatever' },
+    })).rejects.toThrow(/provider 'no-such-provider' is not registered/)
+  })
+
+  it('still rejects an effort the route does not offer, without masking it as a resolution error', async () => {
+    const pool = new MemoryMediaPool()
+    const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000dd' as WorkspaceId
+    const ctx = await load(pool, new RoutedAdapter(['low']))
+    await expect(ctx.agentTeam.addMember({
+      requestId: requestId('add-bad-effort'), workspaceId, handle: 'builder',
+      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      model: { provider: 'mock', model: 'routed', reasoningEffort: 'high' as never },
+    })).rejects.toThrow(/reasoning effort 'high' is not supported by mock\/routed/)
+  })
+
+  it('accepts a model save when no LLM service is mounted at all', async () => {
+    const pool = new MemoryMediaPool()
+    const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000ee' as WorkspaceId
+    const ctx = await load(pool, null)
+    const added = await ctx.agentTeam.addMember({
+      requestId: requestId('add-no-llm'), workspaceId, handle: 'builder',
+      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      model: { provider: 'mock', model: 'routed', reasoningEffort: 'high' as never },
+    })
+    // With no LLM service there is no adapter to validate against, so the
+    // route is stored as given rather than rejected on a missing service.
+    expect(added.status.member.model).toEqual({ provider: 'mock', model: 'routed', reasoningEffort: 'high' })
   })
 })
