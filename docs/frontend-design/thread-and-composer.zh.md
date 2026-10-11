@@ -24,7 +24,7 @@
 - taskless Thread 的「转为任务」是 Human-only durable mutation，不做乐观 overlay。成功后重新读取 Thread 与补充 Channel/Member 投影；unread/stale fence 时保留 Host 返回错误并重新读取相关事实。
 
 ## 引用一条 Message
-Thread 里的一条 Message，可以通过「选中它所回答的那条 Message」来回答。这个入口只在 Host 开关打开时存在：页面读取各表面共用的那一份 reply-capability store，因此关掉开关会同时撤下回复动作、已存的引用行与 composer 引用条，无需刷新。
+Thread 里的一条 Message，可以通过「选中它所回答的那条 Message」来回答。这个入口无条件存在：回复动作、已存的引用行与 composer 引用条是同一个功能，Host 一律完整提供，没有哪个表面需要先问一句「引用是否可用」。
 
 选中一条 Message 时，目标在读者正在看的两处同时被说明。该行**保持**指针刚刚给它的那层扁平交互底色，因此指针移开后选择依然可见；composer 里出现一条引用条，写明父消息及其第一行，旁边紧跟取消，取消会同时清掉两者。引用条落在 composer 卡片内部、输入框上方，目标与草稿因此被读成一个动作。它不重复声明投递：被引用者与其它收件人一样并入同一行「将通知」，因为引用像 mention 一样投递，而一次投递只读一遍。
 

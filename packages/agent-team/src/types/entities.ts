@@ -226,12 +226,6 @@ export interface AgentTeamResolveThreadRefsResult {
   readonly resolved: readonly AgentTeamResolvedThreadRef[]
 }
 
-/** Whether this deployment offers quote-replies. */
-export interface AgentTeamReplySettings {
-  /** On unless the Team Host row turns it off. */
-  readonly enabled: boolean
-}
-
 /** One Message's answer target, as a reader sees it. */
 export interface AgentTeamMessageReplyContext {
   /** Printable author handle of the Message being answered; `human` for the Human. */

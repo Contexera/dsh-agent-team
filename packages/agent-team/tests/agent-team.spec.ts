@@ -41,7 +41,7 @@ afterEach(async () => {
 async function harness(
   pool = new MemoryMediaPool(),
   workspaceIds = [alpha],
-  config?: { readonly gate?: { readonly tokens?: number; readonly idleMs?: number; readonly judgeTimeoutMs?: number }; readonly replyEnabled?: boolean },
+  config?: { readonly gate?: { readonly tokens?: number; readonly idleMs?: number; readonly judgeTimeoutMs?: number } },
 ): Promise<TeamHarness> {
   const ctx = new Context()
   await ctx.plugin(Storage)
@@ -749,25 +749,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await ledger.archiveChannel({ requestId: requestId('archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
     expect(() => ledger.readMessage(actor, { workspaceId: alpha, threadRef: first.thread.threadRef, messageRef: first.message.messageRef }))
       .toThrow(/is archived/)
-  })
-
-  it('with the switch off, reading one Message is refused rather than answered empty', async () => {
-    const test = await harness(new MemoryMediaPool(), [alpha], { replyEnabled: false })
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const ledger = replayLedger(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
-    const anchor = committed((await ledger.sendMessage({ requestId: requestId('anchor'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Please investigate this', actor: agentTeamHumanActor() })).value)
-    committed((await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, threadRef: anchor.thread.threadRef,
-      baseRevision: anchor.thread.revision, body: 'Looking now', replyToMessageRef: anchor.message.messageRef, actor })).value)
-
-    expect(test.ctx.agentTeam.replySettings().enabled).toBe(false)
-    // Refused, not answered empty: an empty answer could not be told apart from
-    // a wrong ref, and would invite answering a Message nobody read.
-    expect(() => test.ctx.agentTeam.readMessage({ workspaceId: alpha, threadRef: anchor.thread.threadRef, messageRef: anchor.message.messageRef }))
-      .toThrow(/disabled/)
-    // The switch withholds the answer; it does not unwrite the link.
-    expect(ledger.resolveMessageRefs(alpha, [anchor.message.messageRef])).toHaveLength(1)
   })
 
   it('serves the Human Inbox with row previews and whole-unread totals', async () => {

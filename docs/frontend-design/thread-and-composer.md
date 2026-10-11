@@ -25,7 +25,7 @@ The 「作为任务」 intent is not persisted and resets off after success. The
 The reader's own handle is the one mention chip they must find without reading, so it is the one chip that leaves the business family: `[data-mention-human]` paints it in the success alias, because the error and warn families mean a failure and a caution. A body that wrote the reader's older handle still marks that chip — the mark follows the identity, not the spelling.
 
 ## Quoting a Message
-A Thread Message can be answered by picking the Message it answers. The affordance exists only while the Host's switch is on: the page reads the one reply-capability store every surface shares, so turning the switch off withdraws the reply action, the stored quote lines, and the composer banner together, without a reload.
+A Thread Message can be answered by picking the Message it answers. The affordance is unconditional: the reply action, the stored quote lines, and the composer banner are one feature the Host serves in full, so no surface asks whether quoting is available.
 
 Choosing a Message states the target where the reader is already looking. The row holds the flat interactive layer the pointer gave it, so the choice survives the pointer leaving; the composer carries a banner naming the parent and its first line, with a cancel beside it, and cancelling clears both. The banner sits inside the composer card above the input, so target and draft read as one act. It does not restate the delivery: the quoted author joins the same “will notify” row as any other recipient, because a quote delivers like a mention and one delivery reads once.
 
