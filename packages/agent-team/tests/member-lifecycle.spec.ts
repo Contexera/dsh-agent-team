@@ -937,6 +937,44 @@ describe('Agent Team Member lifecycle', () => {
     expect(after?.diagnostic?.detail).toContain('401')
   })
 
+  it('reports an unexpected Team wake cancellation before turn start without blaming ordinary notice replacement', async () => {
+    const adapter = new EmptyAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('pre-turn-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('pre-turn-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const discarded: string[] = []
+    ctx.on('agent/inbox/discarded', ({ message }) => { discarded.push(message.id) })
+    // Park every Team wake instead of letting an idle Agent run and claim it:
+    // the reproduced bug is a wake that is queued and then discarded with no
+    // turn/start, which the live loop only produces from a maintenance-latched
+    // wake cleared before convergence. Parking reaches that end-state directly.
+    const steer = vi.spyOn(agent, 'steer').mockImplementation(input => { agent.inbox.append('next-turn', input) })
+
+    const first = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('pre-turn-first'), workspaceId, channelRef: channel.channel.channelRef, body: '@builder investigate' })
+    expect(first.kind).toBe('committed')
+    const firstNotice = agent.inbox.nextTurn.at(-1)!
+    expect(firstNotice.source).toMatchObject({ kind: AGENT_TEAM_PLUGIN_ID, form: 'notice' })
+    expect((ctx.agentTeam as unknown as { pendingTeamWakes: Map<string, unknown> }).pendingTeamWakes.has(firstNotice.id)).toBe(true)
+
+    const second = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('pre-turn-second'), workspaceId, channelRef: channel.channel.channelRef, body: '@builder investigate again' })
+    expect(second.kind).toBe('committed')
+    const replacement = ctx.agentTeam.members().find(status => status.member.memberId === added.status.member.memberId)!
+    expect(replacement.diagnostic).toBeUndefined()
+    expect(agent.inbox.nextTurn).toHaveLength(1)
+    const replacementNotice = agent.inbox.nextTurn[0]!
+    expect(replacementNotice.id).not.toBe(firstNotice.id)
+    expect(agent.inbox.remove(replacementNotice.id)).toBe(true)
+    expect(discarded).toContain(replacementNotice.id)
+
+    const failed = ctx.agentTeam.members().find(status => status.member.memberId === added.status.member.memberId)!
+    expect(failed).toMatchObject({ presence: 'error', diagnostic: {
+      class: 'runtime', source: 'agent/inbox/discarded', sessionId: added.status.member.sessionId,
+    } })
+    expect(failed.diagnostic?.occurredAt).toEqual(expect.any(String))
+    steer.mockRestore()
+  })
+
   it('restarts a Member whose activation failed and rejects restart for suspended Members', async () => {
     const { ctx, workspaceId, presets } = await realHarness()
     presets.failingMount = true

@@ -530,11 +530,17 @@ export default class AgentTeam extends TypertRemoteService {
     activation?: AgentTeamMemberDiagnostic
     /** The Member Session reported agent/error. */
     runtime?: string
+    /** A Team wake was discarded before the Agent opened its turn boundary. */
+    preTurnCancellation?: AgentTeamMemberDiagnostic
     /** Last non-busy automatic-compaction failure; entered transactions retain additional Session history. */
     compaction?: string
     /** The post-commit configuration apply failed; the stored row is ahead of the live surface. */
     capabilityApply?: AgentTeamMemberDiagnostic
   }>()
+  /** Team notice ids waiting for a turn boundary, keyed by the live Agent message id. */
+  private readonly pendingTeamWakes = new Map<string, { readonly memberId: AgentTeamMemberId; readonly sessionId: SessionId }>()
+  /** Notice removals initiated by Team itself, which are normal replacement/disposal operations. */
+  private readonly expectedInboxDiscards = new Set<string>()
   private readonly pressurePolicy: TeamPressurePolicy
   /**
    * The gate thresholds the pressure policy reads, and the only copy of them:
@@ -916,7 +922,8 @@ export default class AgentTeam extends TypertRemoteService {
       else this.runningAgents.delete(agent.id)
       if (status === 'running' && member !== undefined) {
         const recovered = this.clearMemberFailure(member.memberId, 'runtime')
-        if (recovered) this.notifiedInbox.delete(member.memberId)
+        const preTurnRecovered = this.clearMemberFailure(member.memberId, 'preTurnCancellation')
+        if (recovered || preTurnRecovered) this.notifiedInbox.delete(member.memberId)
         this.emitMemberPresenceChanged(member)
         // A rollover/recovery in flight delivers its own sequenced
         // rederived Inbox after the handoff and carried input; a status-driven
@@ -935,6 +942,23 @@ export default class AgentTeam extends TypertRemoteService {
         }
         this.emitMemberPresenceChanged(member)
       }
+    })
+    // A Team notice can be removed before the Agent opens `turn/start`.
+    // `agent/inbox/spliced` deliberately carries no cancellation owner, so a
+    // claimed notice is a normal consumed wake, while a discarded one the Host
+    // did not itself retire is the narrowest Team-owned signal of a drop.
+    this.ctx.on('agent/inbox/claimed', ({ message }) => {
+      this.pendingTeamWakes.delete(message.id)
+    })
+    this.ctx.on('agent/inbox/discarded', ({ agent, message }) => {
+      const pending = this.pendingTeamWakes.get(message.id)
+      if (pending === undefined) return
+      this.pendingTeamWakes.delete(message.id)
+      if (this.expectedInboxDiscards.delete(message.id)) return
+      const member = this.memberForAgent(agent)
+      if (member === undefined || member.state !== 'enabled' || agent.id !== pending.sessionId) return
+      this.setPreTurnCancellation(member.memberId, pending.sessionId)
+      this.emitMemberPresenceChanged(member)
     })
     // The store's dispatch carrier is untagged, so a scope-tagged listener
     // inside the Agent setup would receive nothing; one root listener that
@@ -973,7 +997,7 @@ export default class AgentTeam extends TypertRemoteService {
       // one of the two maps (new ones reject at enqueue), so this snapshot
       // drains them all.
       await Promise.all([...this.memberLifecycleTails.values(), ...this.additionLifecycleTails.values()])
-      await Promise.all([...this.handles.values()].map(handle => handle.dispose()))
+      await Promise.all([...this.handles.values()].map(handle => this.disposeWithWakeGuard(handle)))
       this.handles.clear()
       this.modelSelections.clear()
       this.memberRuntime.disposeAll()
@@ -1487,7 +1511,7 @@ export default class AgentTeam extends TypertRemoteService {
     this.memberBySessionId.delete(previousSessionId)
     await this.waitLogged('wait-external', { label: this.memberLabel(memberId), sessionId: previousSessionId },
       'for the retired Agent to release its Session write path',
-      () => active.dispose())
+      () => this.disposeWithWakeGuard(active))
     this.handles.delete(memberId)
     this.modelSelections.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
@@ -1670,8 +1694,9 @@ export default class AgentTeam extends TypertRemoteService {
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: RECOVERY_NOTICE_SUMMARY },
     })
     for (const pending of [...handle.agent.inbox.nextStep, ...handle.agent.inbox.nextTurn]) {
-      if (this.isInboxNotice(pending)) handle.agent.inbox.remove(pending.id)
+      if (this.isInboxNotice(pending)) this.removeExpectedTeamWake(handle.agent, pending)
     }
+    this.trackTeamWake(handle.agent, hint)
     handle.agent.steer(hint)
     this.ctx.logger.info(`agent-team: ${trigger} continuation steered for ${this.memberScope(member.memberId, handle.agent.session.id)}${notifications.length === 0 ? '' : ` carrying ${this.notificationIdentity(notifications)}`}: it is queued for the Member's next step, not yet read by the model`)
   }
@@ -3118,6 +3143,10 @@ export default class AgentTeam extends TypertRemoteService {
         // racing pre-step rejects instead of admitting claimed messages.
         agentCtx.on('agent/turn-stopping', ({ agent }) => {
           if (!this.contextManagement.needsAdmissionGate(agent)) return
+          // The rollover drops queued notices on purpose — the new generation
+          // rederives the Inbox — so a dropped Team wake here is expected, not
+          // a pre-turn cancellation.
+          this.expectPendingTeamWakes(agent)
           this.contextManagement.captureQueuedInput(agent)
         })
         agentCtx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
@@ -3233,6 +3262,7 @@ export default class AgentTeam extends TypertRemoteService {
       this.memberBySessionId.set(member.sessionId, member.memberId)
       this.modelSelections.set(member.memberId, selected)
       this.clearMemberFailure(member.memberId, 'activation')
+      this.clearMemberFailure(member.memberId, 'preTurnCancellation')
       this.clearMemberFailure(member.memberId, 'capabilityApply')
       this.nameMemberSession(member, created.agent)
       // The one-shot pressure notice needs no explicit re-arm here: it latches
@@ -3302,7 +3332,7 @@ export default class AgentTeam extends TypertRemoteService {
         }, recoveryCarried > 0)
       }
     } catch (error) {
-      await created?.dispose()
+      if (created !== undefined) await this.disposeWithWakeGuard(created)
       this.modelSelections.delete(member.memberId)
       this.memberRuntime.forgetMember(member.memberId)
       const message = error instanceof Error ? error.message : String(error)
@@ -3338,7 +3368,7 @@ export default class AgentTeam extends TypertRemoteService {
         // rebuild starts; a later activation must not resurface it.
         this.clearMemberFailure(memberId, 'compaction')
         this.emitAutoCompactionChanged(memberId)
-        await stale.dispose()
+        await this.disposeWithWakeGuard(stale)
       }
       await this.activateMember(member)
       return this.handles.has(memberId)
@@ -3401,6 +3431,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const runtimeError = failures?.runtime ?? failures?.compaction
     if (runtimeError !== undefined) return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: { class: 'runtime' as const, detail: runtimeError } })
+    if (failures?.preTurnCancellation !== undefined) return Object.freeze({ member, availability: 'active', presence: 'error', capabilityState, diagnostic: failures.preTurnCancellation })
     // A failed apply outranks the plain success row but not a live runtime
     // error: the Member runs, yet its stored configuration is ahead of the
     // surface until the effect lands. The warning digest rides along — the
@@ -3459,7 +3490,7 @@ export default class AgentTeam extends TypertRemoteService {
     return { class: 'activation' as const, detail: error instanceof Error ? error.message : String(error) }
   }
 
-  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'compaction' | 'capabilityApply'): boolean {
+  private clearMemberFailure(memberId: AgentTeamMemberId, slot: 'activation' | 'runtime' | 'preTurnCancellation' | 'compaction' | 'capabilityApply'): boolean {
     const failures = this.memberFailures.get(memberId)
     if (failures === undefined || failures[slot] === undefined) return false
     if (Object.keys(failures).length === 1) this.memberFailures.delete(memberId)
@@ -3678,11 +3709,12 @@ export default class AgentTeam extends TypertRemoteService {
       return
     }
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
-    if (existingInboxHint !== undefined) agent.inbox.remove(existingInboxHint.id)
+    if (existingInboxHint !== undefined) this.removeExpectedTeamWake(agent, existingInboxHint)
     const hint = createUserMessage({
       content: [{ type: 'text', text: this.notificationText(notifications, member.memberId) }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: INBOX_NOTICE_SUMMARY },
     })
+    this.trackTeamWake(agent, hint)
     this.notifiedInbox.set(member.memberId, signature)
     // The attempt is this delivery, counted apart from the business request
     // that revealed the facts: a later retry after a failure is the next
@@ -3735,6 +3767,53 @@ export default class AgentTeam extends TypertRemoteService {
     const source = message.source
     return isAgentTeamSource(source)
       && source.form === 'notice' && source.summary === INBOX_NOTICE_SUMMARY
+  }
+
+  private isTeamWake(message: UserMessage): boolean {
+    return this.isInboxNotice(message) || this.isRecoveryNotice(message)
+  }
+
+  private trackTeamWake(agent: Agent, message: UserMessage): void {
+    const member = this.memberForAgent(agent)
+    if (member === undefined) return
+    this.pendingTeamWakes.set(message.id, { memberId: member.memberId, sessionId: agent.id })
+  }
+
+  /** Remove a Team notice that Host code is replacing or disposing on purpose. */
+  private removeExpectedTeamWake(agent: Agent, message: UserMessage): void {
+    this.expectedInboxDiscards.add(message.id)
+    if (!agent.inbox.remove(message.id)) {
+      this.expectedInboxDiscards.delete(message.id)
+      this.pendingTeamWakes.delete(message.id)
+    }
+  }
+
+  private expectPendingTeamWakes(agent: Agent): void {
+    for (const pending of [...agent.inbox.nextStep, ...agent.inbox.nextTurn]) {
+      if (this.isTeamWake(pending)) this.removeExpectedTeamWake(agent, pending)
+    }
+  }
+
+  /**
+   * Dispose a Member handle after pre-declaring its queued Team wakes: tearing
+   * a Session down discards whatever it had queued, which must not be read as a
+   * pre-turn cancellation of work the Member never refused.
+   */
+  private disposeWithWakeGuard(handle: AgentHandle): Promise<void> {
+    this.expectPendingTeamWakes(handle.agent)
+    return handle.dispose()
+  }
+
+  private setPreTurnCancellation(memberId: AgentTeamMemberId, sessionId: SessionId): void {
+    const failures = this.memberFailures.get(memberId) ?? {}
+    failures.preTurnCancellation = Object.freeze({
+      class: 'runtime' as const,
+      detail: 'Team wake was canceled before the Member started a turn; the Harness did not report a cancellation reason.',
+      sessionId,
+      source: 'agent/inbox/discarded',
+      occurredAt: new Date().toISOString(),
+    })
+    this.memberFailures.set(memberId, failures)
   }
 
   private isRecoveryNotice(message: UserMessage): boolean {
@@ -3848,18 +3927,20 @@ export default class AgentTeam extends TypertRemoteService {
       // the Member's own turn, so it logs under its own stage.
       await this.waitLogged('wait-external', { label: this.memberLabel(memberId), sessionId: member.sessionId },
         'for the Agent to release its Session write path',
-        () => handle.dispose())
+        () => this.disposeWithWakeGuard(handle))
       this.handles.delete(memberId)
     }
     this.memberBySessionId.delete(member.sessionId)
     this.modelSelections.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
     this.clearMemberFailure(memberId, 'activation')
+    this.clearMemberFailure(memberId, 'preTurnCancellation')
   }
 
   private clearMemberRecoveryState(member: Pick<AgentTeamAgentMember, 'memberId' | 'sessionId'>): void {
     this.recovery.stopTracking(member.memberId, 'session-disposed')
     this.clearMemberFailure(member.memberId, 'runtime')
+    this.clearMemberFailure(member.memberId, 'preTurnCancellation')
     this.clearMemberNotificationState(member.memberId)
     this.notificationAttempts.delete(member.memberId)
   }

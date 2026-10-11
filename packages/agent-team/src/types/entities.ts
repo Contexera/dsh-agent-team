@@ -172,6 +172,10 @@ export interface AgentTeamMemberDiagnostic {
   readonly location?: { readonly kind: string; readonly path: string }
   /** The Session the failure is about, when it is about one. */
   readonly sessionId?: SessionId
+  /** The bounded source that observed the failure, when one is available. */
+  readonly source?: string
+  /** When the Host observed the failure, as an ISO timestamp. */
+  readonly occurredAt?: string
 }
 
 /** Browser-safe Member identity with Host-only paths removed. */
