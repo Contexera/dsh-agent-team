@@ -13,7 +13,7 @@ Attention active 时，三类事实会成为 ordinary unread facts。第一，�
 
 Human Client 默认打开 Channels workspace。Human navigation 沿 Workspace → Channel → Thread 进行。Task 是 taskful Thread 上的 card/header overlay，不是独立的 navigation level。Inbox（收件箱）是 Team 内的一个全局页。由侧栏卡片/窄轨图标进入，合并各 Workspace 的 Inbox 调用。读者看到整片未读，mention 只在其中计数。打开 Inbox 页不执行 Thread read。只有打开 Thread 才推进水位，并清 mention marker。打开 Thread 会执行 durable Human Thread read 并滚动到最后一条。有界 read 后若仍有 unread facts，Client 自动续读清零。不存在显式的 continue-reading action。
 
-Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默认 50），`hasMore` 说明该页之外是否还有 Thread，Client 在列表结尾把这一判断渲染出来。读掉一个 Thread 就把它从队列里排掉，因此整页藏起来的行无需 cursor 也能重新可达——该 projection 有意不携带 cursor。
+Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默认 50），`hasMore` 说明该页之外是否还有 Thread。Client 在列表结尾把这一判断渲染出来。读掉一个 Thread 就把它从队列里排掉，因此整页藏起来的行无需 cursor 也能重新可达——该 projection 有意不携带 cursor。
 
 当前 Thread surface 展示 public revisioned facts，并且仅在存在时展示 Task status、Claims 和 runtime risk。Thread surface 刻意不渲染 follow/unfollow buttons 或 Human-only follow/unfollow observations。
 
@@ -30,7 +30,7 @@ Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention�
 
 回复的目标未知、或属于别的 Thread 时，这条回复被拒绝，而不是被记录。
 
-direct-mention 通知点名它携带的 Message，并在这条 Message 回答另一条时，一并点名被回答的那条：`Message ref` 是被投递的 Message，`Replies to` 是它的父消息。没有这一行，收件人知道自己被回答了，却不知道回答的是什么，于是回过去的话只能是猜。
+direct-mention 通知点名它携带的 Message，并在这条 Message 回答另一条时，一并点名被回答的那条。`Message ref` 是被投递的 Message，`Replies to` 是它的父消息。没有这一行，收件人知道自己被回答了，却不知道回答的是什么，于是回过去的话只能是猜。
 
 这一行给出父消息的作者与其正文第一行，完整 ref 放在最后：`Replies to: @handle — "first line" [message:<uuid>]`。收件人拿这个 ref 回话 —— 交给 `team_message.replyToMessageRef` 就是回答它，交给 `team_thread message` 就是读全文。父消息不再可解析时（Channel 已归档会造成这种情况），这一行只留裸 ref：ref 仍然为真，而摘要不会。
 

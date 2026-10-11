@@ -34,9 +34,9 @@ node scripts/sync-paths.mjs
 
 The `tsconfig*.json` facades must not gain `include` or `files`; they must continue matching repository files and adjacent Harness source/declarations.
 
-`generate:typert` analyses a copy of the Host face inside the Harness checkout, so it provisions that temp package's external dependencies itself: the context-continuity engine's built declarations are copied in, and `zod` is linked from this repository's root install — a symlink on POSIX, a directory junction on Windows, where a real symlink is privilege-gated.
+`generate:typert` analyses a copy of the Host face inside the Harness checkout, so it provisions that temp package's external dependencies itself. The context-continuity engine's built declarations are copied in, and `zod` is linked from this repository's root install — a symlink on POSIX, a directory junction on Windows, where a real symlink is privilege-gated.
 
-Keep `zod` a link: a copy puts zod's own declarations inside the analysed package, where the analyzer's reachable-files walk queues a declaration file the program never loaded and dies with a `TypeError` rather than a diagnostic; a link that does not resolve instead surfaces as `TS2307: Cannot find module 'zod'` in every importing file.
+Keep `zod` a link. A copy puts zod's own declarations inside the analysed package, where the analyzer's reachable-files walk queues a declaration file the program never loaded and dies with a `TypeError` rather than a diagnostic. A link that does not resolve instead surfaces as `TS2307: Cannot find module 'zod'` in every importing file.
 
 ## Package seams and module layout
 The published artifact is one root npm package, `@contexera/dsh-agent-team`, declared by the root `package.json` and its `exports` map. The three `packages/*` directories have no manifest of their own: they are the build and export seams of that single package, each with its own build target and its own entry in `exports`.

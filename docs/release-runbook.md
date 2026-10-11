@@ -14,7 +14,7 @@ This document is the procedure for publishing a version of `@contexera/dsh-agent
 
 1. **Read the change set.** `git log --oneline v<previous>..HEAD`, then read the diff of every feature commit. Commit messages understate scope; a change is user-facing only if a user of the bundle can see or invoke it.
 2. **Draft the material**, then send it for review (§4) — no publish without approved text.
-3. **Sweep the version-bearing surfaces.** `npm run check:versions` reads every place that restates the certified DSH baseline and refuses a split one: it takes the harness tag in `.github/workflows/ci.yml` as the reference, requires every other spot to state the same version, and requires each `@deepseek-ai/dsh-*` peer range to admit from it.
+3. **Sweep the version-bearing surfaces.** `npm run check:versions` reads every place that restates the certified DSH baseline and refuses a split one. It takes the harness tag in `.github/workflows/ci.yml` as the reference, requires every other spot to state the same version, and requires each `@deepseek-ai/dsh-*` peer range to admit from it.
    - The list of spots lives in [`scripts/check-version-consistency.mjs`](../scripts/check-version-consistency.mjs) — never keep a second copy by hand.
    - The declaration in `.hoplite/settings.json` sits inside a JSON string with escaped quotes, so a naive `grep` reports nothing there; the gate reads it correctly.
    - Advance these spots only in the pass that publishes the version they name.

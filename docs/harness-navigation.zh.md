@@ -32,13 +32,13 @@ Harness 行为不确定时，先读上游文档，再读实现和测试。不要
 
 ### Client、browser bundle 或加载图
 
-读 architecture 的 Client 章节、development 的 UI 验收规则与目标组件；查阅 Harness client-module 文档、client loading notes、`packages/client/AGENTS.md`、web styling、Cordis lifecycle tutorial，以及对应的 slot/runtime/sidebar/conversation/workspace/theme/module 源码。先 mount 生成的 Remote，再注入依赖它的 UI；declaration 可能稍后才出现时使用 `ctx.slots.inject()`。
+读 architecture 的 Client 章节、development 的 UI 验收规则与目标组件。查阅 Harness client-module 文档、client loading notes、`packages/client/AGENTS.md`、web styling、Cordis lifecycle tutorial，以及对应的 slot/runtime/sidebar/conversation/workspace/theme/module 源码。先 mount 生成的 Remote，再注入依赖它的 UI；declaration 可能稍后才出现时使用 `ctx.slots.inject()`。
 
-parent entry 的 `children` declaration 同时是 render site 与 render authority。Team 的 `sidebar.workspaces` shadow 不得复制 shipped 的 `sidebar.workspaces.directoryFlow`；SlotCore 会拒绝重复的 live child declaration。复用 public exports 与 theme token，不要复用 shipped 的 private component 或 private CSS；component 通过 slot contract 取得数据，而不是直接接触 `ctx`。
+parent entry 的 `children` declaration 同时是 render site 与 render authority。Team 的 `sidebar.workspaces` shadow 不得复制 shipped 的 `sidebar.workspaces.directoryFlow`；SlotCore 会拒绝重复的 live child declaration。复用 public exports 与 theme token，不要复用 shipped 的 private component 或 private CSS。component 通过 slot contract 取得数据，而不是直接接触 `ctx`。
 
 ### Typed Remote、RPC 或生成物
 
-读 Team service declaration、types 与生成脚本；读 Harness 的 Typert generator/loader/protocol/registry 与 API-remote 源码。`InvocationDescriptor` 是反射元数据，不是 wire data。运行 `npm run generate:typert`、typecheck、build，并确认输出稳定。绝不手改 `lib/typert.*`。
+读 Team service declaration、types 与生成脚本。读 Harness 的 Typert generator/loader/protocol/registry 与 API-remote 源码。`InvocationDescriptor` 是反射元数据，不是 wire data。运行 `npm run generate:typert`、typecheck、build，并确认输出稳定。绝不手改 `lib/typert.*`。
 
 ### Workspace、Session 或目录选择
 

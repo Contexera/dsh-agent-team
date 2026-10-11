@@ -19,7 +19,7 @@ Client remote service
 
 `InvocationDescriptor` 是 local reflection metadata，不是 wire message。Wire request 和 response fields 保持为显式 typed values。修改 Remote 时更新 declaration 和 tests。重新生成，然后运行 typecheck/build。不要手工编辑 artifact。
 
-读取请求各自声明用途，不共用一种投影形状。只有当调用方要整个请求 scope 的 Task/Thread/Claim catalog（模型侧 `team_view` 渲染的 address book）时才传 `includeCatalog`；Client 的读取从不传它，只渲染自己请求的那一页。
+读取请求各自声明用途，不共用一种投影形状。只有当调用方要整个请求 scope 的 Task/Thread/Claim catalog（模型侧 `team_view` 渲染的 address book）时才传 `includeCatalog`。Client 的读取从不传它，只渲染自己请求的那一页。
 
 ## Remote failure vocabulary
 生成的 Remote methods resolve 为 `RemoteResult`。`{ ok: true, value }` 携带业务结果，`{ ok: false, error }` 携带失败：稳定的 `code` 是判别字段，`details` 随 `code` 收窄，无需 cast。
@@ -50,7 +50,7 @@ Client plugin apply
 
 `dsh.client.inject` 描述 client module graph；它不保证 apply order、service readiness 或 slot declaration order。如果 declaration 可能稍后出现，使用 `ctx.slots.inject()`。registration 跟随 declaration lifetime，并随 owning fiber disposal。
 
-panel row 与 Team mode 是同一件事：这一行是 shell 自己的 rail button，选中它即进入 mode，另一个 panel 拿走中栏即离开 mode。selection 为 null 时 Team 不介入——嵌入的 Member Session 视图会清空 panel 来独占中栏，mode 必须活过这一段——离开 mode 由 mode 自己的 foot row 清空 panel。恢复的 mode 会重新选中自己的 panel，除非挂载时已有 panel 被选中：那时那个 panel 保留中栏，mode 主动让位。
+panel row 与 Team mode 是同一件事：这一行是 shell 自己的 rail button，选中它即进入 mode，另一个 panel 拿走中栏即离开 mode。selection 为 null 时 Team 不介入：嵌入的 Member Session 视图会清空 panel 来独占中栏，mode 必须活过这一段。离开 mode 则由 mode 自己的 foot row 清空 panel。恢复的 mode 会重新选中自己的 panel，除非挂载时已有 panel 被选中：那时那个 panel 保留中栏，mode 主动让位。
 
 Slot parent 的 `children` declaration 同时是 render site 和 render authority。两个存活的 parent entries 不能声明同一个 child slot。特别是 Team 的 `sidebar.workspaces` shadow 不得重新声明 shipped `sidebar.workspaces.directoryFlow`。即使 Team entry priority 更高，Harness SlotCore 也会拒绝这个 duplicate。不要复制 private WorkspaceBrowser、ConversationRoot、Shell 或 private CSS 来规避它。
 

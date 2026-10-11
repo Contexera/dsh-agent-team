@@ -5,7 +5,7 @@ English | [中文](memory-and-context.zh.md)
 ## Member memory upkeep
 `memory.md` is a bounded routing index rather than a store: identity and role, durable rules that must bind every step, what is in hand, and one line per topic cluster, while `notes/` is read on demand and never injected. Members hold the index well under 8 KiB against the 16 KiB hard ceiling — past it the index is not injected at all, and the block always states its own usage.
 
-Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`; the persona carries only the resident rule that the index stays bounded and that detail lives in the note it names, and a Member's first-run `memory.md` scaffold states the same sections.
+Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`. The persona carries only the resident rule that the index stays bounded and that detail lives in the note it names, and a Member's first-run `memory.md` scaffold states the same sections.
 
 ## Context pressure ownership
 The engine owns Member context pressure end to end as policy; the Host binds that policy to one Member's readings and performs what it decides.
@@ -27,7 +27,7 @@ Host derives bounded coalesced notifications from durable unread state. Idle Age
 
 Hints are at-least-once notification intent, coalesced per Member and rediscovered on restart/resume. A consumed or ignored hint does not create another turn until a later relevant durable change or recovery. Runtime recovery, error thresholds, and the two UI recovery actions remain Host behavior; they do not create ledger authority beyond their documented operations.
 
-Automatic recovery acts only on two conservatively matched error families — transient network failures and rate limiting — and counts consecutive `agent/error` occurrences per Member rather than wakeups or error text: each of the first two occurrences schedules its own delayed wakeup, the third stands down and leaves the error with the operator, and a non-recoverable error cancels tracking outright. Only a clean turn end clears the count.
+Automatic recovery acts only on two conservatively matched error families — transient network failures and rate limiting — and counts consecutive `agent/error` occurrences per Member rather than wakeups or error text. Each of the first two occurrences schedules its own delayed wakeup, the third stands down and leaves the error with the operator, and a non-recoverable error cancels tracking outright. Only a clean turn end clears the count.
 
 Every delivery and recovery decision leaves one bounded line through the Host logger: an Inbox wake names the Member id, the Session, the request and operation that caused it, and the attempt it spent, and says a queued notice is not yet read by the model. Unchanged facts spend no second attempt and add no line above diagnostic level. A failed wake logs at warn, keeps the committed operation as its result, and clears its signature for the next rederivation; automatic recovery reports its classification, count, wait, wakeup, stand-down, and the reason tracking ended.
 

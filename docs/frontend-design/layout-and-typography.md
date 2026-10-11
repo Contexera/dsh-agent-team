@@ -31,15 +31,17 @@ The identity line and the avatar seat do not state the same label. The identity 
 
 The seat is 28px and neither clips nor grows, so it states the time of day alone (`formatClockTime`). The dated forms measure 57px within the year and 87px across it — wide enough to paint over the words beside them. A run breaks at every calendar-day change, so a continuation always shares its run head's day and the date is already one row up. The exact instant stays on the label's `title` (`formatAbsoluteTime`), as the Inbox row and the Channel entry line do.
 
-Agent avatar hue is a stable hash of `memberId`; Human uses `--dsw-alias-state-business-primary`. That color and initial stay the Human's fallback: a stored profile avatar image replaces the initial in every seat the Human occupies, while the displayed name comes from the same profile projection, resolved once in `TeamConversation` as `name ?? t('human')` and passed down as `humanName` to both pages — so the message sender, roster rows, mention fallback names, and `member:human` refs cannot drift apart, or fall back to a literal `human` on their own.
+Agent avatar hue is a stable hash of `memberId`; Human uses `--dsw-alias-state-business-primary`. That color and initial stay the Human's fallback: a stored profile avatar image replaces the initial in every seat the Human occupies, while the displayed name comes from the same profile projection, resolved once in `TeamConversation` as `name ?? t('human')` and passed down as `humanName` to both pages.
 
-Presence maps available/working/error/unavailable to the shared state-dot language, and two presentations carry it: the `TeamMemberAvatar` badge (the avatar's initial plus the dot on its bottom-right edge) wherever a person is listed as a row, and the bare `TeamPresenceDot` inside the composer's recipient menu, which is a menu row rather than a roster row. Roster rows therefore lean on the avatar badge while the menu stays with the dot; that asymmetry is deliberate, not an oversight.
+Resolving the name in one place is what keeps the message sender, roster rows, mention fallback names, and `member:human` refs from drifting apart, or falling back to a literal `human` on their own.
+
+Presence maps available/working/error/unavailable to the shared state-dot language, and two presentations carry it. The `TeamMemberAvatar` badge (the avatar's initial plus the dot on its bottom-right edge) appears wherever a person is listed as a row; the bare `TeamPresenceDot` sits inside the composer's recipient menu, which is a menu row rather than a roster row. Roster rows therefore lean on the avatar badge while the menu stays with the dot; that asymmetry is deliberate, not an oversight.
 
 The `TeamAvatarStack` circles on a Thread entry reuse the same hue hash but carry no dot, because they answer who owns the work rather than who is online right now.
 
 No Agent seat ever draws an image — the hue and initial are the whole identity an Agent has — so the compact stack draws the Human's picture in the one chip that is the Human, and names that chip from the same profile projection.
 
-The Inbox row's leading cluster and the Channel feed's Thread entry rows each take the Human's Member id from the Host (`AgentTeamInbox.humanMemberId`, the same initialization record `AgentTeamView` carries) and let `namedAvatarOwners(owners, human)` replace that one owner with `humanName`/`humanAvatarUrl`, so a rename moves the chip's letter and the stack's label together instead of leaving an initial the profile no longer uses.
+The Inbox row's leading cluster and the Channel feed's Thread entry rows each take the Human's Member id from the Host (`AgentTeamInbox.humanMemberId`, the same initialization record `AgentTeamView` carries). Each then lets `namedAvatarOwners(owners, human)` replace that one owner with `humanName`/`humanAvatarUrl`, so a rename moves the chip's letter and the stack's label together instead of leaving an initial the profile no longer uses.
 
 Owners that are not the Human keep the shared initials, and bytes that do not decode fall back to the display name's initial through the same `useAvatarImage` the other seats use.
 

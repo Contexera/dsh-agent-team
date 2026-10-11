@@ -8,7 +8,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 
 ## Ledger 权威与提交
 - mutation 进入 Host authority，并提交一条 durable operation。
-- 回复把被回答的 Message 记为自身 Message 上的 `replyToMessageRef`，Host 在提交前用 ledger 解析这个 ref：未知的 ref、或属于别的 Thread 的 ref 一律拒绝，不会被存下。父消息作者在提交时加入收件人，邀请规则、direct markers 与 `undeliveredMentions` 报告与 mention 完全一致。被引用的画面 —— 父消息作者与其正文一行 —— 是读取期派生（`replyTo`），绝不是第二份存储副本，因此它不可能与父消息不一致，父消息不在本次读取这一页里时也照样填得上；ref 不再可解析时只留裸 ref。引用不是可选项：这个参数属于回复契约的一部分，携带 ref 的回复只按 ref 本身被接受或拒绝。
+- 回复把被回答的 Message 记为自身 Message 上的 `replyToMessageRef`，Host 在提交前用 ledger 解析这个 ref：未知的 ref、或属于别的 Thread 的 ref 一律拒绝，不会被存下。父消息作者在提交时加入收件人，邀请规则、direct markers 与 `undeliveredMentions` 报告与 mention 完全一致。被引用的画面 —— 父消息作者与其正文一行 —— 是读取期派生（`replyTo`），绝不是第二份存储副本。因此它不可能与父消息不一致，父消息不在本次读取这一页里时也照样填得上。ref 不再可解析时只留裸 ref。引用不是可选项：这个参数属于回复契约的一部分，携带 ref 的回复只按 ref 本身被接受或拒绝。
 - Projections、Inbox results、tools、commands、Remote responses 和 UI 都从已提交的 operations 派生。
 - Client code 不得解释 ledger records，也不得创建 parallel authority。
 
@@ -42,9 +42,9 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 | 完全没有活动 handle | reactivate | activation 本身就失败了 |
 | 其余情况 | steer 一条 resume 提示 | Member 活着、组合完成、绑定正常——其余状态都已被上面几行接走 |
 
-带活动 handle 的 error 态 Member 落在最后一行：`recoverMember` 会 steer 它，而如果原因仍在，下一轮会再失败一次。选之前先分清两件事：模型路由坏了或网关拒收，要改的是路由而不是恢复 Member，在路由通之前 steer 什么也救不回来；真正需要 `clearMemberContext` 的是无法自行收尾的上下文世代——它会让下一条 Session 不带历史。
+带活动 handle 的 error 态 Member 落在最后一行：`recoverMember` 会 steer 它，而如果原因仍在，下一轮会再失败一次。选之前先分清两件事：模型路由坏了或网关拒收，要改的是路由而不是恢复 Member，在路由通之前 steer 什么也救不回来。真正需要 `clearMemberContext` 的是无法自行收尾的上下文世代——它会让下一条 Session 不带历史。
 
-Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲染。它由活动 surface 派生、不落盘：Host 重启后只有在有东西唤醒该 Member 时才会重新派生，所以一个没有被唤醒的 Member 在下次被操作触及前不显示原因。
+Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲染。它由活动 surface 派生、不落盘。Host 重启后只有在有东西唤醒该 Member 时才会重新派生，所以一个没有被唤醒的 Member 在下次被操作触及前不显示原因。
 
 ## 变更流与 Projection
 - `changes()` 是流式 Remote，可声明一个 scope（workspace/channel/thread/presence）。省略 scope 时观察共享 Team 投影变化，不包含 presence。Host 先注册监听，再发送当前基线，之后只发送匹配的变更通知。消费者暂停期间，只保留最新待发送版本。取消或 Host 释放时关闭订阅。Thread read 与 `team/dm-sent` 不改变共享投影：既不推进版本，也不唤醒订阅者。Presence 使用进程内 epoch，其他 scope 使用最近一次共享投影提交的 ledger sequence。版本只在同一 scope 和 Host 生命周期内有意义。Host 只为受 operation 影响的 Members 重算 Inbox hints。
@@ -53,7 +53,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
   以下冷路径仍全量折叠：activation、transition、timeline、carried-input 重放。这些路径读取完整被检视日志或外来日志。三项各自按 Member 保存一个 cursor，该 Member 的 Session 变化时替换。因此保留的折叠状态以 roster 为界，不随 Member 经历过的代数增长。
 - 读取投影按用途定界。`view` 只回答它自己那一页 fact 加上请求点名的 Thread：catalog 字段带的是这一页的 Task、Thread、显示序号与 Claim。只有 `includeCatalog` 才返回整个请求 scope 的 Task/Thread/Claim catalog，也就是模型侧 `team_view` 渲染的 address book 投影。
-- 一页读取沿 fact ledger 走到超出 limit 的第一个匹配为止；catalog 读取再多一次对 scope 内 Thread 的目录过滤，以及每个 Task 行一次活 Claim 查询。这些分量必须分开报告，不合并成一个总数：只报返回行数看不出这次读取走过了什么。
+- 一页读取沿 fact ledger 走到超出 limit 的第一个匹配为止。catalog 读取再多一次对 scope 内 Thread 的目录过滤，以及每个 Task 行一次活 Claim 查询。这些分量必须分开报告，不合并成一个总数：只报返回行数看不出这次读取走过了什么。
 - Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、`active task threads` 雷达）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
 
 ## Session 持久化与重放
@@ -64,7 +64,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Attention 与 Inbox 权威
 - Thread Attention 是 private Member x Thread state。ordinary unread 来自当前 Attention。structured mentions 创建 direct markers。terminal Task changes 在 Attention 结束后仍可能保留稀疏 Activity markers。Host 是唯一 Inbox authority。Session history 可以保留有界 notification context，包括 direct Message bodies 和 Task/Claim transition summaries。但 Session history 不能形成 parallel unread projection。
-- Inbox 读取先对读者的整条未读队列排序，只为自己返回的行准备 preview 文本、instant 的署名者与活 Claim owner；总计仍针对整条队列，所以只取一行的角标也报告全部未读 Thread。`threadObservations` 返回最新的 `limit` 条 observation 并带 `hasMore`，follower 集合始终是完整当前状态。
+- Inbox 读取先对读者的整条未读队列排序，只为自己返回的行准备 preview 文本、instant 的署名者与活 Claim owner。总计仍针对整条队列，所以只取一行的角标也报告全部未读 Thread。`threadObservations` 返回最新的 `limit` 条 observation 并带 `hasMore`，follower 集合始终是完整当前状态。
 
 ## Session 策略与上下文压力
 - Team 管理的 Agent sessions 使用显式 Team preset 和可信的 `danger-full-access` policy。这是面向可信 Workspace 的有意产品边界。
@@ -72,7 +72,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - 已接受 Task 的自动 compaction 已退役。Member 上下文压力由引擎的策略决定，Host 把引擎策略绑到 Member 的读数上（见 Tools and preset）。预算阈值从当前 route 的 context window 派生。handoff 预算每 generation 一条通知。judge 判为无关的长间隔 step 被扣住，而不是放行。硬上限强制原地 compaction，并做 fail-closed 验证。provider context-overflow 获得一条有界 compact-and-retry。Pending/error bookkeeping 只在进程内维护。只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。
 - 终止回合的恢复先读 Harness 的结构化失败，再看措辞。稳定的 code 单独决定结果。`RATE_LIMIT` 是 rate limiting，`TRANSPORT`/`TIMEOUT` 是 transient network，显式 429/503 响应是 rate limiting。其他任何 code（quota、auth、context、请求状态）无论 message 写什么都保持 manual。只有无 code 可用的错误才回落到窄 message 签名。
 - 两级分工不变。`agent/request-error` 负责同一步的 pressure/compaction 重试。`agent/error` 负责终止回合恢复及其连续错误上限。无论走哪条路，失败都保留已记录的 Member diagnostic。
-- 在任何 `turn/start` 之前被丢弃的 Team 唤醒，是唯一一类背后没有 `agent/error` 的 error diagnostic：当一条 Team 自己的 Inbox 或 recovery 通知在 Agent 开启回合前离开队列、且不是 Host 自己做的替换或 dispose 时，Host 记一条 `runtime` 类 diagnostic，带上 `source: 'agent/inbox/discarded'`、该 Member 的 `sessionId` 和 `occurredAt`。Host 有意替换或拆除的通知不触发任何东西，所以普通的通知替换从不显示 error。被取消的 splice 不带 durable 原因，因此它和所有 runtime diagnostic 一样只在进程内维护：重启后，在下一次唤醒真正运行或再次取消之前什么都不显示。
+- 在任何 `turn/start` 之前被丢弃的 Team 唤醒，是唯一一类背后没有 `agent/error` 的 error diagnostic。当一条 Team 自己的 Inbox 或 recovery 通知在 Agent 开启回合前离开队列、且不是 Host 自己做的替换或 dispose 时，Host 记一条 `runtime` 类 diagnostic，带上 `source: 'agent/inbox/discarded'`、该 Member 的 `sessionId` 和 `occurredAt`。Host 有意替换或拆除的通知不触发任何东西，所以普通的通知替换从不显示 error。被取消的 splice 不带 durable 原因，因此它和所有 runtime diagnostic 一样只在进程内维护。重启后，在下一次唤醒真正运行或再次取消之前什么都不显示。
 
 ## 私有记忆、归档与身份效应
 - `$DSH_HOME/agent-team/members/` 下的 private-memory directories 是 Member identity 的 Host-owned effects，不是第二权威。Member activation 确保 private-memory directory、`notes/` 和缺失的 `memory.md` 存在。startup 不会清理 ledger 不知道的 `member:` directories。显式 Member removal 会归档这个 Member 的 Session，并移除这个 Member 的 private-memory directory。Team removal path 之外的 entries 保持不动。
@@ -88,13 +88,13 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留，无 UI 写入路径，供后续 Runtime Revision manifest 编排依赖，cleanup 时勿删。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。
-- Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上，顺序为 mount → restrict → validate。validate 观察限制后的可见面。Activation 还在配置之上强制并集八个 Team tools。未知名 drop + warning，不阻断 activation。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction：idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序；管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+- Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上，顺序为 mount → restrict → validate。validate 观察限制后的可见面。Activation 还在配置之上强制并集八个 Team tools。未知名 drop + warning，不阻断 activation。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
-  Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛，所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
+  Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
 
   等待按类别记日志，带 Member、Session 与时长：等自己的回合是 `stage 'wait-turn'`，等外部执行（例如 Agent 释放自己的 Session 写路径）是 `stage 'wait-external'`。activation 期间的 restriction 失败只表现为这个 Member 的 activation failure。
-- live 应用失败不会放宽面：编辑保留其 ledger commit，旧 restriction 继续生效（新装失败时恢复原状），Remote 调用照常暴露失败；同 requestId 重试会重新应用已存储配置且不产生第二次业务提交——Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
-- 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时留一条可路由的 `capability-apply` diagnostic：`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
+- live 应用失败不会放宽面：编辑保留其 ledger commit，旧 restriction 继续生效（新装失败时恢复原状），Remote 调用照常暴露失败。同 requestId 重试会重新应用已存储配置且不产生第二次业务提交。Host 比较的是存储意图与运行时实际已应用的效果，绝不与该次请求自身的历史比较。
+- 配置编辑把「效果」与「提交」分开回报：`updateMember` 返回 `effect`，取值 `applied`、`already-applied`、`deferred:no-live-handle` 或 `deferred:generation-changed`（先落账、下次激活生效）。失败不进取值——保持响亮拒绝，同时留一条可路由的 `capability-apply` diagnostic。`detail` 带 requestId、operationId、阶段与原因，Session 结构化放在 `sessionId`，日志用同一组关联 id。
 - 名册每行恒带 `capabilityState`（`applied` | `pending`），由运行时实际已应用的效果派生；没有活面的状态字面报 `pending`。该字段与 `availability`/`presence` 正交：后两者回答 Member 会不会跑，它回答存储配置此刻生效没有。
 - Skills 是 Member 私有的。preset 不带共享 skill-filesystem row。Host 在每个 Member 的 agent exact scope layer 上注册一个 filesystem provider。它是 traceable-service 接缝，与 tool restriction 同构。这个 provider 只扫两个 Team 自有 root，排除默认 roots。排前的是插件内置的只读 core skills（`packages/agent-team/core-skills/`，同名内置 skill 跨升级保持稳定）。排后的是 Member 可写的 `$DSH_HOME/agent-team/members/<memberId>/skills/`。
 
@@ -104,7 +104,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Host 服务面（`ctx.agentTeam`）
 
-Host row 只发布一个服务 `ctx.agentTeam`，它被两类消费方以不同方式使用，稳定性承诺也不同。没有 CLI、没有 `bin`、也没有 loopback HTTP 入口：Web Client 是唯一的人类控制面，所有变更都经 typed Remote 下发到 Host。
+Host row 只发布一个服务 `ctx.agentTeam`，它被两类消费方以不同方式使用，稳定性承诺也不同。没有 CLI、没有 `bin`、也没有 loopback HTTP 入口。Web Client 是唯一的人类控制面，所有变更都经 typed Remote 下发到 Host。
 
 - **Remote 方法**（带 `@Remote` 装饰的，如 `members`、`view`、`addMember`、`updateMember`、`sendMessage`、`readThread`、`inbox`、`humanProfile`）是 Client 契约。它们由声明生成 Typert 产物来定型，所以 Client、模型侧工具和其他消费方编译期对齐同一形状；改动其中任何一个都属契约变更。
 - **仅 Host 侧的服务方法**（如 `memberForAgent`、`membersForClient`、`status`，以及激活/生命周期内部实现）供进程内 Host 调用方使用——preset 行、commit listener、启动期的派生逻辑。它们没有兼容承诺，可能随版本调整。

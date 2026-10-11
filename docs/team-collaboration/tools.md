@@ -6,9 +6,9 @@ Successful and rejected tool results return through the normal model loop. `cont
 
 ## `team_view`
 
-`team_view` is the address book: bounded authorized Channel, top-level Thread, and Member summaries — current addresses, not a work queue; unread work lives in `team_inbox`. Threads are the sole paginated catalog: rows are newest-first and carry threadRef, Channel ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action.
+`team_view` is the address book: bounded authorized Channel, top-level Thread, and Member summaries — current addresses, not a work queue; unread work lives in `team_inbox`. Threads are the sole paginated catalog. Rows are newest-first and carry threadRef, Channel ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action.
 
-An `active task threads` section follows the Members list on the first page: every in_progress / in_review Task Thread in the reader's authorized Channels of the Workspace, newest activity first, each row carrying its threadRef, Channel ref, status, Task number, the Members on its live Claims, a bounded anchor subject, and last-activity instant.
+An `active task threads` section follows the Members list on the first page. It lists every in_progress / in_review Task Thread in the reader's authorized Channels of the Workspace, newest activity first, each row carrying its threadRef, Channel ref, status, Task number, the Members on its live Claims, a bounded anchor subject, and last-activity instant.
 
 Its admission is the Task being active, not the reader's participation, and a Thread still holding the reader's unread is not excluded — it answers "who is already on what" independently of the unread queue. The tool guidance points the reader here when a Workspace change surprises them, or before they claim or commit, so in-flight work reads as such instead of a conflict; it is not the unread queue, which stays in `team_inbox`.
 
@@ -24,27 +24,37 @@ The footer routes body reading and acknowledgement to `team_thread read`; the re
 
 `team_thread` owns Attention and reading. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads.
 
-`read` returns one chronological unread batch and advances the watermark; a read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer; `history` pages older facts; `message` reads one Message back verbatim by its ref, which is the way to answer a quote whose original sits outside the page you hold; follow/unfollow change personal Attention.
+`read` returns one chronological unread batch and advances the watermark. A read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer. `history` pages older facts. `message` reads one Message back verbatim by its ref, which is the way to answer a quote whose original sits outside the page you hold. follow/unfollow change personal Attention.
 
 The six actions do not share one maximal render: `status`, `follow`, and `unfollow` answer only the Attention question — one outcome line with the Thread ref, optional Task standing, and following state, no timeline.
 
 `message` renders the ref, the sequence with its instant and sender, and then the body whole: this one action exists so a reader can answer a Message it did not receive, so nothing is trimmed and the orientation is unchanged.
 
-A read renders outcome first (acknowledged and remaining unread counts), then Thread identity and following state, then orientation (the full anchor when the returned facts carry Host-supplied background, the bounded anchor subject otherwise, and never a duplicate when the anchor is itself a returned fact), then active Claims only — the current collision surface, one line per Claim (claim ref, owner, direction) — then the chronological facts with inline unread/direct markers, and a footer stating the read-through sequence and the remaining unread count.
+A read renders five parts in order, then a footer:
+
+1. the outcome — acknowledged and remaining unread counts;
+2. Thread identity and following state;
+3. orientation — the full anchor when the returned facts carry Host-supplied background, the bounded anchor subject otherwise, and never a duplicate when the anchor is itself a returned fact;
+4. active Claims only — the current collision surface, one line per Claim (claim ref, owner, direction);
+5. the chronological facts with inline unread/direct markers.
+
+The footer states the read-through sequence and the remaining unread count.
 
 When the read left Thread facts behind it, a further line states how many those are, so a returning reader sees the size of the span it is not looking at instead of assuming the batch is the Thread.
 
 A history page renders a historical outcome with Thread identity, the full anchor on a first page and the bounded subject on continuation pages, the selected facts, and the cursor/hasMore footer — never current Claims or advice. Every activity fact is structured — actor, Task ref, and the Claim refs an activity claimed, completed, accepted, or released — never a bare kind.
 
-When a `read` acknowledges an unread acceptance of a still-done Task, the result carries a `contextAdvice` section: the reading Member's measured usage, the route's budgets, the Task-boundary threshold `min(128_000, effective handoffAt)`, and one action — keep the current context, roll over fresh after the closeout, or compact in place at the handoff budget. Advice is a recommendation only: the Host never checkpoints, rolls over, or compacts on an acceptance, and a measurement failure degrades to an explicit `unavailable` line instead of reversing the committed read.
+When a `read` acknowledges an unread acceptance of a still-done Task, the result carries a `contextAdvice` section: the reading Member's measured usage, the route's budgets, the Task-boundary threshold `min(128_000, effective handoffAt)`, and one recommended action — keep the current context, roll over fresh after the closeout, or compact in place at the handoff budget.
+
+The advice is a recommendation only. The Host never checkpoints, rolls over, or compacts on an acceptance, and a measurement failure degrades to an explicit `unavailable` line instead of reversing the committed read.
 
 History and repeat reads carry no advice.
 
 ## `team_message`
 
-`team_message.start` creates a top-level Thread and defaults taskless; explicit task intent atomically creates a Task. `reply` appends to an existing Thread. Both accept absolute attachment paths; Host validates and caches all paths atomically. A committed start or reply renders one committed-verb outcome — Thread created or reply added — with the Message ref, the new Thread ref (and Task ref when taskful), and exactly one next-write token hand-off, so the created Thread is immediately addressable and the next mutation has its basis.
+`team_message.start` creates a top-level Thread and defaults taskless; explicit task intent atomically creates a Task. `reply` appends to an existing Thread. Both accept absolute attachment paths; Host validates and caches all paths atomically. A committed start or reply renders one committed-verb outcome — Thread created or reply added — with the Message ref, the new Thread ref (and Task ref when taskful), and exactly one next-write token hand-off. The created Thread is immediately addressable and the next mutation has its basis.
 
-Typed rejection results (`unread_required`, `stale_revision`) begin `Not committed`, keep the structured refs and counts needed to reread and retry deliberately, and render no numeric revision and no write token — a rejection carries no changed facts and is not a safe mutation basis; recovery is read-and-reconsider. A mention of a Member the Thread has never carried is not a rejection: the Message commits and the result reports the undelivered names.
+Typed rejection results (`unread_required`, `stale_revision`) begin `Not committed` and keep the structured refs and counts needed to reread and retry deliberately. They render no numeric revision and no write token, because a rejection carries no changed facts and is not a safe mutation basis; recovery is read-and-reconsider. A mention of a Member the Thread has never carried is not a rejection: the Message commits and the result reports the undelivered names.
 
 `reply` also takes `replyToMessageRef`, which names the Message on this Thread being answered. The Host resolves it against the ledger and refuses a ref that is unknown or belongs to another Thread, so a stored reply always has a parent a reader can be taken to.
 
@@ -54,7 +64,7 @@ The switch on the Team row's settings decides whether the parameter is available
 
 `team_message.dm` sends a private direct message to one enabled Agent Member in the same Workspace. A DM is pure delivery: the ledger appends an audit-only `team/dm-sent` operation (request-idempotent) while the recipient's live session receives the body as a relay-form injected user message — idle recipients get a new turn, busy ones are steered into the current turn. DMs create no Channel, Thread, revision, Attention, or Inbox markers and wake no change waiters. The Human cannot be DMed.
 
-If the recipient has no live session or the wake fails, the operation stays durable and the sender gets a structured delivery error instead of a silent loss; there is no automatic redelivery. Use DMs for quick clarifications and status syncs only — task work, decisions, and anything needing team visibility or traceability belong in Threads, and an exchange passing about 3 round trips should move to a Thread because each DM costs the recipient a full agent turn.
+If the recipient has no live session or the wake fails, the operation stays durable and the sender gets a structured delivery error instead of a silent loss; there is no automatic redelivery. Use DMs for quick clarifications and status syncs only. Task work, decisions, and anything needing team visibility or traceability belong in Threads, and an exchange passing about 3 round trips should move to a Thread because each DM costs the recipient a full agent turn.
 
 ## `team_claim`
 
@@ -68,31 +78,31 @@ A committed mutation names its action (Claim created, completed, or released), r
 
 The tool only validates and returns `status: 'scheduled'` after concluding the turn — it performs no lifecycle or Inbox side effect in the tool body.
 
-The Host reacts only after the successful `tool/result` is durably appended: it waits for the containing turn and true idle, commits one idempotent `team/member-session-rolled-over` operation (Member actor, self-scoped, recording previous/new Session ids, the successful handoff result sequence, and trigger — never handoff prose), disposes the old Agent, archives the old Session, and activates a fresh Session with the handoff as its first model-facing context. Member identity, model, private memory, skills, Claims, and Attention survive.
+The Host reacts only after the successful `tool/result` is durably appended. It waits for the containing turn and true idle, then commits one idempotent `team/member-session-rolled-over` operation — Member actor, self-scoped, recording previous/new Session ids, the successful handoff result sequence, and trigger, never handoff prose. It then disposes the old Agent, archives the old Session, and activates a fresh Session with the handoff as its first model-facing context. Member identity, model, private memory, skills, Claims, and Attention survive.
 
 Without a `checkpointRef` the new Session inherits no old event/chunk history; with one it seeds the recorded checkpoint's exact completed-turn prefix (marked seeded, its inherited history inert) — the ledger never records handoff prose. Non-Team input that arrived after the intent is carried into the new generation once; stale Team Inbox notices are discarded and rederived from the ledger.
 
 A failed or dangling call schedules nothing, and a landed failed result consumes its paired open call in the projection — a provider retry reusing the same call id folds its own fresh arguments, never the failed call's stale ones.
 
-A `checkpointRef` return is prevalidated at tool time through the same resolver the swap uses: a ref that is fabricated, unresolved, unattributable, nonshrinking, unmeasurable, over-budget, or blocked by multiple active Claims rejects as a model-visible error result instead of a fake `scheduled` whose async swap always fails.
+A `checkpointRef` return is prevalidated at tool time through the same resolver the swap uses. A ref that is fabricated, unresolved, unattributable, nonshrinking, unmeasurable, over-budget, or blocked by multiple active Claims rejects as a model-visible error result instead of a fake `scheduled` whose async swap always fails.
 
-The mutable guard set (jobs, route limits, lineage growth) is revalidated at the lifecycle commit seam, so a rollover that passes tool-time validation can still fail there and leave the old generation recoverable — a later-turn fresh rollover replaces the spent intent and recovers the Member.
+The mutable guard set (jobs, route limits, lineage growth) is revalidated at the lifecycle commit seam, so a rollover that passes tool-time validation can still fail there and leave the old generation recoverable. A later-turn fresh rollover replaces the spent intent and recovers the Member.
 
 Request and new-Session identity derive stably from the calling Member's bound Session plus the tool call id, so a crash between result durability and the swap replays to the same generation.
 
 A rollover is refused while the Member owns jobs that would not survive the switch — any running/stopping job, and any settled job whose terminal output was never reported; the rejection names the jobs and directs the Member to collect or stop them first.
 
-A restart that lands between the durable rollover commit and the new Session's activation reconstructs the handoff from the previous Session's durable intent instead of treating the Member as blank: the ledger's recorded previous Session is the lineage source even when the new Session never materialized before the crash, and reconstruction is idempotent — a generation whose own log already carries a handoff never receives a second one.
+A restart that lands between the durable rollover commit and the new Session's activation reconstructs the handoff from the previous Session's durable intent instead of treating the Member as blank. The ledger's recorded previous Session is the lineage source even when the new Session never materialized before the crash, and reconstruction is idempotent: a generation whose own log already carries a handoff never receives a second one.
 
 ## `context_checkpoint`
 
-`context_checkpoint` records one named checkpoint of the calling Member's current context. Like `context_rollover` it performs no lifecycle side effect in the tool body: the durable checkpoint is the successful `tool/call`+`tool/result` pair the Session projection folds, and the returned ref is deterministic from the Member Session identity plus the tool call id, so the model can cite it before the result exists and a repeated provider call id in another generation never collides.
+`context_checkpoint` records one named checkpoint of the calling Member's current context. Like `context_rollover` it performs no lifecycle side effect in the tool body. The durable checkpoint is the successful `tool/call`+`tool/result` pair the Session projection folds, and the returned ref is deterministic from the Member Session identity plus the tool call id, so the model can cite it before the result exists and a repeated provider call id in another generation never collides.
 
 The checkpoint resolves at its containing turn's end, so the model records it as the final action of a completed unit of work; after the turn the Host schedules one quiet continuation message so the Member can keep working toward the recorded anchor. Delivery is exactly-once across restarts: the projection's delivery record is durable, and a checkpoint whose continuation already landed is never re-scheduled.
 
 ## `context_status`
 
-`context_status` returns one bounded structural view of the Member's context generations across the current Session and its archived ancestor lineage: recorded checkpoints (with the completed turn each anchors to, and whether its quiet continuation was delivered), plus handoff, Team-boundary, and compaction boundaries — each with the Threads whose facts entered the Member's context by that anchor, derived only from delivered Session facts, never from unread ledger activity.
+`context_status` returns one bounded structural view of the Member's context generations across the current Session and its archived ancestor lineage. It lists recorded checkpoints (with the completed turn each anchors to, and whether its quiet continuation was delivered), plus handoff, Team-boundary, and compaction boundaries — each with the Threads whose facts entered the Member's context by that anchor, derived only from delivered Session facts, never from unread ledger activity.
 
 It reports the Member's usage against the handoff budget and the hard limit, and — where the Member's preset scope can price one — what a compaction started now would replace.
 
@@ -100,23 +110,23 @@ The definition is the engine's (`createContinuityTools`), not the Team's: the Te
 
 A fresh `context_rollover` (no `checkpointRef`) never requires reading the status first; the status is for picking a checkpointRef return or confirming that a fresh handoff is the better path.
 
-Team boundaries anchor on effect, not push: a committed `team_message` (a start's Thread is attributed from the durable presentation meta of its result, a reply's from its call arguments), a successful `team_claim` mutation, and a successful follow/unfollow each anchor one boundary, labeled by action class (`Team message`, `Team task claim change`, `Team attention change`); a typed rejection (`unread_required`, `stale_revision`), a failed call, a dm, or the read path (`team_inbox`, `team_view`, `team_thread read`) never does.
+Team boundaries anchor on effect, not push. A committed `team_message` (a start's Thread is attributed from the durable presentation meta of its result, a reply's from its call arguments), a successful `team_claim` mutation, and a successful follow/unfollow each anchor one boundary, labeled by action class (`Team message`, `Team task claim change`, `Team attention change`). A typed rejection (`unread_required`, `stale_revision`), a failed call, a dm, or the read path (`team_inbox`, `team_view`, `team_thread read`) never does.
 
-On the push side, only a Thread's FIRST delivered notice anchors — the preserved "work just arrived" anchor, labeled with the Thread refs it first introduced (`First arrival: …`) instead of the notice's own generic account — while later re-deliveries of the same Thread and pure reminders (recovery notices, and the progress-nudge notices recorded before that system was removed) produce nothing.
+On the push side, only a Thread's FIRST delivered notice anchors — the preserved "work just arrived" anchor, labeled with the Thread refs it first introduced (`First arrival: …`) instead of the notice's own generic account. Later re-deliveries of the same Thread and pure reminders (recovery notices, and the progress-nudge notices recorded before that system was removed) produce nothing.
 
-A Team boundary is a selectable default checkpoint exactly when the retained prefix through it stays inside one Thread — exactly one Thread's facts entered the Member's context by that anchor — and the return would shrink the working set below the handoff budget; Thread attribution comes from delivered notice bodies, claim mutations' Task overlays resolved through the ledger, and committed message calls' refs, and a prefix that spans several Threads (or holds none) carries its reason instead.
+A Team boundary is a selectable default checkpoint exactly when two things hold: the retained prefix through it stays inside one Thread — exactly one Thread's facts entered the Member's context by that anchor — and the return would shrink the working set below the handoff budget. Thread attribution comes from delivered notice bodies, claim mutations' Task overlays resolved through the ledger, and committed message calls' refs, and a prefix that spans several Threads (or holds none) carries its reason instead.
 
 A handoff or a compaction boundary is never a return target: it closed a context rather than opened a topic. The rule is judged on the retained prefix, never on the boundary's own contribution.
 
 The rule itself is the engine's shared anchor policy, applied once for both surfaces. Team declares only the part its own vocabulary can state — which of its boundary kinds close a context rather than open a topic (`boundaryRestorableFor`) — and the nouns its reasons are worded in. So a ref the timeline offers is a ref `context_rollover` accepts, rather than two copies of one rule agreeing by accident. Default-boundary refs are session-scoped, so consecutive generations anchoring at the same event seq never collide. Structural only — no transcript content.
 
-Every row is rendered by the engine. On a row that is not restorable the Team answers with a short stable `anchor` digest of that row's own ref instead of the ref itself: rows that share a name and a price stay distinguishable, and no non-selectable row ever carries a citable string — only the `ref` printed on a restorable row may be cited to `context_rollover`.
+Every row is rendered by the engine. On a row that is not restorable the Team answers with a short stable `anchor` digest of that row's own ref instead of the ref itself. Rows that share a name and a price stay distinguishable, and no non-selectable row ever carries a citable string — only the `ref` printed on a restorable row may be cited to `context_rollover`.
 
-A `context_rollover` call with a `checkpointRef` rolls the Member back to that checkpoint's exact completed-turn prefix: the seed is the durable prefix through the checkpoint's `turn/end`, balanced by construction, and the child Session parents at the seed source while inherited checkpoints stay inert history (no inherited intent fires in the child).
+A `context_rollover` call with a `checkpointRef` rolls the Member back to that checkpoint's exact completed-turn prefix. The seed is the durable prefix through the checkpoint's `turn/end`, balanced by construction, and the child Session parents at the seed source while inherited checkpoints stay inert history (no inherited intent fires in the child).
 
 Return is rejected under the same conditions the `context_rollover` tool prevalidates — unresolved, nonshrinking, over-budget, or multiple active Claims (a rewind cannot be proven to stay inside one Thread); in every rejection case a fresh handoff is the documented alternative. A context return re-reads history; it never claims to revert external effects.
 
-Seed costs are priced node by node from the source Session's own replayed measurement, so the retained figure is the exact cost of the kept prefix rather than a share of the log — an oversized tool result inside that prefix prices as what it is. A source whose cost cannot be measured is not selectable (the budget cannot be proven); the discarded figure for an ancestor anchor approximates the current generation's whole usage.
+Seed costs are priced node by node from the source Session's own replayed measurement, so the retained figure is the exact cost of the kept prefix rather than a share of the log — an oversized tool result inside that prefix prices as what it is. A source whose cost cannot be measured is not selectable, because the budget cannot be proven; the discarded figure for an ancestor anchor approximates the current generation's whole usage.
 
 When an ancestor cannot be read, the walk stops there and the result carries `incompleteFrom` (the ancestor's id and the failure reason): history is complete through the last listed source and provably absent beyond it, which is a fact about history, never about Member availability.
 

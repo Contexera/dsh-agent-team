@@ -7,7 +7,7 @@
 - 确认合同：Thread 打开期间到达的事实一律自动做持久 `readThread` 确认。pinned 读者当场看见，滚离底部的读者由纯跳转提示引导回底。确认失败时回退为既有 error surface。不存在任何手动读取动作。
 - 打开即清零：打开 Thread 直接滚动到最后一条。有界批次若返回剩余未读，Client 以串行循环自动续读（每轮 mint 新 requestId 复用 Host 幂等缓存语义）。连续 50 轮未清零视为异常并显示错误提示。
 - 前插更早历史时按 scrollHeight 差值补偿 scrollTop，视口内容不跳动。
-- 更旧 facts 由时间线自己的「加载更早消息」入口翻页，首绘的历史读取决定它是否出现：读取被拒或抛错时该入口保持存在，从屏上最旧的 fact 往回翻，并由它自己的 error surface 报告失败，而不是让更旧的 facts 永远卡在一个不会出现的控件后面。
+- 更旧 facts 由时间线自己的「加载更早消息」入口翻页，首绘的历史读取决定它是否出现。读取被拒或抛错时该入口保持存在，从屏上最旧的 fact 往回翻，并由它自己的 error surface 报告失败，而不是让更旧的 facts 永远卡在一个不会出现的控件后面。
 - 跳转：`scrollToBottom` 立即滚到底部；「↓ N 条新更新」提示按钮只滚到底、无读取语义，读者回到底部即消失。
 - contentKey 必须随渲染事实变化（当前用 `长度:末位factKey` 组合串）。
 
@@ -19,7 +19,7 @@
 - 模式 chip（「作为任务」）：任何宽度都保留可见文字标签。窄于 560px 时改为缩工具组间距（`@container (max-width: 560px)`），而不是藏字。`aria-label`、`title`、`aria-pressed` 照旧承载模式语义。
 - Member Session 输入面即 shipped composer 本身，不做任何修改。Team 不注册任何 Member Session 的 composer 表面：无接管、无 trigger sources、无 dock 提示条。键盘合同、命令与引用菜单、附件与普通会话完全一致。
 - 收件人提示行：通知集合非空时在草稿与工具栏之间渲染 quiet 提示行（`.notifyRow`，`composerNotify` 文案 + `{ids}` 句柄列表）。发送前即可看到"将通知谁"。集合是菜单选中的 recipients 与正文手打 `@Handle` 的并集。`mentionedMemberIds` 从草稿派生，与 Host 同一套大小写不敏感、Unicode 词边界的规则。`@all` 按菜单的展开口径列出全部可投递 Member。空集合不占位。派生集合只用于显示，不进发送 payload。Channel 之外的名字在正文里只是散文，作为显式 recipients 会被拒绝。
-- 读者自己的 handle 是唯一一个必须「不读也能找到」的 mention chip，所以它是唯一离开 business 族的 chip：`[data-mention-human]` 用 success 档着色（error 与 warn 两族分别意味着失败与警示）。正文里写的是读者改名前的 handle 时，该 chip 同样被标记 —— 标记跟着身份走，不跟着拼写走。
+- 读者自己的 handle 是唯一一个必须「不读也能找到」的 mention chip，所以它是唯一离开 business 族的 chip。`[data-mention-human]` 用 success 档着色（error 与 warn 两族分别意味着失败与警示）。正文里写的是读者改名前的 handle 时，该 chip 同样被标记 —— 标记跟着身份走，不跟着拼写走。
 - 草稿缓存：draft/recipients 不在页面局部。它们按 `channel:<channelRef>` / `thread:<threadRef>` 键存放。每 Client 上下文存一份 `TeamDraftStore`（`drafts.ts`）。它用单一 localStorage 键 `dsh.agent-team.drafts.v1`，写穿持久化，按 savedAt 淘汰最旧 ~50 条。切换视图或刷新后草稿与收件人原样恢复。发送提交成功即清除对应键，失败保留。Composer 挂载收敛会剔除不再匹配文本/已失效的收件人。Channel 的「作为任务」意图不进入草稿缓存：默认关闭，成功提交后再次复位关闭。
 - taskless Thread 的「转为任务」是 Human-only durable mutation，不做乐观 overlay。成功后重新读取 Thread 与补充 Channel/Member 投影；unread/stale fence 时保留 Host 返回错误并重新读取相关事实。
 
@@ -30,9 +30,9 @@ Thread 里的一条 Message，可以通过「选中它所回答的那条 Message
 
 有一个作者永远不进这一行：Host 既不投递给 Human（Human 直接读 Thread，没有可投递的 Session），也不投递给消息作者本人。所以被引用的 Human、以及读者引用自己消息时的那位作者，在投递发生之前就已从收件人集合里去掉。这一行陈述的是**将要发生什么**，而不是选中了什么，因此它对这次投递保持沉默，而不是把读者自己念回给读者看，说成那个会收到通知的人。
 
-发送时带上父消息的 ref，Host 因此记录这条引用并向父消息作者送达；发送成功会清掉目标，切换 Thread 同样会清掉，所以过期的引用永远不会跟着下一次 Enter 一起出去。
+发送时带上父消息的 ref，Host 因此记录这条引用并向父消息作者送达。发送成功会清掉目标，切换 Thread 同样会清掉，所以过期的引用永远不会跟着下一次 Enter 一起出去。
 
-时间线里，这条引用领在它所归属的 Message 之前，用的就是读者已经熟悉的 Markdown 引用形式：2px 竖线后一行安静文字，写明作者与父消息第一行，整行都是跳回原文的入口。它是指向原文的把手而不是副本 —— 长父消息不会被粘贴第二遍，引用也不可能与它指向的 Message 不一致。composer 的引用条与它是同一种对象、同一种语言，这正是两者能被读成同一句话的原因。
+时间线里，这条引用领在它所归属的 Message 之前，用的就是读者已经熟悉的 Markdown 引用形式。那是 2px 竖线后一行安静文字，写明作者与父消息第一行，整行都是跳回原文的入口。它是指向原文的把手而不是副本 —— 长父消息不会被粘贴第二遍，引用也不可能与它指向的 Message 不一致。composer 的引用条与它是同一种对象、同一种语言，这正是两者能被读成同一句话的原因。
 
 ## Thread / Task 入口行（channel 时间线内）
 - 语义：每个 top-level Channel 消息进入其 Thread 的唯一入口，形态是正文下方**一行**安静的行——既陈述状态，也负责开门。点击走 `selectThread`，不把 Task 作为独立导航层。`Task #N` 是 home Channel 内 durable Task creation 的展示编号，不是稳定身份。跨视图导航使用 branded Task ref。

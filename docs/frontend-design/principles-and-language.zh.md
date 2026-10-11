@@ -4,14 +4,14 @@
 
 ## 设计原则
 1. **优先复用 Harness 公共原语**（`@deepseek-ai/dsh-client-ui-primitives`）：`MarkdownText`、`Button`、`Pill`、`Modal`、`Tooltip`、`Input`、`StateDot`、图标，以及 `useDismissOnOutsidePointer`、`useAnchoredMaxHeight` 等 hook。Team 不重写这些能力；composer textarea 是唯一例外（`Input` 原语明确只做单行）。`MessageText` 已不在集合内——该原语在 0.1.5 被移除，`TeamMessage` 自行渲染纯文本正文、Markdown 委托给 `MarkdownText`。
-2. **只用 DSH alias token 取色**，且只允许主题实际定义的名字（`@deepseek-ai/dsh-client-ui-theme` 的 `design-platform.css` 与 `gradient-shadow-text.css` 是唯一定义处）：文字 `--dsw-alias-label-*`、边框 `--dsw-alias-border-l1..l4`（+`l2-darkmode-thin`/`inverted*`）、背景 `--dsw-alias-bg-*` 与 `--dsw-alias-interactive-bg-*`、状态 `--dsw-alias-state-*`、阴影 `--dsw-shadow-lv1..lv3`、具体值 `--dsw-specific-*`。禁止凭印象引用主题不存在的 token——`var()` 对未定义变量会静默回退 initial，边框/背景直接隐形（2026-08 教训：`border-subtle`/`border-default`/`text-*`/`fill-tertiary`/`surface-primary` 曾整批不存在，时间线全部发丝线与 loading 点从未渲染过）。Team 自有变量只允许派生值（见头像色相）。
+2. **只用 DSH alias token 取色**，且只允许主题实际定义的名字（`@deepseek-ai/dsh-client-ui-theme` 的 `design-platform.css` 与 `gradient-shadow-text.css` 是唯一定义处）：文字 `--dsw-alias-label-*`、边框 `--dsw-alias-border-l1..l4`（+`l2-darkmode-thin`/`inverted*`）、背景 `--dsw-alias-bg-*` 与 `--dsw-alias-interactive-bg-*`、状态 `--dsw-alias-state-*`、阴影 `--dsw-shadow-lv1..lv3`、具体值 `--dsw-specific-*`。禁止凭印象引用主题不存在的 token。`var()` 对未定义变量会静默回退 initial，边框/背景直接隐形（2026-08 教训：`border-subtle`/`border-default`/`text-*`/`fill-tertiary`/`surface-primary` 曾整批不存在，时间线全部发丝线与 loading 点从未渲染过）。Team 自有变量只允许派生值（见头像色相）。
 3. **聊天密度优先于 assistant 排版密度**：正文统一 14px 档；markdown 原语自带的标题/列表间距在本包内收紧。
 4. **渐进披露**：默认状态安静（细边框、无底色），hover/focus 才提升反馈；次要信息用 tertiary 文字色。
 5. **durable mutation 不做乐观更新**：提交失败保留输入并以 Host 报错为准；成功后从 Host 投影刷新（`mergeChannelView` 合并而非整体替换）。
 6. **键盘与读屏基线不妥协**：所有自定义复合控件都有 role、aria 状态和完整键盘路径。
 
 ## 设计语言对齐（DSH 0.1.7，rc.2 基线）
-Team Client 渲染在 shipped DSH 外壳内部，必须讲基础 UI 的设计语言。本节是**耐久合同**；可重复执行的机械审计是 `node scripts/audit-ui-parity.mjs`（任何可见 UI 改动后、每次 DSH 升级后都跑一次——其中的 shipped 参考 tripwire 会在 harness checkout 不再定义本对齐所依赖的原语时报警，提示重新核对基线）。
+Team Client 渲染在 shipped DSH 外壳内部，必须讲基础 UI 的设计语言。本节是**耐久合同**。可重复执行的机械审计是 `node scripts/audit-ui-parity.mjs`（任何可见 UI 改动后、每次 DSH 升级后都跑一次——其中的 shipped 参考 tripwire 会在 harness checkout 不再定义本对齐所依赖的原语时报警，提示重新核对基线）。
 
 对齐目标是 **0.1.7-rc.2** 的写法：它把焦点环 token 化、把圆角刻度变成命名 token，并重新调圆了几个面（composer 卡 22px → 28px，菜单行与结果行 8px → 12px 与 16px，小胶囊 6px → 8px）。同一份样式如何同时服务 rc.1 与 rc.2，见下面的「双 checkout 规则」。
 
@@ -38,8 +38,8 @@ Team Client 渲染在 shipped DSH 外壳内部，必须讲基础 UI 的设计语
 
 有三处**刻意不跟齐**。它们是裁决而不是漂移，写在这里是为了避免后来者把它「修好」：
 
-- **小胶囊底色**：shipped 的 `.reference` 是行内编辑器引用，平时透明、hover 才上色；Team 的 chip 要在 14px 正文里读成同一个 token，因此继续以共享 hover 底色作为自己的地面。
+- **小胶囊底色**：shipped 的 `.reference` 是行内编辑器引用，平时透明、hover 才上色。Team 的 chip 要在 14px 正文里读成同一个 token，因此继续以共享 hover 底色作为自己的地面。
 - **composer 卡内距**：shipped 卡上 8px、下 4px；Team 的卡多了它没有的行（收件人提示行与附件 chip），因此保留上 10px、下 8px。卡的描边、圆角、底色与阴影与 shipped 完全一致。
-- **中性描边宽度**：shipped 把每一条中性分隔线都写成 `0.5px`（`--dsw-alias-border-l*`，共 164 处），但 Chromium 会把 `border-width` 向上取整到整数 CSS 像素——computed 的 `0.5px` 边框在设备像素比 1×、1.25×、2×、3× 下都报成并画成 `1px`，把 shipped 源码原样取出逐像素实测也是这个结果。Team 直接写实际渲染的那个值 `1px`：像素与 shipped 完全一致，源码说出的就是眼睛看到的。真正的半像素机制是上一条「卡片表面」所用的 `box-shadow` 发丝线。
+- **中性描边宽度**：shipped 把每一条中性分隔线都写成 `0.5px`（`--dsw-alias-border-l*`，共 164 处），但 Chromium 会把 `border-width` 向上取整到整数 CSS 像素。computed 的 `0.5px` 边框在设备像素比 1×、1.25×、2×、3× 下都报成并画成 `1px`，把 shipped 源码原样取出逐像素实测也是这个结果。Team 直接写实际渲染的那个值 `1px`：像素与 shipped 完全一致，源码说出的就是眼睛看到的。真正的半像素机制是上一条「卡片表面」所用的 `box-shadow` 发丝线。
 
 按面记录的组件级裁决在 [components.md](components.md)；审计脚本报告机械漂移，判断由这些文档拥有。

@@ -34,7 +34,9 @@ node scripts/sync-paths.mjs
 
 `tsconfig*.json` path facades 不应添加 `include` 或 `files`；它们需要保持对当前仓库文件和相邻 Harness source/declaration 的匹配行为。
 
-`generate:typert` 分析的是 Harness checkout 内的一份 Host face 副本，因此它自己准备那个临时包的外部依赖：context-continuity 引擎的已构建声明被复制进去，而 `zod` 从本仓库根安装链接过去——POSIX 上是 symlink，Windows 上是目录 junction（那里真正的 symlink 需要特权）。`zod` 必须保持为链接：复制会把 zod 自己的声明放进被分析的包内，分析器的 reachable-files 遍历会因此排入一个 program 从未加载的声明文件，以 `TypeError` 而非可诊断错误终止；反之链接若解析不到，才会以每个引用文件都报 `TS2307: Cannot find module 'zod'` 的形式暴露。
+`generate:typert` 分析的是 Harness checkout 内的一份 Host face 副本，因此它自己准备那个临时包的外部依赖。context-continuity 引擎的已构建声明被复制进去，而 `zod` 从本仓库根安装链接过去——POSIX 上是 symlink，Windows 上是目录 junction（那里真正的 symlink 需要特权）。
+
+`zod` 必须保持为链接。复制会把 zod 自己的声明放进被分析的包内，分析器的 reachable-files 遍历会因此排入一个 program 从未加载的声明文件，以 `TypeError` 而非可诊断错误终止。反之链接若解析不到，才会以每个引用文件都报 `TS2307: Cannot find module 'zod'` 的形式暴露。
 
 ## Package 接缝与模块布局
 发布物是一个根 npm 包 `@contexera/dsh-agent-team`，由根 `package.json` 及其 `exports` map 声明。三个 `packages/*` 目录没有自己的 manifest：它们是这个单一包的构建与导出接缝，各自有构建目标和 `exports` 条目。
@@ -74,11 +76,11 @@ types/requests-results.ts   公开的 request 与 result 形状
 
 **那六个面不会问的一个问题：崩溃重导。** 对这个 operation 驱动的每一个进程内效果——一次唤醒、一次销毁、一次激活、一个外部文件副作用——回答：如果进程在 commit 与效果之间死掉，由哪个 durable state 重导它，而这次重导是否幂等？效果是在 replay **之后**重导的，而不是由 replay 代替；它是一句问句，而不是第七个面。[`host-authority.md`](../architecture/host-authority.md) 记录了 Host 自己的那些重导。
 
-invariant companion 是"被覆盖"而不是"要扩展"：`invariant.ts` 在 mount 时与每次 commit 后校验整个 durable ledger，所以只要新 operation 能 replay，它的 durable record 就自动纳入覆盖。覆盖止于 durable table——上面那句问的进程内效果没有 invariant。只有当新 record 形状需要 projection validator 尚未断言的关系时才扩展它。
+invariant companion 是"被覆盖"而不是"要扩展"。`invariant.ts` 在 mount 时与每次 commit 后校验整个 durable ledger，所以只要新 operation 能 replay，它的 durable record 就自动纳入覆盖。覆盖止于 durable table——上面那句问的进程内效果没有 invariant。只有当新 record 形状需要 projection validator 尚未断言的关系时才扩展它。
 
 这份清单依赖两条边界：
 
-- operation-kind 语义集中在 `ledger.ts`。不要为了缩短文件把它们拆到新模块，也不要把 `spec.ts` 的 record schema 抽成共享 helper——per-kind 的空壳是刻意的，而一个 kind 的校验只有与它的 projection 放在一起才有意义。
+- operation-kind 语义集中在 `ledger.ts`。不要为了缩短文件把它们拆到新模块，也不要把 `spec.ts` 的 record schema 抽成共享 helper。per-kind 的空壳是刻意的，而一个 kind 的校验只有与它的 projection 放在一起才有意义。
 - 新 operation 不等于新 service。它经由现有 ledger 与现有 Remote adapter 进入；不新增 store、不新增平行 projection、不新增第二个 authority。
 
 验证用 `npm run typecheck`、最窄的 Host 测试目标，以及当该 operation 到达 Client 时的 `npm run test:browser`。`npm run check:boundaries` 会随 `npm test` 一起跑，若改动用相对路径而非声明 subpath 跨越 package 就会失败。

@@ -117,9 +117,9 @@ Two failure classes are therefore invisible to them, and both have shipped: a Me
 Add both checks whenever the candidate changes the Session format, the message-source vocabulary, or any shipped preset row:
 
 - **Existing-history upgrade.** Take a profile that already holds Member Sessions written by the previous certified line — including at least one rolled-over generation — and open them under the candidate. Every one must load; a refusal is a release blocker, not a data problem, because the audit is fail-closed and leaves the source artifact unchanged. Record the artifact count checked and the result per artifact.
-- **Published-bundle viability.** Determine whether the **currently published** Team bundle still functions on the candidate DSH, not just the candidate bundle. Install the published version against the candidate in an empty directory, boot it, and exercise Member creation. This decides release urgency: when `latest` has already moved to the candidate, an incompatible published bundle breaks new installs outright, which makes the round release-blocking rather than routine.
+- **Published-bundle viability.** Determine whether the **currently published** Team bundle still functions on the candidate DSH, not just the candidate bundle. Install the published version against the candidate in an empty directory, boot it, and exercise Member creation. This decides release urgency. When `latest` has already moved to the candidate, an incompatible published bundle breaks new installs outright, which makes the round release-blocking rather than routine.
 
-A custom Session message source kind is the durable trap behind the first check: `@deepseek-ai/dsh-llm` documents `MessageSourceMap` as merge-extensible, but the released-format migration audit admits a closed, build-static list of source kinds, so a plugin that adds one writes logs that a later format generation refuses wholesale.
+A custom Session message source kind is the durable trap behind the first check. `@deepseek-ai/dsh-llm` documents `MessageSourceMap` as merge-extensible, but the released-format migration audit admits a closed, build-static list of source kinds, so a plugin that adds one writes logs that a later format generation refuses wholesale.
 
 The trap has a second half: the audit also pins a `plugin` source's members to `kind`, `plugin`, `form`, `sections`, and `summary`, so re-opening the same payload under the admitted kind still fails on any bespoke envelope field.
 
@@ -127,7 +127,7 @@ Both halves are fail-closed and report different errors, so certification eviden
 
 Encode plugin semantics in the admitted shape instead: structured payload as named `{ name, text }` sections under `form: 'snapshot'`, a human-readable one-liner as `summary` under `form: 'notice'`, and any further prose in the model-facing body, which is unconstrained.
 
-A section's `text` is the plugin's own string and is read back verbatim, so encode a list as JSON rather than as a delimiter-joined string: a path or name may itself contain the delimiter, and the split then recovers different values than were written.
+A section's `text` is the plugin's own string and is read back verbatim, so encode a list as JSON rather than as a delimiter-joined string. A path or name may itself contain the delimiter, and the split then recovers different values than were written.
 
 There is no general slot for extra members — the upstream `compact` plugin obtained one only by special-casing its plugin id — so a plugin that needs bespoke members must request that upstream.
 
@@ -135,7 +135,7 @@ There is no general slot for extra members — the upstream `compact` plugin obt
 
 The Harness ships an experimental Agent Teams feature as its own profile bundles (`@deepseek-ai/dsh-experimental-agent-team-profile`, `@deepseek-ai/dsh-experimental-agent-team-web-profile`).
 
-It is a competing Team implementation, not an extension point this bundle builds on: it registers its own model-facing tool family (`spawn_teammate`, `send_message`, `list_agents`, `wait_agent`, `interrupt_agent`, `team_task_*`), disables the shipped global subagent rows in its profile patch to free those names, and carries its own members, tasks, store, and client panel.
+It is a competing Team implementation, not an extension point this bundle builds on. It registers its own model-facing tool family (`spawn_teammate`, `send_message`, `list_agents`, `wait_agent`, `interrupt_agent`, `team_task_*`), disables the shipped global subagent rows in its profile patch to free those names, and carries its own members, tasks, store, and client panel.
 
 This bundle's tools are `team_view`, `team_inbox`, `team_thread`, `team_message`, and `team_claim`, registered only inside its `team-member` preset.
 
@@ -175,9 +175,9 @@ The removed `@deepseek-ai/dsh-invariants` peer likewise left with the registry r
 
 One dependency sits outside the DSH line and therefore outside this certification: `@contexera/dsh-jev` ships with the bundle, because the Team Host mounts it as the long-gap relatedness judge from its own row's key. Its declared peers are Cordis and Schemastery alone, so it contributes no DSH peer declaration to the tree; the endpoint, model and key stay the deployment's to state.
 
-The routed sqlite backend is a vendored fork, not a dependency at all (GitHub issue #28): the upstream package stays a devDependency pinned at the fork source, 0.1.5-rc.2, as the byte-compatibility fixture reference, and every compat round diffs the fork against that version's file before anything else.
+The routed sqlite backend is a vendored fork, not a dependency at all (GitHub issue #28). The upstream package stays a devDependency pinned at the fork source, 0.1.5-rc.2, as the byte-compatibility fixture reference, and every compat round diffs the fork against that version's file before anything else.
 
-The `0.1.5-rc.1` baseline this replaced was certified over Typert generation, full typecheck, 499 tests (1 skipped), build, pack checks, lint, and real browser composition with published-layout installation, Remote mount, Team entry/exit, and ordinary DSH restoration, on peers `>=0.1.5-rc.1 <0.1.6`; `0.1.5-rc.2` was certified on those same peers with no manifest change.
+The `0.1.5-rc.1` baseline this replaced was certified over Typert generation, full typecheck, 499 tests (1 skipped), build, pack checks, lint, and real browser composition with published-layout installation, Remote mount, Team entry/exit, and ordinary DSH restoration, on peers `>=0.1.5-rc.1 <0.1.6`. `0.1.5-rc.2` was certified on those same peers with no manifest change.
 
 The bundle's dependence on that line is structural rather than incidental. A candidate that changes any of the following is a peer-range change, not a patch:
 
@@ -187,7 +187,7 @@ The bundle's dependence on that line is structural rather than incidental. A can
 - The `team-member` preset is declared as a `@deepseek-ai/dsh-agent-preset` row beside its `@deepseek-ai/dsh-agent-preset-registry`, inside the Team's own `isolate` group.
 - Every durable message source the bundle writes carries its producer's own kind; the retired `{ kind: 'plugin', plugin: … }` wrapper is refused at write time.
 
-Preset composition has no compile-time or unit-test guard: the member specs compose a synthetic preset, so a row whose config no longer matches its plugin schema surfaces only in the real browser journey — every Member fails to activate with `preset "team-member" failed to mount: … $.prefix missing required value` while typecheck, unit tests, and build stay green.
+Preset composition has no compile-time or unit-test guard: the member specs compose a synthetic preset, so a row whose config no longer matches its plugin schema surfaces only in the real browser journey. Every Member fails to activate with `preset "team-member" failed to mount: … $.prefix missing required value` while typecheck, unit tests, and build stay green.
 
 Treat `npm run test:browser` as the certification gate for shipped preset rows.
 
@@ -197,7 +197,7 @@ A migration refusal is fail-closed and leaves the source artifact byte-identical
 
 Both classes are release-blocking while npm `latest` points at the candidate.
 
-Existing-history upgrade viability was measured, not assumed: the `0.1.5` candidate's closed source-kind audit refused every Member artifact the released line wrote, and the startup repair pass the bundle then carried repaired 44 refused artifacts across this machine's full store, left 6 untouched for structural Session defects, wrote no byte into any pre-existing artifact, and published nothing on a second walk.
+Existing-history upgrade viability was measured, not assumed. The `0.1.5` candidate's closed source-kind audit refused every Member artifact the released line wrote. The startup repair pass the bundle then carried repaired 44 refused artifacts across this machine's full store, left 6 untouched for structural Session defects, wrote no byte into any pre-existing artifact, and published nothing on a second walk.
 
 ### DSH 0.1.7-rc.1
 
@@ -206,12 +206,12 @@ DSH `0.1.7-rc.1` is certified and moves the baseline. Every `@deepseek-ai/dsh-*`
 Two upstream contract changes drove the round, and both required source adaptation:
 
 - **The preset system was replaced.** Filesystem preset discovery through `@deepseek-ai/dsh-agent-presets` (`roots`/`trust`) is gone; presets are now rows — a host-level `@deepseek-ai/dsh-agent-preset-registry` plus one `@deepseek-ai/dsh-agent-preset` declaration row per preset (`config: { id, plugins }`).
-- **The Team's rows moved with it.** `cordis.patch.yml` now declares the registry (`default: team-member`) and the `team-member` definition row inside one `isolate: { agentPresets: true }` group, with the retired roster's entry list inlined verbatim as `config.plugins` — including both `!!js` platform expressions, because a preset keeps child expressions deferred until their own plugins activate.
+- **The Team's rows moved with it.** `cordis.patch.yml` now declares the registry (`default: team-member`) and the `team-member` definition row inside one `isolate: { agentPresets: true }` group. The retired roster's entry list is inlined verbatim as `config.plugins` — including both `!!js` platform expressions, because a preset keeps child expressions deferred until their own plugins activate.
 - **No Host call site moved.** The `agentPresets` service surface is unchanged; `preset-roster.ts` and the `preset/` directory were deleted rather than rewritten, and the browser-lane overlay carries the same rows.
 - **Session format V4 requires producer-owned message sources.** The jsonl write path refuses `{ kind: 'plugin', plugin: … }` with `format v4 message requires a producer-owned source kind`, so the bundle's nine write sites now write their three producer ids as kinds.
-- **Released V3 history needs no rewrite on disk.** The read-time conversion renames each wrapper to `plugin:<producer>` and preserves `form`/`sections`/`summary`; the read side recognizes both shapes for all three ids by exact identity, never by a `plugin:` prefix test, because the same log carries third-party rows.
+- **Released V3 history needs no rewrite on disk.** The read-time conversion renames each wrapper to `plugin:<producer>` and preserves `form`/`sections`/`summary`. The read side recognizes both shapes for all three ids by exact identity, never by a `plugin:` prefix test, because the same log carries third-party rows.
 
-The startup repair pass (`session-remediation.ts`) was removed in the same change, with Human approval: what it published was precisely the wrapper V4 refuses at write time, so keeping it would manufacture unreadable files, and the pre-0.1.5 kinds it targeted are refused by the released v2→v3 chain before the read-time conversion runs. A deterministic `session-refused` activation now reports the same failure on every restart instead of healing it.
+The startup repair pass (`session-remediation.ts`) was removed in the same change, with Human approval. What it published was precisely the wrapper V4 refuses at write time, so keeping it would manufacture unreadable files, and the pre-0.1.5 kinds it targeted are refused by the released v2→v3 chain before the read-time conversion runs. A deterministic `session-refused` activation now reports the same failure on every restart instead of healing it.
 
 One further change stopped at the test fixtures: rc.1 redrew `IconUserOutlineArtwork` onto a half-pixel grid without renaming the symbol or changing its wrapper, so the `settingsAction` icon's `data-content` fingerprint moved `612cfab9` → `68b4b343` and one committed snapshot line was refreshed. No bundle source changed.
 
@@ -219,7 +219,7 @@ One further change stopped at the test fixtures: rc.1 redrew `IconUserOutlineArt
 
 DSH `0.1.7-rc.2` is certified on the same peers with no manifest change. The candidate falls inside `>=0.1.7-rc.1 <0.1.8`, so section 4 records a baseline instead of a peer move, and every version spot keeps naming the range's lower bound. Tag `477b4f42` (2026-09-24) was certified before npm carried it: at certification time `next` still pointed at `0.1.7-rc.1`.
 
-No symbol this bundle imports was removed or renamed. Inside the peered packages the delta is 213 non-documentation files, concentrated in the shipped Client surface the bundle composes into (`ui-primitives` 55, `ui-conversation` 22, `ui-workspace` 15); `session-format-catalog`, `session-persistence`, and the Typert protocol changed only their manifests, so section 3.6 is not re-triggered.
+No symbol this bundle imports was removed or renamed. Inside the peered packages the delta is 213 non-documentation files, concentrated in the shipped Client surface the bundle composes into (`ui-primitives` 55, `ui-conversation` 22, `ui-workspace` 15). `session-format-catalog`, `session-persistence`, and the Typert protocol changed only their manifests, so section 3.6 is not re-triggered.
 
 Two upstream changes stopped at the test fixtures, and neither moved bundle source. The shipped layout and sidebar now inject a `shortcuts` service, so the takeover bench provides the empty catalog and no-op registrer both parents require.
 
@@ -231,7 +231,7 @@ Evidence on the certified tree: `npm run typecheck`, `npm test` (741 passed, 1 s
 
 This is a pre-certification, not a baseline. Upstream merged its unreleased plugin-ecosystem line into `master` without a tag: at the frozen commit `21638c5631` (2026-09-27, `Merge PR #5282`, 155 commits after `dsh-v0.1.7-rc.2`) `apps/cli` still declares `0.1.7-rc.2`, and no `dsh-v*` tag exists after rc.2.
 
-Section 2.2's basis is an immutable tag together with the npm packages it published, and this candidate has neither, so nothing moved: the baseline stays `0.1.7-rc.1`, every version spot keeps naming its lower bound, the CI harness tag is unchanged, and the peer move waits for a tagged `0.2.0`.
+Section 2.2's basis is an immutable tag together with the npm packages it published, and this candidate has neither, so nothing moved. The baseline stays `0.1.7-rc.1`, every version spot keeps naming its lower bound, the CI harness tag is unchanged, and the peer move waits for a tagged `0.2.0`.
 
 Certification ran anyway, to learn early whether that line breaks the bundle. It does not: no imported symbol was removed or renamed, and no bundle source changed. The one required change is generated — `node scripts/sync-paths.mjs` against the candidate absorbs 13 new upstream path aliases (507 Harness mappings) — and it stays uncommitted, because the committed facades must keep matching the baseline tag that CI regenerates them from.
 
@@ -255,7 +255,7 @@ DSH `0.2.0-rc.1` is certified and moves the baseline; it is the tagged release t
 
 At certification time npm `next` already pointed at it while `latest` still pointed at `0.1.7-rc.2`, so the round was not release-blocking.
 
-The candidate falls outside `>=0.1.7-rc.1 <0.1.8` — a comparator enables prereleases only on its own base tuple, so that range reaches no `0.2.0` cut — and section 4 therefore requires the atomic move: all 45 DSH peers to `>=0.2.0-rc.1 <0.2.1`, the CI harness tag to `dsh-v0.2.0-rc.1`, the Hoplite tag, and every wording spot that names the range.
+The candidate falls outside `>=0.1.7-rc.1 <0.1.8` — a comparator enables prereleases only on its own base tuple, so that range reaches no `0.2.0` cut. Section 4 therefore requires the atomic move: all 45 DSH peers to `>=0.2.0-rc.1 <0.2.1`, the CI harness tag to `dsh-v0.2.0-rc.1`, the Hoplite tag, and every wording spot that names the range.
 
 The declared range decides whether the bundle mounts at all. `loadProfileDirectory` evaluates each bundle manifest through `evaluatePluginCompatibility`, and a bundle whose peers do not admit the running Host goes into `skippedBundles`.
 
@@ -279,7 +279,7 @@ The trailing declared range is closed: `@wowyuarm/dsh-context-continuity@0.1.6` 
 
 Nothing loaded that copy: the engine's only reference to the package is a type-only import, this bundle never names it, and the engine is a library rather than a profile bundle, so its peers never reach `evaluatePluginCompatibility`.
 
-The dependency floor moves with the engine so a lockfile still holding `0.1.5` cannot keep the older declaration alive, and the engine's own range now admits the `0.2.0` line, so installing it at the root of a `0.2.0-rc.1` profile no longer meets a range that excludes the host. The engine's move ships in the same window as this line, because an engine naming `0.2.0-rc.1` puts a stray copy of that generation into trees still on `0.1.7-rc.2`.
+The dependency floor moves with the engine, so a lockfile still holding `0.1.5` cannot keep the older declaration alive. The engine's own range now admits the `0.2.0` line too, so installing it at the root of a `0.2.0-rc.1` profile no longer meets a range that excludes the host. The engine's move ships in the same window as this line, because an engine naming `0.2.0-rc.1` puts a stray copy of that generation into trees still on `0.1.7-rc.2`.
 
 ### DSH 0.2.0-rc.2
 
@@ -303,6 +303,6 @@ Section 3.5 resolves a single DSH generation: 278 `@deepseek-ai/dsh-*` copies, e
 
 The published `0.2.0` bundle was installed against the candidate and booted from a real profile: 278 DSH copies all at the candidate, 188 composed rows, no skipped bundle, and its Client module served at 654,554 bytes.
 
-The certified baseline advanced to this candidate on 2026-09-29, after the certification rather than as part of it: the operator moved all 45 DSH peers to `>=0.2.0-rc.2 <0.2.1`, with the CI harness tag and the Hoplite tag to `dsh-v0.2.0-rc.2` and every wording spot that names the range.
+The certified baseline advanced to this candidate on 2026-09-29, after the certification rather than as part of it. The operator moved all 45 DSH peers to `>=0.2.0-rc.2 <0.2.1`, with the CI harness tag and the Hoplite tag to `dsh-v0.2.0-rc.2` and every wording spot that names the range.
 
 The move narrows the declared line to `0.2.0-rc.2` and later. The published `0.2.0` tarball keeps its wider `>=0.2.0-rc.1 <0.2.1` declaration, so only a later release refuses a host still on `0.2.0-rc.1`.
