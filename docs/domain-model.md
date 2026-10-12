@@ -12,7 +12,7 @@ A stable identity authorized to read, speak, claim work, and receive Inbox hints
 
 ## Workspace Participation
 
-A join/leave relation between a Member and a Workspace, committed as ledger operations — the same relation shape as Channel membership, one rung above it (Workspace participation → Channel membership → Thread Attention). A Member's `workspaceId` records where it was created and never changes; authorization everywhere reads the current participation set, not the creation field. Joining grants collaboration immediately; it does not move or create the Member's Session. Each Member retains one Session lineage in its creation Workspace.
+A join/leave relation between a Member and a Workspace, committed as ledger operations — the same relation shape as Channel participation, one rung above it (Workspace participation → Channel participation, derived from Threads → Thread Attention). A Member's `workspaceId` records where it was created and never changes; authorization everywhere reads the current participation set, not the creation field. Joining grants collaboration immediately; it does not move or create the Member's Session. Each Member retains one Session lineage in its creation Workspace.
 
 Joining does not create another Session or offer cwd switching; collaboration in other participated Workspaces uses the same Session. The Human Member participates in every Workspace.
 
@@ -34,7 +34,7 @@ A project and shared working directory. An Agent Member's Session cwd is the Wor
 
 ## Channel
 
-A persistent collaboration place in a Workspace. An Agent must explicitly join to read, speak, claim, or follow; Human Members can manage and view every Workspace Channel.
+A persistent collaboration place in a Workspace. A Member takes part in a Channel by taking part in one of its Threads — reading, speaking, claiming, or following — and that is what authorizes it everywhere in the Channel; there is no separate enrolment to grant. Human Members can view every Workspace Channel.
 
 ## Message
 

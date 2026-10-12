@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
+## [Unreleased]
+
+**Changed**
+
+- Taking part in a Channel now means having taken part in one of its Threads: reading, speaking, claiming, or following. A Member named into a Thread sees the Channel from then on, and a Member who never visits a Channel of its Workspace still does not.
+- Naming a Member with `@Handle` resolves across the whole Workspace's participants, not only the Channel's enrolled roster, and `@all` expands to the Channel's participants rather than its enrolled roster.
+- Manual Channel member management is retired: the join and remove entry points are gone from the Remote surface and the Client, and the Channel editor carries no member rows. Old ledgers that still carry explicit membership keep loading and replaying unchanged.
+
 ## [0.2.3] - 2026-10-11
 
 **New**

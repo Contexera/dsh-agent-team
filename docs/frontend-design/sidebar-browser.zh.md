@@ -25,7 +25,7 @@ Workspace 概览是当前页时，概览携带 `aria-current='page'`。与原先
 行级 ⋯ 菜单是 `TeamRowMenu`，复用公共 `Menu`。`Menu` 用 `portal` + `closeOnPointerLeave`，锚为裸 ellipsis 图标按钮。hover、focus-within、菜单开启三种状态下可见。菜单开启时该行钉住 hover 底色（`data-menu-open`）。菜单含「编辑」入口，打开对应编辑器。
 - error 态成员额外出现「恢复」项，走 `recoverMember` Remote。Host 向这个成员的活跃会话 steer 续作 prompt。这是运行时动作，不落 ledger。历史上的「从全新上下文开始」入口已移除。Member 经 `context_rollover` 工具自管上下文，Host 侧 clear-context Remote 保留为无可见入口的迁移逃生门。
 
-频道编辑器（`编辑频道`）：名称/说明输入框 + 成员增删字段集。保存钮无改动即禁用，这是 dirty 门。提交走 `updateChannel` Remote，幂等 request 同载荷复用。成功后由投影刷新回填行文案，不做乐观行内改名。成员增删仍走既有 join/remove Remote（request 按 方向+成员+Channel 键复用）。
+频道编辑器（`编辑频道`）：名称/说明输入框。保存钮无改动即禁用，这是 dirty 门。提交走 `updateChannel` Remote，幂等 request 同载荷复用。成功后由投影刷新回填行文案，不做乐观行内改名。成员增删入口已撤销——Channel 参与由 Thread 参与派生。
 
 Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。模型选择复用公共 `Menu` 原语。触发钮呈 Input 形态：当前值 + 旋转 chevron。选项首行「跟随全局默认」，其后按 provider 分组标题 + 模型行，选中尾勾。目录经宿主级 `llm.models` 取得，不依赖任何活跃会话。提交走 `updateMember` Remote。缺省模型即清除覆盖，回到 Host 默认继承。改模型对活跃 Member 原地更新 live model selection，保持 Agent 与 Session 身份不变。后续请求使用新选择。纯展示编辑不重启。
 
