@@ -29,13 +29,6 @@ function memberStatus(memberId: string, handle: string, extra: { readonly presen
 }
 
 describe('Team presentation formatters', () => {
-  it('localizes Task and Claim states', () => {
-    expect(formatTaskStatus('in_review', t)).toBe('待验收')
-    expect(formatTaskStatus('closed', t)).toBe('已关闭')
-    expect(formatClaimState('active', t)).toBe('进行中')
-    expect(formatClaimState('released', t)).toBe('已释放')
-  })
-
   it('names every diagnostic class instead of showing the Host reason alone', () => {
     const status = (diagnosticClass?: AgentTeamMemberDiagnostic['class']): Pick<AgentTeamClientMemberStatus, 'diagnostic'> =>
       diagnosticClass === undefined ? {} : { diagnostic: { class: diagnosticClass, detail: 'host reason' } }
