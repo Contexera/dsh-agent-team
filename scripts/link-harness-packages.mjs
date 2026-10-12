@@ -12,7 +12,7 @@
 // `@contexera/dsh-context-continuity` by name and must resolve exactly one copy
 // of it. A clean checkout resolves the published package the package manager
 // already installed instead, and then there is nothing to link.
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmdirSync, symlinkSync, unlinkSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { continuityDir, continuityEntry, continuityFromSibling } from './continuity-dir.mjs'
@@ -28,6 +28,19 @@ const scopeOf = name => {
 }
 
 let linked = 0
+
+// Replace a link left by an earlier harness layout: it dangles, so existsSync
+// follows it and reports false; without this the create below fails EEXIST on
+// a rerun. A healthy link resolves and is left alone. A win32 junction is
+// reported as a symlink by lstat but is a directory reparse point, which
+// unlink cannot remove.
+const removeStaleLink = target => {
+  if (existsSync(target)) return
+  if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink() !== true) return
+  if (process.platform === 'win32') rmdirSync(target)
+  else unlinkSync(target)
+}
+
 const linkPackage = (name, packageDir) => {
   const scope = scopeOf(name)
   if (scope === undefined) return
@@ -35,9 +48,7 @@ const linkPackage = (name, packageDir) => {
   mkdirSync(scopeRoot, { recursive: true })
   const target = join(scopeRoot, name.slice(scope.length + 1))
   if (existsSync(target)) return
-  // A link left by an earlier harness layout dangles: existsSync is false for
-  // it, so replace it instead of failing the rerun with EEXIST.
-  if (lstatSync(target, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(target)
+  removeStaleLink(target)
   // node_modules/<scope>/<name> -> ../../../deepseek-harness/<packageDir>
   const relativeTarget = relative(scopeRoot, packageDir)
   if (process.platform === 'win32') {
@@ -96,7 +107,7 @@ if (continuityFromSibling) linkPackage('@contexera/dsh-context-continuity', cont
 const selfRef = join(repoRoot, 'node_modules', '@contexera')
 mkdirSync(selfRef, { recursive: true })
 const selfTarget = join(selfRef, 'dsh-agent-team')
-if (lstatSync(selfTarget, { throwIfNoEntry: false })?.isSymbolicLink()) rmSync(selfTarget)
+removeStaleLink(selfTarget)
 if (!existsSync(selfTarget)) {
   if (process.platform === 'win32') {
     symlinkSync(relative(selfRef, repoRoot), join(selfRef, 'dsh-agent-team'), 'junction')
