@@ -5,6 +5,7 @@ import { IconChecklistOutlineMedium, IconPaperclipOutlineMedium, IconSendOutline
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
+import { mentionSurfaceOf, mentionTierIsParticipant } from './mention-presentation.ts'
 import { allMentionMembers, containsAllMention, containsMention, HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
@@ -145,6 +146,9 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   // could address — the same split the Host's allRecipientsFor makes.
   const allMembers = channelPeerMemberIds === undefined ? members : members.filter(status => channelPeerMemberIds.has(status.member.memberId))
   const allCount = allMentionMembers(allMembers).length
+  // The surface comes from the draft key this composer already writes to, so
+  // the weight cannot disagree with the conversation the draft belongs to.
+  const mentionSurface = mentionSurfaceOf(draftKey)
   const listId = 'team-mention-suggestions'
   const menuMaxHeight = useAnchoredMaxHeight(menuRef, 320, menuOpen ? draft : null)
 
@@ -376,6 +380,9 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
                   // How directly a pick reaches this Member; the row's styling
                   // and the sort order read the same tier.
                   data-mention-tier={option.tier}
+                  // Whether the pick lands inside the conversation being
+                  // written into; the name drops a weight when it does not.
+                  data-mention-inside={String(mentionTierIsParticipant(option.tier, mentionSurface))}
                 >
                   <TeamPresenceDot status={option.status} t={t} />
                   <span className={css.mentionName}>@{option.status.member.handle}</span>

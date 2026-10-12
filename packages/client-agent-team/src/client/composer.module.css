@@ -136,6 +136,15 @@
   white-space: nowrap;
 }
 
+/* A candidate outside the conversation being written into stays pickable —
+   the Host addresses them too — so the distinction is weight, not absence.
+   The name drops to the secondary label alias while the row keeps its own
+   contrast. Weight alone carries it: the confirmation a Thread reply can
+   trigger is stated by the status line after the send, not on the row. */
+.mentionOption[data-mention-inside='false'] .mentionName {
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* Icon-sized stand-in for the presence dot on the @all row: theme label
  * color, slightly smaller than the 16px member dots. */
 .mentionAllDot {
@@ -389,6 +398,9 @@
 
 @media (max-width: 600px) {
   .mentionOption {
+    /* The description is dropped below, so the row reads as two columns:
+       dropping to a third would leave the hidden cell holding the free
+       column and squeeze the name into `auto`. */
     grid-template-columns: 16px minmax(0, 1fr);
     min-height: 36px;
     padding-block: 6px;
