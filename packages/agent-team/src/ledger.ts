@@ -1982,10 +1982,16 @@ export class AgentTeamLedger {
       workspaces: Object.freeze(memberId === undefined ? [] : this.workspacesOfFrom(this.state, memberId)
         .map(workspaceId => Object.freeze({ workspaceId, default: workspaceId === this.state.members.get(memberId)?.workspaceId }))),
       channels: Object.freeze(channels),
-      members: Object.freeze([...this.state.memberships.entries()].filter(([channelRef]) => channelRefs.has(channelRef)).flatMap(([channelRef, ids]) =>
-        [...ids].filter(id => {
-          const state = this.state.members.get(id)?.state
-          return state !== 'inactive' && state !== 'archived'
+      // Channel participation is derived, so this roster is derived the same
+      // way: every Member that takes part in a visible Channel, whether by an
+      // enrolment a historical ledger still carries or by having taken part in
+      // one of its Threads. Reading the membership table directly would hide
+      // exactly the Members the widened mention rules let you address.
+      members: Object.freeze([...channelRefs].flatMap(channelRef => [...this.state.members.keys()]
+        .filter(memberId => {
+          const state = this.state.members.get(memberId)?.state
+          return state !== undefined && state !== 'inactive' && state !== 'archived'
+            && this.isChannelMemberFrom(this.state, channelRef, memberId)
         }).sort().map(memberId => Object.freeze({ channelRef, memberId })))),
       tasks: Object.freeze(catalogTasks),
       threads: Object.freeze(catalogThreads),

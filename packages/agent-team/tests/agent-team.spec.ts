@@ -2804,6 +2804,28 @@ describe('body-authored mentions', () => {
     expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
   })
 
+  it('lists a derived Channel participant in the view roster the composer reads', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('roster-channel'), workspaceId: alpha, name: 'engineering', description: '' })
+    const ledger = replayLedger(test)
+    const insider = await addLedgerMember(ledger, channel.channel.channelRef, undefined, 'Test Agent', 'insider')
+    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
+    committed((await ledger.sendMessage({ requestId: requestId('roster-msg'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      body: '@outsider, please look', asTask: false, actor: agentTeamHumanActor() })).value)
+
+    // The roster a UI mention picker reads is derived the same way visibility
+    // is: the Member the Host now lets you address must appear in it, or the
+    // composer offers a narrower set than the ledger accepts.
+    const roster = ledger.view({ workspaceId: alpha }).members
+    expect(roster).toContainEqual({ channelRef: channel.channel.channelRef, memberId: insider.member.memberId })
+    expect(roster).toContainEqual({ channelRef: channel.channel.channelRef, memberId: outsider.member.memberId })
+
+    // Removing the Member ends it: derivation never outlives the Member.
+    await ledger.removeMember({ requestId: requestId('roster-remove'), memberId: outsider.member.memberId, actor: agentTeamHumanActor() })
+    expect(ledger.view({ workspaceId: alpha }).members).not.toContainEqual({ channelRef: channel.channel.channelRef, memberId: outsider.member.memberId })
+    ledger.validate()
+  })
+
   it('reloads a ledger written with the widened mention rules and keeps committing', async () => {
     const test = await harness()
     const { ledger, channelRef } = await channelOf(test)
