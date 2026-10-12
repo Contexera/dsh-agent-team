@@ -54,21 +54,10 @@ describe('Team conversation surfaces', () => {
     expect(b.view.container.querySelector('[data-team-workspace-trigger]')?.getAttribute('aria-current')).toBeNull()
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     const channelPage = b.view.container.querySelector('[data-team-channel]') as HTMLElement
-    const manageMembers = within(channelPage).getByRole('button', { name: '管理成员' })
-    fireEvent.click(manageMembers)
-    const pageManager = b.view.getByRole('dialog', { name: '频道成员' })
-    expect(within(pageManager).getByText('@builder')).toBeTruthy()
-    await waitFor(() => expect(document.activeElement).toBe(within(pageManager).getByRole('button', { name: '移除' })))
-    const removal = Promise.withResolvers<Awaited<ReturnType<typeof b.removeChannelMember>>>()
-    b.removeChannelMember.mockReturnValueOnce(removal.promise)
-    fireEvent.click(within(pageManager).getByRole('button', { name: '移除' }))
-    expect((within(pageManager).getByRole('button', { name: '更新中…' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((within(pageManager).getAllByRole('button', { name: '添加' })[0] as HTMLButtonElement).disabled).toBe(false)
-    removal.resolve({ ok: false, error: { message: 'membership failed' } } as never)
-    expect((await within(pageManager).findByRole('alert')).textContent).toContain('membership failed')
-    expect(within(pageManager).getByRole('button', { name: '移除' })).toBeTruthy()
-    fireEvent.click(within(pageManager).getByRole('button', { name: '关闭' }))
-    await waitFor(() => expect(document.activeElement).toBe(manageMembers))
+    // Membership is derived from participation now, so the Channel page offers
+    // no management entry point at all.
+    expect(within(channelPage).queryByRole('button', { name: '管理成员' })).toBeNull()
+    expect(b.view.queryByRole('dialog', { name: '频道成员' })).toBeNull()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
     fireEvent.change(messageInput, { target: { value: 'hello team @b' } })
     fireEvent.click(b.view.getByRole('option', { name: /@builder/ }))

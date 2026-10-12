@@ -798,54 +798,14 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
   'team/channel-member-added': {
     stored: channelMemberAdded,
     legacyShapes: [],
-    retry: {
-      same: async () => {
-        const out = await ledger.joinChannel({
-          requestId: channelMemberAdded.requestId,
-          actor: human,
-          workspaceId: channelMemberAdded.data.workspaceId,
-          channelRef: channelMemberAdded.data.channelRef,
-          memberId: channelMemberAdded.data.memberId,
-        })
-        expect(out.value.channelRef, 'the join mapper answers with the stored membership').toBe(channelRef)
-        expect(out.value.memberId, 'the join mapper answers with the stored Member').toBe(memberId)
-        return out
-      },
-      changed: () => ledger.joinChannel({
-        requestId: channelMemberAdded.requestId,
-        actor: human,
-        workspaceId: channelMemberAdded.data.workspaceId,
-        channelRef: channelMemberAdded.data.channelRef,
-        memberId: otherMemberId,
-      }),
-    },
+    retry: { replayOnly: 'retired request path: Channel membership is derived from participation now, so nothing writes it — the apply/validate branches stay for old-ledger replay' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },
   'team/channel-member-removed': {
     stored: channelMemberRemoved,
     legacyShapes: [],
-    retry: {
-      same: async () => {
-        const out = await ledger.removeChannelMember({
-          requestId: channelMemberRemoved.requestId,
-          actor: human,
-          workspaceId: channelMemberRemoved.data.workspaceId,
-          channelRef: channelMemberRemoved.data.channelRef,
-          memberId: channelMemberRemoved.data.memberId,
-        })
-        expect(out.value.channelRef, 'the removal mapper answers with the stored membership').toBe(channelRef)
-        expect(out.value.removedAttention, 'the removal mapper answers with its release payload').toEqual([])
-        return out
-      },
-      changed: () => ledger.removeChannelMember({
-        requestId: channelMemberRemoved.requestId,
-        actor: human,
-        workspaceId: channelMemberRemoved.data.workspaceId,
-        channelRef: channelMemberRemoved.data.channelRef,
-        memberId: otherMemberId,
-      }),
-    },
+    retry: { replayOnly: 'retired request path: Channel membership is derived from participation now, so nothing writes it — the apply/validate branches stay for old-ledger replay' },
     legacy: { normalize: 'none', repair: 'channel-inbox-legacy-scope' },
     intent: { scopes: 'derived', inbox: 'delta' },
   },

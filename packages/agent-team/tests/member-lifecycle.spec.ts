@@ -1045,7 +1045,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(consulted).toBe(2)
   })
 
-  it('creates a Member with no description and no Channels and lights delivery on join', async () => {
+  it('creates a Member with no description and no Channels and lights delivery on mention', async () => {
     const { ctx, workspaceId, teamFiber } = await realHarness()
     const bare = await ctx.agentTeam.addMember({ requestId: requestId('bare'), workspaceId, handle: 'bare', description: '', presetId: 'team-member', channelRefs: [] })
     expect(bare.status.availability).toBe('active')
@@ -1065,11 +1065,12 @@ describe('Agent Team Member lifecycle', () => {
     expect(before.kind).toBe('committed')
     expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
 
-    // Joining a Channel lights the whole delivery chain for later mentions.
-    await ctx.agentTeam.joinChannel({ requestId: requestId('join'), workspaceId, channelRef: channel.channel.channelRef, memberId: bare.status.member.memberId })
-    const after = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('post-join'), workspaceId, channelRef: channel.channel.channelRef, body: 'Pinged after joining', recipients: [bare.status.member.memberId] })
+    // Channel enrolment is retired — membership is derived from participation
+    // — so a Workspace participant with no Channels at all is reachable by
+    // mention, and that mention is what lights the delivery chain.
+    const after = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('post-join'), workspaceId, channelRef: channel.channel.channelRef, body: 'Pinged without joining', recipients: [bare.status.member.memberId] })
     expect(after.kind).toBe('committed')
-    if (after.kind !== 'committed') throw new Error(`expected committed post-join mention, received ${after.kind}`)
+    if (after.kind !== 'committed') throw new Error(`expected committed mention, received ${after.kind}`)
     expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId })).toMatchObject({ totalUnreadCount: 1, totalDirectCount: 1,
       items: [expect.objectContaining({ task: expect.objectContaining({ taskRef: after.task!.taskRef }), directCount: 1 })] })
   })

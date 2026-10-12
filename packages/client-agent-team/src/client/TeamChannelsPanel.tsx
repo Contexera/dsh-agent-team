@@ -13,7 +13,6 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import { Button, IconArchiveOutlineRegular, IconEditOutlineRegular, IconPlusOutlineRegular, Input, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { TeamMemberRow } from './TeamMemberRow.tsx'
 import { MultiMenuField } from './multi-menu-field.tsx'
 import { SortableRow, useSidebarRowDrag } from './sidebar-drag.tsx'
 import { moveSidebarItem, useSidebarOrder } from './sidebar-order.ts'
@@ -21,7 +20,6 @@ import { useSidebarSectionOpen, setSidebarSectionOpen } from './sidebar-sections
 import { mintRequestId } from './requests.ts'
 import { TeamRowMenu } from './TeamRowMenu.tsx'
 import { TeamSidebarSection } from './TeamSidebarSection.tsx'
-import { useChannelMembership } from './team-membership.ts'
 import { useEditDialogSave } from './team-dialog-save.ts'
 import createCss from './create.module.css'
 import css from './sidebar.module.css'
@@ -35,8 +33,6 @@ interface TeamChannelsPanelProps {
   readonly createChannel: TeamSidebarProps['createChannel']
   readonly updateChannel: TeamSidebarProps['updateChannel']
   readonly archiveChannel: TeamSidebarProps['archiveChannel']
-  readonly joinChannel: TeamSidebarProps['joinChannel']
-  readonly removeChannelMember: TeamSidebarProps['removeChannelMember']
   readonly creatingAgents: readonly AgentTeamAddMemberRequest[]
   readonly selectedChannelRef?: AgentTeamChannelRef
   readonly selectChannel: TeamSidebarProps['selectChannel']
@@ -247,8 +243,6 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
                   selected={selectedChannelRef === channel.channelRef}
                   updateChannel={updateChannel}
                   archiveChannel={props.archiveChannel}
-                  joinChannel={props.joinChannel}
-                  removeChannelMember={props.removeChannelMember}
                   onCommitted={() => { void refresh() }}
                   selectChannel={selectChannel}
                   t={t}
@@ -267,15 +261,13 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
  * One sidebar Channel row: the select button keeps the `#` identity while the
  * row menu carries the entry point; editing covers display facts and membership.
  */
-function ChannelRow({ channel, members, joinedIds, selected, updateChannel, archiveChannel, joinChannel, removeChannelMember, onCommitted, selectChannel, t }: {
+function ChannelRow({ channel, members, joinedIds, selected, updateChannel, archiveChannel, onCommitted, selectChannel, t }: {
   readonly channel: AgentTeamChannel
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly joinedIds: ReadonlySet<AgentTeamMemberId>
   readonly selected: boolean
   readonly updateChannel: TeamSidebarProps['updateChannel']
   readonly archiveChannel: TeamSidebarProps['archiveChannel']
-  readonly joinChannel: TeamSidebarProps['joinChannel']
-  readonly removeChannelMember: TeamSidebarProps['removeChannelMember']
   readonly onCommitted: () => Promise<void> | void
   readonly selectChannel: TeamSidebarProps['selectChannel']
   readonly t: TeamSidebarProps['t']
@@ -342,8 +334,6 @@ function ChannelRow({ channel, members, joinedIds, selected, updateChannel, arch
           members={members}
           joinedIds={joinedIds}
           updateChannel={updateChannel}
-          joinChannel={joinChannel}
-          removeChannelMember={removeChannelMember}
           onCommitted={onCommitted}
           onClose={() => { setEditing(false) }}
           t={t}
@@ -357,13 +347,11 @@ function ChannelRow({ channel, members, joinedIds, selected, updateChannel, arch
  * Channel editor: name and description commit through one durable update;
  * Channel membership below keeps its own immediate add/remove flow.
  */
-function ChannelEditorDialog({ channel, members, joinedIds, updateChannel, joinChannel, removeChannelMember, onCommitted, onClose, t }: {
+function ChannelEditorDialog({ channel, updateChannel, onCommitted, onClose, t }: {
   readonly channel: AgentTeamChannel
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly joinedIds: ReadonlySet<AgentTeamMemberId>
   readonly updateChannel: TeamSidebarProps['updateChannel']
-  readonly joinChannel: TeamSidebarProps['joinChannel']
-  readonly removeChannelMember: TeamSidebarProps['removeChannelMember']
   readonly onCommitted: () => Promise<void> | void
   readonly onClose: () => void
   readonly t: TeamSidebarProps['t']
@@ -375,12 +363,6 @@ function ChannelEditorDialog({ channel, members, joinedIds, updateChannel, joinC
     onCommitted,
     onClose,
   })
-
-  const membership = useChannelMembership(
-    { joinChannel, removeChannelMember },
-    change => change.memberId,
-    async () => { await onCommitted() },
-  )
 
   const dirty = name.trim() !== channel.name || description.trim() !== channel.description
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -419,28 +401,6 @@ function ChannelEditorDialog({ channel, members, joinedIds, updateChannel, joinC
           <span>{t('channelDescription')}{t('optionalSuffix')}</span>
           <Input className={createCss.input!} value={description} placeholder={t('agentDescriptionPlaceholder')} onChange={event => { setDescription(event.target.value); pendingRequest.current = undefined }} disabled={saving} />
         </label>
-        <fieldset className={createCss.memberPicker} disabled={saving}>
-          <legend>{t('channelMembersSection')}</legend>
-          {members.map(status => {
-            const joined = joinedIds.has(status.member.memberId)
-            const rowPending = membership.pending.has(status.member.memberId)
-            // Same membership law as the Channel page roster: joining needs an
-            // active Member, leaving only needs the fact.
-            const disabled = rowPending || (!joined && status.availability !== 'active')
-            const rowError = membership.errors.get(status.member.memberId)
-            return <TeamMemberRow
-              key={status.member.memberId}
-              status={status}
-              action={{
-                label: rowPending ? t('membershipUpdating') : joined ? t('removeFromChannel') : t('addToChannel'),
-                disabled,
-                onSelect: () => { void membership.change({ workspaceId: channel.workspaceId, channelRef: channel.channelRef, memberId: status.member.memberId, joined }) },
-              }}
-              {...(rowError === undefined ? {} : { error: rowError })}
-              t={t}
-            />
-          })}
-        </fieldset>
         {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
       </form>
     </Modal>

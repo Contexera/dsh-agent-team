@@ -357,23 +357,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     await dialog.getByRole('button', { name: '创建 Agent' }).click()
     await page.getByText(name, { exact: true }).waitFor({ timeout: 20_000 })
   }
-  // Membership is managed from the Channel side now: add both Members to
-  // engineering through the Channel editor before any membership-dependent
-  // flow runs.
+  // Channel membership is derived from Thread participation now, so nothing
+  // enrols anyone: the Channel editor carries no member rows at all.
   await page.getByRole('button', { name: '# engineering' }).hover()
   await page.getByRole('button', { name: 'engineering 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑频道' }).click()
   const joinEditor = page.getByRole('dialog', { name: '编辑频道' })
   await joinEditor.waitFor()
-  for (const handle of ['builder', 'reviewer']) {
-    const row = joinEditor.locator('[data-team-member-row]').filter({ hasText: `@${handle}` })
-    // rc.1: member activation lands asynchronously (handle-based persistence
-    // + async AgentLoop create); the roster can briefly show the new member
-    // as unavailable before its handle registers.
-    await expect.poll(async () => await row.getByRole('button', { name: '添加' }).isEnabled(), { timeout: 30_000 }).toBe(true)
-    await row.getByRole('button', { name: '添加' }).click()
-  }
-  await expect.poll(async () => await joinEditor.getByRole('button', { name: '移除', exact: true }).count()).toBe(2)
+  await expect.poll(async () => await joinEditor.locator('[data-team-member-row]').count()).toBe(0)
   await joinEditor.getByRole('button', { name: '关闭', exact: true }).click()
   // Narrow-viewport create form with every field optional. The 390
   // breakpoint collapses the frame to the rail and unmounts the sidebar
@@ -490,15 +481,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await rampDialog.getByRole('button', { name: '创建频道' }).click()
   await expect.poll(channelOrder).toEqual(['delivery', 'engineering', 'ramp'])
 
-  // Sidebar row menus: the ⋯ entry opens the M2 editors — display facts plus
-  // membership. 保存 stays disabled until a field actually changes, and the
-  // committed rename reaches the row through the refreshed projection.
+  // Sidebar row menus: the ⋯ entry opens the M2 editor for display facts.
+  // 保存 stays disabled until a field actually changes, and the committed
+  // rename reaches the row through the refreshed projection. Membership rows
+  // are gone — participation is derived.
   await page.getByRole('button', { name: '# engineering' }).hover()
   await page.getByRole('button', { name: 'engineering 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑频道' }).click()
   const channelEditor = page.getByRole('dialog', { name: '编辑频道' })
   await channelEditor.waitFor()
-  expect(await channelEditor.getByText('@builder').count()).toBe(1)
+  expect(await channelEditor.locator('[data-team-member-row]').count()).toBe(0)
   const channelSave = channelEditor.getByRole('button', { name: '保存' })
   await expect.poll(async () => await channelSave.isDisabled()).toBe(true)
   await channelEditor.getByLabel('说明').fill('Platform delivery work')
@@ -989,54 +981,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(channelGeometry[1]!.bottom).toBeLessThanOrEqual(channelGeometry[2]!.top + 1)
   expect(channelGeometry[1]!.height).toBeGreaterThan(200)
   await page.screenshot({ path: join(UI01_SHOTS, 'desktop-channel.png'), fullPage: true })
-  await page.getByRole('button', { name: '管理成员' }).click()
-  const channelMembersDialog = page.getByRole('dialog', { name: '频道成员' })
-  await channelMembersDialog.waitFor()
-  // The roster is the shared Member row: identity avatar, handle over its
-  // description, and one 28px membership action per row. The guards below pin
-  // that geometry — a row that silently loses its avatar, lets the copy
-  // overflow its grid, or drops the 12/11px type steps is the regression this
-  // surface keeps regrowing. The 12px radius is the list-row tier this row
-  // shares with the sidebar rows it sits beside in the same app.
-  const rosterRows = await channelMembersDialog.locator('[data-team-member-row]').evaluateAll(rows => rows.map(row => {
-    const avatar = row.querySelector('[role="img"]')
-    const handle = row.querySelector('strong')
-    const description = row.querySelector('small')
-    const action = row.querySelector('button')
-    return {
-      height: Math.round(row.getBoundingClientRect().height),
-      radius: getComputedStyle(row).borderTopLeftRadius,
-      avatarWidth: avatar === null ? 0 : Math.round(avatar.getBoundingClientRect().width),
-      handle: handle?.textContent ?? '',
-      handleSize: handle === null ? undefined : getComputedStyle(handle).fontSize,
-      handleWeight: handle === null ? undefined : getComputedStyle(handle).fontWeight,
-      descriptionSize: description === null ? undefined : getComputedStyle(description).fontSize,
-      copyFits: description === null || description.parentElement === null
-        ? false : description.parentElement.scrollWidth <= description.parentElement.clientWidth,
-      actionWidth: action === null ? 0 : Math.round(action.getBoundingClientRect().width),
-      actionHeight: action === null ? 0 : Math.round(action.getBoundingClientRect().height),
-    }
-  }))
-  expect(rosterRows.length).toBeGreaterThanOrEqual(2)
-  for (const row of rosterRows) {
-    expect(row.avatarWidth).toBe(24)
-    expect(row.height).toBeGreaterThanOrEqual(40)
-    expect(row.radius).toBe('12px')
-    expect(row.handle.startsWith('@')).toBe(true)
-    expect(row.handleSize).toBe('12px')
-    expect(row.handleWeight).toBe('500')
-    expect(row.descriptionSize).toBe('11px')
-    expect(row.copyFits).toBe(true)
-    expect(row.actionWidth).toBeGreaterThanOrEqual(64)
-    expect(row.actionHeight).toBe(28)
-  }
-  await page.screenshot({ path: join(UI04_SHOTS, 'channel-members-modal.png'), fullPage: true })
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect.poll(async () => (await channelMembersDialog.boundingBox())?.width ?? 999).toBeLessThanOrEqual(390)
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-  await page.screenshot({ path: join(UI04_SHOTS, 'channel-members-modal-narrow.png'), fullPage: true })
-  await page.setViewportSize({ width: 1440, height: 960 })
-  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  // Channel membership is derived from participation now: the Channel page
+  // offers no management entry point and no membership dialog exists.
+  await expect.poll(async () => await page.getByRole('button', { name: '管理成员' }).count()).toBe(0)
+  await expect.poll(async () => await page.getByRole('dialog', { name: '频道成员' }).count()).toBe(0)
+  await page.screenshot({ path: join(UI04_SHOTS, 'channel-members-retired.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   const narrowChannelFrame = page.locator('[data-sidebar-collapsed="true"]')
   await narrowChannelFrame.waitFor()

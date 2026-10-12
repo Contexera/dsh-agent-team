@@ -85,6 +85,32 @@ async function sqliteHarness(path: string): Promise<TeamHarness> {
   return { ctx, fiber, facility }
 }
 
+/**
+ * A frozen old ledger whose Member was enrolled into the Channel by hand and
+ * never wrote a word — the historical explicit membership that membership
+ * derivation still has to keep visible.
+ */
+const legacyJoinLedger = JSON.parse("{\"records\":[[\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",{\"sequence\":1,\"operationId\":\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",\"requestId\":\"agent-team:initialize:v1\",\"occurredAt\":\"2026-10-12T11:38:19.890Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":null,\"kind\":\"team/initialized\",\"data\":{\"humanMemberId\":\"member:human\"}}],[\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",{\"sequence\":2,\"operationId\":\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",\"requestId\":\"cap3-channel\",\"occurredAt\":\"2026-10-12T11:38:19.892Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",\"kind\":\"team/channel-created\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channel\":{\"channelRef\":\"channel:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"workspaceId\":\"workspace:alpha\",\"name\":\"engineering\",\"description\":\"\",\"createdAtSequence\":2,\"state\":\"active\"},\"memberIds\":[]}}],[\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",{\"sequence\":3,\"operationId\":\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",\"requestId\":\"add:member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"occurredAt\":\"2026-10-12T11:38:19.894Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",\"kind\":\"team/member-added\",\"data\":{\"member\":{\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"sessionId\":\"session:member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"workspaceId\":\"workspace:alpha\",\"handle\":\"silent3\",\"description\":\"Test Agent\",\"presetId\":\"team-member\",\"privateMemoryPath\":\"/tmp/member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"state\":\"enabled\"},\"channelRefs\":[]}}],[\"operation:ef94c3ad-2c33-4f80-95ea-649ad7b125ea\",{\"sequence\":4,\"operationId\":\"operation:ef94c3ad-2c33-4f80-95ea-649ad7b125ea\",\"requestId\":\"cap3-join\",\"occurredAt\":\"2026-10-12T11:38:19.894Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",\"kind\":\"team/channel-member-added\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channelRef\":\"channel:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\"}}]],\"channelRef\":\"channel:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\"}") as {
+  readonly records: Array<[string, unknown]>
+  readonly channelRef: string
+  readonly memberId: string
+}
+
+/**
+ * A frozen old ledger: Channel membership was still granted and revoked by
+ * hand, so it carries `team/channel-member-removed` with its real cleanup
+ * payload. Nothing writes these operations any more — membership is derived
+ * from participation — so the replay-side tests load the history instead of
+ * committing it.
+ */
+const legacyRemovalLedger = JSON.parse("{\"records\":[[\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",{\"sequence\":1,\"operationId\":\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",\"requestId\":\"agent-team:initialize:v1\",\"occurredAt\":\"2026-10-12T11:32:27.794Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":null,\"kind\":\"team/initialized\",\"data\":{\"humanMemberId\":\"member:human\"}}],[\"operation:90650574-c253-459a-bf9f-78a43409277e\",{\"sequence\":2,\"operationId\":\"operation:90650574-c253-459a-bf9f-78a43409277e\",\"requestId\":\"cap2-channel\",\"occurredAt\":\"2026-10-12T11:32:27.796Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",\"kind\":\"team/channel-created\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channel\":{\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"workspaceId\":\"workspace:alpha\",\"name\":\"engineering\",\"description\":\"\",\"createdAtSequence\":2,\"state\":\"active\"},\"memberIds\":[]}}],[\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",{\"sequence\":3,\"operationId\":\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",\"requestId\":\"add:cap-agent\",\"occurredAt\":\"2026-10-12T11:32:27.797Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:90650574-c253-459a-bf9f-78a43409277e\",\"kind\":\"team/member-added\",\"data\":{\"member\":{\"memberId\":\"member:cap-agent\",\"sessionId\":\"session:cap-agent\",\"workspaceId\":\"workspace:alpha\",\"handle\":\"cap-agent\",\"description\":\"Test Agent\",\"presetId\":\"team-member\",\"privateMemoryPath\":\"/tmp/dsh-agent-team-cap-agent\",\"state\":\"enabled\"},\"channelRefs\":[\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\"]}}],[\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",{\"sequence\":4,\"operationId\":\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",\"requestId\":\"cap2-chat\",\"occurredAt\":\"2026-10-12T11:32:27.798Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",\"kind\":\"team/message-sent\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"mentions\":[\"member:cap-agent\"],\"message\":{\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"sender\":\"member:human\",\"body\":\"plain conversation\",\"topLevel\":true,\"sequence\":4,\"occurredAt\":\"2026-10-12T11:32:27.798Z\"},\"thread\":{\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"revision\":4},\"inbox\":{\"attention\":{\"set\":[{\"memberId\":\"member:human\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"startSequence\":4,\"readThroughSequence\":3},{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"startSequence\":4,\"readThroughSequence\":3}],\"removed\":[]},\"directMarkers\":{\"added\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"sequence\":4}],\"removed\":[]},\"activityMarkers\":{\"added\":[],\"removed\":[]}}}}],[\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",{\"sequence\":5,\"operationId\":\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",\"requestId\":\"cap2-remove\",\"occurredAt\":\"2026-10-12T11:32:27.799Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",\"kind\":\"team/channel-member-removed\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"memberId\":\"member:cap-agent\",\"claims\":[],\"activities\":[],\"tasks\":[],\"threads\":[],\"inbox\":{\"attention\":{\"set\":[],\"removed\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\"}]},\"directMarkers\":{\"added\":[],\"removed\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"sequence\":4}]},\"activityMarkers\":{\"added\":[],\"removed\":[]}}}}]],\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"operationId\":\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"memberId\":\"member:cap-agent\"}") as {
+  readonly records: Array<[string, unknown]>
+  readonly threadRef: string
+  readonly operationId: string
+  readonly channelRef: string
+  readonly memberId: string
+}
+
 function storedPool(records: Array<[string, unknown]>, version: number = agentTeamDomainSpec.version): MemoryMediaPool {
   const pool = new MemoryMediaPool()
   pool.versions.set('agent_team', version)
@@ -189,7 +215,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(replay.workspacesOf(member.memberId)).toEqual([alpha])
     replay.validate()
     await replay.joinWorkspace({ ...leaveRequest, requestId: requestId('rejoin-beta') })
-    expect(replay.view({ workspaceId: beta }, member.memberId).channels).toEqual([])
+    // Rejoining restores the derived half of visibility: this Member wrote in
+    // that Channel's Thread before leaving, so "has taken part" brings it back
+    // — Channel participation is derived from Threads now, not re-enrolled.
+    expect(replay.view({ workspaceId: beta }, member.memberId).channels.map(channel => channel.channelRef))
+      .toEqual([claims[1]!.channel.channelRef])
   })
 
   it('checks handle collisions across all participations, including suspended Members', async () => {
@@ -1356,81 +1386,63 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(ledger.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
   })
 
-  it.each(['channel', 'team'] as const)('replays terminal Activity marker cleanup after %s removal', async (scope) => {
+  // Removal from a single Channel is retired (membership is derived from
+  // participation now), so the live side of this cleanup is the whole-Team
+  // removal; the Channel case survives as the frozen-history replay above.
+  it('replays terminal Activity marker cleanup after Team removal', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId(`cleanup-${scope}-channel`), workspaceId: alpha,
-      name: `cleanup-${scope}`, description: 'Cleanup replay' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId(`cleanup-${scope}-start`), workspaceId: alpha,
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('cleanup-team-channel'), workspaceId: alpha,
+      name: 'cleanup-team', description: 'Cleanup replay' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('cleanup-team-start'), workspaceId: alpha,
       channelRef: channel.channel.channelRef, body: 'Task' })))
     const ledger = replayLedger(test)
     const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    await ledger.changeAttention({ requestId: requestId(`cleanup-${scope}-follow`), workspaceId: alpha,
+    await ledger.changeAttention({ requestId: requestId('cleanup-team-follow'), workspaceId: alpha,
       taskRef: started.task.taskRef, action: 'follow', actor })
-    const humanRead = (await ledger.readThread({ requestId: requestId(`cleanup-${scope}-human-read`), workspaceId: alpha,
+    const humanRead = (await ledger.readThread({ requestId: requestId('cleanup-team-human-read'), workspaceId: alpha,
       taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).value
-    committed((await ledger.changeTask({ requestId: requestId(`cleanup-${scope}-close`), workspaceId: alpha,
+    committed((await ledger.changeTask({ requestId: requestId('cleanup-team-close'), workspaceId: alpha,
       taskRef: started.task.taskRef, action: 'close', baseRevision: humanRead.thread.revision, actor: agentTeamHumanActor() })).value)
     expect(ledger.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(1)
 
-    if (scope === 'channel') {
-      await ledger.removeChannelMember({ requestId: requestId('cleanup-channel-remove'), workspaceId: alpha,
-        channelRef: channel.channel.channelRef, memberId: member.memberId, actor: agentTeamHumanActor() })
-    } else {
-      await ledger.removeMember({ requestId: requestId('cleanup-team-remove'),
-        memberId: member.memberId, actor: agentTeamHumanActor() })
-    }
+    await ledger.removeMember({ requestId: requestId('cleanup-team-remove'),
+      memberId: member.memberId, actor: agentTeamHumanActor() })
     ledger.validate()
     const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
     const replayed = await harness(storedPool(records))
     expect(() => replayLedger(replayed).validate()).not.toThrow()
   })
 
-  it('cleans a removed Member Attention on taskless Threads of the Channel and replays', async () => {
-    const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('taskless-remove-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const ledger = replayLedger(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    const chat = committed((await ledger.sendMessage({ requestId: requestId('taskless-remove-chat'), workspaceId: alpha, channelRef: channel.channel.channelRef,
-      body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-
-    const removed = (await ledger.removeChannelMember({ requestId: requestId('taskless-remove'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, memberId: member.memberId, actor: agentTeamHumanActor() })).value
-    const operation = ledger.getOperation(removed.receipt.operationId)!
+  it('replays a historical Channel member-removal that cleaned a taskless Thread', async () => {
+    // Membership is derived now and nothing writes a removal any more, so this
+    // history is loaded rather than committed: the cleanup it carries is what
+    // old ledgers still depend on.
+    const ledger = replayLedger(await harness(storedPool(legacyRemovalLedger.records)))
+    const operation = ledger.getOperation(legacyRemovalLedger.operationId as never)!
     expect(operation.kind === 'team/channel-member-removed' ? operation.data.inbox.attention.removed : [])
-      .toEqual(expect.arrayContaining([{ memberId: member.memberId, threadRef: chat.thread.threadRef }]))
+      .toEqual(expect.arrayContaining([{ memberId: legacyRemovalLedger.memberId, threadRef: legacyRemovalLedger.threadRef }]))
     ledger.validate()
-
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const replayed = await harness(storedPool(records))
-    expect(() => replayLedger(replayed)).not.toThrow()
   })
 
   it('repairs a legacy Channel member-removal record that omitted taskless-Thread cleanup on load', async () => {
-    const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('legacy-remove-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const ledger = replayLedger(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    const chat = committed((await ledger.sendMessage({ requestId: requestId('legacy-remove-chat'), workspaceId: alpha, channelRef: channel.channel.channelRef,
-      body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-    const removed = (await ledger.removeChannelMember({ requestId: requestId('legacy-remove'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, memberId: member.memberId, actor: agentTeamHumanActor() })).value
-    // Rewrite the removal to the 0.1.7-0.1.9 shape: cleanup scoped to taskful Threads only.
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
+    // The removal is historical, so the ledger is loaded from the frozen
+    // history and then rewritten into the 0.1.7-0.1.9 shape: cleanup scoped to
+    // taskful Threads only.
+    const records = legacyRemovalLedger.records.map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
       if (typed.kind !== 'team/channel-member-removed') return [id, typed] as [string, unknown]
-      const dropTaskless = (entries: readonly { threadRef: string }[]) => entries.filter(entry => entry.threadRef !== chat.thread.threadRef)
+      const dropTaskless = (entries: readonly { threadRef: string }[]) => entries.filter(entry => entry.threadRef !== legacyRemovalLedger.threadRef)
       return [id, { ...typed, data: { ...typed.data, inbox: {
         attention: { set: [], removed: dropTaskless(typed.data.inbox.attention.removed) },
         directMarkers: { added: [], removed: dropTaskless(typed.data.inbox.directMarkers.removed) },
         activityMarkers: { added: [], removed: dropTaskless(typed.data.inbox.activityMarkers.removed) },
       } } }] as [string, unknown]
     })
-    const legacy = await harness(storedPool(records))
-    const legacyLedger = replayLedger(legacy)
+    const legacyLedger = replayLedger(await harness(storedPool(records)))
     expect(() => legacyLedger.validate()).not.toThrow()
-    const repaired = legacyLedger.getOperation(removed.receipt.operationId)!
+    const repaired = legacyLedger.getOperation(legacyRemovalLedger.operationId as never)!
     expect(repaired.kind === 'team/channel-member-removed' ? repaired.data.inbox.attention.removed : [])
-      .toEqual(expect.arrayContaining([{ memberId: member.memberId, threadRef: chat.thread.threadRef }]))
+      .toEqual(expect.arrayContaining([{ memberId: legacyRemovalLedger.memberId, threadRef: legacyRemovalLedger.threadRef }]))
   })
 
   it('rejects a structurally valid Thread read receipt with a forged watermark during replay', async () => {
@@ -1489,15 +1501,15 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   })
 
   it('rejects forged member cleanup snapshots during replay', async () => {
-    const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
-    await test.ctx.agentTeam.removeChannelMember({ requestId: requestId('remove'), workspaceId: alpha, channelRef: channel.channel.channelRef, memberId: member.status.member.memberId })
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
+    // A historical removal carries the cleanup snapshot; forging a released
+    // Task into it must still fail the replay, since old ledgers are validated
+    // on load.
+    const forgedTask = Object.freeze({ taskRef: 'task:forged' as never, channelRef: legacyRemovalLedger.channelRef as never,
+      threadRef: legacyRemovalLedger.threadRef as never, status: 'todo' as const, resolution: 'open' as const })
+    const records = legacyRemovalLedger.records.map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
       if (typed.kind !== 'team/channel-member-removed') return [id, typed] as [string, unknown]
-      return [id, { ...typed, data: { ...typed.data, tasks: [started.task] } }] as [string, unknown]
+      return [id, { ...typed, data: { ...typed.data, tasks: [forgedTask] } }] as [string, unknown]
     })
     await expect(harness(storedPool(records))).rejects.toThrow(/invalid released Claim Task or Thread projection/)
   })
@@ -2081,7 +2093,6 @@ describe('AgentTeam Channel archival ledger', () => {
     await expect(ledger.archiveChannel({ requestId: requestId('ch-arch-2'), workspaceId: alpha, channelRef, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
     await expect(ledger.updateChannel({ requestId: requestId('ch-arch-rename'), workspaceId: alpha, channelRef, name: 'renamed', description: '', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
     await expect(ledger.sendMessage({ requestId: requestId('ch-arch-send'), workspaceId: alpha, channelRef, body: 'hello', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    await expect(ledger.joinChannel({ requestId: requestId('ch-arch-join'), workspaceId: alpha, channelRef, memberId: first.member.memberId, actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
     // A brand-new Member cannot be created into the archived Channel, and
     // existing Members (Memberships survive archival) cannot follow or
     // mutate its Tasks.
@@ -2757,6 +2768,194 @@ describe('body-authored mentions', () => {
     // Channel afterwards is not retroactively addressed by this write.
     expect(sent.directMarkers.map(marker => marker.memberId).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
     expect(ledger.inbox(late.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+  })
+
+  it('names a Workspace participant who is not a Channel Member', async () => {
+    const test = await harness()
+    const { ledger, channelRef } = await channelOf(test)
+    const insider = await enroll(ledger, channelRef, 'insider')
+    // Participates in the Workspace, never enrolled in the Channel: Channel
+    // membership is a Human-side organisation, not a gate on being addressed.
+    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
+    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).channels.map(channel => channel.channelRef)).toEqual([channelRef as never])
+
+    const sent = committed((await ledger.sendMessage({ requestId: requestId('name-outsider'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      channelRef: channelRef as never, body: '@outsider, please look at this' })).value)
+    expect(sent.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
+    // A Human naming someone is a pull-in, not a report: the write commits
+    // outright and the marker is durable. (Inbox listing and Attention reads
+    // stay Channel-gated until visibility is derived from participation.)
+
+  })
+
+  it('keeps @all inside the Channel while @Handle reaches the Workspace', async () => {
+    const test = await harness()
+    const { ledger, channelRef } = await channelOf(test)
+    const insider = await enroll(ledger, channelRef, 'insider')
+    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
+
+    const all = committed((await ledger.sendMessage({ requestId: requestId('all-stays-in-channel'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      channelRef: channelRef as never, body: '@all, standup in ten minutes' })).value)
+    // `@all` is the Channel's own roster, so the Workspace participant outside
+    // that Channel is not addressed by it — while `@Handle` still reaches them.
+    expect(all.directMarkers.map(marker => marker.memberId).sort()).toEqual([insider.member.memberId].sort())
+    const named = committed((await ledger.sendMessage({ requestId: requestId('all-stays-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      channelRef: channelRef as never, body: `@${outsider.member.handle}, named from the Workspace` })).value)
+    expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
+  })
+
+  it('reloads a ledger written with the widened mention rules and keeps committing', async () => {
+    const test = await harness()
+    const { ledger, channelRef } = await channelOf(test)
+    const insider = await enroll(ledger, channelRef, 'insider')
+    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
+
+    const historic = committed((await ledger.sendMessage({ requestId: requestId('historic-all'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      channelRef: channelRef as never, body: '@all and @insider, historic write' })).value)
+    const named = committed((await ledger.sendMessage({ requestId: requestId('historic-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      channelRef: channelRef as never, body: '@outsider, named from the Workspace' })).value)
+    expect(historic.directMarkers.map(marker => marker.memberId).sort()).toEqual([insider.member.memberId].sort())
+    expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
+
+    // A fresh Ledger over the same persisted operations re-validates every
+    // record on load. Widening is replay-safe, so both the historic `@all`
+    // (Channel Member) and the Workspace-only mention survive the re-check and
+    // the next commit still lands.
+    const reopened = replayLedger(test)
+    // Naming the Workspace-only Member again through the reloaded Ledger proves
+    // the widened target check is live after a replay, not just on first write.
+    const again = committed((await reopened.sendMessage({ requestId: requestId('after-reload'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      channelRef: channelRef as never, body: '@outsider, again after the reload' })).value)
+    expect(again.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
+  })
+
+  it('lets a Workspace participant reply, claim and follow without joining the Channel', async () => {
+    const test = await harness()
+    const { ledger, channelRef } = await channelOf(test)
+    await enroll(ledger, channelRef, 'insider')
+    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
+
+    // The mention is what brings the Member onto the Thread: no Channel join
+    // happens at any point below.
+    const sent = await start(ledger, channelRef, '@outsider, please take this')
+
+    // The unread fence stands for a Member too: the Thread has to be read
+    // before the reply, and reading it needs no Channel membership either.
+    const read = await ledger.readThread({ requestId: requestId('outsider-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: outsider.actor })
+    const replied = committed((await ledger.reply({ requestId: requestId('outsider-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      body: 'Taking it', baseRevision: read.value?.thread.revision ?? sent.thread.revision, actor: outsider.actor })).value)
+    expect(replied.message.sender).toBe(outsider.member.memberId)
+
+    // The mention itself started Attention, so the round trip is unfollow then
+    // follow — both without any Channel membership behind them.
+    const unfollowed = (await ledger.changeAttention({ requestId: requestId('outsider-unfollow'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      action: 'unfollow', actor: outsider.actor })).value
+    expect(unfollowed?.attention).toBeUndefined()
+    const followed = (await ledger.changeAttention({ requestId: requestId('outsider-follow'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      action: 'follow', actor: outsider.actor })).value
+    expect(followed?.attention).toBeDefined()
+
+    const claimed = committed((await ledger.changeClaim({ requestId: requestId('outsider-claim'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      action: 'claim', direction: 'Fix the regression', baseRevision: replied.thread.revision, actor: outsider.actor })).value)
+    expect(claimed.task.status).toBe('in_progress')
+  })
+
+  it('shows a Member the Channel of a Thread they took part in', async () => {
+    const test = await harness()
+    const { ledger, channelRef } = await channelOf(test)
+    await enroll(ledger, channelRef, 'insider')
+    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
+    const elsewhere = (await ledger.createChannel({ requestId: requestId('channel-elsewhere'), workspaceId: alpha,
+      name: 'elsewhere', description: '', memberIds: [], actor: agentTeamHumanActor() })).value.channel
+
+    // Channel participation is derived now: no enrolment happens, and taking
+    // part in one Thread of the Channel is what makes it visible.
+    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).channels.map(channel => channel.channelRef)).toEqual([])
+    await start(ledger, channelRef, '@outsider, please look')
+
+    const seen = ledger.view({ workspaceId: alpha }, outsider.member.memberId).channels.map(channel => channel.channelRef)
+    expect(seen).toEqual([channelRef as never])
+    // The derived rule does not widen to the Workspace: a Channel this Member
+    // never took part in stays out of reach.
+    expect(seen).not.toContain(elsewhere.channelRef)
+  })
+
+  it('keeps a Channel visible for an explicit Member who never wrote, across a reload', async () => {
+    // Enrolment by hand is retired, so this Member comes from a frozen old
+    // ledger: the explicit membership it carries must stay visible even though
+    // nothing can produce one any more.
+    const ledger = replayLedger(await harness(storedPool(legacyJoinLedger.records)))
+    const visible = () => ledger.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).channels.map(channel => channel.channelRef)
+    expect(visible()).toEqual([legacyJoinLedger.channelRef as never])
+
+    const reopened = replayLedger(await harness(storedPool(legacyJoinLedger.records)))
+    expect(reopened.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).channels.map(channel => channel.channelRef))
+      .toEqual([legacyJoinLedger.channelRef as never])
+  })
+
+  it('confirms the same way for an Agent outside the Channel and one outside the Thread', async () => {
+    const test = await harness()
+    const { ledger, channelRef } = await channelOf(test)
+    // Case ②: in the Channel, never in this Thread. Case ③: neither.
+    const insider = await enroll(ledger, channelRef, 'insider')
+    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
+    const sent = await start(ledger, channelRef, 'Investigate the regression')
+    // ② is enrolled in the Channel but has never carried this Thread; ③ is
+    // neither. Both are confirmed, so the Agent cannot tell them apart.
+    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).channels.map(channel => channel.channelRef)).toEqual([channelRef as never])
+    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).channels).toEqual([])
+
+    const heldInsider = (await ledger.reply({ requestId: requestId('pull-insider'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      body: '@insider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor() })).value
+    if (heldInsider.kind !== 'confirmation_required') throw new Error(`expected confirmation, received ${heldInsider.kind}`)
+
+    const heldOutsider = (await ledger.reply({ requestId: requestId('pull-outsider'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      body: '@outsider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor() })).value
+    if (heldOutsider.kind !== 'confirmation_required') throw new Error(`expected confirmation, received ${heldOutsider.kind}`)
+
+    // The two cases collapse: the Agent's only signal is this Thread's own
+    // delivery, and the Channel side is derived silently with no notice of its
+    // own. Confirming is what grants Attention on the Thread.
+    const pulled = committed((await ledger.reply({ requestId: requestId('pull-outsider'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      body: '@outsider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor(), confirmationToken: heldOutsider.confirmationToken })).value)
+    expect(pulled.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
+    expect(ledger.attentionStatus(outsider.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeDefined()
+    // Now a Channel participant by derivation, the Thread reaches the Inbox.
+    expect(ledger.inbox(outsider.actor, { workspaceId: alpha })).toMatchObject({ totalDirectCount: 1 })
+  })
+
+  it('delivers without confirmation to an Agent already in the Thread', async () => {
+    const test = await harness()
+    const { ledger, channelRef } = await channelOf(test)
+    const insider = await enroll(ledger, channelRef, 'insider')
+    const sent = await start(ledger, channelRef, '@insider, take this')
+    const read = await ledger.readThread({ requestId: requestId('insider-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: insider.actor })
+
+    // Already carrying the Thread: naming them again is a delivery, not an
+    // invitation, so no confirmation stands in the way.
+    const again = committed((await ledger.reply({ requestId: requestId('insider-again'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      body: '@insider, one more thing', baseRevision: read.value?.thread.revision ?? sent.thread.revision, actor: agentTeamHumanActor() })).value)
+    expect(again.directMarkers.map(marker => marker.memberId)).toEqual([insider.member.memberId])
+  })
+
+  it('still refuses a Member who does not participate in the Workspace', async () => {
+    const test = await harness(new MemoryMediaPool(), [alpha, beta])
+    const { ledger, channelRef } = await channelOf(test)
+    const sent = await start(ledger, channelRef, 'Investigate the regression')
+    // A Member rooted in another Workspace: the boundary moved from Channel
+    // down to Workspace, it did not disappear, so this Member is refused
+    // everywhere in this Workspace.
+    const foreignMember: AgentTeamAgentMember = { memberId: `member:foreign-${crypto.randomUUID()}` as never, sessionId: SessionId('session:foreign'),
+      workspaceId: beta, handle: 'foreign', description: 'Test Agent', presetId: 'team-member', privateMemoryPath: '/tmp/foreign', state: 'enabled' }
+    await ledger.addMember({ requestId: requestId('add-foreign'), actor: agentTeamHumanActor(), member: foreignMember,
+      handle: foreignMember.handle, description: foreignMember.description, presetId: foreignMember.presetId, workspaceId: beta, channelRefs: [] })
+    const foreign = { member: foreignMember, actor: { kind: 'member' as const, memberId: foreignMember.memberId, handle: 'foreign' } }
+    await expect(ledger.reply({ requestId: requestId('foreign-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      body: 'Still here', baseRevision: sent.thread.revision, actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)
+    await expect(ledger.changeAttention({ requestId: requestId('foreign-follow'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      action: 'follow', actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)
+    await expect(ledger.changeClaim({ requestId: requestId('foreign-claim'), workspaceId: alpha, taskRef: sent.task.taskRef,
+      action: 'claim', direction: 'Mine', baseRevision: sent.thread.revision, actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)
   })
 
   it('merges explicit recipients with body mentions without duplicating a Member', async () => {

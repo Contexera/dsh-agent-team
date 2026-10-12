@@ -17,8 +17,6 @@ import type {
   AgentTeamJoinWorkspaceResult,
   AgentTeamLeaveWorkspaceRequest,
   AgentTeamLeaveWorkspaceResult,
-  AgentTeamJoinChannelRequest,
-  AgentTeamJoinChannelResult,
   AgentTeamGetAttachmentRequest,
   AgentTeamGetAttachmentResult,
   AgentTeamPutAttachmentRequest,
@@ -28,8 +26,6 @@ import type {
   AgentTeamRecoverMemberRequest,
   AgentTeamRecoverMemberResult,
   AgentTeamMembersRequest,
-  AgentTeamRemoveChannelMemberRequest,
-  AgentTeamRemoveChannelMemberResult,
   AgentTeamReplyRequest,
   AgentTeamResolveTaskRefsRequest,
   AgentTeamResolveTaskRefsResult,
@@ -127,8 +123,6 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     archiveMember: (request: AgentTeamArchiveMemberRequest) => Promise<RemoteResult<AgentTeamArchiveMemberResult>>
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => Promise<RemoteResult<AgentTeamJoinWorkspaceResult>>
     leaveWorkspace: (request: AgentTeamLeaveWorkspaceRequest) => Promise<RemoteResult<AgentTeamLeaveWorkspaceResult>>
-    joinChannel: (request: AgentTeamJoinChannelRequest) => Promise<RemoteResult<AgentTeamJoinChannelResult>>
-    removeChannelMember: (request: AgentTeamRemoveChannelMemberRequest) => Promise<RemoteResult<AgentTeamRemoveChannelMemberResult>>
     /** Session-independent Host model catalog (`llm.models`); needs no live Member. */
     loadModels: () => Promise<RemoteResult<TeamModelCatalog>>
     /** Embed the Member's Session conversation in the Team conversation seat. */
@@ -149,8 +143,6 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   putAttachment: (request: AgentTeamPutAttachmentRequest) => Promise<RemoteResult<AgentTeamPutAttachmentResult>>
   getAttachment: (request: AgentTeamGetAttachmentRequest) => Promise<RemoteResult<AgentTeamGetAttachmentResult>>
   sendMessage: (request: AgentTeamSendMessageRequest) => Promise<RemoteResult<AgentTeamSendMessageResult>>
-  joinChannel: (request: AgentTeamJoinChannelRequest) => Promise<RemoteResult<AgentTeamJoinChannelResult>>
-  removeChannelMember: (request: AgentTeamRemoveChannelMemberRequest) => Promise<RemoteResult<AgentTeamRemoveChannelMemberResult>>
   reply: (request: AgentTeamReplyRequest) => Promise<RemoteResult<AgentTeamReplyResult | AgentTeamConfirmationRequired>>
   changeTask: (request: AgentTeamTaskRequest) => Promise<RemoteResult<AgentTeamTaskResult>>
   promoteThread: (request: AgentTeamPromoteThreadRequest) => Promise<RemoteResult<AgentTeamPromoteThreadResult>>

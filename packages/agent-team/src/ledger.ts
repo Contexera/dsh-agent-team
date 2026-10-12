@@ -897,66 +897,6 @@ export class AgentTeamLedger {
     return Object.freeze([...this.state.members.values()])
   }
 
-  joinChannel(request: AgentTeamAuthorizedJoinChannelRequest): Promise<AgentTeamLedgerResult<AgentTeamJoinChannelResult>> {
-    return this.enqueue(async () => {
-      const existing = this.state.byRequest.get(request.requestId)
-      if (existing !== undefined) {
-        this.assertSameChannelJoin(existing, request)
-        return this.resolved(this.joinResult(existing))
-      }
-      this.assertHumanActor(request.actor)
-      const channel = this.requireActiveChannel(request.workspaceId, request.channelRef)
-      const member = this.requireMember(request.memberId)
-      if (!this.participatesIn(member.memberId, request.workspaceId)) throw new Error('Agent Member does not participate in the Channel\'s Workspace')
-      if (member.state !== 'enabled') throw new Error(`Agent Member '${member.memberId}' is ${member.state}; only enabled Members can join a Channel`)
-      if (this.isChannelMember(channel.channelRef, member.memberId)) throw new Error(`Agent Member '${member.memberId}' already belongs to Channel '${channel.channelRef}'`)
-      const operation: AgentTeamChannelMemberAddedOperation = Object.freeze({
-        ...this.operationBase(request, this.nextSequence()), kind: 'team/channel-member-added',
-        data: Object.freeze({ workspaceId: request.workspaceId, channelRef: channel.channelRef, memberId: member.memberId }),
-      })
-      await this.table.put(operation.operationId, operation)
-      this.apply(operation)
-      return this.committed(this.joinResult(operation))
-    })
-  }
-
-  removeChannelMember(
-    request: AgentTeamAuthorizedRemoveChannelMemberRequest,
-  ): Promise<AgentTeamLedgerResult<AgentTeamRemoveChannelMemberResult>> {
-    return this.enqueue(async () => {
-      const existing = this.state.byRequest.get(request.requestId)
-      if (existing !== undefined) {
-        this.assertSameChannelMemberRemoval(existing, request)
-        return this.resolved(this.channelMemberRemovalResult(existing))
-      }
-      this.assertHumanActor(request.actor)
-      const channel = this.requireChannel(request.workspaceId, request.channelRef)
-      const member = this.requireMember(request.memberId)
-      if (!this.participatesIn(member.memberId, channel.workspaceId) || !this.isChannelMember(channel.channelRef, member.memberId)) {
-        throw new Error(`Agent Member '${member.memberId}' is not a member of Channel '${channel.channelRef}'`)
-      }
-      const threadRefs = this.channelThreadRefs(channel.channelRef)
-      const releasedClaims = [...this.state.claims.values()]
-        .filter(claim => claim.owner === member.memberId && claim.state === 'active' && threadRefs.has(claim.threadRef))
-        .map(claim => Object.freeze({ ...claim, state: 'released' as const }))
-      const nextClaims = new Map(this.state.claims)
-      for (const claim of releasedClaims) nextClaims.set(claim.claimRef, claim)
-      const sequence = this.nextSequence()
-      const activities = this.releaseSummaries(releasedClaims, member.memberId, sequence)
-      const threads = this.threadsForActivities(activities)
-      const tasks = this.tasksForClaims(releasedClaims, nextClaims)
-      const inbox = this.removeMemberThreadInbox(member.memberId, threadRefs)
-      const operation: AgentTeamChannelMemberRemovedOperation = Object.freeze({
-        ...this.operationBase(request, sequence), kind: 'team/channel-member-removed',
-        data: Object.freeze({ workspaceId: request.workspaceId, channelRef: channel.channelRef, memberId: member.memberId,
-          claims: Object.freeze(releasedClaims), activities, tasks, threads, inbox }),
-      })
-      await this.table.put(operation.operationId, operation)
-      this.apply(operation)
-      return this.committed(this.channelMemberRemovalResult(operation))
-    })
-  }
-
   /**
    * Join one Agent Member to one additional Workspace. Participation is a
    * pure relation — no Session is created or moved; the Member's Session
@@ -2506,7 +2446,7 @@ export class AgentTeamLedger {
       const channelRef = thread === undefined ? undefined : this.channelRefForThreadFrom(projection, thread.threadRef)
       if (thread === undefined || channelRef === undefined || !this.sameThread(thread, operation.data.thread)
         || (task === undefined ? currentTask !== undefined : currentTask === undefined || !this.sameTask(currentTask, task) || thread.taskRef !== task.taskRef)
-        || (actor !== undefined && !projection.memberships.get(channelRef)?.has(actor.memberId))) throw new Error('invalid Attention operation')
+        || (actor !== undefined && !this.participatesInChannelWorkspaceFrom(projection, channelRef, actor.memberId))) throw new Error('invalid Attention operation')
       const current = this.attentionForFrom(projection, operation.data.memberId, thread.threadRef)
       if ((operation.data.action === 'follow' && (task?.resolution === 'closed' || current !== undefined))
         || (operation.data.action === 'unfollow' && (current === undefined || (task !== undefined && this.hasActiveClaimFrom(projection, operation.data.memberId, task.taskRef))))) {
@@ -2584,7 +2524,7 @@ export class AgentTeamLedger {
         || message.threadRef !== thread.threadRef
         || (task === undefined ? message.taskRef !== undefined || thread.taskRef !== undefined
           : message.taskRef !== task.taskRef || thread.taskRef !== task.taskRef || task.threadRef !== thread.threadRef || task.channelRef !== channel.channelRef)
-        || (actor !== undefined && !projection.memberships.get(channel.channelRef)?.has(actor.memberId))) throw new Error('invalid Message operation')
+        || (actor !== undefined && !this.participatesInChannelWorkspaceFrom(projection, channel.channelRef, actor.memberId))) throw new Error('invalid Message operation')
       if (operation.kind === 'team/message-sent') {
         if (!message.topLevel || projection.threads.has(thread.threadRef) || (task !== undefined && projection.tasks.has(task.taskRef))) {
           throw new Error('invalid top-level Message operation')
@@ -2615,7 +2555,7 @@ export class AgentTeamLedger {
         || !this.sameTaskIdentity(priorTask, task) || task.threadRef !== thread.threadRef || task.taskRef !== thread.taskRef
         || thread.revision !== operation.sequence || activity.sequence !== operation.sequence || activity.actor !== operation.actor.memberId
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef || activity.claimRef !== claim.claimRef
-        || (actor !== undefined && !projection.memberships.get(task.channelRef)?.has(actor.memberId))) throw new Error('invalid Claim operation')
+        || (actor !== undefined && !this.participatesInChannelWorkspaceFrom(projection, task.channelRef, actor.memberId))) throw new Error('invalid Claim operation')
       const creates = operation.kind === 'team/claim-created'
       const expectedKind = creates ? 'claim' : operation.kind === 'team/claim-done' ? 'done' : 'release'
       if (activity.kind !== expectedKind || claim.taskRef !== task.taskRef || claim.threadRef !== thread.threadRef) throw new Error('invalid Claim activity')
@@ -2908,7 +2848,6 @@ export class AgentTeamLedger {
     const channelWorkspaceId = projection.channels.get(channelRef)?.workspaceId
     return member !== undefined && member.state !== 'inactive' && member.state !== 'archived'
       && channelWorkspaceId !== undefined && this.participatesInFrom(projection, memberId, channelWorkspaceId)
-      && this.isChannelMemberFrom(projection, channelRef, memberId)
   }
 
   private apply(operation: AgentTeamOperation): void {
@@ -3289,7 +3228,7 @@ export class AgentTeamLedger {
     const { task, thread, channelRef } = this.threadContextFrom(projection, workspaceId, request)
     if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID) {
       const member = projection.members.get(memberId)
-      if (member === undefined || !projection.memberships.get(channelRef)?.has(member.memberId)) {
+      if (member === undefined || !this.participatesInChannelWorkspaceFrom(projection, channelRef, member.memberId)) {
         throw new Error(`Agent Member '${memberId}' is not authorized for Channel '${channelRef}'`)
       }
     }
@@ -3665,7 +3604,7 @@ export class AgentTeamLedger {
     for (const memberId of recipients) {
       if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) continue
       const member = this.requireMember(memberId)
-      if (member.state === 'inactive' || member.state === 'archived' || !this.participatesIn(member.memberId, channel.workspaceId) || !this.isChannelMember(channel.channelRef, memberId)) {
+      if (member.state === 'inactive' || member.state === 'archived' || !this.participatesIn(member.memberId, channel.workspaceId)) {
         throw new Error(`Agent Member '${memberId}' is not authorized for Channel '${channel.channelRef}'`)
       }
     }
@@ -4023,16 +3962,57 @@ export class AgentTeamLedger {
     return member
   }
 
+  /**
+   * Live-side write gate for a Member acting in a Channel: participation in the
+   * Workspace that owns the Channel. Joining the Channel is not a prerequisite —
+   * a Member who works in this Workspace can reply, claim, follow and read here.
+   */
   private requireMemberChannel(member: AgentTeamAgentMember, channelRef: AgentTeamChannelRef): void {
-    if (!this.isChannelMember(channelRef, member.memberId)) throw new Error(`Agent Member '${member.memberId}' is not authorized for Channel '${channelRef}'`)
+    const channel = this.state.channels.get(channelRef)
+    if (channel === undefined || !this.participatesIn(member.memberId, channel.workspaceId)) {
+      throw new Error(`Agent Member '${member.memberId}' is not authorized for Channel '${channelRef}'`)
+    }
   }
 
+  /**
+   * Replay-side write authorization for one Channel's operations: participation
+   * in the Workspace that owns the Channel. Channel membership is a Human-side
+   * organisation and is not a write gate — but it used to be, so this is the
+   * widened form every historical operation is re-checked against. Every actor
+   * that passed the membership form also participates, so the widening can
+   * never reject a record the old rule accepted.
+   */
+  private participatesInChannelWorkspaceFrom(projection: Projection, channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
+    const workspaceId = projection.channels.get(channelRef)?.workspaceId
+    return workspaceId !== undefined && this.participatesInFrom(projection, memberId, workspaceId)
+  }
+
+  /**
+   * Whether a Member takes part in a Channel — the visibility question, now
+   * derived rather than enrolled: taking part in any Thread of the Channel, or
+   * an explicit membership a historical ledger still carries.
+   *
+   * The explicit half is kept only to keep old ledgers reproducible (a Member
+   * added by `channel-member-joined` who never wrote a word must still see the
+   * Channel); nothing new is ever enrolled. Deriving from Threads is what makes
+   * a Member mentioned into a Thread see the Channel that Thread belongs to.
+   */
   private isChannelMember(channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
-    return this.state.memberships.get(channelRef)?.has(memberId) === true
+    return this.isChannelMemberFrom(this.state, channelRef, memberId)
   }
 
   private isChannelMemberFrom(projection: Projection, channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
-    return projection.memberships.get(channelRef)?.has(memberId) === true
+    if (projection.memberships.get(channelRef)?.has(memberId) === true) return true
+    // Deriving stays inside the Workspace boundary: a Member who has left the
+    // Workspace stops seeing its Channels even though the Threads it wrote
+    // there are still on the record.
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return false
+    const channel = projection.channels.get(channelRef)
+    if (channel === undefined || !this.participatesInFrom(projection, memberId, channel.workspaceId)) return false
+    for (const threadRef of this.channelThreadRefsFrom(projection, channelRef)) {
+      if (this.everParticipatedFrom(projection, threadRef, memberId)) return true
+    }
+    return false
   }
 
   /** Every Thread of the Channel, taskful or taskless — the scope both cleanup validators replay against. */
@@ -4106,10 +4086,15 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Names a Message body may address in one Channel: every live Member of that
-   * Channel plus the Human. A name outside this set stays prose, which is what
-   * keeps an incidental name-drop from reaching someone the Channel cannot
-   * deliver to.
+   * Names a Message body may address in one Channel: every live Member who
+   * participates in the Channel's Workspace plus the Human. A name outside this
+   * set stays prose, which is what keeps an incidental name-drop from reaching
+   * someone the Workspace cannot deliver to.
+   *
+   * Participation, not Channel membership, is the boundary: Channel membership
+   * is a Human-side organisation of the Workspace, so a Member who works in
+   * this Workspace is addressable here without first being enrolled in the
+   * Channel. `@all` is narrower than this set — see `allRecipientsFor`.
    *
    * The Human is reachable under two names: the current display handle and the
    * permanent `human` alias, so a rename never silently orphans `@human`
@@ -4119,17 +4104,36 @@ export class AgentTeamLedger {
    * literal, so that yield only ever covers data predating the reservation.
    */
   private mentionCandidatesFor(channelRef: AgentTeamChannelRef): readonly AgentTeamBodyMentionCandidate[] {
+    const workspaceId = this.state.channels.get(channelRef)?.workspaceId
     const candidates: AgentTeamBodyMentionCandidate[] = [{ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: this.humanHandle }]
     for (const member of this.state.members.values()) {
       if (member.state === 'inactive' || member.state === 'archived') continue
-      if (!this.isChannelMember(channelRef, member.memberId)) continue
+      if (workspaceId === undefined || !this.participatesIn(member.memberId, workspaceId)) continue
       candidates.push({ memberId: member.memberId, handle: member.handle })
     }
-    if (this.humanHandle.normalize('NFKC').trim().toLowerCase() !== AGENT_TEAM_HUMAN_HANDLE
-      && !candidates.some(candidate => candidate.handle.normalize('NFKC').trim().toLowerCase() === AGENT_TEAM_HUMAN_HANDLE)) {
-      candidates.push({ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: AGENT_TEAM_HUMAN_HANDLE })
+    return this.withHumanAlias(candidates)
+  }
+
+  /**
+   * The Member set `@all` stands for in one Channel: the Members who take part
+   * in that Channel plus the Human. Deliberately narrower than the names a body
+   * may address — a Member can be named by hand from anywhere in the Workspace,
+   * while `@all` only reaches the people already in this conversation.
+   */
+  private allRecipientsFor(channelRef: AgentTeamChannelRef): readonly AgentTeamMemberId[] {
+    const memberIds: AgentTeamMemberId[] = [AGENT_TEAM_HUMAN_MEMBER_ID]
+    for (const member of this.state.members.values()) {
+      if (member.state === 'inactive' || member.state === 'archived') continue
+      if (!this.isChannelMember(channelRef, member.memberId)) continue
+      memberIds.push(member.memberId)
     }
-    return Object.freeze(candidates)
+    return Object.freeze(memberIds.sort())
+  }
+
+  private withHumanAlias(candidates: readonly AgentTeamBodyMentionCandidate[]): readonly AgentTeamBodyMentionCandidate[] {
+    const taken = candidates.some(candidate => candidate.handle.normalize('NFKC').trim().toLowerCase() === AGENT_TEAM_HUMAN_HANDLE)
+    if (taken || this.humanHandle.normalize('NFKC').trim().toLowerCase() === AGENT_TEAM_HUMAN_HANDLE) return Object.freeze([...candidates])
+    return Object.freeze([...candidates, { memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: AGENT_TEAM_HUMAN_HANDLE }])
   }
 
   /**
@@ -4167,8 +4171,9 @@ export class AgentTeamLedger {
     const resolution = resolveBodyMentions(body, candidates, sender)
     // `@all` stands for its expansion as of this write: the Member set is
     // snapshotted into the recipient list, so a later roster change cannot
-    // retroactively alter what this operation delivered.
-    const authored = resolution.all ? candidates.map(candidate => candidate.memberId) : resolution.memberIds
+    // retroactively alter what this operation delivered. It expands to the
+    // Channel's own participants, not to every name the body could address.
+    const authored = resolution.all ? this.allRecipientsFor(channelRef) : resolution.memberIds
     const merged = new Set([...explicit, ...authored])
     merged.delete(sender)
     return Object.freeze([...merged].sort())

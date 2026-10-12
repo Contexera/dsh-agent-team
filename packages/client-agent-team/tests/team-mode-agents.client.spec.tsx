@@ -235,42 +235,10 @@ describe('Team agent surfaces', () => {
       workspaceId: 'w1', name: 'backend', description: 'API implementation', memberIds: ['member:builder'],
     }))
     expect(b.createChannel.mock.calls[0]![0].requestId).toBe(b.createChannel.mock.calls[1]![0].requestId)
+    // Membership is derived from participation now, so a created Channel has
+    // no membership controls to drive.
     fireEvent.click(b.view.getByRole('button', { name: '# backend' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '管理成员' }))
-    const manager = b.view.getByRole('dialog', { name: '频道成员' })
-    expect(within(manager).getByText('@builder')).toBeTruthy()
-    fireEvent.click(within(manager).getByRole('button', { name: '移除' }))
-    await waitFor(() => { expect(b.removeChannelMember).toHaveBeenCalledWith(expect.objectContaining({ memberId: 'member:builder' })) })
-    await b.runtime.dispose()
-  })
-
-  it('edits Channel membership from the sidebar row menu with idempotent retries', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
-    fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    expect(await b.view.findByText('# engineering')).toBeTruthy()
-
-    fireEvent.click(b.view.getByRole('button', { name: 'engineering 的操作' }))
-    fireEvent.click(await b.view.findByRole('menuitem', { name: '编辑频道' }))
-    const editor = b.view.getByRole('dialog', { name: '编辑频道' })
-    expect(within(editor).getByText('@builder')).toBeTruthy()
-    // The fixture starts with an empty membership: builder's row offers Add.
-    const builderRow = within(editor).getByText('@builder').closest('div') as HTMLElement
-    expect(within(builderRow).getByRole('button', { name: '添加' })).toBeTruthy()
-    // Offline members cannot join from here; their row stays disabled.
-    const offlineRow = within(editor).getByText('@offline').closest('div') as HTMLElement
-    expect((within(offlineRow).getByRole('button', { name: '添加' }) as HTMLButtonElement).disabled).toBe(true)
-
-    b.joinChannel.mockResolvedValueOnce({ ok: false, error: { message: 'membership failed' } } as never)
-    fireEvent.click(within(builderRow).getByRole('button', { name: '添加' }))
-    expect(within(builderRow).getByRole('button', { name: '更新中…' })).toBeTruthy()
-    expect((await within(builderRow).findByRole('alert')).textContent).toContain('membership failed')
-    fireEvent.click(within(builderRow).getByRole('button', { name: '添加' }))
-    await waitFor(() => { expect(b.joinChannel).toHaveBeenCalledTimes(2) })
-    // The retry reuses the committed direction's request id until success.
-    expect(b.joinChannel.mock.calls[0]![0].requestId).toBe(b.joinChannel.mock.calls[1]![0].requestId)
-    await waitFor(() => { expect(within(builderRow).getByRole('button', { name: '移除' })).toBeTruthy() })
-    fireEvent.keyDown(document, { key: 'Escape' })
-    expect(b.view.queryByRole('dialog', { name: '编辑频道' })).toBeNull()
+    expect(b.view.queryByRole('button', { name: '管理成员' })).toBeNull()
     await b.runtime.dispose()
   })
 

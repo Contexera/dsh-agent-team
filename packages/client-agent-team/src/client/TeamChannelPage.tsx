@@ -3,19 +3,17 @@ import type { AgentTeamClientMemberStatus, AgentTeamChannelRef, AgentTeamInbox, 
   AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { Button, IconChevronLeftOutlineRegular, IconChevronRightOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronLeftOutlineRegular, IconChevronRightOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
-import { TeamMemberRow } from './TeamMemberRow.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
 import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, taskStatusDot, mentionNamesOf } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
-import { useChannelMembership } from './team-membership.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
@@ -40,8 +38,6 @@ interface TeamChannelPageProps {
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
   readonly sendMessage: TeamConversationProps['sendMessage']
-  readonly joinChannel: TeamConversationProps['joinChannel']
-  readonly removeChannelMember: TeamConversationProps['removeChannelMember']
   readonly selectThread: TeamConversationProps['selectThread']
   readonly selectChannel: TeamConversationProps['selectChannel']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
@@ -99,7 +95,7 @@ function unreadCounts(inbox: AgentTeamInbox): ReadonlyMap<AgentTeamThreadRef, nu
   return new Map(inbox.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, joinChannel, removeChannelMember, selectThread, selectChannel, backToChannels, resolveTaskRefs, resolveThreadRefs, openMemberSession, t }: TeamChannelPageProps) {
+export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, selectThread, selectChannel, backToChannels, resolveTaskRefs, resolveThreadRefs, openMemberSession, t }: TeamChannelPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
@@ -112,14 +108,11 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   const [pending, setPending] = useState(false)
   const [asTask, setAsTask] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  const [managingMembers, setManagingMembers] = useState(false)
   // The composer draft lives in the keyed draft cache: view switches unmount
   // this page, and a refresh must not cost the half-written message either.
   // The composer owns the subscription — this page only reads a snapshot when
   // it sends, so typing never re-renders the timeline.
   const draftKey: TeamDraftKey = `channel:${channelRef}`
-  const manageTriggerRef = useRef<HTMLSpanElement>(null)
-  const memberListRef = useRef<HTMLDivElement>(null)
   const mountedRef = useRef(false)
   // Flips after the first successful timeline load; later change wakes
   // refresh in place instead of showing the loading surface again.
@@ -256,7 +249,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     setView(undefined)
     setLoadError(undefined)
     setLoading(true)
-    setManagingMembers(false)
     void refresh()
     const disposers = [
       subscribeChanges({ kind: 'channel', channelRef }, update => {
@@ -284,11 +276,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     }
   }, [workspaceId, channelRef])
 
-  useEffect(() => {
-    if (!managingMembers) return
-    queueMicrotask(() => { memberListRef.current?.querySelector('button')?.focus() })
-  }, [managingMembers])
-
   const loadOlder = async () => {
     if (view === undefined || !view.hasMore || loadingOlder) return
     setLoadingOlder(true)
@@ -303,17 +290,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       if (mountedRef.current) setLoadingOlder(false)
     }
   }
-
-  const closeMembers = () => {
-    setManagingMembers(false)
-    queueMicrotask(() => { manageTriggerRef.current?.querySelector('button')?.focus() })
-  }
-
-  const membership = useChannelMembership(
-    { joinChannel, removeChannelMember },
-    change => change.memberId,
-    async () => { await refresh() },
-  )
 
   // Retained across transport failures so a replayed send dedupes on the Host;
   // definitive outcomes (committed or rejected) start the next send fresh.
@@ -386,34 +362,8 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
             <span>{t('onlineCount', { count: onlineCount })}</span>
           </div>}
         </div>
-        {channel !== undefined && <span ref={manageTriggerRef}><Button size="sm" variant="outline" aria-haspopup="dialog" onClick={() => { setManagingMembers(true) }}>{t('manageMembers')}</Button></span>}
       </header>
     </div>
-
-    <Modal open={managingMembers} onClose={closeMembers} title={t('channelMembers')} {...(channel === undefined ? {} : { description: `# ${channel.name} · ${t('memberCount', { count: channelMembers.length })}` })} closeLabel={t('close')} contentClassName={channelCss.modalBody!}>
-      <div ref={memberListRef} className={channelCss.memberList}>
-        {members.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived').map(status => {
-          const joined = channelMemberIds.has(status.member.memberId)
-          const rowPending = membership.pending.has(status.member.memberId)
-          // Joining needs an active Member — the Host refuses any other
-          // availability. Leaving only needs the Membership fact, so removal
-          // stays offered while a joined Member is down.
-          const disabled = rowPending || (!joined && status.availability !== 'active')
-          const rowError = membership.errors.get(status.member.memberId)
-          return <TeamMemberRow
-            key={status.member.memberId}
-            status={status}
-            action={{
-              label: rowPending ? t('membershipUpdating') : joined ? t('removeFromChannel') : t('addToChannel'),
-              disabled,
-              onSelect: () => { void membership.change({ workspaceId, channelRef, memberId: status.member.memberId, joined }) },
-            }}
-            {...(rowError === undefined ? {} : { error: rowError })}
-            t={t}
-          />
-        })}
-      </div>
-    </Modal>
 
     <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
