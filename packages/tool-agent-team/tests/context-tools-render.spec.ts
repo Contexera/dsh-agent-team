@@ -82,7 +82,6 @@ describe('context tools render the model-facing decision surface', () => {
     // A compaction started now is priced where this scope can price one: the
     // member's two options have to be comparable from one read.
     expect(text).toContain('Compact now: about 48K compactible; keeps the last ~32K verbatim')
-    // Each row renders its label, source, size estimates and Threads.
     for (const item of STATUS_VALUE.items) {
       expect(text).toContain(item.label)
       expect(text).toContain(`source: ${item.source}`)

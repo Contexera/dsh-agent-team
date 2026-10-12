@@ -280,7 +280,6 @@ async function realHarness(
   ctx.provide('jobs', { list: () => jobsState.jobs })
   if (persistenceBackend === 'jsonl') await ctx.plugin(JsonlSessionPersistence, { root: persistence })
   await ctx.plugin(SessionTitle, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
-  // The registry injects 'sessionProjections'; the roster stays PENDING without it.
   await ctx.plugin(TestablePresets, { default: 'team-member' })
   await ctx.plugin(AgentPresetPlugin, { id: 'team-member', plugins: teamMemberPlugins })
   await ctx.plugin(Storage)

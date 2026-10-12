@@ -302,7 +302,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(view.tasks.find(task => task.taskRef === started.task.taskRef)).toMatchObject({ status: 'done', resolution: 'accepted' })
     expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toMatchObject({ items: [], totalUnreadCount: 0, totalDirectCount: 0,
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.task.threadRef }) })] })
-    // Cold replay reproduces the same projection and validates the transition.
     const cold = replayLedger(test)
     expect(() => cold.validate()).not.toThrow()
     expect(cold.view({ workspaceId: alpha }).tasks.find(task => task.taskRef === started.task.taskRef)).toMatchObject({ status: 'done', resolution: 'accepted' })
@@ -449,7 +448,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(ledger.dmHistoryBetween(receiver.member.sessionId, sender.member.memberId)).toContain('quick check')
     expect(ledger.dmHistoryBetween(sender.member.sessionId, receiver.member.memberId)).toContain('quick check')
 
-    // Cold replay validates the audit-only record.
     const cold = replayLedger(test)
     expect(() => cold.validate()).not.toThrow()
     expect(cold.dmHistoryBetween(receiver.member.sessionId, sender.member.memberId)).toContain('quick check')
