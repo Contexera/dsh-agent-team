@@ -435,7 +435,8 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
 
     {channel !== undefined ? <TeamComposer
       key={draftKey}
-      members={channelMembers}
+      members={members}
+      channelPeerMemberIds={channelMemberIds}
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}
