@@ -16,6 +16,9 @@ const run = (env: Record<string, string | undefined>): { stdout: string; stderr:
       cwd: process.cwd(),
       env: environment,
       encoding: 'utf8',
+      // Pin stdio: execFileSync otherwise forwards a failing child's stderr to
+      // this process, dumping the expected failure text into the runner log.
+      stdio: ['pipe', 'pipe', 'pipe'],
     })
     return { stdout, stderr: '' }
   } catch (error) {
@@ -72,6 +75,7 @@ describe('harness checkout pointer', () => {
         const stdout = execFileSync(process.execPath, ['-e', `import(${JSON.stringify(scriptUrl)}).then(m => console.log(m.harnessName))`], {
           env: environment,
           encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
         })
         return { stdout, stderr: '' }
       } catch (error) {
