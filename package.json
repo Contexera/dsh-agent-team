@@ -141,6 +141,10 @@
       "types": "./packages/agent-team/lib/types/member-skills.d.ts",
       "default": "./packages/agent-team/lib/member-skills.js"
     },
+    "./recovery-hints": {
+      "types": "./packages/agent-team/lib/types/recovery-hints.d.ts",
+      "default": "./packages/agent-team/lib/recovery-hints.js"
+    },
     "./tools": {
       "types": "./packages/tool-agent-team/lib/types/index.d.ts",
       "default": "./packages/tool-agent-team/lib/index.js"

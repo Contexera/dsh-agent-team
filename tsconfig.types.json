@@ -53,6 +53,9 @@
       "@contexera/dsh-agent-team/mentions": [
         "./packages/agent-team/src/mentions.ts"
       ],
+      "@contexera/dsh-agent-team/recovery-hints": [
+        "./packages/agent-team/src/recovery-hints.ts"
+      ],
       "@contexera/dsh-agent-team/member-skills": [
         "./packages/agent-team/src/member-skills.ts"
       ],

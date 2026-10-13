@@ -286,8 +286,11 @@ describe('Agent Team shipping contract', () => {
       'team_inbox', 'team_thread', 'team_message', 'team_claim', 'team_view',
     ])
     // Validation errors teach the same two token surfaces as the descriptions,
-    // never a single-source story.
-    expect(toolSource).toContain('or reuse the one your own last committed mutation rendered')
+    // never a single-source story. The route sentence itself lives in the
+    // recovery registry, so the tool source cites it rather than spelling it.
+    expect(toolSource).toContain("from '@contexera/dsh-agent-team/recovery-hints'")
+    const recoverySource = await readFile(resolve(root, 'packages/agent-team/src/recovery-hints.ts'), 'utf8')
+    expect(recoverySource).toContain('or reuse the one your own last committed mutation rendered')
     expect(toolSource).not.toContain('the revision is not shown anywhere else')
     // The body parameter restates the opening rule where the model composes the
     // message, so the contract is visible at composition time, not only in the

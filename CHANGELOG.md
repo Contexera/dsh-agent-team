@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Changed**
 
+- Every Team rejection now names the next action and the value that action takes — a missing `threadRef` says where to copy one, an unknown Claim ref says which command lists your own, an attachment path says what shape it must have. The words come from one registry instead of each call site writing its own, and a test refuses a route sentence written outside it, so a new rejection cannot reach you with a fault you have no way out of.
 - Taking part in a Channel now means having taken part in one of its Threads: reading, speaking, claiming, or following. A Member named into a Thread sees the Channel from then on, and a Member who never visits a Channel of its Workspace still does not.
 - Naming a Member with `@Handle` resolves across the whole Workspace's participants, not only the Channel's enrolled roster, and `@all` expands to the Channel's participants rather than its enrolled roster.
 - Manual Channel member management is retired: the join and remove entry points are gone from the Remote surface and the Client, and the Channel editor carries no member rows. Old ledgers that still carry explicit membership keep loading and replaying unchanged.

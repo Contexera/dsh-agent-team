@@ -7,6 +7,7 @@
 
 import AgentTeam from '@contexera/dsh-agent-team/host'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 
 /** The Agent shape every Team tool receives. */
 export type TeamToolAgent = NonNullable<Parameters<AgentTeam['memberForAgent']>[0]>
@@ -51,7 +52,7 @@ export function workspaceOf(args: { workspace?: string | undefined }, agent: Tea
   const workspaces = service(agent).workspacesForAgent(agent)
   const choices = workspaces.map(workspace => workspace.workspaceId).join(', ')
   if (args.workspace === undefined) {
-    if (workspaces.length !== 1) throw new Error(`workspace is required when participating in multiple Workspaces. Choose: ${choices}`)
+    if (workspaces.length !== 1) throw new Error(recoveryFor('workspace_required').sentence({ refused: choices }))
     return workspaces[0]!.workspaceId
   }
   const requested = args.workspace
@@ -66,7 +67,7 @@ export function workspaceOf(args: { workspace?: string | undefined }, agent: Tea
   if (isAbbreviation) {
     const matches = workspaces.filter(workspace => workspace.workspaceId.slice(workspace.workspaceId.indexOf(':') + 1).replaceAll('-', '').toLowerCase().startsWith(tail))
     if (matches.length === 1) return matches[0]!.workspaceId
-    if (matches.length > 1) throw new Error(`ambiguous Workspace '${requested}' matches ${matches.map(workspace => `'${workspace.workspaceId}'`).join(', ')}; reuse a longer prefix or the full Workspace id exactly as listed`)
+    if (matches.length > 1) throw new Error(recoveryFor('workspace_ambiguous').sentence({ refused: `${requested} matches ${matches.map(workspace => `'${workspace.workspaceId}'`).join(', ')}` }))
   }
-  throw new Error(`Not participating in Workspace '${requested}'. Choose: ${choices} — copy the full id, or a unique prefix of at least ${MIN_WORKSPACE_PREFIX} hex characters`)
+  throw new Error(recoveryFor('workspace_not_participating').sentence({ refused: `'${requested}'. Choose: ${choices}` }))
 }

@@ -2,6 +2,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { requestScopedUuid } from './request-scoped-id.ts'
+import { recoveryFor } from './recovery-hints.ts'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { AgentTeamAttachmentId } from './types.ts'
 
@@ -90,12 +91,15 @@ export function mediaTypeForPath(raw: string): string {
  * so a rejection anywhere leaves the upload cache untouched.
  */
 export async function validatePathAttachment(raw: string): Promise<void> {
-  if (!isAbsolute(raw)) throw new Error(`attachment path '${raw}' must be absolute — attachments are resolved from the filesystem root, so a relative path names nothing`)
+  // The fault is stated first and the registered way out second, so the model
+  // reads what was refused before it reads what to do — the same order every
+  // other Team rejection uses.
+  if (!isAbsolute(raw)) throw new Error(`attachment path '${raw}' must be absolute — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
   const info = await stat(raw).catch(() => undefined)
-  if (info === undefined) throw new Error(`attachment path '${raw}' does not exist — check the path, then retry; an unreadable path is refused before anything is cached`)
-  if (!info.isFile()) throw new Error(`attachment path '${raw}' is not a regular file — point at one file, not a directory`)
-  if (info.size === 0) throw new Error(`attachment '${basename(raw)}' must not be empty — attach a file with content, or drop the attachment`)
-  if (info.size > ATTACHMENT_MAX_BYTES) throw new Error(`attachment '${basename(raw)}' exceeds the ${ATTACHMENT_MAX_BYTES} byte limit — split it across messages or shrink the file`)
+  if (info === undefined) throw new Error(`attachment path '${raw}' does not exist — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
+  if (!info.isFile()) throw new Error(`attachment path '${raw}' is not a regular file — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
+  if (info.size === 0) throw new Error(`attachment '${basename(raw)}' must not be empty — ${recoveryFor('attachment_path_rejected').sentence({ refused: `'${basename(raw)}'` })}`)
+  if (info.size > ATTACHMENT_MAX_BYTES) throw new Error(`attachment '${basename(raw)}' exceeds the ${ATTACHMENT_MAX_BYTES} byte limit — ${recoveryFor('attachment_path_rejected').sentence({ refused: `'${basename(raw)}'` })}`)
 }
 
 /**
