@@ -13,24 +13,6 @@ usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
-/**
- * Fold upstream-owned sidebar chrome onto one shape across the certified line.
- * Two cosmetic details of it moved between the 0.1.7-rc.1 and rc.2 cuts: the logo
- * row gained `data-window-drag`, and the new-session icon and label were rewrapped
- * in a mask/content pair. Both cuts sit inside the certified range, so the
- * container snapshot normalizes that rewrapping instead of pinning one cut.
- */
-function normalizeSidebarChrome(container: HTMLElement): HTMLElement {
-  const clone = container.cloneNode(true) as HTMLElement
-  for (const node of clone.querySelectorAll('[data-window-drag]')) node.removeAttribute('data-window-drag')
-  // Class names arrive CSS-module hashed, so these selectors match the stable part.
-  for (const mask of clone.querySelectorAll('[class*="newSessionLabelMask"]')) {
-    const content = mask.querySelector('[class*="newSessionContent"]') ?? mask
-    mask.replaceWith(...content.childNodes)
-  }
-  return clone
-}
-
 describe('Team conversation surfaces', () => {
   it('opens a selected Channel in the Team center and sends only after Host commit', async () => {
     const b = await runtimeWithTeam({ remainingUnreadCounts: [1] })
@@ -863,8 +845,6 @@ describe('Team conversation surfaces', () => {
     expect(b.view.getByRole('button', { name: '对话' })).toBeTruthy()
     expect(b.view.getByRole('button', { name: '频道' })).toBeTruthy()
     expect(b.view.queryByRole('button', { name: '新建工作区' })).toBeNull()
-    expect(normalizeSidebarChrome(b.view.container)).toMatchSnapshot()
-
     await b.team.dispose()
     expect(await b.view.findByText('普通工作区')).toBeTruthy()
     // The conversation seat keeps the shipped ConversationRoot after the Team

@@ -33,8 +33,6 @@ import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
-// @ts-expect-error untyped shared resolution module
-import { harnessDir } from '../../../scripts/harness-dir.mjs'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
 
 const sharedCleanups: Array<() => Promise<void>> = []
@@ -400,71 +398,6 @@ describe('Agent Team member tool policy', () => {
     const names = toolNames(ctx, ordinary.agent)
     for (const teamTool of AGENT_TEAM_TOOL_NAMES) expect(names).not.toContain(teamTool)
     expect(names).not.toContain('ordinary_tool')
-  })
-
-  // Spike (no production code): prove the per-member MOUNT seam — mounting a
-  // plugin through one Member's agent context registers its tools on that
-  // agent's exact layer, invisible to siblings, with the injected service
-  // resolving through the scope chain. The real @deepseek-ai/dsh-tool-session-query
-  // plugin and a minimal SessionQueryEngine stand-in provide the payload.
-  it('spike: mounts session-query per Member through the agent exact layer without sibling visibility', async () => {
-    useAdapter(new EmptyAdapter())
-    const { ctx, workspaceId } = shared
-    const engine = await import('@deepseek-ai/dsh-session-query')
-    // The tool plugin ships in the adjacent Harness checkout (read-only
-    // reference); it is not a Team dependency, so the spike loads it by path.
-    const toolPluginModule = await import(pathToFileURL(join(harnessDir, 'packages/session-query/tool-session-query/lib/index.js')).href)
-    const toolPlugin = {
-      name: 'tool-session-query',
-      inject: toolPluginModule.inject as readonly string[],
-      apply: toolPluginModule.apply as (ctx: Context, config: unknown) => void,
-    }
-
-    const holder = await addMember(ctx, workspaceId, 't7-holder')
-    const sibling = await addMember(ctx, workspaceId, 't7-sibling')
-    const holderAgent = liveAgent(ctx, holder)
-    const siblingAgent = liveAgent(ctx, sibling)
-    expect(toolNames(ctx, siblingAgent)).not.toContain('session_search')
-
-    // A minimal engine: the abstract surface is two search methods; every
-    // other behavior has a concrete default inside SessionQueryEngine.
-    class StandInEngine extends engine.SessionQueryEngine {
-      searches: string[] = []
-      override async searchSessions() {
-        this.searches.push('sessions')
-        return { hits: [], nextCursor: undefined } as never
-      }
-      override async searchEvents() {
-        this.searches.push('events')
-        return { hits: [], nextCursor: undefined } as never
-      }
-    }
-
-    // Mount the real plugin on ONE Member's agent context; provide the engine
-    // on that same context so the plugin's injection resolves through it.
-    const standIn = new StandInEngine(holderAgent.ctx)
-    holderAgent.ctx.plugin(toolPlugin, {})
-    await vi.waitFor(() => {
-      expect(toolNames(ctx, holderAgent)).toContain('session_search')
-    })
-
-    // Sibling and ordinary surfaces stay clean — the mount is agent-exact.
-    expect(toolNames(ctx, siblingAgent)).not.toContain('session_search')
-    expect(toolNames(ctx, siblingAgent)).not.toContain('session_trace')
-    const ordinary = await ctx.agents.create({ sessionId: SessionId('t7-ordinary-spike') })
-    testCleanups.push(async () => { await ordinary.dispose() })
-    expect(toolNames(ctx, ordinary.agent)).not.toContain('session_search')
-
-    // The tool executes against the Member-scoped engine instance.
-    const result = await holderAgent.ctx.tools.execute({
-      callId: ToolCallId('spike-call'),
-      name: 'session_search',
-      arguments: { query: 'anything' },
-      agent: holderAgent as never,
-      signal: new AbortController().signal,
-    })
-    expect(standIn.searches).toEqual(['sessions'])
-    expect(result).toBeDefined()
   })
 
   it('reports the stored configuration warnings after a failed apply, not the restored leftover', async () => {

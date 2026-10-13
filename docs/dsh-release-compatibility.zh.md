@@ -276,7 +276,7 @@ DSH `0.1.7-rc.1` 已认证，并推动基线前移。全部 `@deepseek-ai/dsh-*`
 
 它针对的 0.1.5 前自定义 kind 在读时转换之前就被 released v2→v3 迁移链拒绝。确定性的 `session-refused` 激活失败现在在每次重启重试中报告同一失败，而不再被修复。
 
-还有一处变化止步于测试 fixture：rc.1 把 `IconUserOutlineArtwork` 的路径重画到半像素网格上，没有改名、没有改 wrapper。因此 `settingsAction` 图标的 `data-content` 指纹从 `612cfab9` 变为 `68b4b343`，一行已提交快照随之刷新。源码无改动。
+还有一处变化不需要改 bundle 源码：rc.1 把 `IconUserOutlineArtwork` 的路径重画到半像素网格上，没有改名、没有改 wrapper，因此 `settingsAction` 图标的 `data-content` 指纹从 `612cfab9` 变为 `68b4b343`。
 
 ### DSH 0.1.7-rc.2
 
@@ -286,7 +286,7 @@ DSH `0.1.7-rc.2` 在同一 peer 区间上认证通过，manifest 无改动。候
 
 两处上游变化止步于测试 fixture，都没有改动 bundle 源码。随包 layout 与 sidebar 现在 inject `shortcuts` 服务，接管测试台因此提供两个父级都需要的空 catalog 与空注册器。
 
-sidebar 自身的标记也变了：logo 行多了 `data-window-drag`，新会话图标与文字被重新包进 mask/content 结构。容器快照因此把这两处细节折叠成同一形状，因为已提交的快照必须对认证区间内每个切点成立，而不只是对最新的那个。
+sidebar 自身的标记也变了：logo 行多了 `data-window-drag`，新会话图标与文字被重新包进 mask/content 结构。这一轮用容器快照把这两处细节折叠成同一形状，以便对认证区间内每个切点成立；该快照后来随非必要测试的清理一并删除：它只是复述上游界面标记，行为已有角色断言覆盖。
 
 认证树上的证据：`npm run typecheck`、`npm test`（741 通过、1 跳过）、`npm run lint`、`npm run build`、`npm pack --dry-run`（251 文件）、`npm run test:browser`（4 条 journey）。
 

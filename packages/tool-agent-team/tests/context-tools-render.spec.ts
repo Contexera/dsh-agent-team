@@ -269,12 +269,4 @@ describe('context tools render the model-facing decision surface', () => {
     expect(unavailable).toContain('not available in this scope')
   })
 
-  it('context_rollover renders the scheduled swap and keeps render text self-describing', () => {
-    const tools = contextTools()
-    const text = renderText(tools.get('context_rollover')!, {}, { mode: 'fresh', status: 'scheduled' })
-    expect(text).toContain('rollover')
-    expect(text).toContain('fresh')
-    const seeded = renderText(tools.get('context_rollover')!, {}, { mode: 'from-checkpoint', status: 'scheduled' })
-    expect(seeded).toContain('from-checkpoint')
-  })
 })

@@ -213,7 +213,7 @@ Two upstream contract changes drove the round, and both required source adaptati
 
 The startup repair pass (`session-remediation.ts`) was removed in the same change, with Human approval. What it published was precisely the wrapper V4 refuses at write time, so keeping it would manufacture unreadable files, and the pre-0.1.5 kinds it targeted are refused by the released v2→v3 chain before the read-time conversion runs. A deterministic `session-refused` activation now reports the same failure on every restart instead of healing it.
 
-One further change stopped at the test fixtures: rc.1 redrew `IconUserOutlineArtwork` onto a half-pixel grid without renaming the symbol or changing its wrapper, so the `settingsAction` icon's `data-content` fingerprint moved `612cfab9` → `68b4b343` and one committed snapshot line was refreshed. No bundle source changed.
+One further change required no bundle source edit: rc.1 redrew `IconUserOutlineArtwork` onto a half-pixel grid without renaming the symbol or changing its wrapper, so the `settingsAction` icon's `data-content` fingerprint moved `612cfab9` → `68b4b343`.
 
 ### DSH 0.1.7-rc.2
 
@@ -223,7 +223,7 @@ No symbol this bundle imports was removed or renamed. Inside the peered packages
 
 Two upstream changes stopped at the test fixtures, and neither moved bundle source. The shipped layout and sidebar now inject a `shortcuts` service, so the takeover bench provides the empty catalog and no-op registrer both parents require.
 
-The sidebar's own markup also moved: `data-window-drag` on the logo row, and the new-session icon and label rewrapped in a mask/content pair. The container snapshot folds those two details onto one shape, because a committed snapshot must hold on every cut inside the certified range, not on the newest one alone.
+The sidebar's own markup also moved: `data-window-drag` on the logo row, and the new-session icon and label rewrapped in a mask/content pair. The round folded both onto one shape in its container snapshot, which had to hold on every cut inside the certified range; that snapshot was later deleted with the suite's non-essential tests, since it only restated upstream chrome and caught nothing the role-based assertions miss.
 
 Evidence on the certified tree: `npm run typecheck`, `npm test` (741 passed, 1 skipped), `npm run lint`, `npm run build`, `npm pack --dry-run` (251 files), and `npm run test:browser` (4 journeys).
 

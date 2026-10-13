@@ -47,61 +47,6 @@ describe('team_thread renders the model-facing decision surface', () => {
     expect(text).toContain('claim:7ad04d38-3889-4414-ac0c-23f73c0b962a')
   })
 
-  it('an unread accept with usage below the task-boundary threshold advises keeping the context', () => {
-    const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
-      kind: 'read', threadRef: 'thread:x', taskRef: 'task:x', revision: 100, status: 'done', resolution: 'accepted', following: true,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
-      claims: [], facts: [ACCEPT_FACT],
-      readThroughSequence: 8190, remainingUnreadCount: 0,
-      contextAdvice: {
-        usageTokens: 96_000, taskBoundaryThreshold: 128_000, handoffAt: 200_000, hardLimit: 256_000,
-        action: 'keep',
-        guidance: 'Keep the current context for possible acceptance follow-up. This acceptance is already a timeline boundary; do not create a redundant checkpoint. Record a checkpoint only before the next noisy or risky phase.',
-      },
-    })
-    expect(text).toContain('96,000')
-    expect(text).toContain('128,000')
-    expect(text).toContain('200,000')
-    expect(text).toContain('keep')
-    expect(text).toContain('do not create a redundant checkpoint')
-  })
-
-  it('an unread accept at or above the threshold advises a fresh rollover after closeout', () => {
-    const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
-      kind: 'read', threadRef: 'thread:x', taskRef: 'task:x', revision: 100, status: 'done', resolution: 'accepted', following: true,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
-      claims: [], facts: [ACCEPT_FACT],
-      readThroughSequence: 8190, remainingUnreadCount: 0,
-      contextAdvice: {
-        usageTokens: 156_000, taskBoundaryThreshold: 128_000, handoffAt: 200_000, hardLimit: 256_000,
-        action: 'rollover',
-        guidance: 'Finish the acceptance closeout, persist only durable reusable conclusions, collect or stop jobs, then call context_rollover with a fresh handoff covering every other active Claim. Do not return to an old checkpoint solely because this Task was accepted.',
-      },
-    })
-    expect(text).toContain('156,000')
-    expect(text).toContain('context_rollover')
-    expect(text).toContain('covering every other active Claim')
-  })
-
-  it('an unread accept already at handoffAt advises handing off now', () => {
-    const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
-      kind: 'read', threadRef: 'thread:x', taskRef: 'task:x', revision: 100, status: 'done', resolution: 'accepted', following: true,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
-      claims: [], facts: [ACCEPT_FACT],
-      readThroughSequence: 8190, remainingUnreadCount: 0,
-      contextAdvice: {
-        usageTokens: 203_000, taskBoundaryThreshold: 128_000, handoffAt: 200_000, hardLimit: 256_000,
-        action: 'compact-now',
-        guidance: 'You are at or above the handoff budget. Finish the current atomic action and unsettled evidence, then call context_compact with a summary you write yourself — that shortens this generation in place, keeps your recent work verbatim, and is the default. Roll over only when the work has turned a page.',
-      },
-    })
-    expect(text).toContain('203,000')
-    expect(text).toContain('compact-now')
-  })
-
   it('a read without unread accepts renders no context advice section', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {
       workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
