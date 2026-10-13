@@ -1193,7 +1193,7 @@ export class AgentTeamLedger {
           throw new Error(`unknown Claim '${request.claimRef ?? ''}'${request.claimRef === undefined ? '' : this.unknownRefHint(request.claimRef, 'claim', 'Claim')}`)
         }
         if (previous.taskRef !== task.taskRef || previous.owner !== actor.memberId) {
-          throw new Error('Member can modify only its own Claim on this Task')
+          throw new Error(`Member can modify only its own Claim on this Task — claim ${previous.claimRef} is owned by another Member or belongs to another Task; list this Task's Claims with team_claim list and ${request.action} one of your own`)
         }
         if (previous.state !== 'active') throw new Error(`Claim '${previous.claimRef}' is already ${previous.state}`)
         claim = Object.freeze({ ...previous, state: request.action === 'done' ? 'done' : 'released' })
@@ -4155,7 +4155,7 @@ export class AgentTeamLedger {
     const ref = request.replyToMessageRef
     if (ref === undefined) return undefined
     const parent = this.state.messagesByRef.get(ref)
-    if (parent === undefined) throw new Error(`reply target '${ref}' is not a recorded Message`)
+    if (parent === undefined) throw new Error(`reply target '${ref}' is not a recorded Message${this.unknownRefHint(ref, 'message', 'Message')} — copy a messageRef rendered by team_thread read, team_view, or an inbox notice`)
     if (parent.threadRef !== threadRef) throw new Error(`reply target '${ref}' belongs to another Thread`)
     return parent
   }

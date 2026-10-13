@@ -428,7 +428,7 @@ const teamThread = defineTool({
         ...taskNumberOf(snapshot.task),
       })
     }
-    if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error('read does not accept history arguments')
+    if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error('read takes no beforeSequence or limit — it only drains unread facts; page older facts with action: history')
     const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base })
     return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => entry.fact.kind === 'message'
         ? { sequence: entry.fact.sequence, kind: 'message', body: entry.fact.message.body, sender: entry.fact.message.sender, mentions: [...entry.fact.mentions], ...(entry.fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: entry.fact.message.replyToMessageRef }), ...(entry.fact.replyTo === undefined ? {} : { replyTo: entry.fact.replyTo }), unread: entry.unread, direct: entry.direct, occurredAt: entry.fact.occurredAt }
@@ -554,7 +554,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
     const attachmentPaths = Array.isArray(rawPaths) ? rawPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '') : undefined
     const paths = attachmentPaths !== undefined && attachmentPaths.length > 0 ? { attachmentPaths } : {}
     if (args.action === 'start') {
-      if (args.channelRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined) throw new Error('start requires channelRef and does not accept threadRef, taskRef, or baseRevision')
+      if (args.channelRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined) throw new Error('start requires channelRef and does not accept threadRef, taskRef, or baseRevision — start opens a new Thread; copy a channelRef from team_view, and reply instead when you already hold a threadRef')
       const result = await host.sendMessageForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
         channelRef: args.channelRef as never, body: args.body, asTask: args.asTask === true, ...paths })
       return messageOutcome(result, 'start')
@@ -562,7 +562,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
     if (args.action === 'dm') {
       if (args.memberRef === undefined || args.channelRef !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
         || args.baseRevision !== undefined || args.asTask !== undefined || attachmentPaths !== undefined) {
-        throw new Error('dm requires memberRef and body only; it does not accept channelRef, threadRef, taskRef, baseRevision, asTask, or attachments')
+        throw new Error('dm requires memberRef and body only; it does not accept channelRef, threadRef, taskRef, baseRevision, asTask, or attachments — copy the memberRef of an enabled Agent from team_view; a DM is a private note, so shared work belongs in a Thread reply')
       }
       try {
         const result = await host.dmForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
@@ -666,8 +666,8 @@ const teamClaim = defineTool({
     }
     const baseRevision = args.baseRevision
     if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) throw new Error('claim mutation requires a positive baseRevision; drain the Thread with team_thread read and copy the token it renders, or reuse the one your own last committed mutation rendered')
-    if (args.action === 'claim' && (args.direction === undefined || args.claimRef !== undefined)) throw new Error('claim requires direction and does not accept claimRef')
-    if ((args.action === 'done' || args.action === 'release') && (args.claimRef === undefined || args.direction !== undefined)) throw new Error(`${args.action} requires claimRef and does not accept direction`)
+    if (args.action === 'claim' && (args.direction === undefined || args.claimRef !== undefined)) throw new Error('claim requires direction and does not accept claimRef — claim opens a new Claim with your one-sentence direction; drop claimRef, or use done/release to change an existing one')
+    if ((args.action === 'done' || args.action === 'release') && (args.claimRef === undefined || args.direction !== undefined)) throw new Error(`${args.action} requires claimRef and does not accept direction — copy the claimRef of your own Claim from team_claim list or the Thread read; you can only ${args.action} a Claim you own`)
     const result = await host.changeClaimForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action,
       baseRevision, ...(args.direction === undefined ? {} : { direction: args.direction }), ...(args.claimRef === undefined ? {} : { claimRef: args.claimRef as AgentTeamClaimRef }) })
     // Structured compatibility: every mutation outcome re-reads the real

@@ -26,6 +26,8 @@ The footer routes body reading and acknowledgement to `team_thread read`; the re
 
 `read` returns one chronological unread batch and advances the watermark. A read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer. `history` pages older facts. `message` reads one Message back verbatim by its ref, which is the way to answer a quote whose original sits outside the page you hold. follow/unfollow change personal Attention.
 
+`beforeSequence` and `limit` are history-only parameters. `read` drains unread and cannot page, so any other action carrying them is refused with the `action: history` route.
+
 The six actions do not share one maximal render: `status`, `follow`, and `unfollow` answer only the Attention question — one outcome line with the Thread ref, optional Task standing, and following state, no timeline.
 
 `message` renders the ref, the sequence with its instant and sender, and then the body whole: this one action exists so a reader can answer a Message it did not receive, so nothing is trimmed and the orientation is unchanged.

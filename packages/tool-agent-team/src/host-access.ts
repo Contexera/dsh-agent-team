@@ -28,10 +28,25 @@ export function member(agent: TeamToolAgent) {
 /** A collaboration address, never a cwd or Session switch. */
 export const workspaceParam = {
   type: 'string' as const,
-  description: 'Target Workspace id exactly as listed in your participation context or team_view. Required when you participate in more than one Workspace; only a sole participation can be inferred. This does not change your Session cwd.',
+  description: 'Target Workspace id exactly as listed in your participation context or team_view. A unique prefix of at least 6 hex characters also resolves. Required when you participate in more than one Workspace; only a sole participation can be inferred. This does not change your Session cwd.',
 }
 
-/** Reject ambiguous routing before a tool reads facts or attempts a mutation. */
+/**
+ * Shortest accepted Workspace-id abbreviation, and the same tolerance the
+ * branded Team refs already have. A Member that echoes a prefix it was shown
+ * must not be rejected for the very form the choices list invited it to copy.
+ */
+const MIN_WORKSPACE_PREFIX = 6
+
+/**
+ * Resolve the routing Workspace, or reject with the fix.
+ *
+ * An exact id wins; a unique prefix of at least {@link MIN_WORKSPACE_PREFIX}
+ * hex characters resolves like a branded ref does. Every refusal names the
+ * participated Workspaces and states which form is expected — the same
+ * contract the ledger applies to Task/Thread/Message/Claim refs, so no
+ * parameter family can invite a form it then rejects.
+ */
 export function workspaceOf(args: { workspace?: string | undefined }, agent: TeamToolAgent): WorkspaceId {
   const workspaces = service(agent).workspacesForAgent(agent)
   const choices = workspaces.map(workspace => workspace.workspaceId).join(', ')
@@ -39,7 +54,19 @@ export function workspaceOf(args: { workspace?: string | undefined }, agent: Tea
     if (workspaces.length !== 1) throw new Error(`workspace is required when participating in multiple Workspaces. Choose: ${choices}`)
     return workspaces[0]!.workspaceId
   }
-  const selected = workspaces.find(workspace => workspace.workspaceId === args.workspace)
-  if (selected === undefined) throw new Error(`Not participating in Workspace '${args.workspace}'. Choose: ${choices}`)
-  return selected.workspaceId
+  const requested = args.workspace
+  const exact = workspaces.find(workspace => workspace.workspaceId === requested)
+  if (exact !== undefined) return exact.workspaceId
+  // Only a well-formed, long-enough hex tail may abbreviate; anything else is
+  // an unknown id, never a silently shortened match. The brand prefix is not
+  // part of the tail, so `workspace:1a2b3c4d` abbreviates the same UUID the
+  // branded refs do.
+  const tail = requested.slice(requested.indexOf(':') + 1).replaceAll('-', '').toLowerCase()
+  const isAbbreviation = tail.length >= MIN_WORKSPACE_PREFIX && /^[0-9a-f]+$/.test(tail)
+  if (isAbbreviation) {
+    const matches = workspaces.filter(workspace => workspace.workspaceId.slice(workspace.workspaceId.indexOf(':') + 1).replaceAll('-', '').toLowerCase().startsWith(tail))
+    if (matches.length === 1) return matches[0]!.workspaceId
+    if (matches.length > 1) throw new Error(`ambiguous Workspace '${requested}' matches ${matches.map(workspace => `'${workspace.workspaceId}'`).join(', ')}; reuse a longer prefix or the full Workspace id exactly as listed`)
+  }
+  throw new Error(`Not participating in Workspace '${requested}'. Choose: ${choices} — copy the full id, or a unique prefix of at least ${MIN_WORKSPACE_PREFIX} hex characters`)
 }

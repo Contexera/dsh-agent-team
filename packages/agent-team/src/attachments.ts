@@ -90,12 +90,12 @@ export function mediaTypeForPath(raw: string): string {
  * so a rejection anywhere leaves the upload cache untouched.
  */
 export async function validatePathAttachment(raw: string): Promise<void> {
-  if (!isAbsolute(raw)) throw new Error(`attachment path '${raw}' must be absolute`)
+  if (!isAbsolute(raw)) throw new Error(`attachment path '${raw}' must be absolute — attachments are resolved from the filesystem root, so a relative path names nothing`)
   const info = await stat(raw).catch(() => undefined)
-  if (info === undefined) throw new Error(`attachment path '${raw}' does not exist`)
-  if (!info.isFile()) throw new Error(`attachment path '${raw}' is not a regular file`)
-  if (info.size === 0) throw new Error(`attachment '${basename(raw)}' must not be empty`)
-  if (info.size > ATTACHMENT_MAX_BYTES) throw new Error(`attachment '${basename(raw)}' exceeds the ${ATTACHMENT_MAX_BYTES} byte limit`)
+  if (info === undefined) throw new Error(`attachment path '${raw}' does not exist — check the path, then retry; an unreadable path is refused before anything is cached`)
+  if (!info.isFile()) throw new Error(`attachment path '${raw}' is not a regular file — point at one file, not a directory`)
+  if (info.size === 0) throw new Error(`attachment '${basename(raw)}' must not be empty — attach a file with content, or drop the attachment`)
+  if (info.size > ATTACHMENT_MAX_BYTES) throw new Error(`attachment '${basename(raw)}' exceeds the ${ATTACHMENT_MAX_BYTES} byte limit — split it across messages or shrink the file`)
 }
 
 /**

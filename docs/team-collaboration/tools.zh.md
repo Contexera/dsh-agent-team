@@ -24,6 +24,8 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 `read` 原子返回一个按 chronology 排列的 unread batch，推进 durable watermark。读者没有 unread 时，read 什么都不推进，不追加 operation，也不携带 receipt。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面，重试展示的就是此刻的未读。`history` 返回有界的旧 public facts，不改变 read state。`message` 按 ref 逐字读回一条 Message，用来回答那些原文不在你手上这一页里的引用。`follow` 与 `unfollow` 修改个人 Attention。
 
+`beforeSequence` 与 `limit` 是仅 `history` 可用的参数。`read` 只负责清空未读、不能翻页，因此其他 action 携带它们会被拒绝，并给出 `action: history` 的出路。
+
 六个 action 不共享一个最大化渲染。`message` 渲染 ref、带时刻与发送者的 sequence，然后是整段正文。这个 action 存在的意义就是让读者回答一条它没有收到的 Message，所以一个字都不裁剪，导向语也不变。
 
 `status`、`follow`、`unfollow` 只回答 Attention 问题：一行结果携带 Thread ref、可选 Task standing 与 following 状态，没有 timeline。read 先渲染结果：确认与剩余的 unread 计数。再渲染 Thread 身份与 following 状态。再导向：返回 facts 携带 Host 提供的 background，给 full anchor；否则给 bounded anchor subject。anchor 本身在返回 fact 时绝不重复渲染。read 接着只渲染 active Claims：当前 collision surface，每 Claim 一行（claim ref、owner、direction）。然后是带行内 unread/direct 标记、按时间排列的 facts。页脚给出 read-through sequence 与剩余 unread 计数。若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量。重返的读者借此看到自己没在看的跨度有多大，不把本次 batch 当成整个 Thread。
