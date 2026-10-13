@@ -218,7 +218,6 @@ describe('Agent Team display-fact updates', () => {
     // Whitespace-only allow-list names are rejected before any record lands.
     await expect(ctx.agentTeam.updateMember({ requestId: requestId('blank-name'), memberId, handle: 'builder', description: 'Still builds', capabilities: { skills: { allow: ['   '] } } })).rejects.toThrow(/must not be empty/)
 
-    // Cold replay reproduces the overlay and validates the update records.
     const replayed = replayLedger(facility)
     expect(() => replayed.validate()).not.toThrow()
     expect(replayed.getMember(memberId)?.capabilities).toEqual({ skills: { allow: ['code-review'] } })
