@@ -37,7 +37,7 @@
 - **目标分支是 `master`**；`master` 前进后 rebase 你自己的分支即可，`master` 的历史不会被重写。
 - **每个 commit 一行 Conventional Commits**——`type: lowercase imperative summary`（`feat`、`fix`、`chore`、`refactor`、`test`、`perf`、`docs`）——不带正文。PR 以单个 squash commit 落地，历史留下的就是这行标题。
 - **每处改动都要说**，不只是最显眼的那处：正文只覆盖一半 diff，reviewer 就得反推另一半。
-- **用户可见的改动要更新 [`CHANGELOG.md`](CHANGELOG.md)**，写在 `Unreleased` 下。
+- **用户可见的改动要更新 [`CHANGELOG.md`](CHANGELOG.md)**，写在 `Unreleased` 下。所谓实质性，指用户或调用方会碰到的改动：新行为、改了的契约、否则会踩上的修复。没有可观察差异的重构、内部改名、机械性改动不挣一条 bullet——在 PR 里说明即可。一条 bullet 只写一个主题，文风沿用文件已有的写法；并保持 `Unreleased` 是全文唯一的这样的段：发布流程会消费掉它，见 [`docs/release-runbook.zh.md`](docs/release-runbook.zh.md) §「发布材料」。
 - **维护中的文档是双语配对**：改 `foo.md` 时，同一次改动里一并改 `foo.zh.md`；具体路由规则见 [`docs/AGENTS.md`](docs/AGENTS.md)。
 - **可见改动要证据**：桌面与 390×844 的截图，加上键盘/焦点与 dialog/menu 状态，口径见 [`docs/frontend-design/README.zh.md`](docs/frontend-design/README.zh.md)。
 - **生成文件保持生成**：不要手改 `packages/agent-team/lib/typert.*`，也不要手改生成的 `tsconfig*.json` path facade——改 `scripts/sync-paths.mjs` 后重新生成。
