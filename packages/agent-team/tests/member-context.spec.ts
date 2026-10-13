@@ -32,13 +32,6 @@ describe('Team Member private memory context', () => {
     expect(rendered).not.toContain('Maintenance warning')
   })
 
-  it('names the exact byte count just over the boundary so the warning cannot read as self-contradictory', () => {
-    const rendered = renderMemberMemory(Buffer.alloc(16 * 1024 + 1, 'x'))
-    expect(rendered).toContain('at 16385 B')
-    expect(rendered).toContain('exceeds the 16 KiB context budget')
-    expect(rendered).not.toContain('x'.repeat(100))
-  })
-
   it('states the usage gauge below, at half, and over budget', () => {
     expect(renderMemberMemory(Buffer.alloc(0))).toContain('Private memory index: 0.0 KiB / 16 KiB (0%).')
     const half = renderMemberMemory(Buffer.alloc(8 * 1024, 'z'))

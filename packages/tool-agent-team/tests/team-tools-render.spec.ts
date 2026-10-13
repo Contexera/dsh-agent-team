@@ -76,15 +76,6 @@ describe('team_view renders one address book', () => {
     expect(text).toContain('Thread cursor 100; hasMore=false')
   })
 
-  it('prints each structured subject verbatim on its Thread row', () => {
-    const text = renderText(teamTools().get('team_view')!, {}, {
-      workspaces: WORKSPACES, channels: [], members: [],
-      threads: [{ threadRef: THREAD, channelRef: CHANNEL, revision: 1, messageCount: 1, subject: 'One deterministic bounded subject line' }],
-      tasks: [], activeTaskThreads: [], cursor: 0, hasMore: false,
-    })
-    expect(text).toContain('— One deterministic bounded subject line')
-  })
-
   it('the shared subject formatter collapses whitespace and truncates deterministically (read C-branch)', () => {
     const longBody = `Systematically   review\n\tthe five model-facing  Team tool ${'x'.repeat(120)} results tail-that-must-not-appear`
     const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, {

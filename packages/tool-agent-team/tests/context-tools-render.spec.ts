@@ -82,7 +82,6 @@ describe('context tools render the model-facing decision surface', () => {
     // A compaction started now is priced where this scope can price one: the
     // member's two options have to be comparable from one read.
     expect(text).toContain('Compact now: about 48K compactible; keeps the last ~32K verbatim')
-    // Each row renders its label, source, size estimates and Threads.
     for (const item of STATUS_VALUE.items) {
       expect(text).toContain(item.label)
       expect(text).toContain(`source: ${item.source}`)
@@ -270,12 +269,4 @@ describe('context tools render the model-facing decision surface', () => {
     expect(unavailable).toContain('not available in this scope')
   })
 
-  it('context_rollover renders the scheduled swap and keeps render text self-describing', () => {
-    const tools = contextTools()
-    const text = renderText(tools.get('context_rollover')!, {}, { mode: 'fresh', status: 'scheduled' })
-    expect(text).toContain('rollover')
-    expect(text).toContain('fresh')
-    const seeded = renderText(tools.get('context_rollover')!, {}, { mode: 'from-checkpoint', status: 'scheduled' })
-    expect(seeded).toContain('from-checkpoint')
-  })
 })

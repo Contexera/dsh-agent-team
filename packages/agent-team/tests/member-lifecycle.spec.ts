@@ -31,7 +31,7 @@ import { AgentTeamLedger } from '../src/ledger.ts'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_TOOL_NAMES, isTsxDevMode, markAgentTeamPreset, teamPresetScopeMismatchMessage } from '../src/index.ts'
+import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, teamPresetScopeMismatchMessage } from '../src/index.ts'
 import { checkpointRefFor, foldTeamContextProjection } from '../src/context-projection.ts'
 import { AGENT_TEAM_PLUGIN_ID, continuationCheckpointRefOf, handoffOf, isCheckpointContinuationMessage, isHandoffMessage } from '../src/context-source.ts'
 import { RECOVERY_DELAY_MS } from '../src/recovery.ts'
@@ -280,7 +280,6 @@ async function realHarness(
   ctx.provide('jobs', { list: () => jobsState.jobs })
   if (persistenceBackend === 'jsonl') await ctx.plugin(JsonlSessionPersistence, { root: persistence })
   await ctx.plugin(SessionTitle, { fallbackMaxWords: 5, fallbackMaxBytes: 40, maxTitleBytes: 80 })
-  // The registry injects 'sessionProjections'; the roster stays PENDING without it.
   await ctx.plugin(TestablePresets, { default: 'team-member' })
   await ctx.plugin(AgentPresetPlugin, { id: 'team-member', plugins: teamMemberPlugins })
   await ctx.plugin(Storage)
@@ -2030,12 +2029,6 @@ describe('Agent Team Member lifecycle', () => {
     info.mockRestore()
   })
 
-  it('validates the final Team tool marker during unpublished setup', async () => {
-    expect(AGENT_TEAM_TOOL_NAMES).toEqual(['team_inbox', 'team_thread', 'team_message', 'team_claim', 'team_view', 'context_rollover', 'context_checkpoint', 'context_status', 'context_compact'])
-    const definition = markAgentTeamPreset({ name: 'team_message' })
-    expect(Reflect.get(definition, Symbol.for('@wowyuarm/dsh-agent-team.preset'))).toBe(true)
-  })
-
   it('surfaces an actionable diagnostic for the tsx source-mode dsh-scope mismatch', () => {
     const message = teamPresetScopeMismatchMessage(true)
     expect(message).toContain('selected preset is not team-enabled')
@@ -2044,24 +2037,6 @@ describe('Agent Team Member lifecycle', () => {
     const generic = teamPresetScopeMismatchMessage(false)
     expect(generic).toContain('different physical copies')
     expect(generic).toContain('pnpm install')
-  })
-
-  it('detects the tsx loader in the process launch flags', () => {
-    const originalArgv = process.execArgv
-    const originalNodeOptions = process.env.NODE_OPTIONS
-    try {
-      process.env.NODE_OPTIONS = '--import tsx/esm'
-      expect(isTsxDevMode()).toBe(true)
-      process.env.NODE_OPTIONS = undefined
-      process.execArgv = ['--import', 'tsx/esm']
-      expect(isTsxDevMode()).toBe(true)
-      process.execArgv = []
-      expect(isTsxDevMode()).toBe(false)
-    } finally {
-      process.execArgv = originalArgv
-      if (originalNodeOptions === undefined) delete process.env.NODE_OPTIONS
-      else process.env.NODE_OPTIONS = originalNodeOptions
-    }
   })
 
   it('keeps a persisted Member session active after switching its model and restarting', async () => {

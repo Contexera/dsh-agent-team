@@ -119,60 +119,6 @@ function seed(count: number) {
 }
 
 describe('Thread page render isolation', () => {
-  it('reports the work one keystroke, one change burst, and one arrival cause', async () => {
-    const report: Record<string, unknown> = {}
-    for (const count of [10, 30]) {
-      const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seededMessages: seed(count) })
-      await openThread(b)
-      const input = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
-
-      const keystrokes: unknown[] = []
-      for (const stroke of ['h', 'he', 'hel']) {
-        reset()
-        const before = counts(b)
-        fireEvent.change(input, { target: { value: stroke } })
-        await waitFor(() => expect(input.value).toBe(stroke))
-        keystrokes.push({ stroke, ...delta(before, counts(b)) })
-      }
-
-      // Flush the change stream's initial silent probe, then measure exactly
-      // one Host change event: that is the fan-out the ticket judges.
-      b.publishAgentReply()
-      b.publishAgentReply()
-      await settle(b)
-      reset()
-      const beforeBurst = counts(b)
-      b.publishAgentReply()
-      await settle(b)
-      const burst = delta(beforeBurst, counts(b))
-
-      // A committed send merges exactly one new fact into the timeline; the
-      // page re-renders around it, so only that row may be rendered again.
-      fireEvent.change(input, { target: { value: 'hello' } })
-      await waitFor(() => expect(input.value).toBe('hello'))
-      reset()
-      const beforeSend = counts(b)
-      fireEvent.click(b.view.getByRole('button', { name: '发送' }))
-      await waitFor(() => expect(b.reply).toHaveBeenCalled())
-      await waitFor(() => expect(b.view.queryAllByText('hello').length).toBeGreaterThan(0))
-      await settle(b)
-      const arrival = delta(beforeSend, counts(b))
-
-      report[String(count)] = {
-        keystrokes,
-        burst,
-        arrival,
-        draftAfterSend: input.value,
-        focusPreserved: document.activeElement === input,
-        textHasFirst: b.view.queryAllByText('seeded message 1').length > 0,
-        textHasLast: b.view.queryAllByText(`seeded message ${count}`).length > 0,
-      }
-      await b.runtime.dispose()
-    }
-    console.log(`P0_CLIENT_RENDER3 ${JSON.stringify(report)}`)
-    expect(Object.keys(report)).toHaveLength(2)
-  })
-
   it('re-renders no row for a keystroke or a change burst, and exactly one for an arrival', async () => {
     const bursts: Array<Record<keyof Counts, number>> = []
     const arrivals: Array<Record<keyof Counts, number>> = []
