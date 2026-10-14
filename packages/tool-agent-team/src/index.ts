@@ -10,6 +10,8 @@ import type {
   AgentTeamRequestId,
   AgentTeamMessageRef,
   AgentTeamTaskRef,
+  AgentTeamThreadFact,
+  AgentTeamThreadReadFact,
   AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -163,37 +165,84 @@ function taskStanding(value: { taskRef?: string; status?: string; resolution?: s
   return `${value.taskRef}${value.taskNumber === undefined ? '' : ` (#${value.taskNumber})`}${value.status === undefined ? '' : `, ${value.status}${value.resolution === undefined ? '' : `/${value.resolution}`}`}`
 }
 
+/**
+ * The one model-facing schema for a Thread fact, shared by the read result and
+ * by the facts a rejected write carries back. One declaration keeps the two
+ * surfaces structurally identical — a fact the model can read is a fact a
+ * rejection can hand it.
+ */
+const FACT_SCHEMA = {
+  type: 'object', additionalProperties: false, properties: {
+    sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, body: { type: 'string' }, sender: { type: 'string' }, occurredAt: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } }, replyToMessageRef: { type: 'string' }, replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } }, activity: { type: 'string' }, actor: { type: 'string' }, taskRef: { type: 'string' }, claimRef: { type: 'string' }, claimRefs: { type: 'array', items: { type: 'string' } }, completedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } }, releasedClaimRefs: { type: 'array', items: { type: 'string' } }, unread: { type: 'boolean' }, direct: { type: 'boolean' },
+  },
+} as const
+
 function requestId(agentId: string, callId: string): AgentTeamRequestId {
   return `agent-team:tool:${agentId}:${callId}` as AgentTeamRequestId
 }
 
 /**
+ * One fact as a rejection render receives it: the same fields a read renders,
+ * but with the tag fields widened to plain strings. The render value arrives
+ * through the tool's own output schema, where `kind` is a string rather than a
+ * literal union — the discrimination `factLine` performs is the same one a
+ * read performs, and it must not need a second, narrower type to do it.
+ */
+type RejectedFact = {
+  readonly sequence: number
+  readonly kind: string
+  readonly body?: string
+  readonly sender?: string
+  readonly occurredAt?: string
+  readonly mentions?: readonly string[]
+  readonly replyToMessageRef?: string
+  readonly replyTo?: ReplyContextView
+  readonly activity?: string
+  readonly actor?: string
+  readonly taskRef?: string
+  readonly claimRef?: string
+  readonly claimRefs?: readonly string[]
+  readonly completedClaimRefs?: readonly string[]
+  readonly acceptedClaimRefs?: readonly string[]
+  readonly releasedClaimRefs?: readonly string[]
+  readonly unread?: boolean
+  readonly direct?: boolean
+}
+
+/**
  * One typed-rejection renderer parameterized by the mutation noun, shared by
  * team_message and team_claim. Outcome first, action-local recovery facts,
- * then the single recovery route: read the named Thread and reconsider — a
- * rejection carries no changed facts, so it never renders a numeric revision
- * or a next-write token.
+ * then the facts that gated the write and the single recovery route: the new
+ * facts render here in the same result, and the current revision is written
+ * back as the next write token — so a rejected writer learns WHAT changed and
+ * WHICH token to use without paying a separate read round-trip.
  */
 function rejectionLines(
   noun: 'message' | 'Claim mutation',
-  value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[] },
+  value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly facts?: readonly RejectedFact[] },
 ): string[] {
   const identity = [
     value.threadRef === undefined ? '' : value.threadRef,
     value.taskRef === undefined ? '' : value.taskRef,
   ].filter(part => part !== '').join(' · ')
   if (value.kind === 'unread_required') {
+    const facts = value.facts ?? []
     return [
       'Not committed — unread_required.',
       `${identity}${identity === '' ? '' : ' · '}${value.unreadCount ?? 0} unread, ${value.directCount ?? 0} direct`,
+      ...rejectedFactLines(facts),
       recoveryFor('unread_required').sentence({ threadRef: value.threadRef, taskRef: value.taskRef }),
+      ...(value.revision === undefined ? [] : [nextWriteLine(value.revision)]),
     ]
   }
   if (value.kind === 'stale_revision') {
+    const facts = value.facts ?? []
     return [
       'Not committed — the Thread changed after your last read (stale_revision).',
       identity,
+      ...rejectedFactLines(facts),
       recoveryFor('stale_revision').sentence({}),
+      ...(value.revision === undefined ? [] : [nextWriteLine(value.revision)]),
     ]
   }
   return [
@@ -201,6 +250,18 @@ function rejectionLines(
     `${(value.memberIds ?? []).join(', ')} not following${value.threadRef === undefined ? '' : ` ${value.threadRef}`}${value.taskRef === undefined ? '' : ` (${value.taskRef})`}; no message was added.`,
     recoveryFor('member_not_following').sentence({}),
   ]
+}
+
+/**
+ * The facts a rejection carries, rendered exactly as a Thread read renders
+ * them — one shared `factLine`, so the two surfaces can never drift on shape.
+ * A rejection with nothing to show stays silent rather than printing an empty
+ * heading, and the count states the span so a truncated batch never reads as
+ * the whole increment.
+ */
+function rejectedFactLines(facts: readonly RejectedFact[]): string[] {
+  if (facts.length === 0) return []
+  return ['', `${facts.length} new fact(s) since your last write:`, ...facts.map(fact => factLine(fact as FactView))]
 }
 
 const teamInbox = defineTool({
@@ -361,9 +422,7 @@ const teamThread = defineTool({
       claims: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
       } } },
-      facts: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
-        sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, body: { type: 'string' }, sender: { type: 'string' }, occurredAt: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } }, replyToMessageRef: { type: 'string' }, replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } }, activity: { type: 'string' }, actor: { type: 'string' }, taskRef: { type: 'string' }, claimRef: { type: 'string' }, claimRefs: { type: 'array', items: { type: 'string' } }, completedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } }, releasedClaimRefs: { type: 'array', items: { type: 'string' } }, unread: { type: 'boolean' }, direct: { type: 'boolean' },
-      } } },
+      facts: { type: 'array', required: true, items: FACT_SCHEMA },
       contextAdvice: { type: 'object', additionalProperties: false, properties: {
         usageTokens: { type: 'number' }, taskBoundaryThreshold: { type: 'number' }, handoffAt: { type: 'number' }, hardLimit: { type: 'number' },
         action: { type: 'string', required: true }, guidance: { type: 'string', required: true },
@@ -498,9 +557,7 @@ const teamThread = defineTool({
     }
     if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'read' }))
     const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base })
-    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => entry.fact.kind === 'message'
-        ? { sequence: entry.fact.sequence, kind: 'message', body: entry.fact.message.body, sender: entry.fact.message.sender, mentions: [...entry.fact.mentions], ...(entry.fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: entry.fact.message.replyToMessageRef }), ...(entry.fact.replyTo === undefined ? {} : { replyTo: entry.fact.replyTo }), unread: entry.unread, direct: entry.direct, occurredAt: entry.fact.occurredAt }
-        : activityFactView(entry.fact.sequence, entry.fact.activity, { unread: entry.unread, direct: entry.direct }, entry.fact.occurredAt)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), ...(read.contextAdvice === undefined ? {} : { contextAdvice: adviceView(read.contextAdvice) }), ...taskNumberOf(read.task) })
+    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), ...(read.contextAdvice === undefined ? {} : { contextAdvice: adviceView(read.contextAdvice) }), ...taskNumberOf(read.task) })
   },
 })
 
@@ -516,6 +573,26 @@ function repliesToClause(replyToMessageRef: string | undefined, replyTo: ReplyCo
   return replyTo === undefined
     ? ` (replies to ${replyToMessageRef})`
     : ` (replies to @${replyTo.sender} — "${replyTo.excerpt}")`
+}
+
+/**
+ * The one Host-read-fact → view projection, shared by a Thread read and by the
+ * facts a rejected write carries back. Both surfaces must render a fact
+ * identically, so neither gets its own mapping: a second copy is how the two
+ * would drift, and the drift would be invisible until a model acted on it.
+ */
+function readFactView(entry: {
+  readonly fact: AgentTeamThreadFact
+  readonly unread: boolean
+  readonly direct: boolean
+}): FactView {
+  return entry.fact.kind === 'message'
+    ? { sequence: entry.fact.sequence, kind: 'message', body: entry.fact.message.body, sender: entry.fact.message.sender,
+      mentions: [...entry.fact.mentions],
+      ...(entry.fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: entry.fact.message.replyToMessageRef }),
+      ...(entry.fact.replyTo === undefined ? {} : { replyTo: entry.fact.replyTo }),
+      unread: entry.unread, direct: entry.direct, occurredAt: entry.fact.occurredAt }
+    : activityFactView(entry.fact.sequence, entry.fact.activity, { unread: entry.unread, direct: entry.direct }, entry.fact.occurredAt)
 }
 
 /** One rendered fact line; markers are inline, never a separate ellipsis line. */
@@ -644,6 +721,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
     schema: { type: 'object', additionalProperties: false, properties: {
       kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, revision: { type: 'number' },
       expectedRevision: { type: 'number' }, messageRef: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } }, unreadCount: { type: 'number' }, directCount: { type: 'number' },
+      facts: { type: 'array', items: FACT_SCHEMA },
       undeliveredMentions: { type: 'array', items: { type: 'string' } }, occurredAt: { type: 'string' },
     } },
     render: (_args, value) => {
@@ -707,9 +785,11 @@ function messageOutcome(result: Awaited<ReturnType<AgentTeam['sendMessageForAgen
   if (result.kind === 'member_not_following') return { kind: result.kind, memberIds: [...result.memberIds],
     ...(result.taskRef === undefined ? {} : { taskRef: result.taskRef }), ...(result.threadRef === undefined ? {} : { threadRef: result.threadRef, revision: result.revision }) }
   if (result.kind === 'unread_required') return { kind: result.kind, ...(result.taskRef === undefined ? {} : { taskRef: result.taskRef }), threadRef: result.threadRef,
-    revision: result.revision, unreadCount: result.unreadCount, directCount: result.directCount }
+    revision: result.revision, unreadCount: result.unreadCount, directCount: result.directCount,
+    ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
   if (result.kind === 'stale_revision') return { kind: result.kind, ...(result.taskRef === undefined ? {} : { taskRef: result.taskRef }), threadRef: result.threadRef,
-    expectedRevision: result.expectedRevision, revision: result.revision }
+    expectedRevision: result.expectedRevision, revision: result.revision,
+    ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
   throw new Error('Agents cannot receive invitation confirmations')
 }
 
@@ -732,12 +812,14 @@ const teamClaim = defineTool({
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
       } },
       claims: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true } } } },
+      facts: { type: 'array', items: FACT_SCHEMA },
     } },
     // A committed mutation renders the authoritative affected Claim first —
     // the Host result carries it; the full archive is never appended. list
     // renders the active collision surface and no write token: a current
     // Thread read remains the required mutation basis. Rejections share the
-    // outcome-first recovery form and never a numeric revision.
+    // outcome-first recovery form and carry the facts that gated the write,
+    // plus the current revision as the next write token.
     render: (_args, value) => {
       if (value.kind === 'listed') {
         const active = value.claims.filter(claim => claim.state === 'active')
@@ -784,9 +866,11 @@ const teamClaim = defineTool({
     if (result.kind === 'committed') return { kind: result.kind, action: args.action, taskRef: result.task.taskRef, threadRef: result.thread.threadRef,
       revision: result.thread.revision, status: result.task.status, claim: claimView(result.claim), claims, occurredAt: result.receipt.occurredAt }
     if (result.kind === 'unread_required') return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef,
-      revision: result.revision, status: listed.task.status, unreadCount: result.unreadCount, directCount: result.directCount, claims }
+      revision: result.revision, status: listed.task.status, unreadCount: result.unreadCount, directCount: result.directCount, claims,
+      ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
     return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef, expectedRevision: result.expectedRevision,
-      revision: result.revision, status: listed.task.status, claims }
+      revision: result.revision, status: listed.task.status, claims,
+      ...(result.kind === 'stale_revision' && result.facts !== undefined ? { facts: result.facts.map(entry => readFactView(entry)) } : {}) }
   },
 })
 

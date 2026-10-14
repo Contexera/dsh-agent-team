@@ -7,7 +7,7 @@ Existing-Thread public mutations require the current next-write token in `baseRe
 
 It is absent from `team_view`, `team_inbox`, `team_thread status/follow/unfollow/history`, `team_claim list`, partial reads, and every typed rejection — a fresh-looking token there would invite a blind retry.
 
-Host checks: (1) relevant unread must be read, otherwise `unread_required`; (2) the token must match the current Thread revision, otherwise `stale_revision`; (3) closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation. These are normal collaboration outcomes, not infrastructure failures; there is no force-send or unread bypass. A rejected mutation renders no token; recovery is always read the Thread and reconsider.
+Host checks: (1) relevant unread must be read, otherwise `unread_required`; (2) the token must match the current Thread revision, otherwise `stale_revision`; (3) closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation. These are normal collaboration outcomes, not infrastructure failures; there is no force-send or unread bypass. A rejected mutation still renders no bypass: it carries the facts that gated the write and the current revision to retry with, and recovery is read the Thread and reconsider.
 
 Human close releases active Claims and ends Attention. Reopen restores an open Task but not previous Attention periods.
 

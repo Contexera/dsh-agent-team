@@ -1241,6 +1241,53 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     ledger.validate()
   })
 
+  it('a rejected write carries the facts it gated on and the token to retry with', async () => {
+    const test = await harness()
+    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const ledger = replayLedger(test)
+    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const followed = await ledger.changeAttention({ requestId: requestId('agent-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
+    expect(followed.value.attention).toMatchObject({ readThroughSequence: started.thread.revision })
+    const update = committed((await ledger.reply({ requestId: requestId('human-update'), workspaceId: alpha, taskRef: started.task.taskRef,
+      body: 'New evidence', baseRevision: started.thread.revision, actor: agentTeamHumanActor() })).value)
+
+    // The unread gate answers with the very facts that gated it, in the same
+    // shape a read returns — so the rejected writer sees WHAT is unread without
+    // paying a separate read round-trip.
+    const blocked = (await ledger.reply({ requestId: requestId('blocked'), workspaceId: alpha, taskRef: started.task.taskRef,
+      body: 'Reply without read', baseRevision: started.thread.revision, actor })).value
+    expect(blocked).toMatchObject({ kind: 'unread_required', revision: update.thread.revision, unreadCount: 1 })
+    expect(blocked.kind === 'unread_required' && blocked.facts?.map(entry => entry.fact.sequence)).toEqual([update.message.sequence])
+    expect(blocked.kind === 'unread_required' && blocked.facts?.[0]?.unread).toBe(true)
+
+    // Reading drains the gate, so the NEXT write is gated by revision alone —
+    // and that rejection answers with the increment past the obsolete token.
+    const drained = (await ledger.readThread({ requestId: requestId('agent-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor })).value
+    expect(drained.remainingUnreadCount).toBe(0)
+    // A member write advances the revision without adding unread for that same
+    // member, so the only thing left to gate on is the stale token.
+    const own = committed((await ledger.reply({ requestId: requestId('own-write'), workspaceId: alpha, taskRef: started.task.taskRef,
+      body: 'My own reply', baseRevision: update.thread.revision, actor })).value)
+    const stale = (await ledger.reply({ requestId: requestId('stale'), workspaceId: alpha, taskRef: started.task.taskRef,
+      body: 'Reply with obsolete revision', baseRevision: update.thread.revision, actor })).value
+    expect(stale).toMatchObject({ kind: 'stale_revision', expectedRevision: update.thread.revision, revision: own.thread.revision })
+    // The increment is exactly the facts committed after the token the writer
+    // used — nothing before it, nothing the writer already knew about.
+    expect(stale.kind === 'stale_revision' && stale.facts?.map(entry => entry.fact.sequence)).toEqual([own.message.sequence])
+    // A retry with the revision the rejection named succeeds without any
+    // further read: the round-trip the rejection used to force is gone.
+    const readCount = () => [...test.facility.get('agent_team')!.table('operations').entries()]
+      .filter(([, operation]) => (operation as AgentTeamOperation).kind === 'team/thread-read').length
+    const readsBeforeRetry = readCount()
+    expect(committed((await ledger.reply({ requestId: requestId('retry'), workspaceId: alpha, taskRef: started.task.taskRef,
+      body: 'Retry with the named revision', baseRevision: own.thread.revision, actor })).value).message.body).toBe('Retry with the named revision')
+    // The whole point of the channel: the retry committed with zero additional
+    // read operations, so the reject → read → write chain is now reject → write.
+    expect(readCount()).toBe(readsBeforeRetry)
+    ledger.validate()
+  })
+
   it('makes a 21-update read continue explicit with a remaining unread count', async () => {
     const test = await harness()
     const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })

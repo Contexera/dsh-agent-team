@@ -48,7 +48,7 @@ Attention 不是 reading。这三个 action 都不渲染 Thread 的 facts、不�
 
 `team_message.start` 创建 Channel 顶层 Thread。默认 taskless，也接受明确 task intent 以原子创建 Task。`team_message.reply` 向既有 Thread 追加明确的 reply。二者都接受 `attachments` 中的可选 absolute file paths。Host 验证每个 path，把 bytes 复制到 attachment cache。收件人看到 thumbnails/chips 与一行 cached path。任一 path 验证失败都会拒绝整个 send。commit 的 start/reply 渲染一个 committed-verb 结果：Thread created 或 reply added。结果携带 Message ref、新 Thread ref（taskful 时含 Task ref），以及恰好一个 next-write token hand-off。新建 Thread 立即可寻址，下一次变更也拿到了基础。
 
-类型化拒绝结果（`unread_required`、`stale_revision`）以 `Not committed` 开头。保留重读与审慎重试所需的结构化 refs 与计数，不渲染数字 revision 与写令牌。拒绝不携带变化后的事实，不是安全的变更基础。恢复路径是 read-and-reconsider。mention 一个该 Thread 从未承载过的 Member 不是拒绝。Message 照常提交，结果里报告未送达的名字。
+ 类型化拒绝结果（`unread_required`、`stale_revision`）以 `Not committed` 开头。保留重读与审慎重试所需的结构化 refs 与计数，并渲染挡住这次写入的事实——`unread_required` 是未读批次，`stale_revision` 是过期令牌之后的增量——形状与 `team_thread read` 返回的完全一致，同时把当前 revision 作为下次写入的写令牌交回。因此被拒的写入方在拒绝本身里就知道什么变了、该用哪个令牌，重试无需中间再读一次即可提交。恢复路径仍是 read-and-reconsider：拒绝里的事实是那道门，不是替代确认的手段。mention 一个该 Thread 从未承载过的 Member 不是拒绝。Message 照常提交，结果里报告未送达的名字。
 
 每一处拒绝——类型化结果、抛出的参数形状错误、Host 拒绝——都点名下一步动作与该动作要传的值，且这些措辞来自唯一一份注册表（`packages/agent-team/src/recovery-hints.ts`），不是每个调用点各写一遍。注册表是被强制的，不是建议：一个测试遍历 Host 与 tool 包两侧面向模型的源码，拒绝写在注册表之外的路由句，因此新加的拒绝不可能带着一个模型无路可走的故障上线。
 
@@ -72,7 +72,7 @@ DM 只用于快速澄清与状态同步。任务工作、决策和任何需要�
 
 `team_claim` 列出 Claims，并允许 Agent 仅在真实 Task 上创建、完成或 release 自己的 Direction Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，因为当前 `team_thread read` 仍是必需的变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
 
-拒绝结果（`unread_required`、`stale_revision`）与 message 拒绝共享同一形式：`Not committed`、本地 refs/计数、先读后重试的恢复路径，且无数字 revision。
+拒绝结果（`unread_required`、`stale_revision`）与 message 拒绝共享同一形式：`Not committed`、本地 refs/计数、挡住这次写入的事实、先读后重试的恢复路径，以及当前 revision 作为下次写入的写令牌。
 
 ## `context_rollover`
 

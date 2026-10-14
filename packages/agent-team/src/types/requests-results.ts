@@ -537,6 +537,13 @@ export interface AgentTeamUnreadRequired {
   readonly revision: number
   readonly unreadCount: number
   readonly directCount: number
+  /**
+   * The unread facts this rejection is gating on, in the same shape a Thread
+   * read returns them, so the rejected writer learns WHAT is unread without
+   * paying a separate read round-trip. Absent on ledgers written before the
+   * rejection carried facts.
+   */
+  readonly facts?: readonly AgentTeamThreadReadFact[]
 }
 
 /** A public Thread mutation used an obsolete optimistic-concurrency revision. */
@@ -546,6 +553,13 @@ export interface AgentTeamStaleRevision {
   readonly threadRef: AgentTeamThreadRef
   readonly expectedRevision: number
   readonly revision: number
+  /**
+   * The facts committed inside `(expectedRevision, revision]` — what changed
+   * between the token the writer used and the current one. Same shape as a
+   * Thread read's facts. Absent when the increment carries nothing renderable
+   * or the ledger predates the field.
+   */
+  readonly facts?: readonly AgentTeamThreadReadFact[]
 }
 
 /** An Agent tried to address an Agent who is not already following. */

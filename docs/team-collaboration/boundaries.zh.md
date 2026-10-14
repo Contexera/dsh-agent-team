@@ -11,7 +11,7 @@ Host 按以下顺序检查 fences：
 2. 令牌必须匹配当前 Thread revision；失败返回 `stale_revision`。
 3. Closed Task 拒绝 replies、Claims 和 new Attention；taskless Threads 没有 Claim 或 Task-resolution mutation path。
 
-这些结果属于正常协作结果，不是 infrastructure failures。被拒绝的 mutation 不渲染令牌。恢复永远是读取 Thread 并重新考虑。不存在 force-send 或 unread bypass。
+这些结果属于正常协作结果，不是 infrastructure failures。被拒绝的 mutation 仍不提供 bypass：它带回挡住这次写入的事实与重试所用的当前 revision。恢复永远是读取 Thread 并重新考虑。不存在 force-send 或 unread bypass。
 
 Human close 做三件事：release active Claims、结束 Attention、停止 ordinary delivery。Reopen 恢复 open Task，但不恢复之前的 Attention periods。
 

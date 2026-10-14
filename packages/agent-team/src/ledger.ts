@@ -3619,12 +3619,35 @@ export class AgentTeamLedger {
 
   private unreadRequired(task: AgentTeamTask | undefined, thread: AgentTeamThread, unread: readonly AgentTeamThreadReadFact[]): AgentTeamUnreadRequired {
     return Object.freeze({ kind: 'unread_required', ...(task === undefined ? {} : { taskRef: task.taskRef }), threadRef: thread.threadRef,
-      revision: thread.revision, unreadCount: unread.length, directCount: unread.filter(item => item.direct).length })
+      revision: thread.revision, unreadCount: unread.length, directCount: unread.filter(item => item.direct).length,
+      facts: unread })
   }
 
-  private staleRevision(task: AgentTeamTask | undefined, thread: AgentTeamThread, expectedRevision: number): AgentTeamStaleRevision {
+  private staleRevision(actorMemberId: AgentTeamMemberId, task: AgentTeamTask | undefined, thread: AgentTeamThread, expectedRevision: number): AgentTeamStaleRevision {
     return Object.freeze({ kind: 'stale_revision', ...(task === undefined ? {} : { taskRef: task.taskRef }), threadRef: thread.threadRef,
-      expectedRevision, revision: thread.revision })
+      expectedRevision, revision: thread.revision, facts: this.factsAfter(actorMemberId, thread.threadRef, expectedRevision) })
+  }
+
+  /**
+   * The facts committed strictly after `sequence` — the increment a stale
+   * writer never saw. `unread_required` already carries its own batch through
+   * `unreadFor`; this is the revision gate's equivalent, where the missed
+   * facts are simply those past the obsolete token. `unread` is true by
+   * construction (the writer's token predates them) and `direct` resolves
+   * through the same marker lookup a read uses, so the two surfaces can never
+   * disagree about which facts were aimed at this reader.
+   */
+  private factsAfter(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef, sequence: number): readonly AgentTeamThreadReadFact[] {
+    const projection = this.state
+    const directKeys = new Set(this.directMarkersForFrom(projection, memberId, threadRef).map(marker => this.directMarkerKey(marker)))
+    const result: AgentTeamThreadReadFact[] = []
+    for (const fact of this.threadFactsFrom(projection, threadRef)) {
+      if (fact.sequence <= sequence) continue
+      const direct = fact.kind === 'message' && directKeys.has(this.directMarkerKey({ memberId, threadRef,
+        messageRef: fact.message.messageRef, sequence: fact.sequence }))
+      result.push(Object.freeze({ fact, unread: true, direct }))
+    }
+    return Object.freeze(result)
   }
 
   private releaseSummaries(
@@ -3714,7 +3737,7 @@ export class AgentTeamLedger {
   private deferredThreadWrite(actorMemberId: AgentTeamMemberId, task: AgentTeamTask | undefined, thread: AgentTeamThread, baseRevision: number): AgentTeamUnreadRequired | AgentTeamStaleRevision | undefined {
     const unread = this.unreadFor(actorMemberId, thread.threadRef)
     if (unread.length > 0) return this.unreadRequired(task, thread, unread)
-    if (baseRevision !== thread.revision) return this.staleRevision(task, thread, baseRevision)
+    if (baseRevision !== thread.revision) return this.staleRevision(actorMemberId, task, thread, baseRevision)
     return undefined
   }
 
