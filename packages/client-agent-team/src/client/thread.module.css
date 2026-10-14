@@ -153,12 +153,13 @@
 }
 
 /* A block of consecutive activities reads as one ledger: block members align
-   to the text column (avatar 28px + gap 10px, level with the run divider)
-   instead of stacking as centered floats; an isolated activity stays centered. */
+   to the text column (the identity seat + the row's 10px gap, derived from the
+   same declaration the face reads, level with the run divider) instead of
+   stacking as centered floats; an isolated activity stays centered. */
 .activityRow:has(+ .activityRow),
 .activityRow + .activityRow {
   justify-content: flex-start;
-  padding-left: 38px;
+  padding-left: calc(var(--team-identity-seat, 34px) + 10px);
   text-align: left;
 }
 

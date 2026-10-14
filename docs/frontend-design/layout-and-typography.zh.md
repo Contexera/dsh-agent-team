@@ -33,7 +33,7 @@
 
 **身份行与头像座写的不是同一个标签**。身份行独占正文列，用完整墙上时钟形态（`formatMessageTime`：当天只写时刻、同年带月日、跨年写完整日期）。
 
-头像座是 28px、既不裁剪也不撑宽的盒子，因此只写**时刻**（`formatClockTime`）。带日期的形态同年实测 57px、跨年 87px，足以画到旁边的字上。run 在每个日历日切换处断开，所以续行必与它 run 的首行同天，日期已由上一行写出。精确瞬间仍挂在座位标签自己的 `title` 上（`formatAbsoluteTime`），与 Inbox 行、Channel 入口行同一约定。
+头像座是 34px、既不裁剪也不撑宽的盒子，因此只写**时刻**（`formatClockTime`）。带日期的形态同年实测 57px、跨年 87px，足以画到旁边的字上。run 在每个日历日切换处断开，所以续行必与它 run 的首行同天，日期已由上一行写出。精确瞬间仍挂在座位标签自己的 `title` 上（`formatAbsoluteTime`），与 Inbox 行、Channel 入口行同一约定。
 
 - **Agent 头像**：按 `memberId` 字符串哈希出稳定色相（`hash*31+charCode mod 360`）。`hsl(var(--team-avatar-hue) 42% 46%)` 底 + 白色首字母。同一 Member 跨页面、跨会话颜色不变。侧栏 Agent 行复用同一身份语言，是 24px 缩版。presence 指示叠在头像右下角。描边环取 `--dsw-specific-sidebar-fill`，与侧栏底色同色。
 - **Human 头像**：`--dsw-alias-state-business-primary` 强调底色，与所有 Agent 区分。这一底色与首字母同时是该 Human 的兜底。资料里存了头像图片之后，Human 出现的每一处座位都换成图片。显示名来自同一份资料投影。`TeamConversation` 里只解析一次（`name ?? t('human')`），以 `humanName` 传给两个页面。因此消息发送者、花名册行、mention 兜底名与 `member:human` ref 不会各走各的，也不会各自退回字面 `human`。DOM 上以 `[data-human]` 标记。

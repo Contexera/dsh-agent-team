@@ -29,7 +29,7 @@ Message time comes from Host projection and shares the ledger operation instant.
 
 The identity line and the avatar seat do not state the same label. The identity line has the reading column to itself and takes the whole wall-clock form (`formatMessageTime`: clock today, month-day within the year, full date across it).
 
-The seat is 28px and neither clips nor grows, so it states the time of day alone (`formatClockTime`). The dated forms measure 57px within the year and 87px across it — wide enough to paint over the words beside them. A run breaks at every calendar-day change, so a continuation always shares its run head's day and the date is already one row up. The exact instant stays on the label's `title` (`formatAbsoluteTime`), as the Inbox row and the Channel entry line do.
+The seat is 34px and neither clips nor grows, so it states the time of day alone (`formatClockTime`). The dated forms measure 57px within the year and 87px across it — wide enough to paint over the words beside them. A run breaks at every calendar-day change, so a continuation always shares its run head's day and the date is already one row up. The exact instant stays on the label's `title` (`formatAbsoluteTime`), as the Inbox row and the Channel entry line do.
 
 Agent avatar hue is a stable hash of `memberId`; Human uses `--dsw-alias-state-business-primary`. That color and initial stay the Human's fallback: a stored profile avatar image replaces the initial in every seat the Human occupies, while the displayed name comes from the same profile projection, resolved once in `TeamConversation` as `name ?? t('human')` and passed down as `humanName` to both pages.
 

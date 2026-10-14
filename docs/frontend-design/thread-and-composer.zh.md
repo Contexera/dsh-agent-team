@@ -11,6 +11,16 @@
 - 跳转：`scrollToBottom` 立即滚到底部；「↓ N 条新更新」提示按钮只滚到底、无读取语义，读者回到底部即消失。
 - contentKey 必须随渲染事实变化（当前用 `长度:末位factKey` 组合串）。
 
+## Message 行的身份行
+
+一条 Message 以作者开头：头像座位，以及它旁边的作者名与时间。座位是 `--team-identity-seat`（34px），也是头像尺寸唯一被写下的地方——首字母头像与上传的头像图都从它取宽高，续行的时间在它里面居中，贴着正文列的那两条发丝线也按它起算，所以改头像尺寸不需要第二处修改。它声明在共享对话面上而不是 Thread 页，因为 Channel feed 渲染的是同一批 Message 行。
+
+头像与作者行的齐平，靠的是头像从名字行顶部下移 5px，而不是让作者行长到头像那么高。这个数是本方字体的事实：行内盒在字的上方带着字体半行距，所以默认 13px/20px 下，作者行的大写字母从行盒顶部起算在 5.5px 处才开始，取 5px 即与它们齐平。Raft 的头像同样与它自己的作者行齐平，但它的 `mt-0.5` 只有 2px，是因为那一行是 `leading-none` 的 14px/14px、大写字母本来就下移 2px。照抄那个常数会让本方头像浮到名字上方。
+
+名字与它的时间共用一条基线，与 Raft 的 `items-baseline` 行一致。e2e 旅程在已发布内容轴的两端各断一次头像的渲染尺寸与这个下移量：头像是界面件而不是内容，内容轴只挪它旁边的字，从不挪它。
+
+续行没有身份行，它的时间按上面[时间线滚动](#时间线滚动timeline-scroll)所述坐在头像座位里。
+
 ## Composer 与 @mention
 - textarea 自增高（上限 336px），Channel / Thread composer 出现时自动聚焦且不滚动时间线。Enter 发送、Shift+Enter 换行。IME composition 期间 Enter 不触发发送。发送期间输入框保持聚焦但只读，避免重复提交。发送按钮点击不抢走焦点，发送完成后可直接继续输入。未关注 Member 的首次发送返回确认提醒时，保留草稿与收件人。输入框自动恢复焦点，第二次 Enter 可直接确认发送。composer 卡片沿用 DSH 默认静态表面描边（`border: 0` + l2 elevation 发丝线 + `--dsw-elevation-soft`）。`focus-within` 不改它的颜色。
 - mention 弹层向上展开，`role="listbox"`。textarea 以 `aria-controls/aria-activedescendant/aria-expanded` 关联弹层。↑↓ 循环、Tab/Enter 接受候选、Escape 关闭。外点关闭复用 `useDismissOnOutsidePointer`。高度钳制复用 `useAnchoredMaxHeight`（cap 320px）。高亮行始终通过 `scrollIntoView`（`block: 'nearest'`）保持在弹层可视区内，Member 多时键盘选中的候选不会被折叠隐藏。Thread 面通过 Human-only 的 `threadObservations` 读取当前关注者集合。读取时机是首屏并行一轮，加每次 thread 域 wake。

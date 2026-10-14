@@ -256,7 +256,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
       {/* A continuation row has no identity line for its own time, so the time
           sits in the avatar seat under where the face would be — out of the
           reading path, and off the row's right edge where the words live. The
-          seat is 28px and does not clip, so it states the time of day only: the
+          seat is 34px and does not clip, so it states the time of day only: the
           date belongs to the identity line that opened this run and to the day
           separator above it, and the exact instant stays one hover away on the
           row's own title. */}

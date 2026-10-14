@@ -9,6 +9,16 @@ Opening a Thread scrolls to the latest fact, and a bounded read with a remaining
 
 Older facts are paged by the timeline's own 「加载更早消息」 action, so the first paint's history read is what decides whether it is offered. A read that was refused or rejected leaves the action standing, paging back from the oldest fact on screen under its own error surface, rather than stranding older facts behind a control that never appears.
 
+## The Message row's identity line
+
+A Message leads with its author: the avatar seat and, beside it, the author name and the time. The seat is `--team-identity-seat` (34px) and is the single place the face's size is stated — the initial avatar and the uploaded-image avatar both take their width and height from it, the continuation row's time centres inside it, and the two hairlines that hug the text column are inset past it, so changing the face needs no second edit. It is declared on the shared conversation surface rather than the Thread page, because the Channel feed renders the same Message rows.
+
+The face is levelled with the author line by a 5px drop from the name row's top edge, not by the author line growing to the face's height. An inline box carries font half-leading above its glyphs, so at the default 13px/20px the author line's capitals begin 5.5px below its box top, and 5px puts the face level with them. Raft levels its avatar with its own author line too, but its `mt-0.5` measures 2px only because that line is `leading-none` at 14px/14px, whose capitals already start 2px down. Copying that constant floats our face above its name.
+
+The name and its time share one baseline, as in Raft's `items-baseline` row. The e2e journey asserts the face's rendered size and its drop at each end of the published content axis: the face is chrome, so the axis moves the words beside it and never the face.
+
+A continuation row has no identity line; its time rides in the avatar seat as described under [Timeline scrolling](#timeline-scrolling).
+
 ## Composer and mentions
 The textarea grows to 336px, autofocuses without moving the timeline, sends on Enter, and inserts a newline on Shift+Enter. IME composition suppresses send. During submit it stays focused and read-only; buttons do not steal focus. Confirmation for an unfollowed recipient preserves draft and focus for the second Enter.
 

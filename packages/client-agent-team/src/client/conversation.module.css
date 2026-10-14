@@ -1,4 +1,16 @@
 .surface {
+  /* The face's own box, and the one place its size is stated: the seat the
+     initial or uploaded avatar occupies, the width the continuation row's time
+     centres in, and the indent the run hairlines hug. 34px is the shipped
+     composer's own primary round action (`InputBar .primary`, 34×34), and sits
+     between the 32px this row carried before and Raft's larger `h-9` face: the
+     same gesture as Raft's, held at the size our own round controls use. It is
+     chrome rather than content: the content axis moves the words beside the
+     face, never the face.
+     It sits on the surface root because the Thread, Channel and Inbox pages all
+     render Message faces under it — a declaration scoped to `[data-team-thread]`
+     left the Channel feed reading the `var()` fallback instead. */
+  --team-identity-seat: 34px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
@@ -128,23 +140,41 @@
   corner-shape: round;
   color: #fff;
   display: flex;
-  flex: 0 0 28px;
+  flex: 0 0 var(--team-identity-seat, 34px);
   font-size: 12px;
   font-weight: 600;
-  height: 28px;
+  height: var(--team-identity-seat, 34px);
   justify-content: center;
 }
 .messageRow[data-human] .messageIdentity {
   background: var(--dsw-alias-state-business-primary);
 }
-/* The Human's uploaded avatar takes the same 28px identity seat as the
-   initial it replaces, cropped to the circle. */
+/* The Human's uploaded avatar takes the same identity seat as the initial it
+   replaces, cropped to the circle. */
 .messageIdentityImage {
   border-radius: 50%;
   corner-shape: round;
-  flex: 0 0 28px;
-  height: 28px;
+  flex: 0 0 var(--team-identity-seat, 34px);
+  height: var(--team-identity-seat, 34px);
   object-fit: cover;
+}
+/* The face rides level with the capitals of the name beside it: its top edge
+   meets the author line's cap height, the way Raft's own avatar meets the
+   `text-sm` line it labels. That height is what fixes this number, and it is a
+   property of our font stack rather than of the row — an inline box carries
+   half-leading above its glyphs, so the author line's capitals begin 5.5px
+   below the box top at the default 13px/20px: 2.5px of half-leading, then the
+   3px between the font's 12px ascent and the 9px cap height. Pinning the face to
+   the box top would float it 5.5px above the name it belongs to. One fixed
+   offset cannot track cap height exactly across the content axis — that height
+   reads 5.5px at 13px/20px, 6.5px at 20px/27px, and 5px at 9px/16px — so this
+   value is set for the default size and the published axis stays within 1.5px
+   of level, exact at 10px. Raft's `mt-0.5` is not the constant to copy: its
+   author line is `leading-none` at 14px/14px, whose capitals already begin 2px
+   down, which is all that 2px ever meant. Keep this paired with the type. */
+.messageIdentity,
+.messageIdentityImage {
+  margin-top: 5px;
 }
 /* The text column claims the whole track beside the avatar seat, so a long
    Message may use the full reading width, while `align-items` lets a short one
@@ -160,7 +190,10 @@
   min-width: 0;
 }
 /* Who wrote this Message, and when. It leads the body's own reading path, so
-   the author sits at the same x as the words it introduces. */
+   the author sits at the same x as the words it introduces, and the name and
+   its instant share one baseline — the `items-baseline` row Raft builds. The
+   face is levelled with this line by its own 5px drop, not by this row growing
+   to the face's height, so the name-to-body rhythm rides the text alone. */
 .nameRow {
   align-items: baseline;
   display: flex;
@@ -170,15 +203,14 @@
 
 /* ---- The row's own time ------------------------------------------------ */
 /* A continuation row has no identity line, so its time goes in the avatar seat,
-   on the face's own first line: the seat keeps its 28px and the time is placed
-   absolutely inside it, so revealing a time can never push the text column —
-   the one thing a reader would notice while reading. Because the box neither
-   clips (`overflow` would cut a label rather than move it) nor grows, its label
-   states the time of day alone — 28px is the `HH:mm` the seat was sized for,
-   measured at 27.5px in the shipped stack, while the dated forms run to 57px
-   within the year and 87px across it (57px is the browser's own ink for the
-   dated label on a real row, and the box does not clip it). The date is the
-   identity line's and the day separator's; the instant rides this `title`. */
+   on the face's own first line: the time is placed absolutely inside the seat,
+   so revealing a time can never push the text column — the one thing a reader
+   would notice while reading. Because the box neither clips (`overflow` would
+   cut a label rather than move it) nor grows, its label states the time of day
+   alone: an `HH:mm` measures 27.5px of ink in the shipped stack and centres
+   inside the seat, while the dated forms run to 57px within the year and 87px
+   across it and spill evenly to either side rather than being cut. The date is
+   the identity line's and the day separator's; the instant rides this `title`. */
 .gutterTime {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
@@ -190,7 +222,7 @@
   top: 0;
   transition: opacity 160ms ease-out;
   white-space: nowrap;
-  width: 28px;
+  width: var(--team-identity-seat, 34px);
 }
 @media (hover: hover) {
   [data-team-thread] .messageRow:hover .gutterTime,
@@ -649,9 +681,9 @@
    line is identified by its own data attribute rather than by any button in the
    body, so neither the expand/collapse control nor a Task ref link rendered
    inside a body can read as an entry boundary.
-   The line hugs the text column — inset past the hidden avatar (28px + 10px
-   gap, level with the run divider label) and flush with the body's right
-   edge — because it separates entries inside a run; structural boundaries
+   The line hugs the text column — inset past the hidden avatar (the identity
+   seat + 10px gap, level with the run divider label) and flush with the body's
+   right edge — because it separates entries inside a run; structural boundaries
    (turn divider, day anchor, unread line) stay full-width. */
 .messageRow[data-grouped]:has([data-thread-entry]) {
   margin-top: 3px;
@@ -663,7 +695,7 @@
   background: var(--dsw-alias-border-l2);
   content: '';
   height: 1px;
-  inset: 0 0 auto 38px;
+  inset: 0 0 auto calc(var(--team-identity-seat, 34px) + 10px);
   position: absolute;
 }
 
@@ -671,18 +703,19 @@
    waiting gap (isRunGap) are separate turns — the hairline restores their
    block boundary and the label below it shows the later message's instant,
    which the suppressed identity chrome would have carried. The line hugs the
-   text column (avatar 28px + gap 10px), the same geometry as the task-chip
-   hairline: run-level boundaries inset, structural ones (day anchor, unread
-   line) full-width with centered labels. The divider replaces the following
-   row's own chip hairline so the lines never stack. The line stays on
-   border-l2 — the standard structural hairline level; l3 is the
-   focus/attention tier and an always-on divider must not outrank page chrome. */
+   text column (identity seat + the row's 10px gap — derived, so a face resize
+   moves it), the same geometry as the task-chip hairline: run-level boundaries
+   inset, structural ones (day anchor, unread line) full-width with centered
+   labels. The divider replaces the following row's own chip hairline so the
+   lines never stack. The line stays on border-l2 — the standard structural
+   hairline level; l3 is the focus/attention tier and an always-on divider must
+   not outrank page chrome. */
 .runDivider {
   border-top: 1px solid var(--dsw-alias-border-l2);
-  /* The hairline hugs the text column (avatar 28px + gap 10px) and states no
+  /* The hairline hugs the text column (identity seat + gap 10px) and states no
      instant of its own: the row it separates states its time under the
      pointer, so one line is a line and never a second time. */
-  margin: 2px 0 0 38px;
+  margin: 2px 0 0 calc(var(--team-identity-seat, 34px) + 10px);
 }
 .runDivider + .messageRow[data-grouped]:has([data-thread-entry]) {
   margin-top: 0;

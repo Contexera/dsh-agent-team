@@ -1072,6 +1072,23 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(channelGeometry[0]!.bottom).toBeLessThanOrEqual(channelGeometry[1]!.top + 1)
   expect(channelGeometry[1]!.bottom).toBeLessThanOrEqual(channelGeometry[2]!.top + 1)
   expect(channelGeometry[1]!.height).toBeGreaterThan(200)
+  // The identity seat is one declaration on the shared conversation surface, so
+  // the Channel feed reads the seat the Thread page reads. Declaring it on
+  // `[data-team-thread]` left this surface on the `var()` fallback instead —
+  // invisible while both resolved alike, and a broken text column the moment the
+  // seat moved. A custom property is inherited and never re-resolved, so reading
+  // it off the Channel root is exactly the question. The face is measured too: a
+  // fallback equal to the declaration would satisfy that read on its own.
+  const channelSeat = await page.evaluate(() => {
+    const root = document.querySelector('[data-team-channel]')
+    const face = document.querySelector('[data-team-channel] article [class*="messageIdentity"], [data-team-channel] article [class*="messageIdentityImage"]')
+    return {
+      declared: root === null ? null : getComputedStyle(root).getPropertyValue('--team-identity-seat').trim(),
+      face: face === null ? null : Math.round(face.getBoundingClientRect().width),
+    }
+  })
+  expect(channelSeat.declared).toBe('34px')
+  expect(channelSeat.face).toBe(34)
   await page.screenshot({ path: join(UI01_SHOTS, 'desktop-channel.png'), fullPage: true })
   // Channel membership is derived from participation now: the Channel page
   // offers no management entry point and no membership dialog exists.
@@ -1281,13 +1298,37 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     await page.evaluate(value => { document.body.style.setProperty('--dsh-content-font-size', value) }, size)
   }
   await expect.poll(senderMetrics).toBe('13px/20px')
+
+  // The face is chrome, not content: the three content sizes this block already
+  // visits move the words beside it and leave the face at its own 34px. It is
+  // dropped 5px from the name row's top edge, which is where the author line's
+  // capitals begin rather than where its box begins: an inline box carries font
+  // half-leading above its glyphs, so at 13px/20px the capitals start 5.5px down
+  // (2.5px half-leading, then the 3px between the font's 12px ascent and its 9px
+  // cap height). Raft levels its avatar with its own author line, but its
+  // `mt-0.5` only measures 2px because that line is `leading-none` at 14px/14px
+  // and its capitals already start 2px down. This drop is therefore a fact about
+  // our type, and the assertion pins it against all three tiers at once.
+  // All three numbers are read in one pass: the timeline scrolls and each row is
+  // its own offsetParent, so separate reads could fake a match.
+  const faceGeometry = async (): Promise<[number, number, number]> => await page.evaluate(() => {
+    const row = document.querySelector('[data-team-thread] article')
+    const face = row?.querySelector('[class*="messageIdentity"], [class*="messageIdentityImage"]')
+    const line = row?.querySelector('[class*="nameRow"]')
+    if (face === null || face === undefined || line === null || line === undefined) return [Number.NaN, Number.NaN, Number.NaN]
+    const faceBox = face.getBoundingClientRect()
+    const lineBox = line.getBoundingClientRect()
+    return [faceBox.width, faceBox.height, faceBox.top - lineBox.top]
+  })
   const axisBefore = await page.evaluate(() => document.body.style.getPropertyValue('--dsh-content-font-size'))
-  await setAxis('22px')
-  await expect.poll(senderMetrics).toBe('20px/27px')
-  await page.screenshot({ path: join(UI04_SHOTS, 'content-axis-22px.png') })
-  await setAxis('10px')
-  await expect.poll(senderMetrics).toBe('9px/16px')
-  await page.screenshot({ path: join(UI04_SHOTS, 'content-axis-10px.png') })
+  for (const [size, expected] of [['', '13px/20px'], ['22px', '20px/27px'], ['10px', '9px/16px']] as const) {
+    await setAxis(size)
+    await expect.poll(senderMetrics).toBe(expected)
+    if (size !== '') await page.screenshot({ path: join(UI04_SHOTS, `content-axis-${size}.png`) })
+    const [width, height, drop] = await faceGeometry()
+    expect(Number.isNaN(width)).toBe(false)
+    expect([width, height, drop]).toEqual([34, 34, 5])
+  }
   await page.evaluate(value => {
     if (value === '') document.body.style.removeProperty('--dsh-content-font-size')
     else document.body.style.setProperty('--dsh-content-font-size', value)
@@ -1502,8 +1543,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(hoverFacts.cardRadius).toBe(acceptFacts.radius)
   expect(hoverFacts.actionHeight).toBe(28)
   expect(hoverFacts.cardTransition).toBe('0.16s ease-out')
-  // The seat keeps its 28px: revealing a time never pushes the text column.
-  expect(hoverFacts.seatWidth).toBe(28)
+  // The seat keeps the face's own 34px: revealing a time never pushes the text
+  // column.
+  expect(hoverFacts.seatWidth).toBe(34)
   // ...and the time inside it stays inside it. A dated label is wider than the
   // seat (57px within the year, 87px across it), and the box does not clip, so
   // it would paint across the words beside it. The label states the time of day;
@@ -1597,7 +1639,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(agedSeat.title).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   // ...while the label itself states the time of day and fits the seat it sits in.
   expect(agedSeat.text).toMatch(/^\d{2}:\d{2}$/)
-  expect(agedSeat.width).toBe(28)
+  expect(agedSeat.width).toBe(34)
   expect(agedSeat.ink).toBeLessThanOrEqual(agedSeat.width)
   // And it never reaches the words: the seat's right edge is left of the body
   // column's left edge, so the label ends before the text begins.
