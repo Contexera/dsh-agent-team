@@ -56,9 +56,28 @@ const PRE_COMPACTION_NOTICE_SUMMARY = 'Compaction is imminent; consider persisti
 /** Team tool whose successful mutations are semantic timeline candidates. */
 const TEAM_CLAIM_TOOL_NAME = 'team_claim'
 
-/** Team tools whose successful Thread effects are semantic timeline candidates. */
+/** Team tool whose successful Thread effects are semantic timeline candidates. */
 const TEAM_MESSAGE_TOOL_NAME = 'team_message'
-const TEAM_THREAD_TOOL_NAME = 'team_thread'
+
+/**
+ * Team tool that records Attention changes.
+ *
+ * Attention used to live on `team_thread` alongside the read actions, and every
+ * Session recorded before the split carries its `follow`/`unfollow` calls under
+ * that name. `team_thread` is read-only now, so the current name alone cannot
+ * recover those boundaries when an old log is refolded.
+ */
+const TEAM_ATTENTION_TOOL_NAME = 'team_attention'
+
+/**
+ * Legacy decoder name: attention moved `team_thread` → `team_attention`, and
+ * Sessions recorded before the split still carry durable `team_thread`
+ * follow/unfollow call/result pairs. The fold keeps decoding them — cold refolds
+ * and crash recovery of existing Members depend on old events still resolving
+ * intent — but this is a log decoder, not a tool alias: no new call can carry
+ * the old name, because `team_thread` no longer registers `follow`/`unfollow`.
+ */
+const LEGACY_TEAM_THREAD_TOOL_NAME = 'team_thread'
 
 /** Fixed action-category labels for effect boundaries (mirrors the claim label's shape). */
 const TEAM_MESSAGE_BOUNDARY_LABEL = 'Team message'
@@ -153,7 +172,12 @@ export function isTeamNotice(message: UserMessage): boolean {
 
 /** Whether one tool name can produce a Team-effect boundary from a successful call. */
 function isTeamEffectToolName(name: string): boolean {
-  return name === TEAM_CLAIM_TOOL_NAME || name === TEAM_MESSAGE_TOOL_NAME || name === TEAM_THREAD_TOOL_NAME
+  return name === TEAM_CLAIM_TOOL_NAME || name === TEAM_MESSAGE_TOOL_NAME || name === TEAM_ATTENTION_TOOL_NAME || name === LEGACY_TEAM_THREAD_TOOL_NAME
+}
+
+/** Whether one recorded name carries an Attention change, under either the current or the legacy tool. */
+function isAttentionToolName(name: string): boolean {
+  return name === TEAM_ATTENTION_TOOL_NAME || name === LEGACY_TEAM_THREAD_TOOL_NAME
 }
 
 /** One parsed JSON argument object, or undefined when the raw string carries none. */
@@ -178,13 +202,26 @@ function argumentsAreClaimMutation(raw: string): boolean {
   return action === 'claim' || action === 'done' || action === 'release'
 }
 
-/** Whether one raw team_thread arguments string is an attention mutation (follow/unfollow). */
+/**
+ * Whether one raw arguments string changes Attention.
+ *
+ * `status` reports and changes nothing, so it is not a semantic event — the
+ * same rule `list` follows on claims and `read` follows on Threads. Both the
+ * current tool and the legacy `team_thread` share this one test, which is what
+ * lets an old log's follow/unfollow still resolve to an Attention boundary.
+ */
 function argumentsAreAttentionMutation(raw: string): boolean {
   const action = actionOf(raw)
   return action === 'follow' || action === 'unfollow'
 }
 
-/** Whether one raw team_message arguments string is a Thread-effect attempt (start/reply — dm is not a Thread fact). */
+/**
+ * Whether one raw team_message arguments string is a Thread-effect attempt.
+ *
+ * Both actions write a Thread now that `dm` has its own tool: a private note
+ * never was a Thread fact, and giving it a separate tool keeps that rule
+ * structural rather than a filter over an action enum.
+ */
 function argumentsAreMessageCommit(raw: string): boolean {
   const action = actionOf(raw)
   return action === 'start' || action === 'reply'
@@ -248,7 +285,7 @@ export class TeamContextProjectionHost implements ContextProjectionHost {
   tracksCall(name: string, raw: string): boolean {
     if (!isTeamEffectToolName(name)) return false
     if (name === TEAM_CLAIM_TOOL_NAME) return argumentsAreClaimMutation(raw)
-    if (name === TEAM_THREAD_TOOL_NAME) return argumentsAreAttentionMutation(raw)
+    if (isAttentionToolName(name)) return argumentsAreAttentionMutation(raw)
     return argumentsAreMessageCommit(raw)
   }
 
@@ -326,7 +363,7 @@ export class TeamContextProjectionHost implements ContextProjectionHost {
         : undefined
       return { kind: 'team-boundary', label: TEAM_CLAIM_BOUNDARY_LABEL, topics: threadRef === undefined ? [] : [threadRef] }
     }
-    if (name === TEAM_THREAD_TOOL_NAME) {
+    if (isAttentionToolName(name)) {
       const threadRef = threadRefIn(raw)
       return { kind: 'team-boundary', label: TEAM_ATTENTION_BOUNDARY_LABEL, topics: threadRef === undefined ? [] : [threadRef] }
     }

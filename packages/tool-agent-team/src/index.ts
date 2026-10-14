@@ -256,15 +256,93 @@ const teamInbox = defineTool({
   },
 })
 
+/**
+ * Attention — following a Thread — is a different question from reading one.
+ *
+ * `status`, `follow`, and `unfollow` all answer "am I watching this Thread, and
+ * should I be?", and all three take exactly the same parameters: the Thread
+ * address and the routing Workspace. Reading takes that address plus paging and
+ * message refs. Sharing one parameter pocket between them put three parameters
+ * (`messageRef`, `beforeSequence`, `limit`) in front of three actions that can
+ * never accept them, which is friction the action set created on its own.
+ */
+const teamAttention = defineTool({
+  name: 'team_attention',
+  description: `Read or change your Attention on one Thread — whether you are following it. status reports the current state and changes nothing; follow starts receiving that Thread's updates; unfollow stops them. Attention is not reading: none of these actions render the Thread's facts, acknowledge unread work, or hand off a write token, and reading a Thread never changes whether you follow it. Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task.`,
+  parameters: {
+    action: { type: 'string', required: true, enum: ['status', 'follow', 'unfollow'] },
+    threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    taskRef: { type: 'string', description: "Optional Task ref alias for released clients. Prefer threadRef; if both are given they must identify the same Thread." },
+    workspace: workspaceParam,
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: false, properties: {
+      workspaceId: { type: 'string', required: true }, channelRef: { type: 'string', required: true },
+      kind: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, taskRef: { type: 'string' },
+      revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
+      following: { type: 'boolean', required: true },
+    } },
+    // Renders are the only channel a tool result reaches the model through.
+    // One outcome line, then the Attention state itself: the answer is a
+    // yes/no on one Thread, so there is no orientation, no fact list, and
+    // never a write token — a status read authorizes no mutation.
+    render: (args, value) => {
+      const standing = taskStanding(value)
+      const source = `Workspace: ${value.workspaceId} · Channel: ${value.channelRef}`
+      if (value.kind === 'follow' || value.kind === 'unfollow') {
+        return [{ type: 'text', text: `${source}\nAttention changed — ${value.following ? 'now following' : 'no longer following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
+      }
+      return [{ type: 'text', text: `${source}\nAttention status — ${value.following ? 'following' : 'not following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
+    },
+  },
+  async execute(args, exec) {
+    const agent = exec.agent
+    if (agent === undefined) throw new Error('team_attention requires an Agent session')
+    const host = service(agent)
+    if (args.threadRef === undefined && args.taskRef === undefined) throw new Error(`team_attention needs threadRef (or taskRef on a Taskful Thread) — ${recoveryFor('missing_thread_identity').sentence({})}`)
+    const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
+    const taskNumberOf = (task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } => {
+      if (task === undefined) return {}
+      const resolved = host.resolveTaskRefs({ workspaceId: base.workspaceId, taskRefs: [task.taskRef] }).resolved[0]
+      return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
+    }
+    if (args.action === 'status') {
+      const status = host.attentionStatusForAgent(agent, base)
+      const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
+      return attentionResult('status', base.workspaceId, snapshot, status.attention, taskNumberOf(snapshot.task))
+    }
+    const result = await host.changeAttentionForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action })
+    const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
+    return attentionResult(args.action, base.workspaceId, snapshot, result.attention, taskNumberOf(snapshot.task))
+  },
+})
+
+/** The one result shape every Attention action returns: address, standing, and the state itself. */
+function attentionResult(
+  kind: 'status' | 'follow' | 'unfollow',
+  workspaceId: string,
+  snapshot: ReturnType<AgentTeam['threadHistoryForAgent']>,
+  attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
+  task: { taskNumber?: number },
+): { workspaceId: string; channelRef: string; kind: string; threadRef: string; revision: number; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number } {
+  return {
+    workspaceId, channelRef: snapshot.anchor.channelRef,
+    kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
+    ...(snapshot.task === undefined ? {} : { taskRef: snapshot.task.taskRef, status: snapshot.task.status, resolution: snapshot.task.resolution }),
+    ...(task.taskNumber === undefined ? {} : { taskNumber: task.taskNumber }),
+    following: attention !== undefined,
+  }
+}
+
 const teamThread = defineTool({
   name: 'team_thread',
-  description: `Read or manage your Attention on one Thread. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state; status, follow, and unfollow change or report Attention only and render no Thread timeline. beforeSequence and limit are history-only: read, status, follow, and unfollow reject them — ${recoveryFor('history_only_arguments').sentence({ action: 'those actions' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task.`,
+  description: `Read one Thread's facts. read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit are history-only: read and message reject them — ${recoveryFor('history_only_arguments').sentence({ action: 'those actions' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here.`,
   parameters: {
-    action: { type: 'string', required: true, enum: ['status', 'follow', 'unfollow', 'read', 'history', 'message'] },
+    action: { type: 'string', required: true, enum: ['read', 'history', 'message'] },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for released clients. Prefer threadRef; if both are given they must identify the same Thread." },
     messageRef: { type: 'string', description: "For action `message`: the full branded Message ref to read back, exactly as rendered by this tool or by an inbox notice — including the `message:` prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
-    beforeSequence: { type: 'number', description: 'history only: the oldest fact sequence to page before (exclusive). read, status, follow, unfollow, and message reject it.' }, limit: { type: 'number', description: 'history only: max older facts to return. read, status, follow, unfollow, and message reject it.' }, workspace: workspaceParam,
+    beforeSequence: { type: 'number', description: 'history only: the oldest fact sequence to page before (exclusive). read and message reject it.' }, limit: { type: 'number', description: 'history only: max older facts to return. read and message reject it.' }, workspace: workspaceParam,
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
@@ -292,20 +370,13 @@ const teamThread = defineTool({
       } },
     } },
     // Renders are the only channel a tool result reaches the model through.
-    // status/follow/unfollow answer only the Attention question. read renders
-    // outcome → context → orientation → active collision surface → facts →
-    // watermark/advice, and hands off the opaque next-write token only when
-    // no unread remains. history renders deep orientation and never the
-    // current collision surface or any write token.
+    // read renders outcome → context → orientation → active collision surface
+    // → facts → watermark/advice, and hands off the opaque next-write token
+    // only when no unread remains. history renders deep orientation and never
+    // the current collision surface or any write token.
     render: (args, value) => {
       const standing = taskStanding(value)
       const source = `Workspace: ${value.workspaceId} · Channel: ${value.channelRef}`
-      if (value.kind === 'status') {
-        return [{ type: 'text', text: `${source}\nAttention status — ${value.following ? 'following' : 'not following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
-      }
-      if (value.kind === 'follow' || value.kind === 'unfollow') {
-        return [{ type: 'text', text: `${source}\nAttention changed — ${value.following ? 'now following' : 'no longer following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
-      }
       if (value.kind === 'message') {
         // Verbatim, and the only action that is: the reader asked for this one
         // Message because it has to answer it, so nothing is trimmed here.
@@ -389,18 +460,6 @@ const teamThread = defineTool({
       const resolved = host.resolveTaskRefs({ workspaceId: base.workspaceId, taskRefs: [task.taskRef] }).resolved[0]
       return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
     }
-    if (args.action === 'status') {
-      if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'status' }))
-      const status = host.attentionStatusForAgent(agent, base)
-      const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
-      return threadResult('status', base.workspaceId, snapshot, status.attention, [], taskNumberOf(snapshot.task))
-    }
-    if (args.action === 'follow' || args.action === 'unfollow') {
-      if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: args.action }))
-      const result = await host.changeAttentionForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action })
-      const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
-      return threadResult(args.action, base.workspaceId, snapshot, result.attention, [], taskNumberOf(snapshot.task))
-    }
     if (args.action === 'history') {
       const history = host.threadHistoryForAgent(agent, { ...base, ...(args.beforeSequence === undefined ? {} : { beforeSequence: args.beforeSequence }), ...(args.limit === undefined ? {} : { limit: args.limit }) })
       const status = host.attentionStatusForAgent(agent, base)
@@ -465,7 +524,7 @@ function claimLine(claim: { claimRef: string; owner: string; direction: string }
 }
 
 function threadResult(
-  kind: 'status' | 'follow' | 'unfollow' | 'read' | 'history' | 'message',
+  kind: 'read' | 'history' | 'message',
   workspaceId: string,
   snapshot: Awaited<ReturnType<AgentTeam['readThreadForAgent']>> | ReturnType<AgentTeam['threadHistoryForAgent']>,
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
@@ -495,16 +554,74 @@ function adviceLines(advice: ContextAdviceView): string[] {
   return [`Context guidance — ${summary}`, `Action: ${advice.action}. ${advice.guidance}`]
 }
 
+/**
+ * A direct message is not a Thread fact.
+ *
+ * `dm` takes a Member ref and a body and nothing else — no Thread, no Task, no
+ * write token, no attachments. Sharing a pocket with `reply` meant the model
+ * could hand a `threadRef` to a call that has no Thread to address, and be
+ * refused for a shape the action never wanted. Keeping them apart also makes the
+ * Host's own rule readable: a DM is a private note, so shared work belongs in a
+ * Thread reply.
+ */
+const teamDm = defineTool({
+  name: 'team_dm',
+  description: 'Send one private direct message to a single enabled Agent Member in your Workspace. It takes a memberRef and a body and nothing else: no Thread, no Task, no write token, and no attachments, because a DM addresses a person rather than a conversation. Use it for quick clarifications and status syncs — never for task work, decisions, or anything that needs team visibility or traceability, which belongs in a Thread reply. If an exchange with the same Member runs past about three messages, move it to a Thread: every DM costs the recipient a full agent turn. A DM is recorded whether or not the recipient session could be woken, and the result says which happened; there is no automatic redelivery, so never blindly send a duplicate. The Human cannot be DMed.',
+  parameters: {
+    memberRef: { type: 'string', required: true, description: "Full branded Member ref exactly as returned by Team tools, including the 'member:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves. The Member must be an enabled Agent in your Workspace (the Human cannot be DMed)." },
+    body: { type: 'string', required: true, description: "Markdown body. Lead with the conclusion or state. Mention the Human only when they must know or decide; when a decision is owed, say plainly what needs deciding and what happens by default if nobody answers — no fixed template. Keep it the shortest useful message for the recipient; mechanical detail follows below. Cite Team refs exactly as returned, as bare text with one colon (e.g. task:0f0a…) — never a double colon, never inside backticks or quotes. Unambiguous UUID abbreviations (first 6+ hex chars) also resolve." },
+    workspace: workspaceParam,
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: false, properties: {
+      kind: { type: 'string', required: true },
+      recipientMemberId: { type: 'string', required: true }, recipientHandle: { type: 'string', required: true },
+      delivered: { type: 'boolean', required: true }, deliveryNote: { type: 'string' }, occurredAt: { type: 'string' },
+    } },
+    // Renders are the only channel a tool result reaches the model through.
+    // A DM is recorded either way, so the first line always says which it was:
+    // delivered, or recorded without a live session to wake.
+    render: (_args, value) => {
+      if (value.delivered === false) return [{ type: 'text', text: [
+        `Recorded, not delivered — DM to @${value.recipientHandle} (${value.recipientMemberId}).`,
+        'No automatic redelivery will occur; do not blindly send a duplicate.',
+        `Reason: ${value.deliveryNote ?? 'the recipient session could not be woken'}`,
+      ].join('\n') }]
+      return [{ type: 'text', text: `Delivered — DM to @${value.recipientHandle} (${value.recipientMemberId})${value.occurredAt === undefined ? '' : ` at ${formatTeamTimestamp(value.occurredAt)}`}.` }]
+    },
+  },
+  async execute(args, exec) {
+    const agent = exec.agent
+    if (agent === undefined) throw new Error('team_dm requires an Agent session')
+    // The parameter pocket is the whole point of this tool, so a stray field is
+    // refused rather than ignored: a model that reached for a Thread write's
+    // shape meant a Thread reply, and silently dropping the field would send a
+    // private note where shared work was intended.
+    const stray = Object.keys(args).filter(key => key !== 'memberRef' && key !== 'body' && key !== 'workspace')
+    if (stray.length > 0) throw new Error(`team_dm does not accept ${stray.join(', ')}; it takes memberRef and body only — a DM addresses a person, so shared work belongs in a team_message reply.`)
+    if (args.memberRef === undefined) throw new Error(recoveryFor('dm_requires_member').sentence({}))
+    try {
+      const result = await service(agent).dmForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
+        recipientMemberId: args.memberRef as AgentTeamMemberId, body: args.body })
+      return { kind: 'dm-sent', recipientMemberId: result.recipient.memberId, recipientHandle: result.recipient.handle, delivered: true, occurredAt: result.receipt.occurredAt }
+    } catch (error) {
+      if (error instanceof AgentTeamDmDeliveryError) {
+        return { kind: 'dm-sent', recipientMemberId: error.recipientMemberId, recipientHandle: error.recipientHandle, delivered: false, deliveryNote: error.message }
+      }
+      throw error
+    }
+  },
+})
+
 const teamMessage = markAgentTeamPreset(defineTool({
   name: 'team_message',
-  description: 'Start a top-level Thread, reply to an existing Thread, or send a direct message (DM). Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message and restores Attention, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start defaults to a taskless Thread; pass asTask true to create a Task in the same send. A top-level start may mention related Agents directly; in replies, only a Human can invite a Member the Thread has never carried. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` reaches every Member of the Channel. Naming a Member this Thread has never carried still commits, delivers nothing to that Member, and reports them under undeliveredMentions: ask the Human to invite them, or reach them with a dm. dm sends a private direct message to one enabled Agent Member in your Workspace: use it for quick clarifications and status syncs — never for task work, decisions, or anything that needs team visibility or traceability (use a Thread); if a DM exchange with the same Member exceeds about 3 exchanges, move it to a Thread, because every DM costs the recipient a full agent turn.',
+  description: 'Start a top-level Thread, or reply to an existing one. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message and restores Attention, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start defaults to a taskless Thread; pass asTask true to create a Task in the same send. A top-level start may mention related Agents directly; in replies, only a Human can invite a Member the Thread has never carried. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` reaches every Member of the Channel. Naming a Member this Thread has never carried still commits, delivers nothing to that Member, and reports them under undeliveredMentions: ask the Human to invite them, or reach them with a team_dm. This tool writes Threads only: a private note to one Member is team_dm, not a reply.',
   parameters: {
-    action: { type: 'string', required: true, enum: ['start', 'reply', 'dm'] },
+    action: { type: 'string', required: true, enum: ['start', 'reply'] },
     channelRef: { type: 'string', description: "Full branded Channel ref exactly as returned by Team tools, including the 'channel:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for reply on a Taskful Thread. Prefer threadRef; an unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     replyToMessageRef: { type: 'string', description: "Optional: the full branded Message ref you are answering (as rendered by team_thread or an inbox notice). Reply on the Thread you are already replying to; the Message must be one this Thread recorded. The Host links the reply to it, and its author is then delivered to like a mention, so answering a peer reaches them without typing their handle. Use it when the link is the point — the reader needs to know which Message you are answering. A Message that only continues the Thread's conversation needs neither this nor a mention: the Thread already delivers to the Members on it, so the link would announce a delivery that was going to happen anyway." },
-    memberRef: { type: 'string', description: "Full branded Member ref exactly as returned by Team tools, including the 'member:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves. Required for dm; the Member must be an enabled Agent in your Workspace (the Human cannot be DMed)." },
     asTask: { type: 'boolean', description: 'When true, start creates a Task with the Thread. Default false creates a taskless Thread.' },
     body: { type: 'string', required: true, description: "Markdown body. Lead with the conclusion or state. Mention the Human only when they must know or decide; when a decision is owed, say plainly what needs deciding and what happens by default if nobody answers — no fixed template. Keep it the shortest useful message for the recipients; mechanical detail follows below. Cite Team refs exactly as returned, as bare text with one colon (e.g. task:0f0a…) — never a double colon, never inside backticks or quotes. Unambiguous UUID abbreviations (first 6+ hex chars) also resolve. Mention a Member by writing `@Handle` (`@` required, case-insensitive) in the prose: that is what delivers the Message to them and renders the mention chip, and `@all` reaches the whole Channel." }, baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Thread." },
     attachments: { type: 'array', items: { type: 'string' }, description: 'Absolute file paths to share, e.g. screenshots or generated artifacts; images render as thumbnails for recipients. The Host validates each path and copies the file into the attachment cache, and members also receive one cached path per attachment; if any path fails validation the whole send is rejected.' },
@@ -514,18 +631,9 @@ const teamMessage = markAgentTeamPreset(defineTool({
     schema: { type: 'object', additionalProperties: false, properties: {
       kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, revision: { type: 'number' },
       expectedRevision: { type: 'number' }, messageRef: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } }, unreadCount: { type: 'number' }, directCount: { type: 'number' },
-      recipientMemberId: { type: 'string' }, recipientHandle: { type: 'string' }, delivered: { type: 'boolean' }, deliveryNote: { type: 'string' }, occurredAt: { type: 'string' },
-      undeliveredMentions: { type: 'array', items: { type: 'string' } },
+      undeliveredMentions: { type: 'array', items: { type: 'string' } }, occurredAt: { type: 'string' },
     } },
     render: (_args, value) => {
-      if (value.kind === 'dm-sent') {
-        if (value.delivered === false) return [{ type: 'text', text: [
-          `Recorded, not delivered — DM to @${value.recipientHandle} (${value.recipientMemberId}).`,
-          'No automatic redelivery will occur; do not blindly send a duplicate.',
-          `Reason: ${value.deliveryNote ?? 'the recipient session could not be woken'}`,
-        ].join('\n') }]
-        return [{ type: 'text', text: `Delivered — DM to @${value.recipientHandle} (${value.recipientMemberId})${value.occurredAt === undefined ? '' : ` at ${formatTeamTimestamp(value.occurredAt)}`}.` }]
-      }
       if (value.kind === 'committed' && value.messageRef !== undefined && value.threadRef !== undefined && value.revision !== undefined) {
         return [{ type: 'text', text: [
           value.action === 'start' ? 'Committed — Thread created.' : 'Committed — reply added.',
@@ -559,22 +667,6 @@ const teamMessage = markAgentTeamPreset(defineTool({
       const result = await host.sendMessageForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
         channelRef: args.channelRef as never, body: args.body, asTask: args.asTask === true, ...paths })
       return messageOutcome(result, 'start')
-    }
-    if (args.action === 'dm') {
-      if (args.memberRef === undefined || args.channelRef !== undefined || args.threadRef !== undefined || args.taskRef !== undefined
-        || args.baseRevision !== undefined || args.asTask !== undefined || attachmentPaths !== undefined) {
-        throw new Error(`dm requires memberRef and body only; it does not accept channelRef, threadRef, taskRef, baseRevision, asTask, or attachments — ${recoveryFor('dm_requires_member').sentence({})}`)
-      }
-      try {
-        const result = await host.dmForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
-          recipientMemberId: args.memberRef as AgentTeamMemberId, body: args.body })
-        return { kind: 'dm-sent', recipientMemberId: result.recipient.memberId, recipientHandle: result.recipient.handle, delivered: true, occurredAt: result.receipt.occurredAt }
-      } catch (error) {
-        if (error instanceof AgentTeamDmDeliveryError) {
-          return { kind: 'dm-sent', recipientMemberId: error.recipientMemberId, recipientHandle: error.recipientHandle, delivered: false, deliveryNote: error.message }
-        }
-        throw error
-      }
     }
     const baseRevision = args.baseRevision
     if ((args.threadRef === undefined && args.taskRef === undefined) || args.channelRef !== undefined || args.asTask !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
@@ -796,7 +888,9 @@ const teamView = defineTool({
 export function apply(ctx: Context): void {
   ctx.tools.register(teamInbox)
   ctx.tools.register(teamThread)
+  ctx.tools.register(teamAttention)
   ctx.tools.register(teamMessage)
+  ctx.tools.register(teamDm)
   ctx.tools.register(teamClaim)
   ctx.tools.register(teamView)
   registerContextTools(ctx)

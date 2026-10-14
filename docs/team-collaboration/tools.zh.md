@@ -20,17 +20,29 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 ## `team_thread`
 
-`team_thread` 负责个人 Attention 和 Thread reading。`threadRef` 是 primary identity。`taskRef` 仅是 released Clients 在 taskful Threads 上使用的 compatibility alias。
+`team_thread` 只负责 Thread reading。`threadRef` 是 primary identity。`taskRef` 仅是 released Clients 在 taskful Threads 上使用的 compatibility alias。
 
-`read` 原子返回一个按 chronology 排列的 unread batch，推进 durable watermark。读者没有 unread 时，read 什么都不推进，不追加 operation，也不携带 receipt。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面，重试展示的就是此刻的未读。`history` 返回有界的旧 public facts，不改变 read state。`message` 按 ref 逐字读回一条 Message，用来回答那些原文不在你手上这一页里的引用。`follow` 与 `unfollow` 修改个人 Attention。
+`read` 原子返回一个按 chronology 排列的 unread batch，推进 durable watermark。读者没有 unread 时，read 什么都不推进，不追加 operation，也不携带 receipt。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面，重试展示的就是此刻的未读。`history` 返回有界的旧 public facts，不改变 read state。`message` 按 ref 逐字读回一条 Message，用来回答那些原文不在你手上这一页里的引用。
 
 `beforeSequence` 与 `limit` 是仅 `history` 可用的参数。`read` 只负责清空未读、不能翻页，因此其他 action 携带它们会被拒绝，并给出 `action: history` 的出路。
 
-六个 action 不共享一个最大化渲染。`message` 渲染 ref、带时刻与发送者的 sequence，然后是整段正文。这个 action 存在的意义就是让读者回答一条它没有收到的 Message，所以一个字都不裁剪，导向语也不变。
+三个 action 不共享一个最大化渲染：读展示 Thread，也只有读展示 Thread。这里没有任何 Attention action，因为 Attention 是另一个问题、另一套参数口袋——见 `team_attention`。
 
-`status`、`follow`、`unfollow` 只回答 Attention 问题：一行结果携带 Thread ref、可选 Task standing 与 following 状态，没有 timeline。read 先渲染结果：确认与剩余的 unread 计数。再渲染 Thread 身份与 following 状态。再导向：返回 facts 携带 Host 提供的 background，给 full anchor；否则给 bounded anchor subject。anchor 本身在返回 fact 时绝不重复渲染。read 接着只渲染 active Claims：当前 collision surface，每 Claim 一行（claim ref、owner、direction）。然后是带行内 unread/direct 标记、按时间排列的 facts。页脚给出 read-through sequence 与剩余 unread 计数。若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量。重返的读者借此看到自己没在看的跨度有多大，不把本次 batch 当成整个 Thread。
+`message` 渲染 ref、带时刻与发送者的 sequence，然后是整段正文。这个 action 存在的意义就是让读者回答一条它没有收到的 Message，所以一个字都不裁剪，导向语也不变。
+
+read 先渲染结果：确认与剩余的 unread 计数。再渲染 Thread 身份与 following 状态。再导向：返回 facts 携带 Host 提供的 background，给 full anchor；否则给 bounded anchor subject。anchor 本身在返回 fact 时绝不重复渲染。read 接着只渲染 active Claims：当前 collision surface，每 Claim 一行（claim ref、owner、direction）。然后是带行内 unread/direct 标记、按时间排列的 facts。页脚给出 read-through sequence 与剩余 unread 计数。若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量。重返的读者借此看到自己没在看的跨度有多大，不把本次 batch 当成整个 Thread。
 
 history 页渲染历史结果与 Thread 身份。首页给 full anchor，continuation 页给 bounded subject。渲染选中的 facts 与 cursor/hasMore 页脚，绝无当前 Claims 或 advice。每条 activity fact 都是结构化的：actor、Task ref，以及这条 activity claim、完成、接受或 release 的 Claim refs。绝不是裸 kind。当一次 `read` 确认的是一个仍处于 done 状态 Task 的未读验收时，结果附带一段 `contextAdvice`。`contextAdvice` 携带四样东西：读取 Member 的实测用量、当前路由的预算、任务边界阈值 `min(128_000, effective handoffAt)`、唯一动作。唯一动作三选一：保留当前上下文；验收收尾后 fresh rollover；已达 handoff 预算时就地压缩。建议只是推荐。Host 绝不在验收时自动 checkpoint、rollover 或 compact。测量失败降级为显式 `unavailable` 文案，不反转已提交的 read。history 与重复 read 不带建议。
+
+## `team_attention`
+
+`team_attention` 只回答一个问题：我是否在关注这个 Thread，以及该不该继续关注。`status` 报告当前状态且不改变任何东西；`follow` 开始接收该 Thread 的更新；`unfollow` 停止接收。三者参数完全相同：Thread 地址与路由 Workspace。`threadRef` 是 primary identity，`taskRef` 是 compatibility alias。
+
+Attention 不是 reading。这三个 action 都不渲染 Thread 的 facts、不确认未读、不交写令牌；读一个 Thread 也从不改变你是否关注它。结果形状只携带地址、Task standing 与 following 状态，别无其他，因此 Attention 结果不可能漂移成展示 Thread 内容。
+
+与 `team_thread` 的拆分正是让读路径完全不带 Attention 逻辑的原因：三个 action 共享同一个参数口袋，而不是借用读的口袋——那里有 `messageRef`、`beforeSequence`、`limit` 三个它们永远用不上的参数。
+
+`status` 不产生语义边界：它只报告、不改变，与 Claim 上的 `list`、Thread 上的 `read` 同理。成功的 `follow` 或 `unfollow` 各锚定一个边界。
 
 ## `team_message`
 
@@ -46,7 +58,15 @@ history 页渲染历史结果与 Thread 身份。首页给 full anchor，continu
 
 Team 行设置里的开关决定这个参数是否可用。开关关闭时，携带 ref 的 reply 会被拒绝。
 
-`team_message.dm` 向同一 Workspace 内一个 enabled Agent Member 发送私有 direct message。DM 是纯送达。ledger 追加一个 audit-only 的 `team/dm-sent` operation，requestId 幂等。收件人的 live session 以 relay-form 注入的 user message 收到正文。idle 收件人开新 turn，busy 收件人 steer 进当前 turn。DM 不创建 Channel、Thread、revision、Attention 或 Inbox markers，也不唤醒任何 change waiters。Human 不能被 DM。收件人无 live session 或唤醒失败时，operation 保持 durable。发送方收到结构化的 delivery error，而非静默丢失。不做自动重投。DM 只用于快速澄清与状态同步。任务工作、决策和任何需要团队可见或可追溯的内容一律走 Thread。同一对象往来超过约 3 轮应转 Thread，因为每条 DM 消耗收件人一次完整 agent turn。
+## `team_dm`
+
+`team_dm` 向同一 Workspace 内一个 enabled Agent Member 发送私有 direct message。它只接受 `memberRef` 与 `body`，别无其他——没有 Thread、没有 Task、没有写令牌、没有附件——因为 DM 寻址的是人，不是会话。多带的参数会被拒绝而不是被忽略，因此伸手去拿 Thread 写入形状的模型会被告知：你想要的其实是 Thread reply。
+
+DM 是纯送达。ledger 追加一个 audit-only 的 `team/dm-sent` operation，requestId 幂等。收件人的 live session 以 relay-form 注入的 user message 收到正文。idle 收件人开新 turn，busy 收件人 steer 进当前 turn。DM 不创建 Channel、Thread、revision、Attention 或 Inbox markers，也不唤醒任何 change waiters。Human 不能被 DM。
+
+每条结果的第一行都说明它是哪一种：已送达，还是只记录在案、没有可唤醒的 live session。没有自动重投，因此只记录在案的 DM 绝不被盲目重发。
+
+DM 只用于快速澄清与状态同步。任务工作、决策和任何需要团队可见或可追溯的内容一律走 Thread。同一对象往来超过约 3 轮应转 Thread，因为每条 DM 消耗收件人一次完整 agent turn。
 
 ## `team_claim`
 
@@ -78,7 +98,7 @@ Member 持有无法在切换中存活的 jobs 时，rollover 会被拒绝：任�
 
 fresh 的 `context_rollover`（不带 `checkpointRef`）从不需要先读 status。status 用于选定 checkpointRef 回返，或确认 fresh handoff 是更好路径。
 
-Team 边界锚定在效果而非推送上。committed 的 `team_message` 里，start 的 Thread 从结果持久化的 presentation meta 归属，reply 从 call arguments 归属。成功的 `team_claim` 变更、成功的 follow/unfollow 各锚定一个边界。label 按动作类别：`Team message`、`Team task claim change`、`Team attention change`。typed rejection（`unread_required`、`stale_revision`）、失败调用、dm、读路径（`team_inbox`、`team_view`、`team_thread read`）从不产边界。推送侧仅锚定每个 Thread 首次送达的通知。保留的「工作刚到手」锚点的 label 是该次送达首次引入的 Thread refs（`First arrival: …`），而非 notice 自身的泛化文案。同 Thread 的后续重发与纯提醒（recovery notice，以及 progress-nudge 系统移除前记录的历史 notice）不产出任何边界。
+Team 边界锚定在效果而非推送上。committed 的 `team_message` 里，start 的 Thread 从结果持久化的 presentation meta 归属，reply 从 call arguments 归属。成功的 `team_claim` 变更、`team_attention` 上成功的 follow/unfollow 各锚定一个边界。label 按动作类别：`Team message`、`Team task claim change`、`Team attention change`。typed rejection（`unread_required`、`stale_revision`）、失败调用、dm、读路径（`team_inbox`、`team_view`、`team_thread read`）从不产边界。推送侧仅锚定每个 Thread 首次送达的通知。保留的「工作刚到手」锚点的 label 是该次送达首次引入的 Thread refs（`First arrival: …`），而非 notice 自身的泛化文案。同 Thread 的后续重发与纯提醒（recovery notice，以及 progress-nudge 系统移除前记录的历史 notice）不产出任何边界。
 
 同时满足两个条件，Team 边界才是可选择的默认 checkpoint。第一，经锚点保留的前缀仍停留在单一 Thread 内：恰好一个 Thread 的事实经锚点进入 Member 上下文。第二，回返能把工作集缩到 handoff 预算之下。Thread 归属来自已送达通知正文、claim 变更经 ledger 解析的 Task overlay、以及 committed 消息调用的 ref。前缀跨多 Thread、或不含任何 Thread 的边界，以 reason 说明。handoff 与 compaction 边界永远不是回返目标：它们关闭的是上下文，不是开启话题。判定依据是保留前缀，而非边界自身的贡献。规则本身是引擎的共享锚点策略，两个界面共用同一次判定。Team 只声明只有自己的词汇能说清的那部分——它的哪些边界类型关闭的是上下文而非话题（`boundaryRestorableFor`）——以及 reason 使用的名词。因此时间线给出的 ref 就是 `context_rollover` 接受的 ref，而不是两份相同规则碰巧一致。默认边界的 ref 带 Session 作用域，连续代际在同一事件 seq 锚定也不会碰撞。仅结构信息，不含任何 transcript 正文。
 

@@ -22,13 +22,13 @@ The footer routes body reading and acknowledgement to `team_thread read`; the re
 
 ## `team_thread`
 
-`team_thread` owns Attention and reading. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads.
+`team_thread` reads one Thread. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads.
 
-`read` returns one chronological unread batch and advances the watermark. A read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer. `history` pages older facts. `message` reads one Message back verbatim by its ref, which is the way to answer a quote whose original sits outside the page you hold. follow/unfollow change personal Attention.
+`read` returns one chronological unread batch and advances the watermark. A read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer. `history` pages older facts. `message` reads one Message back verbatim by its ref, which is the way to answer a quote whose original sits outside the page you hold.
 
 `beforeSequence` and `limit` are history-only parameters. `read` drains unread and cannot page, so any other action carrying them is refused with the `action: history` route.
 
-The six actions do not share one maximal render: `status`, `follow`, and `unfollow` answer only the Attention question — one outcome line with the Thread ref, optional Task standing, and following state, no timeline.
+The three actions share no maximal render: reading shows the Thread, and only reading does. There is no Attention action here, because Attention is a different question with a different parameter pocket — see `team_attention`.
 
 `message` renders the ref, the sequence with its instant and sender, and then the body whole: this one action exists so a reader can answer a Message it did not receive, so nothing is trimmed and the orientation is unchanged.
 
@@ -52,6 +52,16 @@ The advice is a recommendation only. The Host never checkpoints, rolls over, or 
 
 History and repeat reads carry no advice.
 
+## `team_attention`
+
+`team_attention` answers one question — am I following this Thread, and should I be? `status` reports the current state and changes nothing; `follow` starts receiving the Thread's updates; `unfollow` stops them. All three take the same parameters: the Thread address and the routing Workspace. `threadRef` is primary, with `taskRef` as the compatibility alias.
+
+Attention is not reading. None of these actions render the Thread's facts, acknowledge unread work, or hand off a write token, and reading a Thread never changes whether you follow it. The result shape carries the address, the Task standing, and the following state — and nothing else, so an Attention result cannot drift into showing Thread content.
+
+The split from `team_thread` is what makes the read path carry no Attention logic at all: the three actions share one parameter pocket instead of borrowing a read pocket with three parameters (`messageRef`, `beforeSequence`, `limit`) they can never accept.
+
+`status` produces no semantic boundary — it reports and changes nothing, the same rule `list` follows on Claims and `read` follows on Threads. A successful `follow` or `unfollow` anchors one boundary.
+
 ## `team_message`
 
 `team_message.start` creates a top-level Thread and defaults taskless; explicit task intent atomically creates a Task. `reply` appends to an existing Thread. Both accept absolute attachment paths; Host validates and caches all paths atomically. A committed start or reply renders one committed-verb outcome — Thread created or reply added — with the Message ref, the new Thread ref (and Task ref when taskful), and exactly one next-write token hand-off. The created Thread is immediately addressable and the next mutation has its basis.
@@ -66,9 +76,15 @@ The link is recorded on the Message, renders as a quote the reader can follow ba
 
 The switch on the Team row's settings decides whether the parameter is available at all; with it off, a reply that carries a ref is refused.
 
-`team_message.dm` sends a private direct message to one enabled Agent Member in the same Workspace. A DM is pure delivery: the ledger appends an audit-only `team/dm-sent` operation (request-idempotent) while the recipient's live session receives the body as a relay-form injected user message — idle recipients get a new turn, busy ones are steered into the current turn. DMs create no Channel, Thread, revision, Attention, or Inbox markers and wake no change waiters. The Human cannot be DMed.
+## `team_dm`
 
-If the recipient has no live session or the wake fails, the operation stays durable and the sender gets a structured delivery error instead of a silent loss; there is no automatic redelivery. Use DMs for quick clarifications and status syncs only. Task work, decisions, and anything needing team visibility or traceability belong in Threads, and an exchange passing about 3 round trips should move to a Thread because each DM costs the recipient a full agent turn.
+`team_dm` sends a private direct message to one enabled Agent Member in the same Workspace. It takes a `memberRef` and a `body` and nothing else — no Thread, no Task, no write token, and no attachments — because a DM addresses a person rather than a conversation. A stray parameter is refused rather than ignored, so a model that reached for a Thread write's shape meant a Thread reply and gets told so.
+
+A DM is pure delivery: the ledger appends an audit-only `team/dm-sent` operation (request-idempotent) while the recipient's live session receives the body as a relay-form injected user message — idle recipients get a new turn, busy ones are steered into the current turn. DMs create no Channel, Thread, revision, Attention, or Inbox markers and wake no change waiters. The Human cannot be DMed.
+
+The first line of every result says which of the two it was: delivered, or recorded without a live session to wake. There is no automatic redelivery, so a recorded-only DM is never blindly resent.
+
+Use DMs for quick clarifications and status syncs only. Task work, decisions, and anything needing team visibility or traceability belong in Threads, and an exchange passing about 3 round trips should move to a Thread because each DM costs the recipient a full agent turn.
 
 ## `team_claim`
 
@@ -114,7 +130,7 @@ The definition is the engine's (`createContinuityTools`), not the Team's: the Te
 
 A fresh `context_rollover` (no `checkpointRef`) never requires reading the status first; the status is for picking a checkpointRef return or confirming that a fresh handoff is the better path.
 
-Team boundaries anchor on effect, not push. A committed `team_message` (a start's Thread is attributed from the durable presentation meta of its result, a reply's from its call arguments), a successful `team_claim` mutation, and a successful follow/unfollow each anchor one boundary, labeled by action class (`Team message`, `Team task claim change`, `Team attention change`). A typed rejection (`unread_required`, `stale_revision`), a failed call, a dm, or the read path (`team_inbox`, `team_view`, `team_thread read`) never does.
+Team boundaries anchor on effect, not push. A committed `team_message` (a start's Thread is attributed from the durable presentation meta of its result, a reply's from its call arguments), a successful `team_claim` mutation, and a successful `team_attention` follow/unfollow each anchor one boundary, labeled by action class (`Team message`, `Team task claim change`, `Team attention change`). A typed rejection (`unread_required`, `stale_revision`), a failed call, a dm, or the read path (`team_inbox`, `team_view`, `team_thread read`) never does.
 
 On the push side, only a Thread's FIRST delivered notice anchors — the preserved "work just arrived" anchor, labeled with the Thread refs it first introduced (`First arrival: …`) instead of the notice's own generic account. Later re-deliveries of the same Thread and pure reminders (recovery notices, and the progress-nudge notices recorded before that system was removed) produce nothing.
 

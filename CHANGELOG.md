@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Changed**
 
+- Attention and direct messages now have their own tools instead of sharing one with reading and replying. `team_attention` answers only "am I following this Thread" with three parameters no read action needs, and `team_dm` addresses a person with a `memberRef` and a `body` and nothing else. `team_thread` reads and `team_message` writes Threads, so neither carries a branch for the other's job. Sessions recorded before the split still fold correctly: a `follow` logged under `team_thread` is decoded to the same boundary it always was, while no new call can carry that name.
 - Every Team rejection now names the next action and the value that action takes — a missing `threadRef` says where to copy one, an unknown Claim ref says which command lists your own, an attachment path says what shape it must have. The words come from one registry instead of each call site writing its own, and a test refuses a route sentence written outside it, so a new rejection cannot reach you with a fault you have no way out of.
 - Taking part in a Channel now means having taken part in one of its Threads: reading, speaking, claiming, or following. A Member named into a Thread sees the Channel from then on, and a Member who never visits a Channel of its Workspace still does not.
 - Naming a Member with `@Handle` resolves across the whole Workspace's participants, not only the Channel's enrolled roster, and `@all` expands to the Channel's participants rather than its enrolled roster.

@@ -140,40 +140,47 @@ describe('team_inbox renders triage, not a read', () => {
   })
 })
 
-describe('team_thread status/follow/unfollow render Attention only', () => {
+describe('team_attention renders Attention only', () => {
   const base = {
     workspaceId: 'workspace:alpha', channelRef: CHANNEL,
     kind: 'status', threadRef: THREAD, taskRef: TASK, taskNumber: 7, revision: 8394, status: 'in_progress', resolution: 'open', following: true,
-    anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor body', sequence: 1 },
-    claims: [{ claimRef: CLAIM, direction: 'renderer fidelity', state: 'active', owner: 'member:6e8a5b10-df16-4ec0-943a-63738010953f' }],
-    facts: [],
   }
   it('status renders one Attention outcome line under its Workspace/Channel source', () => {
-    const text = renderText(teamTools().get('team_thread')!, { action: 'status', threadRef: THREAD }, base)
+    const text = renderText(teamTools().get('team_attention')!, { action: 'status', threadRef: THREAD }, base)
     expect(text).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention status — following ${THREAD} · ${TASK} (#7), in_progress/open.`)
   })
 
   it('follow/unfollow render one Attention-changed line; no anchor, Claims, facts, revision label, or token', () => {
-    const follow = renderText(teamTools().get('team_thread')!, { action: 'follow', threadRef: THREAD }, { ...base, kind: 'follow' })
+    const follow = renderText(teamTools().get('team_attention')!, { action: 'follow', threadRef: THREAD }, { ...base, kind: 'follow' })
     expect(follow).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention changed — now following ${THREAD} · ${TASK} (#7), in_progress/open.`)
-    const unfollow = renderText(teamTools().get('team_thread')!, { action: 'unfollow', threadRef: THREAD }, { ...base, kind: 'unfollow', following: false })
+    const unfollow = renderText(teamTools().get('team_attention')!, { action: 'unfollow', threadRef: THREAD }, { ...base, kind: 'unfollow', following: false })
     expect(unfollow).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention changed — no longer following ${THREAD} · ${TASK} (#7), in_progress/open.`)
     for (const text of [follow, unfollow]) {
-      expect(text).not.toContain('anchor body')
-      expect(text).not.toContain(CLAIM)
       expect(text).not.toContain('revision')
       expect(text).not.toContain('baseRevision')
     }
   })
 
   it('a taskless Attention render omits Task standing', () => {
-    const text = renderText(teamTools().get('team_thread')!, { action: 'status', threadRef: THREAD }, {
+    const text = renderText(teamTools().get('team_attention')!, { action: 'status', threadRef: THREAD }, {
       workspaceId: 'workspace:alpha', channelRef: CHANNEL,
       kind: 'status', threadRef: THREAD, revision: 8394, following: false,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor body', sequence: 1 },
-      claims: [], facts: [],
     })
     expect(text).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention status — not following ${THREAD}.`)
+  })
+
+  it('the output schema carries no read surface at all, because Attention is not reading', () => {
+    // The whole point of the split: the Attention result shape cannot name a
+    // fact, an anchor, a watermark, or a write token, so no render of it can
+    // drift into showing Thread content.
+    const schema = teamTools().get('team_attention')!.output.schema as Record<string, any>
+    for (const absent of ['facts', 'anchor', 'claims', 'readThroughSequence', 'remainingUnreadCount', 'message', 'cursor', 'hasMore', 'contextAdvice']) {
+      expect(schema.properties[absent]).toBeUndefined()
+    }
+    // The Attention state itself is the one required field: an Attention result
+    // that does not say whether you follow the Thread answers nothing.
+    // `required` is hoisted onto the schema's top-level list, not the field.
+    expect(schema.required).toContain('following')
   })
 })
 
@@ -377,16 +384,28 @@ describe('team_message renders its outcome', () => {
   })
 
   it('dm: Delivered vs Recorded-not-delivered with the no-blind-duplicate warning', () => {
-    const delivered = renderText(teamTools().get('team_message')!, { action: 'dm', memberRef: 'member:peer', body: 'x' }, {
+    const delivered = renderText(teamTools().get('team_dm')!, { memberRef: 'member:peer', body: 'x' }, {
       kind: 'dm-sent', recipientMemberId: 'member:peer', recipientHandle: 'Cole', delivered: true,
     })
     expect(delivered).toBe('Delivered — DM to @Cole (member:peer).')
-    const recorded = renderText(teamTools().get('team_message')!, { action: 'dm', memberRef: 'member:peer', body: 'x' }, {
+    const recorded = renderText(teamTools().get('team_dm')!, { memberRef: 'member:peer', body: 'x' }, {
       kind: 'dm-sent', recipientMemberId: 'member:peer', recipientHandle: 'Cole', delivered: false, deliveryNote: 'no live session',
     })
     expect(recorded).toContain('Recorded, not delivered — DM to @Cole (member:peer).')
     expect(recorded).toContain('No automatic redelivery will occur; do not blindly send a duplicate.')
     expect(recorded).toContain('Reason: no live session')
+  })
+
+  it('team_dm takes no Thread, Task, token, or attachment parameter at all', () => {
+    // The split's whole point, asserted rather than assumed: a private note has
+    // no Thread to address, so the parameter pocket cannot invite one. A model
+    // that reaches for a threadRef here gets a schema refusal, not a runtime one.
+    const parameters = teamTools().get('team_dm')!.parameters as Record<string, any>
+    for (const absent of ['threadRef', 'taskRef', 'channelRef', 'baseRevision', 'asTask', 'attachments', 'replyToMessageRef', 'action']) {
+      expect(parameters.properties[absent]).toBeUndefined()
+    }
+    expect(parameters.required).toContain('memberRef')
+    expect(parameters.required).toContain('body')
   })
 
   it('typed rejections begin Not committed, keep refs/counts/recovery, and render no numeric revision or token', () => {
@@ -601,7 +620,7 @@ describe('team tools render absolute event instants in UTC+8', () => {
       claim: { claimRef: CLAIM, direction: 'x', state: 'active', owner: 'member:me' }, claims: [], occurredAt: '2026-09-08T09:00:00.000Z',
     })
     expect(claim).toContain('Committed at 2026-09-08T17:00:00+08:00')
-    const dm = renderText(teamTools().get('team_message')!, { action: 'dm', memberRef: 'member:peer', body: 'x' }, {
+    const dm = renderText(teamTools().get('team_dm')!, { memberRef: 'member:peer', body: 'x' }, {
       kind: 'dm-sent', recipientMemberId: 'member:peer', recipientHandle: 'Cole', delivered: true, occurredAt: '2026-09-08T09:00:00.000Z',
     })
     expect(dm).toBe('Delivered — DM to @Cole (member:peer) at 2026-09-08T17:00:00+08:00.')

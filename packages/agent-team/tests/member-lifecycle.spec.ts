@@ -337,8 +337,10 @@ describe('Agent Team Member lifecycle', () => {
     expect(noticeRequest).toContain('Your Session and cwd have not moved')
     for (const [name, args] of [
       ['team_view', {}],
-      ['team_thread', { action: 'status', threadRef: 'thread:missing' }],
+      ['team_thread', { action: 'read', threadRef: 'thread:missing' }],
+      ['team_attention', { action: 'status', threadRef: 'thread:missing' }],
       ['team_message', { action: 'start', channelRef: 'channel:missing', body: 'Do not route implicitly' }],
+      ['team_dm', { memberRef: 'member:missing', body: 'Do not route implicitly' }],
       ['team_claim', { action: 'list', taskRef: 'task:missing' }],
     ] as const) {
       const omitted = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`global-missing-${name}`),
@@ -432,9 +434,11 @@ describe('Agent Team Member lifecycle', () => {
     const historyArgs = await rejected('team_thread', { action: 'read', threadRef, beforeSequence: 1, limit: 5 })
     expect(historyArgs).toContain('action: history')
     expect(historyArgs).toMatch(/read .*(drain|unread)/i)
-    // A missing mutation basis says which token to copy and where from.
-    expect(await rejected('team_message', { action: 'reply', threadRef, body: 'no token' })).toMatch(/positive baseRevision/)
-    expect(await rejected('team_claim', { action: 'done', taskRef, claimRef: 'claim:missing' })).toMatch(/positive baseRevision/)
+    // A missing mutation basis says which token to copy and where from. Both
+    // tools refuse it on their own argument shape, before the Host ever sees
+    // the call, and both name the same drain-and-copy route.
+    expect(await rejected('team_message', { action: 'reply', threadRef, body: 'no token' })).toMatch(/team_thread read/)
+    expect(await rejected('team_claim', { action: 'done', taskRef, claimRef: 'claim:missing' })).toMatch(/team_thread read/)
     // A missing identity says which parameter is absent and where to get it.
     expect(await rejected('team_claim', { action: 'done', baseRevision: 1, claimRef: 'claim:missing' })).toContain('taskRef')
     expect(await rejected('team_claim', { action: 'list' })).toContain('taskRef')
@@ -444,9 +448,11 @@ describe('Agent Team Member lifecycle', () => {
     // An unusable target says what it must be.
     expect(await rejected('team_message', { action: 'reply', threadRef, baseRevision: 1, replyToMessageRef: 'message:23011', body: 'bad target' })).toContain('recorded Message')
     expect(await rejected('team_message', { action: 'reply', threadRef, baseRevision: 1, attachments: ['relative/shot.png'], body: 'bad attachment' })).toMatch(/absolute|does not exist/)
-    // A start/dm addressed the wrong way says which parameter it wants.
+    // A start addressed the wrong way says which parameter it wants.
     expect(await rejected('team_message', { action: 'start', body: 'no channel' })).toContain('channelRef')
-    expect(await rejected('team_message', { action: 'dm', body: 'no recipient' })).toContain('memberRef')
+    // A DM addresses a person, not a conversation: it says which Member ref it
+    // wants, and takes nothing a Thread write would take.
+    expect(await rejected('team_dm', { body: 'no recipient' })).toContain('memberRef')
 
     // Another Member's Claim: the refusal names the owner rule and the route
     // to the Member's own Claims, rather than only stating the restriction.
@@ -1272,8 +1278,9 @@ describe('Agent Team Member lifecycle', () => {
     expect(agentStarted).toMatchObject({ kind: 'committed' })
     expect(ctx.agentTeam.inbox({ workspaceId })).toMatchObject({ totalDirectCount: 1,
       items: [expect.objectContaining({ directCount: 1 })] })
-    expect(await call('team_thread', { action: 'unfollow', threadRef: agentStarted.threadRef })).toMatchObject({ kind: 'unfollow', following: false })
-    expect(await call('team_thread', { action: 'follow', threadRef: agentStarted.threadRef })).toMatchObject({ kind: 'follow', following: true })
+    expect(await call('team_attention', { action: 'unfollow', threadRef: agentStarted.threadRef })).toMatchObject({ kind: 'unfollow', following: false })
+    expect(await call('team_attention', { action: 'follow', threadRef: agentStarted.threadRef })).toMatchObject({ kind: 'follow', following: true })
+    expect(await call('team_attention', { action: 'status', threadRef: agentStarted.threadRef })).toMatchObject({ kind: 'status', following: true })
 
     const enrolled = await call('team_message', { action: 'start', channelRef: channel.channel.channelRef,
       body: 'Agent-led task for @reviewer' })
@@ -1329,7 +1336,7 @@ describe('Agent Team Member lifecycle', () => {
       undeliveredMentions: [reviewer.status.member.memberId] })
     expect(ctx.agentTeam.inboxForAgent(reviewerAgent, { workspaceId }).items.map(item => item.thread.threadRef)).toEqual([enrolledThreadRef])
 
-    expect(await call('team_thread', { action: 'unfollow', taskRef: started.task!.taskRef })).toMatchObject({ following: false })
+    expect(await call('team_attention', { action: 'unfollow', taskRef: started.task!.taskRef })).toMatchObject({ following: false })
     const claim = await call('team_claim', { action: 'claim', taskRef: started.task!.taskRef, direction: 'implementation', baseRevision: dropped.revision })
     // A committed Claim mutation returns the authoritative affected Claim;
     // the structured claims archive and Task status stay real (compat) —
@@ -1337,7 +1344,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(claim).toMatchObject({ kind: 'committed', action: 'claim', threadRef: started.thread.threadRef, status: 'in_progress',
       claim: expect.objectContaining({ owner: builder.status.member.memberId, direction: 'implementation', state: 'active' }),
       claims: [expect.objectContaining({ owner: builder.status.member.memberId, direction: 'implementation', state: 'active' })] })
-    expect(await call('team_thread', { action: 'status', taskRef: started.task!.taskRef })).toMatchObject({ following: true })
+    expect(await call('team_attention', { action: 'status', taskRef: started.task!.taskRef })).toMatchObject({ following: true })
     expect(await call('team_claim', { action: 'list', taskRef: started.task!.taskRef })).toMatchObject({ kind: 'listed', claims: [expect.objectContaining({ direction: 'implementation' })] })
     const done = await call('team_claim', { action: 'done', taskRef: started.task!.taskRef, claimRef: claim.claim.claimRef, baseRevision: claim.revision })
     expect(done).toMatchObject({ kind: 'committed', action: 'done', status: 'in_review', claim: expect.objectContaining({ state: 'done' }),
@@ -1379,7 +1386,8 @@ describe('Agent Team Member lifecycle', () => {
     }
 
     // The recipient's model answers briefly; the DM relay is one user turn.
-    const sent = await call('team_message', { action: 'dm', memberRef: reviewer.status.member.memberId, body: 'quick check: is the build green?' })
+    const sent = await call('team_dm', { memberRef: reviewer.status.member.memberId, body: 'quick check: is the build green?' })
+    expect(sent).toMatchObject({ kind: 'dm-sent', recipientMemberId: reviewer.status.member.memberId, recipientHandle: 'reviewer', delivered: true })
     expect(sent).toMatchObject({ kind: 'dm-sent', recipientMemberId: reviewer.status.member.memberId, recipientHandle: 'reviewer', delivered: true })
 
     // The injected relay carries the DM body, the sender attribution, and the
@@ -1406,7 +1414,7 @@ describe('Agent Team Member lifecycle', () => {
     // the context line cites the prior DM's body, never the one being sent.
     // Direction is from the reader's perspective: the cited DM came from the
     // other Member (the sender), so the reviewer reads (them → you).
-    const second = await call('team_message', { action: 'dm', memberRef: reviewer.status.member.memberId, body: 'still green?' })
+    const second = await call('team_dm', { memberRef: reviewer.status.member.memberId, body: 'still green?' })
     expect(second).toMatchObject({ kind: 'dm-sent', delivered: true })
     adapter.enqueue(textResponse('Still green.'))
     await waitForIdle(ctx, recipient)
@@ -1423,7 +1431,7 @@ describe('Agent Team Member lifecycle', () => {
     // latest prior exchange from the reader's own side is the builder's own
     // 'still green?', so the reader (builder) reads (you → them).
     adapter.enqueue(textResponse('Thanks.'))
-    const replyFromReviewer = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-mirror-${++callNumber}`), name: 'team_message', arguments: { action: 'dm', memberRef: builder.status.member.memberId, body: 'yes, all green' }, agent: recipient })
+    const replyFromReviewer = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-mirror-${++callNumber}`), name: 'team_dm', arguments: { memberRef: builder.status.member.memberId, body: 'yes, all green' }, agent: recipient })
     expect(replyFromReviewer.isError).toBe(false)
     adapter.enqueue(textResponse('Noted.'))
     await waitForIdle(ctx, sender)
@@ -1434,19 +1442,22 @@ describe('Agent Team Member lifecycle', () => {
     expect(mirrorText).toMatch(/\(you → them, at [^)]+\+08:00\) still green\?/)
 
     // Parameter matrix: human recipients, unknown Members, and stray fields.
-    const bad = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-bad-${++callNumber}`), name: 'team_message', arguments: { action: 'dm', memberRef: AGENT_TEAM_HUMAN_MEMBER_ID, body: 'hi' }, agent: sender })
+    const bad = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-bad-${++callNumber}`), name: 'team_dm', arguments: { memberRef: AGENT_TEAM_HUMAN_MEMBER_ID, body: 'hi' }, agent: sender })
     expect(bad.isError).toBe(true)
     expect(bad.error?.message ?? '').toMatch(/Agent Member/)
-    const unknown = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-unknown-${++callNumber}`), name: 'team_message', arguments: { action: 'dm', memberRef: 'member:nobody', body: 'hi' }, agent: sender })
+    expect(bad.error?.message ?? '').toMatch(/Agent Member/)
+    const unknown = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-unknown-${++callNumber}`), name: 'team_dm', arguments: { memberRef: 'member:nobody', body: 'hi' }, agent: sender })
     expect(unknown.isError).toBe(true)
-    const stray = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-stray-${++callNumber}`), name: 'team_message', arguments: { action: 'dm', memberRef: reviewer.status.member.memberId, body: 'hi', channelRef: channel.channel.channelRef }, agent: sender })
+    // A Thread write's parameters are not merely ignored here: the schema does
+    // not carry them, so a model reaching for one is refused before the Host.
+    const stray = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-stray-${++callNumber}`), name: 'team_dm', arguments: { memberRef: reviewer.status.member.memberId, body: 'hi', channelRef: channel.channel.channelRef }, agent: sender })
     expect(stray.isError).toBe(true)
-    expect(stray.error?.message ?? '').toMatch(/does not accept/)
+    expect(stray.error?.message ?? '').toMatch(/does not accept|unexpected/i)
 
     // A suspended peer is not a sendable target: the ledger rejects the send
     // outright (nothing is recorded), which is the pre-delivery guard.
     await ctx.agentTeam.suspendMember({ requestId: requestId('dm-suspend'), memberId: reviewer.status.member.memberId })
-    const suspended = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-suspended-${++callNumber}`), name: 'team_message', arguments: { action: 'dm', memberRef: reviewer.status.member.memberId, body: 'are you back?' }, agent: sender })
+    const suspended = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`team-dm-suspended-${++callNumber}`), name: 'team_dm', arguments: { memberRef: reviewer.status.member.memberId, body: 'are you back?' }, agent: sender })
     expect(suspended.isError).toBe(true)
     expect(suspended.error?.message ?? '').toMatch(/suspended/)
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()

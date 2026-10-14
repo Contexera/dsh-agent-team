@@ -770,6 +770,54 @@ describe('AgentTeam context projection — effect-anchored team boundaries', () 
     expect(state.boundaries).toHaveLength(0)
   })
 
+  it('a follow recorded under the legacy team_thread name still decodes to an attention boundary', () => {
+    // Sessions written before the attention split carry their follow/unfollow
+    // calls as `team_thread`. Refolding one of those logs must still resolve
+    // them to boundaries: dropping them silently would cost every old Session
+    // two anchors with no error anywhere.
+    const events = [
+      turnStart(1),
+      contextToolCall(1, 'call-follow-legacy', 'team_thread', { action: 'follow', threadRef: 'thread:old-followed' }),
+      toolResult(1, 'call-follow-legacy'),
+      turnEnd(1),
+    ]
+    const state = fold(events)
+    expect(state.boundaries).toHaveLength(1)
+    expect(state.boundaries[0]!.label).toBe('Team attention change')
+    expect(state.boundaries[0]!.attributions).toEqual(['thread:old-followed'])
+  })
+
+  it('a follow recorded under team_attention decodes the same way as the legacy name', () => {
+    // The two names must agree, or the same fold would give old Sessions
+    // boundaries that new ones do not get.
+    const events = [
+      turnStart(1),
+      contextToolCall(1, 'call-follow-current', 'team_attention', { action: 'follow', threadRef: 'thread:new-followed' }),
+      toolResult(1, 'call-follow-current'),
+      turnEnd(1),
+    ]
+    const state = fold(events)
+    expect(state.boundaries).toHaveLength(1)
+    expect(state.boundaries[0]!.label).toBe('Team attention change')
+    expect(state.boundaries[0]!.attributions).toEqual(['thread:new-followed'])
+  })
+
+  it('a status call on either attention name produces no boundary', () => {
+    // status reports Attention and changes nothing, on both the current and
+    // the legacy tool: the same non-event rule `list` follows on claims.
+    const events = [
+      turnStart(1),
+      contextToolCall(1, 'call-status-current', 'team_attention', { action: 'status', threadRef: 'thread:s' }),
+      toolResult(1, 'call-status-current'),
+      turnEnd(1),
+      turnStart(2),
+      contextToolCall(2, 'call-status-legacy', 'team_thread', { action: 'status', threadRef: 'thread:s' }),
+      toolResult(2, 'call-status-legacy'),
+      turnEnd(2),
+    ]
+    expect(fold(events).boundaries).toHaveLength(0)
+  })
+
   it('a claim mutation still produces its boundary (preserved behavior, renamed label)', () => {
     const events = [
       turnStart(1),

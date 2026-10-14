@@ -6,7 +6,7 @@
 
 每一行 `name:` 都是 Loader 按 profile 解析的裸标识符，不按本 bundle 解析。profile 只链接本 bundle 与宿主闭包，所以一行只能点名宿主包或本 bundle 自己的子路径。绝不能点名嵌在本 bundle 依赖树里的包。工作树里能解析的名字，在真实安装里仍可能让该行 `never started`：依赖里的模块只能经由本 bundle 自己名下的再导出到达一行。
 
-九个 model-facing tools 都定义在 `packages/tool-agent-team/src/`。五个 Team 工具在 `index.ts`，四个 context 工具在 `context-tools.ts`。实现层面的 collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了测试可用，就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
+十一个 model-facing tools 都定义在 `packages/tool-agent-team/src/`。七个 Team 工具在 `index.ts`，四个 context 工具在 `context-tools.ts`。实现层面的 collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了测试可用，就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
 
 Host 在这些 preset 之上，编排 Member 上下文自主管理。`context_rollover` 与 `context_checkpoint` 工具只做校验并结束/锚定 turn。在 tool 执行时，引擎的门先拦下 Member 自己的 `context_status` 里未列为 restorable 的 `checkpointRef`。过了这道门的 ref，还要再过 Host 的 seed resolver 预校验。resolver 跟换窗用同一套。当下不可能成功的 ref 以 model-visible 的 error result 拒绝，不给假的 `scheduled`。可变 guard 集（jobs、route limits）在 commit seam 复查。
 

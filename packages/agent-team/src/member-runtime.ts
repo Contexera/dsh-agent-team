@@ -44,7 +44,9 @@ const BUNDLED_SKILLS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url))
 export const AGENT_TEAM_TOOL_NAMES = Object.freeze([
   'team_inbox',
   'team_thread',
+  'team_attention',
   'team_message',
+  'team_dm',
   'team_claim',
   'team_view',
   'context_rollover',

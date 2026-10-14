@@ -88,7 +88,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留，无 UI 写入路径，供后续 Runtime Revision manifest 编排依赖，cleanup 时勿删。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。
-- Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上，顺序为 mount → restrict → validate。validate 观察限制后的可见面。Activation 还在配置之上强制并集九个 Team tools。未知名 drop + warning，不阻断 activation。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+- Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上，顺序为 mount → restrict → validate。validate 观察限制后的可见面。Activation 还在配置之上强制并集十一个 Team tools。未知名 drop + warning，不阻断 activation。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
   Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
 
