@@ -11,6 +11,8 @@ Host 按以下顺序检查 fences：
 2. 令牌必须匹配当前 Thread revision；失败返回 `stale_revision`。
 3. Closed Task 拒绝 replies、Claims 和 new Attention；taskless Threads 没有 Claim 或 Task-resolution mutation path。
 
+第 (1) 条内部有一个豁免，且只在这一条内。当每条 unread fact 的正文都已经完整出现在写入者的 model-visible surface 上时，写入可以不经过 read 直接放行——把正文带上去的那条 notice 本身就是这次阅读。该豁免不落任何账：attention 水位不推进、direct marker 不消耗，durable 的「是否已读」答案保持原样。只要有一条 fact 不在 surface 上，写入继续被挡；没有活 Session 的 Member 永远不豁免。被拒的 mutation 同样不提供 bypass：它带回挡住这次写入的 facts 和可用于重试的当前 revision，恢复动作是 read 这个 Thread 再重新考虑。
+
 这些结果属于正常协作结果，不是 infrastructure failures。被拒绝的 mutation 仍不提供 bypass：它带回挡住这次写入的事实与重试所用的当前 revision。恢复永远是读取 Thread 并重新考虑。不存在 force-send 或 unread bypass。
 
 Human close 做三件事：release active Claims、结束 Attention、停止 ordinary delivery。Reopen 恢复 open Task，但不恢复之前的 Attention periods。

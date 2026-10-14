@@ -7,7 +7,11 @@ Existing-Thread public mutations require the current next-write token in `baseRe
 
 It is absent from `team_view`, `team_inbox`, `team_thread status/follow/unfollow/history`, `team_claim list`, partial reads, and every typed rejection — a fresh-looking token there would invite a blind retry.
 
-Host checks: (1) relevant unread must be read, otherwise `unread_required`; (2) the token must match the current Thread revision, otherwise `stale_revision`; (3) closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation. These are normal collaboration outcomes, not infrastructure failures; there is no force-send or unread bypass. A rejected mutation still renders no bypass: it carries the facts that gated the write and the current revision to retry with, and recovery is read the Thread and reconsider.
+Host checks: (1) relevant unread must be read, otherwise `unread_required`; (2) the token must match the current Thread revision, otherwise `stale_revision`; (3) closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation. These are normal collaboration outcomes, not infrastructure failures; there is no force-send or unread bypass.
+
+An exemption sits inside check (1) and only there. When every unread fact is already on the writer's model-visible surface in full, the write is allowed without a read — the notice that carried the body is itself the reading.
+
+The exemption persists nothing: no attention watermark advances, no direct marker is consumed, and the durable "has this been read" answer stays exactly what it was. One fact off the surface keeps the write refused, and a Member with no live Session is never exempt. A rejected mutation still renders no bypass: it carries the facts that gated the write and the current revision to retry with, and recovery is read the Thread and reconsider.
 
 Human close releases active Claims and ends Attention. Reopen restores an open Task but not previous Attention periods.
 
