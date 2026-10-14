@@ -3638,7 +3638,30 @@ export class AgentTeamLedger {
 
   private staleRevision(actorMemberId: AgentTeamMemberId, task: AgentTeamTask | undefined, thread: AgentTeamThread, expectedRevision: number): AgentTeamStaleRevision {
     return Object.freeze({ kind: 'stale_revision', ...(task === undefined ? {} : { taskRef: task.taskRef }), threadRef: thread.threadRef,
-      expectedRevision, revision: thread.revision, facts: this.factsAfter(actorMemberId, thread.threadRef, expectedRevision) })
+      expectedRevision, revision: thread.revision,
+      ...(this.tokenNeverReached(thread, expectedRevision) ? { tokenUnrecognized: true } : {}),
+      facts: this.factsAfter(actorMemberId, thread.threadRef, expectedRevision) })
+  }
+
+  /**
+   * Whether a write token was never a revision this Thread reached. A token
+   * the Thread did reach is an insertion race; one it never reached is a
+   * copied or invented number, and the model needs the difference — hunting
+   * for the insertion that supposedly invalidated a token this Thread never
+   * issued is time nobody gets back.
+   *
+   * Answered against the Thread's own facts, each of which is the sequence of
+   * the operation that committed it, so "was this ever a revision here" is
+   * "was this ever a fact here". Deliberately fail-closed: a token older than
+   * the Thread's first retained fact is unknowable, not confirmed absent, and
+   * the model is told the ordinary race instead of a certainty the ledger does
+   * not hold.
+   */
+  private tokenNeverReached(thread: AgentTeamThread, expectedRevision: number): boolean {
+    const facts = this.threadFactsFrom(this.state, thread.threadRef)
+    const first = facts[0]?.sequence
+    if (first === undefined || expectedRevision < first) return false
+    return !facts.some(fact => fact.sequence === expectedRevision)
   }
 
   /**

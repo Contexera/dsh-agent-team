@@ -560,6 +560,20 @@ export interface AgentTeamStaleRevision {
    * or the ledger predates the field.
    */
   readonly facts?: readonly AgentTeamThreadReadFact[]
+  /**
+   * True when `expectedRevision` was never a revision this Thread reached —
+   * the writer copied a token from another Thread, or invented one. A stale
+   * token that the Thread did reach is a race between reads and writes; a
+   * token it never reached is a copying mistake, and only the second needs
+   * telling apart, because "the Thread changed" sends a model hunting for an
+   * insertion that never happened.
+   *
+   * Absent (never false) when the ledger cannot tell: the Thread's facts are
+   * all it can check against, so a token older than the Thread's first fact
+   * is unknowable rather than confirmed absent. Fail-closed means a model is
+   * told the ordinary race, not a certainty the ledger does not have.
+   */
+  readonly tokenUnrecognized?: boolean
 }
 
 /** An Agent tried to address an Agent who is not already following. */

@@ -431,6 +431,23 @@ describe('team_message renders its outcome', () => {
     expect(stale).toContain('the increment')
     expect(stale).toContain('Next write — baseRevision: 8394')
 
+    // A token this Thread never reached is not a race. The ordinary sentence
+    // would send a model re-reading to find an insertion that never happened,
+    // so the refusal names the copying mistake and drops the increment lines,
+    // which would otherwise present facts as missed when none were.
+    const copied = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 4711, body: 'x' }, {
+      kind: 'stale_revision', threadRef: THREAD, expectedRevision: 4711, revision: 8394, tokenUnrecognized: true,
+      facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
+    })
+    expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
+    expect(copied).toContain('not a revision this Thread reached')
+    // The headline must not contradict the way out: the first line can no
+    // longer claim the Thread changed, and the race sentence is gone with it.
+    expect(copied).not.toContain('the Thread changed')
+    expect(copied).not.toContain('Read the Thread, reconsider the new facts')
+    expect(copied).not.toContain('the increment')
+    expect(copied).toContain('Next write — baseRevision: 8394')
+
     const notFollowing = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8394, body: 'x' }, {
       kind: 'member_not_following', memberIds: ['member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5'], threadRef: THREAD, revision: 8394,
     })
@@ -526,6 +543,19 @@ describe('team_claim renders the affected Claim', () => {
     expect(stale).toContain('Not committed — the Thread changed after your last read (stale_revision).')
     expect(stale).toContain('the increment')
     expect(stale).toContain('Next write — baseRevision: 8394')
+
+    // The copied-token refusal on the Claim side, because the Claim tool
+    // renders its own rejections: a member that closes a Claim with a token
+    // from another Thread gets the same correction, not the race sentence.
+    const copied = renderText(teamTools().get('team_claim')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
+      kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', tokenUnrecognized: true,
+      claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
+      facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
+    })
+    expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
+    expect(copied).not.toContain('the Thread changed')
+    expect(copied).not.toContain('the increment')
+    expect(copied).toContain('Next write — baseRevision: 8394')
   })
 })
 
