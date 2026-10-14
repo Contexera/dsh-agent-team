@@ -293,6 +293,16 @@ export interface AgentTeamLedgerOptions {
   readonly operationId?: () => AgentTeamOperationId
   readonly occurredAt?: () => string
   readonly ref?: (kind: 'channel' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
+  /**
+   * Whether one unread fact is already on the named Member's model-visible
+   * surface, in full. The Host supplies it: it owns the live Agent sessions,
+   * the ledger owns durable state and must never reach into a runtime.
+   *
+   * Returning false keeps today's behaviour exactly — refuse the write. A
+   * true answer exempts this one write only: nothing is persisted, no
+   * watermark advances, no marker is consumed.
+   */
+  readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
 }
 
 /** Internal append result indicating whether this call committed a new record. */
@@ -519,6 +529,8 @@ export class AgentTeamLedger {
   private readonly createOperationId: () => AgentTeamOperationId
   private readonly createOccurredAt: () => string
   private readonly createRef: (kind: 'channel' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
+  /** Host-supplied surface visibility probe; absent means no write is ever exempt. */
+  private readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
   private operationTail: Promise<void> = Promise.resolve()
   /**
    * Runtime human display name. Durable identity stays `member:human`; only
@@ -552,6 +564,7 @@ export class AgentTeamLedger {
     this.createOperationId = options.operationId ?? (() => `operation:${randomUUID()}` as AgentTeamOperationId)
     this.createOccurredAt = options.occurredAt ?? (() => new Date().toISOString())
     this.createRef = options.ref ?? (kind => `${kind}:${randomUUID()}`)
+    this.isFactVisible = options.isFactVisible
     this.replay()
     const head = this.state.ordered.at(-1)
     this.bootValidation = Object.freeze({
@@ -3733,12 +3746,34 @@ export class AgentTeamLedger {
     return { task, thread }
   }
 
-  /** Business outcomes that defer a thread write: unread work first, then a stale revision. */
+  /**
+   * Business outcomes that defer a thread write: unread work first, then a
+   * stale revision.
+   *
+   * The unread gate has a second chance before it refuses: when every unread
+   * fact is already on this Member's model-visible surface in full, the model
+   * has genuinely read the content, and refusing the write would buy nothing
+   * but a round-trip. That exemption writes no ledger state — no watermark
+   * advance, no marker consumed — it only declines to refuse this one write,
+   * so the durable "has this been read" answer stays exactly what it was.
+   */
   private deferredThreadWrite(actorMemberId: AgentTeamMemberId, task: AgentTeamTask | undefined, thread: AgentTeamThread, baseRevision: number): AgentTeamUnreadRequired | AgentTeamStaleRevision | undefined {
     const unread = this.unreadFor(actorMemberId, thread.threadRef)
-    if (unread.length > 0) return this.unreadRequired(task, thread, unread)
+    if (unread.length > 0 && !this.visibleSurfaceExempts(actorMemberId, unread)) return this.unreadRequired(task, thread, unread)
     if (baseRevision !== thread.revision) return this.staleRevision(actorMemberId, task, thread, baseRevision)
     return undefined
+  }
+
+  /**
+   * Whether every unread fact is already on this Member's visible surface.
+   * Fail-closed in every direction: an absent probe, an empty answer, or one
+   * fact the surface cannot show means the write is not exempt. The probe is
+   * the Host's, because the surface is runtime state the ledger never holds.
+   */
+  private visibleSurfaceExempts(memberId: AgentTeamMemberId, unread: readonly AgentTeamThreadReadFact[]): boolean {
+    const probe = this.isFactVisible
+    if (probe === undefined) return false
+    return unread.every(fact => probe(memberId, fact))
   }
 
   /** Commit projections shared by the Message-sent and Thread-replied results. */
