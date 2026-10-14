@@ -390,14 +390,19 @@ describe('Agent Team Member lifecycle', () => {
     expect(abbreviated.isError, abbreviated.isError ? abbreviated.error.message : '').toBe(false)
 
     // The ambiguous prefix is refused with a message that names both
-    // candidates and says what to do, rather than a bare lookup failure.
+    // candidates and says what to do, rather than a bare lookup failure. The
+    // assertions pin that contract — every candidate named, and a route out —
+    // never one word of the sentence, which the recovery registry owns.
     const ambiguous = await call('team_view', { workspace: 'workspace:1a2b3c4d' })
     expect(ambiguous.isError).toBe(true)
     if (!ambiguous.isError) throw new Error('expected an ambiguous-Workspace rejection')
-    expect(ambiguous.error.message).toContain('ambiguous')
     expect(ambiguous.error.message).toContain(homeId)
     expect(ambiguous.error.message).toContain(otherId)
     expect(ambiguous.error.message).toMatch(/longer prefix|full Workspace id/i)
+    // The rendered sentence states the refusal once. A doubled verb is the
+    // signature of a sentence rewritten around its own interpolated value
+    // instead of composing with it.
+    expect(ambiguous.error.message.match(/matches/g) ?? []).toHaveLength(1)
 
     // An unknown-but-unambiguous-shaped id still says it is not participated,
     // and still lists the choices.
@@ -434,6 +439,21 @@ describe('Agent Team Member lifecycle', () => {
     const historyArgs = await rejected('team_thread', { action: 'read', threadRef, beforeSequence: 1, limit: 5 })
     expect(historyArgs).toContain('action: history')
     expect(historyArgs).toMatch(/read .*(drain|unread)/i)
+    // messageRef belongs to `message` alone. The parameter schema is implicitly
+    // open, so nothing but this guard refuses it — and a silent drop would tell
+    // a model that reached for it nothing at all. One guard covers every action
+    // that is not `message`, so each of them is asserted: a new read action must
+    // not be able to reopen the hole by omission.
+    for (const action of ['read', 'history'] as const) {
+      const strayRef = await rejected('team_thread', { action, threadRef, messageRef: 'message:23011' })
+      expect(strayRef, `${action} silently dropped messageRef`).toContain('does not accept messageRef')
+      expect(strayRef).toContain('action: message')
+    }
+    // The action that does own it is not caught by the same guard: a `message`
+    // call missing its ref is refused for the missing ref, never for owning one.
+    const owned = await rejected('team_thread', { action: 'message', threadRef })
+    expect(owned).toContain('messageRef')
+    expect(owned).not.toContain('does not accept')
     // A missing mutation basis says which token to copy and where from. Both
     // tools refuse it on their own argument shape, before the Host ever sees
     // the call, and both name the same drain-and-copy route.

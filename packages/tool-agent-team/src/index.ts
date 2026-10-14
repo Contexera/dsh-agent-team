@@ -460,6 +460,14 @@ const teamThread = defineTool({
       const resolved = host.resolveTaskRefs({ workspaceId: base.workspaceId, taskRefs: [task.taskRef] }).resolved[0]
       return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
     }
+    // `messageRef` belongs to the `message` action alone. The parameter schema is
+    // implicitly open, so no schema refuses it on the actions that cannot use
+    // it — and a silent drop would tell a model that reached for it nothing at
+    // all. One guard before the branches covers every action that is not
+    // `message`, so a new read action cannot reopen the hole by omission.
+    if (args.action !== 'message' && args.messageRef !== undefined) {
+      throw new Error(recoveryFor('action_only_arguments').sentence({ action: args.action, parameter: 'messageRef', owner: 'message' }))
+    }
     if (args.action === 'history') {
       const history = host.threadHistoryForAgent(agent, { ...base, ...(args.beforeSequence === undefined ? {} : { beforeSequence: args.beforeSequence }), ...(args.limit === undefined ? {} : { limit: args.limit }) })
       const status = host.attentionStatusForAgent(agent, base)
@@ -597,6 +605,11 @@ const teamDm = defineTool({
     // refused rather than ignored: a model that reached for a Thread write's
     // shape meant a Thread reply, and silently dropping the field would send a
     // private note where shared work was intended.
+    //
+    // This guard is hand-written because the tool parameter schema is implicitly
+    // open — the harness compiles a parameter table to `{type, properties,
+    // required}` with no `additionalProperties`, so no schema can refuse a key
+    // it does not name. Do not delete it as redundant.
     const stray = Object.keys(args).filter(key => key !== 'memberRef' && key !== 'body' && key !== 'workspace')
     if (stray.length > 0) throw new Error(`team_dm does not accept ${stray.join(', ')}; it takes memberRef and body only — a DM addresses a person, so shared work belongs in a team_message reply.`)
     if (args.memberRef === undefined) throw new Error(recoveryFor('dm_requires_member').sentence({}))
