@@ -74,8 +74,6 @@ describe('TeamComposer mention menu', () => {
       draftKey={'channel:channel:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@')
-    // The Host accepts an address to any Workspace participant, so the picker
-    // must offer the same set — the Channel roster is only a ranking hint.
     const texts = optionTexts(ui)
     expect(texts.some(text => text.includes('insider'))).toBe(true)
     expect(texts.some(text => text.includes('outsider'))).toBe(true)

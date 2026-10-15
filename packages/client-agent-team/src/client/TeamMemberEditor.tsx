@@ -224,11 +224,6 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
   </div>
 }
 
-/**
- * Agent editor: handle, description, and per-Member model selection commit
- * through one durable update. Channel membership is managed from the Channel
- * side, not here.
- */
 export function AgentEditorDialog({ status, updateMember, loadModels, onCommitted, onClose, t }: {
   readonly status: AgentTeamClientMemberStatus
   readonly updateMember: TeamSidebarProps['updateMember']

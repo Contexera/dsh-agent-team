@@ -96,7 +96,6 @@ function taskEntrySelector(taskNumber: number): string {
   return `[data-team-channel] [data-thread-entry]:has(> button[aria-label="打开 Task #${taskNumber}"], > button[aria-label^="打开 Task #${taskNumber}（"]) > button`
 }
 
-/** The entry line (`data-thread-entry`) one Task's door belongs to. */
 function taskEntryLineSelector(taskNumber: number): string {
   return `[data-team-channel] [data-thread-entry]:has(> button[aria-label="打开 Task #${taskNumber}"], > button[aria-label^="打开 Task #${taskNumber}（"])`
 }
@@ -499,8 +498,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     await dialog.getByRole('button', { name: '创建 Agent' }).click()
     await page.getByText(name, { exact: true }).waitFor({ timeout: 20_000 })
   }
-  // Channel membership is derived from Thread participation now, so nothing
-  // enrols anyone: the Channel editor carries no member rows at all.
   await page.getByRole('button', { name: '# engineering' }).hover()
   await page.getByRole('button', { name: 'engineering 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑频道' }).click()
@@ -623,13 +620,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await rampDialog.getByRole('button', { name: '创建频道' }).click()
   await expect.poll(channelOrder).toEqual(['delivery', 'engineering', 'ramp'])
 
-  // A Channel nobody has taken part in yet is the one place the outside row is
-  // reachable: every Member is tier 2, so every name drops a weight. Weight is
-  // also the whole of the row's distinction now — no row states a consequence on
-  // any tier of either surface — so this measures the colour the name really
-  // resolves to against the token the rule names. Every row here is outside, so
-  // an inside row to differ from is read on a Thread face at the invitation step
-  // instead.
   await page.getByRole('button', { name: '# ramp' }).click()
   await page.getByRole('heading', { name: '# ramp', exact: true }).waitFor()
   const rampComposer = page.getByRole('textbox', { name: '消息内容' })
@@ -677,10 +667,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '返回频道列表' }).click()
   await expect.poll(channelOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering', 'ramp'])
 
-  // Sidebar row menus: the ⋯ entry opens the M2 editor for display facts.
-  // 保存 stays disabled until a field actually changes, and the committed
-  // rename reaches the row through the refreshed projection. Membership rows
-  // are gone — participation is derived.
   await page.getByRole('button', { name: '# engineering' }).hover()
   await page.getByRole('button', { name: 'engineering 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑频道' }).click()
@@ -876,8 +862,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => teamCurrentPage.getAttribute('aria-label')).toBe('打开 builder 的会话')
   await expect.poll(() => page.getByRole('button', { name: '# delivery' }).count()).toBe(1)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-dm.png'), fullPage: true })
-  // Opening the row menu on the selected card must show ONE seamless full-row
-  // fill: the leaf's resident fill is suppressed while the row paints its own.
   await builderRow.hover()
   await builderRow.getByRole('button', { name: 'builder 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑 Agent' }).waitFor()
@@ -1077,7 +1061,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expandControl.waitFor()
   expect(await expandControl.getAttribute('aria-expanded')).toBe('false')
   await page.screenshot({ path: join(UI04_SHOTS, 'message-clamp-preview.png'), fullPage: true })
-  // Keyboard path: the focused control expands with Enter and flips to 收起.
   await expandControl.focus()
   await page.keyboard.press('Enter')
   const collapseControl = longMessage.getByRole('button', { name: '收起' })
@@ -1088,9 +1071,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await collapseControl.click()
   await expect.poll(() => longMessage.locator('[class*="messageClamp"]').count()).toBe(1)
   await expect.poll(async () => await longMessage.getByRole('button', { name: '展开全文' }).getAttribute('aria-expanded')).toBe('false')
-  // Narrow viewport: the clamped preview stays inside the viewport width.
-  // Geometry polls until the fold settles — the collapsed attribute flips
-  // before the conversation pane reaches its narrow width.
   await page.setViewportSize({ width: 390, height: 844 })
   const narrowClamp = longMessage.locator('[class*="messageClamp"]')
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
@@ -1302,14 +1282,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       }
     })
   const invitationRows = await invitationMenu.evaluate(invitationRowState)
-  // The data point has to carry both groups, or "the two differ" proves nothing.
   expect(invitationRows.some(row => row.tier === '0')).toBe(true)
   expect(invitationRows.some(row => row.tier !== '0')).toBe(true)
   const invitationSecondary = await resolveAliasColor(page, '--dsw-alias-label-secondary')
   const invitationPrimary = await resolveAliasColor(page, '--dsw-alias-label-primary')
   for (const row of invitationRows) {
     expect(row.inside).toBe(String(row.tier === '0'))
-    // Inside keeps the row's own primary label; outside drops to the secondary.
     expect(row.nameColor).toBe(row.tier === '0' ? invitationPrimary : invitationSecondary)
     expect(row.text).not.toContain('需确认')
   }
@@ -1362,8 +1340,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const agentRefLinks = page.locator('[data-team-thread] article').filter({ hasText: 'reviewer 已读取邀请' }).getByRole('button', { name: /Task #\d+/ })
   await agentRefLinks.first().waitFor()
   expect(await agentRefLinks.count()).toBe(2)
-  // The Host lookup relabels the raw UUID into the human-facing number; the
-  // full ref stays on hover.
   await expect.poll(() => agentRefLinks.first().textContent()).toBe('Task #1')
   await expect.poll(() => agentRefLinks.nth(1).textContent()).toBe('Task #1')
   expect(await agentRefLinks.first().getAttribute('title')).toBe(task.taskRef)
@@ -1372,11 +1348,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await agentRefLinks.first().locator('xpath=ancestor::strong').count()).toBe(1)
   expect(await page.getByText('已核实邀请', { exact: true }).count()).toBe(1)
 
-  // Long Agent Markdown under the clamp: publish an over-threshold reply and
-  // compare the rendered root's computed font across the fold. The preview
-  // keeps the whole body mounted, so a typography reset broken by the clamp
-  // wrapper would render the preview text larger than the expanded body —
-  // the exact regression this parity check pins.
   const longRead = await scaffold.ctx.agentTeam.readThreadForAgent(reviewerAgent, {
     requestId: 'm2-07-long-read' as never, workspaceId: workspace.id, taskRef: task.taskRef,
   })
@@ -1776,8 +1747,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(seatToBody).toBeGreaterThan(0)
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-seat-time-aged.png') })
-  // The identity line that opens the run still states the date, so nothing is
-  // lost by the seat keeping to the clock: the reader gets it one row up.
   const agedHead = await page.locator('article').filter({ hasText: '离线期间的批量更新 一' }).first().evaluate(element => {
     const time = element.querySelector('[class*="messageTime"]')
     return time === null ? null : time.textContent
@@ -3105,13 +3074,6 @@ it('keeps four same-origin Team pages responsive and independently subscribed', 
   await pages[1]!.screenshot({ path: join(BROWSER_ARTIFACTS, 'multi-web-mobile.png'), fullPage: true })
 }, 120_000)
 
-/**
- * Taskless-thread ref chips must navigate, not just render (task #17): one
- * taskless Thread cites another's abbreviated ref in plain prose, the reader
- * clicks the chip, and the Thread page of the cited Thread opens. The chip is
- * located by its raw-ref title so the assertion survives label redesigns, and
- * arrival is proven by the Thread page marker carrying the cited full ref.
- */
 it('opens a taskless thread from its ref chip in real Web', async () => {
   await installLocalBundle(false)
   // Same install flow as the other journeys: installLocalBundle stages the

@@ -3,7 +3,6 @@ import { IconChevronDownOutlineRegular, IconFolderOpenRegular, Menu, type MenuEn
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import css from './sidebar.module.css'
 
-/** One selectable Workspace, in the order the Workspace list already carries. */
 export interface TeamWorkspaceChoice {
   readonly workspaceId: WorkspaceId
   readonly title: string

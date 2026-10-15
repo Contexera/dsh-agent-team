@@ -67,9 +67,6 @@ function filesUnder(directory) {
   return files
 }
 
-// The front matter this repository's skills use: a `---` fence, then flat
-// `key: value` fields. A folded multi-line value is read as its first line; the
-// fields that matter here (name, description) are single-line.
 function frontMatter(text) {
   const lines = text.replaceAll('\r\n', '\n').split('\n')
   if (lines[0] !== '---') return null

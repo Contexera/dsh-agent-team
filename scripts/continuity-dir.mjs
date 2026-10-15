@@ -38,9 +38,6 @@ import { fileURLToPath } from 'node:url'
 
 const DEFAULT_CONTINUITY_NAME = 'dsh-context-continuity'
 
-// The monorepo directory that publishes the engine is named after the domain
-// concept, not after the published package, so it is spelled separately rather
-// than derived from the package name.
 const MONOREPO_CONTINUITY_DIR = 'context-continuity'
 
 const ENGINE_PACKAGE = '@contexera/dsh-context-continuity'
@@ -144,8 +141,6 @@ function resolveContinuity() {
   ]
   for (const candidate of candidates) {
     if (!isEngineDirectory(candidate.dir)) {
-      // A directory that exists but is not this package is worth naming: it is
-      // the shape a renamed or half-cloned checkout leaves behind.
       if (existsSync(candidate.dir)) skipped.push(`${candidate.dir} is not ${ENGINE_PACKAGE}`)
       continue
     }

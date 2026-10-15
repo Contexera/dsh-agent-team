@@ -17,7 +17,6 @@ const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   return value
 }) as Parameters<typeof TeamSettingsSection>[0]['t']
 
-/** A read failure in the shape the carrier produces (code/details belong to it, not to the test). */
 const readFailure = (message: string): RemoteResult<AgentTeamHumanProfileResult> =>
   ({ ok: false, error: { message } }) as RemoteResult<AgentTeamHumanProfileResult>
 

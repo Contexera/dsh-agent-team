@@ -250,8 +250,6 @@ describe('legacy human profile adoption on boot', () => {
     const home = await tempDshHome()
     await writeFile(join(home, 'settings.yaml.imported'), legacyDocument('ref-1'))
     const mutations = await bootHost(home, { name: 'Ada' })
-    // Nothing to wait for: the pristine gate rejects before any write is
-    // planned, so a settled boot is the whole evidence.
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(mutations).toEqual([])
   })

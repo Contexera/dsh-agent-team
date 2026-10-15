@@ -30,7 +30,6 @@ describe('moveSidebarItem persistence semantics', () => {
 
   it('commits once per gesture path and persists across reloads', () => {
     expect(moveSidebarItem('w1' as never, 'channels', refs, 'c', 'a', 'before')).toEqual(['c', 'a', 'b'])
-    // Stored order feeds the next mount through the hook.
     const first = renderHook(() => useSidebarOrder<Ref>('w1' as never, 'channels', refs)).result.current
     expect(first).toEqual(['c', 'a', 'b'])
   })

@@ -6,13 +6,6 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import * as memberTimeContext from '../src/member-time-context.ts'
 
-/**
- * Live-plugin composition tests: the clock row registers a prepend
- * agent/pre-step listener, resolves the Host lazily, gates on the bound
- * Member, and appends one durable snapshot per eligible step with the folded
- * elapsed baseline.
- */
-
 const PLUGIN = memberTimeContext.name
 
 function fakeAgent(ctx: Context, events: unknown[] = []): Agent {

@@ -175,7 +175,6 @@ export interface AgentTeamUpdateMemberResult extends AgentTeamMemberResult {
 
 /** Result of creating a Member: lifecycle status plus the participation set the Host seeded at creation. */
 export interface AgentTeamAddMemberResult extends AgentTeamMemberResult {
-  /** Workspaces the new Member participates in — creation always seeds exactly the creation Workspace. */
   readonly workspaceIds: readonly WorkspaceId[]
 }
 
@@ -313,10 +312,6 @@ export interface AgentTeamSendMessageRequest {
    */
   readonly attachmentPaths?: readonly string[] | undefined
   readonly confirmationToken?: AgentTeamConfirmationToken
-  /**
-   * When true, create a Task over the new Thread. Omitted/false sends a plain
-   * message. Callers that want the Task overlay must ask for it.
-   */
   readonly asTask?: boolean
 }
 
@@ -395,9 +390,6 @@ export interface AgentTeamEnvironmentResult {
   readonly verdict: AgentTeamEnvironmentVerdict
   /** Host-side diagnostic behind an `undetermined` verdict; not rendered as user copy. */
   readonly reason?: string | undefined
-  // Every fact below is optional by contract: a missing one is never a
-  // mismatch, it only withholds the line that would have stated it.
-  /** Version of the bundle this Host runs from. */
   readonly bundleVersion?: string | undefined
   /**
    * The running DSH version, which is what the page states it is running.
@@ -445,10 +437,6 @@ export interface AgentTeamContextJudgeResult {
 export interface AgentTeamSetHumanProfileRequest {
   /** New display name; omitted keeps the current one. */
   readonly name?: string | undefined
-  /**
-   * New avatar reference; `null` clears the stored one and omitted keeps it.
-   * Clearing needs its own shape because a merge patch cannot remove a field.
-   */
   readonly avatarRef?: string | null | undefined
 }
 
@@ -537,12 +525,6 @@ export interface AgentTeamUnreadRequired {
   readonly revision: number
   readonly unreadCount: number
   readonly directCount: number
-  /**
-   * The unread facts this rejection is gating on, in the same shape a Thread
-   * read returns them, so the rejected writer learns WHAT is unread without
-   * paying a separate read round-trip. Absent on ledgers written before the
-   * rejection carried facts.
-   */
   readonly facts?: readonly AgentTeamThreadReadFact[]
 }
 
@@ -560,19 +542,6 @@ export interface AgentTeamStaleRevision {
    * or the ledger predates the field.
    */
   readonly facts?: readonly AgentTeamThreadReadFact[]
-  /**
-   * True when `expectedRevision` was never a revision this Thread reached —
-   * the writer copied a token from another Thread, or invented one. A stale
-   * token that the Thread did reach is a race between reads and writes; a
-   * token it never reached is a copying mistake, and only the second needs
-   * telling apart, because "the Thread changed" sends a model hunting for an
-   * insertion that never happened.
-   *
-   * Absent (never false) when the ledger cannot tell: the Thread's facts are
-   * all it can check against, so a token older than the Thread's first fact
-   * is unknowable rather than confirmed absent. Fail-closed means a model is
-   * told the ordinary race, not a certainty the ledger does not have.
-   */
   readonly tokenUnrecognized?: boolean
 }
 
@@ -610,11 +579,6 @@ export interface AgentTeamReplyCommittedResult {
   readonly thread: AgentTeamThread
   readonly attention: readonly AgentTeamThreadAttention[]
   readonly directMarkers: readonly AgentTeamDirectMarker[]
-  /**
-   * Agents named in the body that this Thread has never carried. The Message
-   * still commits; these Members simply receive no notification, and the
-   * author is told so it can ask the Human to invite them.
-   */
   readonly undeliveredMentions?: readonly AgentTeamMemberId[]
 }
 
@@ -782,54 +746,21 @@ export interface AgentTeamInboxItem {
   /** The Task's ordinal inside its home Channel; absent on taskless Threads. */
   readonly taskNumber?: number
   readonly thread: AgentTeamThread
-  /** Unread facts waiting for this reader; always zero on the 「最近活跃」 slice. */
   readonly unreadCount: number
   /** How many of them name this reader; always zero on the 「最近活跃」 slice. */
   readonly directCount: number
-  /**
-   * The Thread's opening line, trimmed and capped at 120 characters — the same
-   * bound the Thread page applies to its Task title. Row material only: it
-   * never reaches model-visible notification text.
-   */
   readonly previewText?: string
   readonly newestSequence: number
   /** Instant of the newest unread fact — on the 「最近活跃」 slice, of the newest fact. */
   readonly newestOccurredAt: string
-  /**
-   * Who committed the fact those two fields name — the person waiting for this
-   * reader on the queue, and whoever moved the Thread on the tail. Every Thread
-   * fact is committed by exactly one actor, so a row always names one.
-   */
   readonly newestActor: AgentTeamInboxActor
-  /**
-   * The people still on this Thread's Task: owners of its live Claims, in claim
-   * order, deduped — the same rule, and the same words, the Channel feed's Thread
-   * entry row already uses for the same Task. Resolved here because a row draws
-   * handles and has no Member view of its own to turn ids into them. Empty on a
-   * taskless Thread, and on a done or closed one, whose Claims are history that
-   * the state word already tells.
-   */
   readonly claimOwners: readonly AgentTeamInboxActor[]
   readonly attention?: AgentTeamThreadAttention
 }
 
 export interface AgentTeamInbox {
-  /**
-   * The ledger's Human Member id — the durable identity a row matches to know
-   * which of its actors is the reader, so a seat can draw that one actor from
-   * its own Human identity (name and avatar) instead of the row's initials
-   * fallback. The same id `AgentTeamView` carries, from the same initialization
-   * record.
-   */
   readonly humanMemberId: AgentTeamMemberId
-  /**
-   * The unread queue, mentions first then newest: the Threads holding at least
-   * one unread fact for this reader, at most `limit` of them. `hasMore` says
-   * whether the queue continues past this page; reading a Thread drains it from
-   * the queue, which is how a reader reaches the rows a full page hides.
-   */
   readonly items: readonly AgentTeamInboxItem[]
-  /** Whether unread Threads exist beyond `items` — the queue is bounded, this is its disclosure. */
   readonly hasMore: boolean
   /**
    * Human readers only: the 「最近活跃」 slice — Threads this reader took part in,
@@ -859,13 +790,11 @@ export interface AgentTeamThreadReadRequest {
 export interface AgentTeamContextAdvice {
   /** Current measured usage of the reading Member's context; absent when unmeasured. */
   readonly usageTokens?: number | undefined
-  /** Usage at or above which a fresh rollover is advised; min(128K, handoffAt); absent when unmeasured. */
   readonly taskBoundaryThreshold?: number | undefined
   /** Effective handoff budget of the Member's current route; absent when unmeasured. */
   readonly handoffAt?: number | undefined
   /** Effective hard limit of the Member's current route; absent when unmeasured. */
   readonly hardLimit?: number | undefined
-  /** keep | rollover | compact-now | unavailable. */
   readonly action: 'keep' | 'rollover' | 'compact-now' | 'unavailable'
   readonly guidance: string
 }
@@ -882,21 +811,11 @@ export interface AgentTeamThreadReadResult {
   readonly claims: readonly AgentTeamClaim[]
   /** The same Message, with what it answers attached when it is a reply. */
   readonly anchor: AgentTeamMessage & { readonly replyTo?: AgentTeamMessageReplyContext | undefined }
-  /** Structured Member refs of the anchor Message, from its originating send operation. */
   readonly anchorMentions: readonly AgentTeamMemberId[]
   readonly facts: readonly AgentTeamThreadReadFact[]
   readonly readThroughSequence: number
   /** Number of unread facts left after this bounded read. */
   readonly remainingUnreadCount: number
-  /**
-   * Public Thread facts that precede the watermark this read reaches — where
-   * the reader now stands in the Thread, and how much of it that position has
-   * never shown it. A returning reader's batch answers with the newest facts
-   * alone, so this is the span it is not looking at; the count never depends on
-   * whether this particular response happened to carry background. Zero means
-   * the Thread holds nothing before the reader's position. Absent on a legacy
-   * read snapshot, whose stored shape stays frozen.
-   */
   readonly earlierFactCount?: number
   readonly attention?: AgentTeamThreadAttention
   readonly consumedDirectMarkers: readonly AgentTeamDirectMarker[]
@@ -988,7 +907,6 @@ export interface AgentTeamActiveTaskThread {
   readonly channelRef: AgentTeamChannelRef
   /** The Task's ordinal inside its home Channel. */
   readonly taskNumber?: number
-  /** Always `in_progress` or `in_review` — the two states a live Claim keeps a Task in. */
   readonly status: AgentTeamTask['status']
   /** The Thread's opening line, trimmed and capped at 120 characters — the same bound the Inbox row uses. */
   readonly subject: string
@@ -1006,17 +924,9 @@ export interface AgentTeamViewRequest {
   readonly cursor?: number
   /** Read facts after the cursor (Agent default) or the latest facts before it (Client history). */
   readonly direction?: 'after' | 'before'
-  /** Exclude Thread replies from a top-level-only projection. */
   readonly topLevelOnly?: boolean
   /** Include public Claim and Task activities in the bounded stream (default true). */
   readonly includeActivities?: boolean
-  /**
-   * Return the durable Task/Thread/Claim catalog of the request's whole scope —
-   * the address-book projection `team_view` renders. Omitted, the catalog
-   * fields describe this response's own fact page plus the Thread the request
-   * names, so a small read never carries every Task, Thread and Claim the
-   * Workspace ever had.
-   */
   readonly includeCatalog?: boolean
 }
 

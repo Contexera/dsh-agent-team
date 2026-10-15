@@ -1,15 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderText, teamTools, occurrences } from './render-text.ts'
 
-/**
- * Discriminating render tests for the five model-facing Team tools.
- * Renders are the only channel a tool result reaches the model through, so
- * each test locks the presence AND absence of exactly the fields the next
- * decision needs. Absence assertions target field labels/concepts —
- * `revision`, a `baseRevision` hand-off — never bare numbers, because fact
- * sequences, read-through watermarks, and cursors legitimately render.
- */
-
 const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
 const TASK = 'task:3245ad40-43fd-4191-a416-7dcaf3a340f2'
 const CHANNEL = 'channel:046dd831-c679-4279-b6aa-7813476cf12e'

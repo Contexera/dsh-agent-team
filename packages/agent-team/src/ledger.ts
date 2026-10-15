@@ -491,11 +491,6 @@ function isEmptyInboxDelta(delta: AgentTeamInboxDelta): boolean {
     && delta.activityMarkers.added.length === 0 && delta.activityMarkers.removed.length === 0
 }
 
-/**
- * Which of the two durable Thread-read forms one record holds. Both schemas are
- * strict and structurally disjoint — only the pre-receipt snapshot carries the
- * Thread picture — so `thread` decides it for every stored record.
- */
 export function isThreadReadSnapshot(data: AgentTeamThreadReadData): data is AgentTeamThreadReadSnapshot {
   return 'thread' in data
 }
@@ -719,10 +714,6 @@ export class AgentTeamLedger {
       if (handle !== prior.handle) for (const workspaceId of this.workspacesOf(prior.memberId)) this.assertHandleAvailable(workspaceId, handle, prior.memberId)
       this.assertModelSelection(request.model)
       this.assertCapabilities(request.capabilities)
-      // Partial update: an absent field keeps what the Member already has, and
-      // an explicit null clears the override. Spreading `prior` verbatim
-      // handles the first case; the second must drop the resolved field so the
-      // Member inherits the Host default / full standard capability surface.
       const nextModel = request.model === undefined ? prior.model
         : request.model === null ? undefined : Object.freeze({ ...request.model })
       const nextCapabilities = request.capabilities === undefined ? prior.capabilities
@@ -876,9 +867,6 @@ export class AgentTeamLedger {
    */
   rolloverSeedForMember(memberId: AgentTeamMemberId, targetSessionId: SessionId): { readonly sourceSessionId: SessionId; readonly sourceThroughSeq: SessionLogOffset; readonly checkpointRef: AgentTeamContextCheckpointRef } | undefined {
     const seed = this.state.rolloverSeeds.get(memberId)
-    // Bind the envelope to its recorded target: a later renewal or fresh
-    // rollover that reused or replaced the binding must never consume an
-    // older generation's seed.
     return seed?.targetSessionId === targetSessionId ? seed : undefined
   }
 
@@ -1033,9 +1021,6 @@ export class AgentTeamLedger {
       if (actor.kind === 'member') this.requireMemberChannel(this.requireMember(actor.memberId), channel.channelRef)
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
-      // Recipients are resolved before the request-id lookup: the stored
-      // operation carries the merged set, so a retry has to re-derive the same
-      // list for the collision check to prove it is the same request.
       const recipients = this.mergeBodyMentions(actor.memberId, channel.channelRef, body, this.normalizeRecipients(request.actor, request.recipients))
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
@@ -1469,8 +1454,6 @@ export class AgentTeamLedger {
       const pair = operation.data.senderMemberId === sender.memberId && operation.data.recipientMemberId === recipientMemberId
       const mirror = operation.data.senderMemberId === recipientMemberId && operation.data.recipientMemberId === sender.memberId
       if (!pair && !mirror) continue
-      // pair: the other Member sent it to the reader → (them → you);
-      // mirror: the reader sent it to the other Member → (you → them).
       const direction = pair ? 'them → you' : 'you → them'
       const truncated = operation.data.body.length > 160 ? `${operation.data.body.slice(0, 160)}…` : operation.data.body
       return `(${direction}, at ${formatTeamTimestamp(operation.occurredAt)}) ${truncated}`
@@ -1503,17 +1486,6 @@ export class AgentTeamLedger {
   private inboxForWorkspaces(authorized: AgentTeamHumanActor | AgentTeamMemberActor, workspaceIds: readonly WorkspaceId[], requestedLimit?: number): AgentTeamInbox {
     const limit = requestedLimit ?? 50
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('inbox limit must be an integer between 1 and 100')
-    // One unread slice serves every reader: Threads the reader follows or
-    // holds a marker on, admitted whenever they hold an unread fact — mentions
-    // are counted inside it (`directCount`), never a separate admission rule.
-    // Every row carries its rendering material — Channel display name, Task
-    // ordinal, opening line, and the person the row's instant came from — so the
-    // Client renders a row without a Channel or Member view per row. Carrying
-    // the opening line on the agent-facing projection is
-    // safe: model-visible notifications read the refs and the facts, never this.
-    // A Human reader additionally receives the separate 「最近活跃」 slice below;
-    // `items` stays exactly the unread queue for every reader, so the badge
-    // totals and the agent-facing `team_inbox` result cannot drift with it.
     const taskNumbers = new Map(workspaceIds.flatMap(workspaceId => [...this.taskNumbers(workspaceId)]))
     const unreadThreads = new Set<AgentTeamThreadRef>()
     // Candidates carry only what ranking and the totals need. A row's preview
@@ -1532,8 +1504,6 @@ export class AgentTeamLedger {
       if (channelRef === undefined) continue
       const channel = this.state.channels.get(channelRef)
       if (channel === undefined || !workspaceIds.includes(channel.workspaceId)) continue
-      // Archived Channels do not exist on Team API surfaces: their Threads
-      // reach neither Inbox slice, matching ref resolution and the feed.
       if (channel.state === 'archived') continue
       const workspaceId = channel.workspaceId
       if (authorized.kind === 'member' && !this.isChannelMember(channelRef, authorized.memberId)) continue
@@ -1570,13 +1540,6 @@ export class AgentTeamLedger {
       totalDirectCount: candidates.reduce((sum, item) => sum + item.directCount, 0) })
   }
 
-  /**
-   * The one person a row names: whoever committed the fact that row's instant
-   * came from — a Message's sender, an activity's actor — resolved to the handle
-   * the row draws. Resolving it here is what spares every Client row a Member
-   * view of its own, and a Member the roster no longer names still reads as
-   * themselves through their raw id rather than as nobody.
-   */
   private inboxActorFor(fact: AgentTeamThreadFact): AgentTeamInboxActor {
     return this.memberActor(fact.kind === 'message' ? fact.message.sender : fact.activity.actor)
   }
@@ -1689,8 +1652,6 @@ export class AgentTeamLedger {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameThreadRead(existing, request)
-        // A retry reports the original receipt with the picture the current
-        // projection derives, and never advances a watermark a second time.
         const current = this.prepareRead(existing.data.memberId, existing.data.workspaceId, request)
         return Object.freeze({ value: Object.freeze({ receipt: this.receipt(existing), ...this.readPicture(current) }), committed: false })
       }
@@ -1889,10 +1850,6 @@ export class AgentTeamLedger {
       const member = this.requireMember(memberId)
       if (!this.participatesIn(member.memberId, request.workspaceId)) throw new Error('Member cannot view another Workspace')
     }
-    // Validation above accepts unique UUID abbreviations, so resolve both
-    // filters to full keys once: comparing the authored spelling in the fact
-    // filters below matches nothing and returns an empty view that every
-    // caller reads as "no such thread" (task #17).
     const channelRefFilter = request.channelRef === undefined
       ? undefined
       : this.requireActiveChannel(request.workspaceId, request.channelRef).channelRef
@@ -1925,10 +1882,6 @@ export class AgentTeamLedger {
       if (request.includeActivities === false && fact.kind === 'activity') return false
       return direction === 'before' ? fact.sequence < before : fact.sequence > cursor
     }
-    // Walk from the end the direction starts at and stop once `limit` matches
-    // are collected plus one more proves `hasMore` — `limit` bounds only the
-    // returned items, never the scan below a single extra match. A sidebar
-    // asking for one item no longer sweeps the whole fact ledger.
     const selected: AgentTeamThreadFact[] = []
     let hasMore = false
     if (direction === 'before') {
@@ -2029,20 +1982,6 @@ export class AgentTeamLedger {
     this.validateRecords(this.sortedRecords())
   }
 
-  /**
-   * Validate the durable ledger for the invariant's mount check, reusing the
-   * constructor's record-level replay once instead of paying a second identical
-   * one at startup.
-   *
-   * The adoption is gated on the operations table's single-writer identity —
-   * this ledger's commit path is the only caller of `table.put` — so an
-   * unchanged record count, head sequence and head operation id mean a
-   * mount-time replay would re-derive precisely the records the constructor
-   * already re-derived against its own scratch projection. Any commit between
-   * construction and mount, and every later call, falls back to the full
-   * replay. The check is never narrowed: the reused conclusion is still that
-   * same independent replay of every durable record.
-   */
   validateAtMount(): void {
     const boot = this.bootValidation
     this.bootValidation = undefined
@@ -2063,13 +2002,6 @@ export class AgentTeamLedger {
     return this.state.byOperation.get(operationId)
   }
 
-  /**
-   * Claim releases are thread-visible facts: an open Channel page and every
-   * affected Thread page must refetch alongside the workspace-wide change. Each
-   * released activity contributes its own Thread scope plus the Channel that
-   * owns its Task, deduplicated against the caller's initial scopes — which is
-   * why the caller passes them in rather than the helper inventing them.
-   */
   private withReleasedActivityScopes(
     scopes: AgentTeamChangeScope[],
     tasks: readonly AgentTeamTask[],
@@ -2330,8 +2262,6 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/member-context-cleared') {
       assertHuman()
       const prior = projection.members.get(operation.data.member.memberId)
-      // Legacy in-place clear: the recorded Member is unchanged, and the
-      // projection deliberately does not change either.
       if (prior === undefined || prior.state !== 'enabled' || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member context clear')
       return
     }
@@ -2388,10 +2318,6 @@ export class AgentTeamLedger {
         if (other.memberId !== prior.memberId && other.state !== 'inactive' && this.participationOverlapFrom(projection, other.memberId, prior.memberId)
           && other.handle.normalize('NFKC').trim().toLowerCase() === normalized) throw new Error('invalid Member update handle')
       }
-      // Replay-time human collision uses the Host-synced runtime name; the
-      // default keeps old ledgers (written before configurable names) valid.
-      // A stored rename that now collides fails replay loudly rather than
-      // silently forking the @ namespace, so the operator renames first.
       if (normalized === this.humanHandle.normalize('NFKC').trim().toLowerCase()) throw new Error('invalid Member update handle')
       return
     }
@@ -2872,9 +2798,6 @@ export class AgentTeamLedger {
 
   private apply(operation: AgentTeamOperation): void {
     this.applyTo(this.state, operation)
-    // Live apply only: the record-validation replay re-derives each record
-    // against its own scratch projection, so a scope derivation there would be
-    // discarded.
     const scopes = this.changeScopesOf(operation)
     if (scopes === undefined || scopes.length !== 0) this.projectionVersion = operation.sequence
   }
@@ -3112,12 +3035,6 @@ export class AgentTeamLedger {
     target.taskNumberByTask.set(task.taskRef, ordinal)
   }
 
-  /**
-   * One Claim into the projection and its per-Task bucket. A Claim whose state
-   * changes keeps the position its first write gave it: the bucket answers in
-   * the order the full `claims` scan it replaces did, so a durable list stays
-   * ordered by first write rather than by the latest transition.
-   */
   private recordClaim(target: Projection, claim: AgentTeamClaim): void {
     target.claims.set(claim.claimRef, claim)
     const bucket = target.claimsByTask.get(claim.taskRef)
@@ -3398,13 +3315,6 @@ export class AgentTeamLedger {
     return projection.factsByThread.get(threadRef) ?? []
   }
 
-  /**
-   * The one per-fact instant projection: a fact's wall-clock time is the
-   * occurredAt of the ledger operation that committed it, looked up by
-   * sequence inside the same read snapshot. Every agent-facing surface
-   * (Thread facts, notifications, DM history, mutation results) resolves
-   * through this single path, never a second parallel lookup.
-   */
   private occurredAtForFactFrom(projection: Projection, sequence: number, fallback?: string | undefined): string {
     if (fallback !== undefined) return fallback
     // Facts arrive in ledger sequence order and `ordered` is append-only, so
@@ -3475,7 +3385,6 @@ export class AgentTeamLedger {
     return this.inboxDelta([], [], [], [], markers)
   }
 
-  /** Promotion wakes every current follower; the Human actor never follows, so no recipient filter is needed. */
   private promoteThreadInbox(activity: AgentTeamTaskActivity, threadRef: AgentTeamThreadRef): AgentTeamInboxDelta {
     return this.promoteThreadInboxFrom(this.state, activity, threadRef)
   }
@@ -3643,20 +3552,6 @@ export class AgentTeamLedger {
       facts: this.factsAfter(actorMemberId, thread.threadRef, expectedRevision) })
   }
 
-  /**
-   * Whether a write token was never a revision this Thread reached. A token
-   * the Thread did reach is an insertion race; one it never reached is a
-   * copied or invented number, and the model needs the difference — hunting
-   * for the insertion that supposedly invalidated a token this Thread never
-   * issued is time nobody gets back.
-   *
-   * Answered against the Thread's own facts, each of which is the sequence of
-   * the operation that committed it, so "was this ever a revision here" is
-   * "was this ever a fact here". Deliberately fail-closed: a token older than
-   * the Thread's first retained fact is unknowable, not confirmed absent, and
-   * the model is told the ordinary race instead of a certainty the ledger does
-   * not hold.
-   */
   private tokenNeverReached(thread: AgentTeamThread, expectedRevision: number): boolean {
     const facts = this.threadFactsFrom(this.state, thread.threadRef)
     const first = facts[0]?.sequence
@@ -4330,7 +4225,6 @@ export class AgentTeamLedger {
     }
   }
 
-  /** Provider route and model id are exact identifiers; only whitespace-only values are rejected. */
   private assertModelSelection(model: AgentTeamUpdateMemberRequest['model']): void {
     if (model === undefined || model === null) return
     if (model.provider.trim() === '' || model.model.trim() === '') throw new Error('member model selection must name a provider route and a model id')

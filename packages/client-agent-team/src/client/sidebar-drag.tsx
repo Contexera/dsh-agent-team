@@ -12,7 +12,6 @@ import css from './sidebar.module.css'
 import type { SidebarDropMarker } from './sidebar-order.ts'
 
 export interface SidebarRowDragHandlers<K extends string> {
-  /** Per-row native wiring plus the marker this row currently shows. */
   readonly rowProps: (orderKey: K) => {
     readonly draggable: true
     readonly className?: string | undefined

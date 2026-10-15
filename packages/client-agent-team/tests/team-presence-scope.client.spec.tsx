@@ -18,10 +18,6 @@ describe('presence-scope wake wiring (issue #21)', () => {
     const channelCalls = b.viewChannels.mock.calls.length
     const memberCalls = b.members.mock.calls.length
 
-    // Agent running/idle reaches the Client as a presence-scope wake: the
-    // Agents panel refreshes its rows (green dots), while the Channels
-    // panel's view() and the scope-less Inbox badge stay parked. The
-    // badge debounces, so wait past that window before asserting stillness.
     b.publishPresence()
     await waitFor(() => expect(b.members.mock.calls.length).toBeGreaterThan(memberCalls))
     await new Promise(resolve => setTimeout(resolve, 300))

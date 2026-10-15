@@ -3,14 +3,6 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamEnvironmentResult } from '@contexera/dsh-agent-team/types'
 import { TeamEnvironmentCheck, type TeamEnvironmentLoader } from '../src/client/environment-check.ts'
 
-/**
- * The environment projection is read-only, read once, and has no retry: the
- * page either states a verdict or states nothing, and a failed read never
- * blanks a report that already stands. These tests lock that shape — in
- * particular that a read failure is not an `undetermined` verdict, because the
- * two mean different things to a reader.
- */
-
 /** A read failure in the shape the carrier produces (code/details belong to it, not to the test). */
 const readFailure = (message: string): RemoteResult<AgentTeamEnvironmentResult> =>
   ({ ok: false, error: { message } }) as RemoteResult<AgentTeamEnvironmentResult>

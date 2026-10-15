@@ -3,20 +3,6 @@ import { contextTools, renderText } from './render-text.ts'
 import { engineTimelineItems } from '../src/context-tools.ts'
 import { AGENT_TEAM_TOOL_NAMES } from '@contexera/dsh-agent-team/host'
 
-/**
- * Render-layer discriminating tests: renders are the only channel a tool
- * result reaches the model through, so every field the model must act on
- * (the checkpoint ref, per-anchor verdicts) has to appear in the rendered
- * text — a schema field the render drops is model-invisible (this exact
- * regression made seeded returns unusable in live dogfooding).
- *
- * All four context tools are the engine's own definitions, so what these tests
- * pin is the Team's half of the contract: the vocabulary spliced in as
- * `timelineGuidance`, and the one Team rule the adapter enforces — a row that is
- * not restorable answers with a short digest instead of its ref, because the
- * engine's render prints that field on every row.
- */
-
 const STATUS_VALUE = {
   usageTokens: 55577,
   hardLimit: 256000,

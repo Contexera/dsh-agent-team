@@ -20,7 +20,6 @@ export function isRunGap(previousOccurredAt: string | undefined, occurredAt: str
 
 const pad = (value: number): string => String(value).padStart(2, '0')
 
-/** Local-calendar day key for one wall-clock instant; shared by bespoke loops. */
 export function timelineDayKey(occurredAt: string): string {
   return localDateKey(occurredAt)
 }

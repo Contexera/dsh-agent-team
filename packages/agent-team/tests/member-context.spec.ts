@@ -14,7 +14,6 @@ describe('Team Member private memory context', () => {
   it('injects the private skills directory path beside the memory paths', () => {
     const rendered = renderMemberMemory(Buffer.from('# Member memory\n'))
     expect(rendered).toContain('Private skills directory: <private-memory-path>/skills')
-    // The absolute-path guidance covers the skills directory with the rest.
     expect(rendered).toContain('use the absolute paths above')
   })
 

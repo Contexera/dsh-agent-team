@@ -68,7 +68,6 @@ function persistSnapshot(snapshot: TeamNavigationSnapshot): void {
       ...(taskNumber === undefined ? {} : { taskNumber }),
     }))
   } catch {
-    // Local persistence is a convenience; private mode and quota failures do not block navigation.
   }
 }
 
@@ -131,7 +130,6 @@ export class TeamNavigation {
   }
 
   private setMemberSession(sessionId: SessionId, returnToSessionId?: SessionId): void {
-    // Re-selecting the active Member keeps the original return target.
     if (this.snapshot.memberSessionId === sessionId && this.snapshot.mode === 'team') return
     const { memberSessionId: _memberSessionId, ...base } = this.snapshot
     this.snapshot = {

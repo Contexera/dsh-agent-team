@@ -1,14 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderText, teamTools } from './render-text.ts'
 
-/**
- * Render-layer discriminating tests for the Team collaboration tools.
- * Renders are the only channel a tool result reaches the model through:
- * a bare `accept` activity string left the model unable to see who
- * accepted what, or that its own Claim was completed by the acceptance —
- * the regression this suite locks out.
- */
-
 const ACCEPT_FACT = {
   sequence: 8190,
   kind: 'activity',

@@ -99,12 +99,6 @@ function isBodyRenderedInFull(text: string, body: string): boolean {
   return false
 }
 
-/**
- * The probe the ledger calls: is this unread fact on this Member's surface?
- *
- * A Member with no live session, or one whose surface holds nothing of ours,
- * answers false — the write stays gated, which is today's behaviour.
- */
 export function surfaceVisibilityProbe(agentFor: (memberId: AgentTeamMemberId) => Agent | undefined) {
   return (memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact): boolean => {
     const agent = agentFor(memberId)

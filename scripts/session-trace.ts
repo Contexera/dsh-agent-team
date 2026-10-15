@@ -37,8 +37,6 @@ const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
  * stays out of the default view; `--all` lifts the filter. */
 const TEAM_CWDS = [PROJECT_ROOT, harnessDir] as const
 
-// ---------- argument parsing ----------
-
 function parseArgs(argv: readonly string[]): { command: string; positional: string[]; flags: Set<string>; values: Map<string, string> } {
   const [command = '', ...rest] = argv
   const positional: string[] = []
@@ -90,8 +88,6 @@ common options:
   process.exit(1)
 }
 
-// ---------- team member address book (read-only ledger id translation) ----------
-
 interface MemberAddress { handle: string; sessionId: string }
 
 /**
@@ -125,8 +121,6 @@ function readMemberAddresses(dshHome: string): MemberAddress[] {
       }
     }
     const enabled = [...members.values()].filter(m => m.state === 'enabled')
-    // The current team is the workspace with the most enabled members — the
-    // ledger also carries single-member experiment workspaces on other repos.
     const workspaceCounts = new Map<string, number>()
     for (const member of enabled) {
       workspaceCounts.set(member.workspaceId, (workspaceCounts.get(member.workspaceId) ?? 0) + 1)
@@ -146,8 +140,6 @@ function readMemberAddresses(dshHome: string): MemberAddress[] {
     db.close()
   }
 }
-
-// ---------- composition ----------
 
 interface SessionHeaderView {
   id: string
@@ -186,7 +178,6 @@ interface SessionEventWindowView {
   endSeq: number
 }
 
-/** The exact-read surface this script consumes from `ctx.sessionQuery`. */
 interface SessionQueryView {
   listSessions(signal?: AbortSignal): Promise<SessionRecordView[]>
   listEvents(sessionId: string): Promise<SessionEventRecordView[]>
@@ -217,8 +208,6 @@ async function mount(dshHome: string): Promise<Composition> {
   }
 }
 
-// ---------- derived navigation fields (spec §5.2) ----------
-
 interface DerivedFields {
   turn?: number
   step?: number
@@ -238,15 +227,11 @@ function deriveFields(event: SessionEventView): DerivedFields {
   return derived
 }
 
-// ---------- rendering (text is the default; --json opts back into structured) ----------
-
 /** Minute-precision UTC stamp for scannable columns; the exact ms stays in --json. */
 function fmtTime(ms: number | null): string {
   if (ms === null) return '—'
   return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + 'Z'
 }
-
-// ---------- commands ----------
 
 interface ListRow {
   handle: string
@@ -269,7 +254,6 @@ async function cmdList(comp: Composition, dshHome: string, includeAll: boolean, 
   for (const address of addresses) {
     const session = byId.get(address.sessionId)
     if (session === undefined) {
-      // current generation log absent — member renewed/archived elsewhere
       rows.push({
         handle: address.handle,
         sessionId: address.sessionId,
@@ -350,15 +334,8 @@ async function cmdTimeline(comp: Composition, dshHome: string, member: string, o
   const toolPrefix = opts.toolPrefix
   let matched: Row[]
   if (toolPrefix === undefined) {
-    // No name filter: page by seq first, then hydrate derived fields only for
-    // the shown page — keeps the default output body-free and cheap.
     matched = filtered.map(r => ({ ...r, sessionId: address.sessionId, derived: {} as DerivedFields }))
   } else {
-    // The name lives only in raw `tool/call.data.name` (tool/result carries
-    // none), so the toolName decision requires reading payloads. Resolve it
-    // across the WHOLE candidate set — not just the page — so the match count
-    // is limit-independent. `tool/result` is excluded outright: it can never
-    // match a name filter, and including it only wasted page budget before.
     const calls = filtered.filter(r => r.type === 'tool/call')
     const hydrated: Row[] = []
     if (calls.length > 0) {
@@ -374,11 +351,9 @@ async function cmdTimeline(comp: Composition, dshHome: string, member: string, o
     matched = hydrated
   }
 
-  // Page the fully-resolved match set: newest `limit` rows.
   const start = Math.max(0, matched.length - opts.limit)
   let rows = matched.slice(start)
   if (toolPrefix === undefined && rows.length > 0) {
-    // Hydrate derived fields for just this page (bounded read).
     const window = await rawWindow(comp, address.sessionId, rows[0]!.seq, rows.at(-1)!.seq)
     const bySeq = new Map(window.map(e => [e.seq, e]))
     rows = rows.map(r => ({ ...r, derived: deriveFields(bySeq.get(r.seq) ?? { seq: r.seq, type: r.type, time: r.time }) }))
@@ -478,8 +453,6 @@ function fail(message: string): never {
   console.error(`session-trace: ${message}`)
   process.exit(1)
 }
-
-// ---------- entry ----------
 
 const args = parseArgs(process.argv.slice(2))
 const dshHome = args.values.get('home') ?? `${process.env.HOME ?? fail('HOME is unset')}/.dsh`

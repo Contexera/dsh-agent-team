@@ -144,16 +144,9 @@ export interface AgentTeamMemberSessionRolledOverOperation extends AgentTeamOper
      * parent is the previous active Session.
      */
     readonly sourceSessionId?: SessionId
-    /**
-     * Exclusive end of the seeded source prefix — its exact length in the
-     * source log, from seq 0 through the checkpoint's `turn/end` inclusive.
-     */
     readonly sourceThroughSeq?: SessionLogOffset
-    /** Seq of the successful `context_rollover` tool result in the previous Session log. */
     readonly handoffEventSeq: SessionSeq
-    /** The checkpoint a return was addressed to; absent on a fresh rollover. */
     readonly checkpointRef?: AgentTeamContextCheckpointRef
-    /** Why the rollover happened: the model asked, or a pressure notice was honored. */
     readonly trigger: 'model' | 'pressure'
   }
 }
@@ -190,9 +183,7 @@ export interface AgentTeamChannelMemberRemovedOperation extends AgentTeamOperati
     readonly workspaceId: WorkspaceId
     readonly channelRef: AgentTeamChannelRef
     readonly memberId: AgentTeamMemberId
-    /** Claims released because this Member lost Channel authority. */
     readonly claims: readonly AgentTeamClaim[]
-    /** Public release summaries for the affected Threads. */
     readonly activities: readonly AgentTeamClaimsReleasedActivity[]
     readonly tasks: readonly AgentTeamTask[]
     readonly threads: readonly AgentTeamThread[]
@@ -228,9 +219,7 @@ export interface AgentTeamMemberWorkspaceLeftOperation extends AgentTeamOperatio
   readonly data: {
     readonly workspaceId: WorkspaceId
     readonly memberId: AgentTeamMemberId
-    /** Claims released because this Member lost Workspace authority. */
     readonly claims: readonly AgentTeamClaim[]
-    /** Public release summaries for the affected Threads. */
     readonly activities: readonly AgentTeamClaimsReleasedActivity[]
     readonly tasks: readonly AgentTeamTask[]
     readonly threads: readonly AgentTeamThread[]
@@ -249,15 +238,11 @@ export interface AgentTeamChannelArchivedOperation extends AgentTeamOperationBas
   readonly kind: 'team/channel-archived'
   readonly data: {
     readonly workspaceId: WorkspaceId
-    /** The Channel with its state moved to `archived`. */
     readonly channel: AgentTeamChannel
-    /** Claims released across every Member with an active Claim here. */
     readonly claims: readonly AgentTeamClaim[]
-    /** Public release summaries for the affected Threads. */
     readonly activities: readonly AgentTeamClaimsReleasedActivity[]
     readonly tasks: readonly AgentTeamTask[]
     readonly threads: readonly AgentTeamThread[]
-    /** Attention and marker cleanup for every affected Member. */
     readonly inbox: AgentTeamInboxDelta
   }
 }
@@ -374,19 +359,9 @@ export interface AgentTeamThreadReadReceipt {
   readonly inbox: AgentTeamInboxDelta
 }
 
-/**
- * The pre-receipt form: the whole Thread picture the read answered with, frozen
- * into the record. Ledgers written before the receipt form still hold these and
- * keep loading unchanged — normalized and validated in place, never rewritten.
- *
- * The picture is no longer read back to answer anything: a repeated read reports
- * the original receipt with a picture derived from the current projection, so
- * these fields keep old records validating rather than serving responses.
- */
 export interface AgentTeamThreadReadSnapshot {
   readonly workspaceId: WorkspaceId
   readonly memberId: AgentTeamMemberId
-  /** The Task this legacy read targeted. */
   readonly task?: AgentTeamTask | undefined
   readonly thread: AgentTeamThread
   readonly claims: readonly AgentTeamClaim[]
@@ -395,9 +370,7 @@ export interface AgentTeamThreadReadSnapshot {
   readonly anchorMentions: readonly AgentTeamMemberId[]
   readonly facts: readonly AgentTeamStoredThreadReadFact[]
   readonly readThroughSequence: number
-  /** Number of unread facts left after this bounded read. */
   readonly remainingUnreadCount: number
-  /** The reader's post-read Attention snapshot, when the reader follows. */
   readonly attention?: AgentTeamThreadAttention | undefined
   readonly inbox: AgentTeamInboxDelta
 }
@@ -416,9 +389,7 @@ export interface AgentTeamMemberRemovedOperation extends AgentTeamOperationBase 
   readonly kind: 'team/member-removed'
   readonly data: {
     readonly member: AgentTeamAgentMember
-    /** Claims released because this Member became inactive. */
     readonly claims: readonly AgentTeamClaim[]
-    /** Public release summaries for the affected Threads. */
     readonly activities: readonly AgentTeamClaimsReleasedActivity[]
     readonly tasks: readonly AgentTeamTask[]
     readonly threads: readonly AgentTeamThread[]

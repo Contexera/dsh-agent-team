@@ -1,12 +1,5 @@
 import type { AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadReadSnapshot } from '../../src/types.ts'
 
-/**
- * Rebuild the pre-receipt Thread-read data a ledger written before B2 stored:
- * the picture the read answered with, frozen into the record beside the Inbox
- * delta it consumed. Tests use it to keep the legacy load/normalize/validate
- * path covered — production code never writes this shape again — and to prove
- * a stored record of either shape still opens, replays and validates.
- */
 export function snapshotReadData(data: AgentTeamThreadReadReceipt, picture: Omit<AgentTeamThreadReadResult, 'receipt'>): AgentTeamThreadReadSnapshot {
   return {
     workspaceId: data.workspaceId,

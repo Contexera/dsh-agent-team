@@ -2,21 +2,6 @@ import { useSyncExternalStore } from 'react'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamEnvironmentResult } from '@contexera/dsh-agent-team/types'
 
-/**
- * The Client's one projection of the local environment check.
- *
- * Deliberately separate from the Human identity projection: this is a fact
- * about the installation, not about the Human, it is read once and never
- * written back, and the settings page is the only surface that renders it.
- * Folding it into the identity store would make every seat that names the
- * Human depend on a version comparison it has no use for.
- *
- * Reads are demand-driven off the first subscriber, so an ordinary conversation
- * never calls the Remote. There is no retry: `undetermined` is a settled
- * verdict about facts the Host could not establish, not a failed request, so a
- * reader has nothing to retry.
- */
-
 /** One read of the environment check, replaced wholesale on every change. */
 export interface TeamEnvironmentSnapshot {
   /** `loading` until the first read settles, `ready` once it has. */

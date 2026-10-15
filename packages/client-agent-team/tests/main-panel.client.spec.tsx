@@ -8,7 +8,6 @@ usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
-/** Stands in for the shipped plugin manager's global panel (main key 'plugins'). */
 function ShippedPluginPage() { return <div data-shipped-plugins>插件</div> }
 
 /**

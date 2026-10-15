@@ -1,10 +1,3 @@
-/**
- * The restart affordance is the only operator action left for an unavailable
- * Member, and the row diagnostic is the only place the Client says why it is
- * unavailable. Both verdicts are projection-derived pure functions, so they are
- * pinned here; `team-mode-agents.client.spec.tsx` covers the row menu that
- * consumes them, and the artifact path a refusal carries is asserted below.
- */
 import { describe, expect, it } from 'vitest'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberDiagnostic } from '@contexera/dsh-agent-team/types'
 import { zh } from '../src/client/locales.ts'

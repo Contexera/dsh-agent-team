@@ -10,13 +10,6 @@ beforeEach(() => { localStorage.clear() })
 
 type Runtime = Awaited<ReturnType<typeof runtimeWithTeam>>
 
-/**
- * Drive every continuation a resolved response queues — its landing, the guard
- * it runs through, the reads those issue — to quiescence. Each of them is a
- * microtask, so draining the microtask queue puts the test at a known point; a
- * wall-clock wait cannot, because a loaded machine ends it earlier and an update
- * that was still coming then reads as one that never happened.
- */
 const drainContinuations = async (): Promise<void> => {
   for (let turn = 0; turn < 64; turn += 1) await Promise.resolve()
 }

@@ -7,11 +7,6 @@ import { presenceDotState, presenceLabel } from './TeamPresenceDot.tsx'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import css from './sidebar.module.css'
 
-/**
- * Sidebar Member avatar reusing the conversation identity language: the
- * deterministic member hue and handle initial, with the presence indicator
- * overlaid at the bottom-right so one glyph carries identity and state.
- */
 export function TeamMemberAvatar({ status, t }: {
   readonly status: AgentTeamClientMemberStatus
   readonly t: TeamSidebarProps['t']

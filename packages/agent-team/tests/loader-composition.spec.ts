@@ -1,4 +1,3 @@
-/** Real-composition proof for the opt-in Agent Team Host row. */
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'

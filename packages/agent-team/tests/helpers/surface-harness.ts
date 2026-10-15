@@ -6,15 +6,6 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './memory-backend.ts'
 import AgentTeam from '../../src/index.ts'
 
-/**
- * A Host over an in-memory durable table, for tests that need the real write
- * gate with the real surface probe injected.
- *
- * The ledger is deliberately NOT held here: each test builds its own, because
- * what is under test is how a ledger answers a write — with or without the
- * exemption probe. Every ledger over this table replays the same operations,
- * so a Host commit and a test ledger always see one shared durable state.
- */
 export interface TeamHarness {
   readonly ctx: Context
   readonly fiber: Awaited<ReturnType<Context['plugin']>>

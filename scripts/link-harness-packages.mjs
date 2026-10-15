@@ -21,7 +21,6 @@ import { harnessDir } from './harness-dir.mjs'
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packagesRoot = join(harnessDir, 'packages')
 
-// The first-level scope dir of a package.json name, or undefined.
 const scopeOf = name => {
   const match = /^(@[^/]+)\//.exec(name)
   return match === null ? undefined : match[1]

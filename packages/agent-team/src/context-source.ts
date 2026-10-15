@@ -168,11 +168,6 @@ export function handoffOf(message: UserMessage): AgentTeamContextHandoff | undef
   }
 }
 
-/**
- * The checkpoint ref one continuation notice carries, when the message is one.
- * @param message - candidate user message.
- * @returns the checkpoint ref, or `undefined` when the message is not a continuation.
- */
 export function continuationCheckpointRefOf(message: UserMessage): string | undefined {
   const sections = ownSections(message)
   if (sections === undefined || sections.length !== 1) return undefined
@@ -191,11 +186,6 @@ export function isCheckpointContinuationMessage(message: UserMessage, checkpoint
   return ref !== undefined && (checkpointRef === undefined || ref === checkpointRef)
 }
 
-/**
- * Whether one message carries a rollover-handoff or checkpoint-continuation
- * envelope. Ordinary Team notices share this plugin's attribution, so callers
- * that replace rederived notices must exclude these two families explicitly.
- */
 export function isAgentTeamContextSource(message: UserMessage): boolean {
   return isHandoffMessage(message) || isCheckpointContinuationMessage(message)
 }

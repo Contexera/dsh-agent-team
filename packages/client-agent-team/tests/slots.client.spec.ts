@@ -22,12 +22,8 @@ async function bench(persisted: string | null = null) {
   ctx.provide('locale', new LocaleRuntime(ctx))
   ctx.provide('remote', { $mount: async () => async () => {} } as never)
   ctx.provide('remote.agentTeam', {})
-  // rc.1: the client declares the model-catalog sub-namespace; the bench
-  // supplies it so the takeover fiber is not left pending on inject.
   ctx.provide('remote.session', { modelCatalog: vi.fn(async () => ({ ok: true, value: { groups: [], failures: [] } })) })
   ctx.provide('conversation', { input: { for: () => ({ submit: vi.fn() }) } } as never)
-  // The plugin declares these runtime services; the takeover bench only mounts
-  // them, it never drives sessions or the model catalog.
   ctx.provide('sessions', {
     list: { getSnapshot: () => ({ byId: {} }), subscribe: () => () => {} },
     search: vi.fn(async () => ({ items: [], hasMore: false })),

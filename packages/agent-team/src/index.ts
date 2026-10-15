@@ -499,8 +499,6 @@ export default class AgentTeam extends TypertRemoteService {
   private readonly runningAgents = new Set<SessionId>()
   /** Per-Member runtime state: tool restrictions, skill mounts, warnings, private memory. */
   private readonly memberRuntime = new MemberRuntime({
-    // Deferred field access: the constructor runs before `handles` is
-    // populated, so the resolver must dereference at call time.
     ctx: this.ctx,
     liveMemberContext: memberId => {
       const handle = this.handles.get(memberId)
@@ -650,10 +648,6 @@ export default class AgentTeam extends TypertRemoteService {
       },
       activeClaimLabels: memberId => this.activeClaimLabels(memberId),
       runningJobLabels: memberId => this.runningJobLabels(memberId),
-      // Deployment policy: the row's own gate config, whose omitted fields the
-      // engine answers with its own defaults. This object is this Host's one
-      // copy, refreshed in place on every settings write, so an edit reaches the
-      // next step judged instead of the next mount.
       gate: this.gate,
       /**
        * The relatedness judge of the long-gap gate: the service this Host
@@ -693,13 +687,6 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  /** The Host row's judge settings, as one plain config for the mount. */
-  /**
-   * A Member as a reader prints it: the handle, or `human` for the Human.
-   *
-   * The notice's `From:` line already prints the Human this way, and the alias
-   * is what addresses them, so the two agree without a second naming rule.
-   */
   private printableSender(memberId: AgentTeamMemberId): string {
     return memberId === AGENT_TEAM_HUMAN_MEMBER_ID
       ? 'human'
@@ -798,7 +785,6 @@ export default class AgentTeam extends TypertRemoteService {
     try {
       this.ledger?.setHumanDisplayHandle(this.humanHandle())
     } catch {
-      // The ledger is absent before Service.init; the post-open sync covers it.
     }
   }
 
@@ -1786,11 +1772,6 @@ export default class AgentTeam extends TypertRemoteService {
       this.ctx.logger.info(`agent-team: member '${stored.handle}' session '${stored.sessionId}' stage 'wait-turn' waited ${Date.now() - started}ms for its turn boundary before applying the stored configuration`)
     }
     if (waited && this.handles.get(memberId) !== active) {
-      // The wait resolved because the old generation was disposed, not
-      // because the turn ended; the ledger intent applies at the next
-      // activation instead. Unreachable while handle slots only ever change
-      // inside this same lifecycle queue (a parked edit holds it) — kept as
-      // the guard for any future out-of-queue swap, not as dead weight.
       return 'deferred:generation-changed'
     }
     this.memberRuntime.reapplyMemberToolPolicy(stored)
@@ -1960,8 +1941,6 @@ export default class AgentTeam extends TypertRemoteService {
       gate: Object.freeze({
         tokens: gate.tokens ?? DEFAULT_GATE_TOKENS,
         idleMs: gate.idleMs ?? DEFAULT_GATE_IDLE_MS,
-        // No fallback here: this number is the one the gate is given, so a
-        // second default could only ever disagree with the gate in force.
         judgeTimeoutMs: gate.judgeTimeoutMs,
       }),
     })
@@ -2596,27 +2575,6 @@ export default class AgentTeam extends TypertRemoteService {
     return { prefix: inspection.events.slice(0, through) }
   }
 
-  /**
-   * Redeliver the old generation's unconsumed post-intent input to a
-   * generation whose durable rollover committed but whose delivery did not
-   * finish. Bound to the ledger's recorded transition target — the CURRENT
-   * Session being that target — never to whether the handoff itself landed,
-   * so a crash after the handoff but before the carried enqueue still
-   * replays. The fold is the same durable truth the live transition uses
-   * (unconsumed, non-Team, order preserved). Idempotency keys on what is
-   * CURRENTLY present: delivered `user/message` ids plus the live inbox's
-   * pending next-step/next-turn ids — a historical insert that was already
-   * claimed (and removed) but never surfaced is NOT known and must replay.
-   * Fail-closed for genuinely unreadable previous Sessions (missing/IO) so
-   * the Member's input is never dropped silently, with three bounded
-   * exceptions: a generation that already started its own turns needs no
-   * replay (its carried input was delivered or superseded while it ran), a
-   * log-corruption class error skips with a warning (the Host repairs torn
-   * tails; a retired generation's corrupt log must not permanently block the
-   * Member's activation), and a deterministic released-format refusal skips
-   * with a warning (the candidate's own migration audit refuses that
-   * artifact, so no retry can ever read it).
-   */
   private async replayCarriedInput(member: AgentTeamAgentMember, agent: Agent, generationStarted: boolean): Promise<number> {
     const transition = this.requireLedger().lastTransitionForMember(member.memberId)
     if (transition === undefined || transition.targetSessionId !== agent.session.id) return 0
@@ -3252,13 +3210,6 @@ export default class AgentTeam extends TypertRemoteService {
       this.clearMemberFailure(member.memberId, 'preTurnCancellation')
       this.clearMemberFailure(member.memberId, 'capabilityApply')
       this.nameMemberSession(member, created.agent)
-      // The one-shot pressure notice needs no explicit re-arm here: it latches
-      // on durable Session evidence, and a fresh generation's own event span
-      // starts empty — a new Session is itself the re-arm.
-      // Snapshot whether this generation had already started its own turns
-      // BEFORE any recovery delivery below: the handoff steer and the Inbox
-      // wake legitimately append `turn/start` to this Session, and those must
-      // never be mistaken for the generation having run on its own.
       const generationStarted = created.agent.session.ownEvents().some(event => event.type === 'turn/start')
       // A restart between a durable rollover intent and its swap replays the
       // old Session; the projection still carries the intent, so finish the
@@ -3396,9 +3347,6 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   private memberStatus(member: AgentTeamAgentMember): AgentTeamAgentMemberStatus {
-    // The five states with no live surface report 'pending' literally: no
-    // apply can be in force there, and a literal cannot inherit a stale
-    // applied-record left behind by a torn-down surface.
     if (member.state === 'inactive') return Object.freeze({ member, availability: 'inactive', presence: 'unavailable', capabilityState: 'pending' })
     if (member.state === 'archived') return Object.freeze({ member, availability: 'archived', presence: 'unavailable', capabilityState: 'pending' })
     if (member.state === 'suspended') return Object.freeze({ member, availability: 'suspended', presence: 'unavailable', capabilityState: 'pending' })
@@ -3535,9 +3483,6 @@ export default class AgentTeam extends TypertRemoteService {
           () => this.notifyMember(handle.agent, { kind: 'commit', receipt, operationKind: operation.kind }))
       }
     }
-    // Task acceptance no longer schedules standalone auto compaction: it is
-    // a semantic checkpoint/context cue (delivered as ordinary Team
-    // notification), and the Team pressure policy owns compaction entry.
   }
 
   /**
@@ -3703,9 +3648,6 @@ export default class AgentTeam extends TypertRemoteService {
     })
     this.trackTeamWake(agent, hint)
     this.notifiedInbox.set(member.memberId, signature)
-    // The attempt is this delivery, counted apart from the business request
-    // that revealed the facts: a later retry after a failure is the next
-    // attempt over the same durable facts, not a second operation.
     const attempt = (this.notificationAttempts.get(member.memberId) ?? 0) + 1
     this.notificationAttempts.set(member.memberId, attempt)
     try {

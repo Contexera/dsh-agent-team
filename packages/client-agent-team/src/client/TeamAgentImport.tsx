@@ -7,7 +7,6 @@ import { TeamMemberRow } from './TeamMemberRow.tsx'
 import { mintRequestId } from './requests.ts'
 import css from './create.module.css'
 
-/** Selection is a Host join, not a new Agent or a copied Session. */
 export function TeamAgentImport({ workspaceId, loadMembers, joinWorkspace, onJoined, onPending, t }: {
   readonly workspaceId: WorkspaceId
   readonly loadMembers: TeamSidebarProps['loadMembers']

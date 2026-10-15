@@ -1,9 +1,3 @@
-/**
- * The long-gap gate's judge: what the Host row's key mounts, what clearing it
- * unmounts, and the one setting the gate and the judge must agree on — the
- * judge's own call budget, which is derived from the gate's deadline so a
- * configured judge can never be abandoned before it answers.
- */
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { judgeMountConfig, TeamContextJudge, type TeamContextJudgeConfig } from '../src/context-judge.ts'

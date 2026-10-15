@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './sidebar.module.css'
 
-/** Collapsible sidebar section header: disclosure toggle plus trailing actions. */
 export function TeamSidebarSection({ title, actions, open, onToggle, children }: {
   readonly title: string
   /** Trailing header controls (the add button); never part of the toggle. */

@@ -5,14 +5,6 @@ import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/type
 import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from '../src/client/judge-form.ts'
 import { TeamContextJudgeCheck, type TeamContextJudgeLoader } from '../src/client/context-judge.ts'
 
-/**
- * The Team settings page edits one group of a shared settings section, and the
- * key is write-only. These tests lock the three things that are easy to get
- * wrong: the flat form model is addressed at the real nested paths, a blank key
- * draft writes nothing (so opening the page can never clear a stored key), and
- * a landed write re-reads the status the Host now serves.
- */
-
 const JEV = { apiBase: 'https://api.typesafe.ai/v1', model: 'jev-1.13.0', apiKeyEnv: 'TYPESAFE_API_KEY' }
 
 const SECTION: TeamJudgeSection = { jev: JEV }
