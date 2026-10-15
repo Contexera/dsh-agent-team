@@ -19,11 +19,6 @@ export function diagnosticText(status: Pick<AgentTeamClientMemberStatus, 'diagno
   return diagnostic.location === undefined ? diagnostic.detail : `${diagnostic.detail} (${diagnostic.location.path})`
 }
 
-/**
- * Whether the restart action can help an unavailable Member: it heals
- * transient and repairable failures, but not a transient rollover window
- * (which resolves on its own).
- */
 export function restartOffered(status: AgentTeamClientMemberStatus): boolean {
   return status.diagnostic?.class !== 'rollover'
 }

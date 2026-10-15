@@ -49,7 +49,6 @@ function anchorId(checkpointRef: string): string {
   return createHash('sha256').update(checkpointRef).digest('hex').slice(0, 6)
 }
 
-/** The calling Agent, or a model-visible rejection — these tools only exist in a Member Session. */
 function agentOf(exec: ToolRunContext) {
   const agent = exec.agent
   if (agent === undefined) throw new Error('context tool requires an Agent session')
@@ -76,18 +75,6 @@ function compactionScopeFor(agent: Agent): ContextCompactionScope | undefined {
   return { engine, ...(meter === undefined ? {} : { meter }) }
 }
 
-/**
- * One Host timeline item in the engine's own vocabulary. Team's four sources
- * collapse onto the engine's three kinds, and the two that say something a
- * reader needs (`handoff`, `compaction`) ride its opaque `kind` field rather
- * than being flattened silently.
- *
- * The `ref` of a row that is not restorable is a short digest rather than the
- * ref itself: the engine's render prints this field on every row, and a printed
- * ref is what a model copies into `checkpointRef`. Only a restorable row — the
- * one kind of row whose ref `context_rollover` accepts — carries a citable
- * string.
- */
 export function engineTimelineItems(items: readonly AgentTeamTimelineItem[]): ContextTimelineItem[] {
   return items.map(item => ({
     ref: item.restorable ? item.checkpointRef : anchorId(item.checkpointRef),
@@ -102,12 +89,6 @@ export function engineTimelineItems(items: readonly AgentTeamTimelineItem[]): Co
   }))
 }
 
-/**
- * Team's half of the engine's contract: resolve the calling execution to its
- * Member and Host, answer the ref gate from the one policy that owns it, and run
- * the effects. Every method resolves its own caller, because one adapter serves
- * all four tools.
- */
 const adapter: ContinuityToolAdapter = {
   /**
    * One policy, two readers: a ref is restorable exactly when the Team timeline
@@ -124,9 +105,6 @@ const adapter: ContinuityToolAdapter = {
   async requestRollover(request: RolloverToolRequest, exec) {
     const agent = agentOf(exec)
     const current = member(agent)
-    // The engine already validated the argument shape and the cited ref; the
-    // Host owns the durable intent and the generation swap that follows it at
-    // the idle boundary.
     const outcome = await service(agent).requestNewContext(agent, {
       memberId: current.memberId,
       ...(request.checkpointRef === undefined ? {} : { checkpointRef: request.checkpointRef as AgentTeamContextCheckpointRef }),
@@ -169,16 +147,6 @@ const adapter: ContinuityToolAdapter = {
   },
 }
 
-/**
- * Team vocabulary for the engine's tools. `carriedContext` names the channels a
- * fresh generation already receives — without it the engine's "seeded only by
- * your handoff" sentence reads as "everything must be restated", which is what
- * our own corpus showed members doing. The checklist carries the one item the
- * engine's default does not ask for and the corpus showed missing: which facts
- * were verified and which were only trusted. `timelineGuidance` is the glossary
- * the engine splices into `context_status`: the engine names the structure, and
- * only the Team can say what its own rows mean.
- */
 const TEAM_CONTINUITY_TEXT: ContinuityToolText = {
   subjectNoun: 'Team Member',
   carriedContext: 'You stay the same Team Member: your @handle and role, your private memory index, your skills catalog, and the Team and Workspace instructions carry across a rollover — they are re-injected at birth — and the Team ledger (Threads, Tasks, Claims, your inbox, your owner jobs) is one query away (team_view, team_inbox). Do not restate any of it.',
@@ -191,8 +159,6 @@ const TEAM_CONTINUITY_TEXT: ContinuityToolText = {
 const engineTools = createContinuityTools(adapter, TEAM_CONTINUITY_TEXT)
 
 export function registerContextTools(ctx: { readonly tools: { register(tool: unknown): void } }): void {
-  // The engine's four, and nothing else: the roster the Host validates against
-  // carries the same names, so no description names a tool this surface lacks.
   ctx.tools.register(engineTools.rollover)
   ctx.tools.register(engineTools.checkpoint)
   ctx.tools.register(engineTools.status)

@@ -1,11 +1,6 @@
 import type { TeamDraftKey } from './drafts.ts'
 import type { MentionTier } from './TeamComposer.tsx'
 
-/**
- * Which surface the composer is writing into. A tier means something different
- * on each — tier 1 takes part in the Channel conversation yet not in a given
- * Thread's — so the weight cannot be derived from the tier alone.
- */
 export type MentionSurface = 'thread' | 'channel'
 
 /**

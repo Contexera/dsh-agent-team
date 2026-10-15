@@ -105,10 +105,7 @@ export interface MemberRuntimeDeps {
 export class MemberRuntime {
   /**
    * Live per-Member tool restriction disposers, mirroring modelSelections:
-   * activation registers, disposal paths release, edits swap at a turn
-   * boundary. Deliberate interface reservation: the restriction seam is the
-   * primitive future Runtime Revision manifests orchestrate — do not remove
-   * during cleanup.
+   * activation registers, disposal paths release, edits swap at a turn boundary.
    */
   private readonly memberRestrictions = new Map<AgentTeamMemberId, () => void>()
   /**
@@ -148,9 +145,7 @@ export class MemberRuntime {
    * for entries the current tool surface no longer knows. Runs inside setup
    * BEFORE validateMemberPreset so the validation observes the restricted
    * view (the Host always unions the five Team tools over the configured
-   * list). Deliberate interface reservation: this restriction seam is the
-   * primitive future Runtime Revision manifests orchestrate — do not remove
-   * during cleanup.
+   * list).
    */
   applyMemberToolPolicy(agentCtx: Context, member: AgentTeamAgentMember): void {
     const configured = member.capabilities?.tools?.allow

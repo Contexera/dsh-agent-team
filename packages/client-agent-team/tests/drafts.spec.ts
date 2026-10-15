@@ -70,7 +70,6 @@ describe('TeamDraftStore', () => {
     store.writeDraft('channel:channel:a' as never, '')
 
     expect(stored()['channel:channel:a']).toBeUndefined()
-    // Writing emptiness into an empty slot stays silent.
     store.writeDraft('channel:channel:empty' as never, '')
     expect(stored()['channel:channel:empty']).toBeUndefined()
   })

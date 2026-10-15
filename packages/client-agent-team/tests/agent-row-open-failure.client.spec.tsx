@@ -12,8 +12,6 @@ describe('Team agent session open failures', () => {
   it('reports a rejected open instead of leaving the sidebar ahead of the seat', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     await b.view.findByText('builder')
-    // A Session the Client catalog does not carry yet — the window right after
-    // a Member is created, where `uiWorkspace.openSession` throws.
     b.openSession.mockImplementation(() => {
       throw new Error('sessions.retain: unknown session session:member:builder')
     })

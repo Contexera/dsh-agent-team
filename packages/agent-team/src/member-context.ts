@@ -76,7 +76,6 @@ export function renderMemberIdentity(member: Pick<AgentTeamAgentMember, 'handle'
     : `Team identity: you are @${member.handle} — ${member.description}`
 }
 
-/** A current address list, not a copy of instructions from another checkout. */
 export function renderMemberWorkspaces(workspaces: readonly { readonly workspaceId: string; readonly path: string | undefined; readonly default: boolean }[]): string {
   if (workspaces.length <= 1) return ''
   return [

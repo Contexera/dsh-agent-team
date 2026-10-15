@@ -58,8 +58,6 @@ export function sanitizeFileName(raw: string): string {
     .replace(/[\s.]+$/g, '')
   // oxlint-enable no-control-regex
   if (cleaned === '') return 'attachment'
-  // The metadata sidecar owns 'meta.json' inside every entry directory; a
-  // payload with that name would be clobbered by the sidecar and unreadable.
   if (/^meta\.json$/i.test(cleaned)) return `_${cleaned}`
   // Win32 CreateFile resolves these device names (with or without an
   // extension) as hardware, so the payload write would fail or alias a device.
@@ -91,9 +89,6 @@ export function mediaTypeForPath(raw: string): string {
  * so a rejection anywhere leaves the upload cache untouched.
  */
 export async function validatePathAttachment(raw: string): Promise<void> {
-  // The fault is stated first and the registered way out second, so the model
-  // reads what was refused before it reads what to do — the same order every
-  // other Team rejection uses.
   if (!isAbsolute(raw)) throw new Error(`attachment path '${raw}' must be absolute — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
   const info = await stat(raw).catch(() => undefined)
   if (info === undefined) throw new Error(`attachment path '${raw}' does not exist — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
@@ -210,7 +205,6 @@ export async function scanAttachmentCache(root: string): Promise<readonly CacheE
       const meta = JSON.parse(metaRaw.toString('utf8')) as AttachmentMeta
       entries.push({ attachmentId: id as AgentTeamAttachmentId, uploadedAt: Date.parse(meta.uploadedAt) })
     } catch {
-      // A half-written or foreign directory is not ours to judge; skip it.
     }
   }
   return entries

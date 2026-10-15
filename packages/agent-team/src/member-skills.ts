@@ -5,10 +5,6 @@
  * private `skills/` directory (default roots excluded), and filters `list()`
  * output by that Member's selection ref.
  *
- * Deliberate interface reservation: this per-Member provider seam is the
- * primitive future Runtime Revision manifests orchestrate — do not remove
- * during cleanup.
- *
  * @module @contexera/dsh-agent-team/member-skills
  */
 

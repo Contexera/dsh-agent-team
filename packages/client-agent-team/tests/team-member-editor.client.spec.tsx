@@ -80,7 +80,6 @@ describe('ModelPickerField catalog load', () => {
     let resolveSecond!: (result: RemoteResult<TeamModelCatalog>) => void
     loadModels.mockImplementationOnce(() => new Promise<RemoteResult<TeamModelCatalog>>((resolve) => { resolveSecond = resolve }))
     renderPicker(loadModels)
-    // The revalidation is still pending, yet the warmed rows render at once.
     expect(screen.getByRole('button', { name: '模型' })).toBeTruthy()
     expect(screen.queryByText('正在加载模型目录…')).toBeNull()
     resolveSecond(catalogOk())

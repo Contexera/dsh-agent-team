@@ -12,7 +12,6 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
-/** Which sidebar list an order belongs to; the two ledgers are independent. */
 export type TeamSidebarListKind = 'channels' | 'agents'
 
 /** Insert side of a drop relative to the row under the pointer. */
@@ -30,12 +29,6 @@ function listKey(workspaceId: WorkspaceId | undefined, kind: TeamSidebarListKind
 
 const MEMORY_ONLY = Symbol('sidebar-order.memory')
 
-/**
- * Read-through parse cache over the raw persisted payload: repeated snapshots
- * skip re-validating an unchanged payload, while anything written outside this
- * module — another tab, devtools, a cleared store — is picked up because the
- * raw comparison misses.
- */
 let cachedRaw: string | null | typeof MEMORY_ONLY | undefined
 let cachedOrders: StoredOrders = {}
 
@@ -119,7 +112,6 @@ const listeners = new Set<() => void>()
 interface SnapshotEntry {
   atRevision: number
   signature: string
-  /** Fingerprint of the persisted preference this result folded in. */
   savedFingerprint: string
   result: readonly string[]
 }

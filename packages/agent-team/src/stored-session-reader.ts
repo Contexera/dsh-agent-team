@@ -167,12 +167,6 @@ export class StoredSessionReader {
     }
   }
 
-  /**
-   * Whether one stored Session has durable persisted content, decided through
-   * `stat`: the backend reports a still-draining session through its pending
-   * header, so this is the existence probe activation relies on. Only the
-   * missing case returns `false`; unexpected errors propagate as before.
-   */
   async exists(sessionId: SessionId): Promise<boolean> {
     return (await this.ctx.sessionPersistence.stat(sessionId)) !== undefined
   }

@@ -78,8 +78,6 @@ export interface AgentTeamModelSelection {
  */
 export interface AgentTeamMemberCapabilities {
   /**
-   * Deliberate interface reservation, no UI writes it today: Runtime Revision
-   * manifests depend on this seam — do not remove during cleanup.
    * Absent = the Member sees all standard tools; present = the activation
    * allow-list (unknown names drop with a warning; the Host always unions
    * the five Team tools over it).
@@ -479,20 +477,10 @@ export type AgentTeamThreadFact =
     readonly message: AgentTeamMessage
     /** Structured Member refs from the originating send operation; empty when the Message mentions nobody. */
     readonly mentions: readonly AgentTeamMemberId[]
-    /**
-     * What this Message answers, resolved for a reader at read time.
-     *
-     * Deliberately outside `AgentTeamStoredThreadFact`: this is a projection a
-     * read adds, never a durable fact, so a stored record never carries it and
-     * the storage schema is untouched. `sender` is a printable handle (`human`
-     * for the Human), not a Member ref, because the consumer renders it.
-     */
     readonly replyTo?: AgentTeamMessageReplyContext | undefined
-    /** Wall-clock instant of the committing ledger operation; message facts read through to their Message. */
     readonly occurredAt: string
   }
   | { readonly kind: 'activity'; readonly sequence: number; readonly activity: AgentTeamActivity
-    /** Wall-clock instant of the committing ledger operation; activities have no instant of their own. */
     readonly occurredAt: string }
 
 /** One fact returned by a durable Thread read. */

@@ -4,15 +4,6 @@ import type { AgentTeamBodyMentionCandidate } from '../src/mentions.ts'
 import type { AgentTeamMemberId } from '../src/types.ts'
 import { MENTION_BODY_FIXTURE } from './fixtures/mention-bodies.ts'
 
-/**
- * A Message names its recipients in its own body. These tests lock the scan
- * that decides who a written `@Handle` reaches: the `@` is required, matching
- * is case-insensitive on Unicode word boundaries with the longest handle first,
- * and code is quoted rather than called. The same scan serves a Human typing in
- * the Web Client and an Agent composing through `team_message`, so a mistake
- * here notifies the wrong Member from both surfaces.
- */
-
 const memberId = (value: string): AgentTeamMemberId => `member:${value}` as AgentTeamMemberId
 const SENDER = memberId('sender')
 

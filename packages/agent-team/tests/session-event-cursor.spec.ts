@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { advanceOwnedSessionEventCursor, advanceSessionEventCursor, initSessionEventCursor, type SessionCursorEvent, type SessionEventCursor, type SessionEventFold } from '../src/session-event-cursor.ts'
 
-/** Build the minimal cursor event shape; `payload` stands in for any event body. */
 function event(seq: number, type: string, payload = ''): SessionCursorEvent & { readonly payload: string } {
   return { seq, type, payload }
 }

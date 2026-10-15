@@ -7,7 +7,6 @@ import css from './avatar-stack.module.css'
 /** Distinct owners past this count collapse into one `+N` chip. */
 const MAX_VISIBLE = 3
 
-/** One owner as the stack draws it: the id carries the hue, the name the initial. */
 export interface TeamAvatarOwner {
   readonly memberId: AgentTeamMemberId
   /** Public handle, or the raw Member id when the roster no longer names them. */

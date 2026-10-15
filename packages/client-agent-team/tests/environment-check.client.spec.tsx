@@ -7,13 +7,6 @@ import { TeamEnvironmentCheck, type TeamEnvironmentLoader } from '../src/client/
 import { EnvironmentCheck } from '../src/client/EnvironmentCheck.tsx'
 import { zh } from '../src/client/locales.ts'
 
-/**
- * The environment block states one of three verdicts in text plus an icon, and
- * it never states a version it was not given. These tests hold the three
- * shapes, the withholding rules (no derived certified version, no line), and
- * the fact that the block is quiet rather than alarming before a read lands.
- */
-
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
   for (const [name, replacement] of Object.entries(params ?? {})) value = value.replace(`{${name}}`, String(replacement))

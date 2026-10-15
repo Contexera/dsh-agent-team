@@ -3,28 +3,6 @@ import { parse } from 'yaml'
 import { bundleVersionOf, readInstalledManifest } from './installed-manifest.ts'
 
 /**
- * Human identity profile: the one configurable display name plus the avatar
- * reference. `member:human` stays the durable identity everywhere; only the
- * handle shown in team_view, @ matching, and UI follows this profile.
- *
- * Storage split (see spec.md v1):
- * - name + avatarRef are the Team Host row's own Config, so they live in the
- *   active profile's patch document as that row's `config` and the settings
- *   service derives their form from this schema. rc.1 derives every form from
- *   a plugin's Config, so the retired `installSection` namespace — a section of
- *   its own — has no counterpart; the row id below is the settings namespace.
- * - avatar bytes live under a persistent directory below; the profile holds
- *   only the reference, never a data URL. The composer attachment cache is
- *   TTL-bound and must not hold avatar bytes.
- *
- * The legacy-section adoption below is transitional: it exists for installs
- * upgraded from a pre-rc.1 profile document, and retires — with
- * `LEGACY_HUMAN_PROFILE_SECTION`, `parseLegacyHumanProfile`, and
- * `planLegacyAdoption` — once such installs are no longer supported. Nothing
- * else in the Host reads that document.
- */
-
-/**
  * Settings namespace of the Human profile: the Team Host row's id in
  * `cordis.patch.yml`, which is what the settings service addresses a form and a
  * write by AND the id the profile-document write patches. It is addressed by
@@ -73,11 +51,6 @@ export function normalizeHumanName(raw: string): string {
   return raw.normalize('NFKC').trim()
 }
 
-/**
- * Validate one candidate display name with the same floor as Member handles:
- * non-empty after trim. Uniqueness against live Members is checked by the
- * Host (which owns the ledger), not here, so this stays a pure function.
- */
 export function assertValidHumanName(raw: string): string {
   const name = normalizeHumanName(raw)
   if (name === '') throw new Error('human name must not be empty')

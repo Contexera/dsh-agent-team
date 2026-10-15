@@ -4,13 +4,8 @@ import type {
 } from '@contexera/dsh-agent-team/types'
 import { bytesToBase64 } from './attachment-preview.ts'
 
-/** Fresh idempotency identity for one Client-initiated durable request. */
 export const mintRequestId = (): AgentTeamRequestId => crypto.randomUUID() as AgentTeamRequestId
 
-/**
- * Upload composer files in order. One failure stops with the error text; the
- * caller keeps its chips so a retry uploads only the still-pending files.
- */
 export const uploadComposerFiles = async (
   putAttachment: (request: AgentTeamPutAttachmentRequest) => Promise<RemoteResult<AgentTeamPutAttachmentResult>>,
   workspaceId: AgentTeamPutAttachmentRequest['workspaceId'],

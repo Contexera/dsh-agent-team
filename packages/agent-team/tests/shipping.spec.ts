@@ -37,19 +37,12 @@ async function shippedHarnessName(): Promise<string> {
 // improvement squeezed into the last few characters.
 const PERSONA_CHARACTER_BUDGET = 15000
 
-// The team-member preset rides the shipped patch as one declarative definition
-// row; these assertions scope to exactly that row, from its `- id:` marker to
-// the group's host row that follows it.
 function teamMemberPresetText(patch: string): string {
   const start = patch.indexOf('        - id: wowyuarm-agent-team-preset-team-member')
   const end = patch.indexOf('        - id: wowyuarm-agent-team-host')
   return start >= 0 && end > start ? patch.slice(start, end) : ''
 }
 
-// The YAML block-scalar bodies under `prefix:`/`suffix:`, de-indented the way YAML
-// reads them. The block ends at the first line that is not more indented than its
-// key, so a renamed config key yields an empty string — which is why the budget
-// test also asserts the extraction found the persona at all.
 function personaInstructionText(preset: string): string {
   const lines = preset.replaceAll('\r\n', '\n').split('\n')
   const blocks: string[] = []
@@ -83,8 +76,6 @@ describe('Agent Team shipping contract', () => {
       readFile(resolve(root, 'package.json'), 'utf8'),
     ])
     const preset = teamMemberPresetText(patch)
-    // Extraction guard: a renamed definition-row id would silently empty the
-    // slice and make every preset assertion below vacuous.
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-preset'")
     expect(patch).toContain('id: wowyuarm-agent-team-scope')
     expect(patch).toContain("name: '@deepseek-ai/dsh-agent-preset-registry'")
@@ -223,16 +214,8 @@ describe('Agent Team shipping contract', () => {
     // returned token may serve as the basis for the next deliberate mutation.
     expect(preset).toContain('copy the next-write token that fully drained read renders')
     expect(preset).toContain("a successful public mutation's returned token may serve as the basis for the next deliberate mutation")
-    // The persona distinguishes the two reply channels: direct session talk
-    // with the Human answers in plain text; ledger-backed Team Threads are
-    // what team_message.reply is for.
     expect(preset).toContain('reply in plain text')
     expect(preset).toContain('not a reply channel for it')
-    // The message contract is conclusion-first with one mention rule: the
-    // Human is mentioned exactly when they must know or decide (that mention
-    // is the Human's notification), a decision owed states what needs
-    // deciding and the default in plain words (no fixed template), and
-    // mechanical detail moves below the conclusion rather than being dropped.
     expect(preset).toContain('Lead with the conclusion or state; put mechanical detail')
     expect(preset).toContain('never drop detail a peer Member needs, move it below')
     expect(preset).toContain('mention the Human as @human — that is how they are notified')
@@ -266,10 +249,6 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('`@all` reaches every Member of the Channel')
     expect(preset).toContain('never carried still commits your message, but delivers nothing to that Member')
     expect(preset).not.toContain('pass structured Member refs in the mentions parameter')
-    // The persona keeps only the physical facts of the private space
-    // (absolute paths, memory/notes discipline, reusable-assets boundary);
-    // skill craft itself lives in the bundled member-skill-manager and its
-    // description routes skill work to it.
     expect(preset).toContain('use the injected absolute paths')
     expect(preset).toContain('formal deliverables')
     expect(preset).toContain('your own judgment per task')
@@ -285,8 +264,6 @@ describe('Agent Team shipping contract', () => {
     expect([...toolSource.matchAll(/name: '(team_[a-z]+)'/g)].map(match => match[1])).toEqual([
       'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_claim', 'team_view',
     ])    // Validation errors teach the same two token surfaces as the descriptions,
-    // never a single-source story. The route sentence itself lives in the
-    // recovery registry, so the tool source cites it rather than spelling it.
     expect(toolSource).toContain("from '@contexera/dsh-agent-team/recovery-hints'")
     const recoverySource = await readFile(resolve(root, 'packages/agent-team/src/recovery-hints.ts'), 'utf8')
     expect(recoverySource).toContain('or reuse the one your own last committed mutation rendered')
@@ -304,8 +281,6 @@ describe('Agent Team shipping contract', () => {
       dsh: { bundle: { patch: string } }
     }
     expect(manifest.dsh.bundle.patch).toBe('./cordis.patch.yml')
-    // The preset directory no longer ships: the declarative definition row in
-    // the patch is its only carrier.
     expect(manifest.files).not.toContain('packages/agent-team/preset/**/*')
     expect(manifest.files).toContain('packages/agent-team/core-skills/**/*')
     expect(manifest.files).toContain('packages/agent-team/lib/**/*')

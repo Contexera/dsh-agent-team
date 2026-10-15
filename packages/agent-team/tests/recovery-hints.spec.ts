@@ -9,14 +9,6 @@ import {
   recoveryFor,
 } from '../src/recovery-hints.ts'
 
-/**
- * The recovery registry is a gate, not a constant file, and these tests are
- * what make it one. A registry that nothing reaches, or a rejection that spells
- * its own way out, are both silent drift — the failure mode the registry exists
- * to prevent — so each test below is a mutation check: it goes red for a real
- * change, and the summary of the change it pins is in its name.
- */
-
 /** The situations the model-facing code can actually produce, by hand. */
 const PRODUCED_KINDS: readonly string[] = Object.freeze([
   'unread_required',

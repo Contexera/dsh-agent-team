@@ -12,7 +12,6 @@ describe('sidebar section collapse persistence', () => {
     act(() => { setSidebarSectionOpen('w1' as never, 'channels', false) })
     expect(renderHook(() => useSidebarSectionOpen('w1' as never, 'channels')).result.current).toBe(false)
     expect(localStorage.getItem('dsh.agent-team.sidebar-sections')).toBe('{"collapsed":["w1|channels"]}')
-    // Re-expanding removes the key entry rather than storing `true`.
     act(() => { setSidebarSectionOpen('w1' as never, 'channels', true) })
     expect(renderHook(() => useSidebarSectionOpen('w1' as never, 'channels')).result.current).toBe(true)
     expect(localStorage.getItem('dsh.agent-team.sidebar-sections')).toBe('{"collapsed":[]}')

@@ -4,7 +4,6 @@ import type { TeamSidebarProps } from './slots.ts'
 import { TeamMemberAvatar } from './TeamMemberAvatar.tsx'
 import css from './member-row.module.css'
 
-/** One membership action: what it says and which Member it acts on. */
 export interface TeamMemberAction {
   readonly label: string
   readonly onSelect: () => void
@@ -24,7 +23,6 @@ export interface TeamMemberAction {
  */
 export function TeamMemberIdentity({ status, name, className, t }: {
   readonly status: AgentTeamClientMemberStatus
-  /** Handle spelling for this surface; defaults to the mention form. */
   readonly name?: string | undefined
   /** Surface-local copy hook (sidebar line heights, dialog density). */
   readonly className?: string | undefined

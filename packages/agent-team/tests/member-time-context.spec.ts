@@ -3,14 +3,6 @@ import * as memberTimeContext from '../src/member-time-context.ts'
 import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { MessageId, type UserMessage } from '@deepseek-ai/dsh-llm'
 
-/**
- * The clock plugin folds its baseline from the Member Session's own events,
- * the same manual-fold pattern the Host context projection uses. These tests
- * lock the fold semantics: what counts as a model-visible event, how turn
- * boundaries clear the turn-local baseline, and what a fresh Session (a
- * rollover) may and may not claim about elapsed time.
- */
-
 const PLUGIN = memberTimeContext.name
 
 function userMessage(source: UserMessage['source'], text = 'x'): UserMessage {

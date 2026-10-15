@@ -40,14 +40,6 @@ export interface TeamJudgeSection {
   readonly jev?: unknown
 }
 
-/**
- * Project one section layer onto the controls this page renders. A control the
- * layer does not carry stays absent rather than becoming an empty string, which
- * is what the model reads to decide whether a field is overridden and what a
- * reset reverts to.
- * @param layer - a section, or one of its composition layers.
- * @returns the flat control values, or undefined when the layer carries none.
- */
 function flatten(layer: unknown): Record<string, unknown> | undefined {
   if (layer === null || typeof layer !== 'object') return undefined
   const flat: Record<string, unknown> = {}

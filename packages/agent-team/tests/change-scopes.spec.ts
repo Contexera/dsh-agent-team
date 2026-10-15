@@ -49,7 +49,6 @@ function replayLedger(facility: DomainFacility): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }
 
-/** Durable Member record plus its actor, for commits the service cannot make without a live Agent. */
 async function addLedgerMember(ledger: AgentTeamLedger, channelRef: AgentTeamChannelRef): Promise<AgentTeamMemberActor> {
   const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberActor['memberId']
   const handle = 'reader'

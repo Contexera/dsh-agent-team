@@ -111,7 +111,6 @@ if (offline) {
     fail('#4303 body', `unreadable — ${detail.split('\n')[0]}`)
   }
   if (body != null) {
-    // Each language table states the baseline twice over: version AND full range.
     const rows = [
       { name: '#4303 body (en)', pattern: /Certified against\**\s*\|?\s*(.+?)\s*\|?\s*$/m },
       { name: '#4303 body (zh)', pattern: /^\|\s*\*\*认证基线\*\*\s*\|(.+)\|\s*$/m },

@@ -45,7 +45,6 @@ async function harness(pool = new MemoryMediaPool()): Promise<{ readonly ctx: Co
   return { ctx, facility }
 }
 
-/** A cold ledger over the same table: sequential-replay validation must accept the update records. */
 function replayLedger(facility: DomainFacility): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }

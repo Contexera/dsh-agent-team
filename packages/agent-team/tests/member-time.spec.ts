@@ -23,17 +23,6 @@ import type {
 } from '../src/types.ts'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 
-/**
- * Member time awareness — the ledger-level contract.
- *
- * The hard invariant (acceptance clause): the same historical fact's
- * occurredAt must be identical on every reread path — read, history paging,
- * post-compaction rebuild, and old-ledger replay. These tests build a real
- * ledger, read the same facts through every projection the tools surface,
- * and assert byte-identical instants plus the inbox/view/discovery
- * projections hanging off the same single per-fact source.
- */
-
 const alpha = WorkspaceId('workspace:alpha')
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 

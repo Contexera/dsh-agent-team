@@ -3,8 +3,6 @@ import { mentionSurfaceOf, mentionTierIsParticipant } from '../src/client/mentio
 
 describe('mention row weight', () => {
   it('reads the surface from the draft key the composer already writes to', () => {
-    // One authority: the key's discriminant names the conversation, so the
-    // row's weight cannot disagree with the draft it belongs to.
     expect(mentionSurfaceOf('thread:thread:one' as never)).toBe('thread')
     expect(mentionSurfaceOf('channel:channel:one' as never)).toBe('channel')
   })

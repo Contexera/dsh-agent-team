@@ -4,21 +4,6 @@ import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { isFactOnSurface, visibleTeamTexts } from '../src/surface-visibility.ts'
 import type { AgentTeamThreadReadFact } from '../src/types.ts'
 
-/**
- * The surface probe: whether one unread fact is already on a Member's
- * model-visible surface, in full.
- *
- * This is the half of Channel B that decides *what counts as read*. The three
- * properties that make the whole channel safe are locked here, because the
- * integration suite can only prove what the probe is handed:
- *
- *  1. A Team-authored event whose text carries the body verbatim is a hit.
- *  2. A truncated notice is never a hit — the model never saw the whole body.
- *  3. An ordinary notice, which carries a count and not a character of body,
- *     is never a hit; and another producer's events are not this plugin's.
- */
-
-/** One user message as the Session log holds it, reduced to what the probe reads. */
 interface FakeEvent {
   readonly type: 'user/message'
   readonly data: {
@@ -27,11 +12,6 @@ interface FakeEvent {
   }
 }
 
-/**
- * A Session-shaped object exposing only what the probe touches: the surface
- * node identities and a one-event window read. Built from a list of events, so
- * node `i` resolves to event `i` exactly as the seq = log.length contract says.
- */
 function fakeAgent(events: readonly FakeEvent[]): Agent {
   const nodes = events.map((_, index) => index)
   return {
@@ -46,17 +26,14 @@ function fakeAgent(events: readonly FakeEvent[]): Agent {
   } as never
 }
 
-/** A user message from this plugin, as a notice or DM relay renders one. */
 function teamEvent(text: string): FakeEvent {
   return { type: 'user/message', data: { source: { kind: AGENT_TEAM_PLUGIN_ID }, content: [{ type: 'text', text }] } }
 }
 
-/** A message from any other producer, which must never be read as Team's own. */
 function foreignEvent(text: string): FakeEvent {
   return { type: 'user/message', data: { source: { kind: 'plugin:someone-else' }, content: [{ type: 'text', text }] } }
 }
 
-/** The unread fact the gate is refusing over. */
 function factOf(body: string, sequence = 12): AgentTeamThreadReadFact {
   return { fact: { kind: 'message', sequence, message: { messageRef: 'message:a', body } as never, mentions: [], occurredAt: '2026-10-14T00:00:00.000Z' }, unread: true, direct: true } as never
 }
@@ -93,10 +70,6 @@ describe('the probe answers true only for a body the model saw in full', () => {
   })
 
   it('never matches an ordinary notice, which carries only a count', () => {
-    // The rendering is "Thread X: 2 unread update(s) · newest at …" — not one
-    // character of body, so no arrangement of facts can make it a hit. The
-    // asserted body is the unread Message's own text, which the notice never
-    // reproduces.
     const ordinary = 'Thread task:abc123: 2 unread updates · newest at 2026-10-14T00:00:00.000Z.'
     expect(isFactOnSurface([ordinary], factOf('please review this'))).toBe(false)
   })
@@ -114,7 +87,6 @@ describe('the probe answers true only for a body the model saw in full', () => {
     const intact = 'Direct Team mention\nFrom: quiet\nMessage: short body that was never cut'
     const text = [cut, intact].join('\n\n')
     expect(isFactOnSurface([text], factOf('short body that was never cut'))).toBe(true)
-    // And the cut body is still correctly refused, in that same text.
     expect(isFactOnSurface([text], factOf('x'.repeat(9 * 1024)))).toBe(false)
   })
 

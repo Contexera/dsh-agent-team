@@ -1,7 +1,3 @@
-// MultiMenuField: one labeled multi-select picker shared by every creation
-// form (Agent initial Channels, Channel initial Members). Selection toggles
-// without closing the list so several entries can be picked in one pass; the
-// capped card scrolls internally through long catalogs.
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'

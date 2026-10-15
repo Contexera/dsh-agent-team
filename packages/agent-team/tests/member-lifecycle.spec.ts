@@ -45,12 +45,6 @@ const requestId = (value: string): AgentTeamRequestId => value as AgentTeamReque
 const persistenceRaceError = (): Error =>
   Object.assign(new Error("scandir ENOENT: transient win32 staging directory raced the walk (test seam)"), { code: 'ENOENT' })
 
-/**
- * One-shot filesystem fault for the private-memory half of Member cleanup:
- * while `match` names a path fragment, `rm` on a matching target fails as a
- * real permissions fault would, on every platform this suite runs on. The
- * default (empty) passes every call through unchanged.
- */
 const rmFault = vi.hoisted(() => ({ match: '' }))
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
@@ -73,19 +67,14 @@ afterEach(async () => {
 })
 
 class EmptyAdapter extends LlmAdapter {
-  // The pressure policy resolves the current route's context capacity through
-  // the LLM service; the mock route reports a large window so ordinary turns
-  // stay below every budget.
   override resolveModel(provider: string, model: string) { return Promise.resolve({ provider, id: model, name: model, context: { contextWindow: 320_000 } }) }
   async * stream(_options: GenerateOptions): AsyncIterable<StreamChunk> { yield* [] }
 }
 
 class ScriptedAdapter extends EmptyAdapter {
   readonly requests: GenerateOptions[] = []
-  /** Session ids that produced each recorded request, aligned with `requests`. */
   readonly requestSessions: Array<string | undefined> = []
   private readonly responses: StreamChunk[][] = []
-  /** Context window per model name; the pressure route probe drives this. */
   resolveModelWindow: (model: string) => number = () => 320_000
 
   override resolveModel(provider: string, model: string) {
@@ -96,7 +85,6 @@ class ScriptedAdapter extends EmptyAdapter {
     this.responses.push(response)
   }
 
-  /** When set, every model call throws this instead of consuming the queue. */
   failWith: unknown = undefined
 
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -114,7 +102,6 @@ class GatedAdapter extends ScriptedAdapter {
   readonly release = Promise.withResolvers<void>()
   private calls = 0
 
-  /** 1-based model-call number whose stream blocks until `release`; default 1. */
   constructor(private readonly gateAt = 1) { super() }
 
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -163,8 +150,6 @@ function textResponse(text: string): StreamChunk[] {
 }
 
 function waitForIdle(ctx: Context, agent: NonNullable<ReturnType<Context['agents']['get']>>): Promise<void> {
-  // State-aware: an agent already idle resolves immediately; the event
-  // listener only covers agents that still have a transition ahead.
   if (agent.status === 'idle') return Promise.resolve()
   return new Promise(resolve => {
     const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
@@ -177,13 +162,6 @@ function waitForIdle(ctx: Context, agent: NonNullable<ReturnType<Context['agents
 
 type PersistenceBackend = 'jsonl'
 
-/**
- * The real roster with one test seam: agents armed here resolve no preset
- * composition, exactly as members composed before a bundle-row reload do.
- * Agents composed after arming resolve normally, so a re-activation heals.
- * While `failingMount` is set, preset mounts throw, as a Host restart against
- * a broken preset would, leaving an enabled Member without a live session.
- */
 class TestablePresets extends AgentPresetRegistry {
   readonly orphaned = new WeakSet<Context>()
   failingMount = false
@@ -210,7 +188,6 @@ async function realHarness(
   readonly project: string
   readonly workspaces: Map<WorkspaceId, { id: WorkspaceId; path: string; attachSession: () => Promise<void> }>
   readonly teamFiber: Awaited<ReturnType<Context['plugin']>>
-  /** Sessions the fake workspace registry archived, in archive order. */
   readonly archived: readonly SessionId[]
   /** One-shot failures for the workspace archive side effect. */
   readonly archiveFailures: { remaining: number }
@@ -256,15 +233,12 @@ async function realHarness(
   await ctx.plugin(LlmRuntime)
   ctx.llm.registerAdapter(['mock'], adapter)
   await ctx.plugin(SessionStore)
-  // The preset registry injects 'sessionProjections'; the roster stays PENDING without it.
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  // The Team pressure policy reads the token meter at every Member pre-step;
-  // tests that need pressure control override this with a writable fake.
   const pressureState = { usageTokens: 0, bySession: new Map<string, number>(), failFor: new Set<string>() }
   ctx.provide('tokenMeter', { measure: (session: { id: string }): { totalTokens: number; nodes: { seq: number; tokens: number }[] } => {
     if (pressureState.failFor.has(session.id)) throw new Error('meter unavailable for this session')
@@ -294,13 +268,8 @@ async function realHarness(
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => workspaces.get(id),
     list: () => [],
-    // The registry-global archive set the real registry exposes: the Host
-    // reads it to decide whether a retired Session's archive effect is still
-    // owed, so the fake has to report the same durable truth.
     get archivedSessionIds(): readonly SessionId[] { return archived },
     archiveSession: async (sessionId: SessionId) => {
-      // The real registry resolves an already-archived id without writing;
-      // the fake mirrors that so repeated cleanup cannot record a duplicate.
       if (archived.includes(sessionId)) return
       if (archiveFailures.remaining > 0) {
         archiveFailures.remaining -= 1
@@ -327,7 +296,6 @@ describe('Agent Team Member lifecycle', () => {
     const agent = ctx.agents.get(added.status.member.sessionId)!
     await ctx.agentTeam.joinWorkspace({ requestId: requestId('global-join'), workspaceId: otherId, memberId })
     expect(ctx.agentTeam.membersForClient({ workspaceId: otherId }).map(status => status.member.memberId)).toEqual([memberId])
-    // The committed join wakes the idle Member once; the notice names the Workspace and the unchanged Session.
     adapter.enqueue(textResponse('Acknowledged the participation change.'))
     await agent.whenIdle()
     expect(adapter.requests).toHaveLength(1)
@@ -370,9 +338,6 @@ describe('Agent Team Member lifecycle', () => {
 
   it('accepts a unique Workspace id abbreviation and points at the fix when the abbreviation is not unique', async () => {
     const { ctx, workspaces } = await realHarness()
-    // Two Workspaces sharing a UUID prefix: the abbreviation is ambiguous, so
-    // only the full id resolves. A unique prefix must resolve like the branded
-    // refs do, instead of demanding an exact string.
     const homeId = WorkspaceId('workspace:1a2b3c4d-0000-4000-8000-000000000001')
     const otherId = WorkspaceId('workspace:1a2b3c4d-0000-4000-8000-000000000002')
     workspaces.set(homeId, { id: homeId, path: '/tmp/other-project', attachSession: async () => {} })
@@ -384,28 +349,17 @@ describe('Agent Team Member lifecycle', () => {
     const call = (name: string, args: unknown) => ctx.tools.execute({ signal: new AbortController().signal,
       callId: ToolCallId(`abbrev-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
 
-    // The unique abbreviation resolves — the same tolerance the branded refs
-    // already have, so a Member echoing a prefix is not rejected.
     const abbreviated = await call('team_view', { workspace: 'workspace:1a2b3c4d-0000-4000-8000-000000000001' })
     expect(abbreviated.isError, abbreviated.isError ? abbreviated.error.message : '').toBe(false)
 
-    // The ambiguous prefix is refused with a message that names both
-    // candidates and says what to do, rather than a bare lookup failure. The
-    // assertions pin that contract — every candidate named, and a route out —
-    // never one word of the sentence, which the recovery registry owns.
     const ambiguous = await call('team_view', { workspace: 'workspace:1a2b3c4d' })
     expect(ambiguous.isError).toBe(true)
     if (!ambiguous.isError) throw new Error('expected an ambiguous-Workspace rejection')
     expect(ambiguous.error.message).toContain(homeId)
     expect(ambiguous.error.message).toContain(otherId)
     expect(ambiguous.error.message).toMatch(/longer prefix|full Workspace id/i)
-    // The rendered sentence states the refusal once. A doubled verb is the
-    // signature of a sentence rewritten around its own interpolated value
-    // instead of composing with it.
     expect(ambiguous.error.message.match(/matches/g) ?? []).toHaveLength(1)
 
-    // An unknown-but-unambiguous-shaped id still says it is not participated,
-    // and still lists the choices.
     const unknown = await call('team_view', { workspace: 'workspace:9f8e7d6c-0000-4000-8000-000000000009' })
     expect(unknown.isError).toBe(true)
     if (!unknown.isError) throw new Error('expected an unknown-Workspace rejection')
@@ -413,12 +367,6 @@ describe('Agent Team Member lifecycle', () => {
     expect(unknown.error.message).toContain(homeId)
   })
 
-  /**
-   * Every argument-shape rejection a Member can actually trigger must carry the
-   * next action, not merely name the fault. These are the ten templates the
-   * offline session census recorded as hit at least once; asserting each one
-   * keeps a future edit from silently dropping the recovery clause again.
-   */
   it('every argument-shape rejection names the next action', async () => {
     const { ctx, workspaceId } = await realHarness()
     const channel = await ctx.agentTeam.createChannel({ requestId: requestId('shape-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
@@ -439,53 +387,30 @@ describe('Agent Team Member lifecycle', () => {
     const historyArgs = await rejected('team_thread', { action: 'read', threadRef, beforeSequence: 1, limit: 5 })
     expect(historyArgs).toContain('action: history')
     expect(historyArgs).toMatch(/read .*(drain|unread)/i)
-    // messageRef belongs to `message` alone. The parameter schema is implicitly
-    // open, so nothing but this guard refuses it — and a silent drop would tell
-    // a model that reached for it nothing at all. One guard covers every action
-    // that is not `message`, so each of them is asserted: a new read action must
-    // not be able to reopen the hole by omission.
     for (const action of ['read', 'history'] as const) {
       const strayRef = await rejected('team_thread', { action, threadRef, messageRef: 'message:23011' })
       expect(strayRef, `${action} silently dropped messageRef`).toContain('does not accept messageRef')
       expect(strayRef).toContain('action: message')
     }
-    // The action that does own it is not caught by the same guard: a `message`
-    // call missing its ref is refused for the missing ref, never for owning one.
     const owned = await rejected('team_thread', { action: 'message', threadRef })
     expect(owned).toContain('messageRef')
     expect(owned).not.toContain('does not accept')
-    // A missing mutation basis says which token to copy and where from. Both
-    // tools refuse it on their own argument shape, before the Host ever sees
-    // the call, and both name the same drain-and-copy route.
     expect(await rejected('team_message', { action: 'reply', threadRef, body: 'no token' })).toMatch(/team_thread read/)
     expect(await rejected('team_claim', { action: 'done', taskRef, claimRef: 'claim:missing' })).toMatch(/team_thread read/)
-    // A missing identity says which parameter is absent and where to get it.
     expect(await rejected('team_claim', { action: 'done', baseRevision: 1, claimRef: 'claim:missing' })).toContain('taskRef')
     expect(await rejected('team_claim', { action: 'list' })).toContain('taskRef')
-    // A wrong action combination says what the action accepts instead.
     expect(await rejected('team_claim', { action: 'claim', taskRef, baseRevision: 1, direction: 'd', claimRef: 'claim:missing' })).toContain('direction')
     expect(await rejected('team_claim', { action: 'done', taskRef, baseRevision: 1, direction: 'd' })).toContain('claimRef')
-    // An unusable target says what it must be.
     expect(await rejected('team_message', { action: 'reply', threadRef, baseRevision: 1, replyToMessageRef: 'message:23011', body: 'bad target' })).toContain('recorded Message')
     expect(await rejected('team_message', { action: 'reply', threadRef, baseRevision: 1, attachments: ['relative/shot.png'], body: 'bad attachment' })).toMatch(/absolute|does not exist/)
-    // A start addressed the wrong way says which parameter it wants.
     expect(await rejected('team_message', { action: 'start', body: 'no channel' })).toContain('channelRef')
-    // A DM addresses a person, not a conversation: it says which Member ref it
-    // wants, and takes nothing a Thread write would take.
     expect(await rejected('team_dm', { body: 'no recipient' })).toContain('memberRef')
 
-    // Another Member's Claim: the refusal names the owner rule and the route
-    // to the Member's own Claims, rather than only stating the restriction.
-    // The builder's own claim on the Task is what it tries to close here, so
-    // the target is unambiguously someone else's.
     const peer = await ctx.agentTeam.addMember({ requestId: requestId('shape-peer'), workspaceId, handle: 'peer', description: 'Reviews changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
     const peerAgent = ctx.agents.get(peer.status.member.sessionId)!
     const peerRead = await ctx.agentTeam.readThreadForAgent(peerAgent, { requestId: requestId('shape-peer-read'), workspaceId, threadRef })
     const peerClaim = await ctx.agentTeam.changeClaimForAgent(peerAgent, { requestId: requestId('shape-peer-claim'), workspaceId, taskRef, action: 'claim', baseRevision: peerRead.thread.revision, direction: 'Peer claim on this Task' })
     if (peerClaim.kind !== 'committed') throw new Error(`expected committed peer claim, received ${peerClaim.kind}`)
-    // The peer's claim advanced the Thread, so the builder reads once more to
-    // hold a current token: the only thing standing between it and the peer's
-    // Claim is ownership, which is what this assertion is about.
     const builderRead = await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('shape-builder-read'), workspaceId, threadRef })
     const ownAttempt = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('shape-own-claim'), name: 'team_claim', arguments: { action: 'done', taskRef, baseRevision: builderRead.thread.revision, claimRef: peerClaim.claim.claimRef }, agent })
     expect(ownAttempt.isError).toBe(true)
@@ -2591,11 +2516,6 @@ describe('Agent Team fresh context_rollover rollover (ticket 01)', () => {
   })
 })
 
-/**
- * Wait until the predicate holds or the deadline passes. The default budget
- * mirrors the file-level testTimeout: multi-generation rollover chains take
- * real driver turns on slow CI machines and can exceed a tight 5s poll.
- */
 async function waitFor<T>(probe: () => T | undefined, timeoutMs = 60_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -2606,14 +2526,6 @@ async function waitFor<T>(probe: () => T | undefined, timeoutMs = 60_000): Promi
   }
 }
 
-/**
- * Wait until every given Session id has been archived. Archiving rides
- * retirement, which a rollover publishes only after its durable binding flip,
- * so observing the flip (or a later generation's registration) can still
- * sample the archive list too early. The assertion stays exactly as strong —
- * an id that is never archived still fails — but stops depending on the order
- * inside the commit sequence.
- */
 async function waitForArchived(archived: readonly SessionId[], ...sessionIds: readonly SessionId[]): Promise<void> {
   await waitFor(() => sessionIds.every(sessionId => archived.includes(sessionId)) ? true : undefined)
 }
@@ -4017,12 +3929,6 @@ describe('Agent Team recovery hardening (ticket 04)', () => {
   })
 
   it('finishes a spent rollover intent at activation when a restart lands after the turn ended but before the swap', async () => {
-    // The crash window no other test reaches: the rollover result is durable,
-    // the containing turn HAS ended, the lifecycle commit seam refused the
-    // swap, and the process died before any retry. Activation then replays the
-    // Session, re-derives the spent intent, and must complete the transition
-    // itself — commenting the recovery hook out of the activation path leaves
-    // every other test in this suite green, so this case is its only guard.
     const adapter = new ScriptedAdapter()
     const { ctx, workspaceId, jobsState, teamFiber: initialFiber } = await realHarness(adapter)
     const channel = await ctx.agentTeam.createChannel({ requestId: requestId('recb-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
@@ -5083,12 +4989,6 @@ describe('Agent Team Member private memory directory sanitization (issue #7)', (
   })
 
   it('merges a hand-created colon twin directory into the sanitized root on activation', async () => {
-    // The twin is NOT the ledger legacy directory: it is a directory the
-    // Member's own tool call created under the identity-ref spelling after
-    // the sanitized root already existed (the live Vera incident: 6 days of
-    // colon-form habit, the fix-migration renamed the old root, then a fresh
-    // colon write created a new twin beside it). No ledger path names it, so
-    // only activation-time twin detection can find it.
     const { ctx } = await realHarness()
     const memberId = 'member:1a2b3c4d-0000-4000-8000-000000000002' as AgentTeamMemberId
     const parent = join(process.env.DSH_HOME!, 'agent-team', 'members')
@@ -5286,8 +5186,6 @@ describe('Agent Team member execution isolation (state-requests 02)', () => {
     // execution may not block lifecycle management of another Member.
     const suspending = ctx.agentTeam.suspendMember({ requestId: requestId('isolation-suspend'), memberId: reviewer.status.member.memberId })
     const suspensionOutcome = await Promise.race([suspending.then(() => 'settled' as const),
-      // 1.5s keeps the green side clear of slow-lane scheduler stalls; the
-      // red direction is deterministic (without the fix it never settles).
       new Promise<'pending'>(resolve => { setTimeout(() => resolve('pending'), 1500) })])
 
     // Release before asserting so the held turn always ends, red or green.

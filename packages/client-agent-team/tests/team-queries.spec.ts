@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { TeamQueries, type TeamQueryIdentity } from '../src/client/team-queries.ts'
 import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from '../src/client/team-changes.ts'
 
-/** Stand-in for TeamChangeStream: subscribers receive exactly what a test emits. */
 function hub() {
   const listeners: Array<{ scope: TeamChangeScope; listener: TeamChangeListener }> = []
   return {

@@ -9,7 +9,6 @@ usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
-/** Open the seeded Channel in Team mode: the surface that names and draws the Human. */
 async function openSeededChannel(options?: Parameters<typeof runtimeWithTeam>[0]) {
   const b = await runtimeWithTeam({
     initialChannels: true,

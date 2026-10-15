@@ -11,11 +11,6 @@ const CHROME = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
 let scaffold: WebScaffold
 let browser: Browser | undefined
 
-// PR #42 preview fixture: both sides of a conversation, two runs of consecutive
-// messages, a mention of the reader, quotes in both directions, a clamped body,
-// and a Task thread whose claims give the feed's entry row owners and a state.
-// Every write goes through the real Host paths (read → reply with baseRevision),
-// so the preview shows stored ledger state rather than markup painted by hand.
 const AGENTS = [
   { handle: 'aster', description: '功能开发、修复与测试' },
   { handle: 'vera', description: '独立验收、测试执行与证据' },
@@ -112,9 +107,6 @@ beforeAll(async () => {
     description: '预览样本：气泡、分组、有人@我、引用回复、长文折叠、Task 条目',
   })
   const channelRef = channel.channel.channelRef
-  // Channel participation is derived from Thread participation now, so nothing
-  // enrols anyone here: the fixture's Members take part by reading and writing
-  // the Threads below, which is what puts them in the Channel's roster.
 
   const opener = await team.sendMessage({
     requestId: 'ui-preview-opener' as never,

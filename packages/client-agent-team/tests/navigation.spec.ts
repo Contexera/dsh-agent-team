@@ -117,7 +117,6 @@ describe('TeamNavigation', () => {
       taskRef: 'task:1', threadRef: 'thread:1', taskNumber: 7,
       memberSessionId: 'session:builder', returnToSessionId: 'session:return',
     })
-    // Only the Member overlay is runtime state; a reload restores the Team location below it.
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({
       mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
       taskRef: 'task:1', threadRef: 'thread:1', taskNumber: 7,

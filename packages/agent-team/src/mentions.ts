@@ -30,13 +30,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/**
- * Character ranges the scanner must not read as mentions: fenced code blocks
- * and inline code spans. Authors quote handles there to talk *about* a name
- * rather than call it, and resolving those would notify the wrong Member.
- * The alternation tries the fenced form first so a block is never mistaken for
- * a run of inline spans.
- */
 function codeRanges(body: string): readonly (readonly [number, number])[] {
   const ranges: [number, number][] = []
   for (const match of body.matchAll(/```[\s\S]*?```|`[^`\n]*`/g)) {
@@ -74,7 +67,6 @@ export function scanBodyHandles(body: string, handles: readonly string[]): reado
   }
   if (usable.length === 0) return Object.freeze([])
   const excluded = codeRanges(body)
-  // Longest first so `@Reeves` never resolves as `@Reeve` plus a stray letter.
   const ordered = [...usable].sort((left, right) => right.length - left.length)
   const pattern = new RegExp(
     `(?<![\\p{L}\\p{N}_@])@(?:${ordered.map(handle => escapeRegExp(handle)).join('|')})(?=$|[^\\p{L}\\p{N}_])`,

@@ -8,8 +8,6 @@ import css from './conversation.module.css'
 
 export function TeamConversation({ t, useWorkspaces, navigation, drafts, humanIdentity, putAttachment, getAttachment, loadChannels, readThread, loadThreadHistory, threadObservations, subscribeChanges, loadMembers, loadInbox, sendMessage, reply, changeTask, promoteThread, selectThread, selectChannel, selectWorkspace, backToWorkspace, backToChannels, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession }: TeamConversationProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
-  // Every seat names and draws the Human from this one projection: the
-  // localized fallback stands only until the first profile read lands.
   const identity = useHumanIdentity(humanIdentity)
   const humanName = identity.name ?? t('human')
   const workspaces = useWorkspaces(state => state.items)

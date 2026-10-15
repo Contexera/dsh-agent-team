@@ -5,9 +5,7 @@ const BOTTOM_MARGIN_PX = 48
 export interface TimelineScroll {
   readonly ref: React.RefObject<HTMLElement>
   onScroll: () => void
-  /** Whether the reader currently sits within the follow margin of the bottom. */
   isPinned: () => boolean
-  /** Scroll the timeline to the latest fact immediately. */
   scrollToBottom: () => void
 }
 
