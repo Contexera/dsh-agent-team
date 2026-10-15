@@ -144,14 +144,16 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   return <section className={css.workspaceBrowser} aria-label={t('workspaces')}>
     {/* The way back to the conversation takes over the New Session bar's slot:
         the mode hides that bar, so this row stands where the reader met it —
-        directly under the shell's brand row — in the same 38px slab and the same
-        centred group, since the reader meets one bar in that position in either
-        mode. The seat is the closest a Team control can legally stand to the
+        directly under the shell's brand row — in the same 38px slab, with its
+        label centred and the chevron hanging off the label's leading edge.
+        The seat is the closest a Team control can legally stand to the
         brand row, which is itself either that bar's button or a window-drag
         surface with an aria-hidden mark. */}
     <button type="button" className={css.leaveCard} aria-label={t('backToConversations')} data-team-action="leave" onClick={leaveTeam}>
-      <IconChevronLeftOutlineMedium size={14} className={css.leaveCardGlyph} />
-      <span className={css.leaveCardLabel}>{t('backToConversations')}</span>
+      <span className={css.leaveCardGroup}>
+        <IconChevronLeftOutlineMedium size={14} className={css.leaveCardGlyph} />
+        <span className={css.leaveCardLabel}>{t('backToConversations')}</span>
+      </span>
     </button>
     {/* The Inbox is the one destination that crosses Workspaces — its total sums
         every one of them — so it stands above the selector rather than inside

@@ -135,13 +135,14 @@
    edge, 252px wide — which is what makes the two modes one column rather than
    two columns that resemble each other.
 
-   The group is centred on the slab, as that bar's is — but centring boxes is
-   not centring ink. The row's boxes begin 5px of empty space ahead of the
-   chevron (the glyph draws 4px of ink inside a 14px box) and end flush with the
-   label's last pixel, so centring that span lands the visible ink 2.5px right of
-   the middle. `.leaveCardGlyph` carries -5px: twice the bias, because the row
-   re-centres what the margin leaves, which puts the ink on the middle. Both
-   locales are measured, since '话' and 's' do not end alike. */
+   What centres on the slab is the label, not the group it lays out with the
+   chevron. Centring the group depends on the air inside each glyph's box, and
+   that air differs between CJK and Latin glyphs and across platform font
+   stacks — a compensation measured against one stack overcorrects on another
+   and visibly walks the ink off the middle. A CJK glyph's ink sits symmetric
+   inside its advance, so a centred label box is centred ink; the chevron
+   hangs off the label's leading edge out of flow, where the air inside its
+   own box can no longer move the text. */
 .leaveCard {
   align-items: center;
   background: var(--dsw-alias-button-elevated-fill);
@@ -154,7 +155,6 @@
   flex: none;
   font-size: 14px;
   font-weight: 500;
-  gap: 6px;
   height: 38px;
   justify-content: center;
   line-height: 22px;
@@ -191,6 +191,14 @@
 :global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard:focus-visible {
   background: rgb(255 255 255 / 0.2);
 }
+/* The centred flex item: shrink-wraps the label so the chevron can anchor to
+   the label's leading edge rather than to the slab, and `min-width: 0` keeps
+   the label's ellipsis working inside the centred row. */
+.leaveCardGroup {
+  display: inline-flex;
+  min-width: 0;
+  position: relative;
+}
 .leaveCardLabel {
   font-size: 14px;
   line-height: 20px;
@@ -199,11 +207,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Optical centring, not a layout offset: see `.leaveCard` above. The glyph's own
-   box is symmetric, so the air it carries on the leading side has to come off
-   the box for the drawn ink to sit where the eye expects it. */
+/* A leading affordance, not a centring participant: out of flow and anchored
+   to the label's leading edge, so the air inside the glyph's own box never
+   moves the centred text. The 6px is the gap the group used to state. */
 .leaveCardGlyph {
-  margin-left: -5px;
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 /* The Human mention-Inbox entry: a card above the Workspace selector on the wide
@@ -570,15 +581,18 @@
 /* No shipped sidebar row carries an avatar, so this row has no height to copy:
    it is the shipped two-line row's own composition (a 14/20 title over a 12/17
    meta line, as its search-result row states them) seated at the sidebar's
-   density. The floor is what a Member with no description measures — its copy
-   box then holds the title alone — so the two cases keep one rhythm instead of
-   the row collapsing to a single line. */
+   density. The avatar is the conversation timeline's own identity seat (34px),
+   near as tall as the two-line copy block's 37px, so a Member reads at one
+   size in both surfaces and identity and text read as one aligned unit instead
+   of a token floating beside a paragraph. The floor is the avatar plus its 4px
+   seats, which a Member with no description also measures, so the two cases
+   keep one rhythm instead of the row collapsing to a single line. */
 .agentRow {
   align-items: center;
   border-radius: var(--dsw-radius-md, 12px);
   color: var(--dsw-alias-label-primary);
   display: flex;
-  min-height: 40px;
+  min-height: 42px;
   position: relative;
 }
 .agentSelect {
@@ -592,9 +606,9 @@
   display: grid;
   flex: 1;
   gap: 0 8px;
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 34px minmax(0, 1fr);
   min-width: 0;
-  min-height: 40px;
+  min-height: 42px;
   padding: 4px 4px 4px 8px;
   text-align: left;
 }
@@ -623,13 +637,13 @@
   color: #fff;
   cursor: default;
   display: inline-flex;
-  flex: 0 0 24px;
-  font-size: 11px;
+  flex: 0 0 34px;
+  font-size: 13px;
   font-weight: 600;
-  height: 24px;
+  height: 34px;
   justify-content: center;
   position: relative;
-  width: 24px;
+  width: 34px;
 }
 /* Presence badge rides the avatar's bottom-right edge; the ring matches the
    sidebar fill so the dot reads as one glyph instead of a floating dot. */

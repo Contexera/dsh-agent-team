@@ -35,7 +35,7 @@
 
 头像座是 34px、既不裁剪也不撑宽的盒子，因此只写**时刻**（`formatClockTime`）。带日期的形态同年实测 57px、跨年 87px，足以画到旁边的字上。run 在每个日历日切换处断开，所以续行必与它 run 的首行同天，日期已由上一行写出。精确瞬间仍挂在座位标签自己的 `title` 上（`formatAbsoluteTime`），与 Inbox 行、Channel 入口行同一约定。
 
-- **Agent 头像**：按 `memberId` 字符串哈希出稳定色相（`hash*31+charCode mod 360`）。`hsl(var(--team-avatar-hue) 42% 46%)` 底 + 白色首字母。同一 Member 跨页面、跨会话颜色不变。侧栏 Agent 行复用同一身份语言，是 24px 缩版。presence 指示叠在头像右下角。描边环取 `--dsw-specific-sidebar-fill`，与侧栏底色同色。
+- **Agent 头像**：按 `memberId` 字符串哈希出稳定色相（`hash*31+charCode mod 360`）。`hsl(var(--team-avatar-hue) 42% 46%)` 底 + 白色首字母。同一 Member 跨页面、跨会话颜色不变。侧栏 Agent 行复用同一身份语言，取会话时间线身份座的 34px，与两行文案块（20px 标题 + 17px 注释行）基本齐平。presence 指示叠在头像右下角。描边环取 `--dsw-specific-sidebar-fill`，与侧栏底色同色。
 - **Human 头像**：`--dsw-alias-state-business-primary` 强调底色，与所有 Agent 区分。这一底色与首字母同时是该 Human 的兜底。资料里存了头像图片之后，Human 出现的每一处座位都换成图片。显示名来自同一份资料投影。`TeamConversation` 里只解析一次（`name ?? t('human')`），以 `humanName` 传给两个页面。因此消息发送者、花名册行、mention 兜底名与 `member:human` ref 不会各走各的，也不会各自退回字面 `human`。DOM 上以 `[data-human]` 标记。
 - **presence 圆点**：available=done 绿、working=ongoing、error 红、unavailable 用灰色叉点。映射在 `TeamPresenceDot` 的 `presenceDotState`。这一映射有两种呈现。凡是「把 Member 列成行」的地方都用 `TeamMemberAvatar` 的角标（首字母 + 右下角圆点），而 composer 的收件人菜单用裸 `TeamPresenceDot`。那是菜单行，不是花名册行。所以花名册行统一靠头像角标，菜单保留圆点。这个不对称是有意的，不是遗漏。
 - **Thread 入口头像叠放**：`TeamAvatarStack` 复用同一套色相哈希，但不挂 presence 圆点。它回答「谁在做这件事」，不回答「谁现在在线」。画到读者本人时，那**一枚**胶囊改画 Human 的图片。几何是同一份 18px，环是同一个 2px，`object-fit: cover`。色相留在图下，当解码期间的底。其余所有者照旧是首字母。Inbox 行的领起簇与 Channel feed 的 Thread 入口行都按这条规则接线。

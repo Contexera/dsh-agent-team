@@ -42,7 +42,7 @@
 
 ## 成员花名册（member rosters）
 - `TeamMemberRow.tsx` 是「画一个人」的唯一实现。实现由 `TeamMemberIdentity`（带 presence 角标的 `TeamMemberAvatar` + handle 与 description）加一个可选动作构成。跨 Workspace 的引入花名册渲染这一行，侧栏 Agents 则把同一个 `TeamMemberIdentity` 放进自己的选择按钮里。同一批 Member 因此在不同面之间不会出现身份、字号或截断口径的漂移。
-- 行是网格：24px 头像、`minmax(0, 1fr)` 文案、`auto` 动作轨。圆角取 shipped 圆角刻度的 md 档（12px）、8px/10px 内边距、最小高度 40px，hover 用 `--dsw-alias-interactive-bg-hover`。handle 为 12px/18px、weight 500、主色。description 为 11px/16px、tertiary，且在文案轨内省略号截断，不去顶宽网格。动作轨只在真有动作时声明，没有动作的行把那份宽度还给 description，不留空洞。
+- 行是网格：34px 头像、`minmax(0, 1fr)` 文案、`auto` 动作轨。圆角取 shipped 圆角刻度的 md 档（12px）、8px/10px 内边距、最小高度 50px，hover 用 `--dsw-alias-interactive-bg-hover`。handle 为 12px/18px、weight 500、主色。description 为 11px/16px、tertiary，且在文案轨内省略号截断，不去顶宽网格。动作轨只在真有动作时声明，没有动作的行把那份宽度还给 description，不留空洞。
 - membership 动作是整行唯一的控件。一个 `Button size="sm" variant="outline"`，至少 64×28。标签在添加/移除/更新中…之间变化，外形不变。行自身的失败信息作为 `role="alert"` 渲染在行内文案轨下方。窄于 600px 时动作落到身份下方并与文案左对齐。被压窄的弹层放不下第三列。
 - membership 语义跟随 Host。加入要求 `availability === 'active'`。Host 会拒绝其他 availability。退出只要求 membership 事实本身。所以已经加入但暂时不可用的 Member 仍然保留可用的 移除。
 - 只有侧栏 Agents 在写法上不同。它像目录那样直呼 `builder`，其余花名册按 composer 的称呼写 `@builder`。

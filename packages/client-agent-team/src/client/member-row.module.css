@@ -16,13 +16,13 @@
   /* The action track is declared only when one is rendered, so a row without
      an action gives its width back to the description instead of reserving a
      hole. */
-  grid-template-columns: 24px minmax(0, 1fr);
-  min-height: 40px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  min-height: 50px;
   padding: 8px 10px;
 }
 
 .row:has(button) {
-  grid-template-columns: 24px minmax(0, 1fr) auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
 }
 
 /* The row is a hit target for its action, so it answers the pointer. */
@@ -79,7 +79,7 @@
   .row,
   .row:has(button) {
     align-items: start;
-    grid-template-columns: 24px minmax(0, 1fr);
+    grid-template-columns: 34px minmax(0, 1fr);
   }
 
   .action {

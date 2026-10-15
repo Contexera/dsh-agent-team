@@ -48,7 +48,7 @@ Taking over the slot means taking over the box, not only the position. The row s
 
 The browsing column below keeps the shipped browser's own trailing 12px inset. That is what puts this column's section headers and rows on the shipped rows' left edge.
 
-Centring it is not the same as centring the boxes it lays out. The chevron draws 4px of ink 5px inside its 14px box, while the label fills its own box edge to edge, so a row centred by box puts the group's visible ink 2.5px right of the middle — the reader sees the ink, so the row corrects it. The glyph carries -5px, twice the bias, because a flex row re-centres what the margin leaves.
+What centres is the label, not the group it would lay out with the chevron. Centring the group depends on the air inside each glyph's box, and that air differs between CJK and Latin glyphs and across font stacks — a compensation measured on one stack walks the ink off the middle on another. So the row centres the label alone (CJK ink sits symmetric inside its advance, so a centred box is centred ink), and the chevron hangs 6px off its leading edge, out of flow, where the air in its own box can no longer move the text.
 
 The footer's settings seat (`sidebar.settings`) is deliberately left to the shipped Settings row, which keeps it in both modes. The Team's own settings page registers on `settings.section`, so it stays reachable from the sidebar it belongs to. The former 「成员 / Members」 entry and its read-only roster dialog are retired: the Agent panel already lists every Member with its actions, and the roster only restated that list.
 
