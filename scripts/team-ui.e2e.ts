@@ -1406,6 +1406,67 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await longMarkdownRow.getByRole('button', { name: '收起' }).click()
   await expect.poll(async () => await longMarkdownRow.locator('[class*="messageClamp"]').count()).toBe(1)
 
+  // A wide Markdown table scrolls inside the reading column instead of painting
+  // past it. The column lays its children out shrink-to-fit, so a ≥4-column
+  // table — which the primitive holds at its natural width so its own wrapper
+  // can scroll it — sized that wrapper to the table itself and painted the
+  // overflow onto the page beside the column. The reader's assertion is an
+  // equation rather than prose: the wrapper renders exactly as wide as the body
+  // column, stops at that column's edge, and the table wider than it scrolls
+  // inside it. Both shapes of the body chain are walked, because the cap has to
+  // be stated at each level: a short body puts the Markdown box directly under
+  // the column, while one long enough to fold gains a `[data-document]` wrapper
+  // between them, and either level left uncapped reopens the overflow.
+  // The tool list in the last cell is what carries this table past the column:
+  // seven columns of minimum width fit inside 836px, so the measured overflow
+  // rides on the one column that grows. The assertion below only proves
+  // anything while `scrollWidth` really exceeds `clientWidth`.
+  const wideTableHead = '| 序号 | 会话 | 耗时 | 工具 | 读取 | 写入 | 命中 |'
+  const wideTableRule = '| --- | --- | --- | --- | --- | --- | --- |'
+  const wideTableBody = '| 182 | pulse | 26.7 min | 83 | 0 | 0 | skill,bash,write,message,read,context_search |'
+  const wideTable = `${wideTableHead}\n${wideTableRule}\n${wideTableBody}`
+  const wideTableCases = [
+    { marker: '宽表回归验收', body: `### 宽表回归验收\n\n${wideTable}` },
+    { marker: '宽表折叠回归验收', body: `### 宽表折叠回归验收\n\n${wideTable}\n\n${'折叠态宽表回归验证段落。'.repeat(40)}` },
+  ]
+  for (const [index, variant] of wideTableCases.entries()) {
+    const wideRead = await scaffold.ctx.agentTeam.readThreadForAgent(reviewerAgent, {
+      requestId: `m2-08-wide-table-read-${index}` as never, workspaceId: workspace.id, taskRef: task.taskRef,
+    })
+    const wideReply = await scaffold.ctx.agentTeam.replyForAgent(reviewerAgent, {
+      requestId: `m2-08-wide-table-reply-${index}` as never,
+      workspaceId: workspace.id, taskRef: task.taskRef, body: variant.body,
+      baseRevision: wideRead.thread.revision,
+      recipients: [scaffold.ctx.agentTeam.status().humanMemberId],
+    })
+    expect(wideReply.kind).toBe('committed')
+    const wideTableRow = page.locator('[data-team-thread] article').filter({ hasText: variant.marker })
+    await wideTableRow.waitFor()
+    await wideTableRow.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(UI04_SHOTS, `message-wide-table-${index === 0 ? 'plain' : 'clamped'}.png`), fullPage: true })
+    const tableFit = await wideTableRow.evaluate(element => {
+      const wrapper = element.querySelector('[class*="tableScroll"]') as HTMLElement
+      const body = element.querySelector('[class*="messageBody"]') as HTMLElement
+      const column = element.closest('[class*="timelineContent"]') as HTMLElement
+      const edges = (node: HTMLElement) => node.getBoundingClientRect()
+      return {
+        wrapperWidth: Math.round(edges(wrapper).width),
+        bodyWidth: Math.round(edges(body).width),
+        wrapperPastBody: Math.round(edges(wrapper).right - edges(body).right),
+        wrapperPastColumn: Math.round(edges(wrapper).right - edges(column).right),
+        clientWidth: wrapper.clientWidth,
+        scrollWidth: wrapper.scrollWidth,
+      }
+    })
+    // The wrapper renders as wide as the text column itself ...
+    expect(Math.abs(tableFit.wrapperWidth - tableFit.bodyWidth)).toBeLessThanOrEqual(1)
+    // ... it stays inside that column's right edge ...
+    expect(tableFit.wrapperPastBody).toBeLessThanOrEqual(1)
+    expect(tableFit.wrapperPastColumn).toBeLessThanOrEqual(1)
+    // ... and the table that is wider than the wrapper travels inside it.
+    expect(tableFit.scrollWidth).toBeGreaterThan(tableFit.clientWidth)
+  }
+
   // The sender line is the secondary grade of the content axis: 13px/20px at
   // the default Settings size, and it grows with the body once that size is
   // raised, while the 11px time stays the fixed small grade. The axis is the

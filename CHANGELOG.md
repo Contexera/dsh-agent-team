@@ -17,6 +17,10 @@ All notable changes to this project are documented in this file. The format foll
 - Manual Channel member management is retired: the join and remove entry points are gone from the Remote surface and the Client, and the Channel editor carries no member rows. Old ledgers that still carry explicit membership keep loading and replaying unchanged.
 - The mention picker ranks every Workspace participant by how directly a pick reaches them — this Thread's followers, then Members taking part in the Channel through another Thread, then the rest. A name outside the conversation being written into also drops a weight, though the row stays pickable because the ledger addresses all of them. Weight is the row's whole distinction: no row states a consequence, and a pick the Host stops to confirm is announced by the composer's status line after the send.
 
+**Fixed**
+
+- A wide Markdown table scrolls inside the Message column instead of painting over the page beside it. The column lays its children out shrink-to-fit, so a ≥4-column table — which the primitive holds at its natural width so its own wrapper can scroll it — had sized that wrapper to the table itself, and the overflow landed on the page outside the column's right edge. The cap is declared at both levels of the body chain, because a body long enough to fold gains a `data-document` wrapper between the column and the Markdown box, and a `max-width` only resolves against the box that contains it.
+
 ## [0.2.3] - 2026-10-11
 
 **New**

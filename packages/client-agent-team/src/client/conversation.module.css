@@ -179,15 +179,36 @@
 /* The text column claims the whole track beside the avatar seat, so a long
    Message may use the full reading width, while `align-items` lets a short one
    shrink back onto its own content — a four-word reply must not paint a
-   full-width bar. `max-width: 100%` here stops a long Message from overflowing
-   the column, and `min-width: 0` keeps an unbroken token from forcing the flex
-   track wider than the column. */
+   full-width bar. `min-width: 0` keeps an unbroken token from forcing the flex
+   track wider than the column.
+   Shrink-to-fit has a price the caps below pay: a child sized to its own
+   content can be WIDER than this column, and the width it takes then paints
+   past the column's right edge onto the page. A wide Markdown table is exactly
+   that child — the primitive holds a ≥4-column table at its natural width and
+   scrolls it inside `.tableScroll`, whose own `max-width: 100%` resolves
+   against a parent that has already grown to the table, so it caps nothing.
+   Capping the child at the column is what puts the table back inside its own
+   box and lets that box's horizontal bar do the scrolling instead. The shipped
+   chat transcript lifts this exact cap on purpose, by a rule of its own, for
+   its full-width table breakout; this column has no such rule, so the
+   primitive's base containment is the behavior it wants. */
 .messageBody {
   align-items: flex-start;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
+}
+/* The caps this column's children carry are stated at each level of the body
+   chain, because the chain has two shapes: a short body puts `.messageMarkdown`
+   directly under this column, while one long enough to fold gains a
+   `[data-document]` wrapper BETWEEN them (TeamMessage.tsx). A `max-width` is
+   resolved against the box that contains it, so a cap on the Markdown box
+   cannot reach a wrapper that has already been sized — and a cap on the wrapper
+   cannot reach the unwrapped path. Dropping either rule leaves one of the two
+   body shapes painting past the column. */
+.messageBody > [data-document] {
+  max-width: 100%;
 }
 /* Who wrote this Message, and when. It leads the body's own reading path, so
    the author sits at the same x as the words it introduces, and the name and
@@ -525,7 +546,10 @@
    Heading sizes are chat-tuned: the page h1 stays the loudest element.
    Sizes ride the Settings content-font axis the way shipped chat bodies do:
    the default size and the px delta add back into every number below. */
-.messageBody .messageMarkdown { font-size: var(--dsh-content-font-size, 14px); line-height: calc(22px + var(--dsh-content-font-delta, 0px)); }
+/* The second half of the cap stated at `.messageBody`: this one constrains the
+   unwrapped body, where no `[data-document]` wrapper sits between the column and
+   this box. Stated as a descendant so it reaches both chain shapes. */
+.messageBody .messageMarkdown { font-size: var(--dsh-content-font-size, 14px); line-height: calc(22px + var(--dsh-content-font-delta, 0px)); max-width: 100%; }
 /* Descendant (not child) on .messageBody: the clamp wrapper may sit between
    them, and a broken reset would let the primitive's own root font shorthand
    render the clamped preview larger than the expanded body. */
