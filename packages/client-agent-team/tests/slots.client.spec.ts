@@ -82,7 +82,7 @@ async function bench(persisted: string | null = null) {
 }
 
 describe('Team Client slot takeover', () => {
-  it('enters and leaves Team mode by shadowing and restoring the three primary seats', async () => {
+  it('enters and leaves Team mode by shadowing and restoring the two primary seats', async () => {
     const { ctx, slots } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
@@ -97,7 +97,10 @@ describe('Team Client slot takeover', () => {
     ctx.teamNavigation.actions().enterTeam()
     expect(slots.entries('sidebar.workspaces')).toHaveLength(2)
     expect(slots.entries('main')).toHaveLength(3)
-    expect(slots.entries('sidebar.settings')).toHaveLength(2)
+    // The settings seat is the one sidebar seat the mode leaves alone: the
+    // shipped Settings row keeps it in both modes, so the Team's own way back
+    // to the conversation rides the browser seat above instead of shadowing it.
+    expect(slots.entries('sidebar.settings')).toHaveLength(1)
     expect(slots.entriesOfSlot('sidebar.workspaces')[0]!.options.priority).toBe(-100)
     expect(slots.spec('sidebar.workspaces.directoryFlow')).toBeUndefined()
 
@@ -188,13 +191,16 @@ describe('Team Client slot takeover', () => {
     expect(slots.entries('conversation.input.dock')).toHaveLength(0)
     expect(slots.entries('sidebar.workspaces')).toHaveLength(2)
     expect(slots.entriesOfSlot('sidebar.workspaces')[0]!.options.priority).toBe(-100)
-    expect(slots.entriesOfSlot('sidebar.settings')[0]!.options.priority).toBe(-100)
+    // The settings seat keeps the shipped registrant alone through the Member
+    // Session view: the mode shadows the browser seat, never the footer.
+    expect(slots.entries('sidebar.settings')).toHaveLength(1)
 
-    // The Team foot's wrapped leave closes the Member view, clears the panel,
-    // and restores the Human's original session before deregistering the chrome.
-    const foot = slots.entriesOfSlot('sidebar.settings').find(entry => entry.options.priority === -100)!
-    const footActions = (foot.inject as () => Record<string, unknown>)()
-    ;(footActions.leaveTeam as () => void)()
+    // The browser seat's injected leave closes the Member view, clears the
+    // panel, and restores the Human's original session before deregistering the
+    // chrome.
+    const browserSeat = slots.entriesOfSlot('sidebar.workspaces').find(entry => entry.options.priority === -100)!
+    const browserActions = (browserSeat.inject as () => Record<string, unknown>)()
+    ;(browserActions.leaveTeam as () => void)()
 
     expect(uiWorkspace.openSession).toHaveBeenLastCalledWith('session:human-origin')
     expect(ctx.teamNavigation.getSnapshot()).toEqual({ mode: 'conversation', workspaceId: 'workspace:one' })

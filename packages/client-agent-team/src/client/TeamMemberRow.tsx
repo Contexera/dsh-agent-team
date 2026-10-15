@@ -13,9 +13,9 @@ export interface TeamMemberAction {
 
 /**
  * The one place a Member's identity is drawn: the presence-bearing avatar plus
- * the handle over its description. Read-only rosters, the rosters with a
- * membership action, and the sidebar Agent list all render this, so identity,
- * tone and truncation cannot drift between surfaces that show the same person.
+ * the handle over its description. The rosters with a membership action and the
+ * sidebar Agent list both render this, so identity, tone and truncation cannot
+ * drift between surfaces that show the same person.
  *
  * A fragment, not a row: each surface owns its own row element, hit target and
  * grid, and places this identity in that grid's first two tracks. The handle
@@ -42,8 +42,8 @@ export function TeamMemberIdentity({ status, name, className, t }: {
 /**
  * The one roster row: identity, an optional membership action, and the row's
  * own failure line. The action is the row's only chrome, so the eye lands on
- * the handle first and on the action second. A read-only roster omits it and
- * the trailing track collapses, handing its width back to the description.
+ * the handle first and on the action second. A row without an action omits it
+ * and the trailing track collapses, handing its width back to the description.
  */
 export function TeamMemberRow({ status, action, error, className, t }: {
   readonly status: AgentTeamClientMemberStatus

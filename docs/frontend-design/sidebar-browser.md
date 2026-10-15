@@ -38,7 +38,19 @@ Team is one of the shell's global panels rather than a seat beside them. Its row
 
 Team mode stands the rail down with the shipped New Session button. Both address the profile rather than the Team, and the Team row is not needed once the reader stands on the page it names, so the whole rail hides while `html[data-agent-team-mode='team']` stands and returns the moment the mode is left. The rule keys off the mode attribute and the shipped `panelList` class substring, because SlotCore cannot withdraw another plugin's list row and the entry's label is localized; the browser test pins the transition from both sides.
 
-The mode's foot takes the settings seat (`sidebar.settings`, a single seat, priority -100): while the mode stands, the shipped Settings row is replaced by two full-width rows — 「对话 / Conversations」 (`data-team-action="leave"`) above 「成员 / Members」. That seat is bottom-anchored, so the second row keeps the y the Settings row had and the exit row stands directly above it; on the narrow rail both are 36px circles.
+The mode's way back to the conversation leads the browsing seat: first in `sidebar.workspaces`, directly under the shell's brand row and above the Inbox card, and on the narrow rail the rail's first icon.
+
+That is the closest a Team control can legally stand to the brand row. The row is the shipped New Session button on non-macOS and a window-drag surface on macOS, and its mark is `aria-hidden`, so it can carry neither a second control nor an accessible name.
+
+The exit row is the one row in this column that leaves rather than navigates, so it never carries `aria-current`. It takes over the shipped New Session bar instead of restating a row of its own: the mode hides that bar, so one bar stands in that position in either mode and only its label changes — the same 38px elevated slab and the same l3 hairline, with the label reading 对话 and the glyph pointing back.
+
+Taking over the slot means taking over the box, not only the position. The row stands where the shipped bar stands and measures what it measures: 14px to 266px in the 280px sidebar. The 2px horizontal inset is the shipped bar's own, since shipped declares no width and lets that margin pull a stretched flex item in. The browser test measures both in one render and requires them equal, so the two modes put one bar on one box and a change to either is caught rather than eyeballed.
+
+The browsing column below keeps the shipped browser's own trailing 12px inset. That is what puts this column's section headers and rows on the shipped rows' left edge.
+
+Centring it is not the same as centring the boxes it lays out. The chevron draws 4px of ink 5px inside its 14px box, while the label fills its own box edge to edge, so a row centred by box puts the group's visible ink 2.5px right of the middle — the reader sees the ink, so the row corrects it. The glyph carries -5px, twice the bias, because a flex row re-centres what the margin leaves.
+
+The footer's settings seat (`sidebar.settings`) is deliberately left to the shipped Settings row, which keeps it in both modes. The Team's own settings page registers on `settings.section`, so it stays reachable from the sidebar it belongs to. The former 「成员 / Members」 entry and its read-only roster dialog are retired: the Agent panel already lists every Member with its actions, and the roster only restated that list.
 
 ## Inbox (收件箱)
 The Inbox entry is one card on the wide rail above the Workspace selector. Its total sums the unread of every visible Workspace, so it is the one destination that outlives the scope the selector names, and it leads the sidebar instead of standing inside that scope. On the narrow rail it is the rail's first icon, where no selector exists to lead.

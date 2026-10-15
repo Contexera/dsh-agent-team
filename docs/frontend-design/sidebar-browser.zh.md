@@ -50,7 +50,17 @@ Team 是 shell 的一个 global panel，而不是与它们并排的另一个座�
 
 Team 模式让 rail 与 shipped 新建会话按钮一同让位。两者指向的都是 profile 而不是 Team，而读者既然已经站在「团队」这个名字所指的页上，这一行也不再需要。于是模式成立时整条 rail 隐藏，离开即恢复。显隐不锚文案而锚模式属性与 shipped 的 `panelList` 类名子串，因为 SlotCore 摘不掉别的插件注册的列表行，入口文案又是本地化的；浏览器测试把转换两端都钉住。
 
-mode 的 foot 占用 settings 座位（`sidebar.settings`，单座，priority -100）。模式成立时，shipped 设置行被两行等宽行替代：上「对话」（`data-team-action="leave"`），下「成员」。这个座位底部锚定，所以第二行留在设置行原来的 y 上，退出行紧贴其上方；窄屏 rail 上两行都是 36px 圆钮。
+模式回到普通对话的入口领起 browsing 座位：它在 `sidebar.workspaces` 最前，紧贴 shipped 品牌行之下、收件箱卡片之上，窄屏 rail 上就是 rail 第一枚图标。
+
+这是 Team 控件**能合法站到的**离品牌行最近的位置。那一行在非 macOS 上本身就是 shipped 的新建会话按钮，在 macOS 上是窗口拖拽面，其标识整段 `aria-hidden`，既放不下第二个控件，也拿不出可访问名。
+
+退出行是这一列里唯一「离开」而非「导航」的行，所以它永不携带 `aria-current`。它直接接管 shipped 的 New Session 那条 bar，而不是另立一行：模式本就把那条 bar 隐藏，于是同一位置在两种模式下都只有一条 bar、变的只是标签——同样的 38px 抬升石板、同样的 l3 发丝线，只是文案读作「对话」、图标指向返回。
+
+接管槽位就是接管那个盒，而不只是那个位置。这一行站在 shipped 那条 bar 站的地方，也量出它量出的数：280px 侧栏里从 14px 到 266px。那 2px 的横向内缩是 shipped 那条 bar 自己的——shipped 没声明 width，靠这个 margin 把一个拉伸的 flex 项拉进来。浏览器测试在同一次渲染里量这两者并要求相等，于是两种模式把一条 bar 放在同一个盒上，改任何一边都会被抓住，而不是靠眼睛看。browsing 列保留 shipped browser 自己的 12px 右内缩，正是它让下方的分区头部与各行落在 shipped 各行的左缘上。
+
+居中它，并不等于居中它排出的那些盒。返回箭头那 4px 的墨画在 14px 盒内偏里 5px 处，而文案几乎顶满自己的盒，于是按盒居中会把这一组的可见墨落在中线右侧 2.5px——读者看到的是墨，所以这一行把它修正回来。字形带 -5px，即该偏差的两倍，因为 flex 行会把余量重新居中。
+
+底部的 settings 座位（`sidebar.settings`）刻意留给 shipped 设置行，两种模式下都由它占着。Team 自己的设置页注册在 `settings.section`，因此仍能从它所属的侧栏抵达。原「成员」入口及其只读名册弹层就此退役：Agent 面板本来就列出每个 Member 及其动作，名册只是把那份名单只读地重述了一遍。
 
 ## 收件箱（Inbox）
 

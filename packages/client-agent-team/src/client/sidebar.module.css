@@ -10,12 +10,17 @@
   display: none;
 }
 
+/* The browsing region is the shipped browser's own seat, so this column keeps
+   that seat's inline box: the shell's sidebar padding on the right and nothing
+   on the left, because the shell already indents the region itself. Reading the
+   shipped variable rather than restating its 12px keeps the two columns one
+   fact — a reader switching modes must not see the whole column shift. */
 .workspaceBrowser {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 0 8px 8px;
+  padding: 0 var(--dsh-sidebar-inline-padding, 12px) 8px 0;
 }
 
 .railButton {
@@ -110,6 +115,95 @@
   font-size: 12px;
   line-height: 18px;
   margin: 8px;
+}
+
+/* The mode's exit, first in the browsing region and directly under the shell's
+   brand row — the closest a Team seat can legally stand to it, since that row is
+   either a New Session button or a macOS window-drag surface and its mark is
+   aria-hidden. It is the one row in this column that leaves rather than
+   navigates, so it never carries `aria-current`.
+
+   It takes over the shipped New Session bar's slot and slab: the mode hides that
+   bar, so this row is what the column shows between the brand row and the
+   browsing list, in the same 38px elevated fill, and the label is what changes.
+   The separator is written 1px because that is what shipped's 0.5px declaration
+   renders as.
+
+   The slot is vertical, and horizontally the row keeps the shipped bar's own
+   2px inset inside the column. The column is the shipped browser's seat, so
+   this row's box is then the shipped bar's box exactly — 14px from the sidebar
+   edge, 252px wide — which is what makes the two modes one column rather than
+   two columns that resemble each other.
+
+   The group is centred on the slab, as that bar's is — but centring boxes is
+   not centring ink. The row's boxes begin 5px of empty space ahead of the
+   chevron (the glyph draws 4px of ink inside a 14px box) and end flush with the
+   label's last pixel, so centring that span lands the visible ink 2.5px right of
+   the middle. `.leaveCardGlyph` carries -5px: twice the bias, because the row
+   re-centres what the margin leaves, which puts the ink on the middle. Both
+   locales are measured, since '话' and 's' do not end alike. */
+.leaveCard {
+  align-items: center;
+  background: var(--dsw-alias-button-elevated-fill);
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-md, 12px);
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  font-size: 14px;
+  font-weight: 500;
+  gap: 6px;
+  height: 38px;
+  justify-content: center;
+  line-height: 22px;
+  /* The shipped bar's own inset inside the column, so the row lands on the box
+     the reader met in the other mode rather than beside it. No width: the
+     shipped bar is a stretched flex item too, so the 2px margins are what make
+     it 252px inside this 256px column — stating a width as well would add the
+     margins on top and push the row past the column's edge. */
+  margin: 0 2px 12px;
+  padding: 8px 12px;
+}
+.leaveCard:hover,
+.leaveCard:focus-visible {
+  background: var(--dsw-alias-button-floating-hover);
+}
+.leaveCard:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+/* macOS: the themed elevated fill reads as a foreign slab on the vibrancy
+   sidebar, so the bar we take over washes white in the glass instead — the same
+   substitution the shipped bar makes in the same slot. */
+:global([data-platform='darwin']) .leaveCard {
+  background: rgb(255 255 255 / 0.55);
+}
+:global([data-platform='darwin']) .leaveCard:hover,
+:global([data-platform='darwin']) .leaveCard:focus-visible {
+  background: rgb(255 255 255 / 0.3);
+}
+:global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard {
+  background: rgb(255 255 255 / 0.15);
+}
+:global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard:hover,
+:global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard:focus-visible {
+  background: rgb(255 255 255 / 0.2);
+}
+.leaveCardLabel {
+  font-size: 14px;
+  line-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Optical centring, not a layout offset: see `.leaveCard` above. The glyph's own
+   box is symmetric, so the air it carries on the leading side has to come off
+   the box for the drawn ink to sit where the eye expects it. */
+.leaveCardGlyph {
+  margin-left: -5px;
 }
 
 /* The Human mention-Inbox entry: a card above the Workspace selector on the wide
@@ -212,40 +306,81 @@
   color: var(--dsw-alias-label-primary);
 }
 
-/* One scroll container carries both sections; headers stay in flow. */
+/* One scroll container carries both sections; headers stay in flow.
+   Only the vertical axis scrolls: the section headers reach 4px past this box
+   by their own margin (the shipped header's box equation, whose contents still
+   end inside the rows' edge), and that overhang is a box, not content — left
+   scrollable it becomes a horizontal gutter that shifts the whole column.
+   The bar's space is reserved rather than conditional, as the shipped list
+   reserves it, so a growing list does not move the rows sideways when the bar
+   appears. Reserving it narrows the content box, so this element widens its own
+   box past the column by the same amount — the 4px the shipped list overhangs
+   on the left, and the bar plus its air on the right — which is what keeps the
+   rows on the shipped 256px edge instead of 5px inside it. The two lengths are
+   restated here because the shipped variables that carry them are declared on
+   the shipped browser's own root and never reach this seat. */
 .workspaceSection {
+  --team-list-bar: 5px;
+  --team-list-air: 5px;
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 4px;
+  margin-left: -4px;
+  margin-right: calc(-1 * (var(--team-list-bar) + var(--team-list-air)));
   margin-top: 2px;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  padding-left: 4px;
+  padding-right: var(--team-list-air);
+  scrollbar-gutter: stable;
 }
 
 .section { display: flex; flex-direction: column; }
+/* The shipped header's contents land on the same edges here as in the other
+   mode: the label 4px inside the rows' left edge, the trailing action flush
+   with the rows' right edge. Shipped reaches 4px past its column to get the
+   trailing edge, because its column's content box is narrower than its rows;
+   this header lives inside the scroll container, whose reserved bar gutter
+   already puts its right edge on the rows' edge, so the header states the
+   leading 4px only and takes no negative margin — one that reached past the
+   scrollport would be clipped, cutting the action button.
+   The height is its tallest control and nothing more, which is what makes two
+   stacked headers read as labels rather than as two toolbars: the shipped 36px
+   header is sized to hold a search field and an action cluster, while this one
+   holds a 24px disclosure and a 28px button. Its only vertical margin is the
+   step above it — the list below supplies its own, so a header sits nearer the
+   rows it names than the block before it.
+   No `overflow: hidden`: shipped needs it to clip a label that animates its own
+   width, and Team's label is fixed. */
 .sectionHeader {
   align-items: center;
+  color: var(--dsw-alias-label-tertiary);
   display: flex;
-  min-height: 26px;
-  padding-right: 2px;
+  flex: none;
+  gap: 4px;
+  height: 28px;
+  margin: 2px 0 0;
+  padding: 0 0 0 4px;
 }
 /* Quiet disclosure: the row itself never lights up; only the chevron
-   responds to pointer and keyboard focus. */
+   responds to pointer and keyboard focus. The label reads at the shipped
+   section label's own grade, so a header is one size in either mode. */
 .sectionToggle {
   align-items: center;
   background: transparent;
   border: 0;
   border-radius: var(--dsw-radius-xs, 4px);
-  color: var(--dsw-alias-label-tertiary);
+  color: inherit;
   cursor: pointer;
   display: inline-flex;
-  font-size: 12px;
+  font-size: 14px;
   gap: 4px;
-  line-height: 18px;
+  line-height: 20px;
   min-height: 24px;
   min-width: 0;
-  padding: 0 6px;
+  padding: 0;
 }
 .sectionToggle:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
@@ -269,6 +404,7 @@
 .sectionActions {
   align-items: center;
   display: inline-flex;
+  gap: 4px;
   margin-left: auto;
 }
 
@@ -277,57 +413,74 @@
   flex-direction: column;
 }
 
+/* The shipped header action: a 28px square in the small radius, not a circle —
+   it sits in a line beside a label, where a round 24px control reads as a
+   different family from the one the other mode puts in that corner. */
 .iconButton {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 50%;
-  corner-shape: round;
+  border-radius: var(--dsw-radius-sm, 8px);
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   display: inline-flex;
-  height: 24px;
+  flex: none;
+  height: 28px;
   justify-content: center;
   padding: 0;
-  width: 24px;
+  width: 28px;
 }
 .iconButton:hover,
 .iconButton:focus-visible {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
+/* Shipped keeps this ring inside the button because the header clips its own
+   overflow; Team's header does not clip, so the ring would otherwise add 2px to
+   a line the row grid already measures. */
 .iconButton:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
+/* The shipped action sits on the link colour and the empty-state grade, not on
+   a button chrome of its own — it reads as a line of text that happens to be
+   clickable, which is what the row it replaces in the other mode does. */
 .textButton {
   background: transparent;
   border: 0;
-  border-radius: var(--dsw-radius-sm, 5px);
-  color: var(--dsw-alias-label-secondary);
+  border-radius: var(--dsw-radius-sm, 8px);
+  color: var(--dsw-alias-link);
   cursor: pointer;
-  font-size: 11px;
-  line-height: 18px;
-  padding: 2px 5px;
+  font-size: 13px;
+  line-height: 20px;
+  padding: 0;
 }
+/* Colour only: the button carries no padding, so a hover fill would hug the
+   glyphs instead of reading as a row the way the list rows' fills do. */
 .textButton:hover,
 .textButton:focus-visible {
-  background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 .textButton:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: 1px;
+  outline-offset: 2px;
 }
 .textButton:disabled { cursor: not-allowed; opacity: 0.4; }
 
+/* The rows run the column's full content box, as the shipped browser's list
+   rows do — their hover fill is what shows the row's extent, so an inset list
+   would draw every fill 4px narrower than the header above it. The 1px step
+   keeps a stack legible as separate rows while leaving the air to the rows
+   themselves; no bottom padding, because the section boundary below already
+   carries the step and adding both is what made two sections read as far
+   apart. */
 .channelList,
 .agentList {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 0 4px 4px;
+  padding: 0;
 }
 
 .sidebarRowDragging {
@@ -379,7 +532,7 @@
   border-radius: var(--dsw-radius-md, 12px);
   color: var(--dsw-alias-label-primary);
   display: flex;
-  min-height: 30px;
+  min-height: 32px;
   position: relative;
 }
 .channelSelect {
@@ -393,8 +546,8 @@
   display: flex;
   flex: 1;
   min-width: 0;
-  min-height: 30px;
-  padding: 3px 4px 3px 8px;
+  min-height: 32px;
+  padding: 0 4px 0 8px;
   text-align: left;
 }
 /* Same visible keyboard ring the shipped sidebar's panel rows use. */
@@ -402,21 +555,30 @@
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
 }
+/* The shipped list row's title grade. A Channel row is that row's peer — one
+   leaf destination per line in the same column — so it reads at the same size
+   in either mode rather than at a size of its own. */
 .channelName {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 400;
-  line-height: 18px;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* No shipped sidebar row carries an avatar, so this row has no height to copy:
+   it is the shipped two-line row's own composition (a 14/20 title over a 12/17
+   meta line, as its search-result row states them) seated at the sidebar's
+   density. The floor is what a Member with no description measures — its copy
+   box then holds the title alone — so the two cases keep one rhythm instead of
+   the row collapsing to a single line. */
 .agentRow {
   align-items: center;
   border-radius: var(--dsw-radius-md, 12px);
   color: var(--dsw-alias-label-primary);
   display: flex;
-  min-height: 38px;
+  min-height: 40px;
   position: relative;
 }
 .agentSelect {
@@ -432,8 +594,8 @@
   gap: 0 8px;
   grid-template-columns: 24px minmax(0, 1fr);
   min-width: 0;
-  min-height: 38px;
-  padding: 3px 4px 3px 8px;
+  min-height: 40px;
+  padding: 4px 4px 4px 8px;
   text-align: left;
 }
 .agentSelect:focus-visible {
@@ -487,22 +649,33 @@
   right: -3px;
   width: 12px;
 }
-/* The sidebar's own seating of the shared Member identity. No main-axis
-   centring here: a centred flex line would walk the whole identity right off
-   the avatar's left edge, which is exactly the offset this list kept showing. */
-.agentCopy { display: flex; flex-direction: column; justify-content: flex-start; min-width: 0; }
-.agentCopy strong {
-  font-size: 13px;
+/* The sidebar's own seating of the shared Member identity. Scoped through the
+   row because the shared roster class rides this same element: at equal
+   specificity the later declaration wins, and the shared one is later, so an
+   unscoped `.agentCopy` never applied — the sidebar silently drew the dialog's
+   density instead of its own. No main-axis centring: a centred flex line would
+   walk the whole identity right off the avatar's left edge, which is exactly
+   the offset this list kept showing. */
+.agentSelect .agentCopy {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-width: 0;
+}
+/* Shipped's two-line grades, the pair its own two-line list row states: a
+   14/20 title over a 12/17 meta line. */
+.agentSelect .agentCopy strong {
+  font-size: 14px;
   font-weight: 500;
-  line-height: 17px;
+  line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agentCopy small {
+.agentSelect .agentCopy small {
   color: var(--dsw-alias-label-tertiary);
-  font-size: 10px;
-  line-height: 13px;
+  font-size: 12px;
+  line-height: 17px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -583,18 +756,19 @@
   padding: 2px 8px 6px;
 }
 
-/* A Panel's own failure line, on the rail's 11px alert scale. The 12px inset
-   lands the text on the row labels (list padding 4px + row padding 8px), so a
-   failed load reads as part of the list instead of loose rail text. A missing
-   CSS-module class resolves to `undefined` and renders unstyled: this rule is
-   what the Panels' `css.error` resolves to, so the two stay in step. */
+/* A Panel's own failure line, on the rail's 11px alert scale. The 8px inset
+   lands the text on the row labels, which is the row's own leading inset — the
+   list between them carries none of its own, so this is the whole distance. A
+   failed load therefore reads as part of the list instead of loose rail text.
+   A missing CSS-module class resolves to `undefined` and renders unstyled: this
+   rule is what the Panels' `css.error` resolves to, so the two stay in step. */
 .error {
   color: var(--dsw-alias-state-error-primary);
   font-size: 11px;
   line-height: 16px;
   margin: 0;
   overflow-wrap: anywhere;
-  padding: 4px 12px 6px;
+  padding: 4px 8px 6px;
 }
 
 .editDescription {

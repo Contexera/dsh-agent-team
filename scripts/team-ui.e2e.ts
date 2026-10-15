@@ -145,6 +145,80 @@ async function entryClusterEdges(page: Page, lineSelector: string): Promise<{ re
 }
 
 /**
+ * The horizontal centre of a control's *visible ink*, read off a screenshot of
+ * the control itself rather than from its box. Box geometry cannot answer this
+ * question: a flex row centres the boxes it lays out, and a glyph that draws its
+ * mark off-centre inside a symmetric box carries the whole group with it. The
+ * exit row is exactly that case — the chevron's 4px of ink sits 5px inside its
+ * 14px box while the label fills its own box — so the assertion the reader cares
+ * about ("does the group look centred?") has to be measured in pixels.
+ */
+/**
+ * How far the Team browsing column can be scrolled sideways, in whole pixels —
+ * the largest distance any scroller inside it will actually travel when asked
+ * to scroll right.
+ *
+ * A scrollport with `overflow-x: hidden` still reports a `scrollWidth` past its
+ * `clientWidth` and can still be scrolled programmatically, so neither that pair
+ * nor the computed `overflow-x` tells a clipped box from a reachable one — and
+ * the Team column's own scroller is `hidden` on this axis, so a probe that
+ * skipped those would measure nothing at all. Scrolling is the reader's own
+ * gesture, so this asks every element that clips, hidden included, how far it
+ * will actually go. The scope is the Team region rather than the page: the
+ * shipped shell's own sidebar column clips 1px of its scrollbar gutter, which is
+ * neither this change's business nor reachable as a visible sideways move.
+ */
+async function maxHorizontalScroll(page: Page, selector: string): Promise<number> {
+  return page.evaluate(rootSelector => {
+    const root = document.querySelector(rootSelector)
+    if (root === null) throw new Error(`no ${rootSelector}`)
+    let furthest = 0
+    for (const element of [root, ...root.querySelectorAll('*')]) {
+      const style = getComputedStyle(element)
+      if (style.overflowX === 'visible' || style.overflowX === 'clip') continue
+      const start = element.scrollLeft
+      element.scrollLeft = 9999
+      const reached = element.scrollLeft
+      element.scrollLeft = start
+      if (reached > furthest) furthest = reached
+    }
+    return furthest
+  }, selector)
+}
+
+async function inkCenterOffset(control: Locator): Promise<number> {
+  const shot = await control.screenshot()
+  return control.evaluate(async (element, bytes) => {
+    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' })
+    const bitmap = await createImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const context = canvas.getContext('2d')
+    if (context === null) throw new Error('2d context unavailable')
+    context.drawImage(bitmap, 0, 0)
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
+    const luminance = (x: number, y: number): number => {
+      const index = (y * canvas.width + x) * 4
+      return 0.299 * data[index]! + 0.587 * data[index + 1]! + 0.114 * data[index + 2]!
+    }
+    // Inside the control's own 1px separator, so the border is never ink.
+    let minX = Number.POSITIVE_INFINITY
+    let maxX = -1
+    for (let y = 3; y < canvas.height - 3; y++) {
+      for (let x = 3; x < canvas.width - 3; x++) {
+        if (luminance(x, y) < 150) {
+          if (x < minX) minX = x
+          if (x > maxX) maxX = x
+        }
+      }
+    }
+    if (maxX < 0) throw new Error(`no ink found in ${element.className}`)
+    return (minX + maxX + 1) / 2 - canvas.width / 2
+  }, [...shot])
+}
+
+/**
  * The Channel feed's state column: the left edge of every entry line's state
  * cluster. A Taskful entry always carries one — a status dot and word at
  * minimum — so these x values are what a reader's eye scans down.
@@ -303,6 +377,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const pluginsTrigger = panelRail.getByRole('button', { name: '插件' })
   const teamTrigger = panelRail.getByRole('button', { name: '团队', exact: true })
   const settingsTrigger = page.getByRole('button', { name: '设置' })
+  // The bar the mode's exit takes over, measured while it is still on screen:
+  // in Team mode the stand-down rule hides it, so its box has to be read here.
+  const shippedBarBox = await page.locator('button[class*="newSession"]').boundingBox()
+  expect(shippedBarBox).not.toBeNull()
   const [teamBox, pluginsBox, settingsBox] = await Promise.all([teamTrigger.boundingBox(), pluginsTrigger.boundingBox(), settingsTrigger.boundingBox()])
   expect(teamBox).not.toBeNull()
   expect(pluginsBox).not.toBeNull()
@@ -310,18 +388,61 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(teamBox!.height).toBeCloseTo(pluginsBox!.height, 0)
   expect(teamBox!.y).toBeCloseTo(pluginsBox!.y + pluginsBox!.height + 4, 0)
   await teamTrigger.click()
-  // The mode's foot takes the settings seat, and that seat is bottom-anchored:
-  // the roster row keeps the y the shipped Settings row had, and the way back
-  // to the conversation stands directly above it.
+  // The mode shadows the browser seat only. Its way back to the conversation
+  // takes over the shipped New Session bar's slot — the mode hides that bar, so
+  // one bar stands in that position in either mode and only its label changes.
+  // The seat is the closest a Team control can legally stand to the brand row:
+  // that row is either the shipped New Session button or a macOS window-drag
+  // surface, and its mark is aria-hidden. The shipped bar's own box is measured
+  // in the mode the reader meets it in, so "same slot" is an equation rather
+  // than a resemblance — and the shipped Settings row keeps the footer in both
+  // modes.
   const conversationTrigger = page.getByRole('button', { name: '对话' })
-  const membersTrigger = page.getByRole('button', { name: '成员' })
-  const [conversationBox, membersTriggerBox] = await Promise.all([conversationTrigger.boundingBox(), membersTrigger.boundingBox()])
+  const [conversationBox, brandRowBox, topInboxBox, teamSettingsBox] = await Promise.all([
+    conversationTrigger.boundingBox(),
+    page.locator('[class*="logoRow"]').boundingBox(),
+    page.locator('button[class*="inboxCard"]').boundingBox(),
+    settingsTrigger.boundingBox(),
+  ])
   expect(conversationBox).not.toBeNull()
-  expect(membersTriggerBox).not.toBeNull()
-  expect(membersTriggerBox!.y).toBeCloseTo(settingsBox!.y, 0)
-  expect(membersTriggerBox!.height).toBeCloseTo(settingsBox!.height, 0)
-  expect(conversationBox!.height).toBeCloseTo(settingsBox!.height, 0)
-  expect(conversationBox!.y).toBeCloseTo(membersTriggerBox!.y - conversationBox!.height - 8, 0)
+  expect(brandRowBox).not.toBeNull()
+  expect(topInboxBox).not.toBeNull()
+  expect(teamSettingsBox).not.toBeNull()
+  // Below the brand row, above the Inbox card: the exit is the first control
+  // the browsing region offers.
+  expect(conversationBox!.y).toBeGreaterThanOrEqual(brandRowBox!.y + brandRowBox!.height)
+  expect(conversationBox!.y).toBeLessThan(topInboxBox!.y)
+  // The vertical claim is the shipped bar's slot — the mode hides that bar, so
+  // the column's first row must not jump when the reader switches modes — and it
+  // is an equation: same top, same height.
+  expect(conversationBox!.y).toBeCloseTo(shippedBarBox!.y, 0)
+  expect(conversationBox!.height).toBeCloseTo(shippedBarBox!.height, 0)
+  // Taking over the bar's slot means taking over its box, so this is the same
+  // equation as the vertical one: the mode hides the shipped bar, and the row
+  // that replaces it must land on the box the bar had — 14px to 266px in the
+  // 280px sidebar, the 2px inset being the shipped bar's own. A `width: 100%`
+  // here would add to that margin and push the slab 4px past the column, and an
+  // inset onto the browsing region's own 12px edge would pull it 2px in; both
+  // are kinks this pins shut.
+  expect(conversationBox!.x).toBeCloseTo(shippedBarBox!.x, 0)
+  expect(conversationBox!.width).toBeCloseTo(shippedBarBox!.width, 0)
+  // The browsing column below it scrolls one way only: the section headers reach
+  // 4px past the scrollport by their own margin, and that overhang is a box
+  // rather than content, so nothing may scroll sideways. Measured by asking each
+  // scroller to scroll as far right as it can, which is the reader's own gesture.
+  expect(await maxHorizontalScroll(page, 'section[class*="workspaceBrowser"]')).toBe(0)
+  // Centred is a claim about the ink, not about the box: the chevron draws 4px
+  // of ink 5px inside its 14px box, so a box-centred row lands the group's
+  // visible ink 2.5px right of the middle. The reader sees the ink, so that is
+  // what the gate measures — and it is measured on the assembled bundle, since
+  // jsdom loads no CSS and the optical margin is a CSS declaration.
+  expect(Math.abs(await inkCenterOffset(conversationTrigger))).toBeLessThanOrEqual(1)
+  // The shipped Settings row is not shadowed, so it keeps the y and the height
+  // it had before the mode was entered — the footer is the shell's again.
+  expect(teamSettingsBox!.y).toBeCloseTo(settingsBox!.y, 0)
+  expect(teamSettingsBox!.height).toBeCloseTo(settingsBox!.height, 0)
+  // The roster entry is retired: no second row, and no members dialog trigger.
+  await expect.poll(() => page.getByRole('button', { name: '成员', exact: true }).count()).toBe(0)
   const newSessionButtons = page.locator('button[aria-label="新建会话"]')
   const newSessionButton = page.locator('button[class*="newSession"][aria-label="新建会话"]')
   const brandButton = page.locator('button[class*="brand"][aria-label="新建会话"]')
@@ -329,6 +450,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => newSessionButton.count()).toBe(1)
   await expect.poll(() => newSessionButton.isVisible()).toBe(false)
   await expect.poll(() => brandButton.count()).toBe(1)
+  // Pinned as the defect it is, not as intent: the mode's stand-down rule hides
+  // the `.newSession` bar and the panel rail, but the wide brand row is a second
+  // New Session button on non-macOS and is still live here. The journey below
+  // uses it to stage the Human's own session, so the leak stays asserted until
+  // the mode is given that row's stand-down.
   await expect.poll(() => brandButton.isVisible()).toBe(true)
   await page.getByRole('button', { name: '新建频道' }).click()
   const initialChannelDialog = page.getByRole('dialog', { name: '新建频道' })
@@ -2064,9 +2190,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'narrow-resolved-task-entry.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
-  await page.getByRole('button', { name: '成员', exact: true }).click()
-  await page.getByRole('dialog', { name: '成员' }).screenshot({ path: join(UI01_SHOTS, 'global-members.png') })
-  await page.getByRole('button', { name: '关闭', exact: true }).click()
+  // The mode's exit at the top of the browsing region, directly under the brand
+  // row: the seat this change moved it to. The shot covers the sidebar column,
+  // so the row can be reviewed against the brand row above and the Inbox card
+  // below it rather than in isolation. The column wrapper is a real element —
+  // the slot anchor is `display: contents` and cannot be screenshotted.
+  const sidebarColumn = page.locator('[class*="sidebarCol"]').first()
+  await sidebarColumn.screenshot({ path: join(UI01_SHOTS, 'sidebar-exit-row.png') })
 
   await page.reload()
   await page.getByRole('button', { name: '# delivery' }).waitFor({ timeout: 20_000 })
@@ -2135,13 +2265,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(archivedBuilder.member.state).toBe('archived')
   // The Session archival settles behind the Client wake; poll the registry.
   await expect.poll(() => scaffold.ctx.workspaceRegistry.archivedSessionIds.includes(archivedBuilder.member.sessionId)).toBe(true)
-  // The archived Member's row menu and mention candidates are gone, and the
-  // members modal roster no longer lists it.
-  await page.getByRole('button', { name: '成员', exact: true }).click()
-  const archiveMembersDialog = page.getByRole('dialog', { name: '成员' })
-  await archiveMembersDialog.waitFor()
-  expect(await archiveMembersDialog.getByText('@builder').count()).toBe(0)
-  await archiveMembersDialog.getByRole('button', { name: '关闭', exact: true }).click()
+  // The archived Member's row menu and mention candidates are gone. The
+  // read-only roster that used to restate it is retired with the members entry
+  // (asserted above), so the Agent panel's own row — the surface that still
+  // lists Members — carries the absence alone.
   await page.getByRole('button', { name: '对话' }).click()
   await expect.poll(() => page.locator('[data-team-channel]').count()).toBe(0)
 
@@ -2172,61 +2299,27 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await enterTeamKeyboard.focus()
   await expect.poll(() => enterTeamKeyboard.evaluate(element => element === document.activeElement)).toBe(true)
   await enterTeamKeyboard.press('Enter')
-  await expect.poll(() => page.getByRole('button', { name: '成员', exact: true }).count()).toBe(1)
+  await expect.poll(() => page.getByRole('button', { name: '对话', exact: true }).count()).toBe(1)
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   // The selected plugin page is unmounted rather than sitting behind the Team
   // seat, the rail stands down with the mode (its own Team row included), and the
-  // mode's foot row is what carries the leave action.
+  // browser seat's top row is what carries the leave action.
   await expect.poll(() => page.getByRole('button', { name: '对话', exact: true }).getAttribute('data-team-action')).toBe('leave')
   await expect.poll(() => pluginPanel.count()).toBe(0)
   await expect.poll(() => globalPanelsNav.count()).toBe(1)
   await expect.poll(() => globalPanelsNav.isVisible()).toBe(false)
 
-  const membersKeyboard = page.getByRole('button', { name: '成员', exact: true })
-  await membersKeyboard.focus()
-  await membersKeyboard.press('Space')
-  const membersDialog = page.getByRole('dialog', { name: '成员' })
-  await membersDialog.waitFor()
-  await expect.poll(() => membersDialog.locator('[tabindex="-1"]').evaluate(element => element === document.activeElement)).toBe(true)
-  // The read-only roster rides the same shared Member row, minus the action
-  // track: same avatar, same handle/description steps, no reserved button hole.
-  // The panel mounts loading, so the roster is awaited before it is measured.
-  await expect.poll(() => membersDialog.locator('[data-team-member-row]').count(), { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
-  const readOnlyRows = await membersDialog.locator('[data-team-member-row]').evaluateAll(rows => rows.map(row => ({
-    avatar: Math.round((row.querySelector('[role="img"]')?.getBoundingClientRect().width ?? 0)),
-    action: row.querySelectorAll('button').length,
-    handle: row.querySelector('strong')?.textContent ?? '',
-    description: row.querySelector('small')?.textContent ?? '',
-  })))
-  for (const row of readOnlyRows) {
-    expect(row.avatar).toBe(24)
-    expect(row.action).toBe(0)
-    expect(row.handle.startsWith('@')).toBe(true)
-    expect(row.description.length).toBeGreaterThan(0)
-  }
-  await page.screenshot({ path: join(UI06_SHOTS, 'members-modal-desktop.png'), fullPage: true })
-  await page.keyboard.press('Escape')
-  await expect.poll(() => membersKeyboard.evaluate(element => element === document.activeElement)).toBe(true)
-  // Narrow viewport: the breakpoint unmounts sidebar panels (dialog state
-  // included), so the check re-opens the dialog from the narrow-expanded
-  // sidebar after the collapse has settled.
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.locator('[data-sidebar-collapsed="true"]').waitFor()
-  await page.getByRole('button', { name: '打开侧边栏' }).click()
-  const narrowMembersKeyboard = page.getByRole('button', { name: '成员', exact: true })
-  await narrowMembersKeyboard.focus()
-  await narrowMembersKeyboard.press('Space')
-  const narrowMembersDialog = page.getByRole('dialog', { name: '成员' })
-  await narrowMembersDialog.waitFor()
-  const membersBox = await narrowMembersDialog.boundingBox()
-  expect(membersBox).not.toBeNull()
-  expect(membersBox!.x).toBeGreaterThanOrEqual(0)
-  expect(membersBox!.y).toBeGreaterThanOrEqual(0)
-  expect(membersBox!.x + membersBox!.width).toBeLessThanOrEqual(390)
-  expect(membersBox!.y + membersBox!.height).toBeLessThanOrEqual(844)
-  await page.screenshot({ path: join(UI06_SHOTS, 'members-modal-narrow.png'), fullPage: true })
-  await page.keyboard.press('Escape')
-  await expect.poll(() => narrowMembersKeyboard.evaluate(element => element === document.activeElement)).toBe(true)
+  // The exit is keyboard-reachable at its new seat: focus it, activate with
+  // Space, and the mode stands down to an ordinary conversation. Team mode is
+  // then re-entered through the rail row for the segments below.
+  const leaveKeyboard = page.getByRole('button', { name: '对话', exact: true })
+  await leaveKeyboard.focus()
+  await expect.poll(() => leaveKeyboard.evaluate(element => element === document.activeElement)).toBe(true)
+  await leaveKeyboard.press('Space')
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.agentTeamMode ?? null)).toBe(null)
+  await expect.poll(() => globalPanelsNav.isVisible()).toBe(true)
+  await globalPanelsNav.getByRole('button', { name: '团队', exact: true }).click()
+  await expect.poll(() => page.getByRole('button', { name: '对话', exact: true }).count()).toBe(1)
   await page.setViewportSize({ width: 1440, height: 960 })
 
   // ── Human Inbox (收件箱) ─────────────────────────────────────────────────
@@ -2333,13 +2426,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id }).totalUnreadCount).toBe(baseUnread + 3)
   await expectSidebarUnread(String(baseUnread + 3))
 
-  // Narrow rail: 收件箱 → Channels → Agents, unread marked on the first icon, and
-  // the icon is a destination that opens the Inbox page and expands the sidebar.
+  // Narrow rail: 对话 → 收件箱 → Channels → Agents, unread marked on the Inbox
+  // icon, and that icon is a destination that opens the Inbox page and expands
+  // the sidebar. The exit leads the rail, exactly as it leads the wide column.
   await page.setViewportSize({ width: 390, height: 844 })
   const inboxRail = page.locator('nav[class*="railWorkspace"]')
   await inboxRail.waitFor()
   const railLabels = await inboxRail.locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
-  expect(railLabels).toEqual([`收件箱，${baseUnread + 3} 条未读`, '频道', 'Agents'])
+  expect(railLabels).toEqual(['对话', `收件箱，${baseUnread + 3} 条未读`, '频道', 'Agents'])
   await expectSidebarUnread(String(baseUnread + 3))
   // The dot replaced the number on the surface, so the rail's hover hint is where
   // a reader still meets the quantity without opening the page: the same name the

@@ -158,13 +158,3 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   /** Agent-card session jump, shared by every slot; message member chips reuse it. */
   openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => void
 }
-
-export type TeamSettingsProps = PropsRuntime<'sidebar.settings'> & PropsLocale<'team'> & TeamNavigationActions & {
-  loadMemberGroups: () => Promise<readonly TeamMemberGroup[]>
-}
-
-export interface TeamMemberGroup {
-  readonly workspaceId: string
-  readonly workspaceTitle: string
-  readonly members: readonly AgentTeamClientMemberStatus[]
-}

@@ -50,7 +50,6 @@ import { TeamChangeStream, TeamReadStream, type TeamChangeListener, type TeamCha
 import { TeamQueries, type TeamQueryIdentity } from './team-queries.ts'
 import { TeamDraftStore } from './drafts.ts'
 import { TeamPanelIcon } from './TeamPanelIcon.tsx'
-import { TeamMembersAction } from './TeamMembersAction.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
 import { en, zh, type TeamKey } from './locales.ts'
@@ -264,12 +263,10 @@ function teamSeatInject(
   navigation: TeamNavigation,
   reads: TeamReadStream,
   sharedRemotes: Record<string, unknown>,
-  name: 'sidebar.workspaces' | 'main' | 'sidebar.settings',
-  extraInject?: () => Record<string, unknown>,
+  name: 'sidebar.workspaces' | 'main',
 ): Record<string, unknown> {
   return {
     navigation,
-    ...extraInject?.(),
     ...navigation.actions(),
     // Leaving Team mode is also leaving its panel: the rail row is a
     // destination, and the mode's own exit row hands the column back to the
@@ -311,9 +308,8 @@ function registerModeShadow<T extends object>(
   reads: TeamReadStream,
   drafts: TeamDraftStore,
   humanIdentity: TeamHumanIdentity,
-  name: 'sidebar.workspaces' | 'main' | 'sidebar.settings',
+  name: 'sidebar.workspaces' | 'main',
   component: T,
-  extraInject?: () => Record<string, unknown>,
   // Keyed seats (`main`) address one panel by key; the reserved 'conversation'
   // key is where the shipped Conversation registers, so the Team seat shadows
   // that same panel instead of adding a second one.
@@ -325,8 +321,9 @@ function registerModeShadow<T extends object>(
     const reconcile = (): void => {
       const snapshot = navigation.getSnapshot()
       // The main panel seat yields to the shipped conversation root while a
-      // Member Session view is embedded; both sidebar seats stay shadowed so
-      // the Team chrome keeps working around the Member conversation.
+      // Member Session view is embedded; the sidebar's browser seat stays
+      // shadowed so the Team chrome keeps working around the Member
+      // conversation.
       const active = snapshot.mode === 'team' && !(name === 'main' && snapshot.memberSessionId !== undefined)
       if (active && dispose === undefined) {
         dispose = ctx.slots.register({
@@ -334,7 +331,7 @@ function registerModeShadow<T extends object>(
           ...(entryKey === undefined ? {} : { key: entryKey }),
           priority: -100,
           locale: NS,
-          inject: () => teamSeatInject(ctx, navigation, reads, sharedRemotes, name, extraInject),
+          inject: () => teamSeatInject(ctx, navigation, reads, sharedRemotes, name),
         } as never, component as never)
       } else if (!active && dispose !== undefined) {
         dispose()
@@ -448,24 +445,10 @@ function applyUi(ctx: ClientContext): void {
   ctx.on('connection/reset', () => { changes.recover(); queries.newGeneration() })
   const reads = new TeamReadStream()
 
-  const loadMemberGroups = async () => {
-    const workspaces = ctx.workspaces.list.getSnapshot().items
-    const groups = await Promise.all(workspaces.map(async workspace => {
-      const result = await ctx.remote.agentTeam.members({ workspaceId: workspace.workspaceId })
-      if (!result.ok) throw new Error(result.error.message)
-      // The members modal is a listing surface: archived Members are hidden
-      // everywhere, and removed (inactive) ones never belong in a roster.
-      const members = result.value.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
-      return { workspaceId: workspace.workspaceId, workspaceTitle: workspace.title, members }
-    }))
-    return groups.filter(group => group.members.length > 0)
-  }
-
   registerTeamPanel(ctx, navigation, queries, reads, drafts, humanIdentity)
 
   registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.workspaces', TeamWorkspaceBrowser as never)
-  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'main', TeamConversation as never, undefined, 'conversation')
-  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'sidebar.settings', TeamMembersAction as never, () => ({ loadMemberGroups }))
+  registerModeShadow(ctx, navigation, queries, reads, drafts, humanIdentity, 'main', TeamConversation as never, 'conversation')
 
   // The Team entry lives in the sidebar's panel rail beside the shipped Plugins
   // and scheduled-task entries, so the rail's selection and Team mode are one

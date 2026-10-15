@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { IconAgentPresetOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineRegular, IconChevronLeftOutlineMedium, IconChevronLeftOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamAddMemberRequest } from '@contexera/dsh-agent-team/types'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamWorkspaceSelector } from './TeamWorkspaceSelector.tsx'
@@ -24,7 +24,7 @@ function InboxMark({ unread }: { readonly unread: number }) {
   </span>
 }
 
-export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectChannel, selectInbox, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadChannels, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
+export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectChannel, selectInbox, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadChannels, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   const workspaces = useWorkspaces(state => state.items)
   const selected = navigationState.workspaceId
@@ -118,6 +118,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
 
   if (!wide) {
     return <nav className={css.railWorkspace} aria-label={t('workspaceSections')}>
+      <Tooltip label={t('backToConversations')} side="right">
+        <button type="button" className={css.railButton} aria-label={t('backToConversations')} data-team-action="leave" onClick={leaveTeam}>
+          <IconChevronLeftOutlineRegular size={18} />
+        </button>
+      </Tooltip>
       <Tooltip label={inboxLabel} side="right">
         <button type="button" className={css.railButton} aria-label={inboxLabel} aria-current={inboxIsCurrent ? 'page' : undefined} onClick={() => { selectInbox(); expandSidebar() }}>
           <InboxMark unread={inboxTotal} />
@@ -137,6 +142,17 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   }
 
   return <section className={css.workspaceBrowser} aria-label={t('workspaces')}>
+    {/* The way back to the conversation takes over the New Session bar's slot:
+        the mode hides that bar, so this row stands where the reader met it —
+        directly under the shell's brand row — in the same 38px slab and the same
+        centred group, since the reader meets one bar in that position in either
+        mode. The seat is the closest a Team control can legally stand to the
+        brand row, which is itself either that bar's button or a window-drag
+        surface with an aria-hidden mark. */}
+    <button type="button" className={css.leaveCard} aria-label={t('backToConversations')} data-team-action="leave" onClick={leaveTeam}>
+      <IconChevronLeftOutlineMedium size={14} className={css.leaveCardGlyph} />
+      <span className={css.leaveCardLabel}>{t('backToConversations')}</span>
+    </button>
     {/* The Inbox is the one destination that crosses Workspaces — its total sums
         every one of them — so it stands above the selector rather than inside
         the scope that selector names. */}

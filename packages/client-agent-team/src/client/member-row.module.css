@@ -1,7 +1,7 @@
 /* The shared roster row: one Member's identity, presence and Channel
    membership. Every surface that draws a person renders this geometry, so the
-   dialog, the Channel editor, the sidebar and the footer roster read as the
-   same list at the same density.
+   import roster, the Channel editor and the sidebar read as the same list at
+   the same density.
 
    Its 12px radius is the row tier this app shares with the shipped rail
    (`.panelRow`, `.newSession`): a row that carries a person or an entity is a
@@ -13,8 +13,9 @@
   border-radius: var(--dsw-radius-md, 12px);
   display: grid;
   gap: 0 10px;
-  /* The action track is declared only when one is rendered: a read-only roster
-     gives its width back to the description instead of reserving a hole. */
+  /* The action track is declared only when one is rendered, so a row without
+     an action gives its width back to the description instead of reserving a
+     hole. */
   grid-template-columns: 24px minmax(0, 1fr);
   min-height: 40px;
   padding: 8px 10px;
