@@ -78,8 +78,6 @@ export interface AgentTeamModelSelection {
  */
 export interface AgentTeamMemberCapabilities {
   /**
-   * Deliberate interface reservation, no UI writes it today: Runtime Revision
-   * manifests depend on this seam — do not remove during cleanup.
    * Absent = the Member sees all standard tools; present = the activation
    * allow-list (unknown names drop with a warning; the Host always unions
    * the five Team tools over it).

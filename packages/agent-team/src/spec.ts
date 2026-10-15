@@ -62,8 +62,6 @@ const modelSelectionSchema = z.object({
 // upgrades that rename or remove tools, so divergence is derived at
 // activation instead (see AgentTeamCapabilityWarning).
 const memberCapabilitiesSchema = z.object({
-  // Deliberate interface reservation, no UI writes it today: Runtime Revision
-  // manifests depend on this seam — do not remove during cleanup.
   tools: z.object({ allow: z.array(z.string().min(1)) }).strict().transform(omitUndefined).optional(),
   skills: z.object({ allow: z.array(z.string().min(1)) }).strict().transform(omitUndefined).optional(),
 }).strict().transform(({ tools, skills }): AgentTeamMemberCapabilities => ({
