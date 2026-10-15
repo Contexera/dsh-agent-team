@@ -68,11 +68,10 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
       })))
       if (disposed) return
       // A failed refresh keeps that Workspace's last successful total: a read
-      // that did not land must never fold into zero and read as "no unread"
-      // (issue 03 criterion 6). Recovery overwrites the kept value — a
-      // failure freezes nothing — and the read layer's per-key failed
-      // counter is where the failure stays inspectable; the badge gains no
-      // new visual state for it.
+      // that did not land must never fold into zero and read as "no unread".
+      // Recovery overwrites the kept value — a failure freezes nothing — and the
+      // read layer's per-key failed counter is where the failure stays
+      // inspectable; the badge gains no new visual state for it.
       const totals = new Map<string, number>()
       for (const { workspaceId, result } of results) {
         totals.set(workspaceId, result.ok ? result.value.totalUnreadCount : keptTotalsRef.current.get(workspaceId) ?? 0)

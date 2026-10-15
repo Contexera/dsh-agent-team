@@ -13,7 +13,9 @@ Use this authority order:
 3. **Harness contract:** `../deepseek-harness/docs/`, its applicable `AGENTS.md`, and the corresponding Harness source/tests.
 4. **Work history:** `.scratch/` — active work items and archived design, research, tickets, prototypes, and validation evidence. It is not an implementation or API authority; its own [`AGENTS.md`](.scratch/AGENTS.md) governs how to work there, and the [`README.md`](.scratch/README.md) indexes it. Verify relevant history against code, tests, and the Harness contract.
 
-Keep production code self-explanatory through clear names, types, and structure. Comments explain only non-obvious constraints, ownership, or reasons; they are not the sole definition of current behavior.
+Keep production code self-explanatory through clear names, types, and structure. Comments explain only non-obvious constraints, ownership, or reasons; they are not the sole definition of current behavior. The `check:comments` row in [`docs/development/start-and-checks.md`](docs/development/start-and-checks.md) holds the per-scope budget and the rules a comment's references must satisfy.
+
+When deleting comments in bulk, a green test suite proves nothing about the change. Tests assert behavior; comments are text. Measure the edit itself instead: audit the diff so every removed line is a comment or a blank line, and treat any removed code line as a failure. Delete whole comment blocks rather than merged line ranges — a merged range swallows the code between two comments — and never normalize whitespace outside the lines you removed. This applies to any sweep over comments, including one driven by a subagent report: reports carry line numbers that drift, so verify each cited range against the current file before acting on it.
 
 ## Reading guidance
 

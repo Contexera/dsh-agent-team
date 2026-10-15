@@ -194,8 +194,8 @@ function membersQuery(request: AgentTeamMembersRequest): TeamQueryIdentity {
     // Workspace scope for every member-level commit and presence scopes for
     // run state. The scope-less stream is a superset of projection wakes —
     // every scope-less delivery that touches this roster has also woken this
-    // Workspace — so letting it in adds no needed invalidation, only
-    // unrelated ones that cost a redundant read (issue 03 criterion 4).
+    // Workspace — so letting it in adds no needed invalidation, only unrelated
+    // ones that cost a redundant read.
     covers: scope => scope !== undefined
       && (scope.kind === 'presence' || scope.kind === 'workspace') && scope.workspaceId === request.workspaceId,
   }
