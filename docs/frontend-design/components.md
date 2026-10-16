@@ -36,7 +36,7 @@ Known branded `channel:*` refs render at their original position as Channel chip
 Both resolve against the already-loaded Channel and member rosters with no new Host call, so a ref outside the loaded window stays plain text under the same rule unresolvable refs follow.
 
 ## Count capsule
-`TeamCountBadge.tsx` over `countBadge.module.css .badge` is the one count capsule, and every count the Human reads wears it: the Channel feed's Thread entry and each Inbox queue row. One hand-written copy per surface — which is what there was before they were shared — is exactly what let the feed's copy sit on a different line box from the queue rows', with its digit a pixel away from theirs.
+`TeamCountBadge.tsx` over `countBadge.module.css .badge` is the one count capsule, and every count the Human reads wears it: the Channel feed's Thread entry, each Inbox queue row, and a Task card on the Channel board. One hand-written copy per surface — which is what there was before they were shared — is exactly what let the feed's copy sit on a different line box from the queue rows', with its digit a pixel away from theirs.
 
 The sidebar's Inbox entry is deliberately not one of them: it states unread as a dot rather than a number (see Inbox (收件箱)). What a reader scans the sidebar for is whether anything is waiting, while the quantity — which moves on every fact, and is what they ask for on purpose — belongs in the control's own name.
 
@@ -117,6 +117,31 @@ The key is write-only: the Host redacts the literal, so the control starts blank
 The group is offered only while this deployment serves a settings document: the section is registered regardless, because identity is reachable without one, and an absent settings service simply leaves the group out. Inside a served document the group still answers for itself — a read-only document disables its controls and says so, and a namespace that is not served renders the form's own unavailable line instead of fields nothing would accept.
 
 The form reaches the page through an observable seat rather than as a value. A slot entry's injected props are computed once and cached for that entry's lifetime, so a settings service answering after the first render would otherwise leave the group off the page until a reload. Filling the seat after render is what the page's own test pins.
+
+## Channel page and discussion panel
+The Channel page reads one timeline two ways. A tab strip under the header switches between them: `频道` is the feed, `看板` is a four-column board of the Task-status projection. The board is a second **reading**, not a second surface — it re-sorts the same projection, so a Task's state, owners, and title cannot disagree between the two views, and neither view fetches anything the other has not.
+
+The board reads the window the feed has already loaded, not the Channel's whole history. A board that paged the Channel until `hasMore` was false would merge every top-level Message into the timeline, defeating the feed's own pagination to fill four columns, and it would make opening a tab an unbounded read.
+
+The feed's `加载更早消息` is how the board gets older work: one affordance, one page size, and the two views always describe the same set of facts.
+
+Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
+
+The board is the one Client surface allowed past the 880px reading column, up to 1240px: four status columns are a scanning surface, and narrowing them to the reading measure would cost every column its card width.
+
+The columns are equal (`flex: 1` with `min-width: 0`), so a longer title in one column cannot buy it more room than its neighbours, and they sit on `--dsw-alias-bg-module-platform` — the shipped recessed fill a grouped module uses — so the cards' own base fill reads as raised against them.
+
+The tab strip is a composite control: `role="tablist"` with two `role="tab"` buttons, one tab stop for the group (`tabIndex` -1 on the unselected tab), each tab naming the panel it controls through `aria-controls`/`aria-labelledby`, and Left/Right/Home/End moving selection **and** focus together.
+
+It takes the shipped session page's own tab language — 13px/16px weight 500, a 36px gap, and a 2px underline in `--dsw-alias-state-business-primary` — and the negative bottom margin lifts that underline onto the header's closing rule, so the two read as one edge. The inactive tab is tertiary and the selected one is business blue rather than ink, because `--dsw-alias-brand-primary` resolves to neutral black in this token sheet; shipped states the same reason on its own strip.
+
+A taskless Thread opens beside the feed in a right-hand panel rather than replacing the page. The panel is a discussion's whole face: its head names it and offers promotion plus a close, its body reads the facts with the same day separators and runs as any timeline, and its foot is the ordinary composer at the same `thread:<threadRef>` draft key, so a half-written reply survives the trip between the panel and the Thread page. A Task's entry still walks into the Thread page, which is where Claims and acceptance live.
+
+The panel's seat is reserved only while it is open. An always-on 360px reservation would spend a sixth of a 1440px viewport on an empty band for the whole life of the page and charge every line of the feed for it; the price of releasing it is a single re-wrap at the moment the reader opens or closes the panel, when their attention has moved to the panel anyway.
+
+Below the shared 600px breakpoint the panel covers the stage whole instead of standing beside a feed too narrow to read.
+
+Promotion from the panel is the same Human-only durable mutation the Thread page runs, and it ends the panel's job: on success the panel closes as the reader walks into the new Task's Thread page. A read committed in the panel clears its feed row's unread capsule immediately rather than waiting for the next Inbox read to land.
 
 ## Failure surfaces
 A failed projection renders one of two shapes, and the choice is a claim about what is still on screen. When nothing was ever loaded, the failure replaces the whole surface as `errorState`: it rides the same free space as the loading and empty surfaces it stands in for (`margin: auto`, `padding: 32px 0`), keeps to the 880px reading column, and takes the 12px/18px error scale in `--dsw-alias-state-error-primary`. It carries the Host's message plus one `重试` that re-issues the read — message and retry inside a single `role="alert"`.

@@ -13,7 +13,9 @@ All visible copy comes from structurally matching zh/en locale keys, whose types
 > TODO: decide whether a raw transport message should be replaced by localized copy or stay exactly as the Host worded it; today the surfaces show it verbatim.
 
 ## Accessibility baseline
-Section headers, expand/collapse buttons, menus, listbox/options, and the 「作为任务」 control use native keyboard behavior and complete ARIA state. Every icon button has an accessible label; decoration is hidden. A Thread entry's door is one native button whose label carries both the Thread and its unread count; the capsule drawn beside it is `aria-hidden`, and the owner stack is a single labeled `role="img"` that stays outside the button so its name survives. Timeline uses a dedicated message-timeline label.
+Section headers, expand/collapse buttons, menus, listbox/options, the 「作为任务」 control, and the Channel page's `频道 | 看板` tab strip use native keyboard behavior and complete ARIA state. The tab strip is one tab stop for the group with Left/Right/Home/End moving selection and focus together, each tab naming its panel through `aria-controls`/`aria-labelledby`.
+
+Every icon button has an accessible label; decoration is hidden. A Thread entry's door is one native button whose label carries both the Thread and its unread count; the capsule drawn beside it is `aria-hidden`, and the owner stack is a single labeled `role="img"` that stays outside the button so its name survives. Timeline uses a dedicated message-timeline label.
 
 Unread and run dividers have `role="separator"`; visible UI changes require desktop 1440×960, 390×844, and keyboard browser checks.
 

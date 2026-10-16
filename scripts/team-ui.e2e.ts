@@ -185,38 +185,6 @@ async function maxHorizontalScroll(page: Page, selector: string): Promise<number
   }, selector)
 }
 
-async function inkCenterOffset(control: Locator): Promise<number> {
-  const shot = await control.screenshot()
-  return control.evaluate(async (element, bytes) => {
-    const blob = new Blob([new Uint8Array(bytes)], { type: 'image/png' })
-    const bitmap = await createImageBitmap(blob)
-    const canvas = document.createElement('canvas')
-    canvas.width = bitmap.width
-    canvas.height = bitmap.height
-    const context = canvas.getContext('2d')
-    if (context === null) throw new Error('2d context unavailable')
-    context.drawImage(bitmap, 0, 0)
-    const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
-    const luminance = (x: number, y: number): number => {
-      const index = (y * canvas.width + x) * 4
-      return 0.299 * data[index]! + 0.587 * data[index + 1]! + 0.114 * data[index + 2]!
-    }
-    // Inside the control's own 1px separator, so the border is never ink.
-    let minX = Number.POSITIVE_INFINITY
-    let maxX = -1
-    for (let y = 3; y < canvas.height - 3; y++) {
-      for (let x = 3; x < canvas.width - 3; x++) {
-        if (luminance(x, y) < 150) {
-          if (x < minX) minX = x
-          if (x > maxX) maxX = x
-        }
-      }
-    }
-    if (maxX < 0) throw new Error(`no ink found in ${element.className}`)
-    return (minX + maxX + 1) / 2 - canvas.width / 2
-  }, [...shot])
-}
-
 /**
  * The Channel feed's state column: the left edge of every entry line's state
  * cluster. A Taskful entry always carries one — a status dot and word at
@@ -430,12 +398,33 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // rather than content, so nothing may scroll sideways. Measured by asking each
   // scroller to scroll as far right as it can, which is the reader's own gesture.
   expect(await maxHorizontalScroll(page, 'section[class*="workspaceBrowser"]')).toBe(0)
-  // Centred is a claim about the ink, not about the box: the chevron draws 4px
-  // of ink 5px inside its 14px box, so a box-centred row lands the group's
-  // visible ink 2.5px right of the middle. The reader sees the ink, so that is
-  // what the gate measures — and it is measured on the assembled bundle, since
-  // jsdom loads no CSS and the optical margin is a CSS declaration.
-  expect(Math.abs(await inkCenterOffset(conversationTrigger))).toBeLessThanOrEqual(1)
+  // Centring is a claim about the label's ink, not about the whole control's.
+  // The mode's exit centres its label and hangs the chevron off the label's
+  // leading edge, out of flow: centring the group instead makes the result
+  // depend on the air inside each glyph's box, which differs between CJK and
+  // Latin glyphs and across font stacks. Measuring the control's whole ink would
+  // therefore measure the chevron's offset and call the design wrong for doing
+  // what it documents; the label's own box is the thing that must be centred.
+  // Assembled-bundle only: jsdom loads no CSS and the optical margin is a CSS
+  // declaration.
+  const labelCentreOffset = await page.evaluate(async () => {
+    const label = document.querySelector('button[data-team-action="leave"] span[class*="leaveCardLabel"]')
+    const control = label?.closest('button')
+    if (label == null || control == null) return null
+    const labelBox = label.getBoundingClientRect()
+    const controlBox = control.getBoundingClientRect()
+    return (labelBox.left + labelBox.width / 2) - (controlBox.left + controlBox.width / 2)
+  })
+  expect(labelCentreOffset).not.toBeNull()
+  expect(Math.abs(labelCentreOffset!)).toBeLessThanOrEqual(1)
+  // The chevron leads the label rather than floating on the far side of the row.
+  const glyphBeforeLabel = await page.evaluate(() => {
+    const glyph = document.querySelector('button[data-team-action="leave"] svg')
+    const label = document.querySelector('button[data-team-action="leave"] span[class*="leaveCardLabel"]')
+    if (glyph == null || label == null) return null
+    return glyph.getBoundingClientRect().right <= label.getBoundingClientRect().left
+  })
+  expect(glyphBeforeLabel).toBe(true)
   // The shipped Settings row is not shadowed, so it keeps the y and the height
   // it had before the mode was entered — the footer is the shell's again.
   expect(teamSettingsBox!.y).toBeCloseTo(settingsBox!.y, 0)
@@ -1170,14 +1159,32 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'message-attachment-thumbnail-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
+  // Three stacked bands, whichever reading is on screen: the header, the
+  // content that fills the free space, and the composer. The middle band is the
+  // feed stage — one child holding the timeline and the composer together — so
+  // this reads the stage's own box rather than its two occupants.
   const channelGeometry = await page.locator('[data-team-channel]').evaluate(element => {
     const children = [...element.children].map(child => child.getBoundingClientRect())
     return children.map(rect => ({ top: rect.top, bottom: rect.bottom, height: rect.height }))
   })
-  expect(channelGeometry).toHaveLength(3)
+  expect(channelGeometry).toHaveLength(2)
   expect(channelGeometry[0]!.bottom).toBeLessThanOrEqual(channelGeometry[1]!.top + 1)
-  expect(channelGeometry[1]!.bottom).toBeLessThanOrEqual(channelGeometry[2]!.top + 1)
   expect(channelGeometry[1]!.height).toBeGreaterThan(200)
+  // The reading column, the tab strip and the header share one left edge: the
+  // switch is part of the page's chrome, so it cannot sit on its own x.
+  const channelColumnEdges = await page.evaluate(() => {
+    const root = document.querySelector('[data-team-channel]')
+    const round = (value: number) => Math.round(value)
+    const box = (node: Element | null) => node === null ? null : round(node.getBoundingClientRect().x)
+    return {
+      header: box(root?.querySelector('header')),
+      tabs: box(root?.querySelector('[role="tablist"]')),
+      entry: box(root?.querySelector('[data-thread-entry]')),
+    }
+  })
+  expect(channelColumnEdges.header).not.toBeNull()
+  expect(channelColumnEdges.tabs).toBe(channelColumnEdges.header)
+  expect(channelColumnEdges.entry).toBeGreaterThanOrEqual(channelColumnEdges.header!)
   // The identity seat is one declaration on the shared conversation surface, so
   // the Channel feed reads the seat the Thread page reads. Declaring it on
   // `[data-team-thread]` left this surface on the `var()` fallback instead —
@@ -1221,17 +1228,43 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => (await tasklessChannelFrame.locator(':scope > div').first().boundingBox())?.width ?? 999).toBeLessThanOrEqual(56)
   await expect.poll(async () => (await page.locator('[data-team-channel]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
   await tasklessMessage.getByRole('button', { name: '打开讨论' }).click()
-  await page.getByRole('heading', { name: '讨论' }).waitFor()
-  expect(await page.getByRole('button', { name: /Claims/ }).count()).toBe(0)
-  expect(await page.getByRole('button', { name: '验收' }).count()).toBe(0)
+  // A taskless discussion opens beside its feed instead of replacing the page:
+  // the Channel page, its timeline, and the discussion's own door all stay.
+  const panel = page.locator('[data-team-panel]')
+  await panel.waitFor()
+  await expect.poll(async () => await page.getByRole('heading', { name: '# delivery' }).count()).toBe(1)
+  await expect.poll(async () => await page.locator('[data-team-channel]').count()).toBe(1)
+  // The panel is a discussion's face, not a Task's: no Claims disclosure and no
+  // acceptance control, because a taskless Thread has neither. Scoped to the
+  // panel, since the feed beside it still holds a Task's own door.
+  expect(await panel.getByRole('button', { name: '验收' }).count()).toBe(0)
+  expect(await panel.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   const promote = page.getByRole('button', { name: '转为 Task' })
   await promote.waitFor()
-  const tasklessThreadFrame = page.locator('[data-sidebar-collapsed="true"]')
-  await expect.poll(async () => (await tasklessThreadFrame.locator(':scope > div').first().boundingBox())?.width ?? 999).toBeLessThanOrEqual(56)
-  await expect.poll(async () => (await page.locator('[data-team-thread]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
+  // The panel covers the stage whole at 390px rather than sitting beside a feed
+  // too narrow to read, and neither one overflows the viewport.
+  await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0))
+    .toBeGreaterThanOrEqual(Math.round((await page.locator('[data-team-channel]').boundingBox())?.width ?? 0) - 2)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-  await page.screenshot({ path: join(UI04_SHOTS, 'taskless-thread-narrow.png'), fullPage: true })
+  await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+  // At desktop width the panel opens on the right of the feed, and the seat it
+  // takes is the seat the feed gives up: the two do not overlap, and the reading
+  // column keeps a readable measure instead of collapsing under the panel.
+  const panelSplit = await page.evaluate(() => {
+    const round = (value: number) => Math.round(value)
+    const panelBox = document.querySelector('[data-team-panel]')?.getBoundingClientRect()
+    const timelineBox = document.querySelector('[data-team-channel] section[aria-label]')?.getBoundingClientRect()
+    return panelBox === undefined || timelineBox === undefined ? null : {
+      panelLeft: round(panelBox.left), panelWidth: round(panelBox.width),
+      timelineRight: round(timelineBox.right), timelineWidth: round(timelineBox.width),
+    }
+  })
+  expect(panelSplit).not.toBeNull()
+  expect(panelSplit!.timelineRight).toBeLessThanOrEqual(panelSplit!.panelLeft + 1)
+  expect(panelSplit!.timelineWidth).toBeGreaterThanOrEqual(520)
+  await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-desktop.png'), fullPage: true })
   await promote.focus()
   await page.keyboard.press('Enter')
   await page.getByRole('heading', { name: 'Task #2' }).waitFor()
@@ -1239,6 +1272,65 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await page.getByRole('button', { name: '转为 Task' }).count()).toBe(0)
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
+
+  // The Channel's two readings. The switch is a composite control, so the whole
+  // strip is one tab stop and the arrow keys move selection with focus; both
+  // halves had no browser coverage at all before this journey.
+  const feedTab = page.getByRole('tab', { name: '频道' })
+  const boardTab = page.getByRole('tab', { name: '看板' })
+  await feedTab.waitFor()
+  expect(await feedTab.getAttribute('aria-selected')).toBe('true')
+  expect(await boardTab.getAttribute('tabindex')).toBe('-1')
+  await feedTab.focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => await boardTab.getAttribute('aria-selected')).toBe('true')
+  await expect.poll(() => page.evaluate(() => document.activeElement?.textContent ?? '')).toBe('看板')
+  await settleLayout(page)
+  // The board is a full-content switch: four status columns, and the composer
+  // leaves with the feed because there is no send on a status view.
+  const boardPanel = page.locator('[role="tabpanel"]')
+  const boardHeadings = await boardPanel.locator('[class*="boardColumnHead"]').allTextContents()
+  expect(boardHeadings.map(text => text.replace(/\d+$/, ''))).toEqual(['待处理', '进行中', '待验收', '已完成'])
+  expect(await page.getByRole('textbox', { name: '消息内容' }).count()).toBe(0)
+  const boardGeometry = await page.evaluate(() => {
+    const round = (value: number) => Math.round(value)
+    const scrollport = document.querySelector('[role="tabpanel"]')
+    const columns = [...document.querySelectorAll('[role="tabpanel"] > div > div')].map(node => node.getBoundingClientRect())
+    return {
+      count: columns.length,
+      tops: [...new Set(columns.map(box => round(box.top)))],
+      widths: columns.map(box => round(box.width)),
+      lefts: columns.map(box => round(box.left)),
+      right: round(columns.at(-1)?.right ?? 0),
+      scrollport: scrollport === null ? null : { left: round(scrollport.getBoundingClientRect().left), right: round(scrollport.getBoundingClientRect().right), width: round(scrollport.getBoundingClientRect().width) },
+      pageWidth: document.documentElement.clientWidth,
+    }
+  })
+  expect(boardGeometry.count).toBe(4)
+  // One row of four equal columns: `flex: 1` with `min-width: 0` means a wider
+  // card in one column cannot buy that column more room than its neighbours.
+  expect(boardGeometry.tops).toHaveLength(1)
+  expect(new Set(boardGeometry.widths).size).toBe(1)
+  expect(boardGeometry.widths[0]).toBeGreaterThanOrEqual(150)
+  // The board is a scanning surface, so its columns span the content box rather
+  // than sitting huddled against one edge of it.
+  expect(boardGeometry.lefts[0]! - boardGeometry.scrollport!.left).toBeLessThanOrEqual(boardGeometry.lefts[1]! - boardGeometry.lefts[0]!)
+  await page.screenshot({ path: join(UI04_SHOTS, 'channel-board.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  await page.screenshot({ path: join(UI04_SHOTS, 'narrow-channel-board.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+  // Back to the feed: the composer returns and the selection is remembered.
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(async () => await feedTab.getAttribute('aria-selected')).toBe('true')
+  await expect.poll(async () => await page.getByRole('textbox', { name: '消息内容' }).count()).toBeGreaterThanOrEqual(1)
+  await feedTab.focus()
+  await page.keyboard.press('End')
+  await expect.poll(async () => await boardTab.getAttribute('aria-selected')).toBe('true')
+  await page.keyboard.press('Home')
+  await expect.poll(async () => await feedTab.getAttribute('aria-selected')).toBe('true')
 
   const workspace = scaffold.ctx.workspaceRegistry.list()[0]!
   const projection = scaffold.ctx.agentTeam.view({ workspaceId: workspace.id })
@@ -2206,7 +2298,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // either way, so the precise instant stays on the control's title, one hover
   // away.
   const closedEntry = taskEntryRow(page, 1)
-  await expect.poll(async () => (await closedEntry.textContent())?.trim() ?? '').toBe('Task #1')
+  // A resolved Task's door slims to a footnote: the number, the status word, and
+  // the day it landed — no owner stack and no recency clause, which on every
+  // finished row would only repeat the moment it resolved. The precise instant
+  // stays on the control's title, one hover away.
+  await expect.poll(async () => (await closedEntry.textContent())?.trim() ?? '').toMatch(/^Task #1 · 已(完成|关闭) · \d{2}-\d{2}$/)
+  await expect.poll(async () => (await closedEntry.textContent())?.trim() ?? '').not.toContain('最近活动')
   await expect.poll(async () => await closedEntry.getAttribute('title') ?? '').toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   await closedEntry.scrollIntoViewIfNeeded()
   await settleAnimations(page)

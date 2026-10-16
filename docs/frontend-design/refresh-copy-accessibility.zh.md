@@ -19,6 +19,7 @@
 - 长消息的「展开全文/收起」是原生 button 并携带 `aria-expanded`，键盘 Enter/Space 原生可达。
 - 行内 ⋯ 菜单按钮带 `aria-label`（`{name} 的操作`）与 `aria-expanded/haspopup`；菜单项由公共 `Menu` 提供完整键盘与外点关闭路径。
 - listbox/option 完整键盘闭环（见 composer 一节）；Channel composer 的「作为任务」使用原生 button 的 `aria-pressed`，Space/Enter 均可切换。
+- Channel 页的 `频道 | 看板` 页签行是复合控件：整组只有一个 tab stop（未选中的那个 `tabIndex` 为 -1），Left/Right/Home/End 同时移动选中与焦点，每个页签用 `aria-controls`/`aria-labelledby` 指明自己控制的 panel。
 - 图标按钮均有 aria-label；装饰元素 `aria-hidden`。
 - Thread 入口的「开门」控件是一枚原生 button，label 同时携带 Thread 与它的未读数。旁边画出的胶囊 `aria-hidden`，头像叠放是单个带标签的 `role="img"`，且刻意留在按钮之外以保住它自己的可访问名。
 - 消息时间线区域使用专用 `timelineLabel`（"消息时间线"），不误用频道/参与者标签；Thread 内部事实分组段不带重复的区域标签。

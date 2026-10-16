@@ -4,14 +4,14 @@
 
 ## 布局骨架
 - 对话面（channel/thread）：`display:grid; grid-template-rows: auto 1fr auto`——header / 可滚动时间线 / composer 三段，`height:100%`，内部滚动 `overscroll-behavior: contain`。
-- 内容列 `max-width: 880px` 居中；时间线左右 padding `clamp(18px, 3vw, 36px)`。
+- 内容列 `max-width: 880px` 居中；时间线左右 padding `clamp(18px, 3vw, 36px)`。Channel 页的 feed stage 一并取内容行与 composer 行（`grid-row: 2 / 4`），打开的讨论面板因此能横跨两者。
 - 断点 `@media (max-width: 600px)` 收紧 padding、header 纵排；验收必须覆盖 390×844 无横向溢出。
 - 侧栏由宿主 `sidebar` slot 决定宽窄（wide/rail 二态）；rail 模式下 Team 只渲染图标按钮列。
 - Team 的 mode、Workspace、最后选中的 Channel/Thread，以及 Inbox 页位置写入浏览器缓存。这些是 navigation 事实，不是未读事实。切回 Team 或刷新后恢复最后位置。未读和 Attention 不写入浏览器缓存。
 - 欢迎态是独立居中 surface（eyebrow + h1 + 引导文案），不进入三段骨架。
 - Thread 是导航终点；Task 只在存在时叠加为 header/card。taskful Thread 的头部将 `Task #N` 与状态 Pill 放在同一行（`.titleLine`），任务标题为副行。Claims 用公共 `DisclosureRow` 折叠为一行摘要，展开才渲染 Claim 列表。header 动作区只在 open 任务出现（验收/关闭），accepted 任务保留 header 重新打开主按钮。taskless Thread 显示 Thread 标题与唯一的「转为任务」动作。它不显示状态、Claims 或 Task resolution controls。
 - 关闭任务是终态：composer 槽位换成解释性提示条（`.closedBar/.closedNotice`，文案 + 唯一的重新打开动作），不再渲染禁用的输入框。taskless Thread 保持普通 reply composer。
-- Channel 页与 Thread 页对称：Channel 页有返回行（`backToChannels` 清除 `channelRef` 回到频道列表）。时间线空/加载态在自由空间内居中（`.emptySurface` + `margin:auto`）。
+- Channel 页与 Thread 页共用顶层栏、发丝线与 880px 居中阅读列，并在返回行上分野：Channel 页有返回行（`backToChannels` 清除 `channelRef` 回到频道列表）。Channel 页另在头部下方加一条 `频道 | 看板` 页签行；taskless 讨论在右侧 360px 面板里打开，座位只在面板打开时预留。看板是唯一被允许超出阅读列的 Team 表面，上限 1240px。时间线空/加载态在自由空间内居中（`.emptySurface` + `margin:auto`）。
 - 侧栏两个面板（Agents/Channels）都订阅 `{kind:'workspace'}` 变更。`TeamChangeStream` 在每个页面内按 scope 共享一个流式订阅，每次开场或重连基线都触发补读，之后响应匹配的通知。Channel 刷新成功后清除加载错误，不清除无关的操作错误。
 - 发送幂等：Channel 顶层发送与 Thread reply 一致按 requestId 幂等。Channel composer 的「作为任务」是默认关闭的原生 pressed control。chip 自绘，任何宽度都保留文字。选中态为 primary 底色，hover 不改变按压底色。形态与座位见设计语言表的「模式控件」行。新发送显式携带 taskless 意图，选中时才原子创建 Task。`committed` 与确定性拒绝（如 `unread_required`、`stale_revision`）后换新 id。`confirmation_required` 保留同 id 续发同一操作。传输异常保留 id 以便安全重试（Host 按 requestId 去重并返回原结果）。成功发送后「作为任务」复位为关闭。
 

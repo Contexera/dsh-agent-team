@@ -35,7 +35,7 @@
 - 已知的 branded Channel ref（`channel:*`）在原出现位置渲染为带频道名的可点击 Channel chip，中文为`频道 · …`。点击跳到这个 Channel。已知的 branded Member ref（`member:*`）渲染为带 handle 的 Member chip（中文为`成员 · @…`）。它与会发通知的 `@mention` chip 刻意区分。引用永不发通知。点击活跃 Member 的 chip，按 agent card 同款行为打开这个 Member 的 session。被暂停的 Member 与 Human 只渲染为带名但不可点的文本。两者都直接复用已加载的 Channel/Member roster 解析，不新增 Host 接口。落在已加载窗口之外的 ref 按解析失败同规则保留原文。
 
 ## 计数胶囊（count capsule）
-- `TeamCountBadge.tsx` 配上 `countBadge.module.css .badge` 是**唯一**一枚计数胶囊，读者能看到的每一处计数都穿它。两处是：Channel feed 的 Thread 入口，以及 Inbox 队列行。同一套声明每面各写一份，共享之前就是如此。正是 feed 那一份落到与队列行不同的行盒、数字彼此差出一个像素的原因。侧栏「收件箱」入口有意不用胶囊。入口把未读说成一个点，而不是一个数字（见「Inbox（收件箱）」）。读者扫侧栏问的是「有没有东西在等」。数量随每一条 fact 变动，是专门去问才要的答案。数字留在控件自己的可访问名里。
+- `TeamCountBadge.tsx` 配上 `countBadge.module.css .badge` 是**唯一**一枚计数胶囊，读者能看到的每一处计数都穿它。三处是：Channel feed 的 Thread 入口、Inbox 队列行，以及 Channel 看板上的 Task 卡。同一套声明每面各写一份，共享之前就是如此。正是 feed 那一份落到与队列行不同的行盒、数字彼此差出一个像素的原因。侧栏「收件箱」入口有意不用胶囊。入口把未读说成一个点，而不是一个数字（见「Inbox（收件箱）」）。读者扫侧栏问的是「有没有东西在等」。数量随每一条 fact 变动，是专门去问才要的答案。数字留在控件自己的可访问名里。
 - 这份规则是：高 18px、`min-width: 18px` 配 `box-sizing: border-box`（平台没有全局 border-box reset，否则内边距会把一位数字撑成椭圆）、`border-radius: 999px` 配 `corner-shape: round`、`display: inline-flex` 双向居中、11px/600 配 `font-variant-numeric: tabular-nums`（两位计数不会推动墨迹）、`line-height: 18px`。行盒就取胶囊自己的高度，而不是各面碰巧继承到的值。一面的入口行继承 `normal`，另一面自己设了高度。再加 `flex: none`：座位被挤时 Inbox 行不会把圆圈压小。定位仍留在挂胶囊的那个面上。窄轨要把胶囊钉在 36px 图标盒内，挂载点是 `className`。
 - 计数为 0 不渲染任何东西：计数的缺失不是「一枚写着 0 的胶囊」。超过 99 显示 `99+`。`tone` 只换墨色。Thread 点名了这位读者时是实心底色。只是有新动静时，用完全相同的几何画成 `--dsw-alias-border-l2` 发丝线。发丝线那 1px 边框从发丝线自己的内边距里出。4px + 1px 就是实心那份的 5px。于是两种墨色在任何计数下都是同一个边框盒、同一个内容盒，同一 Thread 再次被点名时行不会跳动。`label` 决定计数如何抵达读屏。有 label 时胶囊是 `role="img"`，由胶囊的可访问名与 `title` 承载数字。没有 label 时是 `aria-hidden`，因为外层控件已经说了这个数。
 - 数字墨迹落在盒中心偏右约半个像素处。十个数字皆然。这是字形在自身 advance 里的落点，不是布局问题，任何声明都改不了。规则真正负责的是「一个字符保持 18px 的盒子」与「两处共用同一条规则」。`scripts/audit-ui-parity.mjs` 直接审计这条规则。重新引入第二份拷贝会让审计报错。
@@ -82,6 +82,16 @@
 - key 是**只写**的。Host 会 redact 字面值。这个控件每次加载都从空开始。空草稿不写任何东西。打开这一页永远不可能清掉已存的 key。「已配置」徽章来自 describe mirror 的 `secrets` 列表：这份状态唯一可读的地方。移除字面值是一次**显式的清除写入**，只在没有暂存草稿时才提供。写入会推动文档 revision，暂存的保存被文档 revision 栅栏住。
 - 这一组只在这次部署提供 settings 文档时才出现。段落本身照常注册：身份不依赖 settings 文档也能读写。settings 服务缺席时这一组直接不渲染。文档在场时这一组也自己答自己。只读文档禁用全部控件并说明。命名空间没被提供时，渲染表单自带的那行「没有提供」，而不是画出一堆没人接受的字段。
 - 表单是以**可观察的 seat**、而不是一个值交给页面的。slot entry 的注入 props 只算一次，并缓存到该 entry 的生命周期。首次渲染之后才应答的 settings 服务，本来会让这一组一直不出现，要刷新。页面自己的测试钉的就是「渲染之后再填 seat」。
+
+## Channel 页与讨论面板（channel page / discussion panel）
+- Channel 页把同一条时间线读成两种视图。头部下方一条页签行在两者之间切换：`频道` 是 feed，`看板` 是按 Task 状态投影的四列看板。看板是第二种**读法**，不是第二个表面。它重排同一份投影，所以一个 Task 的状态、所有者、标题不会在两个视图之间出现分歧，也不会有哪个视图去拉另一个没拉过的东西。
+- 看板只读 feed 已经加载的那一段窗口，不读 Channel 的全部历史。为了填满四列而一直翻到 `hasMore` 为假，等于把每一条 top-level Message 都并进时间线，为了四列而废掉 feed 自己的分页；同时会把「打开一个页签」变成一次无界读取。看板拿更早工作的方式就是 feed 的 `加载更早消息`：一个入口、一个页大小，两个视图永远描述同一批事实。
+- 四列是 `待处理` / `进行中` / `待验收` / `已完成`。五个 Task 状态里 `done` 与 `closed` 合进「已完成」一列。已了结的卡片降透明度而不是隐藏。看板的职责是让在动的工作最响，同时让已完的仍可找到。空列只在列头写自己的 `0`，不画占位行：在计数已经说清的列里再放一行占位，是把同一件事说两遍。
+- 看板是唯一被允许超出 880px 阅读列的 Client 表面，上限 1240px。四个状态列是扫描型表面，压到阅读列宽度会让每一列都失去卡片宽度。四列等宽（`flex: 1` 配 `min-width: 0`），所以某一列标题更长也换不来更多宽度；底色用 `--dsw-alias-bg-module-platform`（shipped 给分组模块的凹陷底色），卡片自身的底层色因此读起来是浮起的。
+- 页签行是复合控件：`role="tablist"` 加两个 `role="tab"` 按钮，整组只有一个 tab stop（未选中那个 `tabIndex` 为 -1），每个页签通过 `aria-controls`/`aria-labelledby` 指明自己控制的 panel，Left/Right/Home/End 同时移动选中与焦点。它取 shipped 会话页自己那套页签语言：13px/16px、weight 500、36px 间距、`--dsw-alias-state-business-primary` 的 2px 下划线；负底边距把下划线提上头部收口线，两者读成同一条边。未选中页签取 tertiary，选中页取 business blue 而非墨色，因为 `--dsw-alias-brand-primary` 在这张 token 表里解析成中性黑；shipped 在自己那条页签上也陈述了同样的理由。
+- taskless Thread 在 feed 右侧的面板里打开，而不是替掉整页。面板就是讨论的全部：头部点名并给出「转为 Task」与关闭，正文用与任何时间线相同的日分隔与消息块读事实，脚部是普通 composer 且共用同一个 `thread:<threadRef>` 草稿键，所以写到一半的回复在面板与 Thread 页之间往返不会丢。Task 的入口照旧走 Thread 页，Claims 与验收在那里。
+- 面板的座位只在它打开时预留。常驻的 360px 预留会在 1440px 视口上把六分之一长期花在一条空带上，并让 feed 的每一行都为它付费；释放它的代价是读者开/关面板那一刻的一次重排，而那时读者的注意力已经移到面板上。窄于共享的 600px 断点后，面板覆盖整个 stage，而不是与窄到没法读的 feed 并排。
+- 面板里的「转为 Task」与 Thread 页跑同一套 Human-only durable mutation，成功即结束面板的任务：面板关闭，读者直接进入新 Task 的 Thread 页。在面板里完成的读取立即清掉它在 feed 行上的未读胶囊，不必等下一次 Inbox 读取落地。
 
 ## 失败态呈现（failure surfaces）
 - 投影失败的呈现只有两种，选哪一种等于声明「屏幕上还剩什么」。**整面失败**（从未加载出投影）用 `errorState`。`errorState` 与所替代的 loading / empty 面共用同一份空白区居中（`margin: auto`、`padding: 32px 0`）。整面失败保持在 880px 阅读列内，取 12px/18px 的 error 字号与 `--dsw-alias-state-error-primary`。内容是 Host message 加一个重新发起读取的 `重试`，message 与按钮同在一个 `role="alert"` 里。**行旁失败**（行还在）用内联 `error`。在内容列内 `margin: 0`，读作所属列表的最后一行，而不是让已有内容的面重新居中。

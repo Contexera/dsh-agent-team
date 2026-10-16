@@ -60,17 +60,23 @@ Every top-level Channel Message has one Thread entry, drawn as a single quiet ro
 
 The state instead leads the entry row, at the same left edge as the body above it and on one x for every entry in the feed. That is the same leading position shipped DSH rows give their state (a `SkillRow`'s collapsed leading slot, the `JobListAction` trigger's dot before its count).
 
-A taskful entry leads with, in order, the avatar stack of the Task's live Claim owners, the 8px `TeamStateDot` for `taskStatusDot(status)`, and the localized status word. The word maps `in_progress`→ongoing, `in_review`→warning, and `done`→done on the shared `StateDot`, while `todo` renders its hollow ring and `closed` a quiet tertiary dot, so all five statuses keep one shape language.
+Where the row opens depends on what is behind it. A Taskful entry walks into the Thread page, which carries Claims, acceptance, and the whole history; a taskless discussion opens in the Channel page's own side panel, so the reader keeps the feed beside them (see [the Channel page](components.md#channel-page-and-discussion-panel)).
+
+An unfinished taskful entry leads with, in order, the avatar stack of the Task's live Claim owners, the 8px `TeamStateDot` for `taskStatusDot(status)`, and the localized status word. The word maps `in_progress`→ongoing, `in_review`→warning, and `done`→done on the shared `StateDot`, while `todo` renders its hollow ring and `closed` a quiet tertiary dot, so all five statuses keep one shape language.
 
 Claims are Host facts rather than decoration: only an `in_progress` or `in_review` Task has owners, a `released` Claim is no longer work, and owners are deduped in Claim order. A done or closed Task keeps no stack because the state word already tells that history. A taskless entry invents no status dot.
+
+A resolved Task drops the whole cluster and leads with the unread capsule alone — the board owns scanning resolved work, and an owner stack on finished work answers a question nobody is asking.
 
 `TeamAvatarStack` draws overlapping 18px circles in the shared Member hue, capped at three plus a `+N` chip. A 2px ring separates neighbours by cutting the faces out of the surface the stack is laid on (values and layering: the Inbox entry note below, where both kinds of row sit on the page fill). The circles are presentational, so the stack is one `role="img"` whose label names the whole roster (`claimers`).
 
 What the entry is follows the state on the same line: 12px/18px tertiary and `fit-content`, with no box of its own. Hover and `:focus-visible` only brighten it to primary and nudge the chevron 2px (120ms, off under reduced motion), under a 2px business-colored focus ring. That text is `Task #N` for a taskful entry, and for a taskless one the localized Thread label once the Thread has follow-up activity, or `replyAction` while the entry Message is still the newest fact.
 
-Follow-up activity appends `· 最近活动 <HH:mm>`, the same recency label an Inbox row wears — today is a bare clock time and only the first day that is not today is named (「昨天 HH:mm」). The Host's `lastActivityAt` differing from the entry Message's own `occurredAt` is exactly "the work moved after this Message", and the control's `title` carries the precise local instant.
+An unfinished entry appends `· 最近活动 <HH:mm>`, the same recency label an Inbox row wears — today is a bare clock time and only the first day that is not today is named (「昨天 HH:mm」). The Host's `lastActivityAt` differing from the entry Message's own `occurredAt` is exactly "the work moved after this Message", and the control's `title` carries the precise local instant.
 
-Only unfinished work prints it, and a `done` or `closed` Task prints its number alone. The status word beside the door already says nothing is moving, so the instant there would only repeat the moment it resolved on every finished row, while the precise instant stays on the control's `title`, one hover away. A taskless Thread never resolves, so a discussion keeps printing the recency that is the whole of its state line — it wears no status word, dot, or owner stack. The Message count is retired — the quantity a reader acts on here is unread, not how much text exists.
+A `done` or `closed` Task replaces that recency with a footnote: `Task #N · <status word> · <MM-DD>`, the day it landed in the same date-only form the Inbox's older rows use, and the full date across years.
+
+The recency clause there would only repeat the moment it resolved on every finished row; the precise instant stays on the control's `title`, one hover away. A taskless Thread never resolves, so a discussion keeps printing the recency that is the whole of its state line, and wears no status word, dot, or owner stack. The Message count is retired — the quantity a reader acts on here is unread, not how much text exists.
 
 A 390 column wraps the door text under the state rather than pushing the row past the reading column.
 

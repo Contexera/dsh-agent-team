@@ -3,11 +3,17 @@
 English | [中文](layout-and-typography.zh.md)
 
 ## Layout skeleton
-Channel and Thread surfaces use `display:grid; grid-template-rows: auto 1fr auto` for header, scrollable timeline, and composer at `height:100%`, with contained inner scrolling. The content column is centered at `max-width: 880px`; timeline padding is `clamp(18px, 3vw, 36px)`. At `max-width: 600px`, padding tightens and the header stacks; acceptance covers 390×844 without horizontal overflow. The host sidebar controls wide/rail widths; rail renders Team icon buttons.
+Channel and Thread surfaces use `display:grid; grid-template-rows: auto 1fr auto` for header, scrollable timeline, and composer at `height:100%`, with contained inner scrolling. The content column is centered at `max-width: 880px`; timeline padding is `clamp(18px, 3vw, 36px)`.
+
+The Channel page's feed stage takes the content and composer rows together (`grid-row: 2 / 4`) so an open discussion panel can span both. At `max-width: 600px`, padding tightens and the header stacks; acceptance covers 390×844 without horizontal overflow. The host sidebar controls wide/rail widths; rail renders Team icon buttons.
 
 Browser storage retains Team mode, Workspace, the last Channel/Thread location, and the Inbox page position (a navigation fact, not an unread fact), but never unread or Attention. Welcome is a separate centered surface. Thread is the navigation endpoint; an existing Task is a header/card overlay. Taskless Threads show a localized Thread/讨论 label and a promote action, not fake status or Claims. Closed Tasks replace the composer with an explanatory notice and reopen action; taskless Threads retain the normal reply composer.
 
-Channel and Thread pages are symmetric. Both subscribe to workspace changes through the shared abortable `TeamChangeStream`; every opening or reconnection baseline requests a catch-up read, followed by matching streamed invalidations. Successful Channel refreshes clear load errors without clearing unrelated action errors. Channel top-level and Thread replies are idempotent by request ID. The Channel 「作为任务」 control is a default-off native pressed control, sends explicit taskless intent unless selected, and resets off after success.
+Channel and Thread pages share a header band, a hairline, and the 880px centered reading column, and both subscribe to workspace changes through the shared abortable `TeamChangeStream`; every opening or reconnection baseline requests a catch-up read, followed by matching streamed invalidations.
+
+The Channel page additionally seats a `频道 | 看板` tab strip under its header and, for a taskless discussion, a 360px right-hand panel whose seat is reserved only while it is open; the board is the one Team surface allowed past the reading column, up to 1240px.
+
+Successful Channel refreshes clear load errors without clearing unrelated action errors. Channel top-level and Thread replies are idempotent by request ID. The Channel 「作为任务」 control is a default-off native pressed control, sends explicit taskless intent unless selected, and resets off after success.
 
 It sits beside the attach control as the labeled mode chip of the language table above, keeping its word at every width — the composer narrows its control gaps below 560px instead of dropping the label.
 
