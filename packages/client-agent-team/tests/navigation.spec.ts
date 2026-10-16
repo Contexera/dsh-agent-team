@@ -152,7 +152,6 @@ describe('TeamNavigation', () => {
       // The Inbox entry is Team navigation too, and the one face an Agent
       // overlay can be opened from: asking for the page closes the overlay.
       navigation => { navigation.actions().selectInbox() },
-      navigation => { navigation.actions().backToChannels() },
       navigation => { navigation.actions().backToWorkspace() },
       navigation => { navigation.actions().enterTeam() },
       navigation => { navigation.actions().exitMemberSession() },

@@ -1,18 +1,27 @@
-.headerMeta {
-  align-items: center;
-  color: var(--dsw-alias-label-tertiary);
+/* The Channel header band is one identity row and the tab strip under it. The
+   identity row leads with the title and carries the description beside it on the
+   title's baseline, the way the shipped session header puts its own metadata
+   after the session title: the description is a subtitle, not a second reading
+   line, so it never grows the band into a two-line block. */
+.headerIdentity {
+  align-items: baseline;
   display: flex;
-  flex-wrap: wrap;
-  font-size: 12px;
-  gap: 6px;
-  line-height: 18px;
-  margin-top: 7px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.headerMeta span + span::before {
-  content: '·';
-  margin-right: 6px;
+/* One line, always: the band's height must not depend on how much someone wrote
+   into the description, and the full text stays on the element's `title`. */
+.headerIdentity .headerDescription {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
 }
+
+/* A `#` name is one unbreakable token, so the description gives up width first. */
+.headerIdentity h1 { flex: none; }
 
 /* The roster is a scrollable window of shared Member rows; the row owns its
    own identity, action and failure line. */
@@ -27,39 +36,47 @@
   overflow-y: auto;
 }
 
-/* The feed/board switch takes the seat the shipped session page gives its
-   对话/轨迹 strip: same 13/16 medium grade, same 36px gap, and the same
-   business-blue active state. The selected tab is blue rather than ink because
-   `--dsw-alias-brand-primary` resolves to neutral black in this token sheet;
-   shipped states that reason on its own tab strip and rides the business alias
-   for the same reason. The negative bottom margin lifts the row's own 2px
-   underline onto the header's closing rule, so the two read as one edge. */
+/* The strip shares the header's flush-left edge — shipped's own strip sits on
+   the same x as the title above it, because the two are one band. */
 .tabs {
   display: flex;
   gap: 36px;
-  margin: 10px auto -13px;
-  max-width: 880px;
+  margin-top: 10px;
+  position: relative;
+  z-index: 1;
 }
 
 .tab {
   appearance: none;
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
   line-height: 16px;
-  padding: 0 2px 11px;
+  padding: 0 0 9px;
+  position: relative;
+}
+
+/* The bar rides a pseudo-element instead of the tab's own border so it can sit
+   1px outside the box, flush with the band's rule. */
+.tab::after {
+  background: transparent;
+  border-radius: 2px;
+  bottom: -1px;
+  content: '';
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
 }
 
 .tab:hover { color: var(--dsw-alias-label-secondary); }
 
-.tab[aria-selected="true"] {
-  border-bottom-color: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-state-business-primary);
-}
+.tab[aria-selected="true"] { color: var(--dsw-alias-state-business-primary); }
+
+.tab[aria-selected="true"]::after { background: var(--dsw-alias-state-business-primary); }
 
 .tab:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));

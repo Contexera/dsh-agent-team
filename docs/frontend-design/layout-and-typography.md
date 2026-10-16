@@ -11,7 +11,11 @@ Browser storage retains Team mode, Workspace, the last Channel/Thread location, 
 
 Channel and Thread pages share a header band, a hairline, and the 880px centered reading column, and both subscribe to workspace changes through the shared abortable `TeamChangeStream`; every opening or reconnection baseline requests a catch-up read, followed by matching streamed invalidations.
 
-The Channel page additionally seats a `频道 | 看板` tab strip under its header and, for a taskless discussion, a 360px right-hand panel whose seat is reserved only while it is open; the board is the one Team surface allowed past the reading column, up to 1240px.
+The Channel band is the shipped session header's shape at its own rhythm — a 30px identity row under a 10px top inset, then the tab strip. Its identity row is the Channel title with the description beside it on the title's baseline, clamped to one line with the full text on its `title`, so the band's height never depends on how much someone wrote into the description.
+
+The band is pane chrome and does **not** share the reading column's edge. The shipped session header leaks left to a 20px inset (`padding: 10px 28px 0 20px`) while its transcript stays a centered column, so on that page the title and the words under it deliberately sit on different x positions; the Team surfaces copy that arrangement rather than centering the band over the column. The band carries no back row either: the browsing sidebar already lists every Channel, so a second way back would be a duplicate control on the page.
+
+The Channel page additionally seats a `频道 | 看板` tab strip on its header's closing rule and, for a taskless discussion, a 360px right-hand panel whose seat is reserved only while it is open; the board is the one Team surface allowed past the reading column, up to 1240px.
 
 Successful Channel refreshes clear load errors without clearing unrelated action errors. Channel top-level and Thread replies are idempotent by request ID. The Channel 「作为任务」 control is a default-off native pressed control, sends explicit taskless intent unless selected, and resets off after success.
 

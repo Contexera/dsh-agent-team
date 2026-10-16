@@ -19,10 +19,15 @@
   overflow: hidden;
 }
 
+/* Header chrome is flush with the pane, not with the reading column: the
+   shipped session header leaks left to a 20px inset while the transcript stays a
+   centred column, so the two deliberately do not share an edge. The 28px right
+   inset is the shipped figure, and it keeps the trailing actions off the pane's
+   edge where a scrollbar already stands. */
 .surfaceHeader {
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   min-width: 0;
-  padding: 14px clamp(18px, 3vw, 36px) 12px;
+  padding: 14px 28px 12px;
 }
 
 .headerRow {
@@ -30,8 +35,6 @@
   display: flex;
   gap: 16px;
   justify-content: space-between;
-  margin: 0 auto;
-  max-width: 880px;
   min-width: 0;
 }
 
@@ -58,9 +61,24 @@
   gap: 6px;
 }
 
+/* The Channel band is one identity row and the tab strip under it, at the
+   shipped session header's own rhythm: 10px top inset, a 30px identity row, the
+   strip's 10px margin, a 16px tab line, and a 9px bottom inset. The band's own
+   12px bottom padding stands down because the strip's inset already places the
+   tabs on the closing rule. */
+.surfaceHeaderWithTabs {
+  padding-top: 10px;
+  padding-bottom: 0;
+}
+
+.surfaceHeaderWithTabs .headerRow {
+  align-items: center;
+  min-height: 30px;
+}
+
 .backRow {
-  margin: 0 auto 8px;
-  max-width: 880px;
+  margin-bottom: 8px;
+  min-width: 0;
 }
 
 .timeline {

@@ -597,10 +597,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // The committed order survives a full reload: boot restore folds the saved
   // preference over the freshly loaded Remote default order.
   await page.reload()
-  // Boot restore lands on the persisted Thread route; the channel list is one
-  // explicit step back.
+  // Boot restore lands on the persisted Channel route, and the sidebar lists
+  // the restored order beside it.
   await page.getByRole('heading', { name: '# delivery' }).waitFor({ timeout: 20_000 })
-  await page.getByRole('button', { name: '返回频道列表' }).click()
   await expect.poll(channelOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering'])
   // A brand-new channel appends after the user's saved entries.
   await page.getByRole('button', { name: '新建频道' }).click()
@@ -653,7 +652,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: '返回频道列表' }).click()
   await expect.poll(channelOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering', 'ramp'])
 
   await page.getByRole('button', { name: '# engineering' }).hover()
@@ -873,7 +871,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI01_SHOTS, 'empty-channel.png'), fullPage: true })
   const channelComposer = page.getByRole('textbox', { name: '消息内容' })
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('消息内容')
-  await page.getByRole('button', { name: '返回频道列表' }).focus()
+  await page.getByRole('tab', { name: '看板' }).focus()
   const idleComposerBorder = await page.locator('[data-team-composer]').evaluate(element => {
     const style = getComputedStyle(element)
     return `${style.borderColor} ${style.boxShadow}`
@@ -1170,13 +1168,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(channelGeometry).toHaveLength(2)
   expect(channelGeometry[0]!.bottom).toBeLessThanOrEqual(channelGeometry[1]!.top + 1)
   expect(channelGeometry[1]!.height).toBeGreaterThan(200)
-  // The reading column, the tab strip and the header share one left edge: the
-  // switch is part of the page's chrome, so it cannot sit on its own x.
+  // The header is pane chrome and the feed is a centered column, so the two do
+  // NOT share an edge: the band sits near the pane's own left edge while the
+  // entry rows stay inside the reading column. The tab strip is part of the band
+  // and takes the band's edge, not the column's.
   const channelColumnEdges = await page.evaluate(() => {
     const root = document.querySelector('[data-team-channel]')
     const round = (value: number) => Math.round(value)
     const box = (node: Element | null) => node === null ? null : round(node.getBoundingClientRect().x)
     return {
+      pane: root === null || root === undefined ? null : round(root.getBoundingClientRect().x),
       header: box(root?.querySelector('header')),
       tabs: box(root?.querySelector('[role="tablist"]')),
       entry: box(root?.querySelector('[data-thread-entry]')),
@@ -1184,7 +1185,48 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(channelColumnEdges.header).not.toBeNull()
   expect(channelColumnEdges.tabs).toBe(channelColumnEdges.header)
-  expect(channelColumnEdges.entry).toBeGreaterThanOrEqual(channelColumnEdges.header!)
+  // Flush with the pane, not centered on the reading column.
+  expect(channelColumnEdges.header! - channelColumnEdges.pane!).toBeLessThanOrEqual(32)
+  expect(channelColumnEdges.entry).toBeGreaterThan(channelColumnEdges.header!)
+  // The band is the shipped session header's shape: one identity row — the
+  // title with the description beside it — and the tab strip directly under,
+  // its 2px bar landing on the band's closing rule. The description sits on the
+  // title's line rather than under it, so the band's height is the same whatever
+  // the description says; the sidebar owns the way back, so the band carries no
+  // back row of its own.
+  const channelBand = await page.evaluate(() => {
+    const round = (value: number) => Math.round(value)
+    const root = document.querySelector('[data-team-channel]')
+    const band = root?.querySelector('[class*="surfaceHeader"]')
+    const title = root?.querySelector('h1')
+    const description = root?.querySelector('h1 + p')
+    const strip = root?.querySelector('[role="tablist"]')
+    const active = strip?.querySelector('[aria-selected="true"]')
+    if (band === null || band === undefined || title === null || title === undefined
+      || strip === null || strip === undefined || active === null || active === undefined) return null
+    const strip$ = strip.getBoundingClientRect()
+    const bar = getComputedStyle(active, '::after')
+    return {
+      bandHeight: round(band.getBoundingClientRect().height),
+      titleBottom: round(title.getBoundingClientRect().bottom),
+      descriptionTop: description === null || description === undefined ? null : round(description.getBoundingClientRect().top),
+      descriptionLines: description === null || description === undefined ? 0 : round(description.getBoundingClientRect().height / parseFloat(getComputedStyle(description).lineHeight)),
+      stripBottom: round(strip$.bottom),
+      ruleBottom: round(band.getBoundingClientRect().bottom),
+      barColor: bar.backgroundColor,
+      backRows: root === null ? -1 : [...root.querySelectorAll('button')].filter(node => (node.textContent ?? '').includes('返回频道列表')).length,
+    }
+  })
+  expect(channelBand).not.toBeNull()
+  // The bar covers the rule: their boxes end within a pixel of each other.
+  expect(Math.abs(channelBand!.stripBottom - channelBand!.ruleBottom)).toBeLessThanOrEqual(1)
+  expect(channelBand!.descriptionLines).toBe(1)
+  expect(channelBand!.backRows).toBe(0)
+  // The description rides the title's own line, not a second one under it.
+  expect(channelBand!.descriptionTop).toBeLessThan(channelBand!.titleBottom)
+  expect(channelBand!.barColor).not.toBe('rgba(0, 0, 0, 0)')
+  // The band is one 76px figure at the top inset the shipped header uses.
+  expect(channelBand!.bandHeight).toBeLessThanOrEqual(80)
   // The identity seat is one declaration on the shared conversation surface, so
   // the Channel feed reads the seat the Thread page reads. Declaring it on
   // `[data-team-thread]` left this surface on the `var()` fallback instead —

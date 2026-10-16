@@ -80,8 +80,6 @@ export interface TeamNavigationActions {
   /** Open the Human mention-Inbox page; clears the Channel/Thread faces. */
   selectInbox: () => void
   backToWorkspace: () => void
-  /** Leave the selected Channel for the workspace Channel list; keeps mode and Workspace. */
-  backToChannels: () => void
   /**
    * Swap the conversation seat to a Member Session while Team chrome stays
    * mounted. `returnToSessionId` is captured once — switching between Member
@@ -113,7 +111,6 @@ export class TeamNavigation {
       selectThread: (threadRef, channelRef, taskRef, taskNumber) => { this.clearMemberSession(); this.setThread(threadRef, channelRef, taskRef, taskNumber) },
       selectInbox: () => { this.clearMemberSession(); this.setInbox() },
       backToWorkspace: () => { this.clearMemberSession(); this.setThread(undefined) },
-      backToChannels: () => { this.clearMemberSession(); this.clearChannel() },
       enterMemberSession: (sessionId, returnToSessionId) => { this.setMemberSession(sessionId, returnToSessionId) },
       exitMemberSession: () => { this.clearMemberSession() },
     }
@@ -168,13 +165,6 @@ export class TeamNavigation {
     if (this.snapshot.inbox === true && this.snapshot.channelRef === undefined && this.snapshot.threadRef === undefined) return
     const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
     this.snapshot = { ...base, inbox: true }
-    this.commit()
-  }
-
-  private clearChannel(): void {
-    const { channelRef: _channelRef, ...base } = this.snapshot
-    if (this.snapshot.channelRef === undefined) return
-    this.snapshot = base
     this.commit()
   }
 

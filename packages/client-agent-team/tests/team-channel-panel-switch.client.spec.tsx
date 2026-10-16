@@ -28,21 +28,32 @@ describe('Team Channel discussion panel switching', () => {
       // Only the feed's own window gains the second discussion: a thread-scoped
       // read answers for one Thread and is left alone.
       if (request.threadRef !== undefined || request.topLevelOnly !== true) return result
-      const value = result.value as Record<string, unknown> & { items: Array<Record<string, unknown>> }
-      return { ok: true as const, value: { ...value, items: [...value.items, {
+      return { ok: true as const, value: { ...result.value, items: [...result.value.items, {
         message: { messageRef: 'message:seed-1', channelRef: 'channel:engineering', threadRef: 'thread:2', sender: 'member:human', body: bodies['thread:2'], topLevel: true, sequence: 2, occurredAt: '2026-10-14T10:00:00.000Z' },
         mentions: [], thread: { threadRef: 'thread:2', revision: 2 }, claimOwners: [], messageCount: 1,
         lastActivityAt: '2026-10-14T10:00:00.000Z',
       }] } }
     })
-    b.readThread.mockImplementation(async (request: { threadRef: string }) => ({
-      ok: true as const,
-      value: {
-        anchor: { messageRef: `message:anchor-${request.threadRef}`, channelRef: 'channel:engineering', threadRef: request.threadRef,
-          sender: 'member:human', body: bodies[request.threadRef] ?? request.threadRef, topLevel: true, sequence: 1, occurredAt: '2026-10-14T09:00:00.000Z' },
-        anchorMentions: [], thread: { threadRef: request.threadRef, revision: 2 }, claims: [], facts: [], cursor: 0, hasMore: false, remainingUnreadCount: 0,
-      },
-    }))
+    // The harness answers for whatever Thread is asked, but it projects every
+    // seeded item into every read's facts. A real Host answers for one Thread,
+    // so each read is scoped to its own anchor and its own facts.
+    const baseRead = b.readThread.getMockImplementation()!
+    b.readThread.mockImplementation(async (request: { threadRef?: string }) => {
+      const result = await baseRead(request)
+      if (!result.ok) return result
+      const threadRef = request.threadRef ?? 'thread:1'
+      const anchor = threadRef === 'thread:2'
+        ? { messageRef: 'message:seed-1', channelRef: 'channel:engineering', threadRef, sender: 'member:human',
+            body: bodies[threadRef], topLevel: true, sequence: 2, occurredAt: '2026-10-14T10:00:00.000Z' }
+        : result.value.anchor
+      return { ok: true as const, value: {
+        ...result.value,
+        anchor,
+        thread: { threadRef, revision: 2 },
+        facts: result.value.facts.filter(fact => fact.fact.kind !== 'message'
+          || (fact.fact.message as { threadRef?: string }).threadRef === threadRef),
+      } }
+    })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     await waitFor(() => expect(b.view.container.querySelectorAll('[data-thread-entry] button').length).toBe(2))
     const doors = b.view.container.querySelectorAll<HTMLElement>('[data-thread-entry] button')

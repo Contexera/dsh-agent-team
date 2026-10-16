@@ -62,6 +62,6 @@ Thread 里的一条 Message，可以通过「选中它所回答的那条 Message
 - `aria-label` 依卡型与计数而定。未读为 0 用 `openTask`/`openThread`，带计数用 `openTaskUnread`/`openThreadUnread`。胶囊本身 `aria-hidden`，计数经这枚「开门」控件自己的 label 抵达读屏。这个通道把数字和数字所属的 Thread 绑在一起。状态簇留在控件**外面**：带 label 的 button 会把后代从可访问性树上剪掉，放进去等于让所有者叠放自己的名字沉默。
 
 ### 状态胶囊与弹层
-- Thread 状态用公共 `Pill`（与 `Task #N` 同行）。Channel Member 数与在线数等元信息用 `.headerMeta` 行内分隔。内容是 `memberCount` + `onlineCount`，error/unavailable 不计为在线。
+- Thread 状态用公共 `Pill`（与 `Task #N` 同行）。
 - Claims 折叠用公共 `DisclosureRow`（`expandOnRowClick`，标题 `Claims · N`）。键盘闭环由原语保证。Claim 行缩进对齐标题文字。
 - 所有弹层走公共 `Modal`：打开时焦点入内容区，关闭后焦点回到触发按钮（`queueMicrotask` 延迟聚焦模式）。
