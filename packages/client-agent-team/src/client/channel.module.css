@@ -27,12 +27,16 @@
   overflow-y: auto;
 }
 
-/* The feed/board switch rides the header's own bottom edge: the negative
-   margin pulls the tab row's 2px active underline onto the surfaceHeader
-   hairline, the same seat the session page's 对话/轨迹 tabs occupy. */
+/* The feed/board switch takes the seat the shipped session page gives its
+   对话/轨迹 strip: same 13/16 medium grade, same 36px gap, and the same
+   business-blue active state. The selected tab is blue rather than ink because
+   `--dsw-alias-brand-primary` resolves to neutral black in this token sheet;
+   shipped states that reason on its own tab strip and rides the business alias
+   for the same reason. The negative bottom margin lifts the row's own 2px
+   underline onto the header's closing rule, so the two read as one edge. */
 .tabs {
   display: flex;
-  gap: 20px;
+  gap: 36px;
   margin: 10px auto -13px;
   max-width: 880px;
 }
@@ -44,27 +48,29 @@
   border-bottom: 2px solid transparent;
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 16px;
   padding: 0 2px 11px;
 }
 
 .tab:hover { color: var(--dsw-alias-label-secondary); }
 
 .tab[aria-selected="true"] {
-  border-bottom-color: var(--dsw-alias-brand-primary);
-  color: var(--dsw-alias-brand-primary);
+  border-bottom-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-state-business-primary);
 }
 
 .tab:focus-visible {
-  border-radius: var(--dsw-radius-md);
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 2px;
 }
 
 /* The board is the same facts re-sorted by state, not a second surface: it
-   borrows the timeline's scroll seat and gutters, and its columns stay one
-   reading row wide so a card never competes with the column beside it. */
+   borrows the timeline's scroll seat, gutters, and scroll behaviour, and it is
+   the one place in the Client that may outgrow the 880px reading column — four
+   status columns side by side are a scanning surface, and narrowing them to the
+   reading measure would cost every column its card width. */
 .board {
   min-height: 0;
   overflow-x: hidden;
@@ -83,7 +89,7 @@
 }
 
 .boardColumn {
-  background: var(--dsw-alias-bg-layer-1);
+  background: var(--dsw-alias-bg-module-platform);
   border-radius: var(--dsw-radius-md);
   flex: 1;
   min-width: 0;
@@ -108,13 +114,6 @@
   margin-left: auto;
 }
 
-.boardColumnEmpty {
-  color: var(--dsw-alias-label-caption);
-  font-size: 12px;
-  margin: 0;
-  padding: 4px;
-}
-
 .boardCard {
   appearance: none;
   background: var(--dsw-alias-bg-base);
@@ -131,7 +130,7 @@
 .boardCard:hover { border-color: var(--dsw-alias-border-l1); }
 
 .boardCard:focus-visible {
-  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 2px;
 }
 
@@ -171,3 +170,78 @@
 }
 
 .boardCardFoot time { margin-left: auto; }
+
+/* The feed's stage owns the timeline and the composer as one seat, so an open
+   panel can span both. The seat is reserved only while a discussion is open:
+   an always-on reservation spends 360px of the reading surface on an empty band
+   for the whole life of the page, and the reader pays for it on every line. The
+   price of the narrower reservation is one re-wrap when the panel opens or
+   closes — a single reflow at the moment the reader moved their attention to the
+   panel. */
+.feedStage {
+  box-sizing: border-box;
+  display: grid;
+  grid-row: 2 / 4;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.feedStage[data-panel="open"] { padding-right: 360px; }
+
+/* The panel is a discussion's whole face beside its feed: the head names it,
+   the body reads it, the foot answers it. It paints over the seat the stage
+   reserves, so opening it moves nothing the feed already printed. */
+.panel {
+  background: var(--dsw-alias-bg-base);
+  border-left: 1px solid var(--dsw-alias-border-l2);
+  display: flex;
+  flex-direction: column;
+  inset: 0 0 0 auto;
+  min-height: 0;
+  position: absolute;
+  width: 360px;
+}
+
+.panelHead {
+  align-items: center;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.panelTitle {
+  color: var(--dsw-alias-label-primary);
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.panelFoot { border-top: 1px solid var(--dsw-alias-border-l2); }
+
+/* Below the shared 600px breakpoint the panel covers the stage whole rather
+   than sitting beside it: a 360px column beside a feed leaves neither one
+   readable at this width. */
+@media (max-width: 600px) {
+  .feedStage[data-panel="open"] { padding-right: 0; }
+
+  .panel {
+    border-left: 0;
+    inset: 0;
+    width: auto;
+  }
+}

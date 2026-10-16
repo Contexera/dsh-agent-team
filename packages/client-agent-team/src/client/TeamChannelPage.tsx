@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { AgentTeamClientMemberStatus, AgentTeamChannelRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamSendMessageRequest, AgentTeamTask, AgentTeamView, AgentTeamViewItem,
   AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
@@ -8,6 +8,7 @@ import type { TeamConversationProps } from './slots.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
+import { TeamChannelPanel } from './TeamChannelPanel.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
@@ -38,6 +39,11 @@ interface TeamChannelPageProps {
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
   readonly sendMessage: TeamConversationProps['sendMessage']
+  readonly readThread: TeamConversationProps['readThread']
+  readonly loadThreadHistory: TeamConversationProps['loadThreadHistory']
+  readonly threadObservations: TeamConversationProps['threadObservations']
+  readonly reply: TeamConversationProps['reply']
+  readonly promoteThread: TeamConversationProps['promoteThread']
   readonly selectThread: TeamConversationProps['selectThread']
   readonly selectChannel: TeamConversationProps['selectChannel']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
@@ -77,13 +83,10 @@ function followUpAt(item: AgentTeamViewItem): string | undefined {
 }
 
 /**
- * What the door prints about follow-up activity, or nothing. A resolved Task
- * stops printing it: the status word beside the door already says nothing is
- * moving, and the instant it would print is the moment it resolved — repeated
- * on every finished row. The precise instant stays on the control's title, one
- * hover away. A taskless Thread never resolves, so a discussion keeps the
- * recency that is the whole of its state line: it wears no status word, dot, or
- * owner stack.
+ * What the door prints about follow-up activity, or nothing. Unfinished work
+ * reports the recency that is the whole of its state line; a resolved Task
+ * prints the day it landed instead (see `ThreadEntryRow`), because the recency
+ * there would only repeat the moment it resolved on every finished row.
  */
 function printedActivityAt(item: AgentTeamViewItem): string | undefined {
   const status = item.task?.status
@@ -95,7 +98,7 @@ function unreadCounts(inbox: AgentTeamInbox): ReadonlyMap<AgentTeamThreadRef, nu
   return new Map(inbox.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, selectThread, selectChannel, backToChannels, resolveTaskRefs, resolveThreadRefs, openMemberSession, t }: TeamChannelPageProps) {
+export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectChannel, backToChannels, resolveTaskRefs, resolveThreadRefs, openMemberSession, t }: TeamChannelPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
@@ -108,11 +111,12 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   const [pending, setPending] = useState(false)
   const [asTask, setAsTask] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  // The feed and the board are two readings of one timeline; the tab only
-  // chooses which of them fills the content seat.
+  // The feed and the board are two readings of one window; the tab only chooses
+  // which of them fills the content seat.
   const [tab, setTab] = useState<'feed' | 'board'>('feed')
-  const [boardLoading, setBoardLoading] = useState(false)
-  const [boardError, setBoardError] = useState<string>()
+  // The taskless Thread open in the feed's side panel. A Task's entry still
+  // walks into the Thread page; only a discussion stays here.
+  const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
   // The composer draft lives in the keyed draft cache: view switches unmount
   // this page, and a refresh must not cost the half-written message either.
   // The composer owns the subscription — this page only reads a snapshot when
@@ -123,8 +127,35 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   // refresh in place instead of showing the loading surface again.
   const loadedRef = useRef(false)
   const refreshSequenceRef = useRef(0)
-  const boardWalkingRef = useRef(false)
   const channelLastItem = view?.items[view.items.length - 1]
+  // The tab strip is a composite control, so its ids are derived rather than
+  // hardcoded: a second Channel page must not collide with this one.
+  const tabIdPrefix = useId()
+  const feedTabRef = useRef<HTMLButtonElement>(null)
+  const boardTabRef = useRef<HTMLButtonElement>(null)
+  // Left/Right cycle and Home/End jump, with selection following focus — the
+  // shipped tab strip's own contract. Enter and Space need no branch: the
+  // button's activation runs the click handler on release.
+  const onTabKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
+    const order: readonly { readonly value: 'feed' | 'board'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
+      { value: 'feed', ref: feedTabRef },
+      { value: 'board', ref: boardTabRef },
+    ]
+    const current = order.findIndex(entry => entry.value === tab)
+    if (current < 0) return
+    let next: number
+    switch (event.key) {
+      case 'ArrowLeft': next = (current + order.length - 1) % order.length; break
+      case 'ArrowRight': next = (current + 1) % order.length; break
+      case 'Home': next = 0; break
+      case 'End': next = order.length - 1; break
+      default: return
+    }
+    event.preventDefault()
+    const target = order[next]!
+    setTab(target.value)
+    target.ref.current?.focus()
+  }
   // Branded-ref navigation for message bodies: channel refs hop directly,
   // task and thread refs resolve against this Channel's loaded timeline and
   // fall back to the Host resolver, which also accepts abbreviated spellings.
@@ -138,7 +169,10 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     if (ref.startsWith('thread:')) {
       const match = view?.items.find(item => item.thread.threadRef === ref)
       if (match !== undefined) {
-        selectThread(match.thread.threadRef, channelRef, match.task?.taskRef, match.taskNumber)
+        // A taskless discussion opens in the feed's own panel; a Task keeps
+        // walking into the Thread page.
+        if (match.task === undefined) { setPanelThreadRef(match.thread.threadRef); return }
+        selectThread(match.thread.threadRef, channelRef, match.task.taskRef, match.taskNumber)
         return
       }
       // Not in the loaded timeline (or cited by abbreviation): resolve through
@@ -179,6 +213,24 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     const humanMemberId = view?.humanMemberId
     return (ref: AgentTeamMemberId) => rosterMember(members, humanMemberId, humanName, ref)
   }, [rosterKey, humanName])
+  const taskNumberOf = useMemo(() => {
+    const numbers = view?.taskNumbers ?? []
+    return (taskRef: AgentTeamTaskRef): number | undefined => numbers.find(entry => entry.taskRef === taskRef)?.taskNumber
+  }, [view])
+  // Zero unread is the absence of a map entry, so clearing deletes the key.
+  const handlePanelRead = useCallback((read: AgentTeamThreadRef): void => {
+    setUnreadByThread(current => {
+      if (!current.has(read)) return current
+      const next = new Map(current)
+      next.delete(read)
+      return next
+    })
+  }, [])
+  const handlePanelPromoted = useCallback((taskRef: AgentTeamTaskRef): void => {
+    if (panelThreadRef !== undefined) selectThread(panelThreadRef, channelRef, taskRef, taskNumberOf(taskRef))
+    setPanelThreadRef(undefined)
+  }, [panelThreadRef, channelRef, selectThread, taskNumberOf])
+  const handlePanelClose = useCallback((): void => { setPanelThreadRef(undefined) }, [])
   // The Thread entry row's owner stack speaks the same grammar as the Inbox
   // row's, Human included: the Host names which actor is the reader, the
   // Client's identity projection says what that actor looks like.
@@ -188,13 +240,16 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
 
   // The board re-sorts the same projection by Task state: every taskful
-  // top-level entry, newest Task number first inside its column.
+  // top-level entry in the loaded window, newest Task number first inside its
+  // column. It reads the feed's own window rather than walking the Channel's
+  // remaining history: a full walk would merge every top-level Message into the
+  // timeline, defeating the feed's pagination, and a board is a first screen the
+  // reader extends on demand, not a reason to load a year of history.
   const boardColumns = useMemo(() => {
     const taskful = (view?.items ?? []).filter((item): item is AgentTeamViewItem & { readonly task: AgentTeamTask } => item.task !== undefined)
     const byNumber = (left: AgentTeamViewItem, right: AgentTeamViewItem): number => (right.taskNumber ?? 0) - (left.taskNumber ?? 0)
     return BOARD_COLUMNS.map(column => ({ ...column, items: taskful.filter(item => column.match(item.task.status)).sort(byNumber) }))
   }, [view])
-  const boardTaskCount = boardColumns.reduce((count, column) => count + column.items.length, 0)
 
   const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${channelLastItem?.message.messageRef ?? ''}`)
   const channel = view?.channels.find(item => item.channelRef === channelRef)
@@ -263,8 +318,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     loadedRef.current = false
     setView(undefined)
     setTab('feed')
-    setBoardError(undefined)
-    setBoardLoading(false)
+    setPanelThreadRef(undefined)
     setLoadError(undefined)
     setLoading(true)
     void refresh()
@@ -293,31 +347,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       for (const dispose of disposers) dispose()
     }
   }, [workspaceId, channelRef])
-
-  // The board reads every Task in the Channel, so its first activation walks
-  // the remaining history into the same projection the feed reads — one data
-  // source, two faces. A failure pauses the walk behind the board's own error
-  // surface; retrying clears it and the walk resumes from the merged cursor.
-  useEffect(() => {
-    if (tab !== 'board' || boardError !== undefined || view === undefined || !view.hasMore || boardWalkingRef.current) return
-    boardWalkingRef.current = true
-    setBoardLoading(true)
-    void (async () => {
-      let cursor: number = view.cursor
-      let hasMore: boolean = view.hasMore
-      while (hasMore) {
-        const result = await loadChannels({ workspaceId, channelRef, direction: 'before', topLevelOnly: true, includeActivities: false, cursor, limit: 100 })
-        if (!mountedRef.current) return
-        if (!result.ok) { setBoardError(result.error.message); return }
-        setView(current => current === undefined ? result.value : mergeChannelView(current, result.value))
-        hasMore = result.value.hasMore
-        cursor = result.value.cursor
-      }
-    })().finally(() => {
-      boardWalkingRef.current = false
-      if (mountedRef.current) setBoardLoading(false)
-    })
-  }, [tab, view, boardError, workspaceId, channelRef, loadChannels])
 
   const loadOlder = async () => {
     if (view === undefined || !view.hasMore || loadingOlder) return
@@ -406,19 +435,18 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
           </div>}
         </div>
       </header>
-      <nav className={channelCss.tabs} role="tablist" aria-label={channel === undefined ? '# …' : `# ${channel.name}`}>
-        <button type="button" role="tab" aria-selected={tab === 'feed'} className={channelCss.tab} onClick={() => { setTab('feed') }}>{t('channelTabFeed')}</button>
-        <button type="button" role="tab" aria-selected={tab === 'board'} className={channelCss.tab} onClick={() => { setTab('board') }}>{t('channelTabBoard')}</button>
+      <nav className={channelCss.tabs} role="tablist" aria-label={channel === undefined ? '# …' : `# ${channel.name}`} onKeyDown={onTabKeyDown}>
+        <button ref={feedTabRef} id={`${tabIdPrefix}-feed`} type="button" role="tab" aria-selected={tab === 'feed'} aria-controls={`${tabIdPrefix}-feed-panel`} tabIndex={tab === 'feed' ? 0 : -1} className={channelCss.tab} onClick={() => { setTab('feed') }}>{t('channelTabFeed')}</button>
+        <button ref={boardTabRef} id={`${tabIdPrefix}-board`} type="button" role="tab" aria-selected={tab === 'board'} aria-controls={`${tabIdPrefix}-board-panel`} tabIndex={tab === 'board' ? 0 : -1} className={channelCss.tab} onClick={() => { setTab('board') }}>{t('channelTabBoard')}</button>
       </nav>
     </div>
 
-    {tab === 'board' && <section className={channelCss.board} aria-label={t('channelTabBoard')}>
-      {boardError !== undefined && <div className={css.errorState} role="alert"><span>{boardError}</span><Button size="sm" variant="outline" onClick={() => { setBoardError(undefined) }}>{t('retry')}</Button></div>}
-      {boardError === undefined && boardLoading && boardTaskCount === 0 && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('boardLoading')}</p></div>}
-      {boardError === undefined && (boardTaskCount > 0 || !boardLoading) && <div className={channelCss.boardColumns}>
+    {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={channelCss.board} aria-label={t('channelTabBoard')}>
+      {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
+      {boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
+      {boardColumns.some(column => column.items.length > 0) && <div className={channelCss.boardColumns}>
         {boardColumns.map(column => <div className={channelCss.boardColumn} key={column.labelKey}>
           <div className={channelCss.boardColumnHead}>{t(column.labelKey)}<span className={channelCss.boardColumnCount}>{column.items.length}</span></div>
-          {column.items.length === 0 && <p className={channelCss.boardColumnEmpty}>{t('boardEmptyColumn')}</p>}
           {column.items.map(item => <BoardCard
             key={item.message.messageRef}
             item={item}
@@ -431,7 +459,8 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       </div>}
     </section>}
 
-    {tab === 'feed' && <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
+    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={channelCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
+      <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
         {loading && channel === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingChannels')}</p></div>}
         {!loading && channel === undefined && error === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('emptyChannels')}</p></div>}
@@ -451,7 +480,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
             const human = item.message.sender === view!.humanMemberId
             const sender = human ? humanName : senderStatus?.member.handle ?? item.message.sender
             const turnGap = isRunGap(index > 0 ? block.items[index - 1]!.message.occurredAt : undefined, item.message.occurredAt)
-            const task = item.task
             // The entry's own line is the gate under the body, and its state
             // leads that line: ownership, status, and unread answer the reader
             // where they are already reading. A reply inside a Thread has none
@@ -490,16 +518,21 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
                   unread={unread}
                   human={humanIdentity}
                   t={t}
-                  onOpen={() => { selectThread(item.thread.threadRef, channelRef, task?.taskRef, item.taskNumber) }}
+                  onOpen={() => {
+                    // A taskless discussion opens in the feed's own panel; a
+                    // Task keeps walking into the Thread page.
+                    if (item.task === undefined) setPanelThreadRef(item.thread.threadRef)
+                    else selectThread(item.thread.threadRef, channelRef, item.task.taskRef, item.taskNumber)
+                  }}
                 />}
               </TeamMessage>
             </Fragment>
           })}
         </div>)}
       </div>
-    </section>}
+      </section>
 
-    {tab === 'board' ? <div /> : channel !== undefined ? <TeamComposer
+      {channel !== undefined ? <TeamComposer
       key={draftKey}
       members={members}
       channelPeerMemberIds={channelMemberIds}
@@ -515,7 +548,41 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       asTask={asTask}
       onAsTaskChange={setAsTask}
       t={t}
-    /> : <div />}
+      /> : <div />}
+
+      {panelThreadRef !== undefined && channel !== undefined && <TeamChannelPanel
+        workspaceId={workspaceId}
+        channelRef={channelRef}
+        threadRef={panelThreadRef}
+        channelName={channel.name}
+        humanName={humanName}
+        {...(humanAvatarUrl === undefined ? {} : { humanAvatarUrl })}
+        {...(view?.humanMemberId === undefined ? {} : { humanMemberId: view.humanMemberId })}
+        members={members}
+        channelMemberIds={channelMemberIds}
+        drafts={drafts}
+        getAttachment={getAttachment}
+        putAttachment={putAttachment}
+        readThread={readThread}
+        loadThreadHistory={loadThreadHistory}
+        threadObservations={threadObservations}
+        reply={reply}
+        promoteThread={promoteThread}
+        subscribeChanges={subscribeChanges}
+        selectThread={selectThread}
+        selectChannel={selectChannel}
+        resolveTaskRefs={resolveTaskRefs}
+        resolveThreadRefs={resolveThreadRefs}
+        openMemberSession={openMemberSession}
+        channelNameOf={channelNameOf}
+        memberOf={memberOf}
+        taskNumberOf={taskNumberOf}
+        onRead={handlePanelRead}
+        onPromoted={handlePanelPromoted}
+        onClose={handlePanelClose}
+        t={t}
+      />}
+    </div>}
   </main>
 }
 

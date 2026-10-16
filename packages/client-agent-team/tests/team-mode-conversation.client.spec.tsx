@@ -1304,17 +1304,18 @@ describe('Team conversation surfaces', () => {
     expect(await b.view.findByRole('button', { name: '打开讨论' })).toBeTruthy()
     expect(b.view.queryByRole('button', { name: '打开 Task #1' })).toBeNull()
     fireEvent.click(b.view.getByRole('button', { name: '打开讨论' }))
-    expect(await b.view.findByRole('heading', { name: '讨论' })).toBeTruthy()
-    expect(b.view.queryByRole('button', { name: /Claims/ })).toBeNull()
-    expect(b.view.queryByRole('button', { name: '验收' })).toBeNull()
-    expect(b.view.getByRole('button', { name: '转为 Task' })).toBeTruthy()
-    fireEvent.click(b.view.getByRole('button', { name: '转为 Task' }))
+    // A discussion stays beside its feed: the panel is its whole face, with
+    // no Claims or acceptance — those belong to the Task it may become.
+    const panel = await b.view.findByRole('complementary', { name: '讨论' })
+    expect(within(panel).queryByRole('button', { name: /Claims/ })).toBeNull()
+    expect(within(panel).queryByRole('button', { name: '验收' })).toBeNull()
+    fireEvent.click(await within(panel).findByRole('button', { name: '转为 Task' }))
     await waitFor(() => expect(b.promoteThread).toHaveBeenCalledWith(expect.objectContaining({
       threadRef: 'thread:1',
     })))
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ threadRef: 'thread:1' })))
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
-    expect(b.view.queryByRole('button', { name: '转为 Task' })).toBeNull()
+    expect(b.view.queryByRole('complementary', { name: '讨论' })).toBeNull()
     await b.runtime.dispose()
   })
 

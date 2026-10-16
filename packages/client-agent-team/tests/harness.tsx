@@ -91,7 +91,7 @@ interface SeededMessage {
   readonly mentions?: readonly string[]
 }
 
-export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialChannels?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; environment?: EnvironmentSeed; environmentFailure?: string }) {
+export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialChannels?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; environment?: EnvironmentSeed; environmentFailure?: string }) {
   if (options?.mode !== undefined) {
     localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }))
   }
@@ -213,13 +213,18 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   let memberships: Array<Record<string, unknown>> = []
   const seedTaskRef = options?.seedTaskRef ?? 'task:1'
   const seedThreadRef = options?.seedThreadRef ?? 'thread:1'
+  // A taskless seed grows a discussion instead of a Task: no Task fact and no
+  // number, and the Message and Thread carry no taskRef. The projections below
+  // already filter undefined Tasks out of tasks/taskNumbers, and the read /
+  // reply / promote doubles all key on threadRef, so every double downstream
+  // stays unchanged.
+  const taskless = options?.seedTaskless === true
   let viewItems: Array<Record<string, unknown>> = (options?.seededMessages ?? []).map((seed, index) => ({
-    message: { messageRef: `message:seed-${index}`, channelRef: 'channel:engineering', threadRef: seedThreadRef, taskRef: seedTaskRef, sender: seed.sender === 'agent' ? 'member:builder' : 'member:human', body: seed.body, topLevel: true, sequence: index + 1, occurredAt: seed.occurredAt },
+    message: { messageRef: `message:seed-${index}`, channelRef: 'channel:engineering', threadRef: seedThreadRef, ...(taskless ? {} : { taskRef: seedTaskRef }), sender: seed.sender === 'agent' ? 'member:builder' : 'member:human', body: seed.body, topLevel: true, sequence: index + 1, occurredAt: seed.occurredAt },
     mentions: seed.mentions ?? [],
-    task: { taskRef: seedTaskRef, channelRef: 'channel:engineering', threadRef: seedThreadRef,
-      status: options?.seedTaskStatus ?? 'todo', resolution: 'open' },
-    thread: { threadRef: seedThreadRef, taskRef: seedTaskRef, revision: 2 },
-    taskNumber: 1,
+    ...(taskless ? {} : { task: { taskRef: seedTaskRef, channelRef: 'channel:engineering', threadRef: seedThreadRef,
+      status: options?.seedTaskStatus ?? 'todo', resolution: 'open' }, taskNumber: 1 }),
+    thread: { threadRef: seedThreadRef, ...(taskless ? {} : { taskRef: seedTaskRef }), revision: 2 },
     // A seed carries no Claims, so the Host would project no owners either.
     claimOwners: [],
     messageCount: 1,
