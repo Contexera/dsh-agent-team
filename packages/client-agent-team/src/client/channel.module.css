@@ -26,3 +26,148 @@
   max-height: min(65vh, 520px);
   overflow-y: auto;
 }
+
+/* The feed/board switch rides the header's own bottom edge: the negative
+   margin pulls the tab row's 2px active underline onto the surfaceHeader
+   hairline, the same seat the session page's 对话/轨迹 tabs occupy. */
+.tabs {
+  display: flex;
+  gap: 20px;
+  margin: 10px auto -13px;
+  max-width: 880px;
+}
+
+.tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 20px;
+  padding: 0 2px 11px;
+}
+
+.tab:hover { color: var(--dsw-alias-label-secondary); }
+
+.tab[aria-selected="true"] {
+  border-bottom-color: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-brand-primary);
+}
+
+.tab:focus-visible {
+  border-radius: var(--dsw-radius-md);
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+/* The board is the same facts re-sorted by state, not a second surface: it
+   borrows the timeline's scroll seat and gutters, and its columns stay one
+   reading row wide so a card never competes with the column beside it. */
+.board {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px clamp(18px, 3vw, 36px) 24px;
+}
+
+.boardColumns {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  margin: 0 auto;
+  max-width: 1240px;
+  min-width: 0;
+}
+
+.boardColumn {
+  background: var(--dsw-alias-bg-layer-1);
+  border-radius: var(--dsw-radius-md);
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+}
+
+.boardColumnHead {
+  align-items: center;
+  color: var(--dsw-alias-label-secondary);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  line-height: 18px;
+  padding: 2px 4px 10px;
+}
+
+.boardColumnHead .boardColumnCount {
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  margin-left: auto;
+}
+
+.boardColumnEmpty {
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  margin: 0;
+  padding: 4px;
+}
+
+.boardCard {
+  appearance: none;
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  cursor: pointer;
+  display: block;
+  margin-bottom: 8px;
+  padding: 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.boardCard:hover { border-color: var(--dsw-alias-border-l1); }
+
+.boardCard:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary);
+  outline-offset: 2px;
+}
+
+/* Resolved work stays findable without competing with what is still moving. */
+.boardCard[data-resolved] { opacity: 0.62; }
+
+.boardCardNum {
+  align-items: center;
+  color: var(--dsw-alias-label-caption);
+  display: flex;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  gap: 6px;
+  line-height: 16px;
+}
+
+.boardCardTitle {
+  color: var(--dsw-alias-label-primary);
+  display: -webkit-box;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
+  margin: 5px 0 8px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.boardCardFoot {
+  align-items: center;
+  color: var(--dsw-alias-label-caption);
+  display: flex;
+  font-size: 11px;
+  gap: 8px;
+  line-height: 18px;
+}
+
+.boardCardFoot time { margin-left: auto; }
