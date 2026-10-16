@@ -114,6 +114,17 @@
   margin-left: auto;
 }
 
+/* Until four columns each have a card's worth of width, the board scrolls
+   sideways instead of squeezing them: four 220px columns plus their gaps and
+   gutters need about 1120px, and a card narrower than 220px breaks its title to
+   one character per line, which is not a card any more. The columns keep their
+   equal share above that width. */
+@media (max-width: 1120px) {
+  .boardColumns { overflow-x: auto; }
+
+  .boardColumn { flex: 1 0 220px; }
+}
+
 .boardCard {
   appearance: none;
   background: var(--dsw-alias-bg-base);

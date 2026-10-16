@@ -128,14 +128,13 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   const loadedRef = useRef(false)
   const refreshSequenceRef = useRef(0)
   const channelLastItem = view?.items[view.items.length - 1]
-  // The tab strip is a composite control, so its ids are derived rather than
-  // hardcoded: a second Channel page must not collide with this one.
+  // Derived ids, so a second Channel page cannot collide with this one.
   const tabIdPrefix = useId()
   const feedTabRef = useRef<HTMLButtonElement>(null)
   const boardTabRef = useRef<HTMLButtonElement>(null)
-  // Left/Right cycle and Home/End jump, with selection following focus — the
-  // shipped tab strip's own contract. Enter and Space need no branch: the
-  // button's activation runs the click handler on release.
+  // The shipped tab strip's contract: arrows cycle, Home/End jump, and
+  // selection follows focus. Enter and Space need no branch — the button's own
+  // activation runs the click handler on release.
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     const order: readonly { readonly value: 'feed' | 'board'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
       { value: 'feed', ref: feedTabRef },
@@ -239,12 +238,10 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     ? undefined
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
 
-  // The board re-sorts the same projection by Task state: every taskful
-  // top-level entry in the loaded window, newest Task number first inside its
-  // column. It reads the feed's own window rather than walking the Channel's
-  // remaining history: a full walk would merge every top-level Message into the
-  // timeline, defeating the feed's pagination, and a board is a first screen the
-  // reader extends on demand, not a reason to load a year of history.
+  // Every taskful entry in the loaded window, newest Task number first inside
+  // its column. The window is the feed's: walking the Channel's remaining
+  // history would merge every top-level Message into the timeline to fill four
+  // columns, defeating the feed's own pagination.
   const boardColumns = useMemo(() => {
     const taskful = (view?.items ?? []).filter((item): item is AgentTeamViewItem & { readonly task: AgentTeamTask } => item.task !== undefined)
     const byNumber = (left: AgentTeamViewItem, right: AgentTeamViewItem): number => (right.taskNumber ?? 0) - (left.taskNumber ?? 0)
@@ -441,7 +438,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       </nav>
     </div>
 
-    {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={channelCss.board} aria-label={t('channelTabBoard')}>
+    {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={channelCss.board}>
       {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
       {boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
       {boardColumns.some(column => column.items.length > 0) && <div className={channelCss.boardColumns}>

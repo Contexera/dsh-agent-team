@@ -1318,6 +1318,31 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'channel-board.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
+  // Four columns cannot fit a 390px column, so the board scrolls sideways and
+  // every card keeps a readable width. Squeezing them instead breaks a title to
+  // one character per line — a failure this asserts against rather than
+  // eyeballs, because it still renders and still passes an overflow check.
+  const narrowBoard = await page.evaluate(() => {
+    const round = (value: number) => Math.round(value)
+    const track = document.querySelector('[role="tabpanel"] > div')
+    const cards = [...document.querySelectorAll('[role="tabpanel"] button')].map(node => node.getBoundingClientRect())
+    return {
+      cardWidths: cards.map(box => round(box.width)),
+      track: track === null ? null : {
+        overflowX: getComputedStyle(track).overflowX,
+        scrollWidth: round(track.scrollWidth),
+        clientWidth: round(track.clientWidth),
+      },
+    }
+  })
+  expect(narrowBoard.cardWidths.length).toBeGreaterThanOrEqual(1)
+  expect(Math.min(...narrowBoard.cardWidths)).toBeGreaterThanOrEqual(190)
+  // The overflow lives in the board track's own horizontal scroll, not on the
+  // page: the track scrolls its wider content, and the document still does not
+  // scroll sideways. A `hidden` overflow here would clip the last columns away
+  // with nothing to reach them, which is what this pins shut.
+  expect(narrowBoard.track!.overflowX).toBe('auto')
+  expect(narrowBoard.track!.scrollWidth).toBeGreaterThan(narrowBoard.track!.clientWidth)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'narrow-channel-board.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })

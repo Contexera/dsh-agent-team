@@ -62,7 +62,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // (see the sync procedure in its file header).
 const COMMENT_BUDGETS = {
   'packages/agent-team/src': 4150,
-  'packages/client-agent-team/src': 1970,
+  'packages/client-agent-team/src': 1950,
   'packages/tool-agent-team/src': 280,
   'scripts': 1900,
 }

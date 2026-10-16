@@ -25,6 +25,7 @@ import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { daySeparatorLabel, timelineDayKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
+import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames, type ThreadFactKey } from './thread-facts.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
 import { rosterChannelName, rosterMember } from './refs.ts'
@@ -66,43 +67,7 @@ type ReadProjection = Awaited<ReturnType<TeamThreadPageProps['readThread']>> ext
   ? Result extends { ok: true; value: infer Value } ? Value : never
   : never
 
-type ThreadFactKey = string
-
-function factKey(fact: AgentTeamThreadFact): ThreadFactKey {
-  return fact.kind === 'message' ? `message:${fact.message.messageRef}` : `activity:${fact.activity.activityRef}`
-}
-
-function messageFact(message: ReadProjection['anchor'], mentions: readonly AgentTeamMemberId[] = []): AgentTeamThreadFact {
-  return { kind: 'message', sequence: message.sequence, message, mentions, occurredAt: message.occurredAt }
-}
-
-/**
- * A fact owns its mention array, so the rendered name list is cached against
- * that array. Every roster refresh replaces the handles map with a fresh Map of
- * identical content, so the cache compares the resolved names rather than the
- * map identity: identity stays stable while the names are unchanged, which is
- * what keeps a memoized row from re-rendering on every refresh.
- */
-const mentionNamesCache = new WeakMap<readonly AgentTeamMemberId[], readonly MentionHandle[]>()
-
-function stableMentionNames(mentions: readonly AgentTeamMemberId[], handles: ReadonlyMap<AgentTeamMemberId, string>, humanName: string): readonly MentionHandle[] {
-  const names = mentionNamesOf(mentions, handles, humanName)
-  const cached = mentionNamesCache.get(mentions)
-  if (cached !== undefined && cached.length === names.length && cached.every((name, index) => mentionNameOf(name) === mentionNameOf(names[index]!))) return cached
-  mentionNamesCache.set(mentions, names)
-  return names
-}
-
-function mergeFacts(...groups: readonly (readonly AgentTeamThreadFact[])[]): readonly AgentTeamThreadFact[] {
-  const byKey = new Map<ThreadFactKey, AgentTeamThreadFact>()
-  for (const group of groups) for (const fact of group) byKey.set(factKey(fact), fact)
-  return [...byKey.values()].sort((left, right) => left.sequence - right.sequence)
-}
-
-function minSequence(facts: readonly AgentTeamThreadFact[]): number | undefined {
-  return facts.reduce<number | undefined>((minimum, fact) => minimum === undefined ? fact.sequence : Math.min(minimum, fact.sequence), undefined)
-}
-
+/** This read's per-fact flags, keyed to the facts the timeline renders. */
 function readMeta(facts: readonly AgentTeamThreadReadFact[]): ReadonlyMap<ThreadFactKey, AgentTeamThreadReadFact> {
   return new Map(facts.map(fact => [factKey(fact.fact), fact]))
 }

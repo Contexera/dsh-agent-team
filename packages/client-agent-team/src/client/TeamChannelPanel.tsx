@@ -15,7 +15,8 @@ import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { formatActivity, mentionedMemberIds, mentionNameOf, mentionNamesOf, type MentionHandle } from './team-formatters.ts'
+import { formatActivity, mentionedMemberIds } from './team-formatters.ts'
+import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames } from './thread-facts.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { chunkRunsWithDays } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
@@ -63,51 +64,17 @@ interface TeamChannelPanelProps {
   readonly t: TeamConversationProps['t']
 }
 
+const factSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined => fact.kind === 'message' ? fact.message.sender : undefined
+const factOccurredAt = (fact: AgentTeamThreadFact): string | undefined => fact.kind === 'message' ? fact.message.occurredAt : undefined
+
 type ReadProjection = Awaited<ReturnType<TeamChannelPanelProps['readThread']>> extends infer Result
   ? Result extends { ok: true; value: infer Value } ? Value : never
   : never
 
-type ThreadFactKey = string
-
-function factKey(fact: AgentTeamThreadFact): ThreadFactKey {
-  return fact.kind === 'message' ? `message:${fact.message.messageRef}` : `activity:${fact.activity.activityRef}`
-}
-
-function messageFact(message: ReadProjection['anchor'], mentions: readonly AgentTeamMemberId[] = []): AgentTeamThreadFact {
-  return { kind: 'message', sequence: message.sequence, message, mentions, occurredAt: message.occurredAt }
-}
-
-function mergeFacts(...groups: readonly (readonly AgentTeamThreadFact[])[]): readonly AgentTeamThreadFact[] {
-  const byKey = new Map<ThreadFactKey, AgentTeamThreadFact>()
-  for (const group of groups) for (const fact of group) byKey.set(factKey(fact), fact)
-  return [...byKey.values()].sort((left, right) => left.sequence - right.sequence)
-}
-
-function minSequence(facts: readonly AgentTeamThreadFact[]): number | undefined {
-  return facts.reduce<number | undefined>((minimum, fact) => minimum === undefined ? fact.sequence : Math.min(minimum, fact.sequence), undefined)
-}
-
-// A fact owns its mention array, so the rendered name list is cached against
-// that array — the Thread page's own policy, kept identical so a row reads the
-// same on either surface.
-const mentionNamesCache = new WeakMap<readonly AgentTeamMemberId[], readonly MentionHandle[]>()
-
-function stableMentionNames(mentions: readonly AgentTeamMemberId[], handles: ReadonlyMap<AgentTeamMemberId, string>, humanName: string): readonly MentionHandle[] {
-  const names = mentionNamesOf(mentions, handles, humanName)
-  const cached = mentionNamesCache.get(mentions)
-  if (cached !== undefined && cached.length === names.length && cached.every((name, index) => mentionNameOf(name) === mentionNameOf(names[index]!))) return cached
-  mentionNamesCache.set(mentions, names)
-  return names
-}
-
-const factSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined => fact.kind === 'message' ? fact.message.sender : undefined
-const factOccurredAt = (fact: AgentTeamThreadFact): string | undefined => fact.kind === 'message' ? fact.message.occurredAt : undefined
-
 /**
  * A taskless Thread's whole face beside its feed: read, answer, and — when the
- * discussion turns into work — promote. It is the Thread page narrowed to what
- * a discussion needs: quoting, claims, and acceptance stay on the Thread page,
- * which a promoted Thread walks into anyway.
+ * discussion turns into work — promote. Quoting, Claims, and acceptance stay on
+ * the Thread page, which a promoted Thread walks into anyway.
  */
 export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
   const threadRequest = { threadRef }
@@ -117,12 +84,11 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
   const [olderFacts, setOlderFacts] = useState<readonly AgentTeamThreadFact[]>([])
   const [historyCursor, setHistoryCursor] = useState<number>()
   const [historyHasMore, setHistoryHasMore] = useState(false)
-  // The Thread page's own bound: a read acknowledges at most 20 unread facts,
-  // and the cap stops a pathological feed from looping without bound.
+  // A read acknowledges at most 20 unread facts, so the cap stops a
+  // pathological feed from looping without bound.
   const MAX_AUTO_READ_ROUNDS = 50
   const [autoReadExhausted, setAutoReadExhausted] = useState(false)
-  // The Thread page's own draft key, so a draft started in the panel continues
-  // on the Thread page and back — one message, two faces.
+  // The Thread page's draft key, so a draft continues across both faces.
   const draftKey: TeamDraftKey = `thread:${threadRef}`
   const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
   const [confirmation, setConfirmation] = useState<AgentTeamConfirmationToken>()
@@ -165,8 +131,6 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
       if (!result.ok) { setError(result.error.message); return false }
       updateProjection(result.value)
       setError(undefined)
-      // The Host committed the read; the feed's badge clears now rather than
-      // when the next Inbox read happens to land.
       onRead(threadRef)
       return true
     } catch (cause) {
@@ -177,9 +141,8 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
     }
   }
 
-  // Continue a bounded read while unread facts remain; each round mints a
-  // fresh requestId so the Host's idempotency cache cannot replay one batch
-  // forever. Same termination rules as the Thread page.
+  // Each round mints a fresh requestId: the Host replays a repeated id from its
+  // idempotency cache, which would return the same batch forever.
   const drainUnread = async (): Promise<void> => {
     for (let round = 1; round <= MAX_AUTO_READ_ROUNDS; round += 1) {
       const snapshot = projectionRef.current
@@ -213,23 +176,20 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
         return next
       })
       if (additions.length === 0) return
-      // Every arrival while the panel is open is acknowledged durably, the
-      // Thread page's own rule: the timeline renders it either way.
+      // Every arrival while the panel is open is acknowledged durably: the
+      // timeline renders it either way.
       await readCurrent(true)
     } catch {
-      // A passive refresh is an invalidation convenience; the next explicit action rereads Host state.
     }
   }
 
-  // Follower ranking is an enhancement, not a page fact: a failed observation
-  // read leaves the roster order in place instead of surfacing an error.
+  // Follower ranking is an enhancement: a failed read leaves roster order.
   const refreshFollowers = async (): Promise<void> => {
     try {
       const result = await threadObservations({ workspaceId, ...threadRequest })
       if (!mountedRef.current || !result.ok) return
       setFollowerIds(new Set(result.value.followers))
     } catch {
-      // The next thread-scope wake retries; ranking falls back to roster order.
     }
   }
 
@@ -250,7 +210,6 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
     sequenceRef.current = sequence
     setLoading(true)
     void (async () => {
-      // One parallel round covers the whole first paint.
       const [read, history, observations] = await Promise.all([
         readThread({ requestId: readRequestIdRef.current, workspaceId, ...threadRequest }),
         loadThreadHistory({ workspaceId, ...threadRequest, limit: 20 }).catch(() => undefined),
@@ -274,8 +233,8 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
         setHistoryCursor(history.value.cursor)
         setHistoryHasMore(history.value.hasMore)
       } else {
-        // A refused history read keeps the way back open: the affordance
-        // stands, and pressing it pages under its own error surface.
+        // A refused read keeps the way back open: the affordance stands and
+        // pages under its own error surface.
         setHistoryHasMore(true)
       }
       if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
@@ -288,7 +247,6 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
         if (!mountedRef.current) return
         if (update.type === 'failed') { setError(update.message); return }
         void refreshPassiveFacts()
-        // Attention changes wake this scope too; keep the mention ranking current.
         void refreshFollowers()
       }),
     ]
@@ -330,10 +288,8 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
     return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
   }
 
-  // Branded-ref navigation for message bodies: channel refs hop to their
-  // Channel; thread and task refs cited here resolve through the Host and
-  // jump to their home Channel — a cited Thread reads whole on the Thread
-  // page. The same rule the Thread page follows.
+  // A cited Thread or Task resolves through the Host and jumps to its home
+  // Channel, where it reads whole; a cited Channel hops directly.
   const openRef = useCallback((ref: string): void => {
     if (ref.startsWith('channel:')) {
       if (ref !== channelRef) selectChannel(ref as AgentTeamChannelRef)
@@ -409,8 +365,6 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
       if (!result.ok) { setError(result.error.message); return }
       if (result.value.kind === 'committed') {
         mutationRequests.current.delete(key)
-        // The panel's job ends where the Task begins: the Channel closes it
-        // and walks the reader into the Thread page's hierarchy.
         onPromoted(result.value.task.taskRef)
       } else if (result.value.kind === 'unread_required') {
         setError(t('unreadRequired', { count: result.value.unreadCount }))
@@ -429,8 +383,7 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
     }
   }
 
-  // Editing the draft invalidates one-shot send state: a confirmation token,
-  // the retained requestId, and the status line.
+  // Editing the draft invalidates one-shot send state.
   const clearSendState = useCallback((): void => {
     setConfirmation(current => current === undefined ? current : undefined)
     setReplyRequestId(current => current === undefined ? current : undefined)
@@ -438,8 +391,8 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
   }, [])
 
   const sendReply = async (): Promise<void> => {
-    // Read the draft at send time: the composer owns the subscription, so a
-    // captured render value would be stale after its own edits.
+    // The composer owns the draft subscription, so a captured render value
+    // would be stale after its own edits.
     const { draft, recipients } = drafts.getSnapshot(draftKey)
     if (pending || thread === undefined || draft.trim() === '') return
     const id = replyRequestId ?? mintRequestId()
@@ -460,8 +413,8 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
       }
       if (result.value.kind === 'committed') {
         const committed = result.value as Extract<typeof result.value, { kind: 'committed' }>
-        // The optimistic row chips what the Host is about to report; its
-        // committed facts replace this row as soon as they arrive.
+        // Chips what the Host is about to report; its committed facts replace
+        // this row as soon as they arrive.
         const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, channelMembers)])].sort()
         setCurrentFacts(current => {
           const merged = mergeFacts(current, [{ kind: 'message', sequence: committed.message.sequence, message: committed.message, mentions: optimisticMentions, occurredAt: committed.receipt.occurredAt }])
