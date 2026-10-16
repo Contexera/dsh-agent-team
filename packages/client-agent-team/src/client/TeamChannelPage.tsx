@@ -12,7 +12,7 @@ import { TeamMessage } from './TeamMessage.tsx'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, formatTaskTitle, taskStatusDot, mentionNamesOf } from './team-formatters.ts'
+import { claimersLabel, formatAbsoluteTime, formatDateOnly, formatInboxTime, formatTaskStatus, formatTaskTitle, taskStatusDot, mentionNamesOf } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
@@ -569,10 +569,17 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   const taskNumber = item.taskNumber
   const followUp = followUpAt(item)
   const printedActivity = printedActivityAt(item)
+  // A resolved Task's gate slims to a footnote — no owner stack, no status
+  // dot: the word and the day it landed say what is left to say, and the
+  // board owns scanning resolved work now. Unread still counts beside it:
+  // a resolved Thread can be answered.
+  const resolved = item.task?.status === 'done' || item.task?.status === 'closed'
   const label = taskNumber !== undefined
     ? t('taskLabel', { number: taskNumber })
     : followUp === undefined ? t('replyAction') : t('threadLabel')
-  const text = printedActivity === undefined ? label : `${label} · ${t('recentActivity', { time: formatInboxTime(printedActivity, t) })}`
+  const text = resolved && item.task !== undefined
+    ? `${label} · ${formatTaskStatus(item.task.status, t)} · ${formatDateOnly(item.lastActivityAt)}`
+    : printedActivity === undefined ? label : `${label} · ${t('recentActivity', { time: formatInboxTime(printedActivity, t) })}`
   const openLabel = taskNumber === undefined
     ? unread > 0 ? t('openThreadUnread', { count: unread }) : t('openThread')
     : unread > 0 ? t('openTaskUnread', { number: taskNumber, count: unread }) : t('openTask', { number: taskNumber })
@@ -581,7 +588,7 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   // descendants from the accessibility tree — and so the control's name says
   // exactly what clicking it does.
   return <span className={css.entryLine} data-thread-entry="">
-    <ThreadStateCluster task={item.task} owners={owners} unread={unread} human={human} t={t} />
+    {resolved ? <TeamCountBadge count={unread} /> : <ThreadStateCluster task={item.task} owners={owners} unread={unread} human={human} t={t} />}
     <button
       type="button"
       className={css.entryRow}

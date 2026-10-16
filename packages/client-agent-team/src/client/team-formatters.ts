@@ -389,6 +389,18 @@ export function formatInboxTime(occurredAt: string, t: TeamConversationProps['t'
   return formatMessageTime(occurredAt, now)
 }
 
+/**
+ * Date-only label for the day a resolved Task landed: month-day within the
+ * year, full date otherwise. The slim feed row's last segment states when the
+ * work landed; a clock time would claim a precision the day does not carry.
+ */
+export function formatDateOnly(occurredAt: string, now = new Date()): string {
+  const at = new Date(occurredAt)
+  if (Number.isNaN(at.getTime())) return ''
+  const date = formatAbsoluteTime(occurredAt).slice(0, 10)
+  return at.getFullYear() === now.getFullYear() ? date.slice(5) : date
+}
+
 export function formatActivity(activity: AgentTeamActivity, options: {
   readonly t: TeamConversationProps['t']
   readonly actorName: (memberId: AgentTeamMemberId) => string

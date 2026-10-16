@@ -4,7 +4,7 @@ import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
-import { allMentionMembers, containsAllMention, bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
+import { allMentionMembers, containsAllMention, bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatDateOnly, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -83,6 +83,9 @@ describe('Team presentation formatters', () => {
     expect(formatMessageTime('2026-02-01T08:30:00', now)).toBe('02-01 08:30')
     expect(formatMessageTime('2025-12-31T23:59:00', now)).toBe('2025-12-31 23:59')
     expect(formatMessageTime('not-a-date', now)).toBe('')
+    expect(formatDateOnly('2026-08-21T03:05:00.000Z', now)).toBe('08-21')
+    expect(formatDateOnly('2025-12-31T23:59:00', now)).toBe('2025-12-31')
+    expect(formatDateOnly('not-a-date', now)).toBe('')
   })
 
   it('states a clock time alone for the 28px seat, never a date', () => {

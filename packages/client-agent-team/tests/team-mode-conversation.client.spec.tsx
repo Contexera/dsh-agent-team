@@ -171,7 +171,7 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('stops printing activity on a resolved Task door', async () => {
+  it('slims a resolved Task door to its number, status word, and landing day', async () => {
     const b = await runtimeWithTeam({
       mode: 'team', workspaceId: 'w1', initialChannels: true,
       seedTaskStatus: 'done',
@@ -182,10 +182,11 @@ describe('Team conversation surfaces', () => {
     // the door is the only place that could print it.
     b.publishAgentReply()
     const door = await b.view.findByRole('button', { name: '打开 Task #1' })
-    // A done Task already says nothing is moving, so the moment it resolved is
-    // not repeated on every finished row; the precise instant stays one hover
-    // away.
-    expect(door.textContent).toBe('Task #1')
+    // A done Task already says nothing is moving, so the door slims to a
+    // footnote — number, status word, and the day it last moved, with no
+    // recency clause repeated on every finished row; the precise instant
+    // stays one hover away, and the board owns scanning resolved work.
+    expect(door.textContent).toBe('Task #1 · 已完成 · 08-21')
     expect(door.getAttribute('title')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
     await b.runtime.dispose()
   })
