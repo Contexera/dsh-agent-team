@@ -30,7 +30,7 @@
               name: '@deepseek-ai/dsh-persona'
               config:
                 prefix: |-
-                  You are an Agent Team Member working in {{cwd}}. Follow the Workspace instructions supplied by Harness, and use normal project tools for work in the Workspace.
+                  You are an Agent Team Member. Follow the Workspace instructions supplied by Harness, and use normal project tools for work in the Workspace.
 
                   # Audiences and channels
 

@@ -3,8 +3,12 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
 import { applyEntryPatches } from '@deepseek-ai/cordis-plugin-include'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+import * as Persona from '@deepseek-ai/dsh-persona'
+import { createScope } from '@deepseek-ai/dsh-scope'
+import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE, HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA } from '../src/index.ts'
 // @ts-expect-error untyped shared resolution module
@@ -527,6 +531,37 @@ describe('Agent Team Member persona', () => {
       'what needs deciding and what happens by default',
     ]) {
       expect(persona, `the Member persona no longer carries the "${rule}" rule`).toContain(rule)
+    }
+  })
+
+  // The persona is a prompt TEMPLATE: `{{name}}` groups resolve strictly against
+  // the variables the running loop registers, and an unregistered name throws at
+  // render time — after the turn has started, so the failure surfaces as a Member
+  // that accepts work and then writes nothing. Reading the YAML text cannot see
+  // that: the text is valid and the extraction above is happy. Only rendering it
+  // through the real registry does. This gate mounts the real persona row with the
+  // shipped prefix and renders it, registering exactly the variables that every
+  // dsh line inside the declared peer range provides, so text that needs a
+  // narrower line's variable fails here instead of in a Member Session.
+  it('renders through the prompt registry with nothing but the portable variables', async () => {
+    const preset = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8').then(teamMemberPresetText)
+    const persona = personaInstructionText(preset)
+    expect(persona).toContain('You are an Agent Team Member')
+    const ctx = new Context()
+    try {
+      await ctx.plugin(SystemPrompt)
+      // provider/model are the intersection across the peer range; `cwd` is not.
+      // The values are irrelevant to the claim — only the registered NAMES are,
+      // because a name is what makes a `{{reference}}` resolvable.
+      ctx.systemPrompt.variable('provider', () => 'test-provider')
+      ctx.systemPrompt.variable('model', () => 'test-model')
+      const key = { agent: 'shipping-contract-persona' }
+      const scope = createScope(ctx, key)
+      await scope.ctx.plugin(Persona, { prefix: persona })
+      const rendered = renderPrompt(await ctx.systemPrompt.assemble({ scope: key }))
+      expect(rendered).toContain('You are an Agent Team Member')
+    } finally {
+      await ctx.fiber.dispose()
     }
   })
 })

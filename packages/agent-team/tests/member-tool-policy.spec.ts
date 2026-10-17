@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 // smaller than the 30s each per-test boot used to get — carry the same
 // headroom to the hook or the slowest lane times out before any test runs.
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 })
-import { Context } from '@deepseek-ai/cordis'
+import { Context, type Plugin } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
@@ -23,7 +23,14 @@ import AgentPresetRegistry from '@deepseek-ai/dsh-agent-preset-registry'
 import LlmRuntime, { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+// The harness package is a default-export plugin class through 0.2.0 and a
+// Cordis-standard `{ name, apply }` module from 0.2.1; cordis resolves neither
+// by unwrapping `.default`, so the plugin is whichever shape this line ships.
+import * as jsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+// The 0.2.0 line ships a default export, the 0.2.1 line a Cordis module; the
+// declaration for the latter has no `default` member, so read it as one.
+const JsonlSessionPersistence = ((jsonlSessionPersistence as { default?: Plugin }).default
+  ?? jsonlSessionPersistence) as Plugin
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -34,6 +41,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { provideWorkingDirectoryFixture } from './helpers/working-directory.ts'
 
 const sharedCleanups: Array<() => Promise<void>> = []
 /** Per-test disposers (LLM adapter registrations, ordinary sessions): drained after each test. */
@@ -174,6 +182,8 @@ async function buildSharedHarness(): Promise<{
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   ctx.loader.builtins.group = Group
+  // dsh-tool-skill injects `workingDirectory` from 0.2.1; a hand-built Context supplies it.
+  provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
   // The registry injects 'sessionProjections'; the roster stays PENDING without it.

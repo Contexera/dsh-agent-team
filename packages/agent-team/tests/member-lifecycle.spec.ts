@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // per-test budget and the waitFor deadline below (kept equal) need headroom.
 vi.setConfig({ testTimeout: 60_000 })
 
-import { Context } from '@deepseek-ai/cordis'
+import { Context, type Plugin } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
@@ -21,7 +21,14 @@ import AgentPresetRegistry, { type AgentPreset, type PresetDefinition } from '@d
 import LlmRuntime, { LlmError, ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+// The harness package is a default-export plugin class through 0.2.0 and a
+// Cordis-standard `{ name, apply }` module from 0.2.1; cordis resolves neither
+// by unwrapping `.default`, so the plugin is whichever shape this line ships.
+import * as jsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+// The 0.2.0 line ships a default export, the 0.2.1 line a Cordis module; the
+// declaration for the latter has no `default` member, so read it as one.
+const JsonlSessionPersistence = ((jsonlSessionPersistence as { default?: Plugin }).default
+  ?? jsonlSessionPersistence) as Plugin
 import { SessionFormatUnsupportedError } from '@deepseek-ai/dsh-session-persistence'
 import SessionTitle from '@deepseek-ai/dsh-session-title'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -37,6 +44,7 @@ import { AGENT_TEAM_PLUGIN_ID, continuationCheckpointRefOf, handoffOf, isCheckpo
 import { RECOVERY_DELAY_MS } from '../src/recovery.ts'
 import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { provideWorkingDirectoryFixture } from './helpers/working-directory.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 const originalDshHome = process.env.DSH_HOME
@@ -230,6 +238,8 @@ async function realHarness(
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   ctx.loader.builtins.group = Group
+  // dsh-tool-skill injects `workingDirectory` from 0.2.1; a hand-built Context supplies it.
+  provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(LlmRuntime)
   ctx.llm.registerAdapter(['mock'], adapter)
   await ctx.plugin(SessionStore)

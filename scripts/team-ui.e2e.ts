@@ -46,6 +46,17 @@ async function settleAnimations(page: Page): Promise<void> {
   }))
 }
 
+/** Open Settings from the shell's own entry, whichever seat holds it. */
+async function openSettings(page: Page): Promise<void> {
+  // The seat, not a name: both footer occupants register `settings.launcher`.
+  const launcher = page.locator('[data-slot="sidebar.settings"] button').first()
+  await launcher.click()
+  const item = page.getByRole('menuitem', { name: '设置', exact: true })
+  await expect.poll(async () => await item.count() > 0 || await page.getByRole('dialog').count() > 0).toBe(true)
+  if (await item.count() > 0) await item.click()
+  await page.getByRole('dialog').waitFor()
+}
+
 /**
  * What a control's focus ring actually renders, plus whether the browser counts
  * the focus as keyboard-visible at all. A ring the reader never sees is not
@@ -339,11 +350,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
 
   expect(scaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
   // The Team entry is the sidebar rail's own row: the same list as the shipped
-  // global panels, one row below the plugin page's, at the same height.
+  // global panels, at the same height and on the list's own pitch.
   const panelRail = page.locator('nav[class*="panelList"]')
   const pluginsTrigger = panelRail.getByRole('button', { name: '插件' })
   const teamTrigger = panelRail.getByRole('button', { name: '团队', exact: true })
-  const settingsTrigger = page.getByRole('button', { name: '设置' })
+  const settingsTrigger = page.locator('[data-slot="sidebar.settings"] button').first()
   // The bar the mode's exit takes over, measured while it is still on screen:
   // in Team mode the stand-down rule hides it, so its box has to be read here.
   const shippedBarBox = await page.locator('button[class*="newSession"]').boundingBox()
@@ -353,7 +364,17 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(pluginsBox).not.toBeNull()
   expect(settingsBox).not.toBeNull()
   expect(teamBox!.height).toBeCloseTo(pluginsBox!.height, 0)
-  expect(teamBox!.y).toBeCloseTo(pluginsBox!.y + pluginsBox!.height + 4, 0)
+  // The Team row is the list's LAST row, on the list's one pitch: "on the grid"
+  // alone also passes when the row slid to a position that is not its own.
+  const railRows = await panelRail.evaluate(el => [...el.querySelectorAll('button')]
+    .map(b => b.getBoundingClientRect().y))
+  expect(railRows.length).toBeGreaterThan(1)
+  expect(teamBox!.y).toBeCloseTo(railRows[railRows.length - 1]!, 0)
+  const pitch = railRows[1]! - railRows[0]!
+  expect(pitch).toBeGreaterThan(0)
+  for (let index = 1; index < railRows.length; index += 1) {
+    expect(railRows[index]! - railRows[index - 1]!, `row ${index} leaves the list's pitch`).toBeCloseTo(pitch, 0)
+  }
   await teamTrigger.click()
   // The mode shadows the browser seat only. Its way back to the conversation
   // takes over the shipped New Session bar's slot — the mode hides that bar, so
@@ -835,8 +856,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // composer: a plain prompt lands on the Member's live Session (the Team
   // manages no member-session input surface, so no structured mention flow
   // remains).
-  await memberInput.fill('member session hello')
-  await memberInput.press('Enter')
+  await memberInput.click()
+  await page.keyboard.type('member session hello')
+  await page.keyboard.press('Enter')
   const isPlainMemberPrompt = (event: ReturnType<typeof builderAgent.session.snapshotEvents>[number]): boolean => event.type === 'user/message'
     && event.data.source.kind === 'user'
     && event.data.content.some(block => block.type === 'text' && block.text === 'member session hello')
@@ -3375,7 +3397,7 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await page.goto(scaffold.authenticatedUrl)
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
 
-  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await openSettings(page)
   const panel = page.getByRole('dialog')
   await panel.getByRole('button', { name: '团队', exact: true }).click()
   const nameField = panel.getByLabel('名字')
@@ -3527,7 +3549,7 @@ it('states the local environment check on the Team page', async () => {
   await page.goto(scaffold.authenticatedUrl)
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
 
-  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await openSettings(page)
   const panel = page.getByRole('dialog')
   await panel.getByRole('button', { name: '团队', exact: true }).click()
   const block = panel.locator('[data-environment]')
@@ -3590,7 +3612,7 @@ it('configures the jev endpoint from the Team page in real Web', async () => {
   await page.goto(scaffold.authenticatedUrl)
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
 
-  await page.getByRole('button', { name: '设置', exact: true }).click()
+  await openSettings(page)
   const panel = page.getByRole('dialog')
   await panel.getByRole('button', { name: '团队', exact: true }).click()
   const heading = panel.getByRole('heading', { name: '团队', exact: true })
