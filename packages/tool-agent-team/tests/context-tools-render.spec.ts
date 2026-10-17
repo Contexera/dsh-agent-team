@@ -133,6 +133,17 @@ describe('context tools render the model-facing decision surface', () => {
     expect(engineTimelineItems([{ ...anchor, source: 'handoff' }])[0]!.kind).toBe('handoff')
     expect(engineTimelineItems([{ ...anchor, source: 'compaction' }])[0]!.kind).toBe('compaction')
     expect(engineTimelineItems([anchor])[0]!.kind).toBeUndefined()
+    // An unmeasurable cost stays absent instead of becoming zero: the engine
+    // reports an absent estimate as unknown, and a zero here would read as a
+    // measurement of nothing. The row must not carry the key at all.
+    const { retainedTokens: _retained, discardedTokens: _discarded, ...unpriced } = anchor
+    const unmeasured = engineTimelineItems([unpriced])[0]!
+    expect('retainedTokens' in unmeasured).toBe(false)
+    expect('discardedTokens' in unmeasured).toBe(false)
+    // A measured zero is still a measurement and must survive as one.
+    const measuredZero = engineTimelineItems([{ ...anchor, retainedTokens: 0, discardedTokens: 0 }])[0]!
+    expect(measuredZero.retainedTokens).toBe(0)
+    expect(measuredZero.discardedTokens).toBe(0)
   })
 
   it('context_status keeps the output bounded by the Host-supplied item list', () => {

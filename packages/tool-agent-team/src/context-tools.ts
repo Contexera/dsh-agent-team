@@ -76,17 +76,23 @@ function compactionScopeFor(agent: Agent): ContextCompactionScope | undefined {
 }
 
 export function engineTimelineItems(items: readonly AgentTeamTimelineItem[]): ContextTimelineItem[] {
+  // The engine declares the two cost fields required through 0.4.0 and
+  // optional from 0.4.1, where an unmeasurable cost is reported as unknown
+  // rather than as zero. One source text cannot satisfy both declarations, so
+  // the shape is reconciled here, at the one boundary that crosses into the
+  // engine: under the required contract the engine always supplies both, and
+  // under the optional one the reader understands an absent value.
   return items.map(item => ({
     ref: item.restorable ? item.checkpointRef : anchorId(item.checkpointRef),
     label: item.name,
     source: item.source === 'agent' ? 'checkpoint' as const : item.source === 'head' ? 'head' as const : 'boundary' as const,
     ...(item.source === 'handoff' || item.source === 'compaction' ? { kind: item.source } : {}),
-    retainedTokens: item.retainedTokens,
-    discardedTokens: item.discardedTokens,
+    ...(item.retainedTokens === undefined ? {} : { retainedTokens: item.retainedTokens }),
+    ...(item.discardedTokens === undefined ? {} : { discardedTokens: item.discardedTokens }),
     affectedTopics: [...item.affectedThreads],
     restorable: item.restorable,
     ...(item.reason === undefined ? {} : { reason: item.reason }),
-  }))
+  }) as ContextTimelineItem)
 }
 
 const adapter: ContinuityToolAdapter = {

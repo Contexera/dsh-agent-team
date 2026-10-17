@@ -2943,9 +2943,13 @@ describe('Agent Team checkpoint selection and return (ticket 02)', () => {
     expect(head!.restorable).toBe(false)
     // A current-generation anchor's discarded estimate is the measured usage
     // beyond the anchor (the suffix a return would drop), never the whole
-    // current usage; retained + discarded equals the measurement.
-    expect(first.discardedTokens).toBe(Math.max(0, timeline.usageTokens - first.retainedTokens))
-    expect(first.retainedTokens + first.discardedTokens).toBeLessThanOrEqual(timeline.usageTokens)
+    // current usage; retained + discarded equals the measurement. This anchor
+    // sits in a live Session whose usage is known, so both estimates are
+    // present: absent would mean the scope could not measure it at all.
+    expect(first.retainedTokens).toBeDefined()
+    expect(first.discardedTokens).toBeDefined()
+    expect(first.discardedTokens).toBe(Math.max(0, timeline.usageTokens - first.retainedTokens!))
+    expect(first.retainedTokens! + first.discardedTokens!).toBeLessThanOrEqual(timeline.usageTokens)
     // The limit bounds the list.
     const limited = await ctx.agentTeam.contextTimelineForAgent(live, { memberId: added.status.member.memberId, limit: 1 })
     expect(limited.items).toHaveLength(1)

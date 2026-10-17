@@ -345,10 +345,14 @@ export interface AgentTeamTimelineItem {
   readonly name: string
   /** Which structural source produced this item. */
   readonly source: 'agent' | 'team-boundary' | 'handoff' | 'compaction' | 'head'
-  /** Approximate tokens a return would retain (the prefix through this anchor). */
-  readonly retainedTokens: number
-  /** Approximate tokens a return would discard (the suffix after this anchor). */
-  readonly discardedTokens: number
+  /**
+   * Approximate tokens a return would retain (the prefix through this anchor),
+   * absent when the scope could not measure it. Absent is not zero: an
+   * unmeasured cost is reported as unknown, never as a measured nothing.
+   */
+  readonly retainedTokens?: number
+  /** Approximate tokens a return would discard (the suffix after this anchor); absent when unmeasured. */
+  readonly discardedTokens?: number
   /**
    * Threads whose facts entered this Session's model context by this anchor
    * (delivered Team notices only — never unread ledger activity). Empty when
@@ -2735,8 +2739,8 @@ export default class AgentTeam extends TypertRemoteService {
       checkpointRef: item.ref,
       name: item.label,
       source,
-      retainedTokens: item.retainedTokens,
-      discardedTokens: item.discardedTokens,
+      ...(item.retainedTokens === undefined ? {} : { retainedTokens: item.retainedTokens }),
+      ...(item.discardedTokens === undefined ? {} : { discardedTokens: item.discardedTokens }),
       affectedThreads: item.affectedTopics,
       restorable: item.restorable,
       ...(item.reason === undefined ? {} : { reason: item.reason }),
