@@ -70,9 +70,9 @@ describe('every entry names an action and the value that action takes', () => {
     }
   })
 
-  it('every id is unique, so a lookup cannot silently bind two entries', () => {
-    const ids = RECOVERY_REGISTRY.map(entry => entry.id)
-    expect(new Set(ids).size).toBe(ids.length)
+  it('every kind is unique, so a lookup cannot silently bind two entries', () => {
+    const kinds = RECOVERY_REGISTRY.map(entry => entry.kind)
+    expect(new Set(kinds).size).toBe(kinds.length)
   })
 
   it('lookup is exact: an unknown kind throws instead of falling back to a neighbour', () => {

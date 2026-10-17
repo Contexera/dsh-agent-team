@@ -28,12 +28,6 @@ import type { AgentTeamThreadReadFact } from './types.ts'
  * answers a question about it. The caller decides what to do with the answer.
  */
 
-/** The notice text prefix a direct mention's rendered detail block starts with. */
-const DIRECT_MENTION_MARKER = 'Direct Team mention'
-
-/** The header a DM relay starts with, naming its sender. */
-const DM_HEADER = /^Direct message from @[^\n]+\n/m
-
 /** The notice's own truncation marker, which means the body was cut. */
 const TRUNCATION_MARKER = '[Message body truncated; use team_thread read for the full Message.]'
 
@@ -105,14 +99,4 @@ export function surfaceVisibilityProbe(agentFor: (memberId: AgentTeamMemberId) =
     if (agent === undefined) return false
     return isFactOnSurface(visibleTeamTexts(agent), fact)
   }
-}
-
-/** Whether a rendered surface text is a direct-mention notice, for tests and diagnostics. */
-export function isDirectMentionNotice(text: string): boolean {
-  return text.includes(DIRECT_MENTION_MARKER)
-}
-
-/** Whether a rendered surface text is a DM relay, for tests and diagnostics. */
-export function isDmRelay(text: string): boolean {
-  return DM_HEADER.test(text)
 }

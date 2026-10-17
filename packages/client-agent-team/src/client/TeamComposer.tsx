@@ -5,7 +5,7 @@ import { IconChecklistOutlineMedium, IconPaperclipOutlineMedium, IconSendOutline
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { mentionSurfaceOf, mentionTierIsParticipant } from './mention-presentation.ts'
+import { MENTION_TIER, mentionSurfaceOf, mentionTierIsParticipant, type MentionTier } from './mention-presentation.ts'
 import { allMentionMembers, containsAllMention, containsMention, HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
@@ -17,14 +17,6 @@ interface MentionMatch {
 }
 
 /** One pickable row: the fixed @all expansion or one concrete member. */
-/**
- * How directly a mention reaches a Member: 0 = follows this Thread (a pick
- * delivers at once), 1 = takes part in the Channel but not this Thread, 2 = the
- * rest of the Workspace. Ranking and row styling both read this, so the two can
- * never disagree about which tier a Member is in.
- */
-export type MentionTier = 0 | 1 | 2
-
 type MentionOption = { readonly kind: 'all' } | { readonly kind: 'member'; readonly status: AgentTeamClientMemberStatus; readonly tier: MentionTier }
 
 function findMention(draft: string, caret: number): MentionMatch | undefined {
@@ -56,9 +48,9 @@ function mentionCandidates(members: readonly AgentTeamClientMemberStatus[], quer
  */
 function mentionTier(status: AgentTeamClientMemberStatus, followers: ReadonlySet<AgentTeamMemberId> | undefined,
   channelPeers: ReadonlySet<AgentTeamMemberId> | undefined): MentionTier {
-  if (followers?.has(status.member.memberId) === true) return 0
-  if (channelPeers?.has(status.member.memberId) === true) return 1
-  return 2
+  if (followers?.has(status.member.memberId) === true) return MENTION_TIER.follower
+  if (channelPeers?.has(status.member.memberId) === true) return MENTION_TIER.peer
+  return MENTION_TIER.other
 }
 
 function rankMentionCandidates(candidates: readonly AgentTeamClientMemberStatus[], followers: ReadonlySet<AgentTeamMemberId> | undefined,
