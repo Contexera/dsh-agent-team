@@ -11,7 +11,7 @@
 
 **按顺序准备：**
 
-1. 先 `corepack enable pnpm` 落地 shim。再 clone `../deepseek-harness`，checkout 最新认证 release tag。当前 tag 是 `dsh-v0.2.0-rc.2`，随认证前进。然后 `corepack pnpm install`（workspace 全量一次到位）、`corepack pnpm build:lib` 与 `corepack pnpm build:native-system`。 shim 是必需的。认证 Harness 自身的 script 内部会调裸 `pnpm`（`build:lib`、`build:web`）。`corepack pnpm` 只在自己进程内解析。缺了 shim 这些步骤会以 `pnpm: not found` 失败。 两个仓库的 `packageManager` 都锁 `pnpm@11.7.0`。shim 因此解析到该版本，而非环境预装的任意版本。
+1. 先 `corepack enable pnpm` 落地 shim。再 clone `../deepseek-harness`，checkout 最新认证 release tag。当前 tag 是 `dsh-v0.2.1-rc.2`，随认证前进。然后 `corepack pnpm install`（workspace 全量一次到位）、`corepack pnpm build:lib` 与 `corepack pnpm build:native-system`。 shim 是必需的。认证 Harness 自身的 script 内部会调裸 `pnpm`（`build:lib`、`build:web`）。`corepack pnpm` 只在自己进程内解析。缺了 shim 这些步骤会以 `pnpm: not found` 失败。 两个仓库的 `packageManager` 都锁 `pnpm@11.7.0`。shim 因此解析到该版本，而非环境预装的任意版本。
 
    native 这一步是独立的构建，不会由别处替我们完成。host addon 被 gitignore。Harness 的 `test` script 会在自己的 Vitest 之前用 `build:native-system` 构建它。本仓库是直接对那个 checkout 跑 Vitest。全新 clone 缺了它会表现为宿主 Team 激活失败（`Agent is not an active Team Member`），而不是缺模块报错。 它在所有平台都安全：`--host-addon-only` 在非 Linux/macOS 上直接退出、不构建。 不要复用上一次构建遗留的 `lib/` 或 `node_modules/`——旧产物可能掩盖声明或运行时不兼容。
 2. 工作流需要 `test:browser` 时，用 `corepack pnpm build:web` 构建 Harness `apps/web` dist。workspace install 已备好它的依赖。
@@ -77,7 +77,7 @@ dsh web
 
 每次发布后随即把稳定 profile 装到该版本（按精确版本号，理由见上）。稳定 profile 与开发 profile 共享全局 ledger 存储（`$DSH_HOME/storages/`）。稳定 profile 停留在旧版，而 ledger 已被新版写入。这时启动会因记录 schema 校验失败而崩溃。2026-08 的 0.1.1 即是这种"写得出、读不回"的中间版本。
 
-本 bundle 的最低兼容版本是 DSH `0.2.0-rc.2`。DSH 的 JSONL Session persistence 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4）。旧格式 Session 数据无需手动处置。不要为 Team ledger 或 Member Session 添加迁移、读取旧格式或静默回退逻辑。
+本 bundle 的最低兼容版本是 DSH `0.2.1-rc.2`。DSH 的 JSONL Session persistence 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4）。旧格式 Session 数据无需手动处置。不要为 Team ledger 或 Member Session 添加迁移、读取旧格式或静默回退逻辑。
 
 ### 重写与推送历史
 

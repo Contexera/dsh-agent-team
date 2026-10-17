@@ -33,7 +33,7 @@ permissions:
 env:
   # Single adjustable variable: the certified harness release tag. Advance it
   # per certification (docs/dsh-release-compatibility.md).
-  DSH_HARNESS_TAG: dsh-v0.2.0-rc.2
+  DSH_HARNESS_TAG: dsh-v0.2.1-rc.2
 
 jobs:
   linux:

@@ -65,7 +65,7 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 - Claims are bucketed per Task by a replay-derived index, so a per-Task read — a Claim list, a Thread picture, an Inbox row, the 「active task threads」 radar — never walks the ledger's whole Claim set. Every index here is rebuilt by replay, never a second durable authority.
 
 ## Session persistence and replay
-- The bundle targets DSH `0.2.0-rc.2` and uses the current DSH Session persistence: the shipped JSONL backend migrates released historical formats itself (v0/v1/v2 → V3 → V4), and old-format Session data needs no manual disposal. Team nevertheless retains a narrow replay normalization for old pre-Message `occurredAt` records, and exactly one record shape still reaches it: the pre-receipt `team/thread-read` snapshot, which froze Message anchors and Thread facts beside the Inbox delta it consumed.
+- The bundle targets DSH `0.2.1-rc.2` and uses the current DSH Session persistence: the shipped JSONL backend migrates released historical formats itself (v0/v1/v2 → V3 → V4), and old-format Session data needs no manual disposal. Team nevertheless retains a narrow replay normalization for old pre-Message `occurredAt` records, and exactly one record shape still reaches it: the pre-receipt `team/thread-read` snapshot, which froze Message anchors and Thread facts beside the Inbox delta it consumed.
 
   That is the only Thread-read form that stores an instant at all — the receipt every current read writes carries progress and its Inbox delta only — and it is normalized and validated in place, never rewritten. Do not add Team Session migration, broad compatibility reads, or fallback storage paths.
 

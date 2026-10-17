@@ -57,7 +57,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、`active task threads` 雷达）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
 
 ## Session 持久化与重放
-- Bundle 目标为 DSH `0.2.0-rc.2`。Bundle 的 Session persistence 使用当前 DSH schema。随附的 JSONL backend 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4），旧格式 Session 数据无需手动处置。这个 DSH Session-schema 策略不会抹掉 Team operation history。Team 有意保留针对旧版、Message-level `occurredAt` 之前 records 的窄 replay normalization。
+- Bundle 目标为 DSH `0.2.1-rc.2`。Bundle 的 Session persistence 使用当前 DSH schema。随附的 JSONL backend 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4），旧格式 Session 数据无需手动处置。这个 DSH Session-schema 策略不会抹掉 Team operation history。Team 有意保留针对旧版、Message-level `occurredAt` 之前 records 的窄 replay normalization。
 - 普通存储的 Message operations 在加载时使用包裹 operation 的 instant。旧 `team/thread-read` snapshot anchors 与 Message facts 从来源 Message operation 解析 instant。只在必要时回退到 read operation。而 snapshot 正是唯一仍会走到这条 normalization 的记录形态。snapshot 把 Message anchors 与 Thread facts 连同消费掉的 Inbox delta 一起冻结在记录里。
 
   当前每次读写入的 receipt 只存进度与 Inbox delta，是唯一不存任何 instant 的 Thread-read 形态。旧记录就地 normalize 并校验，绝不改写。不要增加 Team 自有的 Session migration、宽泛 compatibility reads 或 fallback storage paths。可选的 `member.model` inheritance 与可选 Message attachments 都是当前语义，不是 legacy fields。

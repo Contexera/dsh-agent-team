@@ -167,9 +167,9 @@ Record candidate tag, symptom, affected interface, reproduction command, and nex
 
 ## 6. Current baseline
 
-The current certified baseline is DSH `0.2.0-rc.2`; the paragraphs below preserve the history that produced the preceding baselines.
+The current certified baseline is DSH `0.2.1-rc.2`; the paragraphs below preserve the history that produced the preceding baselines.
 
-The DSH peers state exactly that certified line, `>=0.2.0-rc.2 <0.2.1`, so a line this repository has not verified falls outside the declared range instead of installing under an unverified compatibility claim. The removed `@deepseek-ai/dsh-tool-todo` peer left with the preset row it named when the Team surface dropped the session-local todo tool; the remaining peers keep the one certified range.
+The DSH peers state exactly that certified line, `>=0.2.1-rc.2 <0.2.2`, so a line this repository has not verified falls outside the declared range instead of installing under an unverified compatibility claim. The removed `@deepseek-ai/dsh-tool-todo` peer left with the preset row it named when the Team surface dropped the session-local todo tool; the remaining peers keep the one certified range.
 
 The removed `@deepseek-ai/dsh-invariants` peer likewise left with the registry row it named when the invariant companion began validating on its own.
 
@@ -306,3 +306,19 @@ The published `0.2.0` bundle was installed against the candidate and booted from
 The certified baseline advanced to this candidate on 2026-09-29, after the certification rather than as part of it. The operator moved all 45 DSH peers to `>=0.2.0-rc.2 <0.2.1`, with the CI harness tag and the Hoplite tag to `dsh-v0.2.0-rc.2` and every wording spot that names the range.
 
 The move narrows the declared line to `0.2.0-rc.2` and later. The published `0.2.0` tarball keeps its wider `>=0.2.0-rc.1 <0.2.1` declaration, so only a later release refuses a host still on `0.2.0-rc.1`.
+
+### DSH 0.2.1-rc.2
+
+DSH `0.2.1-rc.2` is certified on a moved peer line, `>=0.2.1-rc.2 <0.2.2`, shipped as Agent Team `0.2.4`. The candidate falls outside `>=0.2.0-rc.2 <0.2.1`, so this round moves all 43 DSH peers rather than recording a baseline in place.
+
+Tag `687f282e` (2026-10-17) sits 1,925 commits after `dsh-v0.2.0-rc.2`. At certification time npm `next` already pointed at it while `latest` still pointed at `0.2.0-rc.2`, so the round was not release-blocking.
+
+No symbol this bundle imports was removed or renamed. The shipped Client surface this bundle composes into changed additively: `ui-primitives`, `ui-conversation`, `ui-sidebar`, `ui-renderer`, and `api-remotes` gained exports and hooks, and `ui-sidebar`'s `panelList` anchor the bundle's pinning test holds on still exists.
+
+Section 3.6 is not re-triggered by a format change: `session-format-catalog` changed only its manifest, and `session-persistence` adds an optional `formatStatus` field to its snapshot type. Both are additive, and no released artifact content is refused.
+
+The engine keeps its own declaration across this release. `@contexera/dsh-context-continuity@0.4.1` declares nine DSH peers as `>=0.2.0-rc.1 <0.2.1`, which does not admit a 0.2.1 host; the engine's own range moves on its own cadence, and a peer mismatch is an install-time warning that blocks neither install nor boot.
+
+Evidence on the certified tree: `npm run typecheck` (514 Harness mappings), `npm test` (1135 passed, 1 skipped), `npm run lint`, `npm run build`, `npm pack --dry-run` (288 files), `check:artifact` (49 runtime relative imports resolved), and `npm run test:browser` (6 journeys).
+
+The CI run on the release commit is green on both lanes; `check:public-baseline` is red until this release updates the pinned discussion body, which happens at publish time by design.

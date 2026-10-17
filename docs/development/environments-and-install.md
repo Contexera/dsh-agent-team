@@ -11,7 +11,7 @@ This applies to any fresh environment: a new clone **or a `git worktree`**. A wo
 
 **Setup, in order:**
 
-1. Enable the corepack shims with `corepack enable pnpm`, then clone `../deepseek-harness`, check out the latest certified release tag (currently `dsh-v0.2.0-rc.2`; advance it per certification), and run `corepack pnpm install` (one workspace-wide install) followed by `corepack pnpm build:lib` and `corepack pnpm build:native-system`. The shim is required because the certified Harness invokes a bare `pnpm` from inside its own scripts (`build:lib`, `build:web`), while `corepack pnpm` resolves only within its own process; without the shim those steps fail as `pnpm: not found`.
+1. Enable the corepack shims with `corepack enable pnpm`, then clone `../deepseek-harness`, check out the latest certified release tag (currently `dsh-v0.2.1-rc.2`; advance it per certification), and run `corepack pnpm install` (one workspace-wide install) followed by `corepack pnpm build:lib` and `corepack pnpm build:native-system`. The shim is required because the certified Harness invokes a bare `pnpm` from inside its own scripts (`build:lib`, `build:web`), while `corepack pnpm` resolves only within its own process; without the shim those steps fail as `pnpm: not found`.
 
    Both repositories pin `pnpm@11.7.0` through `packageManager`, so the shim resolves to that version rather than whatever the environment preinstalled. The native step is a separate build that nothing else performs for us: the host addon is gitignored, the Harness `test` script builds it itself via `build:native-system` before its own Vitest run, and this repository runs Vitest directly against that checkout. A fresh clone without it therefore fails host Team activation (`Agent is not an active Team Member`) rather than reporting a missing module.
 
@@ -91,7 +91,7 @@ Release cadence is batched. Between releases, daily use of a local build is a li
 
 Stable and development profiles share `$DSH_HOME/storages/`. If a stable old version reads a ledger written by a newer version, schema validation can fail; update the stable profile after each release.
 
-The minimum compatible DSH version is `0.2.0-rc.2`. DSH's JSONL Session persistence migrates released historical formats itself (v0/v1/v2 → V3 → V4); old-format Session data needs no manual disposal. Do not add Team ledger or Member Session migration, old-format reads, or silent fallbacks.
+The minimum compatible DSH version is `0.2.1-rc.2`. DSH's JSONL Session persistence migrates released historical formats itself (v0/v1/v2 → V3 → V4); old-format Session data needs no manual disposal. Do not add Team ledger or Member Session migration, old-format reads, or silent fallbacks.
 
 ### Rewriting and pushing history
 

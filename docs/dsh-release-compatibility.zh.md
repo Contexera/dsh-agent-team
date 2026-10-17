@@ -226,9 +226,9 @@ Harness 随附一套 experimental Agent Teams，以独立 profile bundle 形式�
 
 ## 6. 当前基线
 
-当前 Team bundle 的已认证基线是 DSH `0.2.0-rc.2`；以下几段保留产生前几条基线的历史。
+当前 Team bundle 的已认证基线是 DSH `0.2.1-rc.2`；以下几段保留产生前几条基线的历史。
 
-DSH peers 正好声明这条已认证线：`>=0.2.0-rc.2 <0.2.1`。本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
+DSH peers 正好声明这条已认证线：`>=0.2.1-rc.2 <0.2.2`。本仓库尚未验证的线会落在声明区间之外，而不是在未经核实的兼容声明下被装上。Team 面向模型的工具面去掉 session-local todo 工具时，被移除的 `@deepseek-ai/dsh-tool-todo` peer 随它指名的 preset row 一并删除。其余 peers 仍保持唯一一条已认证区间。
 
 被移除的 `@deepseek-ai/dsh-invariants` peer 同样随它指名的 registry row 一并删除：invariant companion 此后自持校验。
 
@@ -369,3 +369,19 @@ tag `639ed01`（2026-09-29）在 `dsh-v0.2.0-rc.1` 之后 187 个提交。认证
 已认证基线于 2026-09-29 在这个候选上向前推进——它发生在认证之后，而不是认证的一部分。运维方把 45 个 DSH peers 移到 `>=0.2.0-rc.2 <0.2.1`，CI harness tag 与 Hoplite tag 移到 `dsh-v0.2.0-rc.2`，各命名区间的措辞位点一并更新。
 
 这次移动把声明线收窄到 `0.2.0-rc.2` 及以后。已发布的 `0.2.0` tarball 仍保留更宽的 `>=0.2.0-rc.1 <0.2.1` 声明，所以要等下一个版本才会拒绝仍停在 `0.2.0-rc.1` 的宿主。
+
+### DSH 0.2.1-rc.2
+
+DSH `0.2.1-rc.2` 在移动后的 peer 线上认证通过：`>=0.2.1-rc.2 <0.2.2`，随 Agent Team `0.2.4` 发布。该候选落在 `>=0.2.0-rc.2 <0.2.1` 之外，因此这一轮是**整体移动 43 个 DSH peers**，而不是原地记录基线。
+
+Tag `687f282e`（2026-10-17）位于 `dsh-v0.2.0-rc.2` 之后 1,925 个提交。认证时 npm `next` 已指向它，而 `latest` 仍停在 `0.2.0-rc.2`，所以这一轮不是发布阻塞级。
+
+本 bundle 导入的符号没有被删除或改名。它组合进去的 shipped Client 面都是增量变化：`ui-primitives`、`ui-conversation`、`ui-sidebar`、`ui-renderer`、`api-remotes` 新增了导出与 hook，本 bundle 钉住 `ui-sidebar` 的 `panelList` 锚点仍然存在。
+
+§3.6 未因格式变化重新触发：`session-format-catalog` 只改了自己的 manifest，`session-persistence` 给快照类型加了一个可选的 `formatStatus` 字段。两者都是增量，没有已发布产物被拒。
+
+引擎在这次发布中保持自己的声明不变。`@contexera/dsh-context-continuity@0.4.1` 把 9 个 DSH peers 声明为 `>=0.2.0-rc.1 <0.2.1`，不含 0.2.1 宿主；引擎的区间按它自己的节奏移动，而 peer 不匹配是安装期警告，既不拦安装也不拦启动。
+
+认证树上的证据：`npm run typecheck`（514 个 Harness 映射）、`npm test`（1135 通过、1 跳过）、`npm run lint`、`npm run build`、`npm pack --dry-run`（288 文件）、`check:artifact`（49 个运行时相对导入全部解析）、`npm run test:browser`（6 条旅程）。
+
+发布提交上的 CI 双 lane 全绿；`check:public-baseline` 在本次发布更新置顶讨论正文之前是红的，这是设计如此，改动作发生在发布时刻。
