@@ -117,7 +117,8 @@ for (const scope of scopes) {
   }
   let lines = 0
   for (const file of await sourceFiles(join(root, scope))) {
-    if (relative(root, file).split('/').includes(EXCLUDED_DIRECTORY)) continue
+    // Both separators: `relative` yields `\` on Windows, where splitting on `/` alone counted `vendor/`.
+    if (relative(root, file).split(/[\\/]/).includes(EXCLUDED_DIRECTORY)) continue
     const text = await readFile(file, 'utf8')
     const lines_ = text.split('\n')
     for (const [index, line] of lines_.entries()) {
