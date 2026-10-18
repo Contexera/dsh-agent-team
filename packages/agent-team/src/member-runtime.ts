@@ -144,8 +144,8 @@ export class MemberRuntime {
    * the freshly composed preset surface, and derive activation-time warnings
    * for entries the current tool surface no longer knows. Runs inside setup
    * BEFORE validateMemberPreset so the validation observes the restricted
-   * view (the Host always unions the five Team tools over the configured
-   * list).
+   * view (the Host always unions the Team tools and `working_directory` over
+   * the configured list).
    */
   applyMemberToolPolicy(agentCtx: Context, member: AgentTeamAgentMember): void {
     const configured = member.capabilities?.tools?.allow
@@ -161,7 +161,15 @@ export class MemberRuntime {
     const knownSet = new Set(known)
     const dropped = configured.filter(name => !knownSet.has(name))
     this.setCapabilityWarnings(member.memberId, dropped.map(name => ({ name, knownNames: known })))
-    const allow = [...new Set([...configured.filter(name => knownSet.has(name)), ...AGENT_TEAM_TOOL_NAMES])]
+    const allow = [...new Set([
+      ...configured.filter(name => knownSet.has(name)),
+      ...AGENT_TEAM_TOOL_NAMES,
+      // A Member's directory is how it works in a Workspace it was invited
+      // into. An allow-list narrows capability, not the checkout it may stand
+      // in, so this survives the restriction the way the Team tools do. A
+      // deployment that mounts no such tool never reaches the filter.
+      ...knownSet.has('working_directory') ? ['working_directory'] : [],
+    ])]
     if (allow.length === 0) return
     // tools.restrict() requires a scoped context and rejects names outside
     // the inherited surface; both errors surface as this Member's activation

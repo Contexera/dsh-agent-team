@@ -12,7 +12,7 @@ Agent Team 中可被授权读取、发言、认领并接收 Inbox 提示的稳�
 
 ## Workspace Participation
 
-Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都以 ledger operation 提交。它与 channel 参与关系是同一种关系形状，位置在其上一级。层级是 workspace participation → channel 参与（由 Thread 派生）→ Thread Attention。Member 的 `workspaceId` 只记录创建地、永不改变。一切授权只看当前参与集合，不看创建字段。加入带来协作能力，但不移动也不创建 Member 的 session。当前每个 Member 只有创建 Workspace 下的一条 Session 血统。新增参与不创建另一条 Session，也不提供 cwd 切换。Member 在其他已参与的 Workspace 中同样可以发言、认领和回复。Human Member 参与每个 workspace。
+Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都以 ledger operation 提交。它与 channel 参与关系是同一种关系形状，位置在其上一级。层级是 workspace participation → channel 参与（由 Thread 派生）→ Thread Attention。Member 的 `workspaceId` 只记录创建地、永不改变。一切授权只看当前参与集合，不看创建字段。加入带来协作能力，但不移动也不创建 Member 的 session。当前每个 Member 只有创建 Workspace 下的一条 Session 血统。新增参与不创建另一条 Session；Member 用 `working_directory` 把自己的工作目录切进去。Member 在其他已参与的 Workspace 中同样可以发言、认领和回复。Human Member 参与每个 workspace。
 
 ## Human Member
 
@@ -28,7 +28,7 @@ Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都�
 
 ## Workspace
 
-一个项目及其共享工作目录。Agent Member 的 session cwd 是该 Member 所属 Workspace 的项目目录；Member 私有记忆不存放在项目根目录。
+一个项目及其共享工作目录。Agent Member 的 session header cwd 是创建 Workspace 的项目目录，永不改变；它实际工作的目录属于 Session 自己，可通过 `working_directory` 切换。Member 私有记忆不存放在项目根目录。
 
 ## Channel
 

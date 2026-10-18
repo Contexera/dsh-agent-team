@@ -24,17 +24,19 @@ import LlmRuntime, { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import FsLocal from '@deepseek-ai/dsh-fs-local'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as ToolWorkingDirectory from '@deepseek-ai/dsh-tool-working-directory'
+import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import SkillRegistry from '@deepseek-ai/dsh-skill'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 
 const sharedCleanups: Array<() => Promise<void>> = []
 /** Per-test disposers (LLM adapter registrations, ordinary sessions): drained after each test. */
@@ -113,6 +115,9 @@ function toolNames(ctx: Context, agent: Agent): readonly string[] {
   return ctx.tools.schemas(agent as never).map(schema => schema.name).sort()
 }
 
+/** The tools every Member surface carries whatever its allow-list says. */
+const MEMBER_TOOL_NAMES = [...AGENT_TEAM_TOOL_NAMES, 'working_directory'].sort()
+
 async function catalogNames(ctx: Context, agent: Agent): Promise<readonly string[]> {
   const skills = await ctx.skills.list({ scope: agent as never })
   return skills.map(skill => skill.name).sort()
@@ -153,11 +158,15 @@ async function buildSharedHarness(): Promise<{
   readonly ctx: Context
   readonly workspaceId: WorkspaceId
   readonly teamFiber: Awaited<ReturnType<Context['plugin']>>
+  readonly otherWorkspace: string
 }> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-agent-team-policy-'))
   const project = join(root, 'project')
+  // A second checkout the Member is invited into: the directory it enters with
+  // working_directory, and the one the assertion below proves it can reach.
+  const otherWorkspace = join(root, 'other-project')
   const persistence = join(root, 'sessions')
-  await Promise.all([mkdir(project), mkdir(persistence)])
+  await Promise.all([mkdir(project), mkdir(otherWorkspace), mkdir(persistence)])
   process.env.DSH_HOME = join(root, 'dsh-home')
   // The team-member definition as one declarative row; the
   // distinguishable-tool fixture is a real module beside this spec, where its
@@ -175,13 +184,18 @@ async function buildSharedHarness(): Promise<{
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   ctx.loader.builtins.group = Group
-  provideWorkingDirectoryFixture(ctx)
+  await ctx.plugin(FsLocal)
+  await ctx.plugin(WorkingDirectory)
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SessionStore)
   // The registry injects 'sessionProjections'; the roster stays PENDING without it.
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  // The Harness mounts `working_directory` globally in every shipped profile,
+  // outside any preset. This harness composes no shipped bundle, so the tool is
+  // mounted here to give the allow-list union something real to preserve.
+  await ctx.plugin(ToolWorkingDirectory)
   await ctx.plugin(SkillRegistry)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentLoop, { agents: [] })
@@ -205,7 +219,7 @@ async function buildSharedHarness(): Promise<{
   })
   const teamFiber = await ctx.plugin(AgentTeam)
   sharedCleanups.push(async () => { await ctx.fiber.dispose(); await facility.closeAll(); await rm(root, { recursive: true, force: true }) })
-  return { ctx, workspaceId, teamFiber }
+  return { ctx, workspaceId, teamFiber, otherWorkspace }
 }
 
 // Isolation invariant: the shared ledger never forgets, so every handle and
@@ -252,18 +266,34 @@ describe('Agent Team member tool policy', () => {
     // Baseline: an unrestricted Member sees the five Team tools and both fixtures.
     const base = await addMember(ctx, workspaceId, 't1-baseline')
     const baseAgent = liveAgent(ctx, base)
-    expect(toolNames(ctx, baseAgent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, baseAgent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
 
     const narrow = await addMember(ctx, workspaceId, 't1-narrow', { tools: { allow: ['ordinary_tool'] } })
     const narrowAgent = liveAgent(ctx, narrow)
     // The five Team tools are force-unioned; spare_tool disappears.
-    expect(toolNames(ctx, narrowAgent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool'].sort())
+    expect(toolNames(ctx, narrowAgent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool'].sort())
     // The sibling surface is unchanged by the restriction, and the hidden
     // tool resolves as absent rather than callable.
-    expect(toolNames(ctx, baseAgent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, baseAgent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
     expect(ctx.tools.get('spare_tool', narrowAgent as never)).toBeUndefined()
     const status = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === narrow.memberId)
     expect(status?.capabilityWarnings).toBeUndefined()
+  })
+
+  it('keeps working_directory on a narrowed Member so it can enter a joined Workspace', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId, otherWorkspace } = shared
+    const narrow = await addMember(ctx, workspaceId, 't15-narrow', { tools: { allow: ['ordinary_tool'] } })
+    const agent = liveAgent(ctx, narrow)
+    // An allow-list narrows capability, never the Member's ability to be in the
+    // directory it was invited to work in.
+    expect(toolNames(ctx, agent)).toContain('working_directory')
+    const entered = await ctx.tools.execute({
+      signal: new AbortController().signal, callId: ToolCallId('t15-cd'), name: 'working_directory',
+      arguments: { cd: otherWorkspace }, agent,
+    })
+    expect(entered.value).toEqual({ cwd: otherWorkspace })
+    expect(ctx.workingDirectory.get(agent.session)).toBe(otherWorkspace)
   })
 
   it('drops unknown allow-list names at activation with a diagnostic warning digest', async () => {
@@ -273,7 +303,7 @@ describe('Agent Team member tool policy', () => {
     // pure intent, dropped at activation, never fatal.
     const drifted = await addMember(ctx, workspaceId, 't2-drifted', { tools: { allow: ['tool-renamed-away', 'ordinary_tool'] } })
     const driftedAgent = liveAgent(ctx, drifted)
-    expect(toolNames(ctx, driftedAgent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool'].sort())
+    expect(toolNames(ctx, driftedAgent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool'].sort())
     const status = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === drifted.memberId)
     expect(status?.availability).toBe('active')
     expect(status?.capabilityWarnings).toEqual([
@@ -303,9 +333,9 @@ describe('Agent Team member tool policy', () => {
     // Reactivation re-applied the stored intent: the roster says so from the
     // same real surface the schema read below verifies.
     expect(resumed.status.capabilityState).toBe('applied')
-    expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool'].sort())
+    expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool'].sort())
     // The sibling never moved.
-    expect(toolNames(ctx, liveAgent(ctx, other))).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, liveAgent(ctx, other))).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
 
     // Host restart: disposal releases restriction state; replay plus
     // reactivation rebuild the same restricted surface from durable intent.
@@ -314,7 +344,7 @@ describe('Agent Team member tool policy', () => {
     const restored = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === narrow.memberId)
     expect(restored?.availability, JSON.stringify(restored)).toBe('active')
     expect(restored?.capabilityState).toBe('applied')
-    expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool'].sort())
+    expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool'].sort())
   })
 
   it('live-applies an allow-list edit at the turn boundary in the same Session', async () => {
@@ -332,7 +362,7 @@ describe('Agent Team member tool policy', () => {
     })
     expect(widened.status.member.capabilities).toEqual({ tools: { allow: ['ordinary_tool', 'spare_tool'] } })
     expect(widened.status.member.sessionId).toBe(narrow.sessionId)
-    expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, agent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
 
     // The next model turn sees the widened surface in its request tools and
     // can call the newly visible tool.
@@ -381,7 +411,7 @@ describe('Agent Team member tool policy', () => {
     expect(settled.status.availability).toBe('active')
     expect(settled.status.member.sessionId).toBe(narrow.sessionId)
     expect(settled.status.member.capabilities).toEqual({ tools: { allow: ['ordinary_tool', 'spare_tool'] } })
-    expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, agent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
     const suspended = await suspending
     expect(suspended.status.availability).toBe('suspended')
     await turnDone
@@ -389,7 +419,7 @@ describe('Agent Team member tool policy', () => {
     // Resume applies the stored intent at the next activation.
     const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('resume-after-wait'), memberId: narrow.memberId })
     expect(resumed.status.availability).toBe('active')
-    expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
   })
 
   it('keeps Team tools hidden from ordinary sessions outside the preset', async () => {
@@ -453,7 +483,7 @@ describe('Agent Team member tool policy', () => {
       description: 'Policy member', capabilities: { tools: { allow: ['ordinary_tool', 'spare_tool'] } },
     })
     expect(current.status.member.capabilities?.tools?.allow).toEqual(['ordinary_tool', 'spare_tool'])
-    expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, agent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
 
     // Retrying the stale request is idempotent in effect: it replays its own
     // receipt but must neither re-apply its own historical configuration over
@@ -461,7 +491,7 @@ describe('Agent Team member tool policy', () => {
     const replayed = await ctx.agentTeam.updateMember(stale)
     expect(replayed.status.member.capabilities?.tools?.allow).toEqual(['ordinary_tool', 'spare_tool'])
     expect(replayed.status.availability).toBe('active')
-    expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    expect(toolNames(ctx, agent)).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
     ctx.agentTeam.validateLedger()
   })
 
@@ -493,7 +523,7 @@ describe('Agent Team member tool policy', () => {
       // surface matching the currently accepted configuration.
       const retried = await ctx.agentTeam.updateMember(request)
       expect(retried.status.member.capabilities?.tools?.allow).toEqual(['spare_tool'])
-      expect(toolNames(ctx, agent)).toEqual([...AGENT_TEAM_TOOL_NAMES, 'spare_tool'].sort())
+      expect(toolNames(ctx, agent)).toEqual([...MEMBER_TOOL_NAMES, 'spare_tool'].sort())
       ctx.agentTeam.validateLedger()
     } finally {
       restrict.mockRestore()

@@ -80,11 +80,11 @@ export function renderMemberWorkspaces(workspaces: readonly { readonly workspace
   if (workspaces.length <= 1) return ''
   return [
     'Team Workspace participation — this list replaces all earlier participation context.',
-    ...workspaces.map(workspace => `${workspace.workspaceId}${workspace.default ? ' (default; Session cwd)' : ''}: ${workspace.path === undefined
+    ...workspaces.map(workspace => `${workspace.workspaceId}${workspace.default ? ' (creation Workspace)' : ''}: ${workspace.path === undefined
       ? 'Workspace path unavailable; ask @human before filesystem work.'
       : `${JSON.stringify(workspace.path)}; instructions: ${JSON.stringify(join(workspace.path, 'AGENTS.md'))}`}`),
-    'Your single Session and cwd stay in the default Workspace. Joining another Workspace does not move them.',
-    'For filesystem work in another Workspace, use absolute paths (or an explicit command cwd). Before working there, read its AGENTS.md and applicable directory instructions yourself; their contents are not injected here.',
+    'Your Session, Team participation, Claims, and write permissions stay bound to your creation Workspace. Your working directory does not: enter a joined Workspace with working_directory({cd: <path>}) and work there, then leave the same way.',
+    'Work where the work is. Relative paths, glob and grep, new shells, run_code, AGENTS.md discovery, and skill discovery all resolve from the current directory, so editing another checkout through absolute paths leaves its instructions unloaded.',
     'Pass workspace explicitly to team_view, team_thread, team_attention, team_message, team_dm and team_claim. team_inbox is the cross-Workspace triage entry point.',
     'If an instruction is ambiguous about which Workspace it concerns, ask @human before acting. Participation does not itself join Channels.',
   ].join('\n')

@@ -103,7 +103,7 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 - Member capabilities (`capabilities` on the Member entity: reserved `tools.allow`, `skills.allow`) are durable intent carried verbatim by every lifecycle operation. Committing performs no known-name validation so old ledgers stay replayable across Harness upgrades; divergence is derived at activation as non-persisted `capabilityWarnings`. `tools.allow` is a deliberate interface reservation: it has no UI write path today.
 
   Edits follow the partial-update semantics of `model`: an omitted field keeps the stored value and an explicit `null` clears it, so a caller that does not manage capabilities can leave the field out and any Remote-written override survives.
-- Activation applies `tools.allow` as a scoped restriction on the composed preset surface before preset validation (mount → restrict → validate), force-unioning the eleven Team tools over the configured list. Unknown names drop with a warning instead of failing activation.
+- Activation applies `tools.allow` as a scoped restriction on the composed preset surface before preset validation (mount → restrict → validate), force-unioning the eleven Team tools and `working_directory` over the configured list. Unknown names drop with a warning instead of failing activation.
 
   Editing the allow-list on a live Member swaps the restriction at a turn boundary in the same Session: idle Members apply immediately, and a running Member's edit waits for that Member's turn to end. Each Member owns one lifecycle chain, so the wait holds only that Member's later operations, still in submission order, while managing another Member never queues behind it and the ledger keeps its single ordered writer.
 

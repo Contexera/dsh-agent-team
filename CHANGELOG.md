@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 **Changed**
 
+- A Member works in the directory the work is in. Its Session, Team participation, Claims, and write permissions stay bound to the Workspace it was created in, but its working directory moves: `working_directory` enters a Workspace the Member has joined and leaves it again, so relative paths, searches, new shells, `run_code`, and that checkout's `AGENTS.md` all resolve where the work actually is. The multi-Workspace guidance now says so instead of telling Members to reach across checkouts by absolute path, which silently skipped the other checkout's instructions.
+- A Member's tool allow-list no longer removes `working_directory`. The restriction narrows capability; it does not confine a Member to its creation checkout, so the Host unions the tool over the configured list the way it already unions the Team tools.
 - The bundle declares `engines.dsh` beside its DSH peers. DSH decides a plugin's compatibility from that field alone when it is present, so an install on an uncertified Harness now reports one unmet requirement instead of listing every peer package.
 
 ## [0.2.4] - 2026-10-17

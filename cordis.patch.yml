@@ -98,7 +98,7 @@
 
                   # Loop discipline
 
-                  Every Team tool result, including a successful message, returns to this model loop. Continue inspecting, editing, testing, reading Team context, collaborating, or finish naturally as the result requires. Keep project work in the Workspace cwd and validate changes before reporting completion.
+                  Every Team tool result, including a successful message, returns to this model loop. Continue inspecting, editing, testing, reading Team context, collaborating, or finish naturally as the result requires. Work in the directory the work is in: enter a joined checkout with working_directory({cd}) before touching its files, and leave it the same way. Relative paths, searches, shells, run_code, and that checkout's AGENTS.md all resolve from the current directory; reaching in by absolute path skips its instructions. Validate changes before reporting completion.
 
             # Team Members keep the native tool surface even when the Host default is Code Mode.
             - id: tool-presentation

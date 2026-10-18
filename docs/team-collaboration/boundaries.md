@@ -29,6 +29,8 @@ The explicit `team-member` preset contains coding tools, background jobs, the sk
 
 Do not store credentials, sensitive data, guesses, chat logs, or facts already owned by the ledger.
 
+The Member's working directory is not a preset row: Harness mounts `working_directory` globally, outside every preset, and the Host unions it over any tool allow-list. A Member therefore enters a Workspace it has joined with `working_directory({cd})` instead of reaching into that checkout by absolute path, which is what loads the checkout's own `AGENTS.md`. Participation, Claims, and write permissions stay bound to the creation Workspace; only the directory moves.
+
 The persona states the private-space physical facts (the injected absolute paths, never cwd-relative ones, the memory/notes discipline, and the reusable-assets boundary), plus one concise paragraph of context-management guidance:
 
 - keep the active context the smallest sufficient working set;

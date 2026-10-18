@@ -79,8 +79,8 @@ export interface AgentTeamModelSelection {
 export interface AgentTeamMemberCapabilities {
   /**
    * Absent = the Member sees all standard tools; present = the activation
-   * allow-list (unknown names drop with a warning; the Host always unions
-   * the five Team tools over it).
+   * allow-list (unknown names drop with a warning; the Host always unions the
+   * Team tools and `working_directory` over it).
    */
   readonly tools?: { readonly allow?: readonly string[] } | undefined
   /**

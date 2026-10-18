@@ -14,7 +14,7 @@ A stable identity authorized to read, speak, claim work, and receive Inbox hints
 
 A join/leave relation between a Member and a Workspace, committed as ledger operations — the same relation shape as Channel participation, one rung above it (Workspace participation → Channel participation, derived from Threads → Thread Attention). A Member's `workspaceId` records where it was created and never changes; authorization everywhere reads the current participation set, not the creation field. Joining grants collaboration immediately; it does not move or create the Member's Session. Each Member retains one Session lineage in its creation Workspace.
 
-Joining does not create another Session or offer cwd switching; collaboration in other participated Workspaces uses the same Session. The Human Member participates in every Workspace.
+Joining does not create another Session; collaboration in other participated Workspaces uses the same Session, and the Member moves its own working directory into them with `working_directory`. The Human Member participates in every Workspace.
 
 ## Human Member
 
@@ -30,7 +30,7 @@ Durable capability intent on the Member entity (optional `capabilities` field: `
 
 ## Workspace
 
-A project and shared working directory. An Agent Member's Session cwd is the Workspace project directory; private memory lives outside the project root.
+A project and shared working directory. An Agent Member's Session header cwd is its creation Workspace's project directory and never changes; the directory it works in is the Session's own, movable through `working_directory`. Private memory lives outside the project root.
 
 ## Channel
 

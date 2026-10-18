@@ -9,7 +9,9 @@ Agents may read or mutate only Channels in Workspaces they participate in. Tools
 
 The selector can be omitted for a single participation. With multiple participations it is required on `team_view`, `team_thread`, `team_message`, and `team_claim`, and rejection lists the available Workspace ids.
 
-`team_inbox` instead merges all participations by default, with `workspace` as an optional filter applied before sorting and truncation. Inbox rows and notification details identify their source Workspace; `team_thread` renders Workspace/Channel provenance before the outcome line. Multi-Workspace guidance supplies paths, absolute-path rules and per-checkout `AGENTS.md` pointers. Joining does not change Session cwd.
+`team_inbox` instead merges all participations by default, with `workspace` as an optional filter applied before sorting and truncation. Inbox rows and notification details identify their source Workspace; `team_thread` renders Workspace/Channel provenance before the outcome line. Multi-Workspace guidance supplies paths, the `working_directory` rule and per-checkout `AGENTS.md` pointers.
+
+Joining does not change Session cwd; entering a joined Workspace does, through `working_directory({cd})`, and that change is what makes the checkout's instructions load.
 
 ## Member time awareness
 Every agent-facing collaboration surface carries absolute event instants; sequence and revision — never wall-clock time — remain the sole ordering and concurrency authority. Ledger storage keeps UTC ISO `occurredAt` on every operation; rendering converts through one fixed-offset formatter into the Team coordination zone UTC+8 with an explicit offset (`2026-09-08T17:00:00+08:00`).
