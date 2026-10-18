@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Context, type Plugin } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Group from '@deepseek-ai/cordis-plugin-group'
@@ -16,14 +16,7 @@ import SkillRegistry from '@deepseek-ai/dsh-skill'
 import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-// The harness package is a default-export plugin class through 0.2.0 and a
-// Cordis-standard `{ name, apply }` module from 0.2.1; cordis resolves neither
-// by unwrapping `.default`, so the plugin is whichever shape this line ships.
-import * as jsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-// The 0.2.0 line ships a default export, the 0.2.1 line a Cordis module; the
-// declaration for the latter has no `default` member, so read it as one.
-const JsonlSessionPersistence = ((jsonlSessionPersistence as { default?: Plugin }).default
-  ?? jsonlSessionPersistence) as Plugin
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -33,7 +26,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam from '../src/index.ts'
 import type { AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideWorkingDirectoryFixture } from './helpers/working-directory.ts'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 
 const cleanups: Array<() => Promise<void>> = []
 const originalDshHome = process.env.DSH_HOME
@@ -78,7 +71,6 @@ async function memberSkillsHarness(): Promise<{
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   ctx.loader.builtins.group = Group
-  // dsh-tool-skill injects `workingDirectory` from 0.2.1; a hand-built Context supplies it.
   provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(LlmRuntime)
   ctx.llm.registerAdapter(['mock'], new EmptyAdapter())

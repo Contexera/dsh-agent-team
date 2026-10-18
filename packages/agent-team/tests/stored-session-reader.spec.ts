@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Context, type Plugin } from '@deepseek-ai/cordis'
+import { Context } from '@deepseek-ai/cordis'
 import { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import {
   SessionFormatUnsupportedError,
@@ -11,14 +11,7 @@ import {
   type SessionHandle,
   type SessionPersistence,
 } from '@deepseek-ai/dsh-session-persistence'
-// The harness package is a default-export plugin class through 0.2.0 and a
-// Cordis-standard `{ name, apply }` module from 0.2.1; cordis resolves neither
-// by unwrapping `.default`, so the plugin is whichever shape this line ships.
-import * as jsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-// The 0.2.0 line ships a default export, the 0.2.1 line a Cordis module; the
-// declaration for the latter has no `default` member, so read it as one.
-const JsonlSessionPersistence = ((jsonlSessionPersistence as { default?: Plugin }).default
-  ?? jsonlSessionPersistence) as Plugin
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
 import { StoredSessionReader, classifyStoredSessionFailure, sessionFailureOf } from '../src/stored-session-reader.ts'
 

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 // One pointer for every consumer: scripts/harness-dir.mjs owns the checkout
@@ -10,27 +9,11 @@ const { harnessDir } = await import('../../scripts/harness-dir.mjs')
 const clientTsdownPath = resolve(harnessDir, 'packages/client/tsdown.client.ts')
 const { clientBundle } = await import(pathToFileURL(clientTsdownPath).href)
 
-// `clientBundle`'s first argument changed meaning in 0.2.1: it used to be the
-// plugin id (this package's name, stamped into `__ModuleLoader__.load({id})`),
-// and it is now the package DIRECTORY, whose `package.json` supplies that same
-// id plus the dependency and `dsh.client` declarations the presets read. The
-// declaration text is the contract, so probe it instead of pinning a harness
-// version: the directory-taking form is the one whose body calls
-// `readPackageManifest`.
-const bundleTakesPackageDir = /function clientBundle\([\s\S]{0,400}?readPackageManifest\(/.test(
-  readFileSync(clientTsdownPath, 'utf8'),
-)
-
-// The bundle's manifest lives at the repository root, not in this directory:
-// one manifest declares the whole plugin, and this package is one of its three
-// build targets. That is also why the argument cannot be `import.meta.dirname`
-// — that directory has no manifest. Only the manifest is read from it; the
-// entry and `outDir` the presets emit resolve against the process cwd, which
-// tsdown sets to this package.
-const bundle = clientBundle(
-  bundleTakesPackageDir ? resolve(import.meta.dirname, '../..') : '@contexera/dsh-agent-team',
-  ['lib/types/index.js'],
-)
+// The manifest lives at the repository root, not in this directory: one
+// manifest declares the whole plugin, and this package is one of its three
+// build targets. Only the manifest is read from it; the entry and `outDir` the
+// presets emit resolve against the process cwd, which tsdown sets here.
+const bundle = clientBundle(resolve(import.meta.dirname, '../..'), ['lib/types/index.js'])
 
 // The Team Remote resolves through its own plugin rather than `resolve.alias`.
 // tsdown reads the client's tsconfig `paths`, whose `/remote` entry points at
