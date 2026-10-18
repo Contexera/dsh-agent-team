@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out this repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Enable the corepack shims
         # The certified Harness calls a bare `pnpm` from inside its own scripts
@@ -97,7 +97,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out this repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Enable the corepack shims
         # The certified Harness calls a bare `pnpm` from inside its own scripts

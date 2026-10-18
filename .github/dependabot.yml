@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # The pnpm lockfile is the install authority for every package in this repo.
+  # `@deepseek-ai/*` is excluded on purpose: the DSH range is a certified
+  # contract (docs/dsh-release-compatibility.md), moved only by a certification
+  # round — never by an automated bump.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: "@deepseek-ai/*"
+
+  # Workflows pin third-party actions to commit SHAs, so a new version only
+  # arrives as an explicit dependency bump here.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

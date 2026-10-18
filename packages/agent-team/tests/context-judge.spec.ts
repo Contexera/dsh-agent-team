@@ -10,6 +10,10 @@ function judgeWith(config: TeamContextJudgeConfig | undefined, deadlineMs = 5_00
   return { judge, setRow: (next: TeamContextJudgeConfig | undefined) => { row = next } }
 }
 
+/** The row's key and the environment's key, the two shapes a test configures. */
+const ROW_KEY = 'key-from-the-row'
+const ENV_KEY = 'key-from-the-environment'
+
 describe('the Team context judge', () => {
   it('mounts the judge from the row\'s key and reports it as enabled', async () => {
     const { judge } = judgeWith(undefined)
@@ -18,7 +22,7 @@ describe('the Team context judge', () => {
     // settings surface states rather than reporting a failure.
     expect(judge.status()).toEqual({ enabled: false, reason: 'no-key', keyEnv: 'TYPESAFE_API_KEY' })
 
-    const { judge: withKey } = judgeWith({ apiKey: 'key-from-the-row' })
+    const { judge: withKey } = judgeWith({ apiKey: ROW_KEY })
     await withKey.sync()
 
     expect(withKey.judge()).toBeDefined()
@@ -26,7 +30,7 @@ describe('the Team context judge', () => {
   })
 
   it('reads the key from the environment variable the row names', async () => {
-    process.env.TEAM_JUDGE_TEST_KEY = 'key-from-the-environment'
+    process.env.TEAM_JUDGE_TEST_KEY = ENV_KEY
     try {
       const { judge } = judgeWith({ apiKeyEnv: 'TEAM_JUDGE_TEST_KEY' })
 
@@ -40,7 +44,7 @@ describe('the Team context judge', () => {
   })
 
   it('leaves the gate off without a key, and unmounts when the key is cleared', async () => {
-    const { judge, setRow } = judgeWith({ apiKey: 'key-from-the-row' })
+    const { judge, setRow } = judgeWith({ apiKey: ROW_KEY })
     await judge.sync()
     expect(judge.judge()).toBeDefined()
 
@@ -54,7 +58,7 @@ describe('the Team context judge', () => {
   })
 
   it('reports an unusable configuration as unavailable, with the Host\'s own diagnostic', async () => {
-    const { judge } = judgeWith({ apiKey: 'key-from-the-row', apiBase: 'not-a-url' })
+    const { judge } = judgeWith({ apiKey: ROW_KEY, apiBase: 'not-a-url' })
 
     await judge.sync()
 
@@ -105,7 +109,7 @@ describe('the Team context judge', () => {
         }
       },
     }) as Context
-    let row: TeamContextJudgeConfig | undefined = { apiKey: 'key-from-the-row', model: 'first' }
+    let row: TeamContextJudgeConfig | undefined = { apiKey: ROW_KEY, model: 'first' }
     const judge = new TeamContextJudge(counting, { config: () => row, deadlineMs: () => 5_000 })
 
     await judge.sync()
@@ -117,7 +121,7 @@ describe('the Team context judge', () => {
     expect(mounts).toBe(1)
     expect(updates).toBe(0)
 
-    row = { apiKey: 'key-from-the-row', model: 'second' }
+    row = { apiKey: ROW_KEY, model: 'second' }
     await judge.sync()
     expect(mounts).toBe(1)
     expect(updates).toBe(1)

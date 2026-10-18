@@ -9,6 +9,9 @@ const JEV = { apiBase: 'https://api.typesafe.ai/v1', model: 'jev-1.13.0', apiKey
 
 const SECTION: TeamJudgeSection = { jev: JEV }
 
+/** A key the user layer stores; the form must never surface it. */
+const STORED_KEY = 'stored-somewhere'
+
 const REPORT: AgentTeamContextJudgeResult = {
   enabled: false,
   reason: 'no-key',
@@ -39,7 +42,7 @@ describe('judge endpoint form', () => {
 
   it('never seeds the key control: the literal does not ride a response', () => {
     const { stub, form } = bench()
-    stub.publish({ user: { jev: { apiKey: 'stored-somewhere' } } })
+    stub.publish({ user: { jev: { apiKey: STORED_KEY } } })
     expect(form.getSnapshot().fields.apiKey.text).toBe('')
     expect(form.getSnapshot().fields.apiKey.overridden).toBe(false)
   })
