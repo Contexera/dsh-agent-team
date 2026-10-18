@@ -197,10 +197,15 @@ describe('Agent Team shipping contract', () => {
     // removes the tool, and re-adding it should be a reviewed decision.
     expect(preset).not.toContain('@deepseek-ai/dsh-tool-todo')
     const bundleManifest = JSON.parse(manifestText) as {
+      engines: { dsh?: string }
       peerDependencies: Record<string, string>
       exports: Record<string, { default?: string }>
       dsh: { client: { platform: string; inject: string[] } }
     }
+    // A plugin's own `engines.dsh` decides DSH compatibility alone (peers are
+    // then ignored), so it states the same certified line the peers do: one
+    // line, one answer whichever field an installer reads.
+    expect(bundleManifest.engines.dsh).toBe('>=0.2.1-rc.2 <0.2.2')
     expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-tool-web']).toBe('>=0.2.1-rc.2 <0.2.2')
     expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-command-compact']).toBe('>=0.2.1-rc.2 <0.2.2')
     expect(bundleManifest.peerDependencies['@deepseek-ai/dsh-agent-preset']).toBe('>=0.2.1-rc.2 <0.2.2')

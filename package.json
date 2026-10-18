@@ -11,6 +11,9 @@
   "private": false,
   "type": "module",
   "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.2.2"
+  },
   "files": [
     "cordis.patch.yml",
     "assets/icon.svg",

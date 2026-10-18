@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
+## [Unreleased]
+
+**Changed**
+
+- The bundle declares `engines.dsh` beside its DSH peers. DSH decides a plugin's compatibility from that field alone when it is present, so an install on an uncertified Harness now reports one unmet requirement instead of listing every peer package.
+
 ## [0.2.4] - 2026-10-17
 
 **Changed**

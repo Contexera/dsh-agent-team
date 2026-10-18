@@ -131,10 +131,18 @@ if (placeholderMatch === null) {
   }
 }
 
-// (b) The certified version is the lower bound of every DSH peer range:
-// the line we certify is the line users can install. (The vendored sqlite
-// fork lives in devDependencies as an exact off-baseline pin on purpose and
-// never enters peerDependencies, so there is nothing to exclude here.)
+// (b) The certified version is the lower bound of every DSH peer range, and of
+// `engines.dsh`: DSH decides compatibility from that field alone when present.
+// (The vendored sqlite fork lives in devDependencies as an exact off-baseline
+// pin on purpose and never enters peerDependencies, so nothing is excluded.)
+const enginesRange = manifest.engines?.dsh
+if (typeof enginesRange !== 'string') {
+  failures.push('package.json: engines.dsh is missing (DSH reads it before the peers, so it must state the certified line)')
+} else {
+  const lower = enginesRange.match(/^>=(\S+)\s+</u)?.[1]
+  if (lower === undefined) failures.push(`package.json engines.dsh has range ${enginesRange}, expected >=<certified> <...`)
+  else if (lower !== reference) failures.push(`package.json engines.dsh admits from ${lower} but the certified baseline is ${reference} (from .github/workflows/ci.yml)`)
+}
 const peerRanges = Object.entries(manifest.peerDependencies ?? {})
   .filter(([name]) => name.startsWith('@deepseek-ai/dsh-'))
 if (peerRanges.length === 0) {
@@ -193,7 +201,7 @@ if (failures.length > 0) {
 }
 console.log(
   `Version consistency check OK: ${stated.length + 1} version spots agree on ${reference}, `
-    + `${peerRanges.length} DSH ranges admit from it, plugin ${manifest.version} `
+    + `engines.dsh and ${peerRanges.length} DSH peers admit from it, plugin ${manifest.version} `
     + `(named by ${installSpots.length} install commands, restated by the bug-report placeholder); `
     + `the peer range is restated by ${proseRanges.length} prose spots.`,
 )
