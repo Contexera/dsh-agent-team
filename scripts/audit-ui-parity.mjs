@@ -410,6 +410,7 @@ const GEOMETRY = [
   ['conversation.module.css', '.messageBody [data-document] .messageMarkdown p', [['margin', '16px 0']], 'document block gap'],
   ['conversation.module.css', '.messageBody [data-document] .messageMarkdown li + li', [['margin-top', '6px']], 'document list-item gap'],
   ['conversation.module.css', '.messageBody [data-document] .messageMarkdown :where(h1, h2, h3, h4, h5, h6)', [['margin', '24px 0 8px']], 'document section-heading margins'],
+  ['conversation.module.css', '.messageBody .messageMarkdown pre', [['font-size', 'calc(13px + var(--dsh-code-font-delta, 0px))']], 'a fenced block rides the Settings code-size axis on the same px-delta pattern as the content axis: 0.2.1-rc.2 rewrote the primitive\'s `--dsw-font-markdown-code-block` onto `--dsh-code-font-delta`, so a literal 13px here would hold the words still while the leading around them moved with the setting'],
 ]
 
 function findRuleBody(file, selector) {

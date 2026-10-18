@@ -585,7 +585,12 @@
 .messageBody .messageMarkdown :where(h1) { font-size: calc(17px + var(--dsh-content-font-delta, 0px)); line-height: calc(26px + var(--dsh-content-font-delta, 0px)); }
 .messageBody .messageMarkdown :where(h2) { font-size: calc(16px + var(--dsh-content-font-delta, 0px)); line-height: calc(24px + var(--dsh-content-font-delta, 0px)); }
 .messageBody .messageMarkdown :where(h3, h4, h5, h6) { font-size: calc(15px + var(--dsh-content-font-delta, 0px)); line-height: calc(22px + var(--dsh-content-font-delta, 0px)); }
-.messageBody .messageMarkdown pre { margin: 8px 0; padding: 10px 12px; font-size: 13px; }
+/* A fence rides the Settings code-size axis, not the 13px chat grade alone:
+   the primitive states the block at `--dsw-font-markdown-code-block`, which
+   0.2.1-rc.2 rewrote onto `--dsh-code-font-delta`, so a literal size here would
+   hold the words still while the leading around them grew. The delta is what
+   the axis publishes (setting − 11px), so default 11px still renders 13px. */
+.messageBody .messageMarkdown pre { margin: 8px 0; padding: 10px 12px; font-size: calc(13px + var(--dsh-code-font-delta, 0px)); }
 .messageBody .messageMarkdown blockquote { margin: 6px 0; }
 .messageBody .messageMarkdown :where(th, td) { padding-block: 5px; }
 /* Past the fold threshold the body is a document, not a chat line: the

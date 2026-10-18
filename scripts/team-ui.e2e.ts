@@ -1674,6 +1674,40 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   }, axisBefore)
   await expect.poll(senderMetrics).toBe('13px/20px')
 
+  const codeRead = await scaffold.ctx.agentTeam.readThreadForAgent(reviewerAgent, {
+    requestId: 'm2-09-code-axis-read' as never, workspaceId: workspace.id, taskRef: task.taskRef,
+  })
+  const codeReply = await scaffold.ctx.agentTeam.replyForAgent(reviewerAgent, {
+    requestId: 'm2-09-code-axis-reply' as never, workspaceId: workspace.id, taskRef: task.taskRef,
+    body: `代码字号轴验收\n\n\`\`\`ts\nconst codeSizeAxis = 'fence follows the code size setting'\n\`\`\``,
+    baseRevision: codeRead.thread.revision,
+    recipients: [scaffold.ctx.agentTeam.status().humanMemberId],
+  })
+  expect(codeReply.kind).toBe('committed')
+  const codeRow = page.locator('[data-team-thread] article').filter({ hasText: '代码字号轴验收' })
+  await codeRow.waitFor()
+  await codeRow.scrollIntoViewIfNeeded()
+  const codeMetrics = async (): Promise<string> => await codeRow.locator('pre').first().evaluate(node => {
+    const { fontSize, lineHeight, paddingTop, paddingBottom } = getComputedStyle(node)
+    // Content box of a one-line fence is exactly one line: reading the painted
+    // height this way keeps the assertion independent of the block's padding,
+    // while still failing on a block that never painted (height 0).
+    const content = Math.round(node.getBoundingClientRect().height - parseFloat(paddingTop) - parseFloat(paddingBottom))
+    return `${fontSize}/${lineHeight}/${content}`
+  })
+  await expect.poll(codeMetrics).toBe('13px/19px/19')
+  const codeAxisBefore = await page.evaluate(() => document.body.style.getPropertyValue('--dsh-code-font-size'))
+  for (const [size, expected] of [['', '13px/19px/19'], ['16px', '18px/24px/24'], ['10px', '12px/18px/18']] as const) {
+    await page.evaluate(value => { document.body.style.setProperty('--dsh-code-font-size', value) }, size)
+    await expect.poll(codeMetrics).toBe(expected)
+    if (size !== '') await page.screenshot({ path: join(UI04_SHOTS, `code-axis-${size}.png`), fullPage: true })
+  }
+  await page.evaluate(value => {
+    if (value === '') document.body.style.removeProperty('--dsh-code-font-size')
+    else document.body.style.setProperty('--dsh-code-font-size', value)
+  }, codeAxisBefore)
+  await expect.poll(codeMetrics).toBe('13px/19px/19')
+
   await agentRefLinks.first().click()
   await page.getByRole('heading', { name: /Task #1/ }).waitFor()
   await page.setViewportSize({ width: 390, height: 844 })

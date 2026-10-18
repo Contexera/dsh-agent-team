@@ -10,6 +10,10 @@ All notable changes to this project are documented in this file. The format foll
 - A Member's tool allow-list no longer removes `working_directory`. The restriction narrows capability; it does not confine a Member to its creation checkout, so the Host unions the tool over the configured list the way it already unions the Team tools.
 - The bundle declares `engines.dsh` beside its DSH peers. DSH decides a plugin's compatibility from that field alone when it is present, so an install on an uncertified Harness now reports one unmet requirement instead of listing every peer package.
 
+**Fixed**
+
+- A fenced code block in a message body follows the code-size setting again. DSH 0.2.1-rc.2 moved the Markdown code-block size onto `--dsh-code-font-delta` while its leading stayed on that same delta, so the Team Client's own fixed 13px held the words still while the lines around them grew with the setting: at 16px the block rendered 13px words on a 24px line. It now renders 13px at the default setting and moves with the setting on the same px-delta pattern the content axis uses.
+
 ## [0.2.4] - 2026-10-17
 
 **Changed**
