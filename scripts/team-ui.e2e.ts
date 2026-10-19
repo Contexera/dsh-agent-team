@@ -1327,6 +1327,67 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(panelSplit).not.toBeNull()
   expect(panelSplit!.timelineRight).toBeLessThanOrEqual(panelSplit!.panelLeft + 1)
   expect(panelSplit!.timelineWidth).toBeGreaterThanOrEqual(520)
+  // The panel is the surface the reader turned to, and it runs the stage's whole
+  // height: level with the feed at the top, and sharing the composer's foot line
+  // rather than floating above it. Both are equations against the stage, so a
+  // change to either seat alone shows up here.
+  const stageEdges = await page.evaluate(() => {
+    const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
+    const stage = box(document.querySelector('[data-team-channel] [data-panel]'))
+    const panel = box(document.querySelector('[data-team-panel]'))
+    const panelFoot = box(document.querySelector('[data-team-panel] [data-team-composer]'))
+    const feedFoot = box(document.querySelector('[data-team-channel] [data-panel] [data-team-composer]'))
+    return stage === undefined || panel === undefined ? null : {
+      panelTop: Math.round(panel.top), stageTop: Math.round(stage.top),
+      panelBottom: Math.round(panel.bottom), stageBottom: Math.round(stage.bottom),
+      panelFootBottom: panelFoot === undefined ? null : Math.round(panelFoot.bottom),
+      feedFootBottom: feedFoot === undefined ? null : Math.round(feedFoot.bottom),
+    }
+  })
+  expect(stageEdges).not.toBeNull()
+  expect(stageEdges!.panelTop).toBe(stageEdges!.stageTop)
+  expect(stageEdges!.panelBottom).toBe(stageEdges!.stageBottom)
+  expect(stageEdges!.panelFootBottom).toBe(stageEdges!.feedFootBottom)
+  // A discussion panel is resizable: the seam is a real separator control, and a
+  // drag re-seats the panel while the feed gives up exactly what the panel takes.
+  const handle = page.locator('[data-team-panel-handle]')
+  await handle.waitFor()
+  expect(await handle.getAttribute('role')).toBe('separator')
+  const seam = async (): Promise<{ panel: number, feed: number }> => await page.evaluate(() => {
+    const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
+    const panel = box(document.querySelector('[data-team-panel]'))
+    const feed = box(document.querySelector('[data-team-channel] [data-panel] section[aria-label]'))
+    return { panel: Math.round(panel?.width ?? 0), feed: Math.round(feed?.width ?? 0) }
+  })
+  const before = await seam()
+  // Dragging the seam left hands the panel the width the feed gives up.
+  const handleBox = await handle.boundingBox()
+  expect(handleBox).not.toBeNull()
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2 - 40, handleBox!.y + 200)
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2 - 120, handleBox!.y + 200)
+  await page.mouse.up()
+  await expect.poll(async () => (await seam()).panel).toBeGreaterThan(before.panel + 100)
+  const dragged = await seam()
+  expect(Math.abs((before.panel + before.feed) - (dragged.panel + dragged.feed))).toBeLessThanOrEqual(2)
+  await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-resized.png'), fullPage: true })
+  // The choice survives a reload and reopens at the same seat, and the keyboard
+  // path reaches a seat too: a pointer-only affordance would leave those readers
+  // stuck with whatever the drag left behind.
+  // The stored seat is the clamped integer; the painted box may differ by its
+  // own border, so the two are compared with that tolerance rather than as text.
+  const storedWidth = await page.evaluate(() => Number(localStorage.getItem('dsh.agent-team.panel-width.v1')))
+  expect(Math.abs(storedWidth - dragged.panel)).toBeLessThanOrEqual(1)
+  await page.reload()
+  await page.locator('[data-team-channel]').first().waitFor()
+  const reopened = page.locator('[data-team-channel] article').filter({ hasText: '这是一条不作为任务的讨论' })
+  await reopened.getByRole('button', { name: '打开讨论' }).click()
+  await page.locator('[data-team-panel]').waitFor()
+  await expect.poll(async () => (await seam()).panel).toBe(dragged.panel)
+  await page.locator('[data-team-panel-handle]').focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await seam()).panel).toBeLessThan(dragged.panel)
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-desktop.png'), fullPage: true })
   await promote.focus()
   await page.keyboard.press('Enter')

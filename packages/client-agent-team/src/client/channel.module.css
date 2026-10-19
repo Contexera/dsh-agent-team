@@ -216,11 +216,14 @@
   position: relative;
 }
 
-.feedStage[data-panel="open"] { padding-right: 360px; }
+.feedStage[data-panel="open"] { padding-right: var(--team-panel-width, 460px); }
 
 /* The panel is a discussion's whole face beside its feed: the head names it,
    the body reads it, the foot answers it. It paints over the seat the stage
-   reserves, so opening it moves nothing the feed already printed. */
+   reserves, so opening it moves nothing the feed already printed. Its seat is
+   one variable the drag handle writes, so a drag repaints without re-rendering
+   the feed, and its box runs the stage's full height so the head sits level with
+   the feed's first row and the composer shares the foot line. */
 .panel {
   background: var(--dsw-alias-bg-base);
   border-left: 1px solid var(--dsw-alias-border-l2);
@@ -229,7 +232,51 @@
   inset: 0 0 0 auto;
   min-height: 0;
   position: absolute;
-  width: 360px;
+  width: var(--team-panel-width, 460px);
+}
+
+/* The grab strip straddles the seam so a pointer aimed at it need not land on
+   the panel itself. Transparent at rest; hover and drag light the 2px rule where
+   the border already is. */
+.panelHandle {
+  appearance: none;
+  background: none;
+  border: 0;
+  bottom: 0;
+  cursor: col-resize;
+  left: -4px;
+  padding: 0;
+  position: absolute;
+  top: 0;
+  touch-action: none;
+  width: 9px;
+  z-index: 2;
+}
+
+.panelHandle::after {
+  background: var(--dsw-alias-state-business-primary);
+  border-radius: 2px;
+  bottom: 0;
+  content: '';
+  left: 4px;
+  opacity: 0;
+  position: absolute;
+  top: 0;
+  transition: opacity 120ms ease;
+  width: 2px;
+}
+
+.panelHandle:hover::after,
+.panelHandle:focus-visible::after,
+.panelHandle[data-dragging]::after { opacity: 1; }
+
+.panelHandle:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panelHandle::after { transition: none; }
 }
 
 .panelHead {
@@ -272,4 +319,7 @@
     inset: 0;
     width: auto;
   }
+
+  /* Covering the stage whole is not a seat one can drag wider. */
+  .panelHandle { display: none; }
 }

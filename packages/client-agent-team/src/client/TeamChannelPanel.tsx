@@ -14,6 +14,7 @@ import { Button, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-prim
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
+import { TeamPanelHandle } from './TeamPanelHandle.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { formatActivity, mentionedMemberIds } from './team-formatters.ts'
 import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames } from './thread-facts.ts'
@@ -26,6 +27,8 @@ import css from './conversation.module.css'
 import threadCss from './thread.module.css'
 
 interface TeamChannelPanelProps {
+  /** The stage this panel is seated in: it owns the width the handle writes. */
+  readonly stage: HTMLElement | null
   readonly workspaceId: WorkspaceId
   readonly channelRef: AgentTeamChannelRef
   readonly threadRef: AgentTeamThreadRef
@@ -76,7 +79,7 @@ type ReadProjection = Awaited<ReturnType<TeamChannelPanelProps['readThread']>> e
  * discussion turns into work — promote. Quoting, Claims, and acceptance stay on
  * the Thread page, which a promoted Thread walks into anyway.
  */
-export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
+export function TeamChannelPanel({ stage, workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
@@ -458,6 +461,7 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
   const title = `${t('threadLabel')} · #${channelName}`
 
   return <aside className={channelCss.panel} aria-label={t('threadLabel')} data-team-panel={threadRef}>
+    <TeamPanelHandle stage={stage} label={t('panelResize')} />
     <div className={channelCss.panelHead}>
       <span className={channelCss.panelTitle} title={title}>{title}</span>
       {task === undefined && thread !== undefined && <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>}

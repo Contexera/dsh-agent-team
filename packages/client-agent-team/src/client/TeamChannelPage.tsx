@@ -10,6 +10,7 @@ import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { TeamChannelPanel } from './TeamChannelPanel.tsx'
+import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
 import { TeamMessage } from './TeamMessage.tsx'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
@@ -129,6 +130,9 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   // The taskless Thread open in the feed's side panel. A Task's entry still
   // walks into the Thread page; only a discussion stays here.
   const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
+  // The stage the panel is seated in, which owns the panel-width variable: the
+  // drag handle writes it there, so a drag never re-renders this page.
+  const [panelStage, setPanelStage] = useState<HTMLDivElement | null>(null)
   // The composer draft lives in the keyed draft cache: view switches unmount
   // this page, and a refresh must not cost the half-written message either.
   // The composer owns the subscription — this page only reads a snapshot when
@@ -261,6 +265,23 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   }, [view])
 
   const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${channelLastItem?.message.messageRef ?? ''}`)
+
+  // Seat the panel from its stage: the saved choice, else this stage's default
+  // share. The stage is laid out after this effect first runs, so the seat
+  // follows its box — a one-shot pass would seat from a pre-layout width and
+  // leave it there. A dragged choice is re-clamped, never re-derived.
+  useEffect(() => {
+    if (panelStage === null) return
+    const seat = () => {
+      if (panelStage.offsetWidth === 0) return
+      const width = resolvePanelWidth(panelStage.offsetWidth, readPanelWidthPreference())
+      panelStage.style.setProperty('--team-panel-width', `${width}px`)
+    }
+    seat()
+    const observer = new ResizeObserver(seat)
+    observer.observe(panelStage)
+    return () => { observer.disconnect() }
+  }, [panelStage, panelThreadRef])
   const channel = view?.channels.find(item => item.channelRef === channelRef)
   const channelMemberIds = new Set(view?.members.filter(item => item.channelRef === channelRef).map(item => item.memberId) ?? [])
   const messageSender = (item: AgentTeamViewItem): AgentTeamMemberId => item.message.sender
@@ -460,7 +481,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       </div>}
     </section>}
 
-    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={channelCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
+    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={channelCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'} ref={setPanelStage}>
       <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
         {loading && channel === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingChannels')}</p></div>}
@@ -552,6 +573,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       /> : <div />}
 
       {panelThreadRef !== undefined && channel !== undefined && <TeamChannelPanel
+        stage={panelStage}
         workspaceId={workspaceId}
         channelRef={channelRef}
         threadRef={panelThreadRef}

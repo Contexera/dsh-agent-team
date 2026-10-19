@@ -87,11 +87,17 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // `vendor/` is excluded from both rules: it is an upstream fork kept identical
 // except for its module tag, so its comments are not ours to condense or rewrite
 // (see the sync procedure in its file header).
+// 2026-10-19: the resizable discussion panel raised both scopes that carry it.
+// Client 2000→2020 seats a new width module and the seam control — the one
+// variable a drag writes, the clamp a narrow stage needs, and why the keyboard
+// path is not optional, none of which the code can show; scripts 1960→1980
+// carries the assertions that make that seat an equation (panel and feed edges
+// equal at top and bottom, panel+feed width conserved across a drag).
 const COMMENT_BUDGETS = {
   'packages/agent-team/src': 4150,
-  'packages/client-agent-team/src': 2000,
+  'packages/client-agent-team/src': 2020,
   'packages/tool-agent-team/src': 280,
-  'scripts': 1960,
+  'scripts': 1980,
 }
 
 const EXCLUDED_DIRECTORY = 'vendor'
