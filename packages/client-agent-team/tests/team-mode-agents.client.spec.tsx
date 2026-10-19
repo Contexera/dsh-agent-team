@@ -548,9 +548,8 @@ describe('Team archival surfaces', () => {
     const readChannels = b.viewChannels.getMockImplementation()!
     const readMembers = b.members.getMockImplementation()!
     await b.view.findByText('还没有频道')
-    // The opening probe consumes the first publish silently, so the second one
-    // is what refreshes the mounted Panels — here with an emptied roster.
-    b.publishChannelUpdate()
+    // The roster refresh the panels read on wake, here with an emptied roster.
+    await b.changeSubscriptionsReady()
     b.members.mockResolvedValue({ ok: true, value: [] } as never)
     b.publishChannelUpdate()
     await b.view.findByText('还没有 Agent')

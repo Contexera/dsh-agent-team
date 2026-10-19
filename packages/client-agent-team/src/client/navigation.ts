@@ -56,24 +56,37 @@ function readSnapshot(): TeamNavigationSnapshot {
 
 function persistSnapshot(snapshot: TeamNavigationSnapshot): void {
   if (typeof localStorage === 'undefined') return
+  const { mode, workspaceId, channelRef, taskRef, threadRef, taskNumber, inbox } = snapshot
+  persistLocallyBestEffort({
+    mode,
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+    ...(channelRef === undefined ? {} : { channelRef }),
+    ...(inbox === true ? { inbox: true } : {}),
+    ...(taskRef === undefined ? {} : { taskRef }),
+    ...(threadRef === undefined ? {} : { threadRef }),
+    ...(taskNumber === undefined ? {} : { taskNumber }),
+  })
+}
+
+/** Remember the position for the next reload; a browser that refuses storage (private mode, quota) loses only that. */
+function persistLocallyBestEffort(payload: TeamNavigationSnapshot): void {
   try {
-    const { mode, workspaceId, channelRef, taskRef, threadRef, taskNumber, inbox } = snapshot
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      mode,
-      ...(workspaceId === undefined ? {} : { workspaceId }),
-      ...(channelRef === undefined ? {} : { channelRef }),
-      ...(inbox === true ? { inbox: true } : {}),
-      ...(taskRef === undefined ? {} : { taskRef }),
-      ...(threadRef === undefined ? {} : { threadRef }),
-      ...(taskNumber === undefined ? {} : { taskNumber }),
-    }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch {
   }
 }
 
 export interface TeamNavigationActions {
   enterTeam: () => void
+  /** Flip the mode only; a caller that also owns the column releases it through {@link leaveTeamForConversation}. */
   leaveTeam: () => void
+  /**
+   * Leave Team mode for the conversation and hand the column back in one move.
+   * The panel release runs before the mode flips: the mode's own ownership
+   * effect reads the flip, and a still-selected Team panel at that instant would
+   * put the mode straight back.
+   */
+  leaveTeamForConversation: (releasePanel: () => void) => void
   selectWorkspace: (workspaceId: WorkspaceId) => void
   selectChannel: (channelRef: AgentTeamChannelRef) => void
   selectThread: (threadRef: AgentTeamThreadRef, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void
@@ -88,6 +101,14 @@ export interface TeamNavigationActions {
   enterMemberSession: (sessionId: SessionId, returnToSessionId?: SessionId) => void
   /** Close the embedded Member Session view and return to the Team views. */
   exitMemberSession: () => void
+}
+
+/**
+ * Whether one `enterMemberSession` call restates the state already standing:
+ * the same Member Session selected while Team mode is already entered.
+ */
+function isReselectingActiveMember(snapshot: TeamNavigationSnapshot, sessionId: SessionId): boolean {
+  return snapshot.memberSessionId === sessionId && snapshot.mode === 'team'
 }
 
 /** Root-scoped Team mode state. Slot lifetimes subscribe to this source. */
@@ -106,6 +127,11 @@ export class TeamNavigation {
     return {
       enterTeam: () => { this.clearMemberSession(); this.setMode('team') },
       leaveTeam: () => { this.setMode('conversation') },
+      leaveTeamForConversation: releasePanel => {
+        this.clearMemberSession()
+        releasePanel()
+        this.setMode('conversation')
+      },
       selectWorkspace: workspaceId => { this.clearMemberSession(); this.setWorkspace(workspaceId) },
       selectChannel: channelRef => { this.clearMemberSession(); this.setChannel(channelRef) },
       selectThread: (threadRef, channelRef, taskRef, taskNumber) => { this.clearMemberSession(); this.setThread(threadRef, channelRef, taskRef, taskNumber) },
@@ -127,7 +153,7 @@ export class TeamNavigation {
   }
 
   private setMemberSession(sessionId: SessionId, returnToSessionId?: SessionId): void {
-    if (this.snapshot.memberSessionId === sessionId && this.snapshot.mode === 'team') return
+    if (isReselectingActiveMember(this.snapshot, sessionId)) return
     const { memberSessionId: _memberSessionId, ...base } = this.snapshot
     this.snapshot = {
       ...base,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AgentTeamClientMemberStatus, AgentTeamModelSelection, AgentTeamUpdateMemberRequest } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamClientMemberStatus, AgentTeamModelSelection } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { TeamModelCatalog, TeamModelEffortOption, TeamModelProviderGroup, TeamSidebarProps } from './slots.ts'
 import { Button, IconChevronDownOutlineRegular, Input, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -236,7 +236,7 @@ export function AgentEditorDialog({ status, updateMember, loadModels, onCommitte
   const [handle, setHandle] = useState(status.member.handle)
   const [description, setDescription] = useState(status.member.description)
   const [model, setModel] = useState<AgentTeamModelSelection | undefined>(status.member.model)
-  const { saving, error, pendingRequest, save } = useEditDialogSave({
+  const { saving, error, save, invalidate } = useEditDialogSave({
     save: updateMember,
     onCommitted,
     onClose,
@@ -258,14 +258,12 @@ export function AgentEditorDialog({ status, updateMember, loadModels, onCommitte
       // and an absent field now leaves any Remote-written override alone.
       model: model ?? null,
     }
-    const samePending = pendingRequest.current !== undefined && pendingRequest.current.memberId === payload.memberId
-      && pendingRequest.current.handle === payload.handle && pendingRequest.current.description === payload.description
-      && sameModel(pendingRequest.current.model, model)
-    const request: AgentTeamUpdateMemberRequest = samePending ? pendingRequest.current! : {
+    await save(previous => previous !== undefined && previous.memberId === payload.memberId
+      && previous.handle === payload.handle && previous.description === payload.description
+      && sameModel(previous.model, model) ? previous : {
       requestId: mintRequestId(),
       ...payload,
-    }
-    await save(request)
+    })
   }
 
   return (
@@ -281,13 +279,13 @@ export function AgentEditorDialog({ status, updateMember, loadModels, onCommitte
       <form id="team-agent-edit-form" className={createCss.form} onSubmit={event => { void submit(event) }}>
         <label className={createCss.field}>
           <span>{t('agentName')}</span>
-          <Input className={createCss.input!} value={handle} onChange={event => { setHandle(event.target.value); pendingRequest.current = undefined }} disabled={saving} autoFocus />
+          <Input className={createCss.input!} value={handle} onChange={event => { setHandle(event.target.value); invalidate() }} disabled={saving} autoFocus />
         </label>
         <label className={createCss.field}>
           <span>{t('agentDescription')}{t('optionalSuffix')}</span>
-          <Input className={createCss.input!} value={description} placeholder={t('agentDescriptionPlaceholder')} onChange={event => { setDescription(event.target.value); pendingRequest.current = undefined }} disabled={saving} />
+          <Input className={createCss.input!} value={description} placeholder={t('agentDescriptionPlaceholder')} onChange={event => { setDescription(event.target.value); invalidate() }} disabled={saving} />
         </label>
-        <ModelPickerField model={model} onModelChange={choice => { pendingRequest.current = undefined; setModel(choice) }} loadModels={loadModels} disabled={saving} t={t} />
+        <ModelPickerField model={model} onModelChange={choice => { invalidate(); setModel(choice) }} loadModels={loadModels} disabled={saving} t={t} />
         {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
       </form>
     </Modal>

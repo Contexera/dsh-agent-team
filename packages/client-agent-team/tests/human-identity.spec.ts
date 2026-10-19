@@ -11,7 +11,6 @@ const PROFILE = {
   name: 'Ada',
   version: '0.1.13',
   repoUrl: 'https://github.com/Contexera/dsh-agent-team',
-  updateAvailable: false,
 }
 
 function storeWith(overrides: {

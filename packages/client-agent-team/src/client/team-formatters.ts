@@ -310,6 +310,21 @@ export function claimersLabel(owners: ReadonlyArray<{ readonly name: string }>, 
   return t('claimers', { names: owners.map(owner => `@${owner.name}`).join(', ') })
 }
 
+/**
+ * Mention names still worth a trailing chip: the reader's own name never
+ * belongs — it is either chipped in place or not named at all — nor does an
+ * author the quote line already names, because the quote states that delivery
+ * itself. A quote that never resolved names nobody, so there the chip is the
+ * only place the delivery still shows.
+ */
+export function unshownMentionNames(
+  names: readonly string[],
+  readerName: string | undefined,
+  quoteAuthor: string | undefined,
+): readonly string[] {
+  return names.filter(name => name !== readerName && name !== quoteAuthor)
+}
+
 const MARKDOWN_BLOCK_CONSTRUCT = /(^|\n)[ \t]{0,3}(?:#{1,6}[ \t]|>[ \t]|[-*+][ \t]|\d+[.)][ \t])|^[ \t]*\|.+\|/m
 const MARKDOWN_INLINE_CONSTRUCT = /[`*_[\]!]|~~~|```/
 

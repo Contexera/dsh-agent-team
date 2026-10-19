@@ -81,9 +81,9 @@ describe('human update checker cache', () => {
   it('serves unknown synchronously and publishes a newer release once observed', async () => {
     const fetchImpl = okFetcher('0.1.14')
     const checker = createHumanUpdateChecker({ currentVersion: '0.1.13', fetchImpl, env: {} })
-    expect(checker.snapshot()).toEqual({ updateAvailable: false })
+    expect(checker.snapshot()).toEqual({})
     await flush()
-    expect(checker.snapshot()).toEqual({ updateAvailable: true, latestVersion: '0.1.14' })
+    expect(checker.snapshot()).toEqual({ latestVersion: '0.1.14' })
     expect(fetchImpl.calls).toBe(1)
   })
 
@@ -92,7 +92,7 @@ describe('human update checker cache', () => {
     const checker = createHumanUpdateChecker({ currentVersion: '0.1.13', fetchImpl, env: {} })
     checker.snapshot()
     await flush()
-    expect(checker.snapshot()).toEqual({ updateAvailable: false })
+    expect(checker.snapshot()).toEqual({})
   })
 
   it('shares one refresh across concurrent snapshots and re-checks after the TTL', async () => {
@@ -119,13 +119,13 @@ describe('human update checker cache', () => {
       }) as UpdateCheckFetcher,
       env: { DSH_AGENT_TEAM_UPDATE_CHECK: '0' },
     })
-    expect(disabled.snapshot()).toEqual({ updateAvailable: false })
+    expect(disabled.snapshot()).toEqual({})
     await flush()
     expect(onSpy).not.toHaveBeenCalled()
 
     const offline = createHumanUpdateChecker({ currentVersion: '0.1.13', fetchImpl: failingFetcher(), env: {} })
-    expect(offline.snapshot()).toEqual({ updateAvailable: false })
+    expect(offline.snapshot()).toEqual({})
     await flush()
-    expect(offline.snapshot()).toEqual({ updateAvailable: false })
+    expect(offline.snapshot()).toEqual({})
   })
 })

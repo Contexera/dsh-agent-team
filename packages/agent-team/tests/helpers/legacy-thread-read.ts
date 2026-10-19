@@ -1,6 +1,7 @@
 import type { AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadReadSnapshot } from '../../src/types.ts'
 
-export function snapshotReadData(data: AgentTeamThreadReadReceipt, picture: Omit<AgentTeamThreadReadResult, 'receipt'>): AgentTeamThreadReadSnapshot {
+/** The pre-slim snapshot a pre-receipt installation would have frozen for this read. */
+export function fabricateLegacyThreadReadSnapshot(data: AgentTeamThreadReadReceipt, picture: Omit<AgentTeamThreadReadResult, 'receipt'>): AgentTeamThreadReadSnapshot {
   return {
     workspaceId: data.workspaceId,
     memberId: data.memberId,
@@ -22,7 +23,7 @@ export function snapshotReadData(data: AgentTeamThreadReadReceipt, picture: Omit
  * build the counterfactual ledger a pre-receipt installation would have written
  * had it never frozen a picture — same progress, same Inbox delta, no picture.
  */
-export function receiptReadData(data: AgentTeamThreadReadSnapshot): AgentTeamThreadReadReceipt {
+export function counterfactualReceiptReadData(data: AgentTeamThreadReadSnapshot): AgentTeamThreadReadReceipt {
   return {
     workspaceId: data.workspaceId,
     memberId: data.memberId,

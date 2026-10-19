@@ -30,7 +30,7 @@ describe('Team Channel discussion panel switching', () => {
       if (request.threadRef !== undefined || request.topLevelOnly !== true) return result
       return { ok: true as const, value: { ...result.value, items: [...result.value.items, {
         message: { messageRef: 'message:seed-1', channelRef: 'channel:engineering', threadRef: 'thread:2', sender: 'member:human', body: bodies['thread:2'], topLevel: true, sequence: 2, occurredAt: '2026-10-14T10:00:00.000Z' },
-        mentions: [], thread: { threadRef: 'thread:2', revision: 2 }, claimOwners: [], messageCount: 1,
+        mentions: [], thread: { threadRef: 'thread:2', revision: 2 }, liveClaimOwners: [], messageCount: 1,
         lastActivityAt: '2026-10-14T10:00:00.000Z',
       }] } }
     })

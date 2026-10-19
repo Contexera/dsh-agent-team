@@ -96,19 +96,18 @@ async function settleLayout(page: Page): Promise<void> {
 }
 
 /**
- * One Task's Thread door in the Channel feed. The door button carries the
- * accessible name — with or without an unread count, so the prefix form has to
- * carry the full-width opening bracket — while the entry line
- * (`data-thread-entry`) is the row that holds the state cluster beside it.
- * `:has()` keeps the exact/prefix pair on one button, so `Task #1` can never
- * resolve to `Task #10`.
+ * One Task's Thread entry line in the Channel feed. The row carries
+ * `data-thread-entry-door` as a stable marker — the Task number, or `thread`
+ * for a taskless Thread — so a selector never has to parse the rendered
+ * accessible name, whose wording is localized and whose unread form appends a
+ * count inside a full-width bracket.
  */
-function taskEntrySelector(taskNumber: number): string {
-  return `[data-team-channel] [data-thread-entry]:has(> button[aria-label="打开 Task #${taskNumber}"], > button[aria-label^="打开 Task #${taskNumber}（"]) > button`
+function taskEntryLineSelector(taskNumber: number): string {
+  return `[data-team-channel] [data-thread-entry-door="${taskNumber}"]`
 }
 
-function taskEntryLineSelector(taskNumber: number): string {
-  return `[data-team-channel] [data-thread-entry]:has(> button[aria-label="打开 Task #${taskNumber}"], > button[aria-label^="打开 Task #${taskNumber}（"])`
+function taskEntrySelector(taskNumber: number): string {
+  return `${taskEntryLineSelector(taskNumber)} > button`
 }
 
 /** One Task's Thread door: the locator form of {@link taskEntrySelector}. */
@@ -2931,10 +2930,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     for (const row of section.rows) {
       const item = hostRows.find(candidate => (candidate.previewText ?? '') === row.text)
       expect(item).toBeDefined()
-      expect(row.actorLabel).toBe(item!.claimOwners.length === 0
+      expect(row.actorLabel).toBe(item!.liveClaimOwners.length === 0
         ? `最新来自 @${item!.newestActor.name}`
-        : `由 ${item!.claimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
-      expect(row.actorWidth).toBe(clusterWidth(item!.claimOwners.length))
+        : `由 ${item!.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
+      expect(row.actorWidth).toBe(clusterWidth(item!.liveClaimOwners.length))
       // The text column follows the cluster that is really drawn: a row pays one
       // face's width per face it has and nothing for the stack it could have had.
       // Reserving the widest stack is what used to put 36px of empty space in
@@ -3090,12 +3089,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     .find(item => item.thread.threadRef === stackThreadRef)!
   // Every claimant the Host accepted is an owner on the row, and the row paid one
   // face per owner rather than the width of the stack it could have carried.
-  expect(stackItem.claimOwners.length).toBe(claimants.length)
-  expect(stackItem.claimOwners.map(owner => owner.name).sort()).toEqual(
+  expect(stackItem.liveClaimOwners.length).toBe(claimants.length)
+  expect(stackItem.liveClaimOwners.map(owner => owner.name).sort()).toEqual(
     claimants.map((entry: { member: { handle: string } }) => entry.member.handle).sort())
-  expect(stackBox.circles).toBe(Math.min(stackItem.claimOwners.length, 3) + (stackItem.claimOwners.length > 3 ? 1 : 0))
-  expect(stackBox.label).toBe(`由 ${stackItem.claimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
-  expect(stackBox.width).toBe(clusterWidth(stackItem.claimOwners.length))
+  expect(stackBox.circles).toBe(Math.min(stackItem.liveClaimOwners.length, 3) + (stackItem.liveClaimOwners.length > 3 ? 1 : 0))
+  expect(stackBox.label).toBe(`由 ${stackItem.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
+  expect(stackBox.width).toBe(clusterWidth(stackItem.liveClaimOwners.length))
   expect(stackBox.inset).toBe(stackBox.width + 8)
   // The row also states where its Task stands, behind the Task's own number and in
   // the pair every other Task surface prints: a dot and the word the Host's status
@@ -3391,8 +3390,8 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await betaArticle.waitFor()
   const chip = betaArticle.locator(`button[title="${alphaShort}"]`)
   await chip.waitFor()
-  // Chip titles cap at 40 characters (boundedThreadTitle): the 43-char
-  // anchor below renders truncated, and navigation still proves identity.
+  // Thread chip titles cap at 40 characters: the 43-char anchor below renders
+  // truncated, and navigation still proves identity.
   await expect.poll(() => chip.textContent()).toMatch(/ALPHA-ROOT-MARKER alpha discussion open…/)
   await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip.png'), fullPage: true })
   await chip.click()

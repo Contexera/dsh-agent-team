@@ -69,8 +69,8 @@ function OwnerAvatar({ owner, human }: {
 }) {
   const image = useAvatarImage(human !== undefined && owner.memberId === human.memberId ? human.avatarUrl : undefined)
   const hue = { '--team-avatar-hue': memberHue(owner.memberId) } as CSSProperties
-  if (image.src === undefined) return <span className={css.avatar} style={hue}>{initial(owner.name)}</span>
-  return <img className={css.avatarImage} style={hue} src={image.src} alt="" aria-hidden="true" onError={image.failed} />
+  if (image.image.kind === 'initial') return <span className={css.avatar} style={hue}>{initial(owner.name)}</span>
+  return <img className={css.avatarImage} style={hue} src={image.image.src} alt="" aria-hidden="true" onError={image.failed} />
 }
 
 /** First visible character of a handle — and of a raw Member id when that is all there is. */

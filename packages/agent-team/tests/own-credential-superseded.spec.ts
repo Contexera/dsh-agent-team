@@ -101,10 +101,10 @@ describe("a write whose credential was superseded by the writer's own previous w
     expect(stale.committed).toBe(false)
     expect(stale.value.kind).toBe('stale_revision')
     expect(stale.value.kind === 'stale_revision' && stale.value.revision).toBe(second)
-    expect(stale.value.kind === 'stale_revision' && stale.value.tokenUnrecognized).toBeUndefined()
+    expect(stale.value.kind === 'stale_revision' && stale.value.staleTokenKind).toBeUndefined()
   })
 
-  it('a token older than the Thread\'s first fact stays unknowable, so the copied-token wording is claimed only where provable', async () => {
+  it('a token older than the Thread\'s first fact is reported as unknown rather than as a race', async () => {
     const test = await harness()
     const ledger = ledgerFor(test.facility)
     const { actor } = await addLedgerMember(ledger, test.workspaceId, 'writer')
@@ -128,7 +128,7 @@ describe("a write whose credential was superseded by the writer's own previous w
 
     expect(stale.committed).toBe(false)
     expect(stale.value.kind).toBe('stale_revision')
-    expect(stale.value.kind === 'stale_revision' && stale.value.tokenUnrecognized).toBeUndefined()
+    expect(stale.value.kind === 'stale_revision' && stale.value.staleTokenKind).toBe('unknown')
   })
 
   it('a token this Thread never reached is named as a copied token, not as an insertion race', async () => {
@@ -147,6 +147,6 @@ describe("a write whose credential was superseded by the writer's own previous w
 
     expect(stale.committed).toBe(false)
     expect(stale.value.kind).toBe('stale_revision')
-    expect(stale.value.kind === 'stale_revision' && stale.value.tokenUnrecognized).toBe(true)
+    expect(stale.value.kind === 'stale_revision' && stale.value.staleTokenKind).toBe('unrecognized')
   })
 })

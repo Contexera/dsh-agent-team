@@ -92,7 +92,8 @@ describe('TeamComposer mention menu', () => {
     expect(memberRows[1]).toContain('insider')
     expect(memberRows[2]).toContain('outsider')
     // One source of truth for the row's visual weight: the tier is a row
-    // attribute, so styling cannot disagree with the sort order.
+    // attribute — the tier's rank, the numeric form the browser journey reads —
+    // so styling cannot disagree with the sort order.
     const tiers = [...ui.container.querySelectorAll('[role="option"][data-mention-tier]')].map(row => row.getAttribute('data-mention-tier'))
     expect(tiers).toEqual(['0', '1', '2'])
   })

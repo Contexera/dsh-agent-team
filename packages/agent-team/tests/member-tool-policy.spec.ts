@@ -1,42 +1,16 @@
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { mkdir, realpath, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-// Every test here boots a whole Host harness over a throwaway tree. The windows
-// lane stretched that boot to 4.1s against vitest's 5s default (worst of 11 CI
-// runs, 2026-09-17..21) and on 2026-09-21 a run crossed it, painting master red
-// while the same commit passed on a rerun. Headroom, not a retry.
-// Shared boot now runs inside `beforeAll`, whose default 10s hook budget is
-// smaller than the 30s each per-test boot used to get — carry the same
-// headroom to the hook or the slowest lane times out before any test runs.
-vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 })
 import { Context } from '@deepseek-ai/cordis'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import AgentPreset from '@deepseek-ai/dsh-agent-preset'
-import AgentPresetRegistry from '@deepseek-ai/dsh-agent-preset-registry'
-import LlmRuntime, { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import FsLocal from '@deepseek-ai/dsh-fs-local'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
-import * as ToolWorkingDirectory from '@deepseek-ai/dsh-tool-working-directory'
-import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
-import SkillRegistry from '@deepseek-ai/dsh-skill'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
-import { MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 
 const sharedCleanups: Array<() => Promise<void>> = []
 /** Per-test disposers (LLM adapter registrations, ordinary sessions): drained after each test. */
@@ -145,81 +119,26 @@ function waitForRunning(ctx: Context, agent: Agent): Promise<void> {
 
 /**
  * File-shared harness: booted once in `beforeAll`, torn down once in
- * `afterAll`. Previously every test paid the full boot (temp tree, preset
- * file, a dozen plugin installs with disk reads through the loader) and the
- * windows lane stretched one boot to 4.1s+ — 7 boots per file meant 7 chances
- * to hit a slow tail. The ledger is append-only, so tests stay isolated
- * through unique handles/requestIds (see the invariant below); the LLM
- * adapter is the one per-test registration because `registerAdapter` throws
- * on duplicate routes — each test registers its own and `afterEach`
- * disposes it.
+ * `afterAll`. The ledger is append-only, so tests stay isolated through unique
+ * handles/requestIds (see the invariant below); the LLM adapter is the one
+ * per-test registration because `registerAdapter` throws on duplicate routes —
+ * each test registers its own and `afterEach` disposes it.
  */
-async function buildSharedHarness(): Promise<{
-  readonly ctx: Context
-  readonly workspaceId: WorkspaceId
-  readonly teamFiber: Awaited<ReturnType<Context['plugin']>>
-  readonly otherWorkspace: string
-}> {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-agent-team-policy-'))
-  const project = join(root, 'project')
-  // A second checkout the Member is invited into: the directory it enters with
-  // working_directory, and the one the assertion below proves it can reach.
-  const otherWorkspace = join(root, 'other-project')
-  const persistence = join(root, 'sessions')
-  await Promise.all([mkdir(project), mkdir(otherWorkspace), mkdir(persistence)])
-  process.env.DSH_HOME = join(root, 'dsh-home')
-  // The team-member definition as one declarative row; the
-  // distinguishable-tool fixture is a real module beside this spec, where its
-  // own imports resolve.
-  const teamMemberPlugins = [
-    { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
-    { id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href },
-  ]
-
-  const ctx = new Context()
-  // rc.1: preset health resolves package rows by walking node_modules above
-  // ctx.baseUrl — point at this repository, where the harness and bundle
-  // packages are linked, as a real profile install would.
-  ctx.baseUrl = pathToFileURL(resolve(import.meta.dirname, '../../../')).href + '/'
-  await ctx.plugin(Loader)
-  ctx.loader.builtins.include = Include
-  ctx.loader.builtins.group = Group
-  await ctx.plugin(FsLocal)
-  await ctx.plugin(WorkingDirectory)
-  await ctx.plugin(LlmRuntime)
-  await ctx.plugin(SessionStore)
-  // The registry injects 'sessionProjections'; the roster stays PENDING without it.
-  await ctx.plugin(SessionProjectionRegistry)
-  await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRuntime)
-  // The Harness mounts `working_directory` globally in every shipped profile,
-  // outside any preset. This harness composes no shipped bundle, so the tool is
-  // mounted here to give the allow-list union something real to preserve.
-  await ctx.plugin(ToolWorkingDirectory)
-  await ctx.plugin(SkillRegistry)
-  await ctx.plugin(AgentRegistry)
-  await ctx.plugin(AgentLoop, { agents: [] })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  // The Team pressure policy reads the token meter at every Member pre-step;
-  // these tests exercise tool policy, so a zero-usage fake keeps it quiet.
-  ctx.provide('tokenMeter', { measure: () => ({ totalTokens: 0, nodes: [] }) })
-  await ctx.plugin(JsonlSessionPersistence, { root: persistence })
-  await ctx.plugin(AgentPresetRegistry, { default: 'team-member' })
-  await ctx.plugin(AgentPreset, { id: 'team-member', plugins: teamMemberPlugins })
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend())
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  const workspaceId = WorkspaceId('workspace:policy-test')
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === workspaceId ? { id, path: project, attachSession: async () => {} } : undefined,
-    list: () => [],
-    archiveSession: async () => {},
+function buildSharedHarness() {
+  return mountTeamMemberHost({
+    cleanups: sharedCleanups,
+    prepare: provideQuietTokenMeter,
+    // The distinguishable-tool fixture is a real module beside this spec,
+    // where its own imports resolve.
+    presetPlugins: [
+      { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
+      { id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href },
+    ],
+    // working_directory is mounted for real: the allow-list union keeps it, and
+    // the policy case below enters a second checkout through it.
+    workingDirectory: 'real',
+    otherProjects: 1,
   })
-  const teamFiber = await ctx.plugin(AgentTeam)
-  sharedCleanups.push(async () => { await ctx.fiber.dispose(); await facility.closeAll(); await rm(root, { recursive: true, force: true }) })
-  return { ctx, workspaceId, teamFiber, otherWorkspace }
 }
 
 // Isolation invariant: the shared ledger never forgets, so every handle and
@@ -282,7 +201,8 @@ describe('Agent Team member tool policy', () => {
 
   it('keeps working_directory on a narrowed Member so it can enter a joined Workspace', async () => {
     useAdapter(new EmptyAdapter())
-    const { ctx, workspaceId, otherWorkspace } = shared
+    const { ctx, workspaceId, otherProjects } = shared
+    const otherWorkspace = otherProjects[0]!
     const narrow = await addMember(ctx, workspaceId, 't15-narrow', { tools: { allow: ['ordinary_tool'] } })
     const agent = liveAgent(ctx, narrow)
     // An allow-list narrows capability, never the Member's ability to be in the

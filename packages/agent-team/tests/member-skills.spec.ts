@@ -1,32 +1,15 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import Loader from '@deepseek-ai/cordis-plugin-loader'
-import Include from '@deepseek-ai/cordis-plugin-include'
-import Group from '@deepseek-ai/cordis-plugin-group'
-import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import AgentPreset from '@deepseek-ai/dsh-agent-preset'
-import AgentPresetRegistry from '@deepseek-ai/dsh-agent-preset-registry'
-import SkillRegistry from '@deepseek-ai/dsh-skill'
-import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
+import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import Storage from '@deepseek-ai/dsh-storage'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam from '../src/index.ts'
 import type { AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
-import { MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { mountTeamMemberHost } from './helpers/team-host-fixture.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 const originalDshHome = process.env.DSH_HOME
@@ -43,63 +26,18 @@ class EmptyAdapter extends LlmAdapter {
   async * stream(_options: GenerateOptions): AsyncIterable<StreamChunk> { yield* [] }
 }
 
-async function memberSkillsHarness(): Promise<{
-  readonly ctx: Context
-  readonly workspaceId: WorkspaceId
-  readonly root: string
-  readonly teamFiber: Awaited<ReturnType<Context['plugin']>>
-}> {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-agent-team-skills-'))
-  const project = join(root, 'project')
-  const persistence = join(root, 'sessions')
-  await Promise.all([mkdir(project), mkdir(persistence)])
-  process.env.DSH_HOME = join(root, 'dsh-home')
-  // The team-member definition as one declarative row; bare internal loader
-  // names resolve through the linked node_modules (the bundle self-link plus
-  // harness checkout links).
-  const teamMemberPlugins = [
-    { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
-    { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
-    { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
-  ]
-
-  const ctx = new Context()
-  // rc.1: preset health resolves package rows by walking node_modules above
-  // ctx.baseUrl — point at this repository, where the harness and bundle
-  // packages are linked, as a real profile install would.
-  ctx.baseUrl = pathToFileURL(resolve(import.meta.dirname, '../../../')).href + '/'
-  await ctx.plugin(Loader)
-  ctx.loader.builtins.include = Include
-  ctx.loader.builtins.group = Group
-  provideWorkingDirectoryFixture(ctx)
-  await ctx.plugin(LlmRuntime)
-  ctx.llm.registerAdapter(['mock'], new EmptyAdapter())
-  await ctx.plugin(SessionStore)
-  // The registry injects 'sessionProjections'; the roster stays PENDING without it.
-  await ctx.plugin(SessionProjectionRegistry)
-  await ctx.plugin(SystemPrompt)
-  await ctx.plugin(ToolRuntime)
-  await ctx.plugin(SkillRegistry)
-  await ctx.plugin(AgentRegistry)
-  await ctx.plugin(AgentLoop, { agents: [] })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  await ctx.plugin(JsonlSessionPersistence, { root: persistence })
-  await ctx.plugin(AgentPresetRegistry, { default: 'team-member' })
-  await ctx.plugin(AgentPreset, { id: 'team-member', plugins: teamMemberPlugins })
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend())
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  const workspaceId = WorkspaceId('workspace:skills-test')
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === workspaceId ? { id, path: project, attachSession: async () => {} } : undefined,
-    list: () => [],
-    archiveSession: async () => {},
+/** Boots the shared Host fixture with the skills tool row the catalog reads through. */
+function memberSkillsHarness() {
+  return mountTeamMemberHost({
+    cleanups,
+    // No turn runs here, but the route must resolve rather than reject.
+    prepare: ctx => { ctx.llm.registerAdapter(['mock'], new EmptyAdapter()) },
+    presetPlugins: [
+      { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
+      { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },
+      { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
+    ],
   })
-  const teamFiber = await ctx.plugin(AgentTeam)
-  cleanups.push(async () => { await ctx.fiber.dispose(); await facility.closeAll(); await rm(root, { recursive: true, force: true }) })
-  return { ctx, workspaceId, root, teamFiber }
 }
 
 async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string): Promise<{ memberId: AgentTeamMemberId; sessionId: SessionId; privateMemoryPath: string }> {

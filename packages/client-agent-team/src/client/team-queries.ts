@@ -1,5 +1,6 @@
 import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from './team-changes.ts'
 import type { TeamChangeStream } from './team-changes.ts'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
 /**
  * One data query's identity. `key` names the query in diagnostics and is what
@@ -10,6 +11,21 @@ import type { TeamChangeStream } from './team-changes.ts'
 export interface TeamQueryIdentity {
   readonly key: string
   readonly covers: (scope: TeamChangeScope) => boolean
+}
+
+/** The Workspace-scoped change kinds a query may declare it covers. */
+export type WorkspaceScopeKind = 'workspace' | 'presence'
+
+/**
+ * Whether one change scope can carry new data for a Workspace-scoped query: it
+ * names one of the query's own scope kinds in that query's Workspace. The
+ * scope-less stream is deliberately excluded — it is a superset of projection
+ * wakes, so every scope-less delivery that touches such a query's data has
+ * already woken the Workspace scope, and admitting it would only add unrelated
+ * invalidations that cost a redundant read.
+ */
+export function coversWorkspaceScope(scope: TeamChangeScope, workspaceId: WorkspaceId | undefined, kind: WorkspaceScopeKind): boolean {
+  return scope !== undefined && scope.kind === kind && scope.workspaceId === workspaceId
 }
 
 /** Per-query read counters. Diagnostics record identity and counts only — never response bodies. */
@@ -24,7 +40,13 @@ export interface TeamQueryCounters {
   readonly droppedStale: number
   /** Responses dropped because an invalidation superseded the read before it landed. */
   readonly droppedSuperseded: number
-  /** Reads that answered with an error or rejected. */
+  /**
+   * Reads that failed to answer with a result — rejected, returned an error, or
+   * answered with an error payload. Counting the payload case too is this
+   * counter's contract: `failed` observes the read, whatever shape the failure
+   * arrived in, while delivery stays unchanged and the consumer renders the
+   * error from its own `result.ok` face.
+   */
   readonly failed: number
 }
 
@@ -57,10 +79,8 @@ interface Waiter {
 type Outcome = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: unknown }
 
 /**
- * A Remote answer that reports failure inside its payload: the `failed`
- * counter observes it like a rejection — that is the documented shape of the
- * counter — while delivery stays unchanged, because the consumer's own
- * `result.ok` face is what renders the error.
+ * Whether a Remote answer reports failure inside its payload rather than as a
+ * result error — the second shape the `failed` counter observes.
  */
 const answeredFailure = (outcome: Outcome): boolean =>
   outcome.ok && typeof outcome.value === 'object' && outcome.value !== null && (outcome.value as { readonly ok?: unknown }).ok === false
@@ -232,40 +252,11 @@ export class TeamQueries {
     const state = entry.state
     if (!outcome.ok || answeredFailure(outcome)) state.counters.failed += 1
     if (entry.issuance <= state.applied) {
-      // A newer response for this query already landed. The stale payload is
-      // dropped whole — and so is its failure: the newest known result is the
-      // one waiters receive, so an old error never masks newer data either.
-      state.counters.droppedStale += 1
-      // Counters and identity only; response bodies never reach the log.
-      console.info('[agent-team] stale read response dropped', { query: entry.key, issuance: entry.issuance, landed: state.applied, reason: 'stale' })
-      if (current) this.inFlight.delete(entry.key)
-      this.deliver(entry, state.stored)
+      this.dropStale(entry, current)
       return
     }
     if (entry.superseded) {
-      // An invalidation — a wake, or a new connection generation — superseded
-      // this read before anything newer landed. Its payload must never become
-      // the query's state: that is exactly how a pre-reset response would be
-      // handed to a post-reset reader. Waiters move to the read that took its
-      // place; when the wake left no replacement — its own listener may sit on
-      // a narrower scope, or the surface may already be gone — the layer
-      // issues that replacement itself, so the invalidation still ends in
-      // fresh data rather than a failure.
-      state.counters.droppedSuperseded += 1
-      console.info('[agent-team] stale read response dropped', { query: entry.key, issuance: entry.issuance, landed: state.applied, reason: 'superseded' })
-      if (current) this.inFlight.delete(entry.key)
-      const target = this.inFlight.get(entry.key)
-      if (target !== undefined && target !== entry) {
-        if (target.outcome !== undefined) this.deliver(entry, target.outcome)
-        else target.waiters.push(...entry.waiters.splice(0, entry.waiters.length))
-        return
-      }
-      if (!this.disposed) {
-        const retry = this.issue(state.identity, entry.load)
-        retry.waiters.push(...entry.waiters.splice(0, entry.waiters.length))
-        return
-      }
-      this.deliver(entry, state.stored)
+      this.deliverSuperseded(entry, current)
       return
     }
     state.applied = entry.issuance
@@ -286,6 +277,50 @@ export class TeamQueries {
       })
     }
     this.deliver(entry, outcome)
+  }
+
+  /**
+   * A newer response for this query already landed. The stale payload is
+   * dropped whole — and so is its failure: the newest known result is the one
+   * waiters receive, so an old error never masks newer data either.
+   */
+  private dropStale(entry: InFlight, current: boolean): void {
+    entry.state.counters.droppedStale += 1
+    this.logDrop(entry, 'stale')
+    if (current) this.inFlight.delete(entry.key)
+    this.deliver(entry, entry.state.stored)
+  }
+
+  /**
+   * An invalidation — a wake, or a new connection generation — superseded this
+   * read before anything newer landed. Its payload must never become the
+   * query's state: that is exactly how a pre-reset response would be handed to
+   * a post-reset reader. Waiters move to the read that took its place; when the
+   * wake left none — its own listener may sit on a narrower scope, or the
+   * surface may already be gone — the layer issues that replacement itself, so
+   * the invalidation still ends in fresh data rather than a failure.
+   */
+  private deliverSuperseded(entry: InFlight, current: boolean): void {
+    entry.state.counters.droppedSuperseded += 1
+    this.logDrop(entry, 'superseded')
+    if (current) this.inFlight.delete(entry.key)
+    const target = this.inFlight.get(entry.key)
+    if (target !== undefined && target !== entry) {
+      if (target.outcome !== undefined) this.deliver(entry, target.outcome)
+      else target.waiters.push(...entry.waiters.splice(0, entry.waiters.length))
+      return
+    }
+    if (!this.disposed) {
+      const retry = this.issue(entry.state.identity, entry.load)
+      retry.waiters.push(...entry.waiters.splice(0, entry.waiters.length))
+      return
+    }
+    this.deliver(entry, entry.state.stored)
+  }
+
+  /** Counters and identity only; response bodies never reach the log. */
+  private logDrop(entry: InFlight, reason: 'stale' | 'superseded'): void {
+    console.info('[agent-team] stale read response dropped', { query: entry.key, issuance: entry.issuance, landed: entry.state.applied, reason })
   }
 
   private deliver(entry: InFlight, outcome: Outcome | undefined): void {

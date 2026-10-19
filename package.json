@@ -141,6 +141,10 @@
       "types": "./packages/agent-team/lib/types/mentions.d.ts",
       "default": "./packages/agent-team/lib/mentions.js"
     },
+    "./human-settings": {
+      "types": "./packages/agent-team/lib/types/human-settings.d.ts",
+      "default": "./packages/agent-team/lib/human-settings.js"
+    },
     "./member-skills": {
       "types": "./packages/agent-team/lib/types/member-skills.d.ts",
       "default": "./packages/agent-team/lib/member-skills.js"

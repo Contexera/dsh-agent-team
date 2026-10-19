@@ -90,22 +90,30 @@ export function evaluateEnvironment(
     return Object.freeze({ ...base, verdict: 'undetermined', reason: unavailable ?? 'the running dsh version is unavailable' })
   }
   const running = { ...base, dshVersion: runtimeVersion }
-  // A real violation is answered first, and it is never downgraded to
-  // `undetermined`: a peer that drifted to a range of its own is a genuine
-  // "not satisfied" even though no single range can then be stated for the
-  // page. Only when nothing is violated does the question become whether the
-  // declared line can be stated at all.
-  // One evaluation covers every dsh peer in the manifest, and `range` above is
-  // derived from exactly those peers: re-judging the range it prints could not
-  // change this answer.
-  const satisfied = evaluatePluginCompatibility(manifest, {}, runtimeVersion) === undefined
-  if (!satisfied) return Object.freeze({ ...running, verdict: 'out-of-range' })
-  // Nothing is violated but there is no line to state: the page withholds the
-  // range rather than inventing one.
-  if (range === undefined) {
-    return Object.freeze({ ...base, verdict: 'undetermined', reason: 'the declared dsh support range is unreadable or drifted' })
-  }
-  return Object.freeze({ ...running, verdict: 'ok' })
+  const verdict = verdictFor({ manifest, runtimeVersion, range })
+  return Object.freeze(verdict.verdict === 'undetermined' ? { ...base, ...verdict } : { ...running, ...verdict })
+}
+
+/**
+ * The verdict for a known running version, and the reason when there is no
+ * verdict to state.
+ *
+ * One evaluation covers every dsh peer in the manifest, and `range` is derived
+ * from exactly those peers: re-judging the range this prints could not change
+ * the answer. A real violation is answered first, and it is never downgraded to
+ * `undetermined` — a peer that drifted to a range of its own is a genuine "not
+ * satisfied" even though no single range can then be stated for the page. Only
+ * when nothing is violated does the question become whether the declared line
+ * can be stated at all.
+ */
+function verdictFor(input: {
+  readonly manifest: object
+  readonly runtimeVersion: string
+  readonly range: AgentTeamEnvironmentSupportRange | undefined
+}): { readonly verdict: AgentTeamEnvironmentVerdict; readonly reason?: string | undefined } {
+  if (evaluatePluginCompatibility(input.manifest, {}, input.runtimeVersion) !== undefined) return { verdict: 'out-of-range' }
+  if (input.range === undefined) return { verdict: 'undetermined', reason: 'the declared dsh support range is unreadable or drifted' }
+  return { verdict: 'ok' }
 }
 
 /**

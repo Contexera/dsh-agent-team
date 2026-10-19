@@ -1,11 +1,30 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { IconAgentPresetOutlineRegular, IconChevronLeftOutlineMedium, IconChevronLeftOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AgentTeamAddMemberRequest } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamAddMemberRequest, AgentTeamInbox } from '@contexera/dsh-agent-team/types'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamWorkspaceSelector } from './TeamWorkspaceSelector.tsx'
 import { TeamAgentsPanel } from './TeamAgentsPanel.tsx'
 import { TeamChannelsPanel } from './TeamChannelsPanel.tsx'
 import css from './sidebar.module.css'
+
+/**
+ * Inbox totals per Workspace, carrying the last good value across failed
+ * refreshes: a read that did not land must never fold into zero and read as
+ * "no unread". Recovery overwrites the kept value — a failure freezes nothing —
+ * and the read layer's per-key failed counter is where the failure stays
+ * inspectable; the badge gains no new visual state for it.
+ */
+function mergeInboxTotals(
+  results: readonly { readonly workspaceId: string; readonly result: RemoteResult<AgentTeamInbox> }[],
+  previous: ReadonlyMap<string, number>,
+): Map<string, number> {
+  const totals = new Map<string, number>()
+  for (const { workspaceId, result } of results) {
+    totals.set(workspaceId, result.ok ? result.value.totalUnreadCount : previous.get(workspaceId) ?? 0)
+  }
+  return totals
+}
 
 type SidebarSection = 'channels' | 'agents'
 
@@ -67,15 +86,7 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
         result: await loadInbox({ workspaceId: workspace.workspaceId, limit: 1 }),
       })))
       if (disposed) return
-      // A failed refresh keeps that Workspace's last successful total: a read
-      // that did not land must never fold into zero and read as "no unread".
-      // Recovery overwrites the kept value — a failure freezes nothing — and the
-      // read layer's per-key failed counter is where the failure stays
-      // inspectable; the badge gains no new visual state for it.
-      const totals = new Map<string, number>()
-      for (const { workspaceId, result } of results) {
-        totals.set(workspaceId, result.ok ? result.value.totalUnreadCount : keptTotalsRef.current.get(workspaceId) ?? 0)
-      }
+      const totals = mergeInboxTotals(results, keptTotalsRef.current)
       keptTotalsRef.current = totals
       setInboxTotal([...totals.values()].reduce((sum, total) => sum + total, 0))
     }

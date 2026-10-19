@@ -9,9 +9,9 @@ import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import * as Persona from '@deepseek-ai/dsh-persona'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import { HUMAN_PROFILE_SETTINGS_NAMESPACE, HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
+import { HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA } from '../src/index.ts'
-// @ts-expect-error untyped shared resolution module
 import { dshPeerRanges } from '../../../scripts/dsh-peers.mjs'
 
 const root = resolve(import.meta.dirname, '../../../')

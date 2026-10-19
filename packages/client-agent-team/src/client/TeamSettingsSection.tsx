@@ -5,6 +5,7 @@ import {
   SettingsForm, SettingsSecretField, SettingsValueField, type SettingsFieldState,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
+import { HUMAN_AVATAR_MAX_BYTES } from '@contexera/dsh-agent-team/human-settings'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
@@ -26,9 +27,6 @@ import css from './team-settings.module.css'
  * other's fields, and a failed write in either keeps the typed value and
  * reports the reason it was refused.
  */
-
-/** Host-side avatar ceiling (`ATTACHMENT_MAX_BYTES`): the settings page refuses larger files before the round trip. */
-const AVATAR_MAX_BYTES = 10 * 1024 * 1024
 
 export interface TeamSettingsInjected {
   /** The shared Human identity projection: profile facts plus post-write refresh. */
@@ -74,30 +72,37 @@ function avatarInitial(name: string | undefined): string {
   return trimmed === '' ? 'H' : trimmed.slice(0, 1).toUpperCase()
 }
 
+/**
+ * The name field's own state: follow the Host value, or a text the reader is
+ * editing. `follow` lets the field re-sync whenever the profile changes
+ * underneath, without a background read clobbering an in-progress edit.
+ */
+type NameDraft =
+  | { readonly kind: 'follow' }
+  | { readonly kind: 'editing'; readonly text: string }
+
+/** Observe the judge's endpoint form, which may arrive after the props were computed. */
+function useObservedJudgeForm(source: TeamJudgeFormSource): TeamJudgeForm | undefined {
+  // A slot entry's injected props are cached for the entry's lifetime, while
+  // the settings service this form is built over can arrive later, so the page
+  // has to observe the seat rather than receive a frozen value.
+  return useSyncExternalStore(source.subscribe, source.getSnapshot)
+}
+
 export function TeamSettingsSection(props: TeamSettingsProps) {
   const { t, identity } = props
   const profile = useHumanIdentity(identity)
-  // The endpoint form is observed rather than received: the settings service it
-  // is built over can arrive after this entry's injected props were computed,
-  // and those props are cached for the entry's lifetime, so a value handed over
-  // once would never appear.
-  const judgeForm = useSyncExternalStore(props.judgeForm.subscribe, props.judgeForm.getSnapshot)
-  // Undefined means "follow the Host value": the field re-syncs whenever the
-  // profile changes underneath, without a background read clobbering a name
-  // the reader is still editing.
-  const [draft, setDraft] = useState<string | undefined>(undefined)
+  const judgeForm = useObservedJudgeForm(props.judgeForm)
+  const [draft, setDraft] = useState<NameDraft>({ kind: 'follow' })
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const filePicker = useRef<HTMLInputElement | null>(null)
 
-  const name = draft ?? profile.name ?? ''
-  const dirty = draft !== undefined && draft.trim() !== (profile.name ?? '')
-  const emptyName = draft !== undefined && draft.trim() === ''
+  const name = draft.kind === 'editing' ? draft.text : profile.name ?? ''
+  const dirty = draft.kind === 'editing' && draft.text.trim() !== (profile.name ?? '')
+  const emptyName = draft.kind === 'editing' && draft.text.trim() === ''
   const hasAvatar = profile.avatarRef !== undefined
-  // The circle answers to decoded bytes, not to a stored reference: the Host
-  // accepts any `image/…` payload, so a file this browser cannot read has to
-  // fall back to the initial exactly as a removed one does.
   const avatar = useAvatarImage(profile.avatarUrl)
 
   const submitName = async (): Promise<void> => {
@@ -110,7 +115,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
       setNotice(t('humanSettingsNameFailed', { message: failure }))
       return
     }
-    setDraft(undefined)
+    setDraft({ kind: 'follow' })
   }
 
   const pickAvatar = async (file: File | undefined): Promise<void> => {
@@ -120,7 +125,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
       setNotice(t('humanSettingsAvatarNotImage'))
       return
     }
-    if (file.size > AVATAR_MAX_BYTES) {
+    if (file.size > HUMAN_AVATAR_MAX_BYTES) {
       setNotice(t('humanSettingsAvatarTooLarge'))
       return
     }
@@ -183,7 +188,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
             aria-invalid={emptyName || undefined}
             value={name}
             disabled={saving}
-            onChange={(event) => { setDraft(event.target.value) }}
+            onChange={(event) => { setDraft({ kind: 'editing', text: event.target.value }) }}
           />
           <Button type="submit" variant="primary" disabled={saving || !dirty || emptyName}>
             {saving ? t('humanSettingsSaving') : t('humanSettingsSave')}
@@ -196,9 +201,9 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
           <div className={css.desc}>{t('humanSettingsAvatarHint')}</div>
         </div>
         <div className={css.controls}>
-          {avatar.src === undefined
+          {avatar.image.kind === 'initial'
             ? <span className={`${css.identity} ${css.identityFallback}`} data-avatar="initial" aria-hidden="true">{avatarInitial(profile.name)}</span>
-            : <img className={`${css.identity} ${css.identityImage}`} data-avatar="image" src={avatar.src} alt="" onError={avatar.failed} />}
+            : <img className={`${css.identity} ${css.identityImage}`} data-avatar="image" src={avatar.image.src} alt="" onError={avatar.failed} />}
           <input
             ref={filePicker}
             type="file"
@@ -239,7 +244,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
       <span>{t('humanSettingsVersion', { version: profile.version ?? '' })}</span>
       <span aria-hidden="true">·</span>
       <a className={css.link} href={profile.repoUrl ?? ''} target="_blank" rel="noreferrer">GitHub</a>
-      {profile.updateAvailable && profile.latestVersion !== undefined
+      {profile.latestVersion !== undefined
         ? <a
             className={css.link}
             href={`${profile.repoUrl ?? ''}/releases`}

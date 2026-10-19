@@ -24,7 +24,6 @@ const PROFILE = {
   name: 'Ada',
   version: '0.1.13',
   repoUrl: 'https://github.com/Contexera/dsh-agent-team',
-  updateAvailable: false,
 }
 
 /** One identity store over a fake Remote pair: the page's real read path. */

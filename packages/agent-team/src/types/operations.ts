@@ -63,24 +63,25 @@ export interface AgentTeamMemberResumedOperation extends AgentTeamOperationBase 
 }
 
 /**
- * Durable archival of one Agent Member: the Member leaves every surface while
- * its Session log and private memory stay recoverable. Like removal, the
- * operation records the full cleanup snapshot — released Claims, public
- * release Activities, and the Member's Inbox delta — so replay recomputes the
- * same projection without runtime state.
+ * The departure facts every releasing operation persists: the Claims it
+ * released, the public release Activities, the Tasks and Threads those touched,
+ * and the Inbox delta the release consumed. Replay recomputes the projection
+ * from these alone, without runtime state.
  */
+export interface AgentTeamReleaseSnapshot {
+  /** Claims released by this operation. */
+  readonly claims: readonly AgentTeamClaim[]
+  /** Public release summaries for the affected Threads. */
+  readonly activities: readonly AgentTeamClaimsReleasedActivity[]
+  readonly tasks: readonly AgentTeamTask[]
+  readonly threads: readonly AgentTeamThread[]
+  readonly inbox: AgentTeamInboxDelta
+}
+
+/** Durable archival of one Agent Member: the Member leaves every surface while its Session log and private memory stay recoverable. */
 export interface AgentTeamMemberArchivedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-archived'
-  readonly data: {
-    readonly member: AgentTeamAgentMember
-    /** Claims released because this Member became hidden. */
-    readonly claims: readonly AgentTeamClaim[]
-    /** Public release summaries for the affected Threads. */
-    readonly activities: readonly AgentTeamClaimsReleasedActivity[]
-    readonly tasks: readonly AgentTeamTask[]
-    readonly threads: readonly AgentTeamThread[]
-    readonly inbox: AgentTeamInboxDelta
-  }
+  readonly data: { readonly member: AgentTeamAgentMember } & AgentTeamReleaseSnapshot
 }
 
 /**
@@ -183,12 +184,7 @@ export interface AgentTeamChannelMemberRemovedOperation extends AgentTeamOperati
     readonly workspaceId: WorkspaceId
     readonly channelRef: AgentTeamChannelRef
     readonly memberId: AgentTeamMemberId
-    readonly claims: readonly AgentTeamClaim[]
-    readonly activities: readonly AgentTeamClaimsReleasedActivity[]
-    readonly tasks: readonly AgentTeamTask[]
-    readonly threads: readonly AgentTeamThread[]
-    readonly inbox: AgentTeamInboxDelta
-  }
+  } & AgentTeamReleaseSnapshot
 }
 
 /**
@@ -219,12 +215,7 @@ export interface AgentTeamMemberWorkspaceLeftOperation extends AgentTeamOperatio
   readonly data: {
     readonly workspaceId: WorkspaceId
     readonly memberId: AgentTeamMemberId
-    readonly claims: readonly AgentTeamClaim[]
-    readonly activities: readonly AgentTeamClaimsReleasedActivity[]
-    readonly tasks: readonly AgentTeamTask[]
-    readonly threads: readonly AgentTeamThread[]
-    readonly inbox: AgentTeamInboxDelta
-  }
+  } & AgentTeamReleaseSnapshot
 }
 
 /**
@@ -239,12 +230,7 @@ export interface AgentTeamChannelArchivedOperation extends AgentTeamOperationBas
   readonly data: {
     readonly workspaceId: WorkspaceId
     readonly channel: AgentTeamChannel
-    readonly claims: readonly AgentTeamClaim[]
-    readonly activities: readonly AgentTeamClaimsReleasedActivity[]
-    readonly tasks: readonly AgentTeamTask[]
-    readonly threads: readonly AgentTeamThread[]
-    readonly inbox: AgentTeamInboxDelta
-  }
+  } & AgentTeamReleaseSnapshot
 }
 
 /** Durable top-level Message, Thread, optional Task, and initial inbox facts. */
@@ -387,14 +373,7 @@ export interface AgentTeamThreadReadOperation extends AgentTeamOperationBase {
 /** Durable irreversible Member removal and global inbox cleanup. */
 export interface AgentTeamMemberRemovedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-removed'
-  readonly data: {
-    readonly member: AgentTeamAgentMember
-    readonly claims: readonly AgentTeamClaim[]
-    readonly activities: readonly AgentTeamClaimsReleasedActivity[]
-    readonly tasks: readonly AgentTeamTask[]
-    readonly threads: readonly AgentTeamThread[]
-    readonly inbox: AgentTeamInboxDelta
-  }
+  readonly data: { readonly member: AgentTeamAgentMember } & AgentTeamReleaseSnapshot
 }
 
 /**

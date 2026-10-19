@@ -19,10 +19,10 @@ import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { bodyMentionsHuman, firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionNameOf, mentionNamesOf, mentionedMemberIds, taskStatusDot, type MentionHandle } from './team-formatters.ts'
+import { bodyMentionsHuman, firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionedMemberIds, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
-import { daySeparatorLabel, timelineDayKey } from './team-separators.ts'
+import { daySeparatorLabel, localDateKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames, type ThreadFactKey } from './thread-facts.ts'
@@ -629,7 +629,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         messageRef={fact.message.messageRef}
         {...(replyContexts.has(fact.message.messageRef) ? { replyTo: replyContexts.get(fact.message.messageRef)!, onOpenReplyTo: handleOpenReplyTo } : {})}
         onReply={handleReply}
-        rowActions
+        rowActions="always"
         replyTarget={replyTarget === fact.message.messageRef}
         replyFlash={flashedMessage === fact.message.messageRef}
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
@@ -658,7 +658,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     facts.forEach((fact, index) => {
       const occurredAt = fact.kind === 'message' ? fact.message.occurredAt : undefined
       if (occurredAt !== undefined) {
-        const day = timelineDayKey(occurredAt)
+        const day = localDateKey(occurredAt)
         if (lastDay !== undefined && day !== lastDay) {
           flushRun()
           nodes.push(<p className={threadCss.daySeparator} key={`day-${index}`}><span>{daySeparatorLabel(occurredAt)}</span></p>)

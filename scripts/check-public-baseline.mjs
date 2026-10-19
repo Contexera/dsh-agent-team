@@ -19,12 +19,12 @@
 //
 // The anchor rule — the same shape `check-version-consistency.mjs` applies to
 // these same README sentences, since one sentence read by two gates can only
-// fail as a union — is: the marker is the WHOLE phrase or clause that qualifies
-// the baseline, and the gap starts BEFORE its token, stays on one line, and
-// crosses no other inline-code span. Only prose after the marker is free; words
-// inserted inside the marker phrase stop the match. That last case is the
-// accepted cost of anchoring on the declaration, not a bug. Fix the pattern
-// together with the prose.
+// fail as a union — lives in `public-baseline-statement.mjs`: the marker is the
+// WHOLE phrase or clause that qualifies the baseline, and the token is the
+// first inline-code span after it, on the same line. Only prose after the
+// marker is free; words inserted inside the marker phrase stop the match. That
+// last case is the accepted cost of anchoring on the declaration, not a bug.
+// Fix the pattern together with the prose.
 //
 // Needs `gh` (authenticated) for the discussion body; `--offline` skips that
 // surface and is for local iteration only — never run it offline before a
@@ -36,6 +36,7 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { dshPeerRanges } from './dsh-peers.mjs'
+import { baselineStatement } from './public-baseline-statement.mjs'
 
 const args = process.argv.slice(2)
 const offline = args.includes('--offline')
@@ -59,19 +60,21 @@ const baseline = parsed?.[1] ?? ''
 console.log(`source of truth: peers ${peerRange}  ->  certified baseline ${baseline}   (package ${manifest.version})\n`)
 
 // ---- 2. Local surfaces ------------------------------------------------------
+// Local surfaces anchor on the certified-baseline declaration; `marker` is the
+// whole qualifying phrase, and `shown` renders the matched sentence for a human.
 const localSurfaces = [
   {
     name: 'README.md',
     file: 'README.md',
-    // "This release is certified against DSH `0.1.5-rc.1`."
-    pattern: /certified against DSH[^\n`]*`([^`]+)`/i,
+    // "This release is certified against DSH `0.2.0-rc.2`."
+    marker: 'certified against DSH',
     shown: value => `certified against DSH \`${value}\``,
   },
   {
     name: 'README.zh.md',
     file: 'README.zh.md',
-    // "当前版本已针对 DSH `0.1.5-rc.1` 完成认证。"
-    pattern: /针对 DSH[^\n`]*`([^`]+)`/,
+    // "当前版本已针对 DSH `0.2.0-rc.2` 完成认证。"
+    marker: '针对 DSH',
     shown: value => `针对 DSH \`${value}\` 完成认证`,
   },
 ]
@@ -84,13 +87,13 @@ for (const surface of localSurfaces) {
     fail(surface.name, `unreadable (${error.code ?? error.message})`)
     continue
   }
-  const hit = surface.pattern.exec(text)
-  if (!hit) {
-    fail(surface.name, `no certified-baseline statement matched ${surface.pattern} — surface silently dropped out of coverage, fix the pattern`)
+  const stated = baselineStatement(text, surface.marker)
+  if (stated === undefined) {
+    fail(surface.name, `no certified-baseline statement matched the \`${surface.marker}\` marker — surface silently dropped out of coverage, fix the marker together with the prose`)
     continue
   }
-  if (hit[1] !== baseline) fail(surface.name, `states \`${hit[1]}\`, expected \`${baseline}\` (found: ${surface.shown(hit[1])})`)
-  else console.log(`ok   ${surface.name.padEnd(14)} ${surface.shown(hit[1])}`)
+  if (stated !== baseline) fail(surface.name, `states \`${stated}\`, expected \`${baseline}\` (found: ${surface.shown(stated)})`)
+  else console.log(`ok   ${surface.name.padEnd(14)} ${surface.shown(stated)}`)
 }
 
 // ---- 3. The pinned compatibility discussion ---------------------------------

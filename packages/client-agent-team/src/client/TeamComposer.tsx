@@ -5,7 +5,7 @@ import { IconChecklistOutlineMedium, IconPaperclipOutlineMedium, IconSendOutline
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { MENTION_TIER, mentionSurfaceOf, mentionTierIsParticipant, type MentionTier } from './mention-presentation.ts'
+import { mentionSurfaceOf, mentionTierIsParticipant } from './mention-presentation.ts'
 import { allMentionMembers, containsAllMention, containsMention, HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
@@ -15,6 +15,17 @@ interface MentionMatch {
   readonly end: number
   readonly query: string
 }
+
+/**
+ * How directly a mention reaches a Member: `thread-follower` follows this
+ * Thread (a pick delivers at once), `channel-peer` takes part in the Channel
+ * but not this Thread, `workspace` is the rest. Ranking and row styling both
+ * read this, so the two can never disagree about which tier a Member is in.
+ */
+export type MentionTier = 'thread-follower' | 'channel-peer' | 'workspace'
+
+/** Sort precedence of one mention tier: lower sorts first. */
+const MENTION_TIER_RANK = { 'thread-follower': 0, 'channel-peer': 1, workspace: 2 } as const satisfies Record<MentionTier, number>
 
 /** One pickable row: the fixed @all expansion or one concrete member. */
 type MentionOption = { readonly kind: 'all' } | { readonly kind: 'member'; readonly status: AgentTeamClientMemberStatus; readonly tier: MentionTier }
@@ -48,18 +59,29 @@ function mentionCandidates(members: readonly AgentTeamClientMemberStatus[], quer
  */
 function mentionTier(status: AgentTeamClientMemberStatus, followers: ReadonlySet<AgentTeamMemberId> | undefined,
   channelPeers: ReadonlySet<AgentTeamMemberId> | undefined): MentionTier {
-  if (followers?.has(status.member.memberId) === true) return MENTION_TIER.follower
-  if (channelPeers?.has(status.member.memberId) === true) return MENTION_TIER.peer
-  return MENTION_TIER.other
+  if (followers?.has(status.member.memberId) === true) return 'thread-follower'
+  if (channelPeers?.has(status.member.memberId) === true) return 'channel-peer'
+  return 'workspace'
 }
 
 function rankMentionCandidates(candidates: readonly AgentTeamClientMemberStatus[], followers: ReadonlySet<AgentTeamMemberId> | undefined,
   channelPeers: ReadonlySet<AgentTeamMemberId> | undefined): readonly AgentTeamClientMemberStatus[] {
   if ((followers === undefined || followers.size === 0) && (channelPeers === undefined || channelPeers.size === 0)) return candidates
-  return [...candidates].sort((left, right) => mentionTier(left, followers, channelPeers) - mentionTier(right, followers, channelPeers))
+  return [...candidates].sort((left, right) => MENTION_TIER_RANK[mentionTier(left, followers, channelPeers)] - MENTION_TIER_RANK[mentionTier(right, followers, channelPeers)])
 }
 
-/** One object URL per draft file; revoked when the draft is removed. */
+/**
+ * The Message this send answers, with the author named when the parent resolved.
+ * The Human is excluded from delivery, so a quote naming them joins no notify row.
+ */
+export interface ReplyTarget {
+  /** Absent when the parent did not resolve and cannot name an author. */
+  readonly memberId?: AgentTeamMemberId
+  readonly senderName: string
+  readonly excerpt: string
+}
+
+/** One object URL per draft file; revoked when the draft file is removed. */
 const draftPreviewUrls = new WeakMap<File, string>()
 
 function draftPreviewUrl(file: File): string | undefined {
@@ -70,6 +92,30 @@ function draftPreviewUrl(file: File): string | undefined {
     draftPreviewUrls.set(file, url)
   }
   return url
+}
+
+function revokeDraftPreviewUrl(file: File): void {
+  const url = draftPreviewUrls.get(file)
+  if (url !== undefined) URL.revokeObjectURL(url)
+}
+
+/**
+ * Member ids one draft would notify: the picked recipients, the handles the body
+ * itself names, and the quoted author. The Human is the one author the Host
+ * never delivers to — they read the Thread directly and hold no session — so a
+ * quote of them (including the reader quoting themselves) joins no row.
+ */
+function deliverableRecipients(
+  recipients: ReadonlySet<AgentTeamMemberId>,
+  draft: string,
+  members: readonly AgentTeamClientMemberStatus[],
+  replyTo: ReplyTarget | undefined,
+): readonly AgentTeamMemberId[] {
+  return [...new Set<AgentTeamMemberId>([
+    ...recipients,
+    ...mentionedMemberIds(draft, members),
+    ...(replyTo?.memberId === undefined || replyTo.memberId === HUMAN_MEMBER_ID ? [] : [replyTo.memberId]),
+  ])].sort()
 }
 
 export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, asTask, onAsTaskChange, t }: {
@@ -97,16 +143,10 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   readonly pendingFiles?: readonly File[]
   readonly onFilesChange?: (files: readonly File[]) => void
   /**
-   * The Message this send answers. Present, the composer states what is being
-   * answered and offers a way out, because a reply the reader cannot cancel is
-   * a trap: the next Enter would quote something they had moved past.
-   *
-   * `memberId` is carried so the author joins the ordinary "will notify" row
-   * below instead of the banner declaring the delivery a second time: quoting
-   * is a mention, and one delivery reads once. It is absent when the parent did
-   * not resolve, which cannot name an author — the Host still delivers.
+   * The Message this send answers, with the author named when the parent
+   * resolved. The Human is the one author the Host never delivers to.
    */
-  readonly replyTo?: { readonly memberId?: AgentTeamMemberId; readonly senderName: string; readonly excerpt: string } | undefined
+  readonly replyTo?: ReplyTarget | undefined
   readonly onCancelReply?: (() => void) | undefined
   /** Channel-only: create a real Task with the top-level Message. Default off. */
   readonly asTask?: boolean
@@ -209,24 +249,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
     pruneRecipients(draft)
   }, [draft, recipients, members])
 
-  // The notify row reports what the Host will resolve from this draft, not just
-  // what the mention menu picked: an authored `@Handle` delivers exactly like a
-  // pick, and `@all` stands for the menu's expansion. A quote's author belongs
-  // here for the same reason — the Host merges them into the recipients — so
-  // answering someone reads as the one delivery it is.
-  //
-  // The Human is the one author the Host never delivers to, so they are the one
-  // author this row must never name: they read the Thread directly and hold no
-  // session, which is why the Host drops a quoted Human — and with them a
-  // Message the reader quotes from themselves — out of the recipient set
-  // entirely. Promising it here would name a delivery that never happens, and
-  // this composer always writes as the Human, so quoting their own Message
-  // would promise it to the one person reading the row.
-  const notifiedIds = [...new Set<AgentTeamMemberId>([
-    ...recipients,
-    ...mentionedMemberIds(draft, members),
-    ...(replyTo?.memberId === undefined || replyTo.memberId === HUMAN_MEMBER_ID ? [] : [replyTo.memberId]),
-  ])].sort()
+  const notifiedIds = deliverableRecipients(recipients, draft, members, replyTo)
 
   const updateMention = (nextDraft: string, caret: number): void => {
     const match = findMention(nextDraft, caret)
@@ -371,7 +394,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
                   onClick={() => { selectOption(option) }}
                   // How directly a pick reaches this Member; the row's styling
                   // and the sort order read the same tier.
-                  data-mention-tier={option.tier}
+                  data-mention-tier={MENTION_TIER_RANK[option.tier]}
                   // Whether the pick lands inside the conversation being
                   // written into; the name drops a weight when it does not.
                   data-mention-inside={String(mentionTierIsParticipant(option.tier, mentionSurface))}
@@ -411,8 +434,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
               <span className={css.fileChipName} title={file.name}>{file.name}<span className={css.fileChipSize}>{formatByteSize(file.size)}</span></span>
               <button type="button" className={css.fileChipRemove} aria-label={t('removeFile', { name: file.name })} disabled={pending}
                 onClick={() => {
-                  const url = draftPreviewUrls.get(file)
-                  if (url !== undefined) URL.revokeObjectURL(url)
+                  revokeDraftPreviewUrl(file)
                   onFilesChange(pendingFiles.filter((_, candidate) => candidate !== index))
                 }}>×</button>
             </li>

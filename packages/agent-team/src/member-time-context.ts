@@ -120,10 +120,14 @@ export function shouldSampleClock(step: number, now: number, baseline: ClockBase
   return baseline.lastTurnInjectionTime === null || now - baseline.lastTurnInjectionTime >= refreshIntervalMs
 }
 
+/** One interval as a duration to render; a non-monotonic clock reads as zero elapsed rather than negative. */
+function nonNegativeDuration(elapsedMs: number): number {
+  return Math.max(0, elapsedMs)
+}
+
 /** Render one durable clock snapshot text. @internal exported for tests. */
 export function renderClockSnapshot(input: { readonly now: number; readonly turn: number; readonly step: number; readonly previous: number | undefined }): string {
-  // A wall-clock rollback clamps elapsed to 0s without rewriting history.
-  const elapsed = input.previous === undefined ? 'unavailable' : formatTeamDuration(input.now - input.previous)
+  const elapsed = input.previous === undefined ? 'unavailable' : formatTeamDuration(nonNegativeDuration(input.now - input.previous))
   const baseline = input.step === 1 ? 'model-visible event' : 'step context'
   return `Team clock sampled while preparing turn ${input.turn}, step ${input.step}: ${formatTeamTimestamp(new Date(input.now).toISOString())}\n`
     + `Elapsed since the preceding ${baseline}: ${elapsed}.\n`

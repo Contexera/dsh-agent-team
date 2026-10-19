@@ -100,7 +100,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
   Member catalog 从内置集起始，内置集里有 `member-skill-manager` meta skill。全部 skill 写作/安装/credentials 引导都在这个 meta skill 里面。persona 只陈述私有空间物理事实。安装就是往 Member 自己的目录写。目录形态为 `skills/<name>/SKILL.md` 加可选 references/scripts，或平铺 `.md`。有意不提供上传 Remote，发现由 filesystem watcher 驱动。
 
-  `skills.allow` 通过 live selection ref 过滤 `list()` 输出。编辑与 tool 编辑在同一 turn 边界换过滤并失效 catalog。过滤是可见性语义，不是安全边界：两个 root 始终被扫描和 watch。Member remove 连同私有目录一起删除。suspend/resume 与 Host restart 恢复相同 catalog。
+  `skills.allow` 通过已挂载 provider 上的 live selection swap 过滤 `list()` 输出。编辑与 tool 编辑在同一 turn 边界换过滤并失效 catalog。过滤是可见性语义，不是安全边界：两个 root 始终被扫描和 watch。Member remove 连同私有目录一起删除。suspend/resume 与 Host restart 恢复相同 catalog。
 
 ## Host 服务面（`ctx.agentTeam`）
 

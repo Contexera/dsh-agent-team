@@ -1,6 +1,24 @@
 import { useState } from 'react'
 
 /**
+ * What one avatar seat should draw.
+ *
+ * `image` carries decoded-looking bytes to paint; `initial` means the seat must
+ * fall back to the name's initial, which is the case both when there is no URL
+ * at all and when the bytes failed to decode.
+ */
+export type AvatarImage =
+  | { readonly kind: 'image'; readonly src: string }
+  | { readonly kind: 'initial' }
+
+/** The seat's avatar decision plus the `<img>` fail signal that revises it. */
+export interface AvatarImageSeat {
+  readonly image: AvatarImage
+  /** Attach to the `<img>`'s `onError`: these bytes do not decode. */
+  readonly failed: () => void
+}
+
+/**
  * Whether one avatar URL actually draws.
  *
  * The Host accepts an avatar by declared media type — `sanitizeMediaType` only
@@ -13,18 +31,10 @@ import { useState } from 'react'
  * The record is keyed by URL: bytes that already failed keep the fallback, and
  * a new upload retries on its own because its data URL differs.
  */
-
-export interface AvatarImage {
-  /** The URL to draw, or `undefined` when the seat must fall back to the initial. */
-  readonly src: string | undefined
-  /** Attach to the `<img>`'s `onError`: these bytes do not decode. */
-  readonly failed: () => void
-}
-
-export function useAvatarImage(url: string | undefined): AvatarImage {
+export function useAvatarImage(url: string | undefined): AvatarImageSeat {
   const [broken, setBroken] = useState<string | undefined>(undefined)
   return {
-    src: url === undefined || url === broken ? undefined : url,
+    image: url === undefined || url === broken ? { kind: 'initial' } : { kind: 'image', src: url },
     failed: () => { if (url !== undefined) setBroken(url) },
   }
 }

@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { requestScopedUuid } from './request-scoped-id.ts'
+import { stableRequestUuid } from './request-scoped-id.ts'
 import { recoveryFor } from './recovery-hints.ts'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { AgentTeamAttachmentId } from './types.ts'
@@ -14,6 +14,13 @@ import type { AgentTeamAttachmentId } from './types.ts'
  * file (original sanitized name) plus a `meta.json` sidecar.
  */
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
+
+/**
+ * The sidecar every cache entry writes beside its payload. A client-supplied
+ * name that would collide with it is escaped by `sanitizeFileName`, so the
+ * sidecar is always ours; both spellings come from this one constant.
+ */
+const ATTACHMENT_SIDECAR_NAME = 'meta.json'
 /** Referenced uploads survive this long after upload for member consumption. */
 export const ATTACHMENT_REFERENCED_TTL_MS = 72 * 60 * 60 * 1000
 /** Unreferenced uploads (uploaded but never sent) are cleaned much sooner. */
@@ -34,12 +41,12 @@ export function newAttachmentId(): AgentTeamAttachmentId {
 
 /**
  * Request-stable cache identity for one upload of an idempotent request: see
- * [`requestScopedUuid`](./request-scoped-id.ts) for why the id is derived
+ * [`stableRequestUuid`](./request-scoped-id.ts) for why the id is derived
  * rather than fresh. `scope` separates several attachments prepared by one
  * request (path copies) from the request's upload itself.
  */
 export function requestScopedAttachmentId(requestId: string, scope?: string): AgentTeamAttachmentId {
-  return requestScopedUuid('attachment-request', requestId, scope) as AgentTeamAttachmentId
+  return stableRequestUuid('attachment-request', requestId, scope) as AgentTeamAttachmentId
 }
 
 /** The request-stable id of the `index`-th path copy one message or reply request prepares. */
@@ -58,7 +65,7 @@ export function sanitizeFileName(raw: string): string {
     .replace(/[\s.]+$/g, '')
   // oxlint-enable no-control-regex
   if (cleaned === '') return 'attachment'
-  if (/^meta\.json$/i.test(cleaned)) return `_${cleaned}`
+  if (cleaned.toLowerCase() === ATTACHMENT_SIDECAR_NAME) return `_${cleaned}`
   // Win32 CreateFile resolves these device names (with or without an
   // extension) as hardware, so the payload write would fail or alias a device.
   return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(cleaned) ? `_${cleaned}` : cleaned
@@ -85,16 +92,25 @@ export function mediaTypeForPath(raw: string): string {
 }
 
 /**
+ * Refuse one attachment, naming the subject the fault is about so the model can
+ * hand the same value back: every rejection states why it failed and the way
+ * out in one sentence.
+ */
+function refuseAttachment(subject: string, fault: string): never {
+  throw new Error(`attachment ${subject} ${fault} — ${recoveryFor('attachment_path_rejected').sentence({ refused: subject })}`)
+}
+
+/**
  * Validate one agent-supplied attachment path before any cache write happens,
  * so a rejection anywhere leaves the upload cache untouched.
  */
 export async function validatePathAttachment(raw: string): Promise<void> {
-  if (!isAbsolute(raw)) throw new Error(`attachment path '${raw}' must be absolute — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
+  if (!isAbsolute(raw)) refuseAttachment(`path '${raw}'`, 'must be absolute')
   const info = await stat(raw).catch(() => undefined)
-  if (info === undefined) throw new Error(`attachment path '${raw}' does not exist — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
-  if (!info.isFile()) throw new Error(`attachment path '${raw}' is not a regular file — ${recoveryFor('attachment_path_rejected').sentence({ refused: `path '${raw}'` })}`)
-  if (info.size === 0) throw new Error(`attachment '${basename(raw)}' must not be empty — ${recoveryFor('attachment_path_rejected').sentence({ refused: `'${basename(raw)}'` })}`)
-  if (info.size > ATTACHMENT_MAX_BYTES) throw new Error(`attachment '${basename(raw)}' exceeds the ${ATTACHMENT_MAX_BYTES} byte limit — ${recoveryFor('attachment_path_rejected').sentence({ refused: `'${basename(raw)}'` })}`)
+  if (info === undefined) refuseAttachment(`path '${raw}'`, 'does not exist')
+  if (!info.isFile()) refuseAttachment(`path '${raw}'`, 'is not a regular file')
+  if (info.size === 0) refuseAttachment(`'${basename(raw)}'`, 'must not be empty')
+  if (info.size > ATTACHMENT_MAX_BYTES) refuseAttachment(`'${basename(raw)}'`, `exceeds the ${ATTACHMENT_MAX_BYTES} byte limit`)
 }
 
 /**
@@ -156,7 +172,7 @@ export async function writeAttachment(root: string, attachmentId: AgentTeamAttac
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, name), bytes)
   const meta: AttachmentMeta = { name, mediaType, uploadedAt: new Date().toISOString() }
-  await writeFile(join(dir, 'meta.json'), JSON.stringify(meta), 'utf8')
+  await writeFile(join(dir, ATTACHMENT_SIDECAR_NAME), JSON.stringify(meta), 'utf8')
   return { attachmentId, path: join(dir, name), name, byteSize: bytes.byteLength, mediaType }
 }
 
@@ -173,13 +189,13 @@ export async function readAttachment(root: string, attachmentId: AgentTeamAttach
   const dir = attachmentDir(root, attachmentId)
   let metaRaw: Buffer
   try {
-    metaRaw = await readFile(join(dir, 'meta.json'))
+    metaRaw = await readFile(join(dir, ATTACHMENT_SIDECAR_NAME))
   } catch {
     return undefined
   }
   const meta = JSON.parse(metaRaw.toString('utf8')) as AttachmentMeta
   const entries = await readdir(dir)
-  const payload = entries.filter(entry => entry !== 'meta.json')[0]
+  const payload = entries.filter(entry => entry !== ATTACHMENT_SIDECAR_NAME)[0]
   if (payload === undefined) return undefined
   const bytes = await readFile(join(dir, payload))
   return { name: meta.name, mediaType: meta.mediaType, byteSize: bytes.byteLength, uploadedAt: meta.uploadedAt, bytes }
@@ -188,6 +204,17 @@ export async function readAttachment(root: string, attachmentId: AgentTeamAttach
 export interface CacheEntryScan {
   readonly attachmentId: AgentTeamAttachmentId
   readonly uploadedAt: number
+}
+
+/** Read one cache entry's sidecar; `undefined` for a half-written or foreign directory the sweep skips. */
+async function readCacheEntry(root: string, id: string): Promise<CacheEntryScan | undefined> {
+  try {
+    const metaRaw = await readFile(join(root, id, ATTACHMENT_SIDECAR_NAME))
+    const meta = JSON.parse(metaRaw.toString('utf8')) as AttachmentMeta
+    return { attachmentId: id as AgentTeamAttachmentId, uploadedAt: Date.parse(meta.uploadedAt) }
+  } catch {
+    return undefined
+  }
 }
 
 /** List every cache entry with its upload instant for the GC sweep. */
@@ -200,12 +227,8 @@ export async function scanAttachmentCache(root: string): Promise<readonly CacheE
   }
   const entries: CacheEntryScan[] = []
   for (const id of ids) {
-    try {
-      const metaRaw = await readFile(join(root, id, 'meta.json'))
-      const meta = JSON.parse(metaRaw.toString('utf8')) as AttachmentMeta
-      entries.push({ attachmentId: id as AgentTeamAttachmentId, uploadedAt: Date.parse(meta.uploadedAt) })
-    } catch {
-    }
+    const entry = await readCacheEntry(root, id)
+    if (entry !== undefined) entries.push(entry)
   }
   return entries
 }

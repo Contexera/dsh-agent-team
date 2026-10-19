@@ -38,7 +38,7 @@ export interface TeamHumanIdentitySnapshot {
   readonly version?: string | undefined
   /** Repository home the footnote links to. */
   readonly repoUrl?: string | undefined
-  readonly updateAvailable: boolean
+  /** A newer published release, when one is known; the footnote stays version + link until then. */
   readonly latestVersion?: string | undefined
   /** Last failure, kept beside the last accepted value so a page can report it. */
   readonly error?: string | undefined
@@ -62,7 +62,7 @@ export interface TeamHumanIdentityLoader {
   loadAvatarUrl: (avatarRef: string) => Promise<string | null>
 }
 
-const INITIAL: TeamHumanIdentitySnapshot = { status: 'loading', updateAvailable: false }
+const INITIAL: TeamHumanIdentitySnapshot = { status: 'loading' }
 
 export class TeamHumanIdentity implements TeamHumanIdentityFace {
   private snapshot: TeamHumanIdentitySnapshot = INITIAL
@@ -111,23 +111,17 @@ export class TeamHumanIdentity implements TeamHumanIdentityFace {
     try {
       const result = await this.loader.loadProfile()
       if (!result.ok) {
-        this.fail(result.error.message)
+        this.recordReadFailure(result.error.message)
         return
       }
       profile = result.value
     } catch (error) {
       // A dropped connection surfaces as a thrown carrier error, not a result:
       // both are read failures and both keep whatever value already stands.
-      this.fail(error instanceof Error ? error.message : String(error))
+      this.recordReadFailure(error instanceof Error ? error.message : String(error))
       return
     }
-    // Bytes are immutable per reference, so one fetch serves every later
-    // refresh that still carries the same avatar.
-    const avatarUrl = profile.avatarRef === undefined
-      ? undefined
-      : profile.avatarRef === this.snapshot.avatarRef && this.snapshot.avatarUrl !== undefined
-        ? this.snapshot.avatarUrl
-        : (await this.loader.loadAvatarUrl(profile.avatarRef)) ?? undefined
+    const avatarUrl = await this.avatarUrlFor(profile.avatarRef)
     this.commit({
       status: 'ready',
       name: profile.name,
@@ -135,9 +129,19 @@ export class TeamHumanIdentity implements TeamHumanIdentityFace {
       ...(avatarUrl === undefined ? {} : { avatarUrl }),
       version: profile.version,
       repoUrl: profile.repoUrl,
-      updateAvailable: profile.updateAvailable,
       ...(profile.latestVersion === undefined ? {} : { latestVersion: profile.latestVersion }),
     })
+  }
+
+  /**
+   * Bytes to draw for one avatar reference. Bytes are immutable per reference,
+   * so one fetch serves every later refresh that still carries the same avatar;
+   * nothing to resolve leaves the seat's fallback.
+   */
+  private async avatarUrlFor(avatarRef: string | undefined): Promise<string | undefined> {
+    if (avatarRef === undefined) return undefined
+    if (avatarRef === this.snapshot.avatarRef && this.snapshot.avatarUrl !== undefined) return this.snapshot.avatarUrl
+    return (await this.loader.loadAvatarUrl(avatarRef)) ?? undefined
   }
 
   /**
@@ -145,7 +149,7 @@ export class TeamHumanIdentity implements TeamHumanIdentityFace {
    * (the seats never blank out over a background read), and only an identity
    * that never loaded becomes `unavailable` — the state that offers a retry.
    */
-  private fail(message: string): void {
+  private recordReadFailure(message: string): void {
     const held = this.snapshot
     this.commit(held.name === undefined
       ? { ...held, status: 'unavailable', error: message }
