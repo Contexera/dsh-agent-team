@@ -293,11 +293,13 @@ describe('Agent Team member tool policy', () => {
       arguments: { cd: otherWorkspace }, agent,
     })
     // `tmpdir()` hands back the 8.3 short form on the windows lane
-    // (`RUNNER~1`), while the tool reports the directory it actually entered
-    // (`runneradmin`). Compare the resolved targets, so the assertion is about
-    // the directory and not about which spelling of it each side happens to
-    // hold.
-    expect(await realpath(entered.value.cwd)).toBe(await realpath(otherWorkspace))
+    // (`RUNNER~1`) while the tool reports the directory it entered under its
+    // long name (`runneradmin`), so the two spellings must not be compared as
+    // strings: the assertion is about which directory was entered, so both
+    // sides are resolved first.
+    const enteredCwd = (entered.value as { cwd?: string } | null)?.cwd
+    expect(enteredCwd).toBeTypeOf('string')
+    expect(await realpath(enteredCwd!)).toBe(await realpath(otherWorkspace))
     expect(await realpath(ctx.workingDirectory.get(agent.session)!)).toBe(await realpath(otherWorkspace))
   })
 
