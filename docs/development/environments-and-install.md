@@ -99,6 +99,8 @@ Local refs can be the only copy of what `master` does not contain: the `backup-p
 
 Before rewriting history — `reset --hard` over committed work, `rebase`, or an amend that abandons commits with unique content — park the current tip in a `backup-pre-<what>-<YYYYMMDD>` branch, or in a `git bundle` file when the refs themselves are about to be deleted. Without one, `git reflog` is the only anchor for the abandoned commits and `git gc` prunes unreachable objects; the 2026-09-12 rewrite of the 0.1.11 round created no backup ref, so only the reflog held the replaced commits.
 
+A rebase whose step list a script chooses fails silently. `GIT_SEQUENCE_EDITOR='sed -i …'` edits the todo by line number, and a commit's line there depends only on how many commits the range holds: a script written for one range shape marks the wrong commit once the range has another, and the rebase still succeeds. Folding commit 3 into commit 2 when you meant commit 4 exits zero and yields a plausible history. Select by subject, not position, then verify by content — each commit's diff must still belong to that commit alone.
+
 Before pushing, dry-run the exact refspec and require the output to name only the refs you intend to publish:
 
 ```sh

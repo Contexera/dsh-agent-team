@@ -85,6 +85,8 @@ dsh web
 
 重写历史之前，先把当前 tip 存成 `backup-pre-<说明>-<YYYYMMDD>` 分支。重写指对已提交内容 `reset --hard`、`rebase`，或会丢弃独占内容的 amend。若这一族 ref 本身要被删除，则先 `git bundle` 成单个文件。没有备份时，被弃 commit 的唯一锚点只剩 `git reflog`，而 `git gc` 会清掉不可达对象。2026-09-12 那次 0.1.11 打磨轮的重写没有建 backup ref。被替换的 commit 只在 reflog 里。
 
+用脚本挑选步骤的 rebase 会静默出错。`GIT_SEQUENCE_EDITOR='sed -i …'` 按行号改 todo，而某个 commit 在那里的行号只取决于这段范围有多少笔——所以按当时形状写下的脚本，换个范围就会标到另一个 commit 上，而 rebase 照样成功。本想把第四笔并进上一笔，实际把第三笔并进了第二笔，退出码是零，产出的历史看着也合理。按 subject 选行，不要按位置选，并按内容验结果：每个 commit 的 diff 必须仍只属于它自己。
+
 push 之前对确切 refspec 跑一次 dry-run，并要求输出里只有你打算发布的 ref：
 
 ```sh
