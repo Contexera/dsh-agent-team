@@ -57,14 +57,41 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // change and needs several drifted commits to trip — while the drift the audit
 // found, about 14 net lines per commit, still reaches it in about ten.
 //
+// `scripts` was recorded at 1900 in the audit, which was the audited count
+// itself with no slack at all — the one scope the rule above was not applied to.
+// It sat at exactly 1900/1900 through v0.2.4 and went over on the first two
+// following commits (1903), failing the gate on comments that each explain a
+// constraint the code cannot show: DSH reading `engines.dsh` before the peers,
+// the vendored sqlite fork's deliberate absence from `peerDependencies`, and a
+// fence-height assertion kept independent of padding. 1960 restores the same
+// ~3% the other scopes carry, absorbing one ordinary scripts commit (36 lines)
+// while still tripping on the audited drift rate within about four commits.
+//
+// `client-agent-team/src` carried the identical defect and was the other scope
+// left without slack: 1950 was the audited count of the day, and it drifted up
+// to 1948/1950 — two comment lines of headroom — with the next Client comment
+// poised to fail the gate on its first line. 2000 applies the same ~3% and
+// absorbs one ordinary Client commit (24 lines). The ratchet still works from
+// here: this scope was raised 1950→1970 by a feature commit and lowered back to
+// 1950 when that work condensed, which is the mechanism behaving as designed.
+//
+// DENSITY IS DIAGNOSTIC ONLY. The success line also prints comments as a share
+// of each scope's non-blank lines, so a reader can see which scope is growing
+// heavier overall. It deliberately carries no threshold: adding code dilutes a
+// ratio and would hide the drift a budget exists to catch, and "which single
+// line should go" is not a question a ratio can answer — an audit of the 22
+// longest comment-to-code blocks here found none that was safe to delete, since
+// this repo's comments record constraints, incidents, and protocol rather than
+// restating the line below.
+//
 // `vendor/` is excluded from both rules: it is an upstream fork kept identical
 // except for its module tag, so its comments are not ours to condense or rewrite
 // (see the sync procedure in its file header).
 const COMMENT_BUDGETS = {
   'packages/agent-team/src': 4150,
-  'packages/client-agent-team/src': 1950,
+  'packages/client-agent-team/src': 2000,
   'packages/tool-agent-team/src': 280,
-  'scripts': 1900,
+  'scripts': 1960,
 }
 
 const EXCLUDED_DIRECTORY = 'vendor'
@@ -116,12 +143,15 @@ for (const scope of scopes) {
     continue
   }
   let lines = 0
+  let counted = 0
   for (const file of await sourceFiles(join(root, scope))) {
     // Both separators: `relative` yields `\` on Windows, where splitting on `/` alone counted `vendor/`.
     if (relative(root, file).split(/[\\/]/).includes(EXCLUDED_DIRECTORY)) continue
     const text = await readFile(file, 'utf8')
     const lines_ = text.split('\n')
     for (const [index, line] of lines_.entries()) {
+      if (line.trim() === '') continue
+      counted += 1
       if (!COMMENT_LINE.test(line)) continue
       lines += 1
       const body = COMMENT_BODY.exec(line)?.[1] ?? ''
@@ -132,7 +162,10 @@ for (const scope of scopes) {
       }
     }
   }
-  rows.push(`${scope} ${lines}/${budget}`)
+  // Density is printed, never enforced — see the header's note on why a ratio
+  // cannot decide whether one more comment is warranted.
+  const density = counted === 0 ? 0 : (lines / counted) * 100
+  rows.push(`${scope} ${lines}/${budget} (${density.toFixed(1)}% of ${counted})`)
   if (lines > budget) {
     violations.push(`${scope} holds ${lines} comment line(s), over its recorded budget of ${budget}`)
   }

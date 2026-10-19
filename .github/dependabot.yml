@@ -4,11 +4,15 @@ updates:
   # `@deepseek-ai/*` is excluded on purpose: the DSH range is a certified
   # contract (docs/dsh-release-compatibility.md), moved only by a certification
   # round — never by an automated bump.
+  # Three at a time, not five. A batch here is reviewed as "run the suite, merge
+  # if green" — every PR touches only the manifest and the lockfile, and the last
+  # batch moved vitest 4 to 5 with the suite unchanged — so an extra round costs
+  # one test run, while a long queue costs skipped review.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     ignore:
       - dependency-name: "@deepseek-ai/*"
 

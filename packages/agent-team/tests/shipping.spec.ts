@@ -303,7 +303,7 @@ describe('Agent Team shipping contract', () => {
     // itself from the row's key, so its code has to be in the tree.
     expect(manifest.dependencies).toEqual({
       '@contexera/dsh-context-continuity': '^0.4.0',
-      '@contexera/dsh-jev': '^0.1.1',
+      '@contexera/dsh-jev': '^0.1.4',
       yaml: '^2.9.1',
       zod: '^4.4.3',
     })
