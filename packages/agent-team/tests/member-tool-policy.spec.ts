@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -292,8 +292,13 @@ describe('Agent Team member tool policy', () => {
       signal: new AbortController().signal, callId: ToolCallId('t15-cd'), name: 'working_directory',
       arguments: { cd: otherWorkspace }, agent,
     })
-    expect(entered.value).toEqual({ cwd: otherWorkspace })
-    expect(ctx.workingDirectory.get(agent.session)).toBe(otherWorkspace)
+    // `tmpdir()` hands back the 8.3 short form on the windows lane
+    // (`RUNNER~1`), while the tool reports the directory it actually entered
+    // (`runneradmin`). Compare the resolved targets, so the assertion is about
+    // the directory and not about which spelling of it each side happens to
+    // hold.
+    expect(await realpath(entered.value.cwd)).toBe(await realpath(otherWorkspace))
+    expect(await realpath(ctx.workingDirectory.get(agent.session)!)).toBe(await realpath(otherWorkspace))
   })
 
   it('drops unknown allow-list names at activation with a diagnostic warning digest', async () => {
