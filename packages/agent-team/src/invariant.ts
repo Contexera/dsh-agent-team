@@ -42,26 +42,34 @@ export class AgentTeamInvariantError extends Error {
  * @returns nothing; listeners and the pending check ride the plugin fiber.
  */
 export const apply = (ctx: Context): void => {
-  const divergence = (error: unknown): string =>
-    `durable ledger and Team projection diverged: ${String(error)}`
+  validateAtMount(ctx)
+  watchCommits(ctx)
+}
 
-  // Mounting stays synchronous: a durable ledger that cannot be re-derived
-  // must fail startup instead of racing the first commit. The mount adopts
-  // the record-level replay the constructor already ran, once and only while
-  // nothing has committed since; every later validation, and every
-  // commit-driven one below, replays the whole durable table.
+/**
+ * Mounting stays synchronous: a durable ledger that cannot be re-derived must
+ * fail startup instead of racing the first commit. The mount adopts the
+ * record-level replay the constructor already ran, once and only while nothing
+ * has committed since; every later validation, and every commit-driven one,
+ * replays the whole durable table.
+ */
+function validateAtMount(ctx: Context): void {
   try {
     ctx.agentTeam.validateLedgerAtMount()
   } catch (error) {
-    throw new AgentTeamInvariantError(divergence(error))
+    throw new AgentTeamInvariantError(divergenceText(error))
   }
+}
 
-  // The commit path cannot pay a full replay before its Remote response
-  // returns, and opening a Thread commits. The replay stays the same full one
-  // over the durable table, but commits coalesce into a single run in the
-  // check phase, after the I/O turn carrying the response. A divergence stays
-  // loud: it is logged where it is detected, and every later commit re-raises
-  // it on a caller-owned frame until a replay comes back clean.
+/**
+ * The commit path cannot pay a full replay before its Remote response returns,
+ * and opening a Thread commits. The replay stays the same full one over the
+ * durable table, but commits coalesce into a single run in the check phase,
+ * after the I/O turn carrying the response. A divergence stays loud: it is
+ * logged where it is detected, and every later commit re-raises it on a
+ * caller-owned frame until a replay comes back clean.
+ */
+function watchCommits(ctx: Context): void {
   let latched: string | undefined
   let pending: NodeJS.Immediate | undefined
   const check = (): void => {
@@ -70,7 +78,7 @@ export const apply = (ctx: Context): void => {
       ctx.agentTeam.validateLedger()
       latched = undefined
     } catch (error) {
-      latched = divergence(error)
+      latched = divergenceText(error)
       ctx.logger.error(`agent-team: ${latched}`)
     }
   }
@@ -78,10 +86,21 @@ export const apply = (ctx: Context): void => {
     if (pending !== undefined) clearImmediate(pending)
     pending = undefined
   }, 'agent-team.invariant.pending-validation')
-  ctx.on('agent-team/committed', () => {
-    // Scheduled before the latch re-raises: a replay that comes back clean is
-    // what releases it.
+  const armProjectionRecheck = (): void => {
     if (pending === undefined) pending = setImmediate(check)
+  }
+  const raiseLatchedDivergence = (): void => {
     if (latched !== undefined) throw new AgentTeamInvariantError(latched)
+  }
+  ctx.on('agent-team/committed', () => {
+    // Order matters: only a replay that comes back clean releases the latch, so
+    // the recheck is armed before this call reports the divergence it holds.
+    armProjectionRecheck()
+    raiseLatchedDivergence()
   })
+}
+
+/** One string every invariant report identifies its divergence by. */
+function divergenceText(error: unknown): string {
+  return `durable ledger and Team projection diverged: ${String(error)}`
 }

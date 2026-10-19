@@ -22,6 +22,7 @@ import type {
   AgentTeamChannelMemberRemovedOperation,
   AgentTeamChannelRef,
   AgentTeamChannelUpdatedOperation,
+  AgentTeamReleaseSnapshot,
   AgentTeamContextCheckpointRef,
   AgentTeamClaim,
   AgentTeamClaimActivity,
@@ -371,6 +372,8 @@ interface Projection {
   readonly byRequest: Map<AgentTeamRequestId, AgentTeamOperation>
   readonly byOperation: Map<AgentTeamOperationId, AgentTeamOperation>
   readonly ordered: AgentTeamOperation[]
+  /** Committing instant per ledger sequence, so a fact's instant is a lookup rather than an index into `ordered`. */
+  readonly occurredAtBySequence: Map<number, string>
   readonly channels: Map<AgentTeamChannelRef, AgentTeamChannel>
   readonly members: Map<AgentTeamMemberId, AgentTeamAgentMember>
   /** Member ↔ Workspace participation relation: the Workspace authorization set, seeded by member-added with the Member's default Workspace. */
@@ -423,8 +426,25 @@ interface AgentTeamAttentionObservation {
   readonly action: 'follow' | 'unfollow'
 }
 
+/**
+ * Operation kinds whose durable record is history alone: they must replay, but
+ * they move no projection state, so replay skips them after indexing the
+ * operation itself. The predicate form is load-bearing — the exhaustiveness
+ * assert at the end of `applyTo` only accepts the kinds this excludes if the
+ * check narrows the operation itself, not merely its `kind`.
+ */
+const AUDIT_ONLY_KINDS = [
+  'team/member-session-restarted',
+  'team/member-context-cleared',
+  'team/dm-sent',
+] as const satisfies readonly AgentTeamOperation['kind'][]
+
+function isAuditOnlyOperation(operation: AgentTeamOperation): operation is Extract<AgentTeamOperation, { kind: typeof AUDIT_ONLY_KINDS[number] }> {
+  return (AUDIT_ONLY_KINDS as readonly string[]).includes(operation.kind)
+}
+
 function emptyProjection(): Projection {
-  return { byRequest: new Map(), byOperation: new Map(), ordered: [], channels: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
+  return { byRequest: new Map(), byOperation: new Map(), ordered: [], occurredAtBySequence: new Map(), channels: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
     claims: new Map(), tasks: new Map(), threads: new Map(), attention: new Map(), directMarkers: new Map(), activityMarkers: new Map(),
     orderedFacts: [], claimsByTask: new Map(), factsByThread: new Map(), channelRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
     messagesByRef: new Map(),
@@ -440,35 +460,21 @@ function assertUnhandledKind(operation: never): never {
 }
 
 /**
- * Opening-line preview for a Human Inbox row: the Thread anchor's first line,
- * trimmed, then capped at 120 characters with an explicit mark — the same bound
- * the Thread page applies to its Task title, so the row and the page it opens
- * never disagree about what a Thread is about.
+ * Opening-line gist: the first line, trimmed, then cut to `max` characters
+ * with an explicit mark.
  */
-function boundedInboxPreview(body: string): string {
+function boundedOpeningLine(body: string, max: number): string {
   const firstLine = body.split('\n', 1)[0]?.trim() ?? ''
-  return firstLine.length > 120 ? `${firstLine.slice(0, 119)}…` : firstLine
+  return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine
 }
 
 /**
- * Chip title for a resolved Thread ref: the same opening-line gist as the
- * Inbox preview, but capped at 40 characters — a chip shares its line with
- * prose, so the 120-character row bound would crowd the message out.
+ * The one-line gist bound shared by the Inbox row, the Task title the Thread page renders, and a quote's excerpt of its parent Message.
  */
-function boundedThreadTitle(body: string): string {
-  const firstLine = body.split('\n', 1)[0]?.trim() ?? ''
-  return firstLine.length > 40 ? `${firstLine.slice(0, 39)}…` : firstLine
-}
+const ONE_LINE_GIST_MAX_CHARACTERS = 120
 
-/**
- * Body gist for one quote block. Longer than a Thread title because a quote is
- * the reader's only handle on the parent Message: it must carry enough of the
- * opening line to be recognised, while still fitting one line in the bubble.
- */
-function boundedReplyExcerpt(body: string): string {
-  const firstLine = body.split('\n', 1)[0]?.trim() ?? ''
-  return firstLine.length > 120 ? `${firstLine.slice(0, 119)}…` : firstLine
-}
+/** A chip shares its line with prose, so the gist bound above would crowd the message out. */
+const THREAD_CHIP_TITLE_MAX_CHARACTERS = 40
 
 /**
  * How many Threads one Workspace's 「最近活跃」 slice may carry. It bounds what
@@ -606,7 +612,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ humanMemberId: request.humanMemberId }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.receipt(operation))
     })
   }
@@ -633,7 +639,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, channel, memberIds }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.channelResult(operation))
     })
   }
@@ -656,7 +662,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, channel }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.channelUpdateResult(operation))
     })
   }
@@ -691,7 +697,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ member, channelRefs }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.memberResult(operation))
     })
   }
@@ -731,7 +737,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ member }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.memberResult(operation))
     })
   }
@@ -767,7 +773,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ member, previousSessionId: prior.sessionId }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.memberResult(operation))
     })
   }
@@ -812,7 +818,7 @@ export class AgentTeamLedger {
         }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.memberResult(operation))
     })
   }
@@ -849,13 +855,13 @@ export class AgentTeamLedger {
 
   /**
    * The Thread a Task overlay lives on, or undefined for an unknown or
-   * archived-Channel Task. Read-only input for attributing claim-mutation
+   * non-visible-Channel Task. Read-only input for attributing claim-mutation
    * boundaries to the Thread whose context they entered.
    */
   threadForTask(taskRef: AgentTeamTaskRef): AgentTeamThreadRef | undefined {
     const task = this.state.tasks.get(taskRef)
     if (task === undefined) return undefined
-    return this.state.channels.get(task.channelRef)?.state === 'archived' ? undefined : task.threadRef
+    return this.visibleChannel(this.state.channels.get(task.channelRef)) === undefined ? undefined : task.threadRef
   }
 
   /**
@@ -889,7 +895,7 @@ export class AgentTeamLedger {
       if (claim.owner !== memberId || claim.state !== 'active') continue
       const task = this.state.tasks.get(claim.taskRef)
       if (task === undefined || task.resolution !== 'open') continue
-      if (this.state.channels.get(task.channelRef)?.state === 'archived') continue
+      if (this.visibleChannel(this.state.channels.get(task.channelRef)) === undefined) continue
       active.push(claim)
     }
     return active.sort((a, b) => a.claimRef.localeCompare(b.claimRef))
@@ -925,7 +931,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, memberId: member.memberId }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.workspaceJoinResult(operation))
     })
   }
@@ -968,7 +974,7 @@ export class AgentTeamLedger {
           claims: Object.freeze(releasedClaims), activities, tasks, threads, inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.workspaceLeaveResult(operation))
     })
   }
@@ -1009,7 +1015,7 @@ export class AgentTeamLedger {
           claims: Object.freeze(releasedClaims), activities, tasks, threads, inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.channelArchivalResult(operation))
     })
   }
@@ -1055,7 +1061,7 @@ export class AgentTeamLedger {
           ...(task === undefined ? {} : { task }), thread, inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.messageResult(operation))
     })
   }
@@ -1120,7 +1126,7 @@ export class AgentTeamLedger {
           mentions: delivered, message, ...(task === undefined ? {} : { task }), thread: nextThread, inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.replyResult(operation, undelivered))
     })
   }
@@ -1151,7 +1157,7 @@ export class AgentTeamLedger {
           activity, task, thread: nextThread, inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.promotionResult(operation))
     })
   }
@@ -1216,7 +1222,7 @@ export class AgentTeamLedger {
           activity, claim, task: nextTask, thread: nextThread, inbox }),
       }) as AgentTeamClaimChangedOperation
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.claimResult(operation))
     })
   }
@@ -1284,7 +1290,7 @@ export class AgentTeamLedger {
           activity, task: nextTask, thread: nextThread, claims: Object.freeze(claims), inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.taskResult(operation))
     })
   }
@@ -1317,7 +1323,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ member: nextMember, claims: Object.freeze(releasedClaims), activities, tasks, threads, inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       this.confirmations.clear()
       return this.committed(this.removalResult(operation))
     })
@@ -1358,7 +1364,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ member: nextMember, claims: Object.freeze(releasedClaims), activities, tasks, threads, inbox }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       this.confirmations.clear()
       return this.committed(this.archivalResult(operation))
     })
@@ -1386,7 +1392,7 @@ export class AgentTeamLedger {
             ...(task === undefined ? {} : { task }), thread, inbox: this.inboxDelta([attention]) }),
         })
         await this.table.put(operation.operationId, operation)
-        this.apply(operation)
+        this.applyAndAdvanceProjectionVersion(operation)
         return this.committed(this.attentionResult(operation))
       }
       if (current === undefined) throw new Error(`Member is already unfollowed from Thread '${thread.threadRef}'`)
@@ -1397,7 +1403,7 @@ export class AgentTeamLedger {
           ...(task === undefined ? {} : { task }), thread, inbox: this.inboxDelta([], [{ memberId: actor.memberId, threadRef: thread.threadRef }], [], this.directMarkersFor(actor.memberId, thread.threadRef)) }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.attentionResult(operation))
     })
   }
@@ -1431,7 +1437,7 @@ export class AgentTeamLedger {
           recipientMemberId: recipient.memberId, body }),
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.dmResult(operation))
     })
   }
@@ -1451,10 +1457,10 @@ export class AgentTeamLedger {
     for (let index = this.state.ordered.length - 1; index >= 0; index -= 1) {
       const operation = this.state.ordered[index]!
       if (operation.kind !== 'team/dm-sent' || operation.operationId === excluding) continue
-      const pair = operation.data.senderMemberId === sender.memberId && operation.data.recipientMemberId === recipientMemberId
-      const mirror = operation.data.senderMemberId === recipientMemberId && operation.data.recipientMemberId === sender.memberId
-      if (!pair && !mirror) continue
-      const direction = pair ? 'them → you' : 'you → them'
+      const sentByOther = operation.data.senderMemberId === sender.memberId && operation.data.recipientMemberId === recipientMemberId
+      const sentByReader = operation.data.senderMemberId === recipientMemberId && operation.data.recipientMemberId === sender.memberId
+      if (!sentByOther && !sentByReader) continue
+      const direction = sentByOther ? 'them → you' : 'you → them'
       const truncated = operation.data.body.length > 160 ? `${operation.data.body.slice(0, 160)}…` : operation.data.body
       return `(${direction}, at ${formatTeamTimestamp(operation.occurredAt)}) ${truncated}`
     }
@@ -1504,7 +1510,7 @@ export class AgentTeamLedger {
       if (channelRef === undefined) continue
       const channel = this.state.channels.get(channelRef)
       if (channel === undefined || !workspaceIds.includes(channel.workspaceId)) continue
-      if (channel.state === 'archived') continue
+      if (this.visibleChannel(channel) === undefined) continue
       const workspaceId = channel.workspaceId
       if (authorized.kind === 'member' && !this.isChannelMember(channelRef, authorized.memberId)) continue
       const unread = this.unreadFor(authorized.memberId, thread.threadRef)
@@ -1527,9 +1533,9 @@ export class AgentTeamLedger {
       channelName: candidate.channelName, ...(candidate.task === undefined ? {} : { task: candidate.task }),
       ...(candidate.taskNumber === undefined ? {} : { taskNumber: candidate.taskNumber }), thread: candidate.thread,
       unreadCount: candidate.unreadCount, directCount: candidate.directCount,
-      previewText: boundedInboxPreview(this.threadAnchor(candidate.thread.threadRef).body),
+      previewText: boundedOpeningLine(this.threadAnchor(candidate.thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
       newestSequence: candidate.newest.sequence, newestOccurredAt: candidate.newest.occurredAt,
-      newestActor: this.inboxActorFor(candidate.newest), claimOwners: this.liveClaimOwners(candidate.task),
+      newestActor: this.inboxActorFor(candidate.newest), liveClaimOwners: this.liveClaimOwners(candidate.task),
       ...(candidate.attention === undefined ? {} : { attention: candidate.attention }) }))
     const recent = authorized.kind === 'human'
       ? this.recentInboxItems(authorized.memberId, workspaceIds[0]!, unreadThreads, taskNumbers)
@@ -1600,9 +1606,7 @@ export class AgentTeamLedger {
       if (channelRef === undefined) continue
       const channel = this.state.channels.get(channelRef)
       if (channel === undefined || channel.workspaceId !== workspaceId) continue
-      // Archived Channels do not exist on Team API surfaces, so their Threads
-      // are no way back into work either — participation ends at archival.
-      if (channel.state === 'archived') continue
+      if (this.visibleChannel(channel) === undefined) continue
       const facts = this.state.factsByThread.get(thread.threadRef) ?? []
       const newest = facts.at(-1)
       if (newest === undefined) continue
@@ -1612,9 +1616,9 @@ export class AgentTeamLedger {
         channelName: this.state.channels.get(channelRef)?.name ?? '',
         ...(task === undefined ? {} : { task }), ...(taskNumber === undefined ? {} : { taskNumber }), thread,
         unreadCount: 0, directCount: 0,
-        previewText: boundedInboxPreview(this.threadAnchor(thread.threadRef).body),
+        previewText: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
         newestSequence: newest.sequence, newestOccurredAt: newest.occurredAt,
-        newestActor: this.inboxActorFor(newest), claimOwners: this.liveClaimOwners(task) }))
+        newestActor: this.inboxActorFor(newest), liveClaimOwners: this.liveClaimOwners(task) }))
     }
     recent.sort((left, right) => right.newestSequence - left.newestSequence || left.thread.threadRef.localeCompare(right.thread.threadRef))
     return Object.freeze(recent.slice(0, RECENT_INBOX_LIMIT))
@@ -1672,7 +1676,7 @@ export class AgentTeamLedger {
         ...this.operationBase(request, this.nextSequence()), kind: 'team/thread-read', data,
       })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       return Object.freeze({ value: Object.freeze({ receipt: this.receipt(operation), ...this.readPicture(prepared) }), committed: true })
     })
   }
@@ -1747,16 +1751,13 @@ export class AgentTeamLedger {
       const thread = key === undefined ? undefined : this.state.threads.get(key)
       const channelRef = thread === undefined ? undefined : this.channelRefForThread(thread.threadRef)
       const channel = channelRef === undefined ? undefined : this.state.channels.get(channelRef)
-      // Same archival rule as tasks: archived Channels do not exist on Team
-      // API surfaces, so their Threads stop resolving and message bodies
-      // render the refs as plain non-navigable text.
-      if (thread === undefined || channelRef === undefined || channel?.workspaceId !== workspaceId || channel?.state === 'archived') continue
+      if (thread === undefined || channelRef === undefined || channel?.workspaceId !== workspaceId || this.visibleChannel(channel) === undefined) continue
       const task = thread.taskRef === undefined ? undefined : this.state.tasks.get(thread.taskRef)
       resolved.push(Object.freeze({
         threadRef: thread.threadRef,
         channelRef,
         ...(task === undefined ? {} : { taskRef: task.taskRef, taskNumber: numbers.get(task.taskRef) ?? 0 }),
-        title: boundedThreadTitle(this.threadAnchor(thread.threadRef).body),
+        title: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, THREAD_CHIP_TITLE_MAX_CHARACTERS),
       }))
     }
     return resolved
@@ -1776,15 +1777,13 @@ export class AgentTeamLedger {
     for (const messageRef of messageRefs) {
       const message = this.state.messagesByRef.get(messageRef)
       if (message === undefined) continue
-      // Archived Channels stop existing on Team API surfaces, exactly as they
-      // do for Task and Thread refs, so their Messages stop resolving too.
       const channel = this.state.channels.get(message.channelRef)
-      if (channel?.workspaceId !== workspaceId || channel.state === 'archived') continue
+      if (this.visibleChannel(channel)?.workspaceId !== workspaceId) continue
       resolved.push(Object.freeze({
         messageRef: message.messageRef,
         threadRef: message.threadRef,
         sender: message.sender,
-        excerpt: boundedReplyExcerpt(message.body),
+        excerpt: boundedOpeningLine(message.body, ONE_LINE_GIST_MAX_CHARACTERS),
       }))
     }
     return resolved
@@ -1830,10 +1829,7 @@ export class AgentTeamLedger {
       const key = this.uniqueRefKey(this.state.tasks, taskRef, 'task')
       const task = key === undefined ? undefined : this.state.tasks.get(key)
       const channel = task === undefined ? undefined : this.state.channels.get(task.channelRef)
-      // Archived Channels do not exist on Team API surfaces: their Tasks stop
-      // resolving, so live message bodies render the refs as plain
-      // non-navigable text through the existing unknown-ref path.
-      if (task === undefined || channel?.workspaceId !== workspaceId || channel?.state === 'archived') continue
+      if (task === undefined || this.visibleChannel(channel)?.workspaceId !== workspaceId) continue
       resolved.push(Object.freeze({ taskRef: task.taskRef, channelRef: task.channelRef, threadRef: task.threadRef, taskNumber: numbers.get(task.taskRef) ?? 0 }))
     }
     return resolved
@@ -1868,7 +1864,7 @@ export class AgentTeamLedger {
       if (memberId !== undefined && !this.isChannelMember(channelRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Channel '${channelRef}'`)
     }
     const channels = [...this.state.channels.values()].filter(channel => channel.workspaceId === request.workspaceId
-      && channel.state !== 'archived'
+      && this.visibleChannel(channel) !== undefined
       && (memberId === undefined || this.isChannelMember(channel.channelRef, memberId)))
     const channelRefs = new Set(channels.map(channel => channel.channelRef))
     const before = request.cursor ?? this.state.ordered.length + 1
@@ -1938,7 +1934,7 @@ export class AgentTeamLedger {
       const task = thread.taskRef === undefined ? undefined : this.state.tasks.get(thread.taskRef)
       const facts = this.state.factsByThread.get(thread.threadRef) ?? []
       return Object.freeze({ message, mentions: fact.mentions, ...(task === undefined ? {} : { task, taskNumber: taskNumbers.get(task.taskRef) ?? 0 }), thread,
-        claimOwners: this.liveClaimOwners(task),
+        liveClaimOwners: this.liveClaimOwners(task),
         messageCount: this.state.messageCountByThread.get(thread.threadRef) ?? 0,
         lastActivityAt: facts.at(-1)?.occurredAt ?? '' })
     })
@@ -2174,7 +2170,7 @@ export class AgentTeamLedger {
   private replay(): void {
     const records = this.sortedRecords()
     this.validateRecords(records)
-    for (const [, operation] of records) this.apply(operation)
+    for (const [, operation] of records) this.applyAndAdvanceProjectionVersion(operation)
   }
 
   private validateRecords(records: readonly [AgentTeamOperationId, AgentTeamOperation][]): void {
@@ -2400,7 +2396,7 @@ export class AgentTeamLedger {
       }
       const expected = operation.data.action === 'follow'
         ? this.inboxDelta([this.followAttentionFrom(projection, operation.data.memberId, thread.threadRef)])
-        : this.inboxDelta([], [{ memberId: operation.data.memberId, threadRef: thread.threadRef }], [], this.directMarkersForFrom(projection, operation.data.memberId, thread.threadRef))
+        : this.inboxDelta([], [{ memberId: operation.data.memberId, threadRef: thread.threadRef }], [], this.frozenMarkerSnapshot(projection, operation.data.memberId, thread.threadRef))
       if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Attention projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs)
       return
@@ -2410,33 +2406,8 @@ export class AgentTeamLedger {
       const data = operation.data
       if (data.memberId !== operation.actor.memberId) throw new Error('Thread read has wrong actor')
       const target = threadReadTargetOf(data)
-      if (isThreadReadSnapshot(data)) {
-        // The pre-receipt form froze the whole picture, so its expected value
-        // is re-derived the same way it was written: from this record's prior
-        // projection only, never from the live one. That shape stays frozen —
-        // a field added after it, like the orientation count, is not compared
-        // here, because no stored legacy record carries it and inventing one
-        // would reject every upgrade of a ledger written before the field.
-        const expected = this.prepareReadFrom(projection, data.memberId, data.workspaceId, target)
-        const expectedData = Object.freeze({ workspaceId: data.workspaceId, memberId: data.memberId,
-          ...(expected.task === undefined ? {} : { task: expected.task }), thread: expected.thread, claims: expected.claims, anchor: expected.anchor,
-          anchorMentions: expected.anchorMentions, facts: expected.facts,
-          readThroughSequence: expected.readThroughSequence, remainingUnreadCount: expected.remainingUnreadCount,
-          ...(expected.attention === undefined ? {} : { attention: expected.attention }), inbox: expected.inbox })
-        if (!isDeepStrictEqual(data, expectedData)) throw new Error('invalid Thread read projection')
-      } else {
-        // A receipt claims progress and its Inbox delta, nothing else, so the
-        // independent derivation stops there too: the picture and the unread
-        // count left behind are projection state a replay re-derives for the
-        // surfaces that need them, not content of this record. The Task ref is
-        // derived rather than copied back, so a Task Thread read cannot drop
-        // the Task it belongs to and shrink its own claim unchecked.
-        const expected = this.prepareReadReceiptFrom(projection, data.memberId, data.workspaceId, target)
-        const expectedData = Object.freeze({ workspaceId: data.workspaceId, memberId: data.memberId, threadRef: data.threadRef,
-          ...(expected.task === undefined ? {} : { taskRef: expected.task.taskRef }),
-          readThroughSequence: expected.readThroughSequence, inbox: expected.inbox })
-        if (!isDeepStrictEqual(data, expectedData)) throw new Error('invalid Thread read receipt')
-      }
+      if (isThreadReadSnapshot(data)) this.validateLegacyThreadReadSnapshot(data, projection, target)
+      else this.validateThreadReadReceipt(data, projection, target)
       this.validateInboxDelta(data.inbox, projection, refs)
       return
     }
@@ -2796,7 +2767,15 @@ export class AgentTeamLedger {
       && channelWorkspaceId !== undefined && this.participatesInFrom(projection, memberId, channelWorkspaceId)
   }
 
-  private apply(operation: AgentTeamOperation): void {
+  /**
+   * Apply one committed operation to the live projection, then advance the
+   * version shared-projection consumers compare against — but only when the
+   * operation invalidated a scope somebody could refetch. Private read progress
+   * and audit-only records (`changeScopesOf` derives no scope for them) leave it
+   * where it was, so one Member's Thread read cannot make a parked Client
+   * believe that something it watches changed.
+   */
+  private applyAndAdvanceProjectionVersion(operation: AgentTeamOperation): void {
     this.applyTo(this.state, operation)
     const scopes = this.changeScopesOf(operation)
     if (scopes === undefined || scopes.length !== 0) this.projectionVersion = operation.sequence
@@ -2804,9 +2783,11 @@ export class AgentTeamLedger {
 
   private applyTo(target: Projection, operation: AgentTeamOperation): void {
     target.ordered.push(operation)
+    target.occurredAtBySequence.set(operation.sequence, operation.occurredAt)
     target.byRequest.set(operation.requestId, operation)
     target.byOperation.set(operation.operationId, operation)
     if (operation.kind === 'team/initialized') return
+    if (isAuditOnlyOperation(operation)) return
     if (operation.kind === 'team/channel-created') {
       target.channels.set(operation.data.channel.channelRef, operation.data.channel)
       target.memberships.set(operation.data.channel.channelRef, new Set(operation.data.memberIds))
@@ -2822,16 +2803,6 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/member-suspended' || operation.kind === 'team/member-resumed') {
       target.members.set(operation.data.member.memberId, operation.data.member)
-      return
-    }
-    if (operation.kind === 'team/member-session-restarted') {
-      // Audit-only: identity, transcript, and memory are untouched, so the
-      // projection deliberately does not change.
-      return
-    }
-    if (operation.kind === 'team/member-context-cleared') {
-      // Legacy audit-only marker: identity, memory path, and binding were
-      // untouched; the Host recreated the live Session empty under the same id.
       return
     }
     if (operation.kind === 'team/member-session-renewed') {
@@ -2940,7 +2911,7 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/claim-created' || operation.kind === 'team/claim-done' || operation.kind === 'team/claim-released') {
-      this.recordClaim(target, operation.data.claim)
+      this.upsertClaimKeepingPosition(target, operation.data.claim)
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       target.tasks.set(operation.data.task.taskRef, operation.data.task)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
@@ -2949,7 +2920,7 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/task-changed') {
-      for (const claim of operation.data.claims) this.recordClaim(target, claim)
+      for (const claim of operation.data.claims) this.upsertClaimKeepingPosition(target, claim)
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       target.tasks.set(operation.data.task.taskRef, operation.data.task)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
@@ -2962,39 +2933,43 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
-    if (operation.kind === 'team/dm-sent') {
-      // Audit-only: delivery is a transient runtime effect, so the durable
-      // projection deliberately does not change.
-      return
-    }
     assertUnhandledKind(operation)
   }
 
   /**
-   * Replay the departure snapshot a releasing operation carries. The order is
-   * replay semantics, not style: Claims land before the Activities that
-   * reference them, and Tasks/Threads before the inbox delta that reads them.
-   * Each caller still applies its own identifying writes (member, membership,
-   * channel) around this call.
+   * Replay the departure snapshot a releasing operation carries. The listed
+   * order is replay semantics: an Activity references a Claim, and the inbox
+   * delta reads the Tasks and Threads. Each caller still applies its own
+   * identifying writes (member, membership, channel) around this call.
    */
   private applyReleaseSnapshot(
     target: Projection,
     operation: AgentTeamOperation,
-    data: {
-      readonly claims: readonly AgentTeamClaim[]
-      readonly activities: readonly AgentTeamClaimsReleasedActivity[]
-      readonly tasks: readonly AgentTeamTask[]
-      readonly threads: readonly AgentTeamThread[]
-      readonly inbox: AgentTeamInboxDelta
-    },
+    data: AgentTeamReleaseSnapshot,
     occurredAt: string,
   ): void {
-    for (const claim of data.claims) this.recordClaim(target, claim)
-    for (const activity of data.activities) this.appendActivityFact(target, activity, occurredAt)
-    for (const task of data.tasks) target.tasks.set(task.taskRef, task)
-    for (const thread of data.threads) target.threads.set(thread.threadRef, thread)
-    this.recordAttentionObservations(target, operation, data.inbox)
-    this.applyInboxDelta(target, data.inbox)
+    this.applyReleasedClaims(target, data.claims)
+    this.applyReleasedActivities(target, data.activities, occurredAt)
+    this.applyReleasedTargets(target, data.tasks, data.threads)
+    this.applyReleasedInbox(target, operation, data.inbox)
+  }
+
+  private applyReleasedClaims(target: Projection, claims: readonly AgentTeamClaim[]): void {
+    for (const claim of claims) this.upsertClaimKeepingPosition(target, claim)
+  }
+
+  private applyReleasedActivities(target: Projection, activities: readonly AgentTeamClaimsReleasedActivity[], occurredAt: string): void {
+    for (const activity of activities) this.appendActivityFact(target, activity, occurredAt)
+  }
+
+  private applyReleasedTargets(target: Projection, tasks: readonly AgentTeamTask[], threads: readonly AgentTeamThread[]): void {
+    for (const task of tasks) target.tasks.set(task.taskRef, task)
+    for (const thread of threads) target.threads.set(thread.threadRef, thread)
+  }
+
+  private applyReleasedInbox(target: Projection, operation: AgentTeamOperation, inbox: AgentTeamInboxDelta): void {
+    this.recordAttentionObservations(target, operation, inbox)
+    this.applyInboxDelta(target, inbox)
   }
 
   /** Facts arrive in ledger sequence order, so global and per-thread lists stay sorted by append only. */
@@ -3035,34 +3010,66 @@ export class AgentTeamLedger {
     target.taskNumberByTask.set(task.taskRef, ordinal)
   }
 
-  private recordClaim(target: Projection, claim: AgentTeamClaim): void {
+  /** One shared bucket for a Task's Claims, created on first write. */
+  private claimBucketFor(target: Projection, taskRef: AgentTeamTaskRef): AgentTeamClaim[] {
+    const bucket = target.claimsByTask.get(taskRef)
+    if (bucket !== undefined) return bucket
+    const created: AgentTeamClaim[] = []
+    target.claimsByTask.set(taskRef, created)
+    return created
+  }
+
+  /**
+   * Write one Claim into the projection and its Task bucket, keeping the
+   * position a Claim already holds: read projections paginate by bucket order,
+   * so an update must not move its Claim to the end.
+   */
+  private upsertClaimKeepingPosition(target: Projection, claim: AgentTeamClaim): void {
     target.claims.set(claim.claimRef, claim)
-    const bucket = target.claimsByTask.get(claim.taskRef)
-    if (bucket === undefined) { target.claimsByTask.set(claim.taskRef, [claim]); return }
+    const bucket = this.claimBucketFor(target, claim.taskRef)
     const known = bucket.findIndex(entry => entry.claimRef === claim.claimRef)
     if (known === -1) bucket.push(claim); else bucket[known] = claim
   }
 
   /**
    * Replay-order Attention observations, appended from committed Inbox deltas
-   * only (the hypothetical read projection applies its delta directly). The
-   * follow/unfollow decision mirrors the full replay scan it replaces: a
-   * removal records only when Attention existed, and a set records unless it
-   * is the Thread-creating Message (initial Attention) or merely advances the
-   * same follow's watermark. Removals are evaluated before sets, exactly like
-   * the scan's loop order.
+   * only (the hypothetical read projection applies its delta directly).
+   *
+   * Removals are evaluated before sets, exactly like the scan's loop order. A
+   * removal records only when Attention existed, and a set records unless it is
+   * the Thread-creating Message (initial Attention) or merely advances the same
+   * follow's watermark.
    */
   private recordAttentionObservations(target: Projection, operation: AgentTeamOperation, delta: AgentTeamInboxDelta): void {
     if (delta.attention.removed.length === 0 && delta.attention.set.length === 0) return
+    const retired = this.recordUnfollowObservations(target, operation, delta.attention.removed)
+    this.recordFollowObservations(target, operation, delta.attention.set, retired)
+  }
+
+  /** Append one `unfollow` per removal that had Attention to end; returns the keys that ended. */
+  private recordUnfollowObservations(
+    target: Projection,
+    operation: AgentTeamOperation,
+    removed: AgentTeamInboxDelta['attention']['removed'],
+  ): ReadonlySet<string> {
     const retired = new Set<string>()
-    for (const key of delta.attention.removed) {
+    for (const key of removed) {
       retired.add(this.attentionKey(key.memberId, key.threadRef))
       if (!target.attention.has(this.attentionKey(key.memberId, key.threadRef))) continue
       this.appendObservation(target, key.threadRef, { sequence: operation.sequence, memberId: key.memberId, action: 'unfollow' })
     }
-    for (const next of delta.attention.set) {
-      const key = this.attentionKey(next.memberId, next.threadRef)
-      const prior = retired.has(key) ? undefined : target.attention.get(key)
+    return retired
+  }
+
+  /** Append one `follow` for each set that starts a new Attention rather than restating an existing one. */
+  private recordFollowObservations(
+    target: Projection,
+    operation: AgentTeamOperation,
+    set: AgentTeamInboxDelta['attention']['set'],
+    retired: ReadonlySet<string>,
+  ): void {
+    for (const next of set) {
+      const prior = retired.has(this.attentionKey(next.memberId, next.threadRef)) ? undefined : target.attention.get(this.attentionKey(next.memberId, next.threadRef))
       if (operation.kind === 'team/message-sent' || (prior !== undefined && prior.startSequence === next.startSequence)) continue
       this.appendObservation(target, next.threadRef, { sequence: operation.sequence, memberId: next.memberId, action: 'follow' })
     }
@@ -3182,7 +3189,7 @@ export class AgentTeamLedger {
       : [Object.freeze({ ...attention, readThroughSequence })]
     const consumedDirectMarkers = new Set(unreadFacts.flatMap(item => item.direct && item.fact.kind === 'message'
       ? [this.directMarkerKey({ memberId, threadRef: thread.threadRef, messageRef: item.fact.message.messageRef })] : []))
-    const consumed = this.directMarkersForFrom(projection, memberId, thread.threadRef)
+    const consumed = this.frozenMarkerSnapshot(projection, memberId, thread.threadRef)
       .filter(marker => consumedDirectMarkers.has(this.directMarkerKey(marker)))
     const activityMarkers = this.activityMarkersForFrom(projection, memberId, thread.threadRef)
       .filter(marker => unreadFacts.some(item => item.fact.kind === 'activity' && item.fact.activity.activityRef === marker.activityRef))
@@ -3243,7 +3250,7 @@ export class AgentTeamLedger {
 
   private unreadForFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamThreadReadFact[] {
     const attention = this.attentionForFrom(projection, memberId, threadRef)
-    const directKeys = new Set(this.directMarkersForFrom(projection, memberId, threadRef).map(marker => this.directMarkerKey(marker)))
+    const directKeys = new Set(this.frozenMarkerSnapshot(projection, memberId, threadRef).map(marker => this.directMarkerKey(marker)))
     const activityKeys = new Set(this.activityMarkersForFrom(projection, memberId, threadRef).map(marker => this.activityMarkerKey(marker)))
     const result: AgentTeamThreadReadFact[] = []
     for (const fact of this.threadFactsFrom(projection, threadRef)) {
@@ -3289,7 +3296,7 @@ export class AgentTeamLedger {
    */
   private remainingUnreadAfter(projection: Projection, memberId: AgentTeamMemberId, receipt: PreparedReadReceipt): number {
     const threadRef = receipt.thread.threadRef
-    const directKeys = new Set(this.directMarkersForFrom(projection, memberId, threadRef).map(marker => this.directMarkerKey(marker)))
+    const directKeys = new Set(this.frozenMarkerSnapshot(projection, memberId, threadRef).map(marker => this.directMarkerKey(marker)))
     for (const marker of receipt.inbox.directMarkers.removed) directKeys.delete(this.directMarkerKey(marker))
     for (const marker of receipt.inbox.directMarkers.added) directKeys.add(this.directMarkerKey(marker))
     const activityKeys = new Set(this.activityMarkersForFrom(projection, memberId, threadRef).map(marker => this.activityMarkerKey(marker)))
@@ -3315,14 +3322,49 @@ export class AgentTeamLedger {
     return projection.factsByThread.get(threadRef) ?? []
   }
 
+  /**
+   * Check a receipt against its own independent derivation: the progress it
+   * claims and the Inbox delta it consumed, nothing else. The picture and the
+   * unread count left behind are projection state a replay re-derives for the
+   * surfaces that need them, not content of this record. The Task ref is
+   * derived rather than copied back, so a Task Thread read cannot drop the Task
+   * it belongs to and shrink its own claim unchecked.
+   */
+  private validateThreadReadReceipt(
+    data: Extract<AgentTeamThreadReadData, { threadRef: AgentTeamThreadRef }>,
+    projection: Projection,
+    target: { readonly threadRef?: AgentTeamThreadRef | undefined; readonly taskRef?: AgentTeamTaskRef | undefined },
+  ): void {
+    const expected = this.prepareReadReceiptFrom(projection, data.memberId, data.workspaceId, target)
+    const expectedData = Object.freeze({ workspaceId: data.workspaceId, memberId: data.memberId, threadRef: data.threadRef,
+      ...(expected.task === undefined ? {} : { taskRef: expected.task.taskRef }),
+      readThroughSequence: expected.readThroughSequence, inbox: expected.inbox })
+    if (!isDeepStrictEqual(data, expectedData)) throw new Error('invalid Thread read receipt')
+  }
+
+  /**
+   * Check a pre-receipt snapshot against the same derivation that wrote it. That
+   * shape is frozen: a field added to a read afterwards, like the orientation
+   * count, is deliberately not compared, because no stored record carries it and
+   * expecting one would reject every ledger written before the field existed.
+   */
+  private validateLegacyThreadReadSnapshot(
+    data: AgentTeamThreadReadSnapshot,
+    projection: Projection,
+    target: { readonly threadRef?: AgentTeamThreadRef | undefined; readonly taskRef?: AgentTeamTaskRef | undefined },
+  ): void {
+    const expected = this.prepareReadFrom(projection, data.memberId, data.workspaceId, target)
+    const expectedData = Object.freeze({ workspaceId: data.workspaceId, memberId: data.memberId,
+      ...(expected.task === undefined ? {} : { task: expected.task }), thread: expected.thread, claims: expected.claims, anchor: expected.anchor,
+      anchorMentions: expected.anchorMentions, facts: expected.facts,
+      readThroughSequence: expected.readThroughSequence, remainingUnreadCount: expected.remainingUnreadCount,
+      ...(expected.attention === undefined ? {} : { attention: expected.attention }), inbox: expected.inbox })
+    if (!isDeepStrictEqual(data, expectedData)) throw new Error('invalid Thread read projection')
+  }
+
   private occurredAtForFactFrom(projection: Projection, sequence: number, fallback?: string | undefined): string {
     if (fallback !== undefined) return fallback
-    // Facts arrive in ledger sequence order and `ordered` is append-only, so
-    // the entry at index sequence - 1 is the committing operation. The index
-    // read is guarded for hypothetical projections whose prefix has not yet
-    // caught up; those callers always pass an explicit fallback instead.
-    const operation = projection.ordered[sequence - 1]
-    return operation?.occurredAt ?? ''
+    return projection.occurredAtBySequence.get(sequence) ?? ''
   }
 
   private messageInboxDelta(
@@ -3471,12 +3513,11 @@ export class AgentTeamLedger {
   }
 
   private directMarkersFor(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamDirectMarker[] {
-    return this.directMarkersForFrom(this.state, memberId, threadRef)
+    return this.frozenMarkerSnapshot(this.state, memberId, threadRef)
   }
 
-  private directMarkersForFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamDirectMarker[] {
-    // A frozen copy, not the live bucket: callers may hand the array to an
-    // Inbox delta that freezes it, which must not freeze the derived index.
+  /** One Member's live Inbox markers for one Thread, snapshotted so a caller cannot freeze the live bucket's array. */
+  private frozenMarkerSnapshot(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamDirectMarker[] {
     const markers = projection.directMarkersByMember.get(memberId)?.get(threadRef)
     return markers === undefined ? [] : Object.freeze([...markers])
   }
@@ -3546,17 +3587,29 @@ export class AgentTeamLedger {
   }
 
   private staleRevision(actorMemberId: AgentTeamMemberId, task: AgentTeamTask | undefined, thread: AgentTeamThread, expectedRevision: number): AgentTeamStaleRevision {
+    const relation = this.revisionRelationTo(thread, expectedRevision)
+    const staleTokenKind = relation === 'reached' ? undefined : relation === 'known-absent' ? 'unrecognized' : 'unknown'
     return Object.freeze({ kind: 'stale_revision', ...(task === undefined ? {} : { taskRef: task.taskRef }), threadRef: thread.threadRef,
       expectedRevision, revision: thread.revision,
-      ...(this.tokenNeverReached(thread, expectedRevision) ? { tokenUnrecognized: true } : {}),
+      ...(staleTokenKind === undefined ? {} : { staleTokenKind }),
       facts: this.factsAfter(actorMemberId, thread.threadRef, expectedRevision) })
   }
 
-  private tokenNeverReached(thread: AgentTeamThread, expectedRevision: number): boolean {
+  /**
+   * How the token a stale writer used relates to this Thread's revisions.
+   *
+   * `before-first-fact` is a token from before this Thread existed — the writer
+   * may simply have read it a moment too early. `known-absent` is a token this
+   * Thread's revisions skipped over: the writer copied it from another Thread or
+   * invented it, so the way out names that instead of pointing at facts that
+   * were never missed. `reached` means the revision really was a point this
+   * Thread passed, so the write is a plain race.
+   */
+  private revisionRelationTo(thread: AgentTeamThread, expectedRevision: number): 'before-first-fact' | 'known-absent' | 'reached' {
     const facts = this.threadFactsFrom(this.state, thread.threadRef)
     const first = facts[0]?.sequence
-    if (first === undefined || expectedRevision < first) return false
-    return !facts.some(fact => fact.sequence === expectedRevision)
+    if (first === undefined || expectedRevision < first) return 'before-first-fact'
+    return facts.some(fact => fact.sequence === expectedRevision) ? 'reached' : 'known-absent'
   }
 
   /**
@@ -3570,7 +3623,7 @@ export class AgentTeamLedger {
    */
   private factsAfter(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef, sequence: number): readonly AgentTeamThreadReadFact[] {
     const projection = this.state
-    const directKeys = new Set(this.directMarkersForFrom(projection, memberId, threadRef).map(marker => this.directMarkerKey(marker)))
+    const directKeys = new Set(this.frozenMarkerSnapshot(projection, memberId, threadRef).map(marker => this.directMarkerKey(marker)))
     const result: AgentTeamThreadReadFact[] = []
     for (const fact of this.threadFactsFrom(projection, threadRef)) {
       if (fact.sequence <= sequence) continue
@@ -3637,7 +3690,7 @@ export class AgentTeamLedger {
       rows.push({
         row: Object.freeze({ taskRef: task.taskRef, threadRef: thread.threadRef, channelRef: task.channelRef,
           ...(taskNumber === undefined ? {} : { taskNumber }), status: task.status,
-          subject: boundedInboxPreview(this.threadAnchor(thread.threadRef).body),
+          subject: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
           members: this.liveClaimOwners(task), lastActivityAt: newest.occurredAt }),
         sequence: newest.sequence,
       })
@@ -3657,8 +3710,6 @@ export class AgentTeamLedger {
   private threadForActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, workspaceId: WorkspaceId, taskRef: AgentTeamTaskRef): { readonly task: AgentTeamTask; readonly thread: AgentTeamThread } {
     const task = this.requireTask(workspaceId, taskRef)
     const thread = this.requireThread(task.threadRef)
-    // Archived Channels do not exist on Team API surfaces: their Tasks and
-    // Claims are unreachable for reads (listClaims) as for writes.
     this.assertThreadChannelActive(task.channelRef)
     if (actor.kind === 'member') this.requireMemberChannel(this.requireMember(actor.memberId), task.channelRef)
     return { task, thread }
@@ -3769,7 +3820,7 @@ export class AgentTeamLedger {
         ? Object.freeze({ ...this.operationBase(request, this.nextSequence()), kind: 'team/member-suspended', data: Object.freeze({ member: next }) })
         : Object.freeze({ ...this.operationBase(request, this.nextSequence()), kind: 'team/member-resumed', data: Object.freeze({ member: next }) })
       await this.table.put(operation.operationId, operation)
-      this.apply(operation)
+      this.applyAndAdvanceProjectionVersion(operation)
       this.confirmations.clear()
       return this.committed(this.memberResult(operation))
     })
@@ -3865,6 +3916,19 @@ export class AgentTeamLedger {
     return this.channelRefForThreadFrom(this.state, threadRef)
   }
 
+  /**
+   * The Channel one read resolves against, or undefined when it is not on Team
+   * read surfaces at all.
+   *
+   * Archival removes a Channel and everything it owns from every read: its
+   * Threads, Tasks, Claims, and Messages stop resolving, and participation ends
+   * with it. This is the single definition of that rule for reads; writes use
+   * `requireActiveChannel`, and Thread-scoped writes `assertThreadChannelActive`.
+   */
+  private visibleChannel(channel: AgentTeamChannel | undefined): AgentTeamChannel | undefined {
+    return channel?.state === 'archived' ? undefined : channel
+  }
+
   private channelRefForThreadFrom(projection: Projection, threadRef: AgentTeamThreadRef): AgentTeamChannelRef | undefined {
     return projection.channelRefByThread.get(threadRef)
   }
@@ -3907,10 +3971,8 @@ export class AgentTeamLedger {
     const channelRef = this.channelRefForThreadFrom(projection, thread.threadRef)
     if (channelRef === undefined) throw new Error(`Thread '${thread.threadRef}' has no Channel`)
     if (projection.channels.get(channelRef)?.workspaceId !== workspaceId) throw new Error(`Thread '${thread.threadRef}' does not belong to Workspace '${workspaceId}'`)
-    // Archived Channels do not exist on Team API surfaces: their Threads are
-    // unreachable by ref, for reads as for writes. Replay stays honest —
-    // operations predating the archival resolve against the then-active
-    // Channel because replay applies in sequence.
+    // Replay stays honest: operations predating the archival resolve against
+    // the then-active Channel because replay applies in sequence.
     if (projection.channels.get(channelRef)?.state === 'archived') {
       throw new Error(`Channel '${channelRef}' is archived and no longer accepts Team work`)
     }

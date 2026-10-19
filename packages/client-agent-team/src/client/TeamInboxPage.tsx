@@ -47,7 +47,7 @@ const RECENT_ROWS_LIMIT = 5
  * after the merge. `newestSequence` is a global ledger position, so it stays
  * comparable across Workspaces.
  */
-function compareInboxRows(left: TeamInboxRow, right: TeamInboxRow): number {
+function compareByHostInboxOrder(left: TeamInboxRow, right: TeamInboxRow): number {
   return right.item.directCount - left.item.directCount
     || right.item.newestSequence - left.item.newestSequence
     || left.item.thread.threadRef.localeCompare(right.item.thread.threadRef)
@@ -103,12 +103,12 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
     setHumanMemberId(results.find(result => result.ok)?.humanMemberId)
     const asRows = (items: readonly AgentTeamInboxItem[], workspaceId: WorkspaceId, workspaceTitle: string): TeamInboxRow[] =>
       items.map(item => ({ workspaceId, workspaceTitle, item }))
-    setRows(results.flatMap(result => asRows(result.items, result.workspaceId, result.workspaceTitle)).sort(compareInboxRows))
+    setRows(results.flatMap(result => asRows(result.items, result.workspaceId, result.workspaceTitle)).sort(compareByHostInboxOrder))
     // The tail is one global bound rather than one per Workspace: the reader was
     // promised five Threads to step back into, and every Workspace's slice is
     // already capped on its own, so the merged list is trimmed here.
     setRecentRows(results.flatMap(result => asRows(result.recent, result.workspaceId, result.workspaceTitle))
-      .sort(compareInboxRows).slice(0, RECENT_ROWS_LIMIT))
+      .sort(compareByHostInboxOrder).slice(0, RECENT_ROWS_LIMIT))
     setError(failure?.ok === false ? failure.message : undefined)
     // Only a successful read carries a verdict: a kept slice must not clear the
     // footnote it was rendered with.
@@ -233,7 +233,7 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
 }) {
   const { item } = row
   const actor = item.newestActor
-  const owners = item.claimOwners
+  const owners = item.liveClaimOwners
   // The row's names come from the Client's Human identity where it applies, so
   // the chip's letter and the label's name move together on a rename.
   const namedOwners = namedAvatarOwners(owners, human)

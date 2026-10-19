@@ -28,7 +28,7 @@ function inboxRow(workspaceId: string, threadRef: string, overrides: Record<stri
     newestActor: { memberId: 'member:iris', name: 'iris' },
     // Nor a roster to draw a Task's live owners: the Host resolves those too, and
     // an Inbox row leads with them the same way the Channel feed's entry does.
-    claimOwners: [],
+    liveClaimOwners: [],
     ...overrides,
   }
 }
@@ -71,10 +71,11 @@ describe('Team Inbox surfaces', () => {
     // the sidebar stays quiet and still answers "how much" when asked.
     expect(dotOf(card)).toBeNull()
     expect(card.getAttribute('aria-label')).toBe('收件箱')
-    // The scaffold's parked first probe consumes one publish; the second wakes.
+    // Waiting for the parked probe to register keeps the first publish a
+    // wake the badge sees, so no sacrificial seed is needed.
     // The second row carries more unread than mentions, so the name can only
     // read 6 by counting the whole unread slice rather than the mentions.
-    b.seedInbox([inboxRow('w1', 'thread:w1'), inboxRow('w2', 'thread:w2', { directCount: 2, unreadCount: 5 })])
+    await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w1', 'thread:w1'), inboxRow('w2', 'thread:w2', { directCount: 2, unreadCount: 5 })])
     await waitForEntryUnread(card, 6)
     await b.runtime.dispose()
@@ -83,7 +84,7 @@ describe('Team Inbox surfaces', () => {
   it('opens the Inbox page from the card with rows and marks the card as the current page', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
-    b.seedInbox([inboxRow('w2', 'thread:w2')])
+    await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w2', 'thread:w2')])
     await waitForEntryUnread(card, 1)
     fireEvent.click(card)
@@ -139,7 +140,7 @@ describe('Team Inbox surfaces', () => {
       task: { taskRef: `task:${index + 1}`, channelRef: 'channel:engineering', threadRef: `thread:${status}`, status, resolution: 'open' },
     }))
     const tasklessRow = (): ReturnType<typeof inboxRow> => inboxRow('w1', 'thread:taskless', { channelName: 'taskless', previewText: 'taskless row', task: undefined, taskNumber: undefined })
-    b.seedInbox([...rows, tasklessRow()])
+    await b.changeSubscriptionsReady()
     b.seedInbox([...rows, tasklessRow()])
     await waitForEntryUnread(card, 6)
     fireEvent.click(card)
@@ -177,7 +178,7 @@ describe('Team Inbox surfaces', () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', humanProfile: { name: 'Ada', avatarRef: 'avatar:1' } })
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const rows = [inboxRow('w1', 'thread:human', { newestActor: { memberId: 'member:human', name: 'member:human' } })]
-    b.seedInbox(rows)
+    await b.changeSubscriptionsReady()
     b.seedInbox(rows)
     await waitForEntryUnread(card, 1)
     fireEvent.click(card)
@@ -205,7 +206,7 @@ describe('Team Inbox surfaces', () => {
       inboxRow('w1', 'thread:ambient', { channelName: 'delivery', previewText: 'ambient row', task: undefined, taskNumber: undefined, directCount: 0, unreadCount: 4, newestSequence: 12 }),
       inboxRow('w1', 'thread:capped', { channelName: 'general', previewText: 'capped row', task: undefined, taskNumber: undefined, directCount: 3, unreadCount: 150, newestSequence: 13 }),
     ]
-    b.seedInbox(rows)
+    await b.changeSubscriptionsReady()
     b.seedInbox(rows)
     await waitFor(() => expect(card.getAttribute('aria-label')).toBe('收件箱，155 条未读'))
     fireEvent.click(card)
@@ -235,7 +236,7 @@ describe('Team Inbox surfaces', () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const rows = [
-      inboxRow('w1', 'thread:owned', { previewText: 'owner stack row', claimOwners: [
+      inboxRow('w1', 'thread:owned', { previewText: 'owner stack row', liveClaimOwners: [
         { memberId: 'member:reviewer', name: 'reviewer' },
         { memberId: 'member:builder', name: 'builder' },
       ] }),
@@ -244,9 +245,9 @@ describe('Team Inbox surfaces', () => {
       // a row leads with is the Thread's own fact, never the section's, or a
       // Thread would change shape on its way from the queue into the tail.
       inboxRow('w1', 'thread:read', { channelName: 'general', previewText: 'read tail row', directCount: 0, unreadCount: 0, newestSequence: 2,
-        claimOwners: [{ memberId: 'member:vera', name: 'vera' }] }),
+        liveClaimOwners: [{ memberId: 'member:vera', name: 'vera' }] }),
     ]
-    b.seedInbox(rows)
+    await b.changeSubscriptionsReady()
     b.seedInbox(rows)
     await waitForEntryUnread(card, 2)
     fireEvent.click(card)
@@ -268,7 +269,7 @@ describe('Team Inbox surfaces', () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const rows = [inboxRow('w1', 'thread:ambient', { directCount: 0, unreadCount: 2 })]
-    b.seedInbox(rows)
+    await b.changeSubscriptionsReady()
     b.seedInbox(rows)
     await waitForEntryUnread(card, 2)
     fireEvent.click(card)
@@ -287,7 +288,7 @@ describe('Team Inbox surfaces', () => {
       // for participation, so the page renders a Thread rather than a quantity.
       inboxRow('w1', 'thread:read', { channelName: 'delivery', previewText: 'already handled', taskNumber: undefined, directCount: 0, unreadCount: 0, newestSequence: 3 }),
     ]
-    b.seedInbox(rows)
+    await b.changeSubscriptionsReady()
     b.seedInbox(rows)
     await waitForEntryUnread(card, 1)
     fireEvent.click(card)
@@ -319,7 +320,7 @@ describe('Team Inbox surfaces', () => {
       inboxRow(workspaceId, `thread:${prefix}${index}`, { channelName: prefix, previewText: `${prefix} ${index}`, taskNumber: undefined, directCount: 0, unreadCount: 0,
         newestSequence: index + 1, newestOccurredAt: `2026-09-13T0${index}:00:00.000Z` }))
     const rows = [...tailRows('w1', 'a'), ...tailRows('w2', 'b')]
-    b.seedInbox(rows)
+    await b.changeSubscriptionsReady()
     b.seedInbox(rows)
     const section = await waitFor(() => {
       const heading = b.view.getByText('最近活跃').closest('section')
@@ -336,7 +337,7 @@ describe('Team Inbox surfaces', () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const one = [inboxRow('w1', 'thread:only', { previewText: 'only workspace' })]
-    b.seedInbox(one)
+    await b.changeSubscriptionsReady()
     b.seedInbox(one)
     await waitForEntryUnread(card, 1)
     fireEvent.click(card)
@@ -351,7 +352,7 @@ describe('Team Inbox surfaces', () => {
     // styled parts.
     const both = [inboxRow('w1', 'thread:only', { previewText: 'only workspace' }),
       inboxRow('w2', 'thread:other', { previewText: 'other workspace' })]
-    b.seedInbox(both)
+    await b.changeSubscriptionsReady()
     b.seedInbox(both)
     const alpha = await b.view.findByRole('button', { name: /Alpha \/ #engineering/ })
     expect(alpha.textContent).toContain('only workspace')
@@ -380,7 +381,7 @@ describe('Team Inbox surfaces', () => {
   it('opens the row Thread through selectWorkspace + selectThread, drops the unread dot, and lands Back on its Channel', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', seededMessages: [{ body: 'Thread opener', occurredAt: '2026-09-13T03:00:00.000Z' }], remainingUnreadCounts: [0], initialChannels: true, seedThreadRef: 'thread:w2' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
-    b.seedInbox([inboxRow('w2', 'thread:w2')])
+    await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w2', 'thread:w2')])
     await waitForEntryUnread(card, 1)
     fireEvent.click(card)
@@ -415,7 +416,7 @@ describe('Team Inbox surfaces', () => {
     // The mode's way back to the conversation leads the rail, above the
     // destinations: an exit is not a page inside the mode.
     expect(labels).toEqual(['对话', '收件箱', '频道', 'Agents'])
-    b.seedInbox([inboxRow('w1', 'thread:w1')])
+    await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w1', 'thread:w1')])
     const inboxButton = within(rail).getByRole('button', { name: '收件箱' })
     await waitForEntryUnread(inboxButton, 1)
@@ -429,7 +430,7 @@ describe('Team Inbox surfaces', () => {
   it('reads the whole unread slice — no mention-only flag — for the dot and the Inbox page', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
-    b.seedInbox([inboxRow('w1', 'thread:w1')])
+    await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w1', 'thread:w1')])
     await waitForEntryUnread(card, 1)
     fireEvent.click(card)
@@ -451,11 +452,7 @@ describe('Team Inbox surfaces', () => {
     // The mentioned row is the oldest of the three, so a recency merge would
     // sink it to the bottom; it also sits in w1 with another row, so a
     // Workspace-order merge would keep both above Beta. This order is neither.
-    b.seedInbox([
-      inboxRow('w1', 'thread:w1-old', { previewText: 'mentioned', directCount: 2, newestSequence: 3, newestOccurredAt: '2026-09-01T02:00:00.000Z' }),
-      inboxRow('w2', 'thread:w2-new', { previewText: 'newest', directCount: 0, newestSequence: 40, newestOccurredAt: '2026-09-13T02:00:00.000Z' }),
-      inboxRow('w1', 'thread:w1-mid', { previewText: 'middle', directCount: 0, newestSequence: 9, newestOccurredAt: '2026-09-10T02:00:00.000Z' }),
-    ])
+    await b.changeSubscriptionsReady()
     b.seedInbox([
       inboxRow('w1', 'thread:w1-old', { previewText: 'mentioned', directCount: 2, newestSequence: 3, newestOccurredAt: '2026-09-01T02:00:00.000Z' }),
       inboxRow('w2', 'thread:w2-new', { previewText: 'newest', directCount: 0, newestSequence: 40, newestOccurredAt: '2026-09-13T02:00:00.000Z' }),
@@ -475,11 +472,7 @@ describe('Team Inbox surfaces', () => {
     const today = new Date()
     const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 14, 5)
     const older = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6, 9, 30)
-    b.seedInbox([
-      inboxRow('w1', 'thread:w1-today', { previewText: 'today row', newestSequence: 3, newestOccurredAt: today.toISOString() }),
-      inboxRow('w1', 'thread:w1-yesterday', { previewText: 'yesterday row', newestSequence: 4, newestOccurredAt: yesterday.toISOString() }),
-      inboxRow('w1', 'thread:w1-older', { previewText: 'older row', newestSequence: 5, newestOccurredAt: older.toISOString() }),
-    ])
+    await b.changeSubscriptionsReady()
     b.seedInbox([
       inboxRow('w1', 'thread:w1-today', { previewText: 'today row', newestSequence: 3, newestOccurredAt: today.toISOString() }),
       inboxRow('w1', 'thread:w1-yesterday', { previewText: 'yesterday row', newestSequence: 4, newestOccurredAt: yesterday.toISOString() }),
@@ -506,7 +499,7 @@ describe('Team Inbox surfaces', () => {
       inboxRow('w1', 'thread:w1', { unreadCount: 2 }),
       inboxRow('w2', 'thread:w2', { unreadCount: 1 }),
     ]
-    b.seedInbox(seeded())
+    await b.changeSubscriptionsReady()
     b.seedInbox(seeded())
     await waitForEntryUnread(card, 3)
 
@@ -536,7 +529,7 @@ describe('Team Inbox surfaces', () => {
       inboxRow('w1', 'thread:w1', { unreadCount: 4, directCount: 0 }),
       inboxRow('w2', 'thread:w2', { unreadCount: 2, directCount: 0 }),
     ]
-    b.seedInbox(grown())
+    await b.changeSubscriptionsReady()
     b.seedInbox(grown())
     await waitForEntryUnread(card, 6)
     await b.runtime.dispose()
@@ -549,7 +542,7 @@ describe('Team Inbox surfaces', () => {
       inboxRow('w1', 'thread:w1', { previewText: 'w1 waiting' }),
       inboxRow('w2', 'thread:w2', { previewText: 'w2 waiting' }),
     ]
-    b.seedInbox(seeded())
+    await b.changeSubscriptionsReady()
     b.seedInbox(seeded())
     await waitForEntryUnread(card, 2)
     fireEvent.click(card)

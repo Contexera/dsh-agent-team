@@ -29,7 +29,7 @@ export interface MemoryMedium {
  * {@link MemoryStorageBackend} instances to simulate reopening the same
  * medium after a restart; `versions` holds the stamped unit versions and is
  * writable by tests to inject a mismatching on-medium version, and
- * `failNextWrites` injects write-primitive failures.
+ * `injectedWriteFailuresRemaining` injects write-primitive failures.
  */
 export class MemoryMediaPool {
   /** Unit name → its records; a missing entry is a never-materialized unit. */
@@ -42,12 +42,12 @@ export class MemoryMediaPool {
    * per rejection. Negative path: callers assert their state is
    * untouched after a durability failure.
    */
-  failNextWrites = 0
+  injectedWriteFailuresRemaining = 0
 
   /** Consume one injected failure, throwing in a rejected write's place. */
   consumeInjectedFailure(): void {
-    if (this.failNextWrites > 0) {
-      this.failNextWrites -= 1
+    if (this.injectedWriteFailuresRemaining > 0) {
+      this.injectedWriteFailuresRemaining -= 1
       throw new Error('injected write failure')
     }
   }

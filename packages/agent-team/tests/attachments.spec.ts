@@ -65,7 +65,7 @@ async function cacheEntries(): Promise<readonly string[]> {
   return (await readdir(attachmentsRoot()).catch(() => [] as string[])).sort()
 }
 
-function replayLedger(facility: DomainFacility): AgentTeamLedger {
+function ledgerAtBoot(facility: DomainFacility): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }
 
@@ -262,7 +262,7 @@ describe('Agent Team attachment remotes', () => {
 
     // A cold replay over the same table accepts the new-format record and the
     // projection carries the metadata; the live service serves the history.
-    const cold = replayLedger(facility)
+    const cold = ledgerAtBoot(facility)
     expect(() => cold.validate()).not.toThrow()
     expect(cold.referencedAttachmentIds().has(uploaded.attachmentId)).toBe(true)
     const history = ctx.agentTeam.threadHistory({ workspaceId: alpha, taskRef: sent.task!.taskRef })
@@ -371,7 +371,7 @@ describe('Agent Team attachment remotes', () => {
       body: 'missing', baseRevision: replied.thread.revision, attachments: [newAttachmentId()],
     })).rejects.toThrow(/not in the upload cache/)
 
-    const cold = replayLedger(facility)
+    const cold = ledgerAtBoot(facility)
     expect(() => cold.validate()).not.toThrow()
     expect(cold.referencedAttachmentIds().has(uploaded.attachmentId)).toBe(true)
     const history = ctx.agentTeam.threadHistory({ workspaceId: alpha, taskRef: started.task!.taskRef })
@@ -450,7 +450,7 @@ describe('agent-supplied attachment paths', () => {
       requestId: requestId('send-bad'), workspaceId: alpha, channelRef: channel.channel.channelRef,
       body: '不应提交', attachmentPaths: [join(sourceDir, 'missing.png')],
     })).rejects.toThrow(/does not exist/)
-    const coldAfterFailure = replayLedger(facility)
+    const coldAfterFailure = ledgerAtBoot(facility)
     expect(() => coldAfterFailure.validate()).not.toThrow()
     expect(await readdir(attachmentsRoot())).toEqual(entriesBefore)
   })
@@ -500,7 +500,7 @@ describe('agent-supplied attachment paths', () => {
       channelRef: channel.channel.channelRef, body: '不应提交', attachmentPaths: [screenshot], attachments: [newAttachmentId()] }))
       .rejects.toThrow(/not in the upload cache/)
     expect(await cacheEntries()).toEqual(before)
-    expect(() => replayLedger(facility).validate()).not.toThrow()
+    expect(() => ledgerAtBoot(facility).validate()).not.toThrow()
 
     const request = { asTask: false, requestId: requestId('collision-keep'), workspaceId: alpha,
       channelRef: channel.channel.channelRef, body: 'first body', attachmentPaths: [screenshot] } as const

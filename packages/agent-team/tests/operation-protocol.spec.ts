@@ -1182,12 +1182,11 @@ async function seedLedger(): Promise<void> {
   }))
   if (fromMember.kind !== 'committed') throw new Error(`seed message committed as '${fromMember.kind}'`)
   expect(fromMember.thread.threadRef, 'seed Thread must take the deterministic ref the fixtures pin').toBe(memberThread)
-  await ensureFollow(human, humanThread, 'seed:follow-human')
-  await ensureFollow(memberActor, memberThread, 'seed:follow-member')
+  await followThreadForLegacyRepair(human, humanThread, 'seed:follow-human')
+  await followThreadForLegacyRepair(memberActor, memberThread, 'seed:follow-member')
 }
 
-/** Legacy channel-scope repair only fires where someone follows a seeded Thread. */
-async function ensureFollow(actor: AgentTeamHumanActor | AgentTeamMemberActor, threadRef: AgentTeamThreadRef, value: string): Promise<void> {
+async function followThreadForLegacyRepair(actor: AgentTeamHumanActor | AgentTeamMemberActor, threadRef: AgentTeamThreadRef, value: string): Promise<void> {
   if (ledger.attentionStatus(actor, { workspaceId: alpha, threadRef }).attention !== undefined) return
   await ledger.changeAttention({ requestId: requestId(value), actor, workspaceId: alpha, threadRef, action: 'follow' })
 }

@@ -14,4 +14,11 @@ import { join } from 'node:path'
 // whether it is unset is never enough. Specs that need a specific home set
 // `process.env.DSH_HOME` themselves and keep save/restore semantics around it
 // (member-lifecycle).
-process.env.DSH_HOME = mkdtempSync(join(tmpdir(), 'dsh-agent-team-test-home-'))
+/** The home this test file was forced onto, for a spec that needs to address it. */
+export function isolateDshHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'dsh-agent-team-test-home-'))
+  process.env.DSH_HOME = home
+  return home
+}
+
+isolateDshHome()

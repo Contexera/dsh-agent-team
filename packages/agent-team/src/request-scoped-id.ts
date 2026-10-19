@@ -3,17 +3,11 @@ import { createHash } from 'node:crypto'
 /**
  * A uuid-shaped id derived from one request, in one namespace.
  *
- * Request-stable rather than fresh, so an exact retry restates the id the
- * first attempt wrote and resolves against it instead of minting a second
- * one, while a different payload for that id is caught by whatever comparison
- * owns the record. Pure and namespaced, so it is restart-safe without a second
- * durable store or an in-memory map.
- *
  * The digest is what keeps caller-controlled text out of a durable name: the
  * request id is hashed, never embedded, so nothing a caller wrote reaches a
  * directory name, a log path, or a UI row — and no escaping is involved.
  */
-export function requestScopedUuid(namespace: string, requestId: string, scope?: string): string {
+export function stableRequestUuid(namespace: string, requestId: string, scope?: string): string {
   const uuid = createHash('sha256')
     .update(`agent-team:${namespace}:${requestId}${scope === undefined ? '' : `#${scope}`}`)
     .digest()

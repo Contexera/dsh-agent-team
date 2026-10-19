@@ -19,6 +19,7 @@
 // Vitest config: `npm run check:core-skills`, which is also part of `npm test`.
 // `--root <dir>` points the same checks at another tree.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { parse as parseYaml } from 'yaml'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -67,15 +68,31 @@ function filesUnder(directory) {
   return files
 }
 
-function frontMatter(text) {
+// The skill loader reads front matter as YAML, so this gate must too: a folded
+// or block-scalar value is part of the description the catalog routes by, and
+// reading only its first line would pass a skill the loader then indexes under
+// a truncated entry. Anything the loader would not accept as a mapping is a
+// failure here, never a silently empty field.
+function frontMatter(text, fail) {
   const lines = text.replaceAll('\r\n', '\n').split('\n')
   if (lines[0] !== '---') return null
   const end = lines.indexOf('---', 1)
   if (end === -1) return null
+  let data
+  try {
+    data = parseYaml(lines.slice(1, end).join('\n'))
+  } catch (error) {
+    fail(`front matter is not valid YAML: ${error.message}`)
+    return null
+  }
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    fail('front matter is not a YAML mapping')
+    return null
+  }
   const fields = new Map()
-  for (const line of lines.slice(1, end)) {
-    const match = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line)
-    if (match !== null) fields.set(match[1], (match[2] ?? '').trim())
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === 'string') fields.set(key, value.trim())
+    else fail(`front matter field "${key}" must be a string`)
   }
   return fields
 }
@@ -108,7 +125,7 @@ for (const name of skills) {
   }
 
   const text = readFileSync(skillFile, 'utf8')
-  const fields = frontMatter(text)
+  const fields = frontMatter(text, message => fail(skillFile, message))
   if (fields === null) {
     fail(skillFile, 'SKILL.md has no front matter block')
   } else {

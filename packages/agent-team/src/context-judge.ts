@@ -35,12 +35,34 @@ export interface TeamContextJudgeConfig {
 const JUDGE_DEADLINE_MARGIN_MS = 1_000
 
 /**
- * Wait before the judge's second attempt. Pinned rather than inherited from the
- * service's own default, because it is half of the same budget the deadline
- * above sizes: a backoff longer than this would spend the gate's remaining time
- * waiting instead of asking again.
+ * One call's shape, sized against the deadline the gate will hold it to.
  */
-const JUDGE_RETRY_DELAY_MS = 500
+interface JudgeCallBudget {
+  readonly timeoutMs: number
+  readonly attempts: number
+  readonly retryDelayMs: number
+}
+
+/**
+ * The budget a judge mounted under this deadline runs with: per-attempt timeout,
+ * attempts, and backoff, all derived here so the call cannot be configured to
+ * outlive the time the gate gives it.
+ *
+ * The service defaults are sized for a standalone caller — 30s per attempt and
+ * three attempts — which the gate would abandon before the first answer came
+ * back. Two attempts stay, because one transport blip must not cost the step
+ * its gate, and the backoff is half the margin so the retry fits inside what the
+ * gate reserves for the hop back. The gate races the whole call against its
+ * deadline regardless, so an attempt that cannot finish in time costs the turn
+ * nothing beyond what it already spent.
+ */
+function judgeCallBudget(deadlineMs: number): JudgeCallBudget {
+  return {
+    timeoutMs: Math.max(JUDGE_DEADLINE_MARGIN_MS, deadlineMs - JUDGE_DEADLINE_MARGIN_MS),
+    attempts: 2,
+    retryDelayMs: JUDGE_DEADLINE_MARGIN_MS / 2,
+  }
+}
 
 /** The key a row states, or the one the named environment variable holds. */
 function resolvedKey(config: TeamContextJudgeConfig | undefined, envName: string): string | undefined {
@@ -66,18 +88,15 @@ export function judgeMountConfig(
     apiKeyEnv: envName,
     ...(config?.model === undefined ? {} : { model: config.model }),
     ...(config?.apiBase === undefined ? {} : { apiBase: config.apiBase }),
-    timeoutMs: Math.max(JUDGE_DEADLINE_MARGIN_MS, deadlineMs - JUDGE_DEADLINE_MARGIN_MS),
-    // Two attempts: this call sits on the path that starts a turn, so the
-    // budget stays small — but one transport blip should not cost the step its
-    // gate, which is what a single attempt did. The gate races the whole call
-    // against its deadline anyway, so a second attempt that cannot finish in
-    // time costs the turn nothing beyond what it already spent.
-    attempts: 2,
-    retryDelayMs: JUDGE_RETRY_DELAY_MS,
+    ...judgeCallBudget(deadlineMs),
   }
 }
 
-/** The judge's status as the Team settings surface reads it. */
+/**
+ * The judge's own reachability facts, shared by every reader: the Host's
+ * internal status and the settings surface's public result both carry these,
+ * so the two cannot drift apart.
+ */
 export interface TeamContextJudgeStatus {
   /** Whether a judge is reachable for the next step. */
   readonly enabled: boolean

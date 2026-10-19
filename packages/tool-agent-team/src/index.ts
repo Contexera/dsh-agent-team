@@ -11,7 +11,6 @@ import type {
   AgentTeamMessageRef,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
-  AgentTeamThreadReadFact,
   AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -210,16 +209,15 @@ type RejectedFact = {
 }
 
 /**
- * One typed-rejection renderer parameterized by the mutation noun, shared by
- * team_message and team_claim. Outcome first, action-local recovery facts,
- * then the facts that gated the write and the single recovery route: the new
- * facts render here in the same result, and the current revision is written
- * back as the next write token — so a rejected writer learns WHAT changed and
- * WHICH token to use without paying a separate read round-trip.
+ * One typed-rejection renderer shared by team_message and team_claim. Outcome
+ * first, action-local recovery facts, then the facts that gated the write and
+ * the single recovery route: the new facts render here in the same result, and
+ * the current revision is written back as the next write token — so a rejected
+ * writer learns WHAT changed and WHICH token to use without paying a separate
+ * read round-trip.
  */
 function rejectionLines(
-  noun: 'message' | 'Claim mutation',
-  value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly tokenUnrecognized?: boolean; readonly facts?: readonly RejectedFact[] },
+  value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly staleTokenKind?: 'unknown' | 'unrecognized'; readonly facts?: readonly RejectedFact[] },
 ): string[] {
   const identity = [
     value.threadRef === undefined ? '' : value.threadRef,
@@ -243,7 +241,7 @@ function rejectionLines(
     // a first line claiming the Thread changed, followed by a sentence saying
     // nothing was inserted, reads as one surface contradicting itself, which
     // is worse than the vagueness this whole change removes.
-    const unrecognized = value.tokenUnrecognized === true
+    const unrecognized = value.staleTokenKind === 'unrecognized'
     return [
       ...(unrecognized ? ['Not committed — that write token was never a revision this Thread reached (stale_revision).']
         : ['Not committed — the Thread changed after your last read (stale_revision).']),
@@ -731,7 +729,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
       kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, revision: { type: 'number' },
       expectedRevision: { type: 'number' }, messageRef: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } }, unreadCount: { type: 'number' }, directCount: { type: 'number' },
       facts: { type: 'array', items: FACT_SCHEMA },
-      undeliveredMentions: { type: 'array', items: { type: 'string' } }, occurredAt: { type: 'string' }, tokenUnrecognized: { type: 'boolean' },
+      undeliveredMentions: { type: 'array', items: { type: 'string' } }, occurredAt: { type: 'string' }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
     } },
     render: (_args, value) => {
       if (value.kind === 'committed' && value.messageRef !== undefined && value.threadRef !== undefined && value.revision !== undefined) {
@@ -745,7 +743,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
           nextWriteLine(value.revision),
         ].join('\n') }]
       }
-      return [{ type: 'text', text: rejectionLines('message', value).join('\n') }]
+      return [{ type: 'text', text: rejectionLines(value).join('\n') }]
     },
     // Minimal durable projection for the Host's context timeline: the
     // structured outcome identity (never the render text). The effect-anchor
@@ -798,7 +796,7 @@ function messageOutcome(result: Awaited<ReturnType<AgentTeam['sendMessageForAgen
     ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
   if (result.kind === 'stale_revision') return { kind: result.kind, ...(result.taskRef === undefined ? {} : { taskRef: result.taskRef }), threadRef: result.threadRef,
     expectedRevision: result.expectedRevision, revision: result.revision,
-    ...(result.tokenUnrecognized === undefined ? {} : { tokenUnrecognized: result.tokenUnrecognized }),
+    ...(result.staleTokenKind === undefined ? {} : { staleTokenKind: result.staleTokenKind }),
     ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
   throw new Error('Agents cannot receive invitation confirmations')
 }
@@ -822,7 +820,7 @@ const teamClaim = defineTool({
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
       } },
       claims: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true } } } },
-      facts: { type: 'array', items: FACT_SCHEMA }, tokenUnrecognized: { type: 'boolean' },
+      facts: { type: 'array', items: FACT_SCHEMA }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
     } },
     // A committed mutation renders the authoritative affected Claim first —
     // the Host result carries it; the full archive is never appended. list
@@ -848,7 +846,7 @@ const teamClaim = defineTool({
           nextWriteLine(value.revision),
         ].join('\n') }]
       }
-      return [{ type: 'text', text: rejectionLines('Claim mutation', value).join('\n') }]
+      return [{ type: 'text', text: rejectionLines(value).join('\n') }]
     },
   },
   async execute(args, exec) {
@@ -880,7 +878,7 @@ const teamClaim = defineTool({
       ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
     return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef, expectedRevision: result.expectedRevision,
       revision: result.revision, status: listed.task.status, claims,
-      ...(result.kind === 'stale_revision' && result.tokenUnrecognized !== undefined ? { tokenUnrecognized: result.tokenUnrecognized } : {}),
+      ...(result.kind === 'stale_revision' && result.staleTokenKind !== undefined ? { staleTokenKind: result.staleTokenKind } : {}),
       ...(result.kind === 'stale_revision' && result.facts !== undefined ? { facts: result.facts.map(entry => readFactView(entry)) } : {}) }
   },
 })

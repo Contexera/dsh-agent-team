@@ -20,8 +20,7 @@ import { TeamAgentImport } from './TeamAgentImport.tsx'
 import createCss from './create.module.css'
 import css from './sidebar.module.css'
 
-interface TeamAgentsPanelProps {
-  readonly workspaceId: WorkspaceId
+interface TeamAgentsPanelProps {  readonly workspaceId: WorkspaceId
   readonly loadMembers: TeamSidebarProps['loadMembers']
   readonly subscribeChanges: TeamSidebarProps['subscribeChanges']
   readonly addMember: TeamSidebarProps['addMember']
@@ -35,6 +34,73 @@ interface TeamAgentsPanelProps {
   readonly openMemberSession: TeamSidebarProps['openMemberSession']
   readonly onCreatingChange: (request: AgentTeamAddMemberRequest, creating: boolean) => void
   readonly t: TeamSidebarProps['t']
+}
+
+type MemberSessionId = AgentTeamClientMemberStatus['member']['sessionId']
+
+/**
+ * How the panel is following one Member's Session binding while it stays
+ * mounted.
+ */
+type RolloverFollow =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'pending'; readonly previousSessionId: MemberSessionId; readonly nextSessionId: MemberSessionId }
+  | { readonly kind: 'followed'; readonly nextSessionId: MemberSessionId }
+
+/**
+ * Follow a model-initiated Session rollover exactly once.
+ *
+ * A rollover moves a Member's Session binding with no Client action. When the
+ * conversation seat is showing that Member's previous live Session, the panel
+ * follows to the new one — but only once the refreshed status is active, so the
+ * commit window (binding moved, new Session not yet live) never redirects to a
+ * Session that does not exist. The seat must still show the previous Session at
+ * completion as well: a rollover observed while unavailable stays pending, and
+ * navigating away before it completes cancels the follow instead of pulling the
+ * pane back.
+ */
+function useMemberSessionFollow(
+  seatSessionId: MemberSessionId | undefined,
+  openMemberSession: TeamSidebarProps['openMemberSession'],
+): (statuses: readonly AgentTeamClientMemberStatus[]) => void {
+  const observed = useRef(new Map<string, MemberSessionId>())
+  const follows = useRef(new Map<string, RolloverFollow>())
+  // The seat's embedded Session id and the opener ride refs: the change
+  // subscription may deliver an invalidation through a refresh closure captured
+  // before the seat rebinds, and the follow decision must always read the live
+  // value.
+  const seatRef = useRef(seatSessionId)
+  seatRef.current = seatSessionId
+  const openRef = useRef(openMemberSession)
+  openRef.current = openMemberSession
+  return useCallback((statuses: readonly AgentTeamClientMemberStatus[]) => {
+    for (const status of statuses) {
+      const memberId = status.member.memberId
+      const current = status.member.sessionId
+      const previous = observed.current.get(memberId)
+      if (previous === undefined) {
+        observed.current.set(memberId, current)
+        continue
+      }
+      if (previous !== current) {
+        observed.current.set(memberId, current)
+        // Only the exact previous live page arms a follow; browsing an older
+        // archive or another Member stays untouched. A binding change seen
+        // before any page is embedded is still recorded so the baseline stays
+        // current.
+        const seat = seatRef.current
+        follows.current.set(memberId, seat !== undefined && previous === seat
+          ? { kind: 'pending', previousSessionId: previous, nextSessionId: current }
+          : { kind: 'idle' })
+      }
+      const follow = follows.current.get(memberId)
+      if (follow?.kind === 'pending' && follow.nextSessionId === current && status.availability === 'active') {
+        const seat = seatRef.current
+        follows.current.set(memberId, { kind: 'followed', nextSessionId: current })
+        if (seat !== undefined && seat === follow.previousSessionId) openRef.current(follow.nextSessionId)
+      }
+    }
+  }, [])
 }
 
 export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, addMember, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, memberSessionId, openMemberSession, onCreatingChange, t }: TeamAgentsPanelProps) {
@@ -62,56 +128,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   }
   const drag = useSidebarRowDrag({ refs: orderedAgentRefs, onCommit: applyMove })
   const sectionOpen = useSidebarSectionOpen(workspaceId, 'agents')
-
-  // Observed old→new Session binding per Member while this panel is
-  // mounted. A model-initiated rollover moves the binding without any
-  // Client action; when the conversation seat is showing the Member's
-  // previous live Session, the panel follows to the new one exactly once —
-  // but only after the refreshed status is actually active, so the commit
-  // window (binding moved, new Session not yet live) never redirects to a
-  // Session that does not exist. The follow requires the seat to still show
-  // the previous Session at completion as well: a rollover observed while
-  // unavailable stays pending, and navigating away before it completes
-  // cancels the follow instead of pulling the pane back.
-  const observedSessionIds = useRef(new Map<string, AgentTeamClientMemberStatus['member']['sessionId']>())
-  const pendingFollows = useRef(new Map<string, { readonly previousSessionId: AgentTeamClientMemberStatus['member']['sessionId']; readonly nextSessionId: AgentTeamClientMemberStatus['member']['sessionId'] }>())
-  // The seat's embedded Session id rides a ref: the change subscription may
-  // deliver an invalidation through a refresh closure captured before the
-  // seat rebinds, and the follow decision must always read the live value.
-  const seatSessionIdRef = useRef(memberSessionId)
-  seatSessionIdRef.current = memberSessionId
-  const openMemberSessionRef = useRef(openMemberSession)
-  openMemberSessionRef.current = openMemberSession
-  const followRollover = useCallback((statuses: readonly AgentTeamClientMemberStatus[]) => {
-    for (const status of statuses) {
-      const memberId = status.member.memberId
-      const observed = observedSessionIds.current.get(memberId)
-      if (observed === undefined) {
-        observedSessionIds.current.set(memberId, status.member.sessionId)
-        continue
-      }
-      if (observed !== status.member.sessionId) {
-        observedSessionIds.current.set(memberId, status.member.sessionId)
-        // Only the exact previous live page follows; browsing an older
-        // archive or another Member stays untouched. A binding change seen
-        // before any page is embedded is still recorded so the observation
-        // baseline stays current.
-        const seatSessionId = seatSessionIdRef.current
-        if (seatSessionId !== undefined && observed === seatSessionId) pendingFollows.current.set(memberId, { previousSessionId: observed, nextSessionId: status.member.sessionId })
-        else pendingFollows.current.delete(memberId)
-      }
-      const pending = pendingFollows.current.get(memberId)
-      if (pending !== undefined && pending.nextSessionId === status.member.sessionId && status.availability === 'active') {
-        // The seat must still show the followed Member's previous Session at
-        // completion too: the commit window can outlive the user's patience,
-        // and navigating away (or onto another Member/archive view) cancels
-        // the follow instead of yanking the pane back onto the new Session.
-        const seatSessionId = seatSessionIdRef.current
-        pendingFollows.current.delete(memberId)
-        if (seatSessionId !== undefined && seatSessionId === pending.previousSessionId) openMemberSessionRef.current(pending.nextSessionId)
-      }
-    }
-  }, [])
+  const followRollover = useMemberSessionFollow(memberSessionId, openMemberSession)
 
   // Only the first refresh owns the loading surface; presence wakes (Agent
   // running/idle) ride the dedicated scope and refresh rows in place.
@@ -229,6 +246,10 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
     })
   }
 
+  // `members` is empty both before the first successful load and after a failed
+  // one, so claiming the roster is empty additionally requires a clear error.
+  const showEmptyRoster = !loading && error === undefined && members.length === 0
+
   return (
     <div className={css.panel}>
       <Modal
@@ -266,9 +287,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
         )}
       >
         {loading && members.length === 0 && <p className={css.emptyState}>{t('loadingAgents')}</p>}
-        {/* `members` is empty both before the first successful load and after a
-            failed one, so the empty claim additionally requires a clear error. */}
-        {!loading && error === undefined && members.length === 0 && <p className={css.emptyState}>{t('emptyAgents')}</p>}
+        {showEmptyRoster && <p className={css.emptyState}>{t('emptyAgents')}</p>}
         <div className={css.agentList}>
           {orderedMembers.map(status => (
             <SortableRow key={status.member.memberId} drag={drag} orderKey={status.member.memberId}>

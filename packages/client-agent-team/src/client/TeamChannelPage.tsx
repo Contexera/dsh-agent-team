@@ -3,6 +3,7 @@ import type { AgentTeamClientMemberStatus, AgentTeamChannelRef, AgentTeamInbox, 
   AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { Button, IconChevronRightOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
@@ -66,9 +67,13 @@ function mergeChannelView(current: AgentTeamView, fresh: AgentTeamView): AgentTe
     ...fresh,
     items,
     cursor: Math.min(fresh.cursor, current.cursor),
-    // Older retained items may precede even a saturated fresh window.
-    hasMore: fresh.hasMore || current.cursor < fresh.cursor,
+    hasMore: fresh.hasMore || hasOlderBeyondFreshWindow(current, fresh),
   }
+}
+
+/** Whether the retained items reach older than the fresh window's own start. */
+function hasOlderBeyondFreshWindow(current: AgentTeamView, fresh: AgentTeamView): boolean {
+  return current.cursor < fresh.cursor
 }
 
 /**
@@ -76,7 +81,7 @@ function mergeChannelView(current: AgentTeamView, fresh: AgentTeamView): AgentTe
  * newest fact on its Thread. That difference is exactly what "has follow-up
  * activity" means, and the Host projects both instants from the ledger.
  */
-function followUpAt(item: AgentTeamViewItem): string | undefined {
+function newerActivityAt(item: AgentTeamViewItem): string | undefined {
   const lastActivityAt: string | undefined = item.lastActivityAt
   return lastActivityAt === undefined || lastActivityAt === item.message.occurredAt ? undefined : lastActivityAt
 }
@@ -87,14 +92,22 @@ function followUpAt(item: AgentTeamViewItem): string | undefined {
  * prints the day it landed instead (see `ThreadEntryRow`), because the recency
  * there would only repeat the moment it resolved on every finished row.
  */
-function printedActivityAt(item: AgentTeamViewItem): string | undefined {
+function unresolvedFollowUpAt(item: AgentTeamViewItem): string | undefined {
   const status = item.task?.status
-  return status === 'done' || status === 'closed' ? undefined : followUpAt(item)
+  return status === 'done' || status === 'closed' ? undefined : newerActivityAt(item)
 }
 
-/** Host unread per Thread, keyed for the feed's rows: zero unread is the absence of a badge, not a row. */
-function unreadCounts(inbox: AgentTeamInbox): ReadonlyMap<AgentTeamThreadRef, number> {
-  return new Map(inbox.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
+/**
+ * Host unread per Thread, keyed for the feed's rows: zero unread is the absence
+ * of a badge, not a row. A failed read keeps the previous counts: a read failure
+ * must not render as "everything was consumed".
+ */
+function applyInboxRead(
+  previous: ReadonlyMap<AgentTeamThreadRef, number>,
+  result: RemoteResult<AgentTeamInbox>,
+): ReadonlyMap<AgentTeamThreadRef, number> {
+  if (!result.ok) return previous
+  return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
 export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, t }: TeamChannelPageProps) {
@@ -277,12 +290,10 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       if (!mountedRef.current || sequence !== refreshSequenceRef.current) return false
       if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeChannelView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
       if (loadedMembers.ok) setMembers(loadedMembers.value); else setLoadError(loadedMembers.error.message)
-      // A failed inbox read keeps the last successful counts — a read failure
-      // must not render as "everything was consumed" (the sidebar badge holds
-      // the same policy) — while the failure itself surfaces through the
-      // error face below.
-      if (loadedInbox.ok) setUnreadByThread(unreadCounts(loadedInbox.value))
-      else setLoadError(loadedInbox.error.message)
+      // A failed inbox read keeps the last successful counts while the failure
+      // itself surfaces through the error face below.
+      if (!loadedInbox.ok) setLoadError(loadedInbox.error.message)
+      setUnreadByThread(current => applyInboxRead(current, loadedInbox))
       if (loaded.ok && loadedMembers.ok && loadedInbox.ok) setLoadError(undefined)
       return loaded.ok && loadedMembers.ok && loadedInbox.ok
     } catch (cause) {
@@ -504,7 +515,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
               >
                 {item.message.topLevel && <ThreadEntryRow
                   item={item}
-                  owners={item.claimOwners}
+                  owners={item.liveClaimOwners}
                   unread={unread}
                   human={humanIdentity}
                   t={t}
@@ -624,8 +635,8 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   readonly onOpen: () => void
 }) {
   const taskNumber = item.taskNumber
-  const followUp = followUpAt(item)
-  const printedActivity = printedActivityAt(item)
+  const followUp = newerActivityAt(item)
+  const printedActivity = unresolvedFollowUpAt(item)
   // A resolved Task's gate slims to a footnote — no owner stack, no status
   // dot: the word and the day it landed say what is left to say, and the
   // board owns scanning resolved work now. Unread still counts beside it:
@@ -644,7 +655,7 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   // owner stack keeps its own accessible name — a labeled button prunes its
   // descendants from the accessibility tree — and so the control's name says
   // exactly what clicking it does.
-  return <span className={css.entryLine} data-thread-entry="">
+  return <span className={css.entryLine} data-thread-entry="" data-thread-entry-door={taskNumber ?? 'thread'}>
     {resolved ? <TeamCountBadge count={unread} /> : <ThreadStateCluster task={item.task} owners={owners} unread={unread} human={human} t={t} />}
     <button
       type="button"
@@ -687,7 +698,7 @@ function BoardCard({ item, unread, human, t, onOpen }: {
   // For resolved work the newest fact is the resolution itself — the date the
   // card prints is when it landed; for moving work it is when it last moved.
   const activityAt = item.lastActivityAt
-  const namedOwners = namedAvatarOwners(item.claimOwners, human)
+  const namedOwners = namedAvatarOwners(item.liveClaimOwners, human)
   return <button
     type="button"
     className={channelCss.boardCard}

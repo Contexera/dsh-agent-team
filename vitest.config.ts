@@ -38,7 +38,30 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ['packages/*/tests/**/*.spec.ts', 'packages/*/tests/**/*.client.spec.tsx'],
+    // Timeout policy lives here rather than in per-file `vi.setConfig` calls, so
+    // no file can quietly widen the budget for the whole suite. Only the
+    // file-shared boot in `member-tool-policy.spec.ts` needs headroom — its
+    // windows-lane boot has crossed vitest's 5s test and 10s hook defaults — and
+    // it needs both, because the shared `beforeAll` carries a budget of its own.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'suite',
+          include: ['packages/*/tests/**/*.spec.ts', 'packages/*/tests/**/*.client.spec.tsx'],
+          exclude: ['**/member-tool-policy.spec.ts'],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'shared-host',
+          include: ['packages/agent-team/tests/member-tool-policy.spec.ts'],
+          testTimeout: 30_000,
+          hookTimeout: 30_000,
+        },
+      },
+    ],
     // Every test file gets a throwaway DSH home so Agent Team boots can never
     // prune the developer's real Member memory directories.
     setupFiles: ['./scripts/isolate-dsh-home.setup.ts'],

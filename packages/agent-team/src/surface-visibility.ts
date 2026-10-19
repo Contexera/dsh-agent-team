@@ -20,16 +20,22 @@ import type { AgentTeamThreadReadFact } from './types.ts'
  * body verbatim, which is exactly the shape `notificationText` and
  * `dmRelayText` write. An ordinary notice carries only a count — "Thread X: 2
  * unread update(s) · newest at …" — and so can never match, by construction
- * rather than by a rule someone has to remember. A body truncated by
- * `boundedNotificationBody`'s 8 KiB cut likewise never appears in full, so it
- * never matches either.
+ * rather than by a rule someone has to remember. A body the writer had to cut
+ * likewise never appears in full, so it never matches either.
  *
  * Nothing here consults or writes ledger state: this reads a live session and
  * answers a question about it. The caller decides what to do with the answer.
  */
 
 /** The notice's own truncation marker, which means the body was cut. */
-const TRUNCATION_MARKER = '[Message body truncated; use team_thread read for the full Message.]'
+export const NOTIFICATION_TRUNCATION_MARKER = '[Message body truncated; use team_thread read for the full Message.]'
+
+/**
+ * How much of one Message body a notice carries before it is cut and marked.
+ * The writer below and the reader that decides whether a fact was delivered
+ * whole must agree on both the budget and the mark.
+ */
+export const NOTIFICATION_BODY_MAX_CHARACTERS = 8 * 1024
 
 /**
  * The text of every Team-authored user message currently on this agent's
@@ -60,15 +66,15 @@ export function visibleTeamTexts(agent: Agent): readonly string[] {
  * Whether one unread fact's body is on the surface, in full.
  *
  * The body must appear verbatim inside a Team-authored surface text. Presence
- * of the text is not enough on its own: a body that `boundedNotificationBody`
- * had to cut appears only as its 8 KiB prefix followed by
- * {@link TRUNCATION_MARKER}, so the fact's own notice never attests it even
- * though the prefix is right there.
+ * of the text is not enough on its own: a body the writer had to cut appears
+ * only as its {@link NOTIFICATION_BODY_MAX_CHARACTERS}-character prefix
+ * followed by {@link NOTIFICATION_TRUNCATION_MARKER}, so the fact's own notice
+ * never attests it even though the prefix is right there.
  *
  * The marker is scoped to the body's own rendering, not to the whole text. One
  * notice can carry several detail blocks and truncates each body independently,
  * so a cut sibling must not disqualify an untruncated one — otherwise a single
- * 8 KiB body would silently un-exempt every other fact in the same notice.
+ * oversized body would silently un-exempt every other fact in the same notice.
  */
 export function isFactOnSurface(texts: readonly string[], fact: AgentTeamThreadReadFact): boolean {
   if (fact.fact.kind !== 'message') return false
@@ -87,7 +93,7 @@ export function isFactOnSurface(texts: readonly string[], fact: AgentTeamThreadR
 function isBodyRenderedInFull(text: string, body: string): boolean {
   let cursor = text.indexOf(body)
   while (cursor !== -1) {
-    if (!text.startsWith(`\n${TRUNCATION_MARKER}`, cursor + body.length)) return true
+    if (!text.startsWith(`\n${NOTIFICATION_TRUNCATION_MARKER}`, cursor + body.length)) return true
     cursor = text.indexOf(body, cursor + 1)
   }
   return false

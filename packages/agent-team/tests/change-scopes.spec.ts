@@ -45,11 +45,11 @@ async function harness(): Promise<{ readonly ctx: Context; readonly facility: Do
   return { ctx, facility }
 }
 
-function replayLedger(facility: DomainFacility): AgentTeamLedger {
+function ledgerAtBoot(facility: DomainFacility): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }
 
-async function addLedgerMember(ledger: AgentTeamLedger, channelRef: AgentTeamChannelRef): Promise<AgentTeamMemberActor> {
+async function commitMemberRecordDirectlyOnLedger(ledger: AgentTeamLedger, channelRef: AgentTeamChannelRef): Promise<AgentTeamMemberActor> {
   const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberActor['memberId']
   const handle = 'reader'
   await ledger.addMember({
@@ -91,7 +91,7 @@ async function restartHarness(pool: MemoryMediaPool): Promise<{ readonly ctx: Co
 }
 
 /** Resolve only after a macrotask so a premature wake-up cannot hide behind microtasks. */
-async function staysPending(promise: Promise<unknown>, ms = 15): Promise<boolean> {
+async function staysPendingAcrossMacrotask(promise: Promise<unknown>, ms = 15): Promise<boolean> {
   let settled = false
   void promise.then(() => { settled = true }, () => { settled = true })
   await new Promise(resolve => setTimeout(resolve, ms))
@@ -109,8 +109,8 @@ describe('scoped Team change notifications', () => {
   it('derives member-workspace join/leave scopes and affected members', async () => {
     const { ctx, facility } = await harness()
     const thread = await startThread(ctx, 'derive-participation')
-    const ledger = replayLedger(facility)
-    const actor = await addLedgerMember(ledger, thread.channelRef)
+    const ledger = ledgerAtBoot(facility)
+    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.channelRef)
     const joinRequest = { requestId: requestId('derive-join'), workspaceId: beta,
       memberId: actor.memberId, actor: agentTeamHumanActor() }
     const joined = await ledger.joinWorkspace(joinRequest)
@@ -134,8 +134,8 @@ describe('scoped Team change notifications', () => {
     const baseline = await changeBaseline(ctx.agentTeam)
     const threadWaiter = nextChange(ctx.agentTeam, { kind: 'thread', threadRef: thread.threadRef })
     const globalWaiter = nextChange(ctx.agentTeam)
-    expect(await staysPending(threadWaiter)).toBe(true)
-    expect(await staysPending(globalWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(threadWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(globalWaiter)).toBe(true)
 
     await ctx.agentTeam.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: thread.taskRef })
 
@@ -143,8 +143,8 @@ describe('scoped Team change notifications', () => {
     // publishes no new version: no parked waiter can mistake it for a change.
     const after = await changeBaseline(ctx.agentTeam)
     expect(after.version).toBe(baseline.version)
-    expect(await staysPending(threadWaiter)).toBe(true)
-    expect(await staysPending(globalWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(threadWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(globalWaiter)).toBe(true)
 
     // A real content change on the same Thread still wakes both, at the
     // durable position of the commit itself.
@@ -159,10 +159,10 @@ describe('scoped Team change notifications', () => {
     const first = await startThread(ctx, 'alpha-thread')
     const second = await startThread(ctx, 'beta-thread')
     const firstWaiter = nextChange(ctx.agentTeam, { kind: 'thread', threadRef: first.threadRef })
-    expect(await staysPending(firstWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(firstWaiter)).toBe(true)
 
     await ctx.agentTeam.reply({ requestId: requestId('other-reply'), workspaceId: alpha, taskRef: second.taskRef, body: 'Unrelated', baseRevision: second.revision })
-    expect(await staysPending(firstWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(firstWaiter)).toBe(true)
 
     const own = await ctx.agentTeam.reply({ requestId: requestId('own-reply'), workspaceId: alpha, taskRef: first.taskRef, body: 'Related', baseRevision: first.revision })
     if (own.kind !== 'committed') throw new Error(`expected committed reply, received ${own.kind}`)
@@ -175,14 +175,14 @@ describe('scoped Team change notifications', () => {
     const baseline = await changeBaseline(ctx.agentTeam)
     const channelWaiter = nextChange(ctx.agentTeam, { kind: 'channel', channelRef: thread.channelRef })
     const workspaceWaiter = nextChange(ctx.agentTeam, { kind: 'workspace', workspaceId: alpha })
-    expect(await staysPending(channelWaiter)).toBe(true)
-    expect(await staysPending(workspaceWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(channelWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(workspaceWaiter)).toBe(true)
 
     await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'scout', description: 'Scouts work', presetId: 'team-member', channelRefs: [thread.channelRef] })
     // Member lifecycle is workspace-scoped: the workspace waiter wakes, the
     // Channel content waiter stays parked until Channel data changes.
     expect(await workspaceWaiter).toMatchObject({ version: expect.any(Number) })
-    expect(await staysPending(channelWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(channelWaiter)).toBe(true)
 
     await ctx.agentTeam.reply({ requestId: requestId('channel-reply'), workspaceId: alpha, taskRef: thread.taskRef, body: 'Content', baseRevision: thread.revision })
     const woken = await channelWaiter
@@ -211,8 +211,8 @@ describe('scoped Team change notifications', () => {
     // A Member record and its reply land outside the service (the bare harness
     // has no live Agent): both are shared-projection commits, and the reply
     // leaves the Human's own Thread unread.
-    const ledger = replayLedger(first.facility)
-    const actor = await addLedgerMember(ledger, thread.channelRef)
+    const ledger = ledgerAtBoot(first.facility)
+    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.channelRef)
     const reply = (await ledger.reply({ requestId: requestId('restart-reply'), workspaceId: alpha, taskRef: thread.taskRef,
       body: 'Member work', baseRevision: thread.revision, actor })).value
     if (reply.kind !== 'committed') throw new Error(`expected committed member reply, received ${reply.kind}`)
@@ -234,7 +234,7 @@ describe('scoped Team change notifications', () => {
     const after = (await changeBaseline(third.ctx.agentTeam)).version
     expect(after).toBe(reply.receipt.sequence)
     const parked = nextChange(third.ctx.agentTeam)
-    expect(await staysPending(parked)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(parked)).toBe(true)
 
     const update = await third.ctx.agentTeam.reply({ requestId: requestId('restart-update'), workspaceId: alpha, taskRef: thread.taskRef,
       body: 'After restart', baseRevision: reply.thread.revision })
@@ -276,7 +276,7 @@ describe('scoped Team change notifications', () => {
     }
     expect(await iterator.next()).toMatchObject({ done: false, value: { version: sequence } })
     const pending = iterator.next()
-    expect(await staysPending(pending)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(pending)).toBe(true)
     controller.abort()
     expect(await pending).toMatchObject({ done: true })
     expect(await iterator.next()).toMatchObject({ done: true })
@@ -304,8 +304,8 @@ describe('ledger change scope and affected member derivation', () => {
     const { ctx, facility } = await harness()
     const thread = await startThread(ctx, 'derive')
     // Replay after every commit so the derived indexes include all operations.
-    const ledger = replayLedger(facility)
-    const actor = await addLedgerMember(ledger, thread.channelRef)
+    const ledger = ledgerAtBoot(facility)
+    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.channelRef)
     // The member's reply is unread for the Human who follows their own Thread,
     // so the Human's read below has a watermark to advance and commits.
     const memberReply = (await ledger.reply({ requestId: requestId('derive-member-reply'), workspaceId: alpha, taskRef: thread.taskRef,

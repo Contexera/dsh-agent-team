@@ -22,6 +22,7 @@ import type {
   AgentTeamModelSelection,
   AgentTeamOperationId,
   AgentTeamRequestId,
+  AgentTeamLiveTaskStatus,
   AgentTeamTask,
   AgentTeamTaskActivity,
   AgentTeamTaskRef,
@@ -32,6 +33,7 @@ import type {
   AgentTeamThreadReadFact,
   AgentTeamThreadRef,
 } from "./entities.ts"
+import type { TeamContextJudgeStatus } from "../context-judge.ts"
 
 /** Receipt returned after an operation is durable or an identical retry resolves it. */
 export interface AgentTeamOperationReceipt {
@@ -357,12 +359,11 @@ export interface AgentTeamHumanProfileResult {
   /** Repository home the footnote links to. */
   readonly repoUrl: string
   /**
-   * Whether a newer release is known. Best-effort and cached Host-side
-   * (npm `latest`, 12 h TTL, silent on any failure), so this stays false
-   * until a background refresh actually observes one; the footnote shows
-   * only the version + link until then.
+   * A newer published release, when one is known. Best-effort and cached
+   * Host-side (npm `latest`, 12 h TTL, silent on any failure), so this stays
+   * absent until a background refresh actually observes one; the footnote
+   * shows only the version + link until then.
    */
-  readonly updateAvailable: boolean
   readonly latestVersion?: string | undefined
 }
 
@@ -413,15 +414,7 @@ export interface AgentTeamContextJudgeRequest {
  * configuration, so the Host resolves an omitted field against the engine's own
  * default rather than letting a second copy of those numbers exist.
  */
-export interface AgentTeamContextJudgeResult {
-  /** Whether a judge is reachable for the next step. */
-  readonly enabled: boolean
-  /** Why no judge is reachable; absent when one is. */
-  readonly reason?: 'no-key' | 'unavailable' | undefined
-  /** Host-side diagnostic behind `unavailable`; not rendered as user copy. */
-  readonly detail?: string | undefined
-  /** The environment variable this deployment reads the judge's key from. */
-  readonly keyEnv: string
+export interface AgentTeamContextJudgeResult extends TeamContextJudgeStatus {
   /** The gate's thresholds in force: row configuration resolved against the engine's defaults. */
   readonly gate: {
     readonly tokens: number
@@ -536,13 +529,20 @@ export interface AgentTeamStaleRevision {
   readonly expectedRevision: number
   readonly revision: number
   /**
+   * How the token the writer used relates to this Thread's revisions, absent
+   * when it was one this Thread really reached — a plain race. `unknown` is a
+   * token from before the Thread's first fact, which may simply have been read
+   * a moment too early; `unrecognized` is a token this Thread's revisions
+   * skipped over, so the writer copied it from another Thread or invented it.
+   */
+  readonly staleTokenKind?: 'unknown' | 'unrecognized'
+  /**
    * The facts committed inside `(expectedRevision, revision]` — what changed
    * between the token the writer used and the current one. Same shape as a
    * Thread read's facts. Absent when the increment carries nothing renderable
    * or the ledger predates the field.
    */
   readonly facts?: readonly AgentTeamThreadReadFact[]
-  readonly tokenUnrecognized?: boolean
 }
 
 /** An Agent tried to address an Agent who is not already following. */
@@ -754,7 +754,8 @@ export interface AgentTeamInboxItem {
   /** Instant of the newest unread fact — on the 「最近活跃」 slice, of the newest fact. */
   readonly newestOccurredAt: string
   readonly newestActor: AgentTeamInboxActor
-  readonly claimOwners: readonly AgentTeamInboxActor[]
+  /** Owners of the Task's live Claims, in claim order, deduped. */
+  readonly liveClaimOwners: readonly AgentTeamInboxActor[]
   readonly attention?: AgentTeamThreadAttention
 }
 
@@ -885,7 +886,7 @@ export interface AgentTeamViewItem {
    * and has no Member view of its own. Empty on a taskless item, and on a done
    * or closed one, whose Claims are history that the state word already tells.
    */
-  readonly claimOwners: readonly AgentTeamInboxActor[]
+  readonly liveClaimOwners: readonly AgentTeamInboxActor[]
   readonly messageCount: number
   /** Instant of the latest fact on this Thread (message or activity), projected from its committing operation. */
   readonly lastActivityAt: string
@@ -907,7 +908,7 @@ export interface AgentTeamActiveTaskThread {
   readonly channelRef: AgentTeamChannelRef
   /** The Task's ordinal inside its home Channel. */
   readonly taskNumber?: number
-  readonly status: AgentTeamTask['status']
+  readonly status: AgentTeamLiveTaskStatus
   /** The Thread's opening line, trimmed and capped at 120 characters — the same bound the Inbox row uses. */
   readonly subject: string
   /** Owners of the Task's live Claims, in claim order, deduped — the same rule the Inbox row and Channel feed use. */

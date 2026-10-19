@@ -47,11 +47,12 @@ import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
 import { TEAM_PANEL_ID, TeamNavigation } from './navigation.ts'
 import { TeamChangeStream, TeamReadStream, type TeamChangeListener, type TeamChangeScope } from './team-changes.ts'
-import { TeamQueries, type TeamQueryIdentity } from './team-queries.ts'
+import { TeamQueries, coversWorkspaceScope, type TeamQueryIdentity, type WorkspaceScopeKind } from './team-queries.ts'
 import { TeamDraftStore } from './drafts.ts'
 import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '@contexera/dsh-agent-team/human-settings'
 import { en, zh, type TeamKey } from './locales.ts'
 
 export type { TeamMode, TeamNavigationActions, TeamNavigationSnapshot } from './navigation.ts'
@@ -59,14 +60,6 @@ export type { TeamKey } from './locales.ts'
 export { TeamNavigation } from './navigation.ts'
 
 const NS = 'team'
-
-/**
- * The Team Host row's settings namespace. Spelled here rather than imported,
- * because a client package must not depend on a Host package — the profile, the
- * judge's endpoint, and the gate's thresholds all live in this one row section,
- * and each settings page renders only the group it owns.
- */
-const TEAM_SETTINGS_NS = 'wowyuarm-agent-team-host'
 
 export const inject = [
   'slots', 'workspaces', 'layout', 'locale', 'remote', 'remote.session', 'sessions', 'connection', 'conversation', 'uiWorkspace',
@@ -105,15 +98,6 @@ declare module '@deepseek-ai/cordis' {
     teamDrafts: TeamDraftStore
     teamQueries: TeamQueries
   }
-}
-
-/** Leaving the mode hands the column back: the mode's own exit row, not the rail. */
-function leaveTeamFromUi(ctx: ClientContext, navigation: TeamNavigation): void {
-  navigation.actions().exitMemberSession()
-  // The panel clears first: the mode flip is what the ownership effect reads, and
-  // a still-selected Team panel at that instant would put the mode straight back.
-  ctx.layout.selectPanel(null)
-  navigation.actions().leaveTeam()
 }
 
 /**
@@ -186,18 +170,14 @@ function openMemberSessionImpl(
   }
 }
 
+/** The change scopes that carry roster facts for this query's Workspace. */
+const ROSTER_SCOPE_KINDS = ['presence', 'workspace'] as const satisfies readonly WorkspaceScopeKind[]
+
 /** The roster query's identity: one key per Workspace, invalidated by presence and workspace changes. */
 function membersQuery(request: AgentTeamMembersRequest): TeamQueryIdentity {
   return {
     key: `members:${request.workspaceId}`,
-    // Only the scopes that actually carry roster facts: the Host wakes this
-    // Workspace scope for every member-level commit and presence scopes for
-    // run state. The scope-less stream is a superset of projection wakes —
-    // every scope-less delivery that touches this roster has also woken this
-    // Workspace — so letting it in adds no needed invalidation, only unrelated
-    // ones that cost a redundant read.
-    covers: scope => scope !== undefined
-      && (scope.kind === 'presence' || scope.kind === 'workspace') && scope.workspaceId === request.workspaceId,
+    covers: scope => ROSTER_SCOPE_KINDS.some(kind => coversWorkspaceScope(scope, request.workspaceId, kind)),
   }
 }
 
@@ -271,7 +251,7 @@ function teamSeatInject(
     // Leaving Team mode is also leaving its panel: the rail row is a
     // destination, and the mode's own exit row hands the column back to the
     // conversation instead of leaving the Team panel selected behind it.
-    leaveTeam: () => { leaveTeamFromUi(ctx, navigation) },
+    leaveTeam: () => { navigation.actions().leaveTeamForConversation(() => { ctx.layout.selectPanel(null) }) },
     ...sharedRemotes,
     ...(name === 'main' ? {
       // A committed durable read consumes this reader's mention markers; the
@@ -511,7 +491,7 @@ function applyUi(ctx: ClientContext): void {
   // through `ctx.get` rather than a hard `inject` for the same reason — a
   // deployment without the settings UI keeps the rest of the Team.
   ctx.inject(['configForms'], (scope: ClientContext) => {
-    const form = new TeamJudgeForm(scope.configForms.get<TeamJudgeSection>(TEAM_SETTINGS_NS), contextJudge)
+    const form = new TeamJudgeForm(scope.configForms.get<TeamJudgeSection>(HUMAN_PROFILE_SETTINGS_NAMESPACE), contextJudge)
     judgeForm.hold(form)
     scope.effect(() => () => {
       judgeForm.release(form)
@@ -532,7 +512,7 @@ function applyUi(ctx: ClientContext): void {
       // The key's literal never rides a response; the describe mirror is what
       // says whether one is stored.
       keyConfigured: (): boolean => ctx.get('configForms')?.describe().getSnapshot().view?.namespaces
-        .find(row => row.ns === TEAM_SETTINGS_NS)?.secrets
+        .find(row => row.ns === HUMAN_PROFILE_SETTINGS_NAMESPACE)?.secrets
         .some(secret => secret.path.join('.') === 'jev.apiKey' && secret.set) ?? false,
       saveName: async (name: string) => {
         const saved = await ctx.remote.agentTeam.setHumanProfile({ name })

@@ -56,17 +56,16 @@ const TEAM_CLAIM_TOOL_NAME = 'team_claim'
 
 const TEAM_MESSAGE_TOOL_NAME = 'team_message'
 
-const TEAM_ATTENTION_TOOL_NAME = 'team_attention'
-
 /**
- * Legacy decoder name: attention moved `team_thread` → `team_attention`, and
- * Sessions recorded before the split still carry durable `team_thread`
- * follow/unfollow call/result pairs. The fold keeps decoding them — cold refolds
- * and crash recovery of existing Members depend on old events still resolving
- * intent — but this is a log decoder, not a tool alias: no new call can carry
- * the old name, because `team_thread` no longer registers `follow`/`unfollow`.
+ * Names one Attention mutation may be recorded under. `team_thread` is a legacy
+ * decoder name: attention moved to `team_attention`, and Sessions recorded
+ * before the split still carry durable `team_thread` follow/unfollow
+ * call/result pairs. The fold keeps decoding them — cold refolds and crash
+ * recovery of existing Members depend on old events still resolving intent —
+ * but this is a log decoder, not a tool alias: no new call can carry the old
+ * name, because `team_thread` no longer registers `follow`/`unfollow`.
  */
-const LEGACY_TEAM_THREAD_TOOL_NAME = 'team_thread'
+const ATTENTION_TOOL_NAMES: readonly string[] = ['team_attention', 'team_thread']
 
 const TEAM_MESSAGE_BOUNDARY_LABEL = 'Team message'
 const TEAM_ATTENTION_BOUNDARY_LABEL = 'Team attention change'
@@ -83,6 +82,12 @@ type TeamBoundaryKind = typeof TEAM_BOUNDARY_KINDS[number]
 /** One anchor Team contributes: the engine stores the kind opaquely, Team reads it back. */
 type TeamBoundaryContribution = DomainBoundaryContribution & { readonly kind: TeamBoundaryKind }
 
+/** The summary the Inbox wake notice carries; the Host writes it and re-reads it to recognize its own notice. */
+export const TEAM_INBOX_NOTICE_SUMMARY = 'Team Inbox has unread work.'
+
+/** The summary the interrupted-work wake notice carries. */
+export const TEAM_RECOVERY_NOTICE_SUMMARY = 'Recovery: continue your interrupted work.'
+
 /**
  * Notice summaries that are pure reminders, never semantic Team facts: a
  * recovery instruction must not become a return anchor. `Progress visibility
@@ -91,7 +96,7 @@ type TeamBoundaryContribution = DomainBoundaryContribution & { readonly kind: Te
  * the fold keeps recognizing them (same pattern as the legacy `new_context`
  * tool name below).
  */
-const REMINDER_NOTICE_SUMMARIES = new Set(['Progress visibility reminder', 'Recovery: continue your interrupted work.'])
+const REMINDER_NOTICE_SUMMARIES = new Set(['Progress visibility reminder', TEAM_RECOVERY_NOTICE_SUMMARY])
 
 /** Whether one notice summary is a pure reminder (never a semantic Team fact). */
 export function isReminderNoticeSummary(summary: string): boolean {
@@ -122,17 +127,22 @@ export function boundaryRefFor(sessionId: string, seq: number): AgentTeamContext
   return `team-boundary-${createHash('sha256').update(JSON.stringify([sessionId, seq])).digest('hex')}` as AgentTeamContextCheckpointRef
 }
 
-export function isTeamNotice(message: UserMessage): boolean {
+/**
+ * Whether one user message is a Team notice the successor generation must
+ * rederive rather than carry: every Team-authored message that is not a
+ * handoff or checkpoint continuation.
+ */
+export function isRedeliverableTeamNotice(message: UserMessage): boolean {
   const source = message.source
   return isAgentTeamSource(source) && !isAgentTeamContextSource(message)
 }
 
 function isTeamEffectToolName(name: string): boolean {
-  return name === TEAM_CLAIM_TOOL_NAME || name === TEAM_MESSAGE_TOOL_NAME || name === TEAM_ATTENTION_TOOL_NAME || name === LEGACY_TEAM_THREAD_TOOL_NAME
+  return name === TEAM_CLAIM_TOOL_NAME || name === TEAM_MESSAGE_TOOL_NAME || ATTENTION_TOOL_NAMES.includes(name)
 }
 
 function isAttentionToolName(name: string): boolean {
-  return name === TEAM_ATTENTION_TOOL_NAME || name === LEGACY_TEAM_THREAD_TOOL_NAME
+  return ATTENTION_TOOL_NAMES.includes(name)
 }
 
 function parseArguments(raw: string): Record<string, unknown> | undefined {
@@ -194,7 +204,7 @@ export class TeamContextProjectionHost implements ContextProjectionHost {
   }
 
   isEphemeralNotice(message: UserMessage): boolean {
-    return isTeamNotice(message)
+    return isRedeliverableTeamNotice(message)
   }
 
   tracksCall(name: string, raw: string): boolean {

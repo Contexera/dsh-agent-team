@@ -427,7 +427,7 @@ describe('team_message renders its outcome', () => {
     // so the refusal names the copying mistake and drops the increment lines,
     // which would otherwise present facts as missed when none were.
     const copied = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 4711, body: 'x' }, {
-      kind: 'stale_revision', threadRef: THREAD, expectedRevision: 4711, revision: 8394, tokenUnrecognized: true,
+      kind: 'stale_revision', threadRef: THREAD, expectedRevision: 4711, revision: 8394, staleTokenKind: 'unrecognized',
       facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
@@ -539,7 +539,7 @@ describe('team_claim renders the affected Claim', () => {
     // renders its own rejections: a member that closes a Claim with a token
     // from another Thread gets the same correction, not the race sentence.
     const copied = renderText(teamTools().get('team_claim')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
-      kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', tokenUnrecognized: true,
+      kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', staleTokenKind: 'unrecognized',
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
       facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })

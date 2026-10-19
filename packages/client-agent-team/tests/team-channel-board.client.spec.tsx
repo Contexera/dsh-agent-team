@@ -114,7 +114,7 @@ describe('Team Channel board', () => {
           task: { taskRef: 'task:1', channelRef: 'channel:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
           taskNumber: 1,
           thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 2 },
-          claimOwners: [],
+          liveClaimOwners: [],
           messageCount: 1,
           lastActivityAt: '2026-10-14T09:00:00.000Z',
         }],

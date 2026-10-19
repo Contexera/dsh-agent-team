@@ -136,7 +136,7 @@ describe('Team conversation surfaces', () => {
     expect(entryLine.firstElementChild?.textContent).toBe('待处理99+')
     expect(entryLine.getAttribute('data-thread-entry')).toBe('')
     // A consumed Thread leaves no stale count behind: the next slice is empty.
-    b.seedInbox([])
+    await b.changeSubscriptionsReady()
     b.seedInbox([])
     await waitFor(() => expect(within(row).queryByText('99+')).toBeNull())
     expect(b.view.getByRole('button', { name: '打开 Task #1' })).toBeTruthy()

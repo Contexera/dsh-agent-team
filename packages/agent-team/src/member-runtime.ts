@@ -30,7 +30,14 @@ import type {
   AgentTeamMemberId,
 } from './types.ts'
 import * as memberSkills from './member-skills.ts'
-import type { MemberSkillSelectionRef } from './member-skills.ts'
+import type { MemberSkillProviderMount } from './member-skills.ts'
+
+/**
+ * Outcome of waiting for a Member's turn boundary: `waited` means a running
+ * turn had to finish first, `idle` means the Member was already between turns
+ * and nothing was awaited.
+ */
+export type TurnBoundary = 'waited' | 'idle'
 
 /**
  * Read-only core skills shipped beside the preset (the meta skill first:
@@ -101,7 +108,7 @@ export interface MemberRuntimeDeps {
   readonly runningAgents: ReadonlySet<SessionId>
 }
 
-/** Per-Member runtime state; the four maps dispose together with each Member. */
+/** Per-Member runtime state: every map here is keyed by Member and released together with that Member. */
 export class MemberRuntime {
   /**
    * Live per-Member tool restriction disposers, mirroring modelSelections:
@@ -115,22 +122,26 @@ export class MemberRuntime {
    */
   private readonly enforcedToolAllow = new Map<AgentTeamMemberId, readonly string[]>()
   /**
-   * Capability intent the live surface is known to reflect (`null` = applied
-   * with no capabilities): runtime-derived like `capabilityWarnings`, never
-   * persisted, and absent whenever the runtime cannot prove it — an unknown
-   * surface re-applies rather than trusting a guess.
+   * Capability intent the live surface is known to reflect: presence in this
+   * map is the proof, and a stored `undefined` means applied with no
+   * capabilities. Runtime-derived like `capabilityWarnings`, never persisted,
+   * and absent whenever the runtime cannot prove it — an unknown surface
+   * re-applies rather than trusting a guess.
    */
-  private readonly appliedCapabilities = new Map<AgentTeamMemberId, AgentTeamMemberCapabilities | null>()
+  private readonly appliedCapabilities = new Map<AgentTeamMemberId, AgentTeamMemberCapabilities | undefined>()
   /**
    * Runtime-derived capability warnings, recomputed at every activation (like
    * memberFailures, keyed by Member and never persisted): persisted warnings
    * would lie after a Host restart or a Harness upgrade renames tools.
    */
   private readonly capabilityWarnings = new Map<AgentTeamMemberId, readonly AgentTeamCapabilityWarning[]>()
-  /** Live skill selection refs let capability edits re-filter the catalog without disposing the Session. */
-  private readonly skillSelections = new Map<AgentTeamMemberId, MemberSkillSelectionRef>()
-  /** Per-Member private skill provider disposers; released with the Member's agent scope. */
-  private readonly skillProviderDisposals = new Map<AgentTeamMemberId, () => void>()
+  /**
+   * Per-Member private skill provider mounts. One entry holds both halves of
+   * one mount — the live selection swap and the disposer — so a capability edit
+   * that re-filters the catalog without disposing the Session, and the release
+   * that unmounts it, can never disagree about which provider is live.
+   */
+  private readonly skillProviderMounts = new Map<AgentTeamMemberId, MemberSkillProviderMount>()
 
   constructor(private readonly deps: MemberRuntimeDeps) {}
 
@@ -182,12 +193,12 @@ export class MemberRuntime {
   /** Whether the live surface is known to reflect exactly this capability intent; an absent record never matches. */
   appliedCapabilitiesMatch(memberId: AgentTeamMemberId, capabilities: AgentTeamMemberCapabilities | undefined): boolean {
     if (!this.appliedCapabilities.has(memberId)) return false
-    return isDeepStrictEqual(this.appliedCapabilities.get(memberId) ?? undefined, capabilities ?? undefined)
+    return isDeepStrictEqual(this.appliedCapabilities.get(memberId), capabilities)
   }
 
   /** Record the capability intent the live surface now reflects; callers invoke it only after every effect of the apply succeeded. */
   recordAppliedCapabilities(memberId: AgentTeamMemberId, capabilities: AgentTeamMemberCapabilities | undefined): void {
-    this.appliedCapabilities.set(memberId, capabilities ?? null)
+    this.appliedCapabilities.set(memberId, capabilities)
   }
 
   /**
@@ -203,25 +214,30 @@ export class MemberRuntime {
     try {
       this.applyMemberToolPolicy(agentCtx, member)
     } catch (error) {
-      if (previousAllow !== undefined) {
-        try {
-          const dispose = agentCtx.tools.restrict({ allow: [...previousAllow] })
-          this.memberRestrictions.set(member.memberId, dispose)
-          this.enforcedToolAllow.set(member.memberId, previousAllow)
-          // Capability warnings are deliberately NOT restored: they describe
-          // the STORED configuration's divergence from the tool surface (the
-          // input `applyMemberToolPolicy` derives from), and the accepted
-          // edit is stored even though its runtime apply failed — reporting
-          // the restored leftover here would make one stored configuration
-          // render two different warnings depending on the prior state. When
-          // the failure precedes the derivation itself (schemas throws),
-          // warnings stay empty rather than inventing a known-name digest;
-          // the next successful apply or activation re-derives them.
-        } catch (restore) {
-          this.deps.ctx.logger.warn(`agent-team: failed to restore the previous tool restriction for member '${member.memberId}' after a failed apply: ${restore instanceof Error ? restore.message : String(restore)}`)
-        }
-      }
+      if (previousAllow !== undefined) this.restoreEnforcedToolAllow(member, agentCtx, previousAllow)
       throw error
+    }
+  }
+
+  /**
+   * Put the previous allow-list back after a failed swap, so the Member is
+   * never wider than the surface it started from. Capability warnings are
+   * deliberately NOT restored: they describe the STORED configuration's
+   * divergence from the tool surface (the input `applyMemberToolPolicy`
+   * derives from), and the accepted edit is stored even though its runtime
+   * apply failed — reporting the restored leftover here would make one stored
+   * configuration render two different warnings depending on the prior state.
+   * When the failure precedes the derivation itself (schemas throws), warnings
+   * stay empty rather than inventing a known-name digest; the next successful
+   * apply or activation re-derives them.
+   */
+  private restoreEnforcedToolAllow(member: AgentTeamAgentMember, agentCtx: Context, previousAllow: readonly string[]): void {
+    try {
+      const dispose = agentCtx.tools.restrict({ allow: [...previousAllow] })
+      this.memberRestrictions.set(member.memberId, dispose)
+      this.enforcedToolAllow.set(member.memberId, previousAllow)
+    } catch (restore) {
+      this.deps.ctx.logger.warn(`agent-team: failed to restore the previous tool restriction for member '${member.memberId}' after a failed apply: ${restore instanceof Error ? restore.message : String(restore)}`)
     }
   }
 
@@ -254,11 +270,11 @@ export class MemberRuntime {
    * Suspend/remove during the wait resolves it — the disposed handle released
    * the old restriction already and no disposer leaks. Host shutdown resolves
    * every wait through `releaseTurnWaits` instead of waiting out a turn that
-   * may never end. Returns whether any wait happened, so the caller can
-   * re-check the handle afterwards.
+   * may never end. Returns whether a running turn had to be awaited, so the
+   * caller can re-check the handle afterwards.
    */
-  async awaitTurnBoundary(active: AgentHandle): Promise<boolean> {
-    if (!this.deps.runningAgents.has(active.agent.id)) return false
+  async awaitTurnBoundary(active: AgentHandle): Promise<TurnBoundary> {
+    if (!this.deps.runningAgents.has(active.agent.id)) return 'idle'
     await new Promise<void>(resolve => {
       const disposers: Array<() => void> = []
       const settle = (): void => {
@@ -282,7 +298,7 @@ export class MemberRuntime {
         }),
       )
     })
-    return true
+    return 'waited'
   }
 
   /**
@@ -299,23 +315,29 @@ export class MemberRuntime {
   /**
    * Register the Member-private skill provider on the created agent's exact
    * scope layer (the traceable-service seam, like the tool restriction):
-   * bundled read-only core skills plus this Member's own private directory,
-   * with the live selection ref that later capability edits swap in place.
-   * The sanitized directory is authoritative: activateMember migrated any
-   * legacy colon directory onto it before the provider mounted.
+   * bundled read-only core skills plus this Member's own private directory.
+   * A deployment with no skill registry registers nothing, and the Member then
+   * simply carries no private catalog. The sanitized directory is
+   * authoritative: activateMember migrated any legacy colon directory onto it
+   * before the provider mounted.
    */
-  mountMemberSkillProvider(member: AgentTeamAgentMember, agentCtx: Context, selection: MemberSkillSelectionRef): void {
-    this.skillProviderDisposals.set(member.memberId, memberSkills.mountMemberSkillProvider(agentCtx, {
+  mountMemberSkillProvider(
+    member: AgentTeamAgentMember,
+    agentCtx: Context,
+    initialSelection: readonly string[] | undefined,
+  ): void {
+    const mount = memberSkills.mountMemberSkillProvider(agentCtx, {
       skillsDirectory: join(memberMemoryDirectoryPath(member), 'skills'),
       bundledSkillsDirectory: BUNDLED_SKILLS_DIRECTORY,
-      selection,
-    }))
-    this.skillSelections.set(member.memberId, selection)
+      initialSelection,
+    })
+    if (mount === undefined) return
+    this.skillProviderMounts.set(member.memberId, mount)
   }
 
-  /** Live-apply a capability edit to a registered selection; a no-op when none exists. */
+  /** Live-apply a capability edit to a mounted provider; a no-op when this Member has none. */
   swapSkillSelection(memberId: AgentTeamMemberId, allow: readonly string[] | undefined): void {
-    this.skillSelections.get(memberId)?.swap(allow)
+    this.skillProviderMounts.get(memberId)?.swap(allow)
   }
 
   /**
@@ -384,23 +406,31 @@ export class MemberRuntime {
 
   /** Drop one Member's transient selection/disposer state after its handle is gone; safe to call twice. */
   forgetMember(memberId: AgentTeamMemberId): void {
-    this.skillSelections.delete(memberId)
-    const providerDispose = this.skillProviderDisposals.get(memberId)
-    if (providerDispose !== undefined) {
-      this.skillProviderDisposals.delete(memberId)
-      providerDispose()
+    const mount = this.skillProviderMounts.get(memberId)
+    if (mount !== undefined) {
+      this.skillProviderMounts.delete(memberId)
+      mount.dispose()
     }
     this.releaseMemberToolPolicy(memberId)
   }
 
+  /**
+   * Every Member id any per-Member map still holds, so a release path that
+   * iterates Members cannot miss one that only a single map knows about.
+   */
+  private trackedMemberIds(): readonly AgentTeamMemberId[] {
+    return [...new Set([
+      ...this.memberRestrictions.keys(),
+      ...this.enforcedToolAllow.keys(),
+      ...this.appliedCapabilities.keys(),
+      ...this.capabilityWarnings.keys(),
+      ...this.skillProviderMounts.keys(),
+    ])]
+  }
+
   /** Dispose every registered per-Member seam; service shutdown only. */
   disposeAll(): void {
-    this.skillSelections.clear()
-    for (const dispose of this.skillProviderDisposals.values()) dispose()
-    this.skillProviderDisposals.clear()
-    for (const dispose of this.memberRestrictions.values()) dispose()
-    this.memberRestrictions.clear()
-    this.capabilityWarnings.clear()
+    for (const memberId of this.trackedMemberIds()) this.forgetMember(memberId)
   }
 }
 

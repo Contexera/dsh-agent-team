@@ -117,7 +117,7 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 
   A Member catalog therefore starts with the bundled set (the `member-skill-manager` meta skill, which owns all skill craft guidance — the persona itself only states the private-space physical facts). Installing is writing into the Member's own directory (directory form `skills/<name>/SKILL.md` with optional references/scripts, or a flat `.md`), there is deliberately no upload Remote, and the filesystem watcher feeds discovery.
 
-  `skills.allow` filters `list()` output through a live selection ref (edits swap the filter and invalidate the catalog at the same turn boundary as tool edits); filtering is a visibility semantic, not a security boundary — both roots stay scanned and watched. Member removal deletes the private directory with its skills; suspend/resume and Host restart restore the identical catalog.
+  `skills.allow` filters `list()` output through a live selection swap on the mounted provider (edits swap the filter and invalidate the catalog at the same turn boundary as tool edits); filtering is a visibility semantic, not a security boundary — both roots stay scanned and watched. Member removal deletes the private directory with its skills; suspend/resume and Host restart restore the identical catalog.
 
 ## Host service surface (`ctx.agentTeam`)
 

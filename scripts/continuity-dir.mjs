@@ -69,14 +69,11 @@ function tripleOf(version) {
 }
 
 /**
- * Whether a checkout can serve this bundle: its version is not older than the
- * declared floor. Prerelease tags are ignored, so a release candidate of the
- * same triple passes — an engine working tree legitimately sits between
- * releases, and rejecting it would break the sibling workflow this exists for.
- * An unreadable version or floor passes: this is a guard against a known-stale
- * checkout, never a package manager.
+ * An engine working tree legitimately sits between releases, so a prerelease of
+ * the same triple passes. An unreadable version or floor also passes: this is a
+ * guard against a known-stale checkout, never a package manager.
  */
-function servesBundle(version, floor) {
+function atLeastFloorIgnoringPrerelease(version, floor) {
   const candidate = tripleOf(version)
   const required = tripleOf(floor)
   if (candidate === undefined || required === undefined) return true
@@ -127,7 +124,7 @@ function resolveContinuity() {
     const explicit = resolve(explicitDir)
     const manifest = manifestOf(explicit)
     if (manifest?.name !== ENGINE_PACKAGE) unresolvable([])
-    if (!servesBundle(manifest.version, declaredFloor)) {
+    if (!atLeastFloorIgnoringPrerelease(manifest.version, declaredFloor)) {
       warn(`${explicit} states ${manifest.version}, below the ${declaredRange} this bundle declares;`
         + ' using it anyway because DSH_CONTEXT_CONTINUITY_DIR names it')
     }
@@ -145,7 +142,7 @@ function resolveContinuity() {
       continue
     }
     const { version } = manifestOf(candidate.dir)
-    if (!servesBundle(version, declaredFloor)) {
+    if (!atLeastFloorIgnoringPrerelease(version, declaredFloor)) {
       skipped.push(`${candidate.dir} states ${version}, below the declared ${declaredRange}`)
       continue
     }

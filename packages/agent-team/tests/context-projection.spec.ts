@@ -106,12 +106,10 @@ function userMessageEvent(message: UserMessage): SessionEvent {
 }
 
 /**
- * Call/result pair under the LEGACY `new_context` name: the pre-rename
- * events crash recovery still folds. Tests of the current model-facing
- * error→retry path must emit `CONTEXT_ROLLOVER_TOOL_NAME` explicitly
- * instead of reusing this helper.
+ * Call/result pair under the LEGACY `new_context` name: the pre-rename events
+ * crash recovery still folds.
  */
-function legacyRolloverPair(turn: number, callId: string, args: { handoff: string; checkpointRef?: string; relatedFiles?: Array<{ path: string; reason: string }> }): SessionEvent[] {
+function legacyNewContextPair(turn: number, callId: string, args: { handoff: string; checkpointRef?: string; relatedFiles?: Array<{ path: string; reason: string }> }): SessionEvent[] {
   return [
     contextToolCall(turn, callId, NEW_CONTEXT_TOOL_NAME, args),
     toolResult(turn, callId),
@@ -131,7 +129,7 @@ describe('AgentTeam context projection — rollover intent', () => {
   it('a successful context_rollover call/result pair creates pending intent', () => {
     const events = [
       turnStart(1),
-      ...legacyRolloverPair(1, 'call-1', { handoff: 'continue from here' }),
+      ...legacyNewContextPair(1, 'call-1', { handoff: 'continue from here' }),
       turnEnd(1),
     ]
     const state = fold(events)
@@ -223,8 +221,8 @@ describe('AgentTeam context projection — rollover intent', () => {
   it('a second successful call before the turn ends does not replace the first intent', () => {
     const events = [
       turnStart(1),
-      ...legacyRolloverPair(1, 'call-1', { handoff: 'first' }),
-      ...legacyRolloverPair(1, 'call-2', { handoff: 'second' }),
+      ...legacyNewContextPair(1, 'call-1', { handoff: 'first' }),
+      ...legacyNewContextPair(1, 'call-2', { handoff: 'second' }),
       turnEnd(1),
     ]
     const state = fold(events)
@@ -241,10 +239,10 @@ describe('AgentTeam context projection — rollover intent', () => {
     // explicit retry can recover the Member.
     const events = [
       turnStart(1),
-      ...legacyRolloverPair(1, 'call-invalid-checkpoint', { handoff: 'attempted checkpoint return', checkpointRef: 'context-checkpoint-' + 'f'.repeat(64) }),
+      ...legacyNewContextPair(1, 'call-invalid-checkpoint', { handoff: 'attempted checkpoint return', checkpointRef: 'context-checkpoint-' + 'f'.repeat(64) }),
       turnEnd(1),
       turnStart(2),
-      ...legacyRolloverPair(2, 'call-fresh-retry', { handoff: 'explicit fresh retry' }),
+      ...legacyNewContextPair(2, 'call-fresh-retry', { handoff: 'explicit fresh retry' }),
       turnEnd(2),
     ]
     const state = fold(events)
@@ -298,7 +296,7 @@ describe('AgentTeam context projection — rollover intent', () => {
   it('inherited fork-prefix calls never produce intent in a seeded child', () => {
     const parentEvents = [
       turnStart(1),
-      ...legacyRolloverPair(1, 'call-parent', { handoff: 'old generation' }),
+      ...legacyNewContextPair(1, 'call-parent', { handoff: 'old generation' }),
       turnEnd(1),
     ]
     const childEvents: SessionEvent[] = [...parentEvents, turnStart(2), turnEnd(2)]
@@ -312,7 +310,7 @@ describe('AgentTeam context projection — rollover intent', () => {
   it('the live unit folds event-by-event to the same state as the cold fold', () => {
     const events = [
       turnStart(1),
-      ...legacyRolloverPair(1, 'call-1', { handoff: 'live', relatedFiles: [{ path: 'src/index.ts', reason: 'in progress' }] }),
+      ...legacyNewContextPair(1, 'call-1', { handoff: 'live', relatedFiles: [{ path: 'src/index.ts', reason: 'in progress' }] }),
       turnEnd(1),
     ]
     const definition = createTeamContextProjectionDefinition(PROJECTION_HOST)

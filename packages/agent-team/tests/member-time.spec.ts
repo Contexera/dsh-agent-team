@@ -11,7 +11,7 @@ import { agentTeamHumanActor, AgentTeamLedger, isThreadReadSnapshot } from '../s
 import { formatTeamTimestamp } from '../src/time-format.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { snapshotReadData } from './helpers/legacy-thread-read.ts'
+import { fabricateLegacyThreadReadSnapshot } from './helpers/legacy-thread-read.ts'
 import type {
   AgentTeamAgentMember,
   AgentTeamMemberActor,
@@ -71,7 +71,7 @@ function withTask<T extends { readonly task?: AgentTeamTask }>(result: T): T & {
   return result as T & { readonly task: AgentTeamTask }
 }
 
-function replayLedger(test: TeamHarness): AgentTeamLedger {
+function replayLedgerAtConstruction(test: TeamHarness): AgentTeamLedger {
   return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }
 
@@ -101,10 +101,7 @@ async function seededThread(): Promise<{ readonly test: TeamHarness; readonly le
   const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
   const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Implement member time awareness' })))
   const taskRef = started.task.taskRef
-  // The replay ledger is constructed AFTER the host commits: its projection
-  // replays the durable records once, at construction, and does not observe
-  // later table writes.
-  const ledger = replayLedger(test)
+  const ledger = replayLedgerAtConstruction(test)
   const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
   await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef, action: 'follow', actor })
   committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef,
@@ -165,7 +162,7 @@ describe('the cache invariant: one fact, one instant, on every reread path', () 
     // the identical instants on every reread path — the post-compaction and
     // restart path. History is read-state independent, so the comparison
     // covers the whole thread, not only the one drained batch.
-    const replay = replayLedger(test)
+    const replay = replayLedgerAtConstruction(test)
     const replayedHistory = replay.threadHistory(actor, { workspaceId: alpha, taskRef })
     expect(replayedHistory.facts.map(fact => `${fact.sequence}:${fact.occurredAt}`)).toEqual(historyInstants)
     expect(replayedHistory.anchor.occurredAt).toBe(history.anchor.occurredAt)
@@ -200,7 +197,7 @@ describe('the cache invariant: one fact, one instant, on every reread path', () 
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
       if (typed.kind !== 'team/thread-read' || isThreadReadSnapshot(typed.data)) return [id, typed] as [string, unknown]
-      const data = snapshotReadData(typed.data, pictures.get(typed.requestId)!)
+      const data = fabricateLegacyThreadReadSnapshot(typed.data, pictures.get(typed.requestId)!)
       const facts = data.facts.map(entry => ({ ...entry, fact: { ...entry.fact, occurredAt: undefined } }))
       return [id, { ...typed, data: { ...data, facts } }] as [string, unknown]
     })
@@ -208,7 +205,7 @@ describe('the cache invariant: one fact, one instant, on every reread path', () 
     pool.versions.set('agent_team', agentTeamDomainSpec.version)
     pool.media.set('agent_team', { tables: new Map([['operations', new Map(records)]]), global: null })
     const revived = await harness(pool)
-    const replay = replayLedger(revived)
+    const replay = replayLedgerAtConstruction(revived)
     const replayed = (await replay.readThread({ requestId: requestId('legacy-reread'), workspaceId: alpha, taskRef, actor })).value
     for (const entry of replayed.facts) expect(entry.fact.occurredAt).toBe(storedInstants.get(entry.fact.sequence))
     expect(() => replay.validate()).not.toThrow()
@@ -242,7 +239,7 @@ describe('discovery projections hang off the same per-fact source', () => {
     // The row answers 「谁在这个 Task 上」 with the ledger's own rule — the same one
     // the Channel feed applies — resolved to handles here, because an Inbox row
     // has no Member roster of its own to turn ids into them.
-    expect(claimed.claimOwners).toEqual([{ memberId: actor.memberId, name: actor.handle }])
+    expect(claimed.liveClaimOwners).toEqual([{ memberId: actor.memberId, name: actor.handle }])
     // The claimant drains its own unread before writing, and a released Claim is
     // no longer work: the Task drops back to unclaimed, and the row stops naming
     // owners the moment there are none rather than keeping a stale roster.
@@ -253,7 +250,7 @@ describe('discovery projections hang off the same per-fact source', () => {
     const humanItem = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha }).items
       .find(item => item.task?.taskRef === taskRef)!
     expect(humanItem.task?.status).toBe('todo')
-    expect(humanItem.claimOwners).toEqual([])
+    expect(humanItem.liveClaimOwners).toEqual([])
   })
 
   it('names every live Claim owner in claim order, and only those still on the Task', async () => {
@@ -272,7 +269,7 @@ describe('discovery projections hang off the same per-fact source', () => {
     }
     // A second Claim is a second face, and the roster is ordered by claim, not by
     // whichever Member the ledger happens to hold first.
-    expect(ownerRow().claimOwners).toEqual([
+    expect(ownerRow().liveClaimOwners).toEqual([
       { memberId: actor.memberId, name: actor.handle },
       { memberId: second.memberId, name: second.handle },
     ])
@@ -283,7 +280,7 @@ describe('discovery projections hang off the same per-fact source', () => {
       .find(claim => claim.owner === actor.memberId)!
     committed((await ledger.changeClaim({ requestId: requestId('owner-release-pair'), workspaceId: alpha, taskRef,
       action: 'release', claimRef: ownClaim.claimRef, baseRevision: drained.readThroughSequence, actor })).value)
-    expect(ownerRow().claimOwners).toEqual([{ memberId: second.memberId, name: second.handle }])
+    expect(ownerRow().liveClaimOwners).toEqual([{ memberId: second.memberId, name: second.handle }])
   })
 
   it('a taskless Thread names no owners at all', async () => {
@@ -300,7 +297,7 @@ describe('discovery projections hang off the same per-fact source', () => {
     expect(items).toHaveLength(2)
     const taskless = items.find(item => item.thread.threadRef === started.thread.threadRef)!
     expect(taskless.task).toBeUndefined()
-    expect(taskless.claimOwners).toEqual([])
+    expect(taskless.liveClaimOwners).toEqual([])
   })
 
   it('view lastActivityAt is the tail fact instant of each Thread', async () => {

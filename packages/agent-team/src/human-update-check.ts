@@ -1,12 +1,12 @@
 /**
  * Best-effort Host-side check for a newer published bundle release.
  *
- * The settings footnote needs `updateAvailable`/`latestVersion`, but the
- * profile read path must never wait on the network: the checker serves a
- * cached snapshot synchronously and refreshes it in the background. Every
- * failure mode — disabled by the operator, no fetch implementation, timeout,
- * non-OK status, malformed payload, unparsable version — settles as "no
- * update known", so the footnote degrades to version + link exactly as before.
+ * The settings footnote needs `latestVersion`, but the profile read path must
+ * never wait on the network: the checker serves a cached snapshot
+ * synchronously and refreshes it in the background. Every failure mode —
+ * disabled by the operator, no fetch implementation, timeout, non-OK status,
+ * malformed payload, unparsable version — settles as "no update known", so
+ * the footnote degrades to version + link exactly as before.
  *
  * No durable state: the cache lives only in memory. A Host restart simply
  * starts unknown again, which is the safe default for an informational tip.
@@ -98,8 +98,8 @@ export interface HumanUpdateCheckerOptions {
   readonly env?: { readonly [key: string]: string | undefined } | undefined
 }
 
+/** A newer published release is known; `latestVersion` is absent until one is. */
 export interface HumanUpdateSnapshot {
-  readonly updateAvailable: boolean
   readonly latestVersion?: string | undefined
 }
 
@@ -146,8 +146,8 @@ export function createHumanUpdateChecker(options: HumanUpdateCheckerOptions): {
   return {
     snapshot: (): HumanUpdateSnapshot => {
       if (checkedAt + ttlMs <= now()) refresh()
-      if (latestVersion === undefined) return { updateAvailable: false }
-      return { updateAvailable: true, latestVersion }
+      if (latestVersion === undefined) return {}
+      return { latestVersion }
     },
   }
 }

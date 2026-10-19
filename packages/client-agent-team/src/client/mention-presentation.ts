@@ -1,16 +1,8 @@
-import type { TeamDraftKey } from './drafts.ts'
+import type { TeamDraftKey, TeamDraftKind } from './drafts.ts'
+import { draftKindOf } from './drafts.ts'
+import type { MentionTier } from './TeamComposer.tsx'
 
-export type MentionSurface = 'thread' | 'channel'
-
-/**
- * How directly a mention reaches a Member, in delivery order: a follower's pick
- * delivers at once, a Channel peer is pulled in by the Host, and the rest of
- * the Workspace may need the Human's confirmation. Ranking subtracts these, so
- * the numbers are an order rather than labels; every consumer names one.
- */
-export const MENTION_TIER = { follower: 0, peer: 1, other: 2 } as const
-
-export type MentionTier = typeof MENTION_TIER[keyof typeof MENTION_TIER]
+export type MentionSurface = TeamDraftKind
 
 /**
  * The surface a composer is on, read from the draft key it already writes to:
@@ -18,7 +10,7 @@ export type MentionTier = typeof MENTION_TIER[keyof typeof MENTION_TIER]
  * second prop could only restate — or contradict — it.
  */
 export function mentionSurfaceOf(draftKey: TeamDraftKey): MentionSurface {
-  return draftKey.startsWith('thread:') ? 'thread' : 'channel'
+  return draftKindOf(draftKey)
 }
 
 /**
@@ -28,5 +20,5 @@ export function mentionSurfaceOf(draftKey: TeamDraftKey): MentionSurface {
  * is the conversation there.
  */
 export function mentionTierIsParticipant(tier: MentionTier, surface: MentionSurface): boolean {
-  return surface === 'thread' ? tier === MENTION_TIER.follower : tier !== MENTION_TIER.other
+  return surface === 'thread' ? tier === 'thread-follower' : tier !== 'workspace'
 }
