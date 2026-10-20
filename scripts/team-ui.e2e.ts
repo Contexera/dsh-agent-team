@@ -1294,11 +1294,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await panel.waitFor()
   await expect.poll(async () => await page.getByRole('heading', { name: '# delivery' }).count()).toBe(1)
   await expect.poll(async () => await page.locator('[data-team-channel]').count()).toBe(1)
-  // The panel is a discussion's face, not a Task's: no Claims disclosure and no
-  // acceptance control, because a taskless Thread has neither. Scoped to the
-  // panel, since the feed beside it still holds a Task's own door.
+  // The panel is a discussion's face, not a Task's: no acceptance control,
+  // because a taskless Thread has none. The feed beside it holds a Task's door.
   expect(await panel.getByRole('button', { name: '验收' }).count()).toBe(0)
-  expect(await panel.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   const promote = page.getByRole('button', { name: '转为 Task' })
   await promote.waitFor()
   // The panel covers the feed at 390px rather than sitting beside one too narrow
@@ -2356,8 +2354,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   if (agentClaim.kind !== 'committed') throw new Error(`Agent Claim was rejected: ${agentClaim.kind}`)
 
-  await page.getByRole('button', { name: /Claims · 1/ }).click()
-  await page.getByText('实现验收功能', { exact: true }).waitFor()
+  // A Claim reaches this page only as the activity line that recorded it.
+  expect(await page.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   await page.getByText(/认领了「实现验收功能」/).waitFor()
   await page.screenshot({ path: join(UI05_SHOTS, 'active-thread.png'), fullPage: true })
 

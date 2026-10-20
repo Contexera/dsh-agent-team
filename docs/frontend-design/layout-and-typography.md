@@ -7,7 +7,7 @@ Channel and Thread surfaces use `display:grid; grid-template-rows: auto 1fr auto
 
 The Channel page's feed stage takes the content and composer rows together (`grid-row: 2 / 4`) so an open discussion panel can span both. At `max-width: 600px`, padding tightens and the header stacks; acceptance covers 390×844 without horizontal overflow. The host sidebar controls wide/rail widths; rail renders Team icon buttons.
 
-Browser storage retains Team mode, Workspace, the last Channel/Thread location, and the Inbox page position (a navigation fact, not an unread fact), but never unread or Attention. Welcome is a separate centered surface. Thread is the navigation endpoint; an existing Task is a header/card overlay. Taskless Threads show a localized Thread/讨论 label and a promote action, not fake status or Claims. Closed Tasks replace the composer with an explanatory notice and reopen action; taskless Threads retain the normal reply composer.
+Browser storage retains Team mode, Workspace, the last Channel/Thread location, and the Inbox page position (a navigation fact, not an unread fact), but never unread or Attention. Welcome is a separate centered surface. Thread is the navigation endpoint; an existing Task is a header/card overlay. Taskless Threads show a localized Thread/讨论 label and a promote action, never a fake status. Closed Tasks replace the composer with an explanatory notice and reopen action; taskless Threads retain the normal reply composer.
 
 Channel and Thread pages share a header band, a hairline, and the 880px centered reading column, and both subscribe to workspace changes through the shared abortable `TeamChangeStream`; every opening or reconnection baseline requests a catch-up read, followed by matching streamed invalidations.
 

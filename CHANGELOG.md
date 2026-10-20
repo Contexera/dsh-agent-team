@@ -17,6 +17,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Removed**
 
+- A Task's Thread band states the Task rather than listing its work queue: the `Claims · N` disclosure is gone with its row layout, its empty line and its three state words. A Claim still reaches a reader as the fact that recorded it — the activity line in the timeline — and as the owners drawn on a feed entry row, and the early-accept dialog still lists the open Claims it will complete, because that list is what the acceptance is decided on. What went is the surface that listed Claims on demand.
 - `AgentTeamHumanProfileResult.updateAvailable` is gone. `latestVersion` carries the fact on its own: present exactly when a newer release is known, absent while the check has not observed one — or is disabled, offline, or failed. A caller that treated `updateAvailable: false` as "up to date" was reading four different states as one.
 
 **Fixed**

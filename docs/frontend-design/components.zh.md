@@ -89,7 +89,7 @@
 - 四列是 `待处理` / `进行中` / `待验收` / `已完成`。五个 Task 状态里 `done` 与 `closed` 合进「已完成」一列。已了结的卡片降透明度而不是隐藏。看板的职责是让在动的工作最响，同时让已完的仍可找到。空列只在列头写自己的 `0`，不画占位行：在计数已经说清的列里再放一行占位，是把同一件事说两遍。
 - 看板是唯一被允许超出 880px 阅读列的 Client 表面，上限 1240px。四个状态列是扫描型表面，压到阅读列宽度会让每一列都失去卡片宽度。四列等宽（`flex: 1` 配 `min-width: 0`），所以某一列标题更长也换不来更多宽度；底色用 `--dsw-alias-bg-module-platform`（shipped 给分组模块的凹陷底色），卡片自身的底层色因此读起来是浮起的。
 - 页签行是复合控件：`role="tablist"` 加两个 `role="tab"` 按钮，整组只有一个 tab stop（未选中那个 `tabIndex` 为 -1），每个页签通过 `aria-controls`/`aria-labelledby` 指明自己控制的 panel，Left/Right/Home/End 同时移动选中与焦点。它取 shipped 会话页自己那套页签语言：13px/16px、weight 500、36px 间距、`--dsw-alias-state-business-primary` 的 2px 下划线。下划线走伪元素并伸出盒底 1px，正好压在页头收口线上，两者读成同一条边（shipped 同款做法）。未选中页签取 tertiary，选中页取 business blue 而非墨色，因为 `--dsw-alias-brand-primary` 在这张 token 表里解析成中性黑；shipped 在自己那条页签上也陈述了同样的理由。
-- taskless Thread 在 feed 右侧的面板里打开，而不是替掉整页。面板就是讨论的全部：头部点名并给出「转为 Task」与关闭，正文用与任何时间线相同的日分隔与消息块读事实，脚部是普通 composer 且共用同一个 `thread:<threadRef>` 草稿键，所以写到一半的回复在面板与 Thread 页之间往返不会丢。Task 的入口照旧走 Thread 页，Claims 与验收在那里。
+- taskless Thread 在 feed 右侧的面板里打开，而不是替掉整页。面板就是讨论的全部：头部点名并给出「转为 Task」与关闭，正文用与任何时间线相同的日分隔与消息块读事实，脚部是普通 composer 且共用同一个 `thread:<threadRef>` 草稿键，所以写到一半的回复在面板与 Thread 页之间往返不会丢。Task 的入口照旧走 Thread 页，验收在那里。
 - 面板是 surface 自己的子元素，不是 feed 的：它与上方的页头带、下方的 feed 同处一列，从页顶贯到页底。正因如此，它的头部才能与身份行同带——与 `# name` 及描述共享同一个 10px 上内边与 30px 行高——而不是从页签行下方才开始；也正因如此，头部自己没有收口线：带自己的那条线已经结束了这一行，再并排画一条，等于在什么都没围住的地方声明边界。同一个理由，面板的 composer 与 feed 的 composer 站在同一条线上，上方不画线。
 - 面板的座位只在它打开时预留，且只预留在 feed 旁边。常驻的预留会长期把一条空带花在阅读面上，并让 feed 的每一行都为它付费；释放它的代价是读者开/关面板那一刻的一次重排，而那时读者的注意力已经移到面板上。
 - 打开面板是「决定在哪里读」，所以宽度归读者：打开时面板取 stage 的较大部分（52%，钳在 420–960px 之间），两道面之间的接缝可以把这份份额拖向任一侧。两侧读同一个变量，所以 feed 让出的正好是面板拿走的，面板也永远画不到 feed 上；一次拖拽只重绘，不重渲染任何一侧。座位按浏览器记住，重新打开时再按当时的 surface 钳一次，所以在宽窗口选定的宽度不会在窄窗口溢出。面板打开时页头带也让出同一份宽度，所以长描述会在接缝旁省略，而不是钻到接缝下面。接缝是真正的 separator 控件并带键盘路径——方向键微调、Shift 加大步长——否则纯指针的交互会把那些读者留在他们改不动的座位上。面板与 feed 共用 surface 的整个高度：头部坐在页头带的身份行里，两条 composer 站在同一条脚线上。
@@ -103,11 +103,10 @@
 - Panel 失败按 Panel 记：每个挂载中的 Panel 各自报告自己看到的那次断连。所以一次断连会在侧栏出现同一条消息，正文自身读取也失败时再在页面上出现一次。
 - Panel 失败行不带重试按钮：侧栏靠 change stream 自愈。断连只上报一次，传输恢复后唤醒全部 listener（见 [`host-authority.md`](../architecture/host-authority.md)）。
 
-## Thread 顶层栏与 Claim 面板（header band / claim panel）
-- Thread 顶层栏装的是返回行、Task 身份、运行风险区与 Claims 区，整条带由 `.surfaceHeader` 自己那一条底边收口。因此带内两个分区**只靠间距分层**。分区级 `border-top` 会在什么都没围住的地方再画一条线，带上方的组已经由带自己的边线结束。这里「分隔线条数」是可量测的设计属性而非口味问题。shipped DSH 的分隔线只画在组与组之间，见 `PluginInventorySettingsTab.module.css` 的 `.group + .group { border-top: 0.5px solid … }`。所以原先每个分区各带一条 `1px solid var(--dsw-alias-border-l2)` 既不合房规也是多余的。保留的是：页头带自己的 `border-bottom`（真实结构边界）与时间线里的未读边界线（语义边界）。
+## Thread 顶层栏（header band）
+- Thread 顶层栏装的是返回行、Task 身份与运行风险区，整条带由 `.surfaceHeader` 自己那一条底边收口。因此带内分区**只靠间距分层**。分区级 `border-top` 会在什么都没围住的地方再画一条线，带上方的组已经由带自己的边线结束。这里「分隔线条数」是可量测的设计属性而非口味问题。shipped DSH 的分隔线只画在组与组之间，见 `PluginInventorySettingsTab.module.css` 的 `.group + .group { border-top: 0.5px solid … }`。所以原先每个分区各带一条 `1px solid var(--dsw-alias-border-l2)` 既不合房规也是多余的。保留的是：页头带自己的 `border-bottom`（真实结构边界）与时间线里的未读边界线（语义边界）。
 - 顶层栏是**有高度预算**的，不只是「整齐」问题。两个 Member 处于错误态时，顶层栏占到 960px 视口里的 426px，把对话内容整个推到首屏以下。改成分区间距分层后同样内容只占 360px。
-- 一行 Claim 是**三条网格轨道且都有内容**：presence 点、身份加状态一组、direction。身份与状态共用第一行、direction 独占第二行。handle 因此不会变成在宽行尽头漂着的后缀。880px 下，旧单行布局会把 handle 放到 handle 所属 direction 之后 158px 处。状态也不会飘在行尾，离开状态所限定的那条 Claim。**窄屏不重排模板**。一套 `14px minmax(0, 1fr) auto` 模板在 1440 与 390 都成立，两端因此不会各自漂移。14px 的点列加上列表 22px 缩进，让每个点都落在上方 `Claims · N` 标题的同一条竖轴上。
-- 行首的 presence 点是这一行**唯一**的活跃指示器。在 handle 旁再加一个「可用」徽标，等于把同一件事说两遍。这类重复读者会先察觉、后命名。已完成的 Claim 带 `claimRowDone`。完成 Claim 的 direction 降到次级色，完成的工作不再与进行中的抢注意力。Claim 本身仍然可见。
+- 顶层栏只点名 Task 并说明它出了什么问题，**不装这个 Task 的工作队列**。Claim 以「记录它的那条事实」抵达读者：时间线里的活动行，以及 feed 入口行上画出的所有者。提前验收的确认弹窗仍会列出将一并完成的 Claim，因为那份清单就是验收据以判断的东西。没有哪个面按需列出 Claim，顶层栏因此只剩身份与真问题。
 - 运行风险行每个出错 Member 一行。行首是诊断结构化 class 的本地化名称：`session-refused`、`session-unreadable`、`preset-composition`、`rollover`、`runtime`、`activation`。这就是 `AgentTeamMemberDiagnostic.class` 这条策略轴。`restartOffered` 早已按这条轴分支。这条轴回答可本地化的「这是哪一类问题」。Host 的 `detail` 天生是英文，行内只截取 `detail` 首句。完整原文留在风险行 `title` 上。`AgentTeamClientMemberStatus` 本来就把整份 diagnostic 带到浏览器，因此这条轴不需要改 Host 协议。
 - 每个 class 一个句子 key，让可见行留在界面语言里，而不是把 Host 字符串直接贴进本地化界面。完全没有 diagnostic 的 Member 回落到 `runtime` 文案，而不是留空。
 - Task / Thread 身份下方那句开篇文字**在任意宽度、任意 Thread 类型下都只占一行**。实现是 `-webkit-line-clamp: 1`，同时写标准属性 `line-clamp`。完整原文留在 `title`。Task 标题本来就长且夹着不可断的 ref。讨论的开篇就是自己的锚消息，正文时间线里紧接着完整重复了一遍。所以别给开篇在页头带里留第二行。那等于把页头高度花在读者已经能看到的文字上，还让页头高度取决于别人当初打了多少字。压成一行后，很长的开篇与两个字的开篇页头同高（实测 taskless Thread 两种都是 114px）。
