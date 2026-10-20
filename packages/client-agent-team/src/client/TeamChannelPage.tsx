@@ -50,6 +50,7 @@ interface TeamChannelPageProps {
   readonly selectChannel: TeamConversationProps['selectChannel']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
+  readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly t: TeamConversationProps['t']
 }
@@ -111,7 +112,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, t }: TeamChannelPageProps) {
+export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamChannelPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
@@ -597,6 +598,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       selectChannel={selectChannel}
       resolveTaskRefs={resolveTaskRefs}
       resolveThreadRefs={resolveThreadRefs}
+      resolveMessageRefs={resolveMessageRefs}
       openMemberSession={openMemberSession}
       channelNameOf={channelNameOf}
       memberOf={memberOf}

@@ -1248,13 +1248,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(channelBand!.barColor).not.toBe('rgba(0, 0, 0, 0)')
   // The band is one 76px figure at the top inset the shipped header uses.
   expect(channelBand!.bandHeight).toBeLessThanOrEqual(80)
-  // The identity seat is one declaration on the shared conversation surface, so
-  // the Channel feed reads the seat the Thread page reads. Declaring it on
-  // `[data-team-thread]` left this surface on the `var()` fallback instead —
-  // invisible while both resolved alike, and a broken text column the moment the
-  // seat moved. A custom property is inherited and never re-resolved, so reading
-  // it off the Channel root is exactly the question. The face is measured too: a
-  // fallback equal to the declaration would satisfy that read on its own.
+  // The seat is one declaration on the shared conversation surface, so the feed
+  // reads what a Thread's reading seat reads. Reading it off the Channel root is
+  // the question: a custom property is inherited, never re-resolved there. The
+  // face is measured too, since a fallback equal to the declaration satisfies it.
   const channelSeat = await page.evaluate(() => {
     const root = document.querySelector('[data-team-channel]')
     const face = document.querySelector('[data-team-channel] article [class*="messageIdentity"], [data-team-channel] article [class*="messageIdentityImage"]')
@@ -1409,6 +1406,35 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.locator('[data-team-panel-handle]').focus()
   await page.keyboard.press('ArrowRight')
   await expect.poll(async () => (await seam()).panel).toBeLessThan(dragged.panel)
+  // The panel's Messages carry the Thread page's hover card: copy and quote.
+  const panelRow = page.locator('[data-team-panel] article').first()
+  await panelRow.hover()
+  await settleAnimations(page)
+  const panelCard = panelRow.locator('[data-message-card]')
+  await expect.poll(() => panelCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
+  // It clears its row as on the Thread page and stays wholly inside the body.
+  const panelCardPlacement = await panelRow.evaluate(element => {
+    const row = element.getBoundingClientRect()
+    const card = element.querySelector('[data-message-card]')!.getBoundingClientRect()
+    const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
+    const scroll = element.closest('section')!.getBoundingClientRect()
+    return {
+      clearanceToContent: Math.round(body.top - card.bottom),
+      clipTop: Math.round(card.top - scroll.top),
+    }
+  })
+  expect(panelCardPlacement.clearanceToContent).toBe(2)
+  expect(panelCardPlacement.clipTop).toBeGreaterThanOrEqual(0)
+  await panelCard.locator('[data-quote-message]').click()
+  const replyBanner = page.locator('[data-team-panel] [data-reply-banner]')
+  await replyBanner.waitFor()
+  await expect.poll(async () => await replyBanner.textContent()).toContain('引用')
+  await page.getByRole('button', { name: '取消引用' }).click()
+  await expect.poll(async () => await replyBanner.count()).toBe(0)
+  // The reveal belongs to the pointer here too: off the row, the card is gone.
+  await page.mouse.move(4, 4)
+  await expect.poll(() => panelCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
+  await settleAnimations(page)
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-desktop.png'), fullPage: true })
   await promote.focus()
   await page.keyboard.press('Enter')

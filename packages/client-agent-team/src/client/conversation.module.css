@@ -126,10 +126,9 @@
 
 /* One Message is one row on the reading path — one column for everyone, no
    per-message surface, no per-message width. The row's own layer appears only
-   while the reader is on it, and only in the Thread: that is what gives a busy
-   Thread its hierarchy without painting every turn as a card, spending the
-   reading column on decoration, or lending the Channel feed a language its own
-   entry rows already own. */
+   while the reader is on it, and only in a Thread's reading seat: the page and
+   the panel read one Thread, so both speak it, and the Channel feed keeps the
+   language its own entry rows own. */
 .messageRow { align-items: flex-start; display: flex; gap: 10px; padding: 10px 0; position: relative; }
 .messageRow[data-grouped] { padding-top: 2px; }
 .messageRow[data-grouped] .messageIdentity,
@@ -305,11 +304,11 @@
    at all, so its content starts 8px higher: the card rises those 8px with it
    instead of sinking into the words. (Reading the rise as a fixed number is what
    let the card graze a continuation row's first line.)
-   The timeline's own top padding is 12px, so the first row gets the rest of its
-   rise back rather than clipping the card at the scroll edge. */
+   The first row has no predecessor to give it that room, so its scroll box does:
+   a box padded shorter than the rise clips the card it opens on. */
 [data-team-thread] { --team-card-rise: 20px; }
 [data-team-thread] .messageRow[data-grouped] { --team-card-rise: 28px; }
-[data-team-thread] .timelineContent > .messageRow:first-child { margin-top: calc(var(--team-card-rise) - 12px); }
+[data-team-thread] .timeline { padding-top: max(12px, var(--team-card-rise)); }
 .messageCard {
   align-items: center;
   background: var(--dsw-alias-bg-layer-1);
