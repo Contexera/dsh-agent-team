@@ -137,15 +137,19 @@ It takes the shipped session page's own tab language — 13px/16px weight 500, a
 
 A taskless Thread opens beside the feed in a right-hand panel rather than replacing the page. The panel is a discussion's whole face: its head names it and offers promotion plus a close, its body reads the facts with the same day separators and runs as any timeline, and its foot is the ordinary composer at the same `thread:<threadRef>` draft key, so a half-written reply survives the trip between the panel and the Thread page. A Task's entry still walks into the Thread page, which is where Claims and acceptance live.
 
-The panel's seat is reserved only while it is open. An always-on reservation would spend a band of the reading surface on nothing for the whole life of the page and charge every line of the feed for it; the price of releasing it is a single re-wrap at the moment the reader opens or closes the panel, when their attention has moved to the panel anyway.
+The panel is the surface's own child, not the feed's: it spans the band above the feed as well as the feed itself, as one column from the top of the page to the bottom. That is what lets its head share the band's identity row — the same 10px top inset and 30px row as `# name` and its description — instead of starting under the tab strip.
+
+It is also why the head carries no closing rule of its own: the band's rule already ends that row, and a second line beside it would draw a boundary where nothing is bounded. For the same reason the panel's composer stands on the feed composer's line with no rule above it.
+
+The panel's seat is reserved only while it is open, and only beside the feed. An always-on reservation would spend a band of the reading surface on nothing for the whole life of the page and charge every line of the feed for it; the price of releasing it is a single re-wrap at the moment the reader opens or closes the panel, when their attention has moved to the panel anyway.
 
 Opening the panel is a decision about where to read, so its width is the reader's: the panel takes the larger share of the stage on open — 52% of it, clamped to 420–960px — and a seam between the two surfaces drags that share either way.
 
-Both surfaces read one variable, so the feed gives up exactly what the panel takes and the panel can never paint over it, and a drag repaints without re-rendering either side. The seat persists per browser and re-clamps to whatever stage it reopens on, so a width chosen on a wide window never overflows a narrow one.
+Both surfaces read one variable, so the feed gives up exactly what the panel takes and the panel can never paint over it, and a drag repaints without re-rendering either side. The seat persists per browser and re-clamps to whatever surface it reopens on, so a width chosen on a wide window never overflows a narrow one. The band gives up the same width while the panel is open, so a long description ellipsizes beside the seam instead of running underneath it.
 
-The seam is a real separator control with a keyboard path — the arrow keys nudge it, Shift for a coarse step — because a pointer-only affordance would leave those readers with the seat they cannot change. The panel and the feed share the stage's full height: the head sits level with the feed's first row, and both composers stand on the same foot line.
+The seam is a real separator control with a keyboard path — the arrow keys nudge it, Shift for a coarse step — because a pointer-only affordance would leave those readers with the seat they cannot change. The panel and the feed share the surface's full height: the head sits in the band's identity row, and both composers stand on the same foot line.
 
-Below the shared 600px breakpoint the panel covers the stage whole instead of standing beside a feed too narrow to read.
+Below the shared 600px breakpoint the panel covers the feed whole instead of standing beside one too narrow to read: the two take the surface's single column and the feed's rows, so the panel paints over the feed while the band above stays visible and keeps its own width. Placing either of them out of that column would open a second implicit column and squeeze the feed to a sliver rather than covering it.
 
 Promotion from the panel is the same Human-only durable mutation the Thread page runs, and it ends the panel's job: on success the panel closes as the reader walks into the new Task's Thread page. A read committed in the panel clears its feed row's unread capsule immediately rather than waiting for the next Inbox read to land.
 

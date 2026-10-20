@@ -18,26 +18,26 @@ describe('panel width', () => {
     vi.stubGlobal('localStorage', storage())
   })
 
-  it('defaults the panel to the larger half of the stage', () => {
+  it('defaults the panel to the larger half of the surface', () => {
     // The reader turned to the panel, so it leads; the feed keeps a scannable
     // measure beside it rather than the other way round.
     expect(resolvePanelWidth(1160, null)).toBe(603)
     expect(resolvePanelWidth(1160, null)).toBeGreaterThan(1160 / 2)
   })
 
-  it('never takes the whole stage, so the feed beside it stays readable', () => {
-    for (const stage of [700, 900, 1160, 1440, 1920, 2560]) {
-      const width = clampPanelWidth(Number.MAX_SAFE_INTEGER, stage)
-      expect(width).toBeLessThanOrEqual(stage)
-      expect(stage - width).toBeGreaterThanOrEqual(1)
+  it('never takes the whole surface, so the feed beside it stays readable', () => {
+    for (const surface of [700, 900, 1160, 1440, 1920, 2560]) {
+      const width = clampPanelWidth(Number.MAX_SAFE_INTEGER, surface)
+      expect(width).toBeLessThanOrEqual(surface)
+      expect(surface - width).toBeGreaterThanOrEqual(1)
     }
   })
 
-  it('settles at the panel floor on a stage too narrow for both floors', () => {
+  it('settles at the panel floor on a surface too narrow for both floors', () => {
     // Below PANEL_MIN + FEED_FLOOR the two floors cannot both be met, so the
     // panel holds its own floor instead of the clamp inverting to the ceiling.
-    for (const stage of [500, 600, 700, 800, 839]) {
-      expect(clampPanelWidth(PANEL_MAX, stage)).toBe(PANEL_MIN)
+    for (const surface of [500, 600, 700, 800, 839]) {
+      expect(clampPanelWidth(PANEL_MAX, surface)).toBe(PANEL_MIN)
     }
   })
 
@@ -47,7 +47,7 @@ describe('panel width', () => {
     expect(clampPanelWidth(700, 1440)).toBe(700)
   })
 
-  it('re-clamps a saved seat to a stage that has since narrowed', () => {
+  it('re-clamps a saved seat to a surface that has since narrowed', () => {
     // A width saved on a wide window must not overflow a narrow one.
     expect(resolvePanelWidth(600, 900)).toBeLessThanOrEqual(600)
   })

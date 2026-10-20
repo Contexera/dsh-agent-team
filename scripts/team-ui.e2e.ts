@@ -1304,10 +1304,23 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await panel.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   const promote = page.getByRole('button', { name: '转为 Task' })
   await promote.waitFor()
-  // The panel covers the stage whole at 390px rather than sitting beside a feed
-  // too narrow to read, and neither one overflows the viewport.
+  // The panel covers the feed at 390px rather than sitting beside one too narrow
+  // to read, and neither overflows the viewport. The band keeps its own width:
+  // the open panel must not also reserve a column up there, which would squeeze
+  // the identity row to nothing and leave the tabs one glyph per line — a
+  // clipped surface hides that from a page-level overflow check, so the band's
+  // own box is measured against the surface's.
   await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0))
     .toBeGreaterThanOrEqual(Math.round((await page.locator('[data-team-channel]').boundingBox())?.width ?? 0) - 2)
+  const narrowBand = await page.evaluate(() => {
+    const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
+    const surface = box(document.querySelector('[data-team-channel]'))
+    const headerRow = box(document.querySelector('[data-team-channel] [class*="headerRow"]'))
+    if (surface === undefined || headerRow === undefined) return null
+    return { surfaceWidth: Math.round(surface.width), headerRowWidth: Math.round(headerRow.width) }
+  })
+  expect(narrowBand).not.toBeNull()
+  expect(narrowBand!.headerRowWidth).toBe(narrowBand!.surfaceWidth - 24)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
@@ -1327,27 +1340,35 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(panelSplit).not.toBeNull()
   expect(panelSplit!.timelineRight).toBeLessThanOrEqual(panelSplit!.panelLeft + 1)
   expect(panelSplit!.timelineWidth).toBeGreaterThanOrEqual(520)
-  // The panel is the surface the reader turned to, and it runs the stage's whole
-  // height: level with the feed at the top, and sharing the composer's foot line
-  // rather than floating above it. Both are equations against the stage, so a
-  // change to either seat alone shows up here.
-  const stageEdges = await page.evaluate(() => {
+  // The panel is the surface the reader turned to, and it runs the surface whole:
+  // its head shares the band's identity row — same top, same height — rather than
+  // starting under the tab strip, and its foot shares the feed composer's line
+  // rather than floating above it. Each is an equation between two boxes measured
+  // in one render, so a change to either seat alone shows up here.
+  const bandEdges = await page.evaluate(() => {
     const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
-    const stage = box(document.querySelector('[data-team-channel] [data-panel]'))
+    const surface = box(document.querySelector('[data-team-channel]'))
+    const headerRow = box(document.querySelector('[data-team-channel] [class*="headerRow"]'))
     const panel = box(document.querySelector('[data-team-panel]'))
+    const panelHead = box(document.querySelector('[data-team-panel] [class*="panelHead"]'))
     const panelFoot = box(document.querySelector('[data-team-panel] [data-team-composer]'))
     const feedFoot = box(document.querySelector('[data-team-channel] [data-panel] [data-team-composer]'))
-    return stage === undefined || panel === undefined ? null : {
-      panelTop: Math.round(panel.top), stageTop: Math.round(stage.top),
-      panelBottom: Math.round(panel.bottom), stageBottom: Math.round(stage.bottom),
+    if (surface === undefined || headerRow === undefined || panel === undefined || panelHead === undefined) return null
+    return {
+      surfaceTop: Math.round(surface.top), surfaceBottom: Math.round(surface.bottom),
+      panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom),
+      headerRowTop: Math.round(headerRow.top), headerRowHeight: Math.round(headerRow.height),
+      panelHeadTop: Math.round(panelHead.top), panelHeadHeight: Math.round(panelHead.height),
       panelFootBottom: panelFoot === undefined ? null : Math.round(panelFoot.bottom),
       feedFootBottom: feedFoot === undefined ? null : Math.round(feedFoot.bottom),
     }
   })
-  expect(stageEdges).not.toBeNull()
-  expect(stageEdges!.panelTop).toBe(stageEdges!.stageTop)
-  expect(stageEdges!.panelBottom).toBe(stageEdges!.stageBottom)
-  expect(stageEdges!.panelFootBottom).toBe(stageEdges!.feedFootBottom)
+  expect(bandEdges).not.toBeNull()
+  expect(bandEdges!.panelTop).toBe(bandEdges!.surfaceTop)
+  expect(bandEdges!.panelBottom).toBe(bandEdges!.surfaceBottom)
+  expect(bandEdges!.panelHeadTop).toBe(bandEdges!.headerRowTop)
+  expect(bandEdges!.panelHeadHeight).toBe(bandEdges!.headerRowHeight)
+  expect(bandEdges!.panelFootBottom).toBe(bandEdges!.feedFootBottom)
   // A discussion panel is resizable: the seam is a real separator control, and a
   // drag re-seats the panel while the feed gives up exactly what the panel takes.
   const handle = page.locator('[data-team-panel-handle]')

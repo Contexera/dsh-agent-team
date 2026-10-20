@@ -130,9 +130,9 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   // The taskless Thread open in the feed's side panel. A Task's entry still
   // walks into the Thread page; only a discussion stays here.
   const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
-  // The stage the panel is seated in, which owns the panel-width variable: the
+  // The surface the panel is seated in, which owns the panel-width variable: the
   // drag handle writes it there, so a drag never re-renders this page.
-  const [panelStage, setPanelStage] = useState<HTMLDivElement | null>(null)
+  const [panelSurface, setPanelSurface] = useState<HTMLElement | null>(null)
   // The composer draft lives in the keyed draft cache: view switches unmount
   // this page, and a refresh must not cost the half-written message either.
   // The composer owns the subscription — this page only reads a snapshot when
@@ -266,22 +266,22 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
 
   const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${channelLastItem?.message.messageRef ?? ''}`)
 
-  // Seat the panel from its stage: the saved choice, else this stage's default
-  // share. The stage is laid out after this effect first runs, so the seat
-  // follows its box — a one-shot pass would seat from a pre-layout width and
-  // leave it there. A dragged choice is re-clamped, never re-derived.
+  // Seat the panel from its surface: the saved choice, else this surface's
+  // default share. The surface is laid out after this effect first runs, so the
+  // seat follows its box — a one-shot pass would seat from a pre-layout width
+  // and leave it there. A dragged choice is re-clamped, never re-derived.
   useEffect(() => {
-    if (panelStage === null) return
+    if (panelSurface === null) return
     const seat = () => {
-      if (panelStage.offsetWidth === 0) return
-      const width = resolvePanelWidth(panelStage.offsetWidth, readPanelWidthPreference())
-      panelStage.style.setProperty('--team-panel-width', `${width}px`)
+      if (panelSurface.offsetWidth === 0) return
+      const width = resolvePanelWidth(panelSurface.offsetWidth, readPanelWidthPreference())
+      panelSurface.style.setProperty('--team-panel-width', `${width}px`)
     }
     seat()
     const observer = new ResizeObserver(seat)
-    observer.observe(panelStage)
+    observer.observe(panelSurface)
     return () => { observer.disconnect() }
-  }, [panelStage, panelThreadRef])
+  }, [panelSurface, panelThreadRef])
   const channel = view?.channels.find(item => item.channelRef === channelRef)
   const channelMemberIds = new Set(view?.members.filter(item => item.channelRef === channelRef).map(item => item.memberId) ?? [])
   const messageSender = (item: AgentTeamViewItem): AgentTeamMemberId => item.message.sender
@@ -447,7 +447,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     finally { setPending(false) }
   }
 
-  return <main className={css.surface} data-team-channel={channelRef}>
+  return <main className={css.surface} data-team-channel={channelRef} ref={setPanelSurface}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderWithTabs}`}>
       <header className={css.headerRow}>
         <div className={css.headerCopy}>
@@ -481,7 +481,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       </div>}
     </section>}
 
-    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={channelCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'} ref={setPanelStage}>
+    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={channelCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
       <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
         {loading && channel === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingChannels')}</p></div>}
@@ -571,41 +571,41 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       onAsTaskChange={setAsTask}
       t={t}
       /> : <div />}
-
-      {panelThreadRef !== undefined && channel !== undefined && <TeamChannelPanel
-        stage={panelStage}
-        workspaceId={workspaceId}
-        channelRef={channelRef}
-        threadRef={panelThreadRef}
-        channelName={channel.name}
-        humanName={humanName}
-        {...(humanAvatarUrl === undefined ? {} : { humanAvatarUrl })}
-        {...(view?.humanMemberId === undefined ? {} : { humanMemberId: view.humanMemberId })}
-        members={members}
-        channelMemberIds={channelMemberIds}
-        drafts={drafts}
-        getAttachment={getAttachment}
-        putAttachment={putAttachment}
-        readThread={readThread}
-        loadThreadHistory={loadThreadHistory}
-        threadObservations={threadObservations}
-        reply={reply}
-        promoteThread={promoteThread}
-        subscribeChanges={subscribeChanges}
-        selectThread={selectThread}
-        selectChannel={selectChannel}
-        resolveTaskRefs={resolveTaskRefs}
-        resolveThreadRefs={resolveThreadRefs}
-        openMemberSession={openMemberSession}
-        channelNameOf={channelNameOf}
-        memberOf={memberOf}
-        taskNumberOf={taskNumberOf}
-        onRead={handlePanelRead}
-        onPromoted={handlePanelPromoted}
-        onClose={handlePanelClose}
-        t={t}
-      />}
     </div>}
+
+    {tab === 'feed' && panelThreadRef !== undefined && channel !== undefined && <TeamChannelPanel
+      surface={panelSurface}
+      workspaceId={workspaceId}
+      channelRef={channelRef}
+      threadRef={panelThreadRef}
+      channelName={channel.name}
+      humanName={humanName}
+      {...(humanAvatarUrl === undefined ? {} : { humanAvatarUrl })}
+      {...(view?.humanMemberId === undefined ? {} : { humanMemberId: view.humanMemberId })}
+      members={members}
+      channelMemberIds={channelMemberIds}
+      drafts={drafts}
+      getAttachment={getAttachment}
+      putAttachment={putAttachment}
+      readThread={readThread}
+      loadThreadHistory={loadThreadHistory}
+      threadObservations={threadObservations}
+      reply={reply}
+      promoteThread={promoteThread}
+      subscribeChanges={subscribeChanges}
+      selectThread={selectThread}
+      selectChannel={selectChannel}
+      resolveTaskRefs={resolveTaskRefs}
+      resolveThreadRefs={resolveThreadRefs}
+      openMemberSession={openMemberSession}
+      channelNameOf={channelNameOf}
+      memberOf={memberOf}
+      taskNumberOf={taskNumberOf}
+      onRead={handlePanelRead}
+      onPromoted={handlePanelPromoted}
+      onClose={handlePanelClose}
+      t={t}
+    />}
   </main>
 }
 

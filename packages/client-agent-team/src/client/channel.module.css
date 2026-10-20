@@ -199,13 +199,9 @@
 
 .boardCardFoot time { margin-left: auto; }
 
-/* The feed's stage owns the timeline and the composer as one seat, so an open
-   panel can span both. The seat is reserved only while a discussion is open:
-   an always-on reservation spends 360px of the reading surface on an empty band
-   for the whole life of the page, and the reader pays for it on every line. The
-   price of the narrower reservation is one re-wrap when the panel opens or
-   closes — a single reflow at the moment the reader moved their attention to the
-   panel. */
+/* The feed's stage owns the timeline and the composer as one seat, and an open
+   panel reserves its width here rather than always: an always-on reservation
+   spends 360px of the reading surface on an empty band for the page's life. */
 .feedStage {
   box-sizing: border-box;
   display: grid;
@@ -218,12 +214,11 @@
 
 .feedStage[data-panel="open"] { padding-right: var(--team-panel-width, 460px); }
 
-/* The panel is a discussion's whole face beside its feed: the head names it,
-   the body reads it, the foot answers it. It paints over the seat the stage
-   reserves, so opening it moves nothing the feed already printed. Its seat is
-   one variable the drag handle writes, so a drag repaints without re-rendering
-   the feed, and its box runs the stage's full height so the head sits level with
-   the feed's first row and the composer shares the foot line. */
+/* The panel is a discussion's whole face beside its feed: the head names it, the
+   body reads it, the foot answers it. As the surface's own child it spans the
+   band and the feed as one column, so its 10px inset puts the head on the band's
+   identity row. Its seat is one variable the handle writes, so a drag repaints
+   without re-rendering the feed. */
 .panel {
   background: var(--dsw-alias-bg-base);
   border-left: 1px solid var(--dsw-alias-border-l2);
@@ -231,6 +226,7 @@
   flex-direction: column;
   inset: 0 0 0 auto;
   min-height: 0;
+  padding-top: 10px;
   position: absolute;
   width: var(--team-panel-width, 460px);
 }
@@ -279,12 +275,16 @@
   .panelHandle::after { transition: none; }
 }
 
+/* The band's identity row, continued on the panel's side of the seam: the
+   panel's 10px inset and this 30px row are the band's own numbers. No closing
+   rule — the band's rule already ends the row, so a second one only draws a
+   line the reader has to read past. */
 .panelHead {
   align-items: center;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
   display: flex;
   gap: 8px;
-  padding: 10px 12px;
+  min-height: 30px;
+  padding: 0 12px;
 }
 
 .panelTitle {
@@ -306,20 +306,28 @@
   padding: 12px;
 }
 
-.panelFoot { border-top: 1px solid var(--dsw-alias-border-l2); }
-
-/* Below the shared 600px breakpoint the panel covers the stage whole rather
-   than sitting beside it: a 360px column beside a feed leaves neither one
-   readable at this width. */
+/* Below the shared 600px breakpoint the panel covers the feed rather than
+   sitting beside it: a 360px column beside a feed leaves neither one readable.
+   Both take the surface's one column and the feed's own rows, so the panel
+   paints over the feed while the band above them — and the seam it shares —
+   stay visible. Placing one of them auto would open a second implicit column
+   and squeeze the feed instead of covering it. The band's width override lives
+   beside the rule it replaces, in the conversation module. */
 @media (max-width: 600px) {
   .feedStage[data-panel="open"] { padding-right: 0; }
 
+  .feedStage { grid-column: 1; }
+
   .panel {
     border-left: 0;
-    inset: 0;
+    grid-column: 1;
+    grid-row: 2 / 4;
+    inset: auto;
+    padding-top: 0;
+    position: relative;
     width: auto;
   }
 
-  /* Covering the stage whole is not a seat one can drag wider. */
+  /* Covering the feed whole is not a seat one can drag wider. */
   .panelHandle { display: none; }
 }

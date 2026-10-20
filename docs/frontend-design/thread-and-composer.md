@@ -60,7 +60,7 @@ Every top-level Channel Message has one Thread entry, drawn as a single quiet ro
 
 The state instead leads the entry row, at the same left edge as the body above it and on one x for every entry in the feed. That is the same leading position shipped DSH rows give their state (a `SkillRow`'s collapsed leading slot, the `JobListAction` trigger's dot before its count).
 
-Where the row opens depends on what is behind it. A Taskful entry walks into the Thread page, which carries Claims, acceptance, and the whole history; a taskless discussion opens in the Channel page's own side panel, so the reader keeps the feed beside them (see [the Channel page](components.md#channel-page-and-discussion-panel)).
+Where the row opens depends on what is behind it. A Taskful entry walks into the Thread page, which carries Claims, acceptance, and the whole history; a taskless discussion opens in the Channel page's own side panel, so the reader keeps the feed beside them and reads its head on the band's identity row (see [the Channel page](components.md#channel-page-and-discussion-panel)).
 
 An unfinished taskful entry leads with, in order, the avatar stack of the Task's live Claim owners, the 8px `TeamStateDot` for `taskStatusDot(status)`, and the localized status word. The word maps `in_progress`→ongoing, `in_review`→warning, and `done`→done on the shared `StateDot`, while `todo` renders its hollow ring and `closed` a quiet tertiary dot, so all five statuses keep one shape language.
 

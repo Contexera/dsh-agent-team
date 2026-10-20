@@ -17,6 +17,9 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  /* The discussion panel's containing box: the panel is the one child that
+     spans the band and the feed as a single column. */
+  position: relative;
 }
 
 /* Header chrome is flush with the pane, not with the reading column: the
@@ -28,6 +31,15 @@
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   min-width: 0;
   padding: 14px 28px 12px;
+}
+
+/* An open panel owns the right edge, so the band gives up its width: a long
+   description would otherwise run under the seam. Below the breakpoint the
+   panel covers the feed instead of sitting beside it, so the band takes its
+   width back — this override lives here, after the rule it replaces, because a
+   same-specificity copy in another module loses to bundle order. */
+.surface:has(> [data-team-panel]) .surfaceHeader {
+  padding-right: calc(var(--team-panel-width, 460px) + 12px);
 }
 
 .headerRow {
@@ -700,6 +712,7 @@
 
 @media (max-width: 600px) {
   .surfaceHeader { padding: 12px 12px 10px; }
+  .surface:has(> [data-team-panel]) .surfaceHeader { padding-right: 12px; }
   .headerRow { align-items: stretch; flex-direction: column; gap: 8px; }
   .headerActions { flex-wrap: wrap; }
   .backRow { margin-bottom: 6px; }

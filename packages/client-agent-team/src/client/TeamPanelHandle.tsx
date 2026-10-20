@@ -7,11 +7,11 @@ const COARSE_STEP = 96
 
 /**
  * The seam that re-seats the discussion panel through one CSS variable on the
- * stage, so a drag never re-renders either side. The keyboard path is not
+ * surface, so a drag never re-renders either side. The keyboard path is not
  * optional: without it those readers keep a seat they cannot change.
  */
-export function TeamPanelHandle({ stage, label }: {
-  readonly stage: HTMLElement | null
+export function TeamPanelHandle({ surface, label }: {
+  readonly surface: HTMLElement | null
   readonly label: string
 }) {
   const [dragging, setDragging] = useState(false)
@@ -21,26 +21,26 @@ export function TeamPanelHandle({ stage, label }: {
   const frame = useRef<number | null>(null)
 
   const apply = useCallback((requested: number) => {
-    if (stage === null) return 0
-    const width = clampPanelWidth(requested, stage.offsetWidth)
-    stage.style.setProperty('--team-panel-width', `${width}px`)
+    if (surface === null) return 0
+    const width = clampPanelWidth(requested, surface.offsetWidth)
+    surface.style.setProperty('--team-panel-width', `${width}px`)
     return width
-  }, [stage])
+  }, [surface])
 
   // The seat a drag or nudge starts from.
   const current = useCallback((): number => {
-    if (stage === null) return PANEL_MIN
-    const declared = Number.parseFloat(getComputedStyle(stage).getPropertyValue('--team-panel-width'))
-    return Number.isFinite(declared) ? declared : clampPanelWidth(stage.offsetWidth * 0.52, stage.offsetWidth)
-  }, [stage])
+    if (surface === null) return PANEL_MIN
+    const declared = Number.parseFloat(getComputedStyle(surface).getPropertyValue('--team-panel-width'))
+    return Number.isFinite(declared) ? declared : clampPanelWidth(surface.offsetWidth * 0.52, surface.offsetWidth)
+  }, [surface])
 
-  // Once per mounted stage: the choice follows the reader across channels, each
+  // Once per mounted surface: the choice follows the reader across channels, each
   // re-clamping it to its own width.
   useEffect(() => {
-    if (stage === null) return
+    if (surface === null) return
     const preference = readPanelWidthPreference()
     if (preference !== null) apply(preference)
-  }, [stage, apply])
+  }, [surface, apply])
 
   const cancelFrame = () => {
     if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null }
@@ -48,9 +48,9 @@ export function TeamPanelHandle({ stage, label }: {
   useEffect(() => cancelFrame, [])
 
   const commit = useCallback((width: number) => {
-    if (stage === null) return
-    writePanelWidthPreference(clampPanelWidth(width, stage.offsetWidth))
-  }, [stage])
+    if (surface === null) return
+    writePanelWidthPreference(clampPanelWidth(width, surface.offsetWidth))
+  }, [surface])
 
   const onPointerDown = (event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return

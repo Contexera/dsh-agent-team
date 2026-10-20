@@ -27,8 +27,8 @@ import css from './conversation.module.css'
 import threadCss from './thread.module.css'
 
 interface TeamChannelPanelProps {
-  /** The stage this panel is seated in: it owns the width the handle writes. */
-  readonly stage: HTMLElement | null
+  /** The surface this panel is seated in: it owns the width the handle writes. */
+  readonly surface: HTMLElement | null
   readonly workspaceId: WorkspaceId
   readonly channelRef: AgentTeamChannelRef
   readonly threadRef: AgentTeamThreadRef
@@ -79,7 +79,7 @@ type ReadProjection = Awaited<ReturnType<TeamChannelPanelProps['readThread']>> e
  * discussion turns into work — promote. Quoting, Claims, and acceptance stay on
  * the Thread page, which a promoted Thread walks into anyway.
  */
-export function TeamChannelPanel({ stage, workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
+export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
@@ -461,7 +461,7 @@ export function TeamChannelPanel({ stage, workspaceId, channelRef, threadRef, ch
   const title = `${t('threadLabel')} · #${channelName}`
 
   return <aside className={channelCss.panel} aria-label={t('threadLabel')} data-team-panel={threadRef}>
-    <TeamPanelHandle stage={stage} label={t('panelResize')} />
+    <TeamPanelHandle surface={surface} label={t('panelResize')} />
     <div className={channelCss.panelHead}>
       <span className={channelCss.panelTitle} title={title}>{title}</span>
       {task === undefined && thread !== undefined && <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>}
@@ -479,24 +479,22 @@ export function TeamChannelPanel({ stage, workspaceId, channelRef, threadRef, ch
         <Button size="sm" onClick={() => { setAutoReadExhausted(false); void drainUnread() }} disabled={loading}>{t('retry')}</Button>
       </div>}
     </section>
-    {projection !== undefined && thread !== undefined && <div className={channelCss.panelFoot}>
-      <TeamComposer
-        key={draftKey}
-        members={members}
-        followerMemberIds={followerIds}
-        channelPeerMemberIds={channelMemberIds}
-        drafts={drafts}
-        draftKey={draftKey}
-        pending={pending}
-        {...(statusMessage === undefined ? {} : { confirmation: statusMessage })}
-        {...(error === undefined ? {} : { error })}
-        onEdit={clearSendState}
-        onSubmit={() => { void sendReply() }}
-        placeholder={t('replyPlaceholder')}
-        pendingFiles={pendingFiles}
-        onFilesChange={setPendingFiles}
-        t={t}
-      />
-    </div>}
+    {projection !== undefined && thread !== undefined && <TeamComposer
+      key={draftKey}
+      members={members}
+      followerMemberIds={followerIds}
+      channelPeerMemberIds={channelMemberIds}
+      drafts={drafts}
+      draftKey={draftKey}
+      pending={pending}
+      {...(statusMessage === undefined ? {} : { confirmation: statusMessage })}
+      {...(error === undefined ? {} : { error })}
+      onEdit={clearSendState}
+      onSubmit={() => { void sendReply() }}
+      placeholder={t('replyPlaceholder')}
+      pendingFiles={pendingFiles}
+      onFilesChange={setPendingFiles}
+      t={t}
+    />}
   </aside>
 }
