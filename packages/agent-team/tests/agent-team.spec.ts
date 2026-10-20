@@ -14,14 +14,13 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SqliteStorageBackend } from '../src/vendor/storage-sqlite/index.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { DEFAULT_GATE_IDLE_MS, DEFAULT_GATE_TOKENS } from '@contexera/dsh-context-continuity'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { fabricateLegacyThreadReadSnapshot, counterfactualReceiptReadData } from './helpers/legacy-thread-read.ts'
 import AgentTeam, { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
 import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
-import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadReadData, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadRef } from '../src/types.ts'
+import type { AgentTeamAgentMember, AgentTeamHostActor, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadReadData, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadRef } from '../src/types.ts'
 
 interface TeamHarness {
   readonly ctx: Context
@@ -2463,6 +2462,93 @@ describe('AgentTeam Member session rollover ledger command', () => {
   })
 })
 
+describe('AgentTeam Host-initiated Session recycling ledger command', () => {
+  const hostActor = (): AgentTeamHostActor => ({ kind: 'host', handle: 'agent-team' })
+
+  it('commits a Host-actored recycling that moves exactly the sessionId', async () => {
+    const pool = new MemoryMediaPool()
+    const test = await harness(pool)
+    const ledger = ledgerAtBoot(test)
+    const { member } = await addLedgerMember(ledger, undefined)
+    const newSessionId = SessionId(`agent-team-${crypto.randomUUID()}`)
+
+    const recycled = (await ledger.recycleMemberSession({
+      requestId: requestId('recycle'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
+      previousSessionId: member.sessionId, newSessionId,
+    })).value
+
+    // Identity, memory, and binding survive; only the generation moves.
+    expect(recycled.member.sessionId).toBe(newSessionId)
+    expect(recycled.member).toMatchObject({
+      memberId: member.memberId, handle: member.handle, state: 'enabled', privateMemoryPath: member.privateMemoryPath,
+    })
+    expect(ledger.previousSessionForMember(member.memberId)).toBe(member.sessionId)
+    const operation = [...pool.media.get('agent_team')!.tables.get('operations')!.values() as Iterable<AgentTeamOperation>]
+      .find(op => op.kind === 'team/member-session-recycled')
+    // The Host records itself: no Member or Human authority is borrowed for a
+    // decision neither of them made.
+    expect(operation).toMatchObject({
+      kind: 'team/member-session-recycled',
+      actor: { kind: 'host', handle: 'agent-team' },
+      data: { previousSessionId: member.sessionId, newSessionId },
+    })
+    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
+  })
+
+  it('rejects a non-Host actor, a stale binding, and a forged replay', async () => {
+    const pool = new MemoryMediaPool()
+    const test = await harness(pool)
+    const ledger = ledgerAtBoot(test)
+    const { member, actor } = await addLedgerMember(ledger, undefined)
+    const newSessionId = SessionId(`agent-team-${crypto.randomUUID()}`)
+
+    // A Member may roll itself over, but recycling is the Host's decision.
+    await expect(ledger.recycleMemberSession({
+      requestId: requestId('member-actor'), workspaceId: alpha, memberId: member.memberId, actor: actor as never,
+      previousSessionId: member.sessionId, newSessionId,
+    })).rejects.toThrow(/requires Host authority/)
+    await expect(ledger.recycleMemberSession({
+      requestId: requestId('stale'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
+      previousSessionId: SessionId('agent-team-stale'), newSessionId,
+    })).rejects.toThrow(/no longer bound/)
+    await ledger.recycleMemberSession({
+      requestId: requestId('recycle'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
+      previousSessionId: member.sessionId, newSessionId,
+    })
+    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
+    await test.fiber.dispose()
+    cleanups.pop()
+    // Forging a snapshot that moves more than the sessionId must not replay.
+    const forged = records.map(([key, operation]) => {
+      if (typeof operation !== 'object' || operation === null || (operation as AgentTeamOperation).kind !== 'team/member-session-recycled') return [key, operation] as [string, unknown]
+      const recycled = operation as Extract<AgentTeamOperation, { kind: 'team/member-session-recycled' }>
+      return [key, { ...recycled, data: { ...recycled.data, member: { ...recycled.data.member, handle: 'impostor' } } }] as [string, unknown]
+    })
+    await expect(harness(storedPool(forged))).rejects.toThrow(/invalid Member session recycling/)
+  })
+
+  it('rejects a replay whose actor is not the Host', async () => {
+    const pool = new MemoryMediaPool()
+    const test = await harness(pool)
+    const ledger = ledgerAtBoot(test)
+    const { member } = await addLedgerMember(ledger, undefined)
+    const newSessionId = SessionId(`agent-team-${crypto.randomUUID()}`)
+    await ledger.recycleMemberSession({
+      requestId: requestId('recycle'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
+      previousSessionId: member.sessionId, newSessionId,
+    })
+    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
+    await test.fiber.dispose()
+    cleanups.pop()
+    const forged = records.map(([key, operation]) => {
+      if (typeof operation !== 'object' || operation === null || (operation as AgentTeamOperation).kind !== 'team/member-session-recycled') return [key, operation] as [string, unknown]
+      const recycled = operation as Extract<AgentTeamOperation, { kind: 'team/member-session-recycled' }>
+      return [key, { ...recycled, actor: { kind: 'human', memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: 'human' } }] as [string, unknown]
+    })
+    await expect(harness(storedPool(forged))).rejects.toThrow(/invalid Member session recycling authority/)
+  })
+})
+
 describe('AgentTeam durable Thread read progress', () => {
   /**
    * A live facility holding one committed Human Thread read — a reply from a
@@ -3068,31 +3154,6 @@ describe('body-authored mentions', () => {
     ledger.setHumanDisplayHandle('YuCreate')
     await expect(enroll(ledger, channelRef, 'human')).rejects.toThrow('reserved human alias')
     await expect(enroll(ledger, channelRef, 'Human')).rejects.toThrow('reserved human alias')
-  })
-})
-
-/**
- * The gate's thresholds are row configuration the settings document omits, so
- * the Host resolves an omitted field rather than publishing a second copy of a
- * number nobody chose. Two of the three are the engine's to answer; the judge's
- * budget is Team's, because a judge is reached over a network and the engine's
- * default is sized for one beside the Host.
- */
-describe('AgentTeam gate thresholds as the settings surface reports them', () => {
-  it('answers the judge\'s budget itself and leaves the other two to the engine', async () => {
-    const plain = await harness()
-
-    expect(plain.ctx.agentTeam.contextJudgeForClient({}).gate).toEqual({
-      tokens: DEFAULT_GATE_TOKENS,
-      idleMs: DEFAULT_GATE_IDLE_MS,
-      judgeTimeoutMs: 10_000,
-    })
-  })
-
-  it('keeps every threshold a deployment states, including a judge budget below Team\'s own', async () => {
-    const stated = await harness(undefined, undefined, { gate: { tokens: 64_000, idleMs: 60_000, judgeTimeoutMs: 3_000 } })
-
-    expect(stated.ctx.agentTeam.contextJudgeForClient({}).gate).toEqual({ tokens: 64_000, idleMs: 60_000, judgeTimeoutMs: 3_000 })
   })
 })
 

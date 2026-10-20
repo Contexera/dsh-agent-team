@@ -7,14 +7,8 @@
 }
 .titleLine h1 { margin: 0; }
 
-/* The header band closes with its own rule, so the sections inside it
-   separate by space alone — a rule here would draw a second line around
-   nothing. */
-.workSection {
-  margin: 14px auto 0;
-  max-width: 880px;
-}
-
+/* The header band closes with its own rule, so a section inside it needs no
+   rule of its own — that would draw a second line around nothing. */
 .riskSection {
   margin: 14px auto 0;
   max-width: 880px;
@@ -53,75 +47,6 @@
 .riskClass {
   color: var(--dsw-alias-state-error-primary);
   font-weight: 600;
-}
-
-.claimList {
-  display: grid;
-  gap: 0;
-  padding: 4px 0 0 22px;
-}
-
-/* Identity and its state share the first line; the direction owns the second.
-   The dot column plus the row's left padding put every dot on the same spine
-   as the disclosure row's title. */
-.claimRow {
-  align-items: center;
-  border-radius: var(--dsw-radius-sm, 6px);
-  column-gap: 8px;
-  display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
-  min-height: 30px;
-  padding: 3px 6px 5px;
-}
-
-.claimRow:hover { background: var(--dsw-alias-interactive-bg-hover); }
-
-/* The presence dot in the first track is the row's only liveness signal: a
-   second badge beside the handle would say "available" twice. */
-.claimOwner {
-  align-items: center;
-  color: var(--dsw-alias-label-secondary);
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 500;
-  gap: 4px;
-  grid-column: 2;
-  grid-row: 1;
-  line-height: 16px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.claimDirection {
-  color: var(--dsw-alias-label-primary);
-  font-size: 12px;
-  grid-column: 2;
-  grid-row: 2;
-  line-height: 18px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-/* A finished Claim stops competing with the live ones for the eye. */
-.claimRowDone .claimDirection { color: var(--dsw-alias-label-secondary); }
-
-.claimState {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  grid-column: 3;
-  grid-row: 1;
-  line-height: 18px;
-  white-space: nowrap;
-}
-
-.emptyClaims {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  line-height: 18px;
-  margin: 0;
-  padding: 5px 6px;
 }
 
 .activityRow {
@@ -297,11 +222,6 @@
 }
 
 @media (max-width: 600px) {
-  /* The claim row keeps its desktop template: identity and state share the
-     first line and the direction owns the second at every width, so only the
-     vertical alignment changes here. */
-  .claimRow { align-items: start; }
-
   .activityRow { padding-inline: 0; }
   .newUpdates { max-width: calc(100% - 16px); }
 }

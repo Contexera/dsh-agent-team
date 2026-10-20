@@ -14,14 +14,6 @@ export function formatTaskStatus(status: AgentTeamTask['status'], t: TeamConvers
   } as const)[status])
 }
 
-export function formatClaimState(state: AgentTeamClaim['state'], t: TeamConversationProps['t']): string {
-  return t(({
-    active: 'claimStateActive',
-    done: 'claimStateDone',
-    released: 'claimStateReleased',
-  } as const)[state])
-}
-
 const RISK_CLASS_KEYS = {
   'session-refused': ['riskClassSessionRefused', 'riskSessionRefused'],
   'session-unreadable': ['riskClassSessionUnreadable', 'riskSessionUnreadable'],

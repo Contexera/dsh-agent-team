@@ -1,6 +1,5 @@
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { apply } from '../src/index.ts'
-import { registerContextTools } from '../src/context-tools.ts'
 
 /**
  * Shared render-spec harness: registers the Team tools into a throwaway
@@ -14,15 +13,6 @@ export function teamTools(): Map<string, ToolDefinition> {
     const definition = tool as ToolDefinition
     registered.set(definition.name, definition)
   } } } as never)
-  return registered
-}
-
-export function contextTools(): Map<string, ToolDefinition> {
-  const registered = new Map<string, ToolDefinition>()
-  registerContextTools({ tools: { register: (tool: unknown) => {
-    const definition = tool as ToolDefinition
-    registered.set(definition.name, definition)
-  } } })
   return registered
 }
 

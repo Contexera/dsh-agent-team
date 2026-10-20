@@ -153,14 +153,6 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
     sentence: ({ refused }: RecoveryContext) => `${refused ?? 'That ref'} matches several entries — reuse a longer prefix, or the full ref exactly as returned by Team tools.`,
   },
   {
-    kind: 'checkpoint_ref_malformed',
-    sentence: () => 'Copy a checkpointRef exactly as returned by context_status — never derive, shorten, or rebuild one.',
-  },
-  {
-    kind: 'rollover_blocked_by_jobs',
-    sentence: ({ refused }: RecoveryContext) => `This rollover is refused while jobs survive it (${refused ?? ''}) — collect or stop them, then retry.`,
-  },
-  {
     kind: 'workspace_required',
     sentence: ({ refused }: RecoveryContext) => `workspace is required when you participate in multiple Workspaces — choose one of: ${refused ?? ''}.`,
   },

@@ -67,8 +67,6 @@
     }
   },
   "dependencies": {
-    "@contexera/dsh-context-continuity": "^0.4.0",
-    "@contexera/dsh-jev": "^0.1.4",
     "yaml": "^2.9.1",
     "zod": "^4.4.3"
   },
@@ -121,9 +119,9 @@
       "types": "./packages/agent-team/lib/types/vendor/storage-sqlite/index.d.ts",
       "default": "./packages/agent-team/lib/vendor/storage-sqlite/index.js"
     },
-    "./compaction-engine": {
-      "types": "./packages/agent-team/lib/types/compaction-engine.d.ts",
-      "default": "./packages/agent-team/lib/compaction-engine.js"
+    "./team-compaction-engine": {
+      "types": "./packages/agent-team/lib/types/team-compaction-engine.d.ts",
+      "default": "./packages/agent-team/lib/team-compaction-engine.js"
     },
     "./member-context": {
       "types": "./packages/agent-team/lib/types/member-context.d.ts",
@@ -187,6 +185,7 @@
     "@deepseek-ai/dsh-client-ui-workspace": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-command-compact": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-compaction": ">=0.2.1-rc.2 <0.2.2",
+    "@deepseek-ai/dsh-compaction-basic": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-home-paths": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-sandbox-policy": ">=0.2.1-rc.2 <0.2.2",

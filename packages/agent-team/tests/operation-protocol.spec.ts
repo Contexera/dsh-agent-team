@@ -44,6 +44,7 @@ import type {
   AgentTeamChannelRef,
   AgentTeamChangeScope,
   AgentTeamClaim,
+  AgentTeamHostActor,
   AgentTeamHumanActor,
   AgentTeamInboxDelta,
   AgentTeamMemberActor,
@@ -72,6 +73,7 @@ const previousOperationId = 'operation:protocol-seed' as AgentTeamOperationId
 const memberId = 'member:protocol' as AgentTeamMemberId
 const memberHandle = 'protocol-agent'
 const memberActor: AgentTeamMemberActor = { kind: 'member', memberId, handle: memberHandle }
+const hostActor: AgentTeamHostActor = { kind: 'host', handle: 'agent-team' }
 const otherMemberId = 'member:protocol-other' as AgentTeamMemberId
 
 /**
@@ -118,7 +120,7 @@ const taskfulThread: AgentTeamThread = { threadRef: humanThread, taskRef: fixtur
 const plainThread: AgentTeamThread = { threadRef: humanThread, revision: 6 }
 const fixtureClaimRef = 'claim:protocol-fixture' as AgentTeamClaim['claimRef']
 
-function opBase(operationId: string, value: string, sequence: number, actor: AgentTeamActor = human) {
+function opBase<A extends AgentTeamActor>(operationId: string, value: string, sequence: number, actor: A = human as A) {
   return {
     sequence,
     operationId: operationId as AgentTeamOperationId,
@@ -208,6 +210,17 @@ const memberSessionRolledOver: Op<'team/member-session-rolled-over'> = {
     newSessionId: SessionId('session:protocol-next'),
     handoffEventSeq: SessionSeq(7),
     trigger: 'model',
+  },
+}
+
+const memberSessionRecycled: Op<'team/member-session-recycled'> = {
+  ...opBase('operation:protocol-28', 'request:protocol-member-session-recycled', 28, hostActor),
+  previousOperationId,
+  kind: 'team/member-session-recycled',
+  data: {
+    member: { ...fixtureMember, sessionId: SessionId('session:protocol-fresh') },
+    previousSessionId: SessionId('session:protocol'),
+    newSessionId: SessionId('session:protocol-fresh'),
   },
 }
 
@@ -736,6 +749,34 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         newSessionId: memberSessionRolledOver.data.member.sessionId,
         handoffEventSeq: SessionSeq(8),
         trigger: memberSessionRolledOver.data.trigger,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/member-session-recycled': {
+    stored: memberSessionRecycled,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.recycleMemberSession({
+          requestId: memberSessionRecycled.requestId,
+          actor: hostActor,
+          workspaceId: alpha,
+          memberId,
+          previousSessionId: memberSessionRecycled.data.previousSessionId,
+          newSessionId: memberSessionRecycled.data.newSessionId,
+        })
+        expect(out.value.member.sessionId, 'the recycle mapper answers with the stored Session move').toBe(memberSessionRecycled.data.newSessionId)
+        return out
+      },
+      changed: () => ledger.recycleMemberSession({
+        requestId: memberSessionRecycled.requestId,
+        actor: hostActor,
+        workspaceId: alpha,
+        memberId,
+        previousSessionId: memberSessionRecycled.data.previousSessionId,
+        newSessionId: SessionId('session:protocol-other-fresh'),
       }),
     },
     legacy: { normalize: 'none', repair: 'none' },

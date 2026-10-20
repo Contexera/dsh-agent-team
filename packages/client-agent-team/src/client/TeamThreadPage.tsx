@@ -13,13 +13,13 @@ import type {
   AgentTeamView,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { Button, DisclosureRow, IconChevronLeftOutlineRegular, IconChecklistOutlineRegular, Modal, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronLeftOutlineRegular, Modal, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { bodyMentionsHuman, firstSentence, formatActivity, formatClaimState, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionedMemberIds, taskStatusDot } from './team-formatters.ts'
+import { bodyMentionsHuman, firstSentence, formatActivity, formatRiskClass, formatTaskStatus, formatTaskTitle, mentionedMemberIds, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { daySeparatorLabel, localDateKey } from './team-separators.ts'
@@ -121,7 +121,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // The composer owns the subscription — this page only reads a snapshot when
   // it sends, so typing never re-renders the timeline.
   const draftKey: TeamDraftKey = `thread:${threadRef}`
-  const [claimsOpen, setClaimsOpen] = useState(false)
   // Early acceptance: the Human may accept while Claims are still open; the
   // confirm dialog lists exactly what will be completed with the Task.
   const [confirmingAccept, setConfirmingAccept] = useState(false)
@@ -923,29 +922,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           </ul>
         </Modal>
       })()}
-      {task !== undefined && thread !== undefined && <section className={threadCss.workSection} aria-label={t('claims')}>
-        <DisclosureRow
-          expandOnRowClick
-          expandable
-          open={claimsOpen}
-          onToggle={() => { setClaimsOpen(current => !current) }}
-          icon={<IconChecklistOutlineRegular size={14} />}
-          title={`${t('claims')} · ${taskClaims.length}`}
-        >
-          <div className={threadCss.claimList}>
-            {taskClaims.length === 0 && <p className={threadCss.emptyClaims}>{t('noClaims')}</p>}
-            {taskClaims.map(claim => {
-              const ownerStatus = members.find(status => status.member.memberId === claim.owner)
-              return <article className={`${threadCss.claimRow}${claim.state === 'done' ? ` ${threadCss.claimRowDone}` : ''}`} key={claim.claimRef}>
-                {ownerStatus === undefined ? <span /> : <TeamPresenceDot status={ownerStatus} t={t} />}
-                <strong className={threadCss.claimOwner} title={memberName(claim.owner)}>{memberName(claim.owner)}</strong>
-                <span className={threadCss.claimDirection}>{claim.direction}</span>
-                <small className={threadCss.claimState}>{formatClaimState(claim.state, t)}</small>
-              </article>
-            })}
-          </div>
-        </DisclosureRow>
-      </section>}
     </div>
 
     <section ref={timeline.ref} onScroll={handleTimelineScroll} className={css.timeline} aria-label={t('timelineLabel')}>

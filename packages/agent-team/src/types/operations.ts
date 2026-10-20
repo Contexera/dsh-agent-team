@@ -5,6 +5,7 @@ import type {
   AgentTeamChannel,
   AgentTeamChannelRef,
   AgentTeamContextCheckpointRef,
+  AgentTeamHostActor,
   AgentTeamOperationBase,
   AgentTeamClaim,
   AgentTeamClaimActivity,
@@ -149,6 +150,22 @@ export interface AgentTeamMemberSessionRolledOverOperation extends AgentTeamOper
     readonly handoffEventSeq: SessionSeq
     readonly checkpointRef?: AgentTeamContextCheckpointRef
     readonly trigger: 'model' | 'pressure'
+  }
+}
+
+/**
+ * Durable Host-initiated recycling of one Member's Session: the Host judged a
+ * live generation cold enough to replace before delivering the message that
+ * woke it. The data is the binding transition alone — no handoff prose (the
+ * successor's continuity is its own memory) and no checkpoint lineage.
+ */
+export interface AgentTeamMemberSessionRecycledOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/member-session-recycled'
+  readonly actor: AgentTeamHostActor
+  readonly data: {
+    readonly member: AgentTeamAgentMember
+    readonly previousSessionId: SessionId
+    readonly newSessionId: SessionId
   }
 }
 
@@ -404,6 +421,7 @@ export type AgentTeamOperation =
   | AgentTeamMemberContextClearedOperation
   | AgentTeamMemberSessionRenewedOperation
   | AgentTeamMemberSessionRolledOverOperation
+  | AgentTeamMemberSessionRecycledOperation
   | AgentTeamChannelUpdatedOperation
   | AgentTeamMemberUpdatedOperation
   | AgentTeamChannelMemberAddedOperation

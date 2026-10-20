@@ -33,7 +33,6 @@ import type {
   AgentTeamThreadReadFact,
   AgentTeamThreadRef,
 } from "./entities.ts"
-import type { TeamContextJudgeStatus } from "../context-judge.ts"
 
 /** Receipt returned after an operation is durable or an identical retry resolves it. */
 export interface AgentTeamOperationReceipt {
@@ -206,10 +205,9 @@ export interface AgentTeamClearMemberContextResult {
 }
 
 /**
- * Member-authored intent (carried by its live Agent) to continue in its next
- * private context generation. The requestId and new Session id derive stably
- * from the successful `context_rollover` tool call so crash replay converges on
- * one operation and one generation.
+ * The retired Member-authored rollover request. No current build produces one;
+ * the Host records its own swaps as `team/member-session-recycled`. The shape
+ * stays because a ledger written by an earlier build still decodes through it.
  */
 export interface AgentTeamRolloverSessionRequest {
   readonly requestId: AgentTeamRequestId
@@ -219,7 +217,7 @@ export interface AgentTeamRolloverSessionRequest {
   readonly previousSessionId: AgentTeamMemberSessionId
   /** The next generation Session, derived from the successful tool call. */
   readonly newSessionId: AgentTeamMemberSessionId
-  /** Seq of the successful `context_rollover` tool result in the previous Session log. */
+  /** Seq of the retired rollover tool result in the previous Session log. */
   readonly handoffEventSeq: AgentTeamMemberSessionSeq
   /** Why the rollover happened: the model asked, or honored a pressure notice. */
   readonly trigger: 'model' | 'pressure'
@@ -401,26 +399,6 @@ export interface AgentTeamEnvironmentResult {
   /** Lower bound of the declared range: the certified, actually-tested DSH line. */
   readonly certifiedDshVersion?: string | undefined
   readonly supportRange?: AgentTeamEnvironmentSupportRange | undefined
-}
-
-/** Relatedness-judge read: carries no input; the answer is the Host's own state. */
-export interface AgentTeamContextJudgeRequest {
-}
-
-/**
- * What the Team settings surface states about the long-gap gate's judge. It
- * carries only what the settings document cannot: whether a judge is actually
- * reachable, why it is not, and the gate's effective thresholds — which are row
- * configuration, so the Host resolves an omitted field against the engine's own
- * default rather than letting a second copy of those numbers exist.
- */
-export interface AgentTeamContextJudgeResult extends TeamContextJudgeStatus {
-  /** The gate's thresholds in force: row configuration resolved against the engine's defaults. */
-  readonly gate: {
-    readonly tokens: number
-    readonly idleMs: number
-    readonly judgeTimeoutMs: number
-  }
 }
 
 /**
@@ -782,24 +760,6 @@ export interface AgentTeamThreadReadRequest {
   readonly taskRef?: AgentTeamTaskRef
 }
 
-/**
- * Private, read-time context guidance for one acceptance the reading Member
- * just acknowledged. Host-computed after the durable read committed; never a
- * ledger fact, never persisted, and absent unless this read acknowledged an
- * unread acceptance of a Task that is still done.
- */
-export interface AgentTeamContextAdvice {
-  /** Current measured usage of the reading Member's context; absent when unmeasured. */
-  readonly usageTokens?: number | undefined
-  readonly taskBoundaryThreshold?: number | undefined
-  /** Effective handoff budget of the Member's current route; absent when unmeasured. */
-  readonly handoffAt?: number | undefined
-  /** Effective hard limit of the Member's current route; absent when unmeasured. */
-  readonly hardLimit?: number | undefined
-  readonly action: 'keep' | 'rollover' | 'compact-now' | 'unavailable'
-  readonly guidance: string
-}
-
 export interface AgentTeamThreadReadResult {
   /**
    * Receipt of the durable read this response committed; absent when the read
@@ -820,8 +780,6 @@ export interface AgentTeamThreadReadResult {
   readonly earlierFactCount?: number
   readonly attention?: AgentTeamThreadAttention
   readonly consumedDirectMarkers: readonly AgentTeamDirectMarker[]
-  /** Present only when this read acknowledged an unread acceptance of a still-done Task. */
-  readonly contextAdvice?: AgentTeamContextAdvice
 }
 
 /** Non-mutating Thread history request. */

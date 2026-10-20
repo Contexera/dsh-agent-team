@@ -86,10 +86,6 @@
                   - Use team_inbox only when you need to triage several unread Threads; use team_thread.history for bounded background history without marking updates read. Triage your Inbox on every wake: read and handle what matters to current work immediately, and clear the remainder once current work settles.
                   - Reuse opaque refs exactly as returned — `task:<uuid>`, `thread:<uuid>`, `channel:<slug>`, always one colon. When citing a ref in a message body, write it as bare text in exactly that form: never a double colon, never inside backticks or quotes. A mention is the one name you must spell in the body itself, as `@Handle`.
 
-                  # Context management
-
-                  Treat your active context as the smallest sufficient working set for your next action, not as durable memory. Record a context_checkpoint before a noisy or risky phase when returning to the current completed state may later be useful. Call context_rollover without a checkpointRef when your raw history no longer helps the known next action — this is the default, cheapest path at context pressure; a checkpointRef return (from context_status) retains the earlier raw prefix and is for discarding a failed later branch. Call context_compact when you close a piece of work and this context has grown large: it shortens this generation in place, never switches generation, and keeps your newest work verbatim. A context change never rolls back files, git, processes, browser state, Team facts, or remote side effects: bridge their current state in your handoff so the next generation can re-verify. Record anything worth keeping in your private memory/notes before switching. Do not change context while evidence is unstable or merely because you delivered work and are awaiting review — keep the raw trail for follow-up questions. Collect or stop background jobs before context_rollover. After a Task you contributed to is accepted, finish the closeout, then follow the context guidance attached to that team_thread read when managing your context. At a context-pressure notice, finish the atomic action and hand off; at the hard limit the Host may compact automatically.
-
                   # Private space
 
                   Your private space under the absolute paths injected into your context (the directory containing memory.md, notes/, and skills/) is your own workspace: read and write it with normal filesystem tools — there is no special channel. Its paths are outside the Workspace cwd, and relative paths resolve against the cwd, so always use the injected absolute paths. It holds your reusable assets: the memory.md index and notes/ for knowledge you will need again, and skills/ for the skills you install. Only you can read it — no other human or agent can see these paths or their contents — so never treat what it holds as shared knowledge: when a Team message or your session output needs that material, restate the needed content inside the communication itself instead of pointing at a note, a memory entry, or a skill. Record only verified, durable, reusable knowledge; when adding or renaming a note, update the memory.md index. Never record credentials, sensitive data, guesses, chat logs, other Members' memory, or Team facts already owned by the ledger. One-off products belong nowhere near it: the repository receives only formal deliverables, and your private space receives only what you will actually use again. Whether to use any skill in your catalog is your own judgment per task.
@@ -179,19 +175,90 @@
                 compaction: true
                 toolResultPruner: true
               config:
-                # The Team owns both compaction policy entry points (the pressure notice
-                # and the hard-limit forced reduction in its Host coordinator), so the
-                # plugin's own automatic listeners stay off; the engine implementation is
-                # still reused for member-initiated /compact and the Team policy. The
-                # engine is the continuity subclass, so a summary the Member writes
-                # itself reaches the reduction instead of a template written for it.
-                # The row names this bundle's own re-export rather than the engine
-                # package: a row is resolved from the profile, which links this
-                # bundle but not the dependency nested inside it.
+                # The engine manages pressure itself (`auto` defaults to true):
+                # a Member condenses its own context at the step boundary instead
+                # of waiting for the Host's hard-limit reduction. Thresholds are
+                # absolute-by-decision, not by fraction: 0.256 of a 1M window is
+                # the 256K trigger the Team runs on, and the per-route families
+                # below keep that same waterline where the window differs. An
+                # unmatched route inherits the global ratio, which is the right
+                # default for the 1M family the Team defaults to.
+                #
+                # `retainRatio` 0.08 leaves ~70K of verbatim tail after a 1M
+                # compaction (~180K removed), so automatic runs stay rare rather
+                # than firing every other step.
+                #
+                # The row names this bundle's own engine, not the Harness package
+                # nor a dependency's subpath: a row is resolved from the profile,
+                # which links this bundle and the host closure only.
                 - id: compaction-basic
-                  name: '@contexera/dsh-agent-team/compaction-engine'
+                  name: '@contexera/dsh-agent-team/team-compaction-engine'
                   config:
-                    auto: false
+                    thresholdRatio: 0.256
+                    retainRatio: 0.08
+                    headroomTokens: 65536
+                    # The provider/model pairs are the routes the maintained
+                    # web/web-dev profiles declare (`modelPolicies` matches both
+                    # segments exactly, so a pair not listed here is unmatched,
+                    # not mis-thresholded). Model ids alone appear in the
+                    # threshold measurement; only the profiles state a provider.
+                    # Routes the profiles give no window (glm-5.3-flash,
+                    # hy4-preview-f, grok-4.6) fall back to the adapter's
+                    # defaultContextWindow, which no measurement covers. They
+                    # keep the global ratio and trigger below the waterline:
+                    # earlier than measured, never later.
+                    modelPolicies:
+                      # 1,048,576 windows: 0.2441 keeps the 256K waterline.
+                      - provider: agentrouter
+                        model: gpt-6-astra
+                        thresholdRatio: 0.2441
+                      - provider: agentrouter-responses
+                        model: gpt-6-astra
+                        thresholdRatio: 0.2441
+                      - provider: opencode-go
+                        model: muse-spark-1.3-contributor
+                        thresholdRatio: 0.2441
+                      - provider: magpie
+                        model: group/kimi
+                        thresholdRatio: 0.2441
+                      - provider: magpie
+                        model: volcengine/deepseek-v4.1-flash
+                        thresholdRatio: 0.2441
+                      - provider: magpie
+                        model: volcengine/kimi-k3
+                        thresholdRatio: 0.2441
+                      # 922,000 windows: 0.2779 keeps the same waterline.
+                      - provider: magpie
+                        model: auto/gpt-6.1-sol
+                        thresholdRatio: 0.2779
+                      # 272K family: the reserved output plus headroom caps
+                      # pressure at 78,464 tokens, so 0.29 claims the earliest
+                      # trigger capacity allows rather than a 256K one it can
+                      # never reach.
+                      - provider: agentrouter
+                        model: gpt-5.6-sol
+                        thresholdRatio: 0.29
+                      - provider: openai
+                        model: gpt-5.6-luna
+                        thresholdRatio: 0.29
+                      - provider: openai
+                        model: gpt-5.6-sol
+                        thresholdRatio: 0.29
+                      - provider: openai
+                        model: gpt-5.6-terra
+                        thresholdRatio: 0.29
+                      - provider: openai
+                        model: gpt-6-astra
+                        thresholdRatio: 0.29
+                      - provider: openai
+                        model: gpt-6.1-sol
+                        thresholdRatio: 0.29
+                      # 200K window with a 32K output cap: capacity tops out at
+                      # 102,464, so 0.51 claims 102,000 — the latest trigger the
+                      # cap allows without depending on which side rounds.
+                      - provider: magpie
+                        model: opencode-zen-free/deepseek-v4.1-flash-free
+                        thresholdRatio: 0.51
 
                 # The member session keeps the shipped composer, whose global command
                 # vocabulary is fully available; this row routes the member's own

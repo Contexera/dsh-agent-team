@@ -40,8 +40,6 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { TeamSettingsSection } from './TeamSettingsSection.tsx'
-import { TeamContextJudgeCheck } from './context-judge.ts'
-import { TeamJudgeForm, TeamJudgeFormSeat, type TeamJudgeSection } from './judge-form.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
@@ -52,7 +50,6 @@ import { TeamDraftStore } from './drafts.ts'
 import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
-import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '@contexera/dsh-agent-team/human-settings'
 import { en, zh, type TeamKey } from './locales.ts'
 
 export type { TeamMode, TeamNavigationActions, TeamNavigationSnapshot } from './navigation.ts'
@@ -356,25 +353,11 @@ function applyUi(ctx: ClientContext): void {
   const environment = new TeamEnvironmentCheck({
     loadEnvironment: () => ctx.remote.agentTeam.environment({}),
   })
-  // The long-gap gate's judge: what the Host answers about reachability, and
-  // the thresholds in force. Its own projection rather than a field of the
-  // environment check, because it re-reads after every write that can mount or
-  // unmount the judge while the environment verdict is settled once.
-  const contextJudge = new TeamContextJudgeCheck({
-    loadContextJudge: () => ctx.remote.agentTeam.contextJudge({}),
-  })
-  // The settings page's endpoint form. It is held in a seat rather than handed
-  // over as a value, because the service it is built over may arrive after the
-  // page's injected props were computed — and a slot entry's props are computed
-  // once and cached, so a value would freeze the answer.
-  const judgeForm = new TeamJudgeFormSeat()
   ctx.effect(() => () => {
     navigation.dispose()
     drafts.dispose()
     humanIdentity.dispose()
     environment.dispose()
-    contextJudge.dispose()
-    judgeForm.dispose()
     void disposeNavigation()
     void disposeDrafts()
   }, 'agent-team: navigation service')
@@ -478,26 +461,10 @@ function applyUi(ctx: ClientContext): void {
   }, 'agent-team: mode marker')
 
   // The Team's settings page: one settings section, ordered between General (0)
-  // and Models (10) so it sits near the top. It holds two groups that write
-  // through two different documents: identity goes through the Team Remote,
+  // and Models (10) so it sits near the top. It writes through the Team Remote,
   // which answers with the Host's own rejection reason (a name collides, an
   // empty one), and the shared identity re-reads afterwards, so a rename lands
   // in the timeline and the member refs at the same moment the page shows it.
-  //
-  // The judge's endpoint is one group of the Team row's settings section, so it
-  // is offered only while this deployment serves a settings document: the page
-  // is registered here regardless, because identity is reachable without one,
-  // and the seat above stays empty when there is none. The service is read
-  // through `ctx.get` rather than a hard `inject` for the same reason — a
-  // deployment without the settings UI keeps the rest of the Team.
-  ctx.inject(['configForms'], (scope: ClientContext) => {
-    const form = new TeamJudgeForm(scope.configForms.get<TeamJudgeSection>(HUMAN_PROFILE_SETTINGS_NAMESPACE), contextJudge)
-    judgeForm.hold(form)
-    scope.effect(() => () => {
-      judgeForm.release(form)
-      form.dispose()
-    }, 'agent-team: judge settings form')
-  })
   ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'team-settings',
@@ -507,13 +474,6 @@ function applyUi(ctx: ClientContext): void {
     inject: () => ({
       identity: humanIdentity,
       environment,
-      judge: contextJudge,
-      judgeForm,
-      // The key's literal never rides a response; the describe mirror is what
-      // says whether one is stored.
-      keyConfigured: (): boolean => ctx.get('configForms')?.describe().getSnapshot().view?.namespaces
-        .find(row => row.ns === HUMAN_PROFILE_SETTINGS_NAMESPACE)?.secrets
-        .some(secret => secret.path.join('.') === 'jev.apiKey' && secret.set) ?? false,
       saveName: async (name: string) => {
         const saved = await ctx.remote.agentTeam.setHumanProfile({ name })
         if (!saved.ok) return saved.error.message

@@ -31,8 +31,6 @@ const PRODUCED_KINDS: readonly string[] = Object.freeze([
   'attachment_path_rejected',
   'unknown_ref',
   'ambiguous_ref',
-  'checkpoint_ref_malformed',
-  'rollover_blocked_by_jobs',
   'workspace_required',
   'workspace_ambiguous',
   'workspace_not_participating',

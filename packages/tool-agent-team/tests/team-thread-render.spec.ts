@@ -39,7 +39,7 @@ describe('team_thread renders the model-facing decision surface', () => {
     expect(text).toContain('claim:7ad04d38-3889-4414-ac0c-23f73c0b962a')
   })
 
-  it('a read without unread accepts renders no context advice section', () => {
+  it('a read states its facts and never recommends a context action', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {
       workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
       kind: 'read', threadRef: 'thread:x', revision: 100, following: false,
@@ -77,34 +77,16 @@ describe('team_thread renders the model-facing decision surface', () => {
     expect(activityText).not.toContain('Context guidance')
   })
 
-  it('history renders structured activities but never context advice', () => {
+  it('history renders structured activities and no context section', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {
       kind: 'history', threadRef: 'thread:x', taskRef: 'task:x', revision: 100, status: 'done', resolution: 'accepted', following: true,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
       claims: [],
       facts: [ACCEPT_FACT],
       cursor: 8190, hasMore: false,
-      contextAdvice: undefined,
     })
     expect(text).toContain('claim:7ad04d38-3889-4414-ac0c-23f73c0b962a')
     expect(text).not.toContain('Context guidance')
-  })
-
-  it('an unavailable measurement renders an explicit fallback, never a fabricated threshold verdict', () => {
-    const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
-      kind: 'read', threadRef: 'thread:x', taskRef: 'task:x', revision: 100, status: 'done', resolution: 'accepted', following: true,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
-      claims: [], facts: [ACCEPT_FACT],
-      readThroughSequence: 8190, remainingUnreadCount: 0,
-      contextAdvice: {
-        usageTokens: undefined as never, taskBoundaryThreshold: undefined as never, handoffAt: 200_000, hardLimit: 256_000,
-        action: 'unavailable',
-        guidance: 'Context usage could not be measured for this acceptance; manage context by your existing pressure policy.',
-      },
-    })
-    expect(text).toContain('could not be measured')
-    expect(text).not.toContain('usageTokens')
   })
 
   it('a read that left facts behind states how many, so a returning reader sees the span it is not looking at', () => {

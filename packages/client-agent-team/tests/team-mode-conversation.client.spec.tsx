@@ -72,8 +72,10 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => expect(b.view.getByRole('button', { name: '打开 Task #1' }).textContent).toContain('最近活动'))
     fireEvent.click(b.view.getByRole('button', { name: '打开 Task #1' }))
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
-    fireEvent.click(b.view.getByRole('button', { name: /Claims/ }))
-    expect(b.view.getByText('Implement API')).toBeTruthy()
+    // The band states the Task and not its work queue: a Claim reaches this page
+    // only as the activity line that recorded it, so no disclosure lists them.
+    expect(b.view.queryByRole('button', { name: /Claims/ })).toBeNull()
+    expect(b.view.queryByText('Implement API')).toBeNull()
     expect(b.view.queryByRole('button', { name: '关注 Thread' })).toBeNull()
     expect(b.view.queryByRole('button', { name: '取消关注' })).toBeNull()
     expect(b.view.queryByText('Human 观察')).toBeNull()
@@ -1305,9 +1307,8 @@ describe('Team conversation surfaces', () => {
     expect(b.view.queryByRole('button', { name: '打开 Task #1' })).toBeNull()
     fireEvent.click(b.view.getByRole('button', { name: '打开讨论' }))
     // A discussion stays beside its feed: the panel is its whole face, with
-    // no Claims or acceptance — those belong to the Task it may become.
+    // no acceptance — that belongs to the Task it may become.
     const panel = await b.view.findByRole('complementary', { name: '讨论' })
-    expect(within(panel).queryByRole('button', { name: /Claims/ })).toBeNull()
     expect(within(panel).queryByRole('button', { name: '验收' })).toBeNull()
     fireEvent.click(await within(panel).findByRole('button', { name: '转为 Task' }))
     await waitFor(() => expect(b.promoteThread).toHaveBeenCalledWith(expect.objectContaining({

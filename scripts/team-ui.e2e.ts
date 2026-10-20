@@ -772,12 +772,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-edit-modal.png'), fullPage: true })
   await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()
 
-  // The manual clear-context entry is retired (ticket 01): Members manage
-  // their own context through the context_rollover tool, so every row menu must
-  // omit the entry entirely and no confirm dialog exists. Model-initiated
-  // rollover and the live follow are covered by the member-lifecycle
-  // integration tests and the Client component suite; the full
-  // model-driven browser journey lands with ticket 04.
+  // The manual clear-context entry is retired: the Host recycles a Member's
+  // generation at its wake boundary, so every row menu must omit the entry
+  // entirely and no confirm dialog exists. The swap itself is covered by the
+  // member-lifecycle integration tests and the Client component suite.
   await builderRow.hover()
   await builderRow.getByRole('button', { name: 'builder 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑 Agent' }).waitFor()
@@ -1294,11 +1292,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await panel.waitFor()
   await expect.poll(async () => await page.getByRole('heading', { name: '# delivery' }).count()).toBe(1)
   await expect.poll(async () => await page.locator('[data-team-channel]').count()).toBe(1)
-  // The panel is a discussion's face, not a Task's: no Claims disclosure and no
-  // acceptance control, because a taskless Thread has neither. Scoped to the
-  // panel, since the feed beside it still holds a Task's own door.
+  // The panel is a discussion's face, not a Task's: no acceptance control,
+  // because a taskless Thread has none. The feed beside it holds a Task's door.
   expect(await panel.getByRole('button', { name: '验收' }).count()).toBe(0)
-  expect(await panel.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   const promote = page.getByRole('button', { name: '转为 Task' })
   await promote.waitFor()
   // The panel covers the feed at 390px rather than sitting beside one too narrow
@@ -2356,8 +2352,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   if (agentClaim.kind !== 'committed') throw new Error(`Agent Claim was rejected: ${agentClaim.kind}`)
 
-  await page.getByRole('button', { name: /Claims · 1/ }).click()
-  await page.getByText('实现验收功能', { exact: true }).waitFor()
+  // A Claim reaches this page only as the activity line that recorded it.
+  expect(await page.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   await page.getByText(/认领了「实现验收功能」/).waitFor()
   await page.screenshot({ path: join(UI05_SHOTS, 'active-thread.png'), fullPage: true })
 
@@ -3543,8 +3539,7 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await panel.getByRole('button', { name: '团队', exact: true }).click()
   const nameField = panel.getByLabel('名字')
   await nameField.waitFor()
-  // The Team page carries two saves — this row's and the judge group's — so the
-  // identity row is addressed through the one form it owns.
+  // The identity row is addressed through the one form the page owns.
   const nameSave = panel.locator('form button[type="submit"]')
   // The Host has no override stored yet, so the page shows the historic default
   // and the version footnote's two facts: the bundle version and the repo link.
@@ -3729,175 +3724,4 @@ it('states the local environment check on the Team page', async () => {
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
 
-/**
- * The judge group on the Team page: one line of state above the three controls
- * that decide whether jev can be reached at all. The journey proves the whole
- * path — page → settings document → the Host's own judge → back into the status
- * line — because a write that landed and a write that merely staged look
- * identical on the page, so only that round trip tells them apart.
- *
- * The page is deliberately small: the gate's thresholds and the key's
- * environment variable share the same row and are Team's own business, so this
- * journey also pins their absence from the controls and from the copy.
- *
- * The key literal is written, then cleared: mounting and unmounting the judge
- * is the one state change this page can reach without a network call, and the
- * literal is a fixture that never leaves the temporary profile.
- */
-it('configures the jev endpoint from the Team page in real Web', async () => {
-  await installLocalBundle(false)
-  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
-  browser = await chromium.launch({ headless: true, executablePath: CHROME })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
-  const consoleWatch = watchConsole(page)
-  await page.goto(scaffold.authenticatedUrl)
-  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
 
-  await openSettings(page)
-  const panel = page.getByRole('dialog')
-  await panel.getByRole('button', { name: '团队', exact: true }).click()
-  const heading = panel.getByRole('heading', { name: '团队', exact: true })
-  await heading.waitFor()
-  const judgeToggle = panel.getByRole('button', { name: /^jev/ })
-  const judge = panel.locator('[data-team-judge]')
-
-  // A fresh profile holds no key: the row says so in one line and the controls
-  // that would change it are not on the page at all. A closed disclosure that
-  // merely hid its content would still be reachable by keyboard and by a screen
-  // reader, so the journey pins the absence rather than the styling.
-  const status = judgeToggle.locator('[data-context-judge]')
-  await status.waitFor()
-  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
-  expect(await status.textContent()).toContain('未配置 key')
-  expect(await judgeToggle.getAttribute('aria-expanded')).toBe('false')
-  expect(await judge.count()).toBe(0)
-  expect(await panel.getByRole('textbox', { name: 'apiBase' }).count()).toBe(0)
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-no-key.png'), fullPage: true })
-
-  // Opening it is what puts the three controls on the page — exactly those, and
-  // nothing else: the gate's thresholds and the key's environment variable share
-  // the same settings section and are Team's own business, so neither a control
-  // nor a number for them appears here. It is a real button, so the keyboard
-  // path a reader without a pointer has is the one that opens it.
-  await judgeToggle.focus()
-  await page.keyboard.press('Enter')
-  expect(await judgeToggle.getAttribute('aria-expanded')).toBe('true')
-  await judge.waitFor()
-  expect(await judge.textContent()).not.toContain('阈值')
-  expect(await judge.textContent()).not.toContain('环境变量')
-  expect(await judge.getByRole('textbox').count()).toBe(3)
-  expect(await judge.getByText('jev', { exact: true }).count()).toBe(0)
-  // Nothing is overridden in a fresh profile, so the endpoint controls start
-  // empty: the row states only what it states, and the engine's own defaults are
-  // never copied onto the page. The key is a password field — a stored literal
-  // never rides a response — so it starts blank and there is nothing to clear.
-  expect(await judge.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('')
-  expect(await judge.getByRole('textbox', { name: 'model' }).inputValue()).toBe('')
-  const keyField = judge.getByLabel('key', { exact: true })
-  expect(await keyField.getAttribute('type')).toBe('password')
-  expect(await keyField.getAttribute('autocomplete')).toBe('new-password')
-  expect(await keyField.inputValue()).toBe('')
-  expect(await judge.getByRole('button', { name: '清除 key' }).count()).toBe(0)
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-open.png'), fullPage: true })
-
-  // One save writes all three: the row now carries them, which is what the
-  // shipped overridden badge reports, and the judge mounts — the status line
-  // states the Host's own answer rather than the form's optimism.
-  await judge.getByRole('textbox', { name: 'apiBase' }).fill('https://openrouter.ai/api/v1')
-  await judge.getByRole('textbox', { name: 'model' }).fill('typesafe/jev-1.13')
-  await keyField.fill('sk-e2e-not-a-real-key')
-  await judge.getByRole('button', { name: '保存' }).click()
-  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('enabled')
-  expect(await status.textContent()).toContain('jev 已就绪')
-  await expect.poll(async () => await judge.getByRole('button', { name: '重置' }).count()).toBe(2)
-  expect(await keyField.inputValue()).toBe('')
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-enabled.png'), fullPage: true })
-
-  // Clearing is its own write, and unmounts the judge again. It is the page's
-  // own control, so it is also where the keyboard path is proven: Tab from the
-  // key field reaches it, it carries the one focus ring the language defines,
-  // and Enter is what clears.
-  const clearButton = judge.getByRole('button', { name: '清除 key' })
-  await clearButton.waitFor()
-  await keyField.click()
-  await page.keyboard.press('Tab')
-  const clearRing = await focusRing(page, '[role="dialog"] button:focus-visible')
-  expect(clearRing?.focusVisible).toBe(true)
-  expect(clearRing?.outlineStyle).not.toBe('none')
-  expect(clearRing?.outlineWidth).toBe('2px')
-  // The shot is taken while the ring is on the control, so the page's own
-  // control carries its focus state in the evidence rather than in prose.
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-key-configured.png'), fullPage: true })
-  await page.keyboard.press('Enter')
-  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
-  await expect.poll(async () => await judge.getByRole('button', { name: '清除 key' }).count()).toBe(0)
-  // The endpoint survives the key's removal: they are one row, but the clear
-  // writes exactly the one field it names.
-  expect(await judge.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('https://openrouter.ai/api/v1')
-
-  // 390×844: the shipped panel keeps its 188px nav rail, so the page has to
-  // survive a column far narrower than its sentences. It must stay inside the
-  // panel and add no horizontal overflow of its own. The shot is taken with the
-  // judge group itself in view — the panel scrolls, so a full-page capture at
-  // the top would leave the row this rule restacks below the fold.
-  await page.setViewportSize({ width: 390, height: 844 })
-  await settleLayout(page)
-  await judgeToggle.scrollIntoViewIfNeeded()
-  // Two rules are measured here rather than eyeballed. The row's answer moves
-  // under the title it answers for, and the shipped field head turns into a
-  // column: at this width a label and its override badges cannot share a line,
-  // and side by side the badges are painted over the label's text.
-  const narrowGeometry = await judgeToggle.evaluate(toggle => {
-    const title = toggle.querySelector('[class*="groupTitle"]')!
-    const answer = toggle.querySelector('[data-context-judge]')!
-    const head = document.querySelector('[data-team-judge] [class*="head"]')!
-    const label = head.querySelector('label')!
-    const badges = head.querySelector('[class*="badges"]')
-    const titleBox = title.getBoundingClientRect()
-    const answerBox = answer.getBoundingClientRect()
-    const labelBox = label.getBoundingClientRect()
-    const badgesBox = badges?.getBoundingClientRect()
-    return {
-      answerBelowTitle: Math.round(answerBox.top - (titleBox.top + titleBox.height)),
-      labelWidth: Math.round(labelBox.width),
-      labelText: Math.round(label.scrollWidth),
-      badgesTop: badgesBox === undefined ? undefined : Math.round(badgesBox.top - labelBox.bottom),
-    }
-  })
-  expect(narrowGeometry.answerBelowTitle).toBeGreaterThanOrEqual(-1)
-  expect(narrowGeometry.labelWidth).toBeGreaterThanOrEqual(narrowGeometry.labelText)
-  expect(narrowGeometry.badgesTop).toBeGreaterThanOrEqual(-1)
-  // The answer is a sentence with a leading glyph, so at this width the glyph
-  // rides the first line of the text instead of hanging at the middle of a
-  // wrapped block, and the sentence starts where the glyph ends rather than in
-  // a column of its own.
-  const narrowAnswer = await status.evaluate(node => {
-    const glyph = node.querySelector('svg')!.getBoundingClientRect()
-    const text = node.querySelector('span')!.getBoundingClientRect()
-    return {
-      glyphTop: Math.round(glyph.top),
-      glyphRight: Math.round(glyph.right),
-      textTop: Math.round(text.top),
-      textLeft: Math.round(text.left),
-    }
-  })
-  expect(narrowAnswer.glyphTop - narrowAnswer.textTop).toBeLessThanOrEqual(4)
-  expect(narrowAnswer.textLeft).toBeGreaterThanOrEqual(narrowAnswer.glyphRight)
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-narrow-judge.png'), fullPage: true })
-  const narrow = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-  }))
-  expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
-  const statusBox = (await status.boundingBox())!
-  const panelBox = (await panel.boundingBox())!
-  expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1)
-  await page.setViewportSize({ width: 1440, height: 960 })
-  await settleLayout(page)
-
-  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
-}, 180_000)
