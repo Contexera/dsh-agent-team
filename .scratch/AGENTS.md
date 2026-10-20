@@ -45,8 +45,8 @@ Each `issues/NN-<slug>.md` uses a fixed skeleton, numbered from `01` in dependen
 
 ## Version control
 
-- **Active does not enter version history**: while a work item is open, its `active/<work>/` directory is working material and stays uncommitted — untracked, or staged locally only when a reviewer must see it.
-- **Archive amends into the substantive commit**: when a work item closes, move it into `archive/YYYY-MM/` and amend that move into the commit(s) that deliver the work, so the archive records what actually shipped instead of sitting in a scratch-only commit at the tip.
+- **Active does not enter version history**: while a work item is open, its `active/<work>/` directory is gitignored working material. Force-add it (`git add -f`) only when a reviewer must see it.
+- **Archive enters history on close**: when a work item closes, move it into `archive/YYYY-MM/` and amend that move into the commit(s) that deliver the work, so the archive records what actually shipped instead of sitting in a scratch-only commit at the tip.
 
 ## Directory index
 
