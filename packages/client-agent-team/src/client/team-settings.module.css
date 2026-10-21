@@ -42,8 +42,6 @@
   padding: 16px 0;
 }
 
-/* The last identity row is followed by the environment check, whose own top
- * rule is the separator; a trailing rule here would draw a second line. */
 .row:last-child {
   border-bottom: none;
 }
@@ -110,9 +108,6 @@
   line-height: 40px;
 }
 
-/* The environment check answers a question about this installation rather than
- * about the Human, so it opens on the same rule that separates the page's other
- * rows: without that rule the verdict reads as one of the identity rows'. */
 .environment {
   border-top: 1px solid var(--dsw-alias-border-l2);
   padding-top: 16px;

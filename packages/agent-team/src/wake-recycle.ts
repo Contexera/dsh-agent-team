@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { SessionId as SessionIdBrand } from '@deepseek-ai/dsh-session'
+import type { AgentTeamRequestId } from './types.ts'
 
 export interface WakeRecycleConfig {
   readonly enabled: boolean
@@ -86,12 +87,17 @@ export function decideWakeRecycle(input: WakeRecycleInput): WakeRecyclePlan {
   }
 }
 
+export interface TransitionIdentity {
+  readonly newSessionId: SessionId
+  readonly requestId: AgentTeamRequestId
+}
+
 /**
  * Durable identity of one wake swap. Derived from the retired Session alone:
  * the Host may crash between the commit and the activation, and the recovery
  * must converge on the same successor instead of minting a second one.
  */
-export function wakeRecycleIdentity(previousSessionId: SessionId): { readonly newSessionId: SessionId; readonly requestId: string } {
+export function wakeRecycleIdentity(previousSessionId: SessionId): TransitionIdentity {
   const digest = createHash('sha256').update(JSON.stringify(['wake-recycle', previousSessionId])).digest('hex')
-  return { newSessionId: SessionIdBrand(`agent-team-recycle-${digest}`), requestId: `agent-team:recycle:${digest}` }
+  return { newSessionId: SessionIdBrand(`agent-team-recycle-${digest}`), requestId: `agent-team:recycle:${digest}` as AgentTeamRequestId }
 }

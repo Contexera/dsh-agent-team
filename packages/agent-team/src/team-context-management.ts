@@ -11,27 +11,16 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionId as SessionIdBrand } from '@deepseek-ai/dsh-session'
-import type { AgentTeamAgentMember, AgentTeamMemberId } from './types.ts'
-import { wakeRecycleIdentity } from './wake-recycle.ts'
+import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamRequestId } from './types.ts'
+import type { TeamContextProjectionState } from './context-projection.ts'
+import { wakeRecycleIdentity, type TransitionIdentity } from './wake-recycle.ts'
 
-export interface TeamPendingIntent {
-  readonly toolCallId: string
-  readonly resultSeq: number
-  readonly turn: number
-  readonly turnEndSeq: number
-}
+export type TeamContextState = Pick<TeamContextProjectionState, 'pending' | 'checkpoints' | 'continuations'>
 
-/** The fields this coordinator reads from a Session's fold; the projection unit owns its full shape. */
-export interface TeamContextState {
-  readonly pending: TeamPendingIntent | null
-  readonly checkpoints: readonly { readonly checkpointRef: string; readonly turnEndSeq: number }[]
-  readonly continuations: readonly { readonly checkpointRef: string; readonly deliveredSeq: number }[]
-}
+type TeamPendingIntent = NonNullable<TeamContextState['pending']>
 
-export interface TeamTransitionPlan {
+export interface TeamTransitionPlan extends TransitionIdentity {
   readonly previousSessionId: SessionId
-  readonly newSessionId: SessionId
-  readonly requestId: string
   readonly carriedInput: readonly UserMessage[]
 }
 
@@ -49,17 +38,14 @@ export interface TeamContextManagementOptions {
   readonly log: (message: string) => void
 }
 
-interface MemberTransition {
-  /** Absent for a requestRecycle swap: no live Agent opened it. */
-  readonly agent: Agent | undefined
-  readonly intent: TeamPendingIntent | undefined
-  turnEnded: boolean
-}
+type MemberTransition =
+  | { readonly kind: 'rollover'; readonly agent: Agent; readonly intent: TeamPendingIntent; turnEnded: boolean }
+  | { readonly kind: 'recycle' }
 
 /** Durable identity of one rollover: a result seq is session-local and collides across generations. */
-export function teamRolloverIdentity(previousSessionId: SessionId, toolCallId: string): { readonly newSessionId: SessionId; readonly requestId: string } {
+export function teamRolloverIdentity(previousSessionId: SessionId, toolCallId: string): TransitionIdentity {
   const digest = createHash('sha256').update(JSON.stringify([previousSessionId, toolCallId])).digest('hex')
-  return { newSessionId: SessionIdBrand(`agent-team-rollover-${digest}`), requestId: `agent-team:rollover:${digest}` }
+  return { newSessionId: SessionIdBrand(`agent-team-rollover-${digest}`), requestId: `agent-team:rollover:${digest}` as AgentTeamRequestId }
 }
 
 export class TeamContextManagement {
@@ -109,17 +95,16 @@ export class TeamContextManagement {
     const member = this.options.memberForAgent(agent)
     if (member === undefined) return
     const pending = this.options.projectionForMember(memberId, member.sessionId)?.pending
-    // Only the intent's own result landing durably starts a transition, and only once.
     if (pending == null || pending.resultSeq !== event.seq) return
     if (this.members.has(memberId)) return
-    this.members.set(memberId, { agent, intent: pending, turnEnded: false })
+    this.members.set(memberId, { kind: 'rollover', agent, intent: pending, turnEnded: false })
   }
 
   private onTurnEnd(memberId: AgentTeamMemberId, agent: Agent): void {
     this.scheduleCheckpointContinuations(memberId, agent)
     const transition = this.members.get(memberId)
-    const intent = transition?.intent
-    if (transition === undefined || intent === undefined || transition.turnEnded) return
+    if (transition === undefined || transition.kind !== 'rollover' || transition.turnEnded) return
+    const intent = transition.intent
     const member = this.options.memberForAgent(agent)
     if (member === undefined || transition.agent !== agent) return
     transition.turnEnded = true
@@ -149,14 +134,14 @@ export class TeamContextManagement {
    */
   requestRecycle(memberId: AgentTeamMemberId, member: AgentTeamAgentMember): Promise<void> {
     if (this.disposed || this.members.has(memberId)) return Promise.resolve()
-    this.members.set(memberId, { agent: undefined, intent: undefined, turnEnded: true })
+    this.members.set(memberId, { kind: 'recycle' })
     return this.performTransition(memberId, member, wakeRecycleIdentity(member.sessionId))
   }
 
   private async performTransition(
     memberId: AgentTeamMemberId,
     member: AgentTeamAgentMember,
-    identity: { readonly newSessionId: SessionId; readonly requestId: string },
+    identity: TransitionIdentity,
   ): Promise<void> {
     try {
       // Inside the guard as well as the await: a host that throws before
@@ -183,7 +168,7 @@ export class TeamContextManagement {
   }
 
   private settleAll(): void {
-    for (const memberId of [...this.settleWaiters.keys()]) this.settleMember(memberId)
+    for (const memberId of this.settleWaiters.keys()) this.settleMember(memberId)
   }
 
   /** Crash-recovery hook the Host runs during activation: finish a swap a restart interrupted. */
@@ -204,11 +189,10 @@ export class TeamContextManagement {
     }
     const member = this.options.memberForAgent(agent)
     if (member === undefined) return
-    this.members.set(memberId, { agent, intent: pending, turnEnded: true })
+    this.members.set(memberId, { kind: 'rollover', agent, intent: pending, turnEnded: true })
     void this.performTransition(memberId, member, teamRolloverIdentity(member.sessionId, pending.toolCallId))
   }
 
-  /** Crash repair for quiet continuations: schedule the follow-up a durable result still owes. */
   repairContinuations(agent: Agent, state: TeamContextState): void {
     if (this.disposed) return
     const memberId = this.options.memberForAgent(agent)?.memberId
@@ -224,7 +208,6 @@ export class TeamContextManagement {
     }
   }
 
-  /** Quiet follow-ups owed to checkpoints the turn just resolved; each waits for idle so its wake latches. */
   private scheduleCheckpointContinuations(memberId: AgentTeamMemberId, agent: Agent): void {
     const state = this.options.projectionForMember(memberId, agent.session.id)
     if (state === undefined) return

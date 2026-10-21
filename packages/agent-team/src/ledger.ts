@@ -165,7 +165,12 @@ export function agentTeamHumanActor(): AgentTeamHumanActor {
 
 const HOST_ACTOR: AgentTeamHostActor = Object.freeze({ kind: 'host', handle: 'agent-team' })
 
-/** Resolve the Host's own authority: the actor a Host-decided transition records. */
+function freezeActor(actor: AgentTeamActor): AgentTeamActor {
+  if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
+  if (actor.kind === 'human') return Object.freeze({ kind: 'human', memberId: actor.memberId, handle: actor.handle })
+  return Object.freeze({ kind: 'member', memberId: actor.memberId, handle: actor.handle })
+}
+
 export function agentTeamHostActor(): AgentTeamHostActor {
   return HOST_ACTOR
 }
@@ -2219,8 +2224,6 @@ export class AgentTeamLedger {
         throw new Error(`agent-team operation ${operation.sequence} has invalid Human authority`)
       }
     }
-    // A Host-actored kind has no member side; every caller below has already
-    // established that this operation's actor is Human or a Member.
     const actorMemberId = (): AgentTeamMemberId => {
       if (operation.actor.kind === 'host') throw new Error(`agent-team operation ${operation.sequence} has no Member actor`)
       return operation.actor.memberId
@@ -2292,8 +2295,6 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/member-session-recycled') {
-      // The Host's own decision, so the actor is checked by kind alone: the
-      // transition moves exactly the sessionId and leaves every other fact.
       if (operation.actor.kind !== 'host' || operation.actor.handle !== 'agent-team') throw new Error('invalid Member session recycling authority')
       const prior = projection.members.get(operation.data.member.memberId)
       if (prior === undefined || prior.state !== 'enabled'
@@ -2411,7 +2412,6 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/thread-attention-changed') {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
-      // Attention is never Host-driven, so this pairing needs a real member side.
       if (operation.actor.kind === 'host' || operation.data.memberId !== operation.actor.memberId) throw new Error('Attention operation has wrong actor')
       const thread = projection.threads.get(operation.data.thread.threadRef)
       const task = operation.data.task
@@ -2847,8 +2847,6 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/member-session-recycled') {
       target.members.set(operation.data.member.memberId, operation.data.member)
       target.previousSessions.set(operation.data.member.memberId, operation.data.previousSessionId)
-      // Recycling never seeds: an earlier checkpoint return's seed is not this
-      // generation's lineage.
       target.rolloverSeeds.delete(operation.data.member.memberId)
       return
     }
@@ -4697,8 +4695,7 @@ export class AgentTeamLedger {
 
   private operationBase(request: { readonly requestId: AgentTeamRequestId; readonly actor: AgentTeamActor }, sequence: number) {
     return { sequence, operationId: this.createOperationId(), requestId: request.requestId, occurredAt: this.createOccurredAt(),
-      // The spread erases the actor's discriminant, so the union is restated here.
-      actor: Object.freeze({ ...request.actor }) as AgentTeamActor, previousOperationId: this.state.ordered.at(-1)?.operationId ?? null }
+      actor: freezeActor(request.actor), previousOperationId: this.state.ordered.at(-1)?.operationId ?? null }
   }
 
   private nextSequence(): number {

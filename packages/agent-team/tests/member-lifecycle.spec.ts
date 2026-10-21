@@ -3186,10 +3186,12 @@ describe('Agent Team wake-slot generation swap (ticket 05)', () => {
       }, { timeout: 20_000 })
       // The retired log is archived, never deleted, and the binding moved.
       expect(ctx.workspaceRegistry.archivedSessionIds).toContain(sessionId)
-      const active = await vi.waitFor(() => {
+      // Availability flips to active only once the successor's Agent is live;
+      // reading it immediately after the binding moved sees the window in
+      // between, so wait for the settled value instead of a one-shot read.
+      await vi.waitFor(() => {
         const availability = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.availability
         if (availability !== 'active') throw new Error(`member not active yet: ${availability}`)
-        return availability
       }, { timeout: 20_000 })
       const fresh = await vi.waitFor(() => {
         const live = ctx.agents.get(successor)
@@ -3334,6 +3336,43 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       }, { timeout: 20_000 })
       expect(ctx.agents.get(successor)).toBeDefined()
       expect(ctx.agents.get(sessionId)).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('swaps a cold generation reached through resume, inside that request\'s own lifecycle chain', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState, archived } = await realHarness(adapter)
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('resume-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [] })
+      const memberId = added.status.member.memberId
+      const sessionId = added.status.member.sessionId
+      const agent = ctx.agents.get(sessionId)!
+      adapter.enqueue(textResponse('First look done.'))
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+
+      pressureState.bySession.set(sessionId, 130_000)
+      await vi.advanceTimersByTimeAsync(61 * 60_000)
+      await ctx.agentTeam.suspendMember({ requestId: requestId('resume-wake-suspend'), memberId })
+      adapter.enqueue(textResponse('Resumed into a fresh context.'))
+
+      // Resume activates the stored, cold Session from inside its own lifecycle
+      // chain; the swap that activation requests must run in that frame rather
+      // than queue behind the operation awaiting it.
+      const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('resume-wake'), memberId })
+      const successor = await vi.waitFor(() => {
+        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        if (current === undefined || current.member.sessionId === sessionId) throw new Error('swap not applied yet')
+        return current.member.sessionId
+      }, { timeout: 20_000 })
+      expect(String(successor)).toMatch(/^agent-team-recycle-[0-9a-f]{64}$/)
+      expect(ctx.agents.get(successor)).toBeDefined()
+      expect(archived).toContain(sessionId)
+      expect(resumed.status.member.sessionId).toBe(sessionId)
     } finally {
       vi.useRealTimers()
     }

@@ -7,8 +7,6 @@
 }
 .titleLine h1 { margin: 0; }
 
-/* The header band closes with its own rule, so a section inside it needs no
-   rule of its own — that would draw a second line around nothing. */
 .riskSection {
   margin: 14px auto 0;
   max-width: 880px;

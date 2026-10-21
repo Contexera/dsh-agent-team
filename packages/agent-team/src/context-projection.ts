@@ -232,22 +232,18 @@ export interface TeamContextProjectionConfig {
   readonly checkpointToolName?: string
 }
 
-/** Whether one notice summary is a pure reminder (never a semantic Team fact). */
 export function isReminderNoticeSummary(summary: string): boolean {
   return REMINDER_NOTICE_SUMMARIES.has(summary)
 }
 
-/** Deterministic checkpoint ref from the recording Session and the successful call id. */
 export function checkpointRefFor(sessionId: string, callId: string): AgentTeamContextCheckpointRef {
   return `context-checkpoint-${createHash('sha256').update(JSON.stringify([sessionId, callId])).digest('hex')}` as AgentTeamContextCheckpointRef
 }
 
-/** Deterministic boundary ref from the recording Session and the anchoring seq. */
 export function boundaryRefFor(sessionId: string, seq: number): AgentTeamContextCheckpointRef {
   return `team-boundary-${createHash('sha256').update(JSON.stringify([sessionId, seq])).digest('hex')}` as AgentTeamContextCheckpointRef
 }
 
-/** Every Team-authored message that is not a handoff or checkpoint continuation. */
 export function isRedeliverableTeamNotice(message: UserMessage): boolean {
   return isAgentTeamSource(message.source) && !isAgentTeamContextSource(message)
 }
@@ -268,12 +264,10 @@ export function emptyContextProjectionState(target: ContextFoldTarget): TeamCont
   }
 }
 
-/** Whether one checkpoint's quiet continuation has already been delivered durably. */
 export function continuationDelivered(state: TeamContextProjectionState, checkpointRef: string): boolean {
   return state.continuations.some(entry => entry.checkpointRef === checkpointRef && entry.deliveredSeq !== -1)
 }
 
-/** Blank prose is absent: a handoff nobody can read back is not a fact. */
 const nonBlankString = z.string().refine(value => value.trim() !== '')
 const rolloverArgumentsSchema = z.object({
   handoff: nonBlankString,
@@ -290,7 +284,6 @@ function parseArguments(raw: string): unknown {
   }
 }
 
-/** Unparsable or incomplete arguments produce no intent. */
 function parseRolloverArguments(raw: string): { handoff: string; checkpointRef?: string; relatedFiles: readonly { path: string; reason: string }[] } | undefined {
   const parsed = rolloverArgumentsSchema.safeParse(parseArguments(raw))
   if (!parsed.success) return undefined
@@ -338,11 +331,9 @@ function createStep(config: TeamContextProjectionConfig): TeamContextStep {
   const applyToolResult = (state: TeamContextProjectionState, event: SessionEvent & { type: 'tool/result' }): TeamContextProjectionState => {
     const message = event.data.message
     const index = state.openCalls.findIndex(call => call.callId === message.toolCallId)
-    // An unpaired result touches nothing: the fold only reacts to calls it tracked.
     if (index === -1) return state
     const recorded = state.openCalls[index]!
     const openCalls = state.openCalls.filter(call => call.callId !== recorded.callId)
-    // Success or failure consumes the pair, so a retried call id pairs fresh arguments.
     if (message.isError === true || event.data.error !== undefined) return { ...state, openCalls }
     const seq = event.seq
     const turn = event.data.turn
@@ -394,12 +385,9 @@ function createStep(config: TeamContextProjectionConfig): TeamContextStep {
   }
 
   const applyInboxSpliced = (state: TeamContextProjectionState, inserted: readonly UserMessage[]): TeamContextProjectionState => {
-    // Without a pending intent the input is ordinary queued work the current
-    // generation consumes itself.
     if (state.pending === null || inserted.length === 0) return state
     const fresh: CarriedCandidate[] = []
     for (const message of inserted) {
-      // Handoff and continuation envelopes are delivered context the successor keeps.
       if (!codec.isContextSource(message) && host.isEphemeralNotice(message)) continue
       if (state.carriedCandidates.some(candidate => candidate.messageId === message.id)) continue
       if (fresh.some(candidate => candidate.messageId === message.id)) continue
@@ -531,7 +519,6 @@ export function createTeamContextProjectionDefinition(
   }
 }
 
-/** The one configuration the registered unit and every cold fold share. */
 export function createTeamContextProjectionConfig(host: ContextProjectionHost): TeamContextProjectionConfig {
   return {
     codec: TEAM_CONTEXT_CODEC,
@@ -541,7 +528,6 @@ export function createTeamContextProjectionConfig(host: ContextProjectionHost): 
   }
 }
 
-/** Only a checkpoint whose turn ended is a return target. */
 export function checkpointByRef(state: TeamContextProjectionState, checkpointRef: string): ContextCheckpointEntry | undefined {
   return state.checkpoints.find(entry => entry.checkpointRef === checkpointRef && entry.turnEndSeq !== -1)
 }
@@ -550,7 +536,6 @@ export function boundaryByRef(state: TeamContextProjectionState, ref: string): D
   return state.boundaries.find(boundary => boundaryRefFor(state.sessionId, boundary.resultSeq) === ref)
 }
 
-/** Candidates are keyed by message id; the durable inbox splices hold the bodies. */
 export function carriedInputOf(
   state: TeamContextProjectionState,
   events: readonly SessionEvent[],
@@ -613,7 +598,6 @@ function threadsQuotedInMessage(message: UserMessage): readonly string[] {
   return refs
 }
 
-/** A missing ledger yields no attribution instead of failing the fold. */
 export interface TeamContextProjectionOptions {
   readonly threadForTask?: (taskRef: AgentTeamTaskRef) => AgentTeamThreadRef | undefined
 }

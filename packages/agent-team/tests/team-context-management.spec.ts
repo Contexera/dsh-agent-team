@@ -71,7 +71,7 @@ describe('the Team generation coordinator', () => {
     // convergence, so nothing may swap until the Agent reports idle.
     const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
     const { agent, idler } = fakeAgent()
-    const pending = { toolCallId: 'call-live', resultSeq: 4, turn: 2, turnEndSeq: -1 }
+    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-live', resultSeq: 4, turn: 2, turnEndSeq: -1 }
     const coordinator = management({ agent, states: [{ ...idleState, pending }], executeTransition })
 
     coordinator.onSessionEvent(MEMBER_ID, agent, { type: 'tool/result', seq: 4, data: {} } as unknown as SessionEvent)
@@ -94,7 +94,7 @@ describe('the Team generation coordinator', () => {
     // it would leave this generation permanently un-swappable.
     const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
     const { agent } = fakeAgent()
-    const pending = { toolCallId: 'call-spent', resultSeq: 4, turn: 2, turnEndSeq: -1 }
+    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-spent', resultSeq: 4, turn: 2, turnEndSeq: -1 }
     const logs: string[] = []
     const coordinator = management({ agent, states: [{ ...idleState, pending }], executeTransition, logs })
 
@@ -112,7 +112,7 @@ describe('the Team generation coordinator', () => {
   it('finishes a recovered intent whose turn ended before the crash, carrying no captured input', async () => {
     const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
     const { agent } = fakeAgent()
-    const pending = { toolCallId: 'call-done', resultSeq: 9, turn: 3, turnEndSeq: 12 }
+    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-done', resultSeq: 9, turn: 3, turnEndSeq: 12 }
     const coordinator = management({ agent, states: [{ ...idleState, pending }], executeTransition })
 
     coordinator.recoverPendingTransition(MEMBER_ID, agent, SESSION_ID)
@@ -130,7 +130,7 @@ describe('the Team generation coordinator', () => {
   it('leaves the generation recoverable when the swap rejects', async () => {
     const logs: string[] = []
     const { agent } = fakeAgent()
-    const pending = { toolCallId: 'call-fail', resultSeq: 1, turn: 0, turnEndSeq: 3 }
+    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-fail', resultSeq: 1, turn: 0, turnEndSeq: 3 }
     const coordinator = management({
       agent,
       states: [{ ...idleState, pending }],
@@ -149,7 +149,7 @@ describe('the Team generation coordinator', () => {
 
   it('starts a transition only on the intent\'s own durable result', () => {
     const { agent } = fakeAgent()
-    const pending = { toolCallId: 'call-x', resultSeq: 7, turn: 1, turnEndSeq: -1 }
+    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-x', resultSeq: 7, turn: 1, turnEndSeq: -1 }
     const coordinator = management({ agent, states: [{ ...idleState, pending }] })
 
     coordinator.onSessionEvent(MEMBER_ID, agent, { type: 'tool/result', seq: 6, data: {} } as unknown as SessionEvent)
@@ -167,7 +167,7 @@ describe('the Team generation coordinator', () => {
     const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
     const first = fakeAgent()
     const second = fakeAgent()
-    const pending = { toolCallId: 'call-replaced', resultSeq: 4, turn: 2, turnEndSeq: -1 }
+    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-replaced', resultSeq: 4, turn: 2, turnEndSeq: -1 }
     const coordinator = new TeamContextManagement({
       // The delivery target is read at swap time, not when the intent landed:
       // between the two the Member may have moved to another generation, and
@@ -244,9 +244,9 @@ describe('the Team generation coordinator', () => {
     const state: TeamContextState = {
       pending: null,
       checkpoints: [
-        { checkpointRef: 'context-checkpoint-a', turnEndSeq: 4 },
-        { checkpointRef: 'context-checkpoint-b', turnEndSeq: 5 },
-        { checkpointRef: 'context-checkpoint-c', turnEndSeq: -1 },
+        { checkpointRef: 'context-checkpoint-a', name: 'a', resultSeq: 1, turn: 1, turnEndSeq: 4 },
+        { checkpointRef: 'context-checkpoint-b', name: 'b', resultSeq: 2, turn: 2, turnEndSeq: 5 },
+        { checkpointRef: 'context-checkpoint-c', name: 'c', resultSeq: 3, turn: 3, turnEndSeq: -1 },
       ],
       continuations: [{ checkpointRef: 'context-checkpoint-b', deliveredSeq: 6 }],
     }

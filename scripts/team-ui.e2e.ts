@@ -3539,7 +3539,6 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await panel.getByRole('button', { name: '团队', exact: true }).click()
   const nameField = panel.getByLabel('名字')
   await nameField.waitFor()
-  // The identity row is addressed through the one form the page owns.
   const nameSave = panel.locator('form button[type="submit"]')
   // The Host has no override stored yet, so the page shows the historic default
   // and the version footnote's two facts: the bundle version and the repo link.
