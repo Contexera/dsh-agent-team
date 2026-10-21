@@ -1,31 +1,20 @@
-import { Fragment, useRef, useState, useSyncExternalStore } from 'react'
+import { useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import {
-  Button, IconChevronDownOutlineRegular, IconChevronRightOutlineRegular, Input,
-  SettingsForm, SettingsSecretField, SettingsValueField, type SettingsFieldState,
-} from '@deepseek-ai/dsh-client-ui-primitives'
-import type { AgentTeamContextJudgeResult } from '@contexera/dsh-agent-team/types'
+import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { HUMAN_AVATAR_MAX_BYTES } from '@contexera/dsh-agent-team/human-settings'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
 import { useAvatarImage } from './avatar-image.ts'
-import { useContextJudge, type TeamContextJudgeSource } from './context-judge.ts'
-import type { TeamJudgeField, TeamJudgeForm, TeamJudgeFormSource } from './judge-form.ts'
 import css from './team-settings.module.css'
 
 /**
- * The Team's settings page: the Human's display name and avatar, the endpoint
- * the relatedness judge calls, the local environment check, and the version
- * footnote.
+ * The Team's settings page: the Human's display name and avatar, the local
+ * environment check, and the version footnote.
  *
- * The page owns no durable fact and no copy of one, and it holds its two
- * writable groups apart because they are two different documents: identity
- * arrives from the shared identity projection and writes through the Team
- * Remote, while the judge's endpoint is one group of the Team row's settings
- * section and writes through the settings provider. Neither group renders the
- * other's fields, and a failed write in either keeps the typed value and
- * reports the reason it was refused.
+ * The page owns no durable fact and no copy of one: identity arrives from the
+ * shared identity projection and writes through the Team Remote, and a failed
+ * write keeps the typed value and reports the reason the Host refused it.
  */
 
 export interface TeamSettingsInjected {
@@ -39,12 +28,6 @@ export interface TeamSettingsInjected {
   removeAvatar: () => Promise<string | undefined>
   /** The local environment check, a read-only projection of the installation. */
   environment: TeamEnvironmentSource
-  /** The judge's live status: whether one is reachable right now. */
-  judge: TeamContextJudgeSource
-  /** The staged form over the judge's endpoint; it holds nothing while this deployment serves no settings document. */
-  judgeForm: TeamJudgeFormSource
-  /** Whether the settings document holds a key literal for the judge. */
-  keyConfigured: () => boolean
 }
 
 export type TeamSettingsProps =
@@ -81,18 +64,9 @@ type NameDraft =
   | { readonly kind: 'follow' }
   | { readonly kind: 'editing'; readonly text: string }
 
-/** Observe the judge's endpoint form, which may arrive after the props were computed. */
-function useObservedJudgeForm(source: TeamJudgeFormSource): TeamJudgeForm | undefined {
-  // A slot entry's injected props are cached for the entry's lifetime, while
-  // the settings service this form is built over can arrive later, so the page
-  // has to observe the seat rather than receive a frozen value.
-  return useSyncExternalStore(source.subscribe, source.getSnapshot)
-}
-
 export function TeamSettingsSection(props: TeamSettingsProps) {
   const { t, identity } = props
   const profile = useHumanIdentity(identity)
-  const judgeForm = useObservedJudgeForm(props.judgeForm)
   const [draft, setDraft] = useState<NameDraft>({ kind: 'follow' })
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -227,16 +201,6 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
         </div>
       </div>
     </div>
-    {judgeForm === undefined
-      ? null
-      : <Fragment>
-          <JudgeGroup
-            t={t}
-            form={judgeForm}
-            judge={props.judge}
-            keyConfigured={props.keyConfigured}
-          />
-        </Fragment>}
     <div className={css.environment}>
       <EnvironmentCheck t={t} environment={props.environment} />
     </div>
@@ -256,170 +220,4 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
     {emptyName && <p className={css.notice}>{t('humanSettingsNameEmpty')}</p>}
     {notice === null ? null : <p className={css.notice} role="alert">{notice}</p>}
   </div>
-}
-
-/**
- * The judge's endpoint as one collapsed row: the state of jev on the line
- * itself, and the three controls that decide it behind a disclosure.
- *
- * Collapsed is the default because the endpoint is set once and then left
- * alone, while its state is worth seeing every time the page opens — so the
- * row carries the answer and the controls wait. The status is read rather than
- * derived, because a deployment may mount a judge from configuration this page
- * cannot see, and it states what the Host answered rather than predicting it.
- */
-function JudgeGroup(props: {
-  readonly t: PropsLocale<'team'>['t']
-  readonly form: TeamJudgeForm
-  readonly judge: TeamContextJudgeSource
-  readonly keyConfigured: () => boolean
-}) {
-  const { t, form, judge, keyConfigured } = props
-  const { report } = useContextJudge(judge)
-  const state = useSyncExternalStore(form.subscribe, form.getSnapshot, form.getSnapshot)
-  const actions = form.actions()
-  const [open, setOpen] = useState(false)
-  const [clearing, setClearing] = useState(false)
-  const [clearFailed, setClearFailed] = useState(false)
-
-  const configured = keyConfigured()
-  // Every control answers to the document: a read-only document disables them
-  // all rather than letting a save fail after the fact.
-  const disabled = !state.shell.writable
-  const labels = {
-    overridden: t('teamSettingsOverridden'),
-    reset: t('teamSettingsReset'),
-    invalid: t('teamSettingsInvalid'),
-  }
-  const field = (name: TeamJudgeField): SettingsFieldState => state.fields[name]
-
-  const clear = async (): Promise<void> => {
-    setClearing(true)
-    setClearFailed(false)
-    const landed = await form.clearKey()
-    setClearing(false)
-    if (!landed) setClearFailed(true)
-  }
-
-  return <div className={css.group}>
-    <button
-      type="button"
-      className={css.groupToggle}
-      aria-expanded={open}
-      onClick={() => { setOpen(value => !value) }}
-    >
-      <span className={css.groupChevron} aria-hidden="true">
-        {open ? <IconChevronDownOutlineRegular size={14} /> : <IconChevronRightOutlineRegular size={14} />}
-      </span>
-      <span className={css.groupTitle}>{t('teamJudgeGroupTitle')}</span>
-      <JudgeStatus t={t} report={report} />
-    </button>
-    {open
-      ? <div className={css.groupBody} role="group" aria-label={t('teamJudgeGroupTitle')} data-team-judge>
-        <p className={css.groupHint}>{t('teamJudgeGroupHint')}</p>
-        <SettingsForm
-          labels={{
-            unavailable: t('teamSettingsUnavailable'),
-            readOnly: t('teamSettingsReadOnly'),
-            saveFailed: t('teamSettingsSaveFailed'),
-            save: t('teamSettingsSave'),
-            saving: t('teamSettingsSaving'),
-          }}
-          state={state.shell}
-          onSave={actions.save}
-          onDiscard={actions.discard}
-        >
-          <SettingsValueField
-            id="team-judge-api-base"
-            label={t('teamJudgeApiBase')}
-            text={field('apiBase').text}
-            overridden={field('apiBase').overridden}
-            invalid={field('apiBase').invalid}
-            overriddenLabel={labels.overridden}
-            resetLabel={labels.reset}
-            invalidLabel={labels.invalid}
-            disabled={disabled}
-            onEdit={text => { actions.edit('apiBase', text) }}
-            onReset={() => { actions.resetField('apiBase') }}
-          />
-          <SettingsValueField
-            id="team-judge-model"
-            label={t('teamJudgeModel')}
-            text={field('model').text}
-            overridden={field('model').overridden}
-            invalid={field('model').invalid}
-            overriddenLabel={labels.overridden}
-            resetLabel={labels.reset}
-            invalidLabel={labels.invalid}
-            disabled={disabled}
-            onEdit={text => { actions.edit('model', text) }}
-            onReset={() => { actions.resetField('model') }}
-          />
-          <SettingsSecretField
-            id="team-judge-api-key"
-            label={t('teamJudgeKey')}
-            hint={t('teamJudgeKeyHint')}
-            text={field('apiKey').text}
-            configured={configured}
-            stateLabel={configured ? t('teamJudgeKeySet') : t('teamJudgeKeyUnset')}
-            disabled={disabled}
-            onEdit={text => { actions.edit('apiKey', text) }}
-          />
-          {configured
-            ? <div className={css.clearRow}>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={disabled || state.shell.dirty || clearing}
-                onClick={() => { void clear() }}
-              >
-                {t('teamJudgeClearKey')}
-              </Button>
-              <p className={css.clearHint}>
-                {state.shell.dirty ? t('teamJudgeClearBlocked') : t('teamJudgeClearHint')}
-              </p>
-              {clearFailed ? <p className={css.notice} role="status">{t('teamJudgeClearFailed')}</p> : null}
-            </div>
-            : null}
-        </SettingsForm>
-      </div>
-      : null}
-  </div>
-}
-
-/** The three glyphs, drawn at the 16px seat the settings page uses for state marks. */
-const ICONS = {
-  ok: <path d="M3 8.5 6.5 12 13 4.5" />,
-  off: <><circle cx="8" cy="8" r="6" /><path d="M5.6 8h4.8" /></>,
-  warn: <><path d="M8 2.5 14.6 13.6H1.4z" /><path d="M8 6.6v3.2" /><path d="M8 11.9h.01" /></>,
-} as const
-
-/**
- * The judge's live status in one line, inside the row that carries it. The
- * verdict is stated as text and an icon, never by color alone, and nothing is
- * said before the first read settles: the row then stands as a bare title.
- */
-function JudgeStatus({ t, report }: {
-  readonly t: PropsLocale<'team'>['t']
-  readonly report: AgentTeamContextJudgeResult | undefined
-}) {
-  if (report === undefined) return null
-  const verdict = report.enabled ? 'enabled' : report.reason ?? 'unavailable'
-  return <span className={css.status} data-context-judge={verdict}>
-    <svg
-      className={css.statusIcon}
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >{ICONS[report.enabled ? 'ok' : report.reason === 'no-key' ? 'off' : 'warn']}</svg>
-    <span>
-      {report.enabled
-        ? t('teamJudgeReady')
-        : report.reason === 'no-key' ? t('teamJudgeNoKey') : t('teamJudgeUnavailable')}
-    </span>
-  </span>
 }

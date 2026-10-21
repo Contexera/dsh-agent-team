@@ -37,6 +37,7 @@ const attachmentIdSchema = z.string().min(1).transform(value => value as AgentTe
 const actorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('human'), memberId: memberIdSchema, handle: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('member'), memberId: memberIdSchema, handle: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal('host'), handle: z.literal('agent-team') }).strict(),
 ])
 
 const operationBase = {
@@ -397,6 +398,16 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/member-session-recycled'),
+    data: z.object({
+      member: memberSchema,
+      previousSessionId: sessionIdSchema,
+      newSessionId: sessionIdSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/channel-updated'),
     data: z.object({ workspaceId: workspaceIdSchema, channel: channelSchema }).strict(),
   }).strict(),
@@ -553,7 +564,14 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
 /** Durable validator for the closed Agent Team operation union; ledgers written before message occurredAt existed normalize on load. */
 export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = storedAgentTeamOperationSchema.transform(stampOperationMessages)
 
-/** Versioned durable Agent Team declaration; v1 is the first public ledger format and older local media reject at open. */
+/**
+ * Versioned durable Agent Team declaration; v1 is the first public ledger
+ * format and older local media reject at open. The number moves only when a
+ * stored record would mean something different: this layout has no migration,
+ * so a bump breaks every existing ledger. Adding an operation kind is not that
+ * — an older build's records keep parsing — which is why every additive kind
+ * since the public format landed at v1.
+ */
 export const agentTeamDomainSpec = defineDomain({
   name: 'agent_team',
   version: 1,

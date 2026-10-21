@@ -38,8 +38,8 @@
       "@contexera/dsh-agent-team/sqlite-backend": [
         "./packages/agent-team/src/vendor/storage-sqlite/index.ts"
       ],
-      "@contexera/dsh-agent-team/compaction-engine": [
-        "./packages/agent-team/src/compaction-engine.ts"
+      "@contexera/dsh-agent-team/team-compaction-engine": [
+        "./packages/agent-team/src/team-compaction-engine.ts"
       ],
       "@contexera/dsh-agent-team/member-context": [
         "./packages/agent-team/src/member-context.ts"
@@ -76,6 +76,21 @@
       ],
       "@deepseek-ai/dsh-skill-filesystem": [
         "../deepseek-harness/packages/skill/skill-filesystem/lib/types"
+      ],
+      "@deepseek-ai/dsh-experimental-session-search": [
+        "../deepseek-harness/packages/experimental/session-search/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-ralph-bundle": [
+        "../deepseek-harness/packages/experimental/ralph-bundle/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-terminal-bundle": [
+        "../deepseek-harness/packages/experimental/terminal-bundle/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-badge-skill-bundle": [
+        "../deepseek-harness/packages/experimental/badge-skill-bundle/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-session-titles-bundle": [
+        "../deepseek-harness/packages/experimental/session-titles-bundle/lib/types/index.d.ts"
       ],
       "@deepseek-ai/dsh-client-product-analytics": [
         "../deepseek-harness/packages/client/product-analytics/lib/types/index.d.ts"
@@ -119,6 +134,24 @@
       "@deepseek-ai/dsh-experimental-speech-to-text": [
         "../deepseek-harness/packages/experimental/speech-to-text/lib/types/index.d.ts"
       ],
+      "@deepseek-ai/dsh-experimental-translator": [
+        "../deepseek-harness/packages/experimental/translator/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-translator/types": [
+        "../deepseek-harness/packages/experimental/translator/lib/types/types.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-client-ui-cot-translation": [
+        "../deepseek-harness/packages/experimental/client-ui-cot-translation/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-client-ui-cot-translation/types": [
+        "../deepseek-harness/packages/experimental/client-ui-cot-translation/lib/types/types.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-client-ui-cot-translation/client": [
+        "../deepseek-harness/packages/experimental/client-ui-cot-translation/lib/types/client/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-cot-translation-bundle": [
+        "../deepseek-harness/packages/experimental/cot-translation-bundle/lib/types/index.d.ts"
+      ],
       "@deepseek-ai/dsh-experimental-speech-to-text-sensevoice": [
         "../deepseek-harness/packages/experimental/speech-to-text-sensevoice/lib/types/index.d.ts"
       ],
@@ -131,6 +164,9 @@
       "@deepseek-ai/dsh-experimental-voice-input-bundle": [
         "../deepseek-harness/packages/experimental/voice-input-bundle/lib/types/index.d.ts"
       ],
+      "@deepseek-ai/dsh-experimental-plugin-market-bundle": [
+        "../deepseek-harness/packages/experimental/plugin-market-bundle/lib/types/index.d.ts"
+      ],
       "@deepseek-ai/dsh-experimental-speech-to-text/wave": [
         "../deepseek-harness/packages/experimental/speech-to-text/lib/types/wave.d.ts"
       ],
@@ -142,6 +178,18 @@
       ],
       "@deepseek-ai/dsh-experimental-client-ui-voice-input/client": [
         "../deepseek-harness/packages/experimental/client-ui-voice-input/lib/types/client/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-client-ui-claude-code-mods": [
+        "../deepseek-harness/packages/experimental/client-ui-claude-code-mods/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-client-ui-claude-code-mods/client": [
+        "../deepseek-harness/packages/experimental/client-ui-claude-code-mods/lib/types/client/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-claude-code-mods/types": [
+        "../deepseek-harness/packages/experimental/claude-code-mods/lib/types/types.d.ts"
+      ],
+      "@deepseek-ai/dsh-experimental-claude-code-mods/examples/*": [
+        "../deepseek-harness/packages/experimental/claude-code-mods/examples/*"
       ],
       "@deepseek-ai/dsh/profile-boot": [
         "../deepseek-harness/apps/cli/lib/types/profile-boot.d.ts"
@@ -206,6 +254,24 @@
       "@deepseek-ai/dsh-experimental-computer-use-cua-driver-mcp": [
         "../deepseek-harness/packages/experimental/computer-use-cua-driver-mcp/lib/types/index.d.ts"
       ],
+      "@deepseek-ai/dsh-experimental-cua-macos": [
+        "../deepseek-harness/packages/experimental/cua-macos/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-cua/native-client": [
+        "../deepseek-harness/packages/experimental/cua/lib/types/native-client.d.ts"
+      ],
+      "@deepseek-ai/dsh-cua/protocol": [
+        "../deepseek-harness/packages/experimental/cua/lib/types/protocol.d.ts"
+      ],
+      "@deepseek-ai/dsh-cua": [
+        "../deepseek-harness/packages/experimental/cua/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-cua/api": [
+        "../deepseek-harness/packages/experimental/cua/lib/types/api.d.ts"
+      ],
+      "@deepseek-ai/dsh-cua/bridge": [
+        "../deepseek-harness/packages/experimental/cua/lib/types/bridge.d.ts"
+      ],
       "@deepseek-ai/dsh-experimental-computer-use-cua-driver-native": [
         "../deepseek-harness/packages/experimental/computer-use-cua-driver-native/lib/types/index.d.ts"
       ],
@@ -244,9 +310,6 @@
       ],
       "@deepseek-ai/node-addon-system/flock": [
         "../deepseek-harness/native/system/packages/entry/lib/types/flock.d.ts"
-      ],
-      "@deepseek-ai/dsh-invariants": [
-        "../deepseek-harness/packages/runtime-diagnostics/invariants/lib/types/index.d.ts"
       ],
       "@deepseek-ai/dsh-tool-call-timeout-policy": [
         "../deepseek-harness/packages/guard/timeout-policy/lib/types"
@@ -299,6 +362,15 @@
       "@deepseek-ai/dsh-api-settings-controller/types": [
         "../deepseek-harness/packages/api/settings-controller/lib/types/types.d.ts"
       ],
+      "@deepseek-ai/dsh-api-remote-access": [
+        "../deepseek-harness/packages/api/remote-access/lib/types/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-api-remote-access/client": [
+        "../deepseek-harness/packages/api/remote-access/lib/types/client/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-api-remote-access/types": [
+        "../deepseek-harness/packages/api/remote-access/lib/types/types.d.ts"
+      ],
       "@deepseek-ai/dsh-api-workspace-controller": [
         "../deepseek-harness/packages/api/workspace-controller/lib/types/index.d.ts"
       ],
@@ -317,11 +389,11 @@
       "@deepseek-ai/dsh-typert-protocol/types": [
         "../deepseek-harness/packages/typert/protocol/lib/types/types.d.ts"
       ],
+      "@deepseek-ai/dsh-typert-protocol/remote-info": [
+        "../deepseek-harness/packages/typert/protocol/lib/types/remote-info.d.ts"
+      ],
       "@deepseek-ai/dsh-typert-loader": [
         "../deepseek-harness/packages/typert/loader/lib/types/index.d.ts"
-      ],
-      "@deepseek-ai/dsh-session/invariant": [
-        "../deepseek-harness/packages/core/session/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-typert-registry/types": [
         "../deepseek-harness/packages/typert/registry/lib/types/types.d.ts"
@@ -515,24 +587,6 @@
       "@deepseek-ai/dsh-agent/brand": [
         "../deepseek-harness/packages/core/agent/lib/types/brand.d.ts"
       ],
-      "@deepseek-ai/dsh-agent/invariant": [
-        "../deepseek-harness/packages/core/agent/lib/types/invariant.d.ts"
-      ],
-      "@deepseek-ai/dsh-scope/invariant": [
-        "../deepseek-harness/packages/core/scope/lib/types/invariant.d.ts"
-      ],
-      "@deepseek-ai/dsh-agent-loop/invariant": [
-        "../deepseek-harness/packages/core/agent-loop/lib/types/invariant.d.ts"
-      ],
-      "@deepseek-ai/dsh-experimental-agent-team/invariant": [
-        "../deepseek-harness/packages/experimental/agent-team/lib/types/invariant.d.ts"
-      ],
-      "@deepseek-ai/dsh-host-*/invariant": [
-        "../deepseek-harness/packages/host/*/lib/types/invariant.d.ts"
-      ],
-      "@deepseek-ai/dsh-client-*/invariant": [
-        "../deepseek-harness/packages/client/*/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-headless/startup": [
         "../deepseek-harness/packages/bundle/headless/lib/types/startup.d.ts"
       ],
@@ -595,6 +649,12 @@
       ],
       "@deepseek-ai/dsh-plugin-manager/tools": [
         "../deepseek-harness/packages/boot/plugin-manager/lib/types/tools.d.ts"
+      ],
+      "@deepseek-ai/dsh-plugin-market/types": [
+        "../deepseek-harness/packages/boot/plugin-market/lib/types/types.d.ts"
+      ],
+      "@deepseek-ai/dsh-plugin-market/tools": [
+        "../deepseek-harness/packages/boot/plugin-market/lib/types/tools.d.ts"
       ],
       "@deepseek-ai/dsh-tool-cordis/host": [
         "../deepseek-harness/packages/extensions/tool-cordis/lib/types/host.d.ts"
@@ -668,9 +728,6 @@
       "@deepseek-ai/dsh-client-ui-renderer/client": [
         "../deepseek-harness/packages/client/ui-renderer/lib/types/client"
       ],
-      "@deepseek-ai/dsh-client-ui-renderer/invariant": [
-        "../deepseek-harness/packages/client/ui-renderer/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-client-ui-session": [
         "../deepseek-harness/packages/client/ui-session/lib/types"
       ],
@@ -685,6 +742,9 @@
       ],
       "@deepseek-ai/dsh-client-file-upload/client": [
         "../deepseek-harness/packages/client/file-upload/lib/types/client/index.d.ts"
+      ],
+      "@deepseek-ai/dsh-client-file-upload/types": [
+        "../deepseek-harness/packages/client/file-upload/lib/types/types.d.ts"
       ],
       "@deepseek-ai/dsh-api-remotes": [
         "../deepseek-harness/packages/api/remotes/lib/types"
@@ -776,6 +836,9 @@
       "@deepseek-ai/dsh-client-ui-model-selection": [
         "../deepseek-harness/packages/client/ui-model-selection/lib/types"
       ],
+      "@deepseek-ai/dsh-client-ui-deepseek-model-label-1017": [
+        "../deepseek-harness/packages/client/ui-deepseek-model-label-1017/lib/types"
+      ],
       "@deepseek-ai/dsh-client-ui-goal": [
         "../deepseek-harness/packages/client/ui-goal/lib/types"
       ],
@@ -796,6 +859,9 @@
       ],
       "@deepseek-ai/dsh-experimental-client-ui-agent-team": [
         "../deepseek-harness/packages/experimental/client-ui-agent-team/lib/types"
+      ],
+      "@deepseek-ai/dsh-experimental-client-ui-agent-team/client": [
+        "../deepseek-harness/packages/experimental/client-ui-agent-team/lib/types/client/index.d.ts"
       ],
       "@deepseek-ai/dsh-client-ui-settings-plugins": [
         "../deepseek-harness/packages/client/ui-settings-plugins/lib/types"
@@ -820,9 +886,6 @@
       ],
       "@deepseek-ai/dsh-client-ui-jobs/client": [
         "../deepseek-harness/packages/client/ui-jobs/lib/types/client/index.d.ts"
-      ],
-      "@deepseek-ai/dsh-client-ui-jobs/invariant": [
-        "../deepseek-harness/packages/client/ui-jobs/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-client-ui-schedule": [
         "../deepseek-harness/packages/client/ui-schedule/lib/types"
@@ -863,6 +926,9 @@
       "@deepseek-ai/dsh-client-ui-plugin-manager": [
         "../deepseek-harness/packages/client/ui-plugin-manager/lib/types"
       ],
+      "@deepseek-ai/dsh-client-ui-plugin-market": [
+        "../deepseek-harness/packages/client/ui-plugin-market/lib/types"
+      ],
       "@deepseek-ai/dsh-client-ui-settings-plugin-inventory": [
         "../deepseek-harness/packages/client/ui-settings-plugin-inventory/lib/types"
       ],
@@ -887,6 +953,9 @@
       "@deepseek-ai/dsh-client-ui-open-in-app": [
         "../deepseek-harness/packages/client/ui-open-in-app/lib/types"
       ],
+      "@deepseek-ai/dsh-client-ui-secret-mask": [
+        "../deepseek-harness/packages/client/ui-secret-mask/lib/types"
+      ],
       "@deepseek-ai/dsh-sdk-client": [
         "../deepseek-harness/packages/sdk/client/lib/types"
       ],
@@ -902,11 +971,20 @@
       "@deepseek-ai/dsh-experimental-auto-review": [
         "../deepseek-harness/packages/experimental/auto-review/lib/types"
       ],
+      "@deepseek-ai/dsh-experimental-claude-code-mods": [
+        "../deepseek-harness/packages/experimental/claude-code-mods/lib/types"
+      ],
       "@deepseek-ai/dsh-experimental-agent-team-profile": [
         "../deepseek-harness/packages/experimental/agent-team-profile/lib/types"
       ],
       "@deepseek-ai/dsh-experimental-tool-agent-team": [
         "../deepseek-harness/packages/experimental/tool-agent-team/lib/types"
+      ],
+      "@deepseek-ai/dsh-experimental-worktree": [
+        "../deepseek-harness/packages/experimental/worktree/lib/types"
+      ],
+      "@deepseek-ai/dsh-experimental-tool-worktree": [
+        "../deepseek-harness/packages/experimental/tool-worktree/lib/types"
       ],
       "@deepseek-ai/dsh-experimental-webworker-runtime": [
         "../deepseek-harness/packages/experimental/webworker-runtime/lib/types"
@@ -917,14 +995,20 @@
       "@deepseek-ai/dsh-experimental-inspector": [
         "../deepseek-harness/packages/experimental/inspector/lib/types"
       ],
+      "@deepseek-ai/dsh-experimental-inspector-profile": [
+        "../deepseek-harness/packages/experimental/inspector-profile/lib/types"
+      ],
+      "@deepseek-ai/dsh-experimental-session-inspector": [
+        "../deepseek-harness/packages/experimental/session-inspector/lib/types"
+      ],
+      "@deepseek-ai/dsh-experimental-session-inspector/client": [
+        "../deepseek-harness/packages/experimental/session-inspector/lib/types/client/index.d.ts"
+      ],
       "@deepseek-ai/dsh-experimental-inspector/client": [
         "../deepseek-harness/packages/experimental/inspector/lib/types/client/index.d.ts"
       ],
       "@deepseek-ai/dsh-experimental-ptc-runtime-python": [
         "../deepseek-harness/packages/experimental/ptc-runtime-python/lib/types"
-      ],
-      "@deepseek-ai/dsh-experimental-schedule-bundle": [
-        "../deepseek-harness/packages/experimental/schedule-bundle/lib/types/index.d.ts"
       ],
       "@deepseek-ai/dsh-util-crypto": [
         "../deepseek-harness/packages/util/crypto/lib/types"
@@ -977,9 +1061,6 @@
       "@deepseek-ai/dsh-agent-preset-registry": [
         "../deepseek-harness/packages/preset/agent-preset-registry/lib/types"
       ],
-      "@deepseek-ai/dsh-agent-preset-registry/invariant": [
-        "../deepseek-harness/packages/preset/agent-preset-registry/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-agent-tool-presentation": [
         "../deepseek-harness/packages/core/agent-tool-presentation/lib/types"
       ],
@@ -1000,9 +1081,6 @@
       ],
       "@deepseek-ai/dsh-authorization": [
         "../deepseek-harness/packages/credentials/authorization/lib/types"
-      ],
-      "@deepseek-ai/dsh-authorization/invariant": [
-        "../deepseek-harness/packages/credentials/authorization/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-base": [
         "../deepseek-harness/packages/bundle/base/lib/types"
@@ -1034,14 +1112,8 @@
       "@deepseek-ai/dsh-commands": [
         "../deepseek-harness/packages/interaction/commands/lib/types"
       ],
-      "@deepseek-ai/dsh-commands/invariant": [
-        "../deepseek-harness/packages/interaction/commands/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-compaction": [
         "../deepseek-harness/packages/compaction/compaction/lib/types"
-      ],
-      "@deepseek-ai/dsh-compaction/invariant": [
-        "../deepseek-harness/packages/compaction/compaction/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-compaction-basic": [
         "../deepseek-harness/packages/compaction/compaction-basic/lib/types"
@@ -1057,9 +1129,6 @@
       ],
       "@deepseek-ai/dsh-credentials": [
         "../deepseek-harness/packages/credentials/credentials/lib/types"
-      ],
-      "@deepseek-ai/dsh-credentials/invariant": [
-        "../deepseek-harness/packages/credentials/credentials/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-credentials-local": [
         "../deepseek-harness/packages/credentials/credentials-local/lib/types"
@@ -1079,9 +1148,6 @@
       "@deepseek-ai/dsh-fs": [
         "../deepseek-harness/packages/fs/fs/lib/types"
       ],
-      "@deepseek-ai/dsh-fs/invariant": [
-        "../deepseek-harness/packages/fs/fs/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-fs-local": [
         "../deepseek-harness/packages/fs/fs-local/lib/types"
       ],
@@ -1097,14 +1163,11 @@
       "@deepseek-ai/dsh-goal": [
         "../deepseek-harness/packages/goal/goal/lib/types"
       ],
-      "@deepseek-ai/dsh-goal/invariant": [
-        "../deepseek-harness/packages/goal/goal/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-goal-round-driver": [
         "../deepseek-harness/packages/goal/goal-round-driver/lib/types"
       ],
-      "@deepseek-ai/dsh-goal-round-driver/invariant": [
-        "../deepseek-harness/packages/goal/goal-round-driver/lib/types/invariant.d.ts"
+      "@deepseek-ai/dsh-harness-dev-context": [
+        "../deepseek-harness/packages/context/harness-dev-context/lib/types"
       ],
       "@deepseek-ai/dsh-headless": [
         "../deepseek-harness/packages/bundle/headless/lib/types"
@@ -1113,25 +1176,19 @@
         "../deepseek-harness/packages/util/home-paths/lib/types"
       ],
       "@deepseek-ai/dsh-hook-protocol": [
-        "../deepseek-harness/packages/hooks/hook-protocol/lib/types"
-      ],
-      "@deepseek-ai/dsh-hook-protocol/invariant": [
-        "../deepseek-harness/packages/hooks/hook-protocol/lib/types/invariant.d.ts"
+        "../deepseek-harness/packages/experimental/hook-protocol/lib/types"
       ],
       "@deepseek-ai/dsh-hooks-claude-code": [
-        "../deepseek-harness/packages/hooks/hooks-claude-code/lib/types"
+        "../deepseek-harness/packages/experimental/hooks-claude-code/lib/types"
       ],
       "@deepseek-ai/dsh-hooks-codex": [
-        "../deepseek-harness/packages/hooks/hooks-codex/lib/types"
+        "../deepseek-harness/packages/experimental/hooks-codex/lib/types"
       ],
       "@deepseek-ai/dsh-http-proxy": [
         "../deepseek-harness/packages/util/http-proxy/lib/types"
       ],
       "@deepseek-ai/dsh-jobs": [
         "../deepseek-harness/packages/jobs/jobs/lib/types"
-      ],
-      "@deepseek-ai/dsh-jobs/invariant": [
-        "../deepseek-harness/packages/jobs/jobs/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-jobs-local": [
         "../deepseek-harness/packages/jobs/jobs-local/lib/types"
@@ -1144,9 +1201,6 @@
       ],
       "@deepseek-ai/dsh-llm": [
         "../deepseek-harness/packages/llm/llm/lib/types"
-      ],
-      "@deepseek-ai/dsh-llm/invariant": [
-        "../deepseek-harness/packages/llm/llm/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-llm-deepseek": [
         "../deepseek-harness/packages/llm/llm-deepseek/lib/types"
@@ -1168,9 +1222,6 @@
       ],
       "@deepseek-ai/dsh-llm-retry": [
         "../deepseek-harness/packages/llm/llm-retry/lib/types"
-      ],
-      "@deepseek-ai/dsh-llm-retry/invariant": [
-        "../deepseek-harness/packages/llm/llm-retry/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-loader-smoke": [
         "../deepseek-harness/packages/test-support/loader-smoke/lib/types"
@@ -1205,17 +1256,17 @@
       "@deepseek-ai/dsh-permission-presets": [
         "../deepseek-harness/packages/interaction/permission-presets/lib/types"
       ],
-      "@deepseek-ai/dsh-permission-presets/invariant": [
-        "../deepseek-harness/packages/interaction/permission-presets/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-persona": [
         "../deepseek-harness/packages/preset/persona/lib/types"
       ],
       "@deepseek-ai/dsh-plan-mode": [
         "../deepseek-harness/packages/plan/plan-mode/lib/types"
       ],
-      "@deepseek-ai/dsh-plan-mode/invariant": [
-        "../deepseek-harness/packages/plan/plan-mode/lib/types/invariant.d.ts"
+      "@deepseek-ai/dsh-plugin-market": [
+        "../deepseek-harness/packages/boot/plugin-market/lib/types"
+      ],
+      "@deepseek-ai/dsh-plugin-market-index": [
+        "../deepseek-harness/packages/util/plugin-market-index/lib/types"
       ],
       "@deepseek-ai/dsh-plugin-package-inventory-deepseek": [
         "../deepseek-harness/packages/llm/plugin-package-inventory-deepseek/lib/types"
@@ -1244,9 +1295,6 @@
       "@deepseek-ai/dsh-sandbox-policy": [
         "../deepseek-harness/packages/sandbox/sandbox-policy/lib/types"
       ],
-      "@deepseek-ai/dsh-sandbox-policy/invariant": [
-        "../deepseek-harness/packages/sandbox/sandbox-policy/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-sandbox-ssh": [
         "../deepseek-harness/packages/ssh/sandbox-ssh/lib/types"
       ],
@@ -1255,9 +1303,6 @@
       ],
       "@deepseek-ai/dsh-schedule": [
         "../deepseek-harness/packages/schedule/schedule/lib/types"
-      ],
-      "@deepseek-ai/dsh-schedule/invariant": [
-        "../deepseek-harness/packages/schedule/schedule/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-scope": [
         "../deepseek-harness/packages/core/scope/lib/types"
@@ -1294,9 +1339,6 @@
       ],
       "@deepseek-ai/dsh-session-log-deepseek": [
         "../deepseek-harness/packages/session/session-log-deepseek/lib/types"
-      ],
-      "@deepseek-ai/dsh-session-log-deepseek/invariant": [
-        "../deepseek-harness/packages/session/session-log-deepseek/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-session-log-export": [
         "../deepseek-harness/packages/session-query/session-log-export/lib/types"
@@ -1337,11 +1379,8 @@
       "@deepseek-ai/dsh-session-title": [
         "../deepseek-harness/packages/session/session-title/lib/types"
       ],
-      "@deepseek-ai/dsh-session-title/invariant": [
-        "../deepseek-harness/packages/session/session-title/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-session-title-all-prompts-llm": [
-        "../deepseek-harness/packages/session/session-title-all-prompts-llm/lib/types"
+        "../deepseek-harness/packages/experimental/session-title-all-prompts-llm/lib/types"
       ],
       "@deepseek-ai/dsh-session-title-first-prompt-llm": [
         "../deepseek-harness/packages/session/session-title-first-prompt-llm/lib/types"
@@ -1359,7 +1398,7 @@
         "../deepseek-harness/packages/shell/shell/lib/types"
       ],
       "@deepseek-ai/dsh-skill-badge": [
-        "../deepseek-harness/packages/skill/skill-badge/lib/types"
+        "../deepseek-harness/packages/experimental/skill-badge/lib/types"
       ],
       "@deepseek-ai/dsh-skill-office": [
         "../deepseek-harness/packages/skill/skill-office/lib/types"
@@ -1376,23 +1415,20 @@
       "@deepseek-ai/dsh-ssh": [
         "../deepseek-harness/packages/ssh/ssh/lib/types"
       ],
+      "@deepseek-ai/dsh-ssh-helper-runtime": [
+        "../deepseek-harness/packages/ssh/ssh-helper-runtime/lib/types"
+      ],
       "@deepseek-ai/dsh-storage": [
         "../deepseek-harness/packages/storage/storage/lib/types"
       ],
       "@deepseek-ai/dsh-storage-domain": [
         "../deepseek-harness/packages/storage/storage-domain/lib/types"
       ],
-      "@deepseek-ai/dsh-storage-domain/invariant": [
-        "../deepseek-harness/packages/storage/storage-domain/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-storage-json": [
         "../deepseek-harness/packages/storage/storage-json/lib/types"
       ],
       "@deepseek-ai/dsh-subagent": [
         "../deepseek-harness/packages/subagent/subagent/lib/types"
-      ],
-      "@deepseek-ai/dsh-subagent/invariant": [
-        "../deepseek-harness/packages/subagent/subagent/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-subagent-acp": [
         "../deepseek-harness/packages/subagent/subagent-acp/lib/types"
@@ -1409,9 +1445,6 @@
       "@deepseek-ai/dsh-subagent-fork-in-process": [
         "../deepseek-harness/packages/subagent/subagent-fork-in-process/lib/types"
       ],
-      "@deepseek-ai/dsh-subagent-in-process-driver": [
-        "../deepseek-harness/packages/subagent/subagent-in-process-driver/lib/types"
-      ],
       "@deepseek-ai/dsh-subagent-spawn-in-process": [
         "../deepseek-harness/packages/subagent/subagent-spawn-in-process/lib/types"
       ],
@@ -1427,9 +1460,6 @@
       "@deepseek-ai/dsh-system-prompt": [
         "../deepseek-harness/packages/core/system-prompt/lib/types"
       ],
-      "@deepseek-ai/dsh-system-prompt/invariant": [
-        "../deepseek-harness/packages/core/system-prompt/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-terminal": [
         "../deepseek-harness/packages/terminal/terminal/lib/types"
       ],
@@ -1438,9 +1468,6 @@
       ],
       "@deepseek-ai/dsh-time-context": [
         "../deepseek-harness/packages/context/time-context/lib/types"
-      ],
-      "@deepseek-ai/dsh-time-context/invariant": [
-        "../deepseek-harness/packages/context/time-context/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-timeout": [
         "../deepseek-harness/packages/util/timeout/lib/types"
@@ -1485,10 +1512,13 @@
         "../deepseek-harness/packages/shell/tool-pwsh-persistent/lib/types"
       ],
       "@deepseek-ai/dsh-tool-ralph": [
-        "../deepseek-harness/packages/workflow/tool-ralph/lib/types"
+        "../deepseek-harness/packages/experimental/tool-ralph/lib/types"
+      ],
+      "@deepseek-ai/dsh-tool-schedule": [
+        "../deepseek-harness/packages/schedule/tool-schedule/lib/types"
       ],
       "@deepseek-ai/dsh-tool-session-query": [
-        "../deepseek-harness/packages/session-query/tool-session-query/lib/types"
+        "../deepseek-harness/packages/experimental/tool-session-query/lib/types"
       ],
       "@deepseek-ai/dsh-tool-skill": [
         "../deepseek-harness/packages/skill/tool-skill/lib/types"
@@ -1499,20 +1529,14 @@
       "@deepseek-ai/dsh-tool-subagent": [
         "../deepseek-harness/packages/subagent/tool-subagent/lib/types"
       ],
-      "@deepseek-ai/dsh-tool-subagent/invariant": [
-        "../deepseek-harness/packages/subagent/tool-subagent/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-tool-subagent-control": [
         "../deepseek-harness/packages/subagent/tool-subagent-control/lib/types"
       ],
       "@deepseek-ai/dsh-tool-terminal": [
-        "../deepseek-harness/packages/terminal/tool-terminal/lib/types"
+        "../deepseek-harness/packages/experimental/tool-terminal/lib/types"
       ],
       "@deepseek-ai/dsh-tool-todo": [
         "../deepseek-harness/packages/todo/tool-todo/lib/types"
-      ],
-      "@deepseek-ai/dsh-tool-todo/invariant": [
-        "../deepseek-harness/packages/todo/tool-todo/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-tool-web": [
         "../deepseek-harness/packages/web/tool-web/lib/types"
@@ -1520,8 +1544,8 @@
       "@deepseek-ai/dsh-tool-workflow": [
         "../deepseek-harness/packages/workflow/tool-workflow/lib/types"
       ],
-      "@deepseek-ai/dsh-tool-workflow/invariant": [
-        "../deepseek-harness/packages/workflow/tool-workflow/lib/types/invariant.d.ts"
+      "@deepseek-ai/dsh-tool-working-directory": [
+        "../deepseek-harness/packages/session/tool-working-directory/lib/types"
       ],
       "@deepseek-ai/dsh-tool-workspace-dependencies": [
         "../deepseek-harness/packages/skill/tool-workspace-dependencies/lib/types"
@@ -1529,14 +1553,8 @@
       "@deepseek-ai/dsh-tools": [
         "../deepseek-harness/packages/core/tools/lib/types"
       ],
-      "@deepseek-ai/dsh-tools/invariant": [
-        "../deepseek-harness/packages/core/tools/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-user-approval": [
         "../deepseek-harness/packages/interaction/user-approval/lib/types"
-      ],
-      "@deepseek-ai/dsh-user-approval/invariant": [
-        "../deepseek-harness/packages/interaction/user-approval/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-user-questions": [
         "../deepseek-harness/packages/interaction/user-questions/lib/types"
@@ -1546,6 +1564,9 @@
       ],
       "@deepseek-ai/dsh-web-app": [
         "../deepseek-harness/packages/bundle/web-app/lib/types"
+      ],
+      "@deepseek-ai/dsh-web-deepseek-api": [
+        "../deepseek-harness/packages/web/web-deepseek-api/lib/types"
       ],
       "@deepseek-ai/dsh-web-fetch-http": [
         "../deepseek-harness/packages/web/web-fetch-http/lib/types"
@@ -1560,13 +1581,10 @@
         "../deepseek-harness/packages/web/web-search-perplexity/lib/types"
       ],
       "@deepseek-ai/dsh-webhook": [
-        "../deepseek-harness/packages/webhook/webhook/lib/types"
-      ],
-      "@deepseek-ai/dsh-webhook/invariant": [
-        "../deepseek-harness/packages/webhook/webhook/lib/types/invariant.d.ts"
+        "../deepseek-harness/packages/experimental/webhook/lib/types"
       ],
       "@deepseek-ai/dsh-webhook-github": [
-        "../deepseek-harness/packages/webhook/webhook-github/lib/types"
+        "../deepseek-harness/packages/experimental/webhook-github/lib/types"
       ],
       "@deepseek-ai/dsh-win32-process": [
         "../deepseek-harness/packages/subprocess/win32-process/lib/types"
@@ -1574,17 +1592,14 @@
       "@deepseek-ai/dsh-workflow": [
         "../deepseek-harness/packages/workflow/workflow/lib/types"
       ],
-      "@deepseek-ai/dsh-workflow/invariant": [
-        "../deepseek-harness/packages/workflow/workflow/lib/types/invariant.d.ts"
-      ],
       "@deepseek-ai/dsh-workflow-ptc": [
         "../deepseek-harness/packages/workflow/workflow-ptc/lib/types"
       ],
+      "@deepseek-ai/dsh-working-directory": [
+        "../deepseek-harness/packages/session/working-directory/lib/types"
+      ],
       "@deepseek-ai/dsh-workspace": [
         "../deepseek-harness/packages/workspace/workspace/lib/types"
-      ],
-      "@deepseek-ai/dsh-workspace/invariant": [
-        "../deepseek-harness/packages/workspace/workspace/lib/types/invariant.d.ts"
       ],
       "@deepseek-ai/dsh-workspace-changes": [
         "../deepseek-harness/packages/deliverables/workspace-changes/lib/types"

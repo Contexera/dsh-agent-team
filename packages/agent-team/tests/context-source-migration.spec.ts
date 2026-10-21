@@ -34,7 +34,7 @@ import {
   isCheckpointContinuationMessage,
   isHandoffMessage,
 } from '../src/context-source.ts'
-import { TEAM_CONTEXT_CODEC } from '../src/context-continuity-host.ts'
+import { TEAM_CONTEXT_CODEC } from '../src/context-codec.ts'
 
 const handoffInput = {
   handoff: 'objective: finish the parser\nnext step: run tests',

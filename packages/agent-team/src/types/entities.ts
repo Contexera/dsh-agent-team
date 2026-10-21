@@ -57,7 +57,17 @@ export interface AgentTeamMemberActor {
   readonly handle: string
 }
 
-export type AgentTeamActor = AgentTeamHumanActor | AgentTeamMemberActor
+/**
+ * The Host acting on a Member's Session — never a business actor. Automatic
+ * Session recycling is the only user: the model neither asked for it nor could
+ * refuse it, so Human or Member authority would be a false attribution.
+ */
+export interface AgentTeamHostActor {
+  readonly kind: 'host'
+  readonly handle: 'agent-team'
+}
+
+export type AgentTeamActor = AgentTeamHumanActor | AgentTeamMemberActor | AgentTeamHostActor
 
 /** Provider route plus provider-owned model id one Member can be pinned to. */
 export interface AgentTeamModelSelection {

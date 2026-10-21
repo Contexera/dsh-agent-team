@@ -14,7 +14,7 @@ When changing a Host capability, read package source/tests first and then the ma
 
 ## Lifecycle and notifications
 - Agent lifecycle, JSON/SQLite replay, authorization, idempotency, and revision checks stay on Host. Durable unread changes may produce one bounded coalesced Agent context notification through the public safe boundary: direct mentions carry their Message and source, Task/Claim Activities carry a concise transition, and ordinary unread carries only a body-free Thread-first route. Promotion is a Task activity and reaches followers through Activity markers. Notifications are not a second authority and do not promise exactly-once model processing.
-- A committed Session transition (`team/member-session-renewed`, `team/member-session-rolled-over`) records the desired binding, not a completed one: retiring the old generation and activating the target are Host effects outside the ledger write. Startup and the explicit Member recovery action both finish an interrupted transition from the recorded previous Session, and each effect derives its own completion — a live handle never proves the archive half ran. A repeated request therefore answers with the recorded receipt and an honest status rather than committing a second binding.
+- A committed Session transition (`team/member-session-renewed`, `team/member-session-rolled-over`, `team/member-session-recycled`) records the desired binding, not a completed one: retiring the old generation and activating the target are Host effects outside the ledger write. Startup and the explicit Member recovery action both finish an interrupted transition from the recorded previous Session, and each effect derives its own completion — a live handle never proves the archive half ran. A repeated request answers with the recorded receipt and an honest status, never a second binding.
 - Every durable Member state has one desired external effect set — the [Member Lifecycle](../domain-model.md#member-lifecycle) table. Each lifecycle operation re-runs that set right after its commit, and startup re-runs it for every non-enabled Member, so an archive, suspension, or removal interrupted by a crash or a failed Workspace/Session/filesystem call converges by repeating the same derivation rather than by a second durable write.
 - Startup never activates a non-enabled Member: an effect that fails during startup is logged and retried at the next boot instead of failing the boot. Lifecycle operations for one Member stay serialized in submission order, while different Members never queue behind each other's waits.
 - After the ledger append, delivery effects follow — commit listeners, Client change invalidation, the participation notice, and one wake per affected Member. Each runs in a boundary that logs a failure instead of failing the operation, so a failed listener or wake still answers with the committed result, not a false rollback; only invariant divergence still rejects. A failed Inbox wake clears its recorded notice state, so the next commit touching that Member rederives the same durable Inbox facts and retries without a second append. DM keeps its explicit recorded-but-not-delivered error.
@@ -26,7 +26,7 @@ A wake is one bounded coalesced notice the Host delivers over one of four causes
 | Cause | What produced it |
 | --- | --- |
 | `commit` | any committed operation touching the Member: a mention, a DM, a Task activity, a promotion, an accepted answer |
-| `transition` | a recorded `team/member-session-renewed` or `team/member-session-rolled-over` whose retire and activation effects complete out of order; the rederived Inbox is sequenced after the handoff |
+| `transition` | a recorded `team/member-session-renewed`, `team/member-session-recycled`, or legacy `team/member-session-rolled-over` whose retire and activation effects complete out of order; the rederived Inbox is sequenced after any carried input |
 | `activation` | a fresh activation, carrying the previous Session id when input was carried forward |
 | `running` | the Member's own `agent/status` going `running` — one wake per transition, not per step |
 
@@ -75,16 +75,11 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 
 ## Sessions, policy, and context pressure
 - Team-managed Agent sessions use the explicit Team preset and trusted `danger-full-access` policy. An untitled Member session receives its handle as a title; explicit or previous titles win.
-- Accepted-Task auto compaction is retired. Member context pressure is decided by the engine's policy, which the Host binds to Member readings (see Tools and preset):
-  - budgets derive from the live route's context window;
-  - one handoff-budget notice per generation;
-  - a long-gap step the relatedness judge reads as unrelated is held rather than admitted;
-  - forced in-place compaction with fail-closed verification at the hard limit;
-  - one bounded compact-and-retry for provider context-overflow.
-
-  Pending/error bookkeeping is process-local; only compactions in a transaction add Session history.
+- Member context is owned by two Host-side mechanisms and no model tool (see Tools and preset): the preset's compaction engine shortens an oversized Session in place, and the generation coordinator swaps a cold Session at a true idle boundary, recording `team/member-session-recycled` as the Host actor.
+- A swapping generation reports unavailable with a `rollover` diagnostic until its successor activates, so a Client following the row never opens a Session that does not exist yet.
+- Pending/error bookkeeping is process-local; only compactions in a transaction add Session history.
 - Terminal recovery classifies each `agent/error` from structured Harness data before any wording. The stable code decides alone — `RATE_LIMIT` is rate limiting, `TRANSPORT`/`TIMEOUT` a transient network failure, an explicit 429/503 response rate limiting — and any other code (quota, auth, context, request) stays manual whatever its message says. Only a codeless error falls back to the narrow message signatures.
-- The split stays two-level: `agent/request-error` owns the same-step pressure/compaction retry, `agent/error` owns terminal recovery with its consecutive-error limit, and either way the failure keeps its recorded Member diagnostic.
+- `agent/error` owns terminal recovery with its consecutive-error limit, and the failure keeps its recorded Member diagnostic.
 - A Team wake discarded before any `turn/start` is the one error diagnostic with no `agent/error` behind it. A Team-owned Inbox or recovery notice that leaves the queue before the turn opens, and that the Host did not replace or dispose, records a `runtime` diagnostic with `source: 'agent/inbox/discarded'`, the `sessionId`, and `occurredAt`. A notice the Host replaces or disposes raises nothing, so ordinary replacement never errors. Like every runtime diagnostic it is process-local, re-derived only on the next wake.
 
 ## Private memory, archival, and identity effects

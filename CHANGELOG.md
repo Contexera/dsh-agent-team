@@ -4,8 +4,14 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+**Upgrade note**
+
+- The generation swap records a new operation kind, `team/member-session-recycled`, in the durable ledger. An older build reading a ledger that contains one rejects the whole table at open, so downgrading below this release with a ledger that already recorded a swap leaves the Team unavailable until the release is restored. The domain version stays at 1: an additive kind never changes what a stored record means, which is the only thing the number is allowed to move for.
+
 **Changed**
 
+- A Member no longer manages its own context. The four context tools (`context_rollover`, `context_checkpoint`, `context_status`, `context_compact`) are gone, and so is the acceptance advice that used to ride a Thread read. The preset's compaction engine shortens an oversized Session in place (a `BasicCompactionEngine` subclass supplying the measured seven-section summary template, `auto` on, trigger at an absolute 256K waterline), and a generation swap is a Host decision: `team-context-management.ts` reacts to a durable pending intent, records `team/member-session-recycled` as the Host actor, and activates a fresh Session parented at the one it replaces.
+- A swapped-in generation is told nothing about the swap. Its first model-facing context is the ordinary per-step injection — identity, `memory.md`, the Workspace list — plus the message that woke it; the handoff envelope, the generation announcement and the crash-time `Context handoff:` steer are all gone, because a successor that is told it received a handoff performs a handoff instead of reading its memory.
 - A Member works in the directory the work is in. Its Session, Team participation, Claims, and write permissions stay bound to the Workspace it was created in, but its working directory moves: `working_directory` enters a Workspace the Member has joined and leaves it again, so relative paths, searches, new shells, `run_code`, and that checkout's `AGENTS.md` all resolve where the work actually is. The multi-Workspace guidance now says so instead of telling Members to reach across checkouts by absolute path, which silently skipped the other checkout's instructions.
 - A Member's tool allow-list no longer removes `working_directory`. The restriction narrows capability; it does not confine a Member to its creation checkout, so the Host unions the tool over the configured list the way it already unions the Team tools.
 - The bundle declares `engines.dsh` beside its DSH peers. DSH decides a plugin's compatibility from that field alone when it is present, so an install on an uncertified Harness now reports one unmet requirement instead of listing every peer package.
@@ -17,6 +23,8 @@ All notable changes to this project are documented in this file. The format foll
 
 **Removed**
 
+- The bundle no longer depends on `@contexera/dsh-context-continuity` or `@contexera/dsh-jev`. The Team's projection, message codec, and generation coordinator are its own; `scripts/continuity-dir.mjs`, the engine exports (`./compaction-engine`), the copy steps in `generate-typert.mjs`, and the `DSH_CONTEXT_CONTINUITY_DIR` resolution are gone with them. A profile that still states the old `gate`/`jev` fields in the Host row keeps working — the schema is non-strict, so the unknown keys pass through — but nothing reads them, and a `jev.apiKey` left in a real profile stays in plain text until it is deleted by hand.
+- The Team settings page drops its `jev` endpoint group: the apiBase/model/key controls, the reachability line, and the 14 locale keys behind them. The page is identity, the environment check, and the version footnote.
 - A Task's Thread band states the Task rather than listing its work queue: the `Claims · N` disclosure is gone with its row layout, its empty line and its three state words. A Claim still reaches a reader as the fact that recorded it — the activity line in the timeline — and as the owners drawn on a feed entry row, and the early-accept dialog still lists the open Claims it will complete, because that list is what the acceptance is decided on. What went is the surface that listed Claims on demand.
 - `AgentTeamHumanProfileResult.updateAvailable` is gone. `latestVersion` carries the fact on its own: present exactly when a newer release is known, absent while the check has not observed one — or is disabled, offline, or failed. A caller that treated `updateAvailable: false` as "up to date" was reading four different states as one.
 

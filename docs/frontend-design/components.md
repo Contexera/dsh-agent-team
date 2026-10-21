@@ -103,23 +103,6 @@ Two versions a reader could reasonably confuse are therefore kept apart: the run
 
 The block carries `data-environment` with its verdict, so an acceptance journey waits on a state rather than on prose.
 
-## Judge endpoint group
-The page's second group points jev at an endpoint: three controls — apiBase, model, and the write-only key — waiting behind a collapsed disclosure whose row is the whole control. The row carries the state and the chevron; the fields appear when it opens, and the opened body carries `role="group"` named by that title, because the page shows two saves and neither may be announced without context.
-
-Collapsed is the default because the endpoint is set once and then left alone, while its state is worth seeing every time the page opens. The controls are absent from the DOM while it is closed rather than hidden in it. A disclosure that only hides its content stays reachable by Tab and by a screen reader, so the browser acceptance pins that absence — no `[data-team-judge]` body, no fields — rather than the styling that suggests it.
-
-The state is that row rather than a line above the fields: `remote.agentTeam.contextJudge` answers whether jev is reachable, and the row states the Host's own answer as words plus a 14px glyph, carried on `data-context-judge` — `enabled`, `no-key`, `unavailable`. Only `unavailable` takes the warn colour, because a missing key is a step to take while an unreachable endpoint is something to fix. The row says nothing before the first read settles, and `detail` stays a Host diagnostic rather than user copy.
-
-The gate's thresholds and the key's environment variable share that same row and are deliberately absent: they are row configuration the Team owns, and a deployment can still set them in its own patch layer. The Client reads only the `jev` group, through a projection adapter that flattens the section's `value`, `base`, and `user` layers and maps each control name onto the path it really lives at (`['jev','apiBase']`).
-
-The form is the shipped settings stack — `SettingsFormModel` with `SettingsForm`, `SettingsValueField`, and `SettingsSecretField` — so drafts, override badges, reset, and the save behave as they do on the Harness's own settings pages. Every write goes through `ctx.configForms.get(namespace)`, which owns the revision fence and folds the Host's answer back into the mirror; a save that did not land keeps its drafts and says so, and a landed one re-reads the status.
-
-The key is write-only: the Host redacts the literal, so the control starts blank on every load, and a blank draft writes nothing — opening the page can never clear a stored key. The configured badge comes from the describe mirror's `secrets` list, the only place that state is readable. Removing a literal is an explicit clear of its own, offered only while no draft is staged, because a write moves the document revision a staged save is fenced to.
-
-The group is offered only while this deployment serves a settings document: the section is registered regardless, because identity is reachable without one, and an absent settings service simply leaves the group out. Inside a served document the group still answers for itself — a read-only document disables its controls and says so, and a namespace that is not served renders the form's own unavailable line instead of fields nothing would accept.
-
-The form reaches the page through an observable seat rather than as a value. A slot entry's injected props are computed once and cached for that entry's lifetime, so a settings service answering after the first render would otherwise leave the group off the page until a reload. Filling the seat after render is what the page's own test pins.
-
 ## Channel page and discussion panel
 The Channel page reads one timeline two ways. A tab strip under the header switches between them: `频道` is the feed, `看板` is a four-column board of the Task-status projection. The board is a second **reading**, not a second surface — it re-sorts the same projection, so a Task's state, owners, and title cannot disagree between the two views, and neither view fetches anything the other has not.
 

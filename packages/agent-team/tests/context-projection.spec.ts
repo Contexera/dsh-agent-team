@@ -1,23 +1,23 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createToolResultMessage, createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
-import { SESSION_FORMAT_VERSION, SessionId, SessionLogOffset, SessionSeq, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
 
 /** Fixed Session identity for every fold in this spec; checkpoint refs key on it. */
 const SID = 'agent-team-test-session'
-import { continuationDelivered, readContextTimeline, type ContextProjectionState, type ContextTimelineItem } from '@contexera/dsh-context-continuity'
 import {
   CONTEXT_CHECKPOINT_TOOL_NAME,
   CONTEXT_ROLLOVER_TOOL_NAME,
   NEW_CONTEXT_TOOL_NAME,
   boundaryRefFor,
   checkpointRefFor,
-  createTeamContextProjectionConfig,
+  continuationDelivered,
   createTeamContextProjectionDefinition,
   foldTeamContextProjection,
   TeamContextProjectionHost,
+  type TeamContextProjectionState,
 } from '../src/context-projection.ts'
 import { AGENT_TEAM_PLUGIN_ID, continuationCheckpointRefOf, handoffOf } from '../src/context-source.ts'
-import { TEAM_CONTEXT_CODEC } from '../src/context-continuity-host.ts'
+import { TEAM_CONTEXT_CODEC } from '../src/context-codec.ts'
 
 /**
  * Team's projection host with no ledger attached: boundary attribution that
@@ -28,44 +28,12 @@ import { TEAM_CONTEXT_CODEC } from '../src/context-continuity-host.ts'
 const PROJECTION_HOST = new TeamContextProjectionHost()
 
 /** Fold one log through the engine's unit with Team's config — the production path. */
-function fold(events: readonly SessionEvent[], inheritedEventCount?: SessionLogOffset, sessionId: string = SID): ContextProjectionState {
+function fold(events: readonly SessionEvent[], inheritedEventCount?: SessionLogOffset, sessionId: string = SID): TeamContextProjectionState {
   return foldTeamContextProjection(
     events,
     { sessionId, ...(inheritedEventCount === undefined ? {} : { inheritedEventCount }) },
     PROJECTION_HOST,
   )
-}
-
-/** A root generation's header: the engine's lineage walk only reads `parentSession`. */
-function headerOf(sessionId: string): SessionHeader {
-  return { version: SESSION_FORMAT_VERSION, id: sessionId as SessionId, createdAt: 0, isSeeded: false }
-}
-
-/**
- * Read one log through the engine's production timeline read with Team's fold
- * config — the same path `context_status` takes, so a case here pins the
- * refs, kinds, and order the model is actually offered.
- */
-async function readTimeline(
-  events: readonly SessionEvent[],
-  options: { readonly sessionId?: string; readonly inheritedEventCount?: SessionLogOffset; readonly limit?: number } = {},
-): Promise<readonly ContextTimelineItem[]> {
-  const sessionId = options.sessionId ?? SID
-  const timeline = await readContextTimeline({
-    current: {
-      sessionId: sessionId as SessionId,
-      header: headerOf(sessionId),
-      inheritedEventCount: options.inheritedEventCount ?? SessionLogOffset(0),
-      events,
-    },
-    config: createTeamContextProjectionConfig(PROJECTION_HOST),
-    // This spec folds single generations: any ancestor walk would be a bug.
-    readAncestor: async () => { throw new Error('this spec has no ancestry') },
-    currentUsageTokens: 1000,
-    handoffAt: 200_000,
-    ...(options.limit === undefined ? {} : { limit: options.limit }),
-  })
-  return timeline.items
 }
 
 let eventSeq = 0
@@ -125,8 +93,8 @@ function checkpointPair(turn: number, callId: string, name: string): SessionEven
 
 beforeEach(() => { eventSeq = 0 })
 
-describe('AgentTeam context projection — rollover intent', () => {
-  it('a successful context_rollover call/result pair creates pending intent', () => {
+describe('AgentTeam context projection — legacy rollover intent decode', () => {
+  it('a legacy context_rollover call/result pair still creates pending intent', () => {
     const events = [
       turnStart(1),
       ...legacyNewContextPair(1, 'call-1', { handoff: 'continue from here' }),
@@ -138,9 +106,9 @@ describe('AgentTeam context projection — rollover intent', () => {
     expect(state.pending?.relatedFiles).toEqual([])
   })
 
-  it('the current tool name creates pending intent identically', () => {
-    // The model-facing tool is `context_rollover`; a successful pair under
-    // the new name produces the same pending intent shape.
+  it('the renamed decoder name folds identically to its predecessor', () => {
+    // No current build produces either name; both must fold, because a log
+    // written under the renamed tool still has to resolve after an upgrade.
     const events = [
       turnStart(1),
       contextToolCall(1, 'call-rollover', CONTEXT_ROLLOVER_TOOL_NAME, { handoff: 'new name, same swap' }),
@@ -252,9 +220,8 @@ describe('AgentTeam context projection — rollover intent', () => {
 
   it('a spent pending from the legacy new_context name is replaceable by a modern-name retry', () => {
     // Mixed lineage across the rename: an old-generation ended pending
-    // (legacy name, failed swap — process lock gone) must not block the
-    // current generation's fresh `context_rollover` from taking over the
-    // intent slot.
+    // (legacy name, failed swap — process lock gone) must not block a later
+    // rollover pair from taking over the intent slot.
     const events = [
       turnStart(1),
       contextToolCall(1, 'call-legacy-spent', NEW_CONTEXT_TOOL_NAME, { handoff: 'legacy failed swap' }),
@@ -472,7 +439,7 @@ describe('AgentTeam context sources', () => {
 })
 
 describe('AgentTeam context projection — timeline boundaries', () => {
-  it('a handoff delivery becomes a handoff boundary resolved by its turn end', async () => {
+  it('a handoff delivery becomes a handoff boundary resolved by its turn end', () => {
     const events = [
       turnStart(1),
       userMessageEvent(TEAM_CONTEXT_CODEC.createHandoffMessage({ handoff: 'seed text', previousSessionId: 'session:a' as never, newSessionId: 'session:b' as never, trigger: 'model', handoffEventSeq: 5 as never })),
@@ -480,12 +447,7 @@ describe('AgentTeam context projection — timeline boundaries', () => {
     ]
     const state = fold(events)
     expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]).toMatchObject({ kind: 'handoff', turnEndSeq: events.at(-1)!.seq })
-    // The engine's read derives the ref through Team's host and carries the
-    // host's own kind, so the timeline's identity vocabulary stays Team's.
-    const boundaryRef = boundaryRefFor(SID, state.boundaries[0]!.resultSeq)
-    const items = await readTimeline(events)
-    expect(items.find(item => item.ref === boundaryRef)).toMatchObject({ source: 'boundary', kind: 'handoff', label: 'context handoff' })
+    expect(state.boundaries[0]).toMatchObject({ kind: 'handoff', label: 'context handoff', turnEndSeq: events.at(-1)!.seq })
   })
 
   it('a Team claim mutation result becomes a team boundary; list calls do not', () => {
@@ -544,28 +506,7 @@ describe('AgentTeam context projection — timeline boundaries', () => {
     expect(state.boundaries[0]).toMatchObject({ kind: 'compaction' })
   })
 
-  it('timeline candidates order newest first, include the head, and respect the limit', async () => {
-    // One checkpoint per completed turn, three turns total.
-    const names = ['first', 'second', 'third']
-    const events: SessionEvent[] = []
-    for (const [index, name] of names.entries()) {
-      const turn = index + 1
-      events.push(turnStart(turn), ...checkpointPair(turn, `call-${name}`, name), turnEnd(turn))
-    }
-    const state = fold(events)
-    const candidates = await readTimeline(events, { limit: 2 })
-    expect(candidates).toHaveLength(2)
-    // The head (latest completed turn) is newest; the third checkpoint is
-    // the next-newest anchor.
-    expect(candidates[0]!.ref).toBe(`head:${state.lastTurnEndSeq}`)
-    expect(candidates[1]!.ref).toBe(checkpointRefFor(SID, 'call-third'))
-    const all = await readTimeline(events)
-    expect(all[1]!.ref).toBe(checkpointRefFor(SID, 'call-third'))
-    expect(all[2]!.ref).toBe(checkpointRefFor(SID, 'call-second'))
-    expect(all[3]!.ref).toBe(checkpointRefFor(SID, 'call-first'))
-  })
-
-  it('inherited boundaries and checkpoints are invisible to a seeded child fold', async () => {
+  it('inherited boundaries and checkpoints are invisible to a seeded child fold', () => {
     const parentEvents = [
       turnStart(1),
       ...checkpointPair(1, 'call-inherited', 'anchor'),
@@ -580,10 +521,6 @@ describe('AgentTeam context projection — timeline boundaries', () => {
     expect(state.checkpoints).toHaveLength(0)
     expect(state.boundaries).toHaveLength(0)
     expect(state.continuations).toHaveLength(0)
-    // The read applies the same cut, so the ancestor's anchors never reach
-    // the model through the timeline either.
-    const items = await readTimeline(childEvents, { inheritedEventCount: inherited as SessionLogOffset })
-    expect(items.every(item => !item.ref.includes('call-inherited'))).toBe(true)
   })
 
   it('folding one event at a time matches the cold fold of the same log', () => {
@@ -907,7 +844,7 @@ describe('AgentTeam context projection — the engine unit Team registers', () =
     expect(child.sessionId).toBe('agent-team-child')
   })
 
-  it('boundary refs are Session-scoped: an ancestor boundary never collides with this generation\'s', async () => {
+  it('boundary refs are Session-scoped: an ancestor boundary never collides with this generation\'s', () => {
     const seq = 7
     expect(boundaryRefFor('agent-team-generation-one', seq)).not.toBe(boundaryRefFor('agent-team-generation-two', seq))
     const notice = createUserMessage({ content: [{ type: 'text', text: 'Thread: thread:aaaa1111-2222-4333-8444-555566667777' }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox has unread work.' } })
@@ -922,9 +859,6 @@ describe('AgentTeam context projection — the engine unit Team registers', () =
     expect(firstRef).toBe(boundaryRefFor('agent-team-generation-one', event.seq))
     expect(secondRef).toBe(boundaryRefFor('agent-team-generation-two', event.seq))
     expect(firstRef).not.toBe(secondRef)
-    // The engine's read derives each ref through the host of its own source.
-    const items = await readTimeline([turnStart(1), event, turnEnd(2)], { sessionId: 'agent-team-generation-one' })
-    expect(items.find(item => item.source === 'boundary')!.ref).toBe(firstRef)
   })
 
   it('a claim boundary is attributed to its Task\'s Thread through the ledger; without a resolution it stays unattributed', () => {

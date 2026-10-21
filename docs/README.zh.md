@@ -22,7 +22,7 @@
 | [`architecture/client-and-remote.zh.md`](architecture/client-and-remote.zh.md) | typed Remote 声明、Client plugin 与 slot composition、Client 数据与呈现边界 | 修改 RPC、Client plugin 加载、slot 或 projection |
 | [`architecture/workspace-session-storage.zh.md`](architecture/workspace-session-storage.zh.md) | 复用 Harness 的 Workspace、Session 和存储，而不另建并行 Team 状态 | 修改 Workspace 选择、Session 存储或 ledger 路由 |
 | [`domain-model.zh.md`](domain-model.zh.md) | 稳定的 Agent Team 领域词汇 | 修改领域语义、类型命名或正式协作合同 |
-| [`team-collaboration/README.zh.md`](team-collaboration/README.zh.md) | 已实现的九工具、Thread Attention、Inbox、读取、mention 与 mutation fence 合同 | 修改 Team 协作语义、模型工具或 Agent 通知时 |
+| [`team-collaboration/README.zh.md`](team-collaboration/README.zh.md) | 已实现的七工具、Thread Attention、Inbox、读取、mention 与 mutation fence 合同 | 修改 Team 协作语义、模型工具或 Agent 通知时 |
 | [`team-collaboration/model-and-time.zh.md`](team-collaboration/model-and-time.zh.md) | 协作模型与 Member 时间感知 | 修改 Thread、Task、Claim 的含义或时间提示 |
 | [`team-collaboration/tools.zh.md`](team-collaboration/tools.zh.md) | 十一个 model-facing 工具及全部工具共用的规则 | 修改某个工具的合同、ref 或它周围的 mutation fence |
 | [`team-collaboration/attention-and-messaging.zh.md`](team-collaboration/attention-and-messaging.zh.md) | Attention、Inbox、mention、面向人类的消息与 ref 引用 | 修改通知、mention 投递或消息呈现 |

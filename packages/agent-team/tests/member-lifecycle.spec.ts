@@ -32,8 +32,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, teamPresetScopeMismatchMessage } from '../src/index.ts'
-import { checkpointRefFor, foldTeamContextProjection } from '../src/context-projection.ts'
-import { AGENT_TEAM_PLUGIN_ID, continuationCheckpointRefOf, handoffOf, isCheckpointContinuationMessage, isHandoffMessage } from '../src/context-source.ts'
+import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { RECOVERY_DELAY_MS } from '../src/recovery.ts'
 import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
@@ -250,8 +249,8 @@ async function realHarness(
     const totalTokens = pressureState.bySession.get(session.id) ?? pressureState.usageTokens
     return { totalTokens, nodes: [{ seq: 0, tokens: totalTokens }] }
   } })
-  // The rollover job guard reads the member-scoped jobs registry; a writable
-  // fake lets tests drive owned-job states.
+  // The generation swap's job guard reads the member-scoped jobs registry; a
+  // writable fake keeps the service present.
   const jobsState: { jobs: Array<{ id: string; label: string; status: string; reported: boolean }> } = { jobs: [] }
   ctx.provide('jobs', { list: () => jobsState.jobs })
   if (persistenceBackend === 'jsonl') await ctx.plugin(JsonlSessionPersistence, { root: persistence })
@@ -2206,318 +2205,6 @@ describe('Agent Team Member lifecycle', () => {
   })
 })
 
-describe('Agent Team fresh context_rollover rollover (ticket 01)', () => {
-  it('rolls a Member over end to end: handoff first, fresh Session, archive, facts survive', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, archived, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('rollover-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('rollover-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const previousSessionId = added.status.member.sessionId
-    const memberId = added.status.member.memberId
-    await writeFile(join(added.status.member.privateMemoryPath, 'notes', 'kept.md'), 'persistent note')
-
-    // One direct prompt drives a turn whose only tool call is context_rollover.
-    const handoff = 'Objective: land the parser feature. Verified: tests pass. Next: run the browser check.'
-    adapter.enqueue(toolCallResponse('call-nc', 'context_rollover', { handoff }))
-    // The generation after the rollover consumes the handoff and replies.
-    adapter.enqueue(textResponse('Continuing from the handoff.'))
-    const liveBefore = ctx.agents.get(previousSessionId)!
-    // The retired generation's own source shape, captured while it is still
-    // live: this is exactly what the timeline hands the Host to price a row.
-    const retiredSource = {
-      sessionId: previousSessionId,
-      header: liveBefore.session.header,
-      inheritedEventCount: liveBefore.session.inheritedEventCount,
-      events: liveBefore.session.ownEvents(),
-    }
-    liveBefore.followup(createUserMessage({ content: [{ type: 'text', text: 'Please hand off now.' }], source: { kind: 'user' } }))
-
-    // The rollover completes asynchronously after the containing turn ends.
-    const renewedStatus = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId ? current : undefined
-    })
-    const newSessionId = renewedStatus.member.sessionId
-
-    // Fresh generation: nothing inherited from the old log, and the lineage
-    // parent points at the previous active Session. The swap's commit order is
-    // binding flip → retire (dispose + archive) → activate, and only the flip
-    // is published first, so the previous Agent's disappearance still races
-    // this probe; wait for it instead of sampling straight after the flip.
-    await waitFor(() => ctx.agents.get(previousSessionId) === undefined ? true : undefined)
-    // The ledger binding flips before the new Session activates; wait for
-    // the published handle AND the delivered handoff — the swap commits the
-    // binding first, activates and steers the handoff afterwards.
-    const liveAfter = await waitFor(() => ctx.agents.get(newSessionId)!)
-    expect(liveAfter).not.toBe(liveBefore)
-    expect(liveAfter.session.header.parentSession).toBe(previousSessionId)
-    expect(liveAfter.session.inheritedEventCount).toBe(0)
-    await waitFor(() => liveAfter.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    const ownEvents = liveAfter.session.ownEvents()
-    // The only pre-handoff events are the constructor seed marker; the
-    // handoff leads every model-facing event of the new generation.
-    const firstUserIndex = ownEvents.findIndex(event => event.type === 'user/message')
-    expect(ownEvents.slice(0, firstUserIndex).some(event => event.type === 'tool/call' || event.type === 'assistant/message')).toBe(false)
-
-    // The old Session archived; private memory and binding survive.
-    expect(archived).toContain(previousSessionId)
-    expect(archived).not.toContain(newSessionId)
-    await expect(access(join(added.status.member.privateMemoryPath, 'notes', 'kept.md'))).resolves.toBeUndefined()
-    expect(ctx.agentTeam.memberForAgent(liveAfter)?.sessionId).toBe(newSessionId)
-
-    // The durable ledger records the Member-actor rollover and replays cleanly.
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-    // The handoff message is the first model-facing context of the new generation.
-    const firstUserEvent = liveAfter.session.ownEvents().find(event => event.type === 'user/message')
-    expect(firstUserEvent?.type).toBe('user/message')
-    if (firstUserEvent?.type !== 'user/message') throw new Error('expected handoff user message')
-    expect(firstUserEvent.data.source).toMatchObject({ kind: AGENT_TEAM_PLUGIN_ID, form: 'snapshot' })
-    expect(handoffOf(firstUserEvent.data)).toMatchObject({
-      previousSessionId, newSessionId, trigger: 'model',
-    })
-    expect(firstUserEvent.data.content[0]).toMatchObject({ type: 'text' })
-    const handoffText = (firstUserEvent.data.content[0] as { text: string }).text
-    expect(handoffText).toContain(handoff)
-    // The generation consumed the handoff and answered.
-    expect(adapter.requests.length).toBeGreaterThanOrEqual(2)
-
-    // The timeline folds its sources with the same configuration the
-    // projection folds with, legacy rollover alias included.
-    const foldConfig = ctx.agentTeam.contextFoldConfig()
-    expect(foldConfig.rolloverToolNames).toContain('context_rollover')
-    expect(foldConfig.checkpointToolName).toBe('context_checkpoint')
-
-    // A live source is priced in the live Session's own tokens and a retired one
-    // through its own detached replay — never the current generation's.
-    pressureState.bySession.set(newSessionId, 777)
-    pressureState.bySession.set(previousSessionId, 4242)
-    expect(ctx.agentTeam.measureContextSourceForAgent(liveAfter, {
-      sessionId: newSessionId,
-      header: liveAfter.session.header,
-      inheritedEventCount: liveAfter.session.inheritedEventCount,
-      events: liveAfter.session.ownEvents(),
-    })).toMatchObject({ totalTokens: 777 })
-    expect(ctx.agentTeam.measureContextSourceForAgent(liveAfter, retiredSource)).toMatchObject({ totalTokens: 4242 })
-  })
-
-  it('an ordinary Session never receives the context_rollover tool', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx } = await realHarness(adapter)
-    const plain = await ctx.agents.create({ sessionId: SessionId('plain-session'), meta: { cwd: process.cwd() } })
-    try {
-      const names = ctx.tools.schemas(plain.agent).map(tool => tool.name)
-      expect(names).not.toContain('context_rollover')
-      expect(names).not.toContain('team_message')
-    } finally {
-      await plain.dispose()
-    }
-  })
-
-  it('fails a checkpointRef rollover whose ref resolves nowhere, leaving the Member recoverable', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('cpref-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('cpref-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-
-    // A well-formed ref that resolves to no checkpoint in the Member's
-    // lineage rejects at the tool boundary: the engine's gate answers from the
-    // timeline the Member can read and refuses before any Host call, so the
-    // failure is model-visible as an error result instead of a fake
-    // `scheduled` whose async swap always fails. No pending intent, no turn
-    // conclusion, and the Member stays bound — recoverable by construction.
-    const vanishedRef = checkpointRefFor(sessionId, 'call-that-never-recorded')
-    const live = ctx.agents.get(sessionId)!
-    adapter.enqueue(toolCallResponse('call-cp-ref', 'context_rollover', { handoff: 'attempted checkpoint return', checkpointRef: vanishedRef }))
-    adapter.enqueue(textResponse('the anchor does not resolve; picking another path.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'try returning to a checkpoint' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, live)
-    await new Promise(resolve => setTimeout(resolve, 100))
-
-    const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!
-    expect(current.member.sessionId).toBe(sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-    // The rejection is durable and model-visible, and no pending intent was
-    // recorded from the refused call. The sentence belongs to the engine; what
-    // the contract needs is an error result that names the ref the model cited,
-    // which is what lets the next attempt drop it.
-    const refused = live.session.ownEvents().find(event => {
-      if (event.type !== 'tool/result') return false
-      return event.data.message.isError === true && JSON.stringify(event.data.message.content).includes(vanishedRef)
-    })
-    expect(refused).toBeDefined()
-    const poisoned = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id, inheritedEventCount: live.session.inheritedEventCount })
-    expect(poisoned.pending).toBeNull()
-
-    // An explicit later-turn fresh rollover still succeeds: the refused
-    // checkpoint call left nothing locked.
-    adapter.enqueue(toolCallResponse('call-cp-ref-retry', 'context_rollover', { handoff: 'explicit fresh retry after the refused return' }))
-    // The generation the retry swaps in consumes the handoff and answers.
-    adapter.enqueue(textResponse('Continuing from the fresh retry handoff.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over fresh instead' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.member.sessionId !== sessionId ? status : undefined
-    })
-    expect(renewed.member.sessionId).not.toBe(sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('recovers from a transition that fails at the commit seam after a successful rollover result', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, jobsState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('seam-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('seam-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // A rollover that PASSES tool-time validation can still fail at the
-    // lifecycle commit seam: a job may start between the tool result and the
-    // swap. Inject exactly that TOCTOU window through the seam the real Host
-    // rechecks — the turn/end observer fires after the successful result is
-    // durable and before the coordinator's idle-waited swap runs.
-    let injected = false
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== sessionId || event.type !== 'turn/end' || injected) return
-      injected = true
-      jobsState.jobs = [{ id: 'bash-seam', label: 'racing job', status: 'running', reported: false }]
-    })
-    adapter.enqueue(toolCallResponse('call-seam-nc', 'context_rollover', { handoff: 'seam-failing fresh rollover' }))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over while a job races the seam' }], source: { kind: 'user' } }))
-    // The turn ends; the swap runs after idle and fails at the seam guard,
-    // leaving the old generation bound and a SPENT pending intent in the
-    // projection — the recoverable poison state.
-    await waitForIdle(ctx, live)
-    await new Promise(resolve => setTimeout(resolve, 100))
-    disposeObserver()
-    expect(injected).toBe(true)
-
-    const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!
-    expect(current.member.sessionId).toBe(sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-    const poisoned = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id, inheritedEventCount: live.session.inheritedEventCount })
-    expect(poisoned.pending).toMatchObject({ toolCallId: 'call-seam-nc' })
-    expect(poisoned.pending?.turnEndSeq).not.toBe(-1)
-
-    // The blocking job settles; an explicit later-turn fresh rollover must
-    // replace the spent pending intent and complete the swap.
-    jobsState.jobs = []
-    adapter.enqueue(toolCallResponse('call-seam-retry', 'context_rollover', { handoff: 'explicit fresh retry after the seam failure' }))
-    // The generation the retry swaps in consumes the handoff and answers.
-    adapter.enqueue(textResponse('Continuing from the fresh retry handoff.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'the job settled; roll over fresh now' }], source: { kind: 'user' } }))
-    // First gate: the retry's successful result must land durably and REPLACE
-    // the spent pending intent in the projection — the poison state is
-    // provably undone at the fold before the binding moves.
-    const replaced = await waitFor(() => {
-      const state = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id, inheritedEventCount: live.session.inheritedEventCount })
-      return state.pending?.toolCallId === 'call-seam-retry' && state.pending.turnEndSeq !== -1 ? state : undefined
-    })
-    expect(replaced.pending).toMatchObject({ handoff: 'explicit fresh retry after the seam failure' })
-
-    const renewed = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.member.sessionId !== sessionId ? status : undefined
-    })
-    expect(renewed.member.sessionId).not.toBe(sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('rejects any supplied non-string checkpointRef value at the tool boundary', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('cpref2-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('cpref2-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // A declared parameter carries its schema validation (a non-string
-    // rejects at the execute boundary with a harness validator message), and
-    // the body adds the blank-string check the schema cannot express. Either
-    // layer rejecting is correct: no value may be silently treated as an
-    // absent ref, because absent means fresh.
-    const supplied: Array<string | number | null> = [7, null, '']
-    for (const [attempt, value] of supplied.entries()) {
-      adapter.enqueue(toolCallResponse(`call-cp-any-${attempt}`, 'context_rollover', { handoff: `attempt ${attempt}`, checkpointRef: value }))
-      adapter.enqueue(textResponse(`attempt ${attempt} rejected; continuing.`))
-      live.followup(createUserMessage({ content: [{ type: 'text', text: `try checkpointRef ${JSON.stringify(value)}` }], source: { kind: 'user' } }))
-      await waitForIdle(ctx, live)
-    }
-
-    const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!
-    expect(current.member.sessionId).toBe(sessionId)
-    const results = live.session.ownEvents().filter(event => event.type === 'tool/result')
-    const rejections = results.filter(event => {
-      if (event.type !== 'tool/result') return false
-      const text = JSON.stringify(event.data.message.content)
-      return text.includes('checkpointRef must be a non-empty string when supplied') || text.includes('\\"checkpointRef\\" must be a string')
-    })
-    expect(rejections).toHaveLength(supplied.length)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('rejects malformed relatedFiles entries instead of seeding the handoff envelope with undefined fields', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('badfiles-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('badfiles-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // Tool argument validation is layered: the Harness schema validator
-    // rejects missing/non-string/object violations at the execute boundary,
-    // and the tool's own execute check catches the blank string the schema
-    // cannot express.
-    const malformed: Array<Record<string, unknown> | null> = [
-      { reason: 'missing path' },
-      { path: 'src/index.ts', reason: 7 },
-      null,
-      { path: '   ', reason: 'blank path' },
-    ]
-    for (const [attempt, entry] of malformed.entries()) {
-      adapter.enqueue(toolCallResponse(`call-bad-files-${attempt}`, 'context_rollover', { handoff: `attempt ${attempt}`, relatedFiles: [entry] }))
-      adapter.enqueue(textResponse(`attempt ${attempt} rejected; continuing.`))
-      live.followup(createUserMessage({ content: [{ type: 'text', text: `try malformed relatedFiles ${attempt}` }], source: { kind: 'user' } }))
-      await waitForIdle(ctx, live)
-    }
-
-    // Every malformed call rejected: the binding never moved, no rollover
-    // operation committed, and each attempt surfaced an explicit error. Each
-    // attempt submits a single-entry array, so every error addresses
-    // relatedFiles[0]. Defense is layered: the Harness schema validator
-    // rejects missing/non-string/object violations at the boundary, and the
-    // tool's own execute check catches the blank string the schema cannot
-    // express.
-    const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!
-    expect(current.member.sessionId).toBe(sessionId)
-    const results = live.session.ownEvents().filter(event => event.type === 'tool/result')
-    if (process.env.DSH_DEBUG_TOOL_RESULTS !== undefined) {
-      for (const event of results) {
-        if (event.type !== 'tool/result') continue
-        console.log('TOOL_RESULT', JSON.stringify(event.data.message.content).slice(0, 220))
-      }
-    }
-    const expectedDetails: Array<string> = [
-      'missing required property "relatedFiles[0].path"',
-      '"relatedFiles[0].reason" must be a string',
-      '"relatedFiles[0]" must be an object',
-      'context_rollover relatedFiles[0].path must be a non-empty string',
-    ]
-    for (const [attempt, detail] of expectedDetails.entries()) {
-      const rejected = results.find(event => {
-        if (event.type !== 'tool/result') return false
-        return JSON.stringify(event.data.message.content).includes(JSON.stringify(detail).slice(1, -1))
-      })
-      expect(rejected, `attempt ${attempt} (${JSON.stringify(malformed[attempt])}) should reject with ${detail}`).toBeDefined()
-    }
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-})
-
 async function waitFor<T>(probe: () => T | undefined, timeoutMs = 60_000): Promise<T> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -2528,2316 +2215,262 @@ async function waitFor<T>(probe: () => T | undefined, timeoutMs = 60_000): Promi
   }
 }
 
-async function waitForArchived(archived: readonly SessionId[], ...sessionIds: readonly SessionId[]): Promise<void> {
-  await waitFor(() => sessionIds.every(sessionId => archived.includes(sessionId)) ? true : undefined)
-}
+describe('Agent Team Member lifecycle: context, acceptance, and activation (ticket 04)', () => {
+    it('task acceptance no longer schedules standalone auto compaction', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('noauto-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('noauto-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const memberId = added.status.member.memberId
+      pressureState.usageTokens = 0
+      const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('noauto-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Investigate the release', recipients: [memberId] })
+      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
+      const live = ctx.agents.get(added.status.member.sessionId)!
+      await waitForIdle(ctx, live)
+      const read = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('noauto-read'), workspaceId, taskRef: started.task!.taskRef })
+      const claim = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('noauto-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: read.thread.revision, direction: 'own the fix' })
+      if (claim.kind !== 'committed') throw new Error(`expected committed claim, received ${claim.kind}`)
+      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('noauto-human-read'), workspaceId, taskRef: started.task!.taskRef })
+      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('noauto-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
+      // The Member stays available with no compaction failure: acceptance is
+      // a semantic cue, never an unconditional summarization job. The
+      // compaction diagnostic surface is empty (no memberFailures entry).
+      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!
+      expect(status.availability).toBe('active')
+      expect(status.presence === 'available' || status.presence === 'working').toBe(true)
+      expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    })
 
-  it('carries later direct input across a rollover and rederives Team notices from the ledger', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('gate-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('gate-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const previousSessionId = added.status.member.sessionId
-    const memberId = added.status.member.memberId
+    it('wakes a normal-accept contributor with both the accepted and completed Claim semantics', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('notify-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const builder = await ctx.agentTeam.addMember({ requestId: requestId('notify-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const reviewer = await ctx.agentTeam.addMember({ requestId: requestId('notify-reviewer'), workspaceId, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('notify-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Ship both semantics', recipients: [builder.status.member.memberId, reviewer.status.member.memberId] })
+      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
+      const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
+      const reviewerAgent = ctx.agents.get(reviewer.status.member.sessionId)!
+      adapter.enqueue(textResponse('builder saw the task.'))
+      adapter.enqueue(textResponse('reviewer saw the task.'))
+      await waitForIdle(ctx, builderAgent)
+      await waitForIdle(ctx, reviewerAgent)
+      // Advance both members' read watermarks so their initial-start unread
+      // facts are consumed: a member with no unread facts is not woken by the
+      // other member's Claim mutations, which keeps the scripted wake turns
+      // below attributable to exactly one member at a time.
+      await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-initial-read'), workspaceId, taskRef: started.task!.taskRef })
+      await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-initial-read'), workspaceId, taskRef: started.task!.taskRef })
 
-    adapter.enqueue(toolCallResponse('call-nc', 'context_rollover', { handoff: 'handoff for the gate test' }))
-    adapter.enqueue(textResponse('Continuing after the handoff.'))
-    const liveBefore = ctx.agents.get(previousSessionId)!
-    liveBefore.followup(createUserMessage({ content: [{ type: 'text', text: 'Start the rollover.' }], source: { kind: 'user' } }))
+      // builder: finished its Claim before the accept (normal flow). Each
+      // mutation wakes only the OTHER following member with an unread
+      // activity (a member's own activity is never unread to itself), so one
+      // scripted response per commit suffices; the mutating member itself
+      // stays idle and the helper resolves immediately for it.
+      adapter.enqueue(textResponse('reviewer saw the claim.'))
+      const builderRead = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-read'), workspaceId, taskRef: started.task!.taskRef })
+      const builderClaim = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('notify-builder-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: builderRead.thread.revision, direction: 'implement' })
+      if (builderClaim.kind !== 'committed') throw new Error(`expected committed claim, received ${builderClaim.kind}`)
+      await waitForIdle(ctx, builderAgent)
+      await waitForIdle(ctx, reviewerAgent)
+      // Consume the claim activity so later wake turns stay attributable to
+      // exactly one mutation at a time.
+      await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-claim-read'), workspaceId, taskRef: started.task!.taskRef })
+      adapter.enqueue(textResponse('reviewer saw the completion.'))
+      const builderRead2 = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-read-2'), workspaceId, taskRef: started.task!.taskRef })
+      const builderDone = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('notify-builder-done'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (builderClaim as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: builderRead2.thread.revision })
+      if (builderDone.kind !== 'committed') throw new Error(`expected committed done, received ${builderDone.kind}`)
+      await waitForIdle(ctx, builderAgent)
+      await waitForIdle(ctx, reviewerAgent)
+      await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-done-read'), workspaceId, taskRef: started.task!.taskRef })
+      // reviewer: still holds an active Claim at accept time (early accept).
+      adapter.enqueue(textResponse('builder saw the review claim.'))
+      const reviewerRead = await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-read'), workspaceId, taskRef: started.task!.taskRef })
+      const reviewerClaim = await ctx.agentTeam.changeClaimForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: reviewerRead.thread.revision, direction: 'review' })
+      if (reviewerClaim.kind !== 'committed') throw new Error(`expected committed claim, received ${reviewerClaim.kind}`)
+      await waitForIdle(ctx, reviewerAgent)
+      await waitForIdle(ctx, builderAgent)
+      await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-review-read'), workspaceId, taskRef: started.task!.taskRef })
 
-    // Deterministic race injection: deliver the later direct input inside the
-    // old generation's own turn/end observer — after turn-stopping, at the
-    // boundary where a queued follow-up can slip in between turn end and
-    // idle convergence, before the driver converges or opens a new turn.
-    // The turn/end observer fires inside the append publication, so the
-    // injected follow-up defers one microtask — the same discipline the Host
-    // uses for steer-from-observer — while still landing deterministically
-    // before the driver can converge to idle or open a new turn.
-    const raced = Promise.withResolvers<void>()
-    let injected = false
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== previousSessionId || event.type !== 'turn/end' || injected) return
-      injected = true
-      queueMicrotask(() => {
-        liveBefore.followup(createUserMessage({ content: [{ type: 'text', text: 'Direct follow-up that arrived during the transition.' }], source: { kind: 'user' } }))
-        raced.resolve()
+      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('notify-human-read'), workspaceId, taskRef: started.task!.taskRef })
+      adapter.enqueue(textResponse('I saw the acceptance.'))
+      adapter.enqueue(textResponse('I saw the atomic completion.'))
+      // Register the idle waits BEFORE the commit as pure event listeners:
+      // both members are idle now and the helper would resolve immediately,
+      // so a dedicated listener-only wait is required to observe the wake
+      // turns the acceptance is about to start.
+      const idleAfterWake = (agent: { id: string }): Promise<void> => new Promise(resolve => {
+        const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
+          if (subject !== agent || status !== 'idle') return
+          dispose()
+          resolve()
+        })
       })
-    })
-    // The ledger binding moves first, activation follows; wait for the new
-    // generation's live handle before asserting on it (the commit window's
-    // readiness semantics are locked separately below).
-    const newSessionId = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId ? current.member.sessionId : undefined
-    })
-    const liveAfter = await waitFor(() => ctx.agents.get(newSessionId)!)
+      const builderIdle = idleAfterWake(builderAgent)
+      const reviewerIdle = idleAfterWake(reviewerAgent)
+      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('notify-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
 
-    // Old-generation invariant: the rollover turn is the only turn that ran a
-    // step; the racing follow-up never reached a second model request.
-    const oldEvents = liveBefore.session.ownEvents()
-    expect(oldEvents.filter(event => event.type === 'step/start').length).toBe(1)
-    disposeObserver()
-    await raced.promise
-
-    // The carried input is delivered after the handoff; wait for the new
-    // generation to surface it before asserting.
-    await waitFor(() => {
-      const surfaced = liveAfter.session.ownEvents().filter(event => event.type === 'user/message')
-      return surfaced.some(event => JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('Direct follow-up that arrived during the transition')) ? surfaced : undefined
-    })
-    const userEvents = liveAfter.session.ownEvents().filter(event => event.type === 'user/message')
-    const bodies = userEvents.map(event => (event as { data: { content: ReadonlyArray<{ type: string; text?: string }> } }).data.content
-      .filter(block => block.type === 'text').map(block => block.text ?? '').join(''))
-    const followUpCount = bodies.filter(body => body.includes('Direct follow-up that arrived during the transition')).length
-    expect(followUpCount).toBe(1)
-    const handoffIndex = bodies.findIndex(body => body.includes('handoff for the gate test'))
-    const followUpIndex = bodies.findIndex(body => body.includes('Direct follow-up'))
-    expect(handoffIndex).toBeGreaterThanOrEqual(0)
-    expect(followUpIndex).toBeGreaterThan(handoffIndex)
-  })
-
-  it('rolls the same Member over twice with identical result sequences without id collisions', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, archived } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('twice-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('twice-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Both generations call context_rollover as their first tool call with the
-    // same provider call id, so the folded result seq repeats exactly.
-    adapter.enqueue(toolCallResponse('same-call-id', 'context_rollover', { handoff: 'first handoff' }))
-    adapter.enqueue(textResponse('first continuation.'))
-    ctx.agents.get(firstSessionId)!.followup(createUserMessage({ content: [{ type: 'text', text: 'first' }], source: { kind: 'user' } }))
-    const first = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const secondSessionId = first.member.sessionId
-
-    // Generation 2: wait for the ledger flip AND the new agent's
-    // registration before steering input at it — the flip precedes the
-    // retire/activate span, so the agent is not yet in ctx.agents when
-    // members() first reports the new sessionId.
-    adapter.enqueue(toolCallResponse('same-call-id', 'context_rollover', { handoff: 'second handoff' }))
-    adapter.enqueue(textResponse('second continuation.'))
-    const secondSessionAgent = await waitFor(() => ctx.agents.get(secondSessionId))
-    secondSessionAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'second' }], source: { kind: 'user' } }))
-    const second = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== secondSessionId ? current : undefined
+      // Both contributors wake; the notice for the already-done owner names
+      // the acceptance of its done Claim, the early-completed one names the
+      // atomic completion. The two agents share one adapter, so attribute the
+      // wake requests by the responding session's own history, not by queue
+      // position: each agent's last request is the accept wake turn.
+      await builderIdle
+      await reviewerIdle
+      const builderClaimRef = (builderClaim as { claim: { claimRef: string } }).claim.claimRef
+      const reviewerClaimRef = (reviewerClaim as { claim: { claimRef: string } }).claim.claimRef
+      // Attribute the wake requests by agent id (the request's sessionId is
+      // the agent's session id), not by adapter queue position: the two agents
+      // share one adapter and their turns interleave.
+      const requestsFor = (agent: { id: string }): string[] =>
+        adapter.requestSessions.map((sessionId, at) => sessionId === agent.id ? at : -1)
+          .filter(at => at >= 0).map(at => JSON.stringify(adapter.requests[at]!.messages))
+      const builderRequest = requestsFor(builderAgent).at(-1)!
+      const reviewerRequest = requestsFor(reviewerAgent).at(-1)!
+      expect(builderRequest).toContain('accept')
+      expect(builderRequest).toContain(builderClaimRef)
+      expect(reviewerRequest).toContain(reviewerClaimRef)
+      expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
     })
 
-    // Distinct generations, both archives preserved, and the ledger holds
-    // exactly two rollover operations with distinct ids. Archiving rides
-    // retirement, which follows the durable flip, so wait for both archives
-    // rather than sampling the list straight after the flip.
-    expect(second.member.sessionId).not.toBe(firstSessionId)
-    expect(second.member.sessionId).not.toBe(secondSessionId)
-    await waitForArchived(archived, firstSessionId, secondSessionId)
-    expect(archived).not.toContain(second.member.sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('derives bounded url-safe rollover identities from hostile provider call ids', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('hostile-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('hostile-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Path metacharacters, traversal segments, control characters, and an
-    // unbounded length are all legal provider call ids; none of them may
-    // reach the derived Session id, and the `:` separator merge must not
-    // collide `x:y` with `x-y`.
-    const hostileCallId = `../..\\x07${'\u0000'.repeat(3)}~ ${'a'.repeat(5000)}:tail`
-    adapter.enqueue(toolCallResponse(hostileCallId, 'context_rollover', { handoff: 'hostile id handoff' }))
-    adapter.enqueue(textResponse('continuing after the hostile id.'))
-    ctx.agents.get(firstSessionId)!.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over now' }], source: { kind: 'user' } }))
-    const first = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const hostileSessionId = first.member.sessionId
-    // Bounded and url-safe: a fixed prefix plus one sha256 hex digest, never
-    // the provider id verbatim.
-    expect(hostileSessionId).toMatch(/^agent-team-rollover-[0-9a-f]{64}$/)
-    expect(hostileSessionId).not.toContain('..')
-    expect(hostileSessionId.length).toBeLessThan(120)
-
-    // The `:` merge collision: `x:y` and `x-y` must derive distinct
-    // generations even though a naive `replaceAll(':', '-')` would alias them.
-    const secondSessionId = hostileSessionId
-    // The ledger flip precedes the retire/activate span: wait for the new
-    // agent's registration, not just the members() projection.
-    adapter.enqueue(toolCallResponse('x:y', 'context_rollover', { handoff: 'colon pair' }))
-    adapter.enqueue(textResponse('colon continuation.'))
-    const secondSessionAgent = await waitFor(() => ctx.agents.get(secondSessionId))
-    secondSessionAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'colon' }], source: { kind: 'user' } }))
-    const colon = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== secondSessionId ? current : undefined
-    })
-    const thirdSessionId = colon.member.sessionId
-    // Same flip-to-registration window as above: wait for the agent itself.
-    adapter.enqueue(toolCallResponse('x-y', 'context_rollover', { handoff: 'dash pair' }))
-    adapter.enqueue(textResponse('dash continuation.'))
-    const thirdSessionAgent = await waitFor(() => ctx.agents.get(thirdSessionId))
-    thirdSessionAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'dash' }], source: { kind: 'user' } }))
-    const dash = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== thirdSessionId ? current : undefined
-    })
-    expect(dash.member.sessionId).not.toBe(thirdSessionId)
-    expect(dash.member.sessionId).toMatch(/^agent-team-rollover-[0-9a-f]{64}$/)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('delivers the handoff first even when unread Team facts exist at rollover time', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('unread-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('unread-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const previousSessionId = added.status.member.sessionId
-
-    // An unread Team fact lands while the rollover turn is still settling:
-    // its Inbox notice would ordinarily wake the next turn first, so this is
-    // the discriminating window for handoff-first delivery.
-    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('unread-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Unread work that must not preempt the handoff', recipients: [memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    adapter.enqueue(textResponse('acknowledged.'))
-    const live = ctx.agents.get(previousSessionId)!
-    await waitForIdle(ctx, live)
-    await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('unread-read'), workspaceId, taskRef: started.task!.taskRef })
-
-    adapter.enqueue(toolCallResponse('call-nc', 'context_rollover', { handoff: 'handoff under unread pressure' }))
-    adapter.enqueue(textResponse('continuing.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'hand off now' }], source: { kind: 'user' } }))
-    // Once the rollover intent is durable, a fresh unread fact arrives; its
-    // notice steers the old inbox, which the admission gate must hold back
-    // while the handoff leads the new generation.
-    const seenResult = Promise.withResolvers<void>()
-    let seen = false
-    const disposeSeen = ctx.on('session/event', (session, event) => {
-      if (session.id !== previousSessionId || event.type !== 'tool/result' || seen) return
-      seen = true
-      seenResult.resolve()
-    })
-    await seenResult.promise
-    disposeSeen()
-    const update = await ctx.agentTeam.reply({ requestId: requestId('unread-update'), workspaceId, taskRef: started.task!.taskRef, body: 'Second unread update', baseRevision: (await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('unread-read-2'), workspaceId, taskRef: started.task!.taskRef })).thread.revision })
-    if (update.kind !== 'committed') throw new Error(`expected committed update, received ${update.kind}`)
-
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId ? current : undefined
-    })
-    // The flip precedes the retire/activate span: wait for the new agent's
-    // registration before reading its session log.
-    const liveAfter = await waitFor(() => ctx.agents.get(renewed.member.sessionId))
-    await waitFor(() => liveAfter.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    // The first model-facing user message of the new generation is the
-    // handoff snapshot, not the rederived Team Inbox notice.
-    const firstUser = liveAfter.session.ownEvents().find(event => event.type === 'user/message')
-    expect(firstUser?.type).toBe('user/message')
-    if (firstUser?.type !== 'user/message') throw new Error('expected first user message')
-    expect(firstUser.data.source).toMatchObject({ kind: AGENT_TEAM_PLUGIN_ID, form: 'snapshot' })
-    // The rederived Inbox still arrives afterwards — unread work is not lost.
-    await waitFor(() => {
-      const events = liveAfter.session.ownEvents().filter(event => event.type === 'user/message')
-      return events.some(event => JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('Team Inbox has unread work')) ? true : undefined
-    })
-  })
-
-  it('never reports the new Session as active during the rollover commit window', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('window-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('window-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const previousSessionId = added.status.member.sessionId
-
-    adapter.enqueue(toolCallResponse('call-nc', 'context_rollover', { handoff: 'window handoff' }))
-    adapter.enqueue(textResponse('continuing.'))
-    ctx.agents.get(previousSessionId)!.followup(createUserMessage({ content: [{ type: 'text', text: 'hand off' }], source: { kind: 'user' } }))
-
-    // Observe the exact commit window: the durable rollover operation is
-    // visible while the old generation still runs and the new Session does
-    // not exist yet. The Member must not report the new binding as active.
-    const windowProbe = Promise.withResolvers<void>()
-    let probed = false
-    const disposeCommitted = ctx.on('agent-team/committed', () => {
-      if (probed) return
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      if (status === undefined || status.member.sessionId === previousSessionId) return
-      probed = true
-      expect(status.availability).not.toBe('active')
-      expect(status.presence).toBe('unavailable')
-      expect(status.diagnostic).toMatchObject({ class: 'rollover', detail: 'context rollover in progress' })
-      windowProbe.resolve()
-    })
-    const renewedSessionId = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId ? current.member.sessionId : undefined
-    })
-    await waitFor(() => ctx.agents.get(renewedSessionId)!)
-    disposeCommitted()
-    await windowProbe.promise
-    // Once activation completes, the same Member reports active again.
-    const settled = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!
-    expect(settled.member.sessionId).toBe(renewedSessionId)
-    expect(settled.availability).toBe('active')
-  })
-
-describe('Agent Team checkpoint selection and return (ticket 02)', () => {
-  it('records a checkpoint at turn N and continues quietly in turn N+1 without an extra model request', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('cp-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('cp-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // The checkpoint tool result lands in turn 1; concludeTurn closes the
-    // turn; the quiet Host continuation opens turn 2; its reply completes it.
-    // The scripted adapter answers exactly one model request per turn, so a
-    // checkpoint may not add any request beyond the ordinary continuation.
-    adapter.enqueue(toolCallResponse('call-cp-1', 'context_checkpoint', { name: 'before-rewrite' }))
-    adapter.enqueue(textResponse('continuing after the checkpoint.'))
-    const requestCountBefore = adapter.requests.length
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'record a checkpoint' }], source: { kind: 'user' } }))
-    // Wait until the continuation turn's reply lands, then for true idle.
-    await waitFor(() => live.session.ownEvents().some(event => event.type === 'assistant/message') ? true : undefined)
-    await live.whenIdle()
-
-    const events = live.session.ownEvents()
-    const turns = events.filter(event => event.type === 'turn/start').map(event => (event as { data: { turn: number } }).data.turn)
-    expect(turns).toEqual([1, 2])
-    // Exactly two model requests: the checkpoint turn and the continuation.
-    expect(adapter.requests.length - requestCountBefore).toBe(2)
-    // The continuation is the quiet Host notice, delivered as the first
-    // message of turn 2.
-    const turn2Index = events.findIndex(event => event.type === 'turn/start' && (event as { data: { turn: number } }).data.turn === 2)
-    const afterTurn2 = events.slice(turn2Index + 1)
-    const firstUser = afterTurn2.find(event => event.type === 'user/message')
-    expect(firstUser?.type).toBe('user/message')
-    if (firstUser?.type !== 'user/message') throw new Error('expected continuation user message')
-    expect(firstUser.data.source).toMatchObject({ kind: AGENT_TEAM_PLUGIN_ID, form: 'snapshot' })
-    expect(continuationCheckpointRefOf(firstUser.data)).toBeDefined()
-  })
-
-  it('records a checkpoint alongside sibling calls with results settling in model order', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('sib-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('sib-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // One step carrying two tool calls: the checkpoint plus a sibling
-    // team_view. Both results commit in model order before the turn closes,
-    // and the checkpoint anchor is that shared turn end. A single streamed
-    // response carries both call blocks on distinct block indexes.
-    const cpId = ToolCallId('call-sib-cp')
-    const viewId = ToolCallId('call-sib-view')
-    const cpArguments = JSON.stringify({ name: 'with-sibling' })
-    const viewArguments = JSON.stringify({})
-    const both = [
-      { type: 'block-start', index: 0, blockType: 'tool-call' } as const,
-      { type: 'tool-call-delta', index: 0, id: cpId, name: 'context_checkpoint', argumentsDelta: cpArguments } as never,
-      { type: 'block-end', index: 0, block: { type: 'tool-call', id: cpId, name: 'context_checkpoint', arguments: cpArguments } } as never,
-      { type: 'block-start', index: 1, blockType: 'tool-call' } as const,
-      { type: 'tool-call-delta', index: 1, id: viewId, name: 'team_view', argumentsDelta: viewArguments } as never,
-      { type: 'block-end', index: 1, block: { type: 'tool-call', id: viewId, name: 'team_view', arguments: viewArguments } } as never,
-      { type: 'usage', usage: { inputTokens: 10, outputTokens: 5 } } as const,
-      { type: 'finish', reason: { kind: 'tool-calls' } } as const,
-    ]
-    adapter.enqueue([...both] as never)
-    adapter.enqueue(textResponse('both settled.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'checkpoint with a sibling' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-
-    const events = live.session.ownEvents()
-    const turnEnds = events.filter(event => event.type === 'turn/end')
-    expect(turnEnds).toHaveLength(1)
-    const results = events.filter(event => event.type === 'tool/result')
-    expect(results.length).toBe(2)
-    const state = foldTeamContextProjection(events, { sessionId: live.session.id })
-    expect(state.checkpoints).toHaveLength(1)
-    expect(state.checkpoints[0]!.turnEndSeq).toBe(turnEnds[0]!.seq)
-  })
-
-  it('a failed or dangling checkpoint call produces no checkpoint and no quiet follow-up', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('failcp-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('failcp-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // Malformed arguments (missing name) reject at the schema layer; the
-    // turn completes with no checkpoint and no continuation turn opens.
-    adapter.enqueue(toolCallResponse('call-fail-cp', 'context_checkpoint', {}))
-    adapter.enqueue(textResponse('the checkpoint was rejected; continuing.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'try a broken checkpoint' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, live)
-    await new Promise(resolve => setTimeout(resolve, 60))
-
-    const events = live.session.ownEvents()
-    const turns = events.filter(event => event.type === 'turn/start')
-    expect(turns).toHaveLength(1)
-    const state = foldTeamContextProjection(events, { sessionId: live.session.id })
-    expect(state.checkpoints).toHaveLength(0)
-    expect(state.continuations).toHaveLength(0)
-  })
-
-  it('returns the bounded structural timeline with restorable checkpoints and priced boundaries', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('tl-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('tl-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // Record two checkpoints, then read the timeline through the tool. Each
-    // checkpoint turn is followed by a quiet continuation turn, so wait for
-    // the continuation's reply before recording the next anchor.
-    const continuationReplies = (text: string) => () => live.session.ownEvents().some(event => {
-      if (event.type !== 'assistant/message') return false
-      return JSON.stringify(event.data.message.content).includes(text)
-    }) ? true : undefined
-    adapter.enqueue(toolCallResponse('call-tl-cp1', 'context_checkpoint', { name: 'first anchor' }))
-    adapter.enqueue(textResponse('one.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'checkpoint one' }], source: { kind: 'user' } }))
-    await waitFor(continuationReplies('one.'))
-    await live.whenIdle()
-    adapter.enqueue(toolCallResponse('call-tl-cp2', 'context_checkpoint', { name: 'second anchor' }))
-    adapter.enqueue(textResponse('two.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'checkpoint two' }], source: { kind: 'user' } }))
-    await waitFor(continuationReplies('two.'))
-    await live.whenIdle()
-
-    const timeline = await ctx.agentTeam.contextTimelineForAgent(live, { memberId: added.status.member.memberId })
-    expect(timeline.items.length).toBeGreaterThanOrEqual(2)
-    const refs = timeline.items.map(item => item.checkpointRef)
-    expect(refs).toContain(checkpointRefFor(sessionId, 'call-tl-cp1'))
-    expect(refs).toContain(checkpointRefFor(sessionId, 'call-tl-cp2'))
-    // Newest first, head present, every agent checkpoint restorable.
-    const first = timeline.items.find(item => item.checkpointRef === checkpointRefFor(sessionId, 'call-tl-cp1'))!
-    const second = timeline.items.find(item => item.checkpointRef === checkpointRefFor(sessionId, 'call-tl-cp2'))!
-    expect(first.restorable).toBe(true)
-    expect(second.restorable).toBe(true)
-    expect(timeline.items.findIndex(item => item.checkpointRef === checkpointRefFor(sessionId, 'call-tl-cp2'))).toBeLessThan(timeline.items.findIndex(item => item.checkpointRef === checkpointRefFor(sessionId, 'call-tl-cp1')))
-    const head = timeline.items.find(item => item.source === 'head')
-    expect(head).toBeDefined()
-    expect(head!.restorable).toBe(false)
-    // A current-generation anchor's discarded estimate is the measured usage
-    // beyond the anchor (the suffix a return would drop), never the whole
-    // current usage; retained + discarded equals the measurement. This anchor
-    // sits in a live Session whose usage is known, so both estimates are
-    // present: absent would mean the scope could not measure it at all.
-    expect(first.retainedTokens).toBeDefined()
-    expect(first.discardedTokens).toBeDefined()
-    expect(first.discardedTokens).toBe(Math.max(0, timeline.usageTokens - first.retainedTokens!))
-    expect(first.retainedTokens! + first.discardedTokens!).toBeLessThanOrEqual(timeline.usageTokens)
-    // The limit bounds the list.
-    const limited = await ctx.agentTeam.contextTimelineForAgent(live, { memberId: added.status.member.memberId, limit: 1 })
-    expect(limited.items).toHaveLength(1)
-  })
-
-  it('marks the timeline incomplete at an unreadable ancestor without touching Member availability', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('tl-inc-channel'), workspaceId, name: 'engineering', description: 'Engineering Work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('tl-inc-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Generation 1 runs a turn, then a fresh rollover archives it as the
-    // new generation's lineage ancestor.
-    const live = ctx.agents.get(firstSessionId)!
-    adapter.enqueue(textResponse('gen1 work.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'gen1 work' }], source: { kind: 'user' } }))
-    await waitFor(() => live.session.ownEvents().some(event => event.type === 'assistant/message') ? true : undefined)
-    await live.whenIdle()
-    adapter.enqueue(toolCallResponse('call-tl-inc-nc', 'context_rollover', { handoff: 'gen2 handoff' }))
-    adapter.enqueue(textResponse('gen2 starting.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-
-    // The archived ancestor becomes unreadable: the timeline must record
-    // where and why history stopped instead of silently ending, and the
-    // Member's availability must not change — an ancestor read is history,
-    // not a current-binding fact.
-    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-    ctx.sessionPersistence.open = async (id, access, options) => {
-      if (id === firstSessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source (test seam)')
-      return realOpen(id, access, options)
-    }
-    const timeline = await ctx.agentTeam.contextTimelineForAgent(next, { memberId, limit: 24 })
-    expect(timeline.incompleteFrom).toMatchObject({ sessionId: firstSessionId, reason: expect.stringMatching(/^refused: /) })
-    expect(timeline.items.length).toBeGreaterThan(0)
-    // A generation opens on its handoff boundary: it is read with Team's own
-    // source vocabulary and is never a return target, so a return into the
-    // generation's opening is refused with a reason that names the source.
-    const handoff = timeline.items.find(item => item.source === 'handoff')
-    expect(handoff).toMatchObject({ name: 'context handoff', restorable: false, reason: "source 'handoff' is not a restorable checkpoint" })
-    const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!
-    expect(status.availability).toBe('active')
-    expect(status.presence).not.toBe('unavailable')
-  })
-
-  it('returns to a checkpoint through context_rollover: exact seed prefix, handoff first, seed lineage', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, archived } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('ret-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('ret-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Turn 1 records the anchor; the continuation answers; turn 3+ makes
-    // noise worth discarding; then the model returns to the anchor. Wait on
-    // the continuation's reply text so the anchor turn is fully resolved
-    // before its prefix is captured.
-    adapter.enqueue(toolCallResponse('call-ret-cp', 'context_checkpoint', { name: 'good state' }))
-    adapter.enqueue(textResponse('anchored.'))
-    const live = ctx.agents.get(firstSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'record the anchor' }], source: { kind: 'user' } }))
-    await waitFor(() => live.session.ownEvents().some(event => {
-      if (event.type !== 'assistant/message') return false
-      return JSON.stringify(event.data.message.content).includes('anchored.')
-    }) ? true : undefined)
-    await live.whenIdle()
-    const anchorEvents = live.session.ownEvents().length
-    const anchorTurnEndSeq = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id }).checkpoints[0]!.turnEndSeq
-
-    adapter.enqueue(textResponse('noisy branch work.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'now make some noise' }], source: { kind: 'user' } }))
-    await waitFor(() => live.session.ownEvents().filter(event => event.type === 'assistant/message').length >= 2 ? true : undefined)
-    await live.whenIdle()
-    expect(live.session.ownEvents().length).toBeGreaterThan(anchorEvents)
-
-    // Return to the anchor with a handoff bridging the discarded branch.
-    adapter.enqueue(toolCallResponse('call-ret-nc', 'context_rollover', { handoff: 'The noisy branch failed; resume from the anchor.', checkpointRef: checkpointRefFor(firstSessionId, 'call-ret-cp') }))
-    adapter.enqueue(textResponse('resumed from the anchor.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'return to the anchor' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const newSessionId = renewed.member.sessionId
-    const next = await waitFor(() => ctx.agents.get(newSessionId)!)
-
-    // Seeded lineage: parent is the seed source (the same Session here),
-    // isSeeded is set, and the inherited prefix is exactly the anchor cut.
-    expect(next.session.header.parentSession).toBe(firstSessionId)
-    expect(next.session.inheritedEventCount).toBe(anchorTurnEndSeq + 1)
-    const own = next.session.ownEvents()
-    const inherited = next.session.snapshotEvents(0 as never, next.session.inheritedEventCount)
-    // The inherited prefix ends on the anchor's turn end; nothing later.
-    expect(inherited.at(-1)!.seq).toBe(anchorTurnEndSeq)
-    // The handoff is the first own model-facing context. The binding flip
-    // precedes the handoff delivery (the swap steers it after activation);
-    // wait for the delivered event before asserting on it. Probe ownEvents()
-    // fresh each round — the snapshot taken above predates the handoff append
-    // whenever the agent registers before the steering lands, and polling a
-    // stale snapshot would never observe it.
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    const firstUser = next.session.ownEvents().find(event => event.type === 'user/message')
-    expect(firstUser?.type).toBe('user/message')
-    if (firstUser?.type !== 'user/message') throw new Error('expected handoff')
-    expect(handoffOf(firstUser.data)).toMatchObject({ checkpointRef: checkpointRefFor(firstSessionId, 'call-ret-cp') })
-    expect((firstUser.data.content[0] as { text: string }).text).toContain('resume from the anchor')
-    // Inherited historical intent stays inert: the inherited prefix's
-    // checkpoint history is visible, but no continuation or rollover is
-    // rescheduled from it.
-    const state = foldTeamContextProjection(own, { sessionId: next.session.id, inheritedEventCount: next.session.inheritedEventCount })
-    expect(state.pending).toBeNull()
-    expect(state.continuations).toHaveLength(0)
-    // The old generation archived; the ledger records the seed fields.
-    await waitForArchived(archived, firstSessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-})
-
-describe('Agent Team checkpoint lineage (ticket 02 ancestors)', () => {
-  it('returns to a checkpoint in an archived ancestor: seed from the ancestor, archive only the previous active', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, archived } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('anc-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('anc-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Generation 1: record the anchor, let its continuation settle.
-    adapter.enqueue(toolCallResponse('call-anc-cp', 'context_checkpoint', { name: 'gen1 anchor' }))
-    adapter.enqueue(textResponse('gen1 anchored.'))
-    const gen1 = ctx.agents.get(firstSessionId)!
-    gen1.followup(createUserMessage({ content: [{ type: 'text', text: 'record the gen1 anchor' }], source: { kind: 'user' } }))
-    await waitFor(() => gen1.session.ownEvents().some(event => {
-      if (event.type !== 'assistant/message') return false
-      return JSON.stringify(event.data.message.content).includes('gen1 anchored.')
-    }) ? true : undefined)
-    await gen1.whenIdle()
-
-    // Fresh rollover into generation 2 (no checkpoint): the anchor stays in
-    // generation 1, which becomes an archived ancestor.
-    adapter.enqueue(toolCallResponse('call-anc-fresh', 'context_rollover', { handoff: 'gen2 handoff' }))
-    adapter.enqueue(textResponse('gen2 running.'))
-    gen1.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over fresh' }], source: { kind: 'user' } }))
-    const gen2Status = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const secondSessionId = gen2Status.member.sessionId
-    const gen2 = await waitFor(() => ctx.agents.get(secondSessionId)!)
-    await waitFor(() => gen2.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await gen2.whenIdle()
-    expect(archived).toContain(firstSessionId)
-
-    // Generation 2 makes noise, then returns to the archived ancestor's
-    // anchor. The seed source is generation 1 (the ancestor), while the
-    // previous active Session (generation 2) archives separately.
-    adapter.enqueue(textResponse('gen2 noise.'))
-    gen2.followup(createUserMessage({ content: [{ type: 'text', text: 'gen2 noise' }], source: { kind: 'user' } }))
-    await waitFor(() => gen2.session.ownEvents().filter(event => event.type === 'assistant/message').length >= 2 ? true : undefined)
-    await gen2.whenIdle()
-
-    adapter.enqueue(toolCallResponse('call-anc-return', 'context_rollover', { handoff: 'Return to the gen1 anchor; the gen2 branch is discarded.', checkpointRef: checkpointRefFor(firstSessionId, 'call-anc-cp') }))
-    adapter.enqueue(textResponse('resumed from the ancestor anchor.'))
-    gen2.followup(createUserMessage({ content: [{ type: 'text', text: 'return to the ancestor anchor' }], source: { kind: 'user' } }))
-    const gen3Status = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== secondSessionId ? current : undefined
-    })
-    const thirdSessionId = gen3Status.member.sessionId
-    const gen3 = await waitFor(() => ctx.agents.get(thirdSessionId)!)
-
-    // Lineage: the seed parent is the archived ancestor (generation 1),
-    // and both the ancestor and the previous active generation stay
-    // archived — the ledger keeps them distinct.
-    expect(gen3.session.header.parentSession).toBe(firstSessionId)
-    expect(gen3.session.inheritedEventCount).toBeGreaterThan(0)
-    await waitForArchived(archived, firstSessionId, secondSessionId)
-    expect(archived).not.toContain(thirdSessionId)
-    // The inherited prefix is exactly the ancestor's anchor cut.
-    const gen1Fold = foldTeamContextProjection(gen1.session.ownEvents(), { sessionId: firstSessionId })
-    const anchor = gen1Fold.checkpoints.find(entry => entry.checkpointRef === checkpointRefFor(firstSessionId, 'call-anc-cp'))!
-    expect(gen3.session.inheritedEventCount).toBe(anchor.turnEndSeq + 1)
-    // The handoff is the first own model-facing context of generation 3.
-    // The binding flip precedes the handoff delivery; wait for the event.
-    await waitFor(() => gen3.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    const firstOwnUser = gen3.session.ownEvents().find(event => event.type === 'user/message')
-    expect(firstOwnUser?.type).toBe('user/message')
-    if (firstOwnUser?.type !== 'user/message') throw new Error('expected handoff')
-    expect(handoffOf(firstOwnUser.data)).toMatchObject({ checkpointRef: checkpointRefFor(firstSessionId, 'call-anc-cp') })
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('delivers a checkpoint continuation exactly once across Host restarts', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('repair-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('repair-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const sessionId = added.status.member.sessionId
-
-    // Record a checkpoint; its quiet continuation may deliver before or
-    // after the crash point — the discriminating invariant is that restarts
-    // never duplicate it, because the projection's delivery record is
-    // durable and the repair path reads it before scheduling.
-    adapter.enqueue(toolCallResponse('call-repair-cp', 'context_checkpoint', { name: 'pre-crash anchor' }))
-    const live = ctx.agents.get(sessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'checkpoint before the crash' }], source: { kind: 'user' } }))
-    await waitFor(() => foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id }).checkpoints.some(entry => entry.turnEndSeq !== -1) ? true : undefined)
-    await live.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 50))
-    const deliveredBeforeRestart = live.session.ownEvents().filter(event => event.type === 'user/message'
-      && isCheckpointContinuationMessage(event.data)).length
-    expect(deliveredBeforeRestart).toBeLessThanOrEqual(1)
-
-    // Host restart on the same harness: the plugin remounts, the persisted
-    // session replays, and the repair path may deliver one continuation for
-    // a resolved-but-undelivered checkpoint — never a second one on top of
-    // a delivered record. Each remount returns its own fiber; dispose the
-    // current one, not the stale first-generation handle.
-    adapter.enqueue(textResponse('repaired continuation.'))
-    await ctx.agentTeam.suspendMember({ requestId: requestId('repair-suspend'), memberId: added.status.member.memberId })
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    const secondFiber = await ctx.plugin(AgentTeam)
-    await ctx.agentTeam.resumeMember({ requestId: requestId('repair-resume'), memberId: added.status.member.memberId })
-    const resumed = await waitFor(() => {
-      const agent = ctx.agents.get(sessionId)
-      return agent !== undefined && agent.status === 'idle' ? agent : undefined
-    })
-    await waitFor(() => resumed.session.ownEvents().some(event => event.type === 'user/message'
-      && isCheckpointContinuationMessage(event.data)) ? true : undefined)
-    await resumed.whenIdle()
-    const continuations = resumed.session.ownEvents().filter(event => event.type === 'user/message'
-      && isCheckpointContinuationMessage(event.data))
-    expect(continuations).toHaveLength(1)
-
-    // Restarting again does not duplicate the delivered continuation: the
-    // projection's delivery record is durable.
-    await ctx.agentTeam.suspendMember({ requestId: requestId('repair-suspend2'), memberId: added.status.member.memberId })
-    await secondFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    await ctx.agentTeam.resumeMember({ requestId: requestId('repair-resume2'), memberId: added.status.member.memberId })
-    const resumed2 = await waitFor(() => {
-      const agent = ctx.agents.get(sessionId)
-      return agent !== undefined && agent.status === 'idle' ? agent : undefined
-    })
-    await new Promise(resolve => setTimeout(resolve, 150))
-    const continuations2 = resumed2.session.ownEvents().filter(event => event.type === 'user/message'
-      && isCheckpointContinuationMessage(event.data))
-    expect(continuations2).toHaveLength(1)
-  })
-})
-
-describe('Agent Team pressure policy integration (ticket 03)', () => {
-  it('steers the one-shot pressure notice into a running Member turn at the handoff budget', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('press-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('press-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // Below the handoff budget: no notice at all.
-    pressureState.usageTokens = 150_000
-    adapter.enqueue(textResponse('ordinary work.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'ordinary turn' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    expect(live.session.ownEvents().some(event => event.type === 'user/message'
-      && (event.data as { source?: { summary?: string } }).source?.summary === 'Context pressure: prepare a handoff')).toBe(false)
-
-    // At the handoff budget: exactly one structured notice rides the next
-    // turn, and further turns in the same generation do not repeat it.
-    pressureState.usageTokens = 200_000
-    adapter.enqueue(textResponse('under pressure.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'another turn' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    const notices = () => live.session.ownEvents().filter(event => event.type === 'user/message'
-      && (event.data as { source?: { summary?: string } }).source?.summary === 'Context pressure: prepare a handoff')
-    expect(notices()).toHaveLength(1)
-    const notice = notices()[0]!
-    expect((notice.data as { content: ReadonlyArray<{ type: string; text?: string }> }).content[0]?.text).toContain('context_rollover')
-
-    adapter.enqueue(textResponse('still under pressure.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'third turn' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    expect(notices()).toHaveLength(1)
-    // The Member stays available throughout: a notice is not a failure.
-    const status = ctx.agentTeam.members().find(entry => entry.member.memberId === added.status.member.memberId)!
-    expect(status.availability).toBe('active')
-  })
-
-  it('a fresh rollover re-arms the pressure notice for the new generation', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('rearm-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('rearm-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const previousSessionId = added.status.member.sessionId
-
-    pressureState.usageTokens = 200_000
-    adapter.enqueue(textResponse('pressured turn.'))
-    const live = ctx.agents.get(previousSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'turn one' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    const noticesIn = (agent: ReturnType<typeof ctx.agents.get>) => agent!.session.ownEvents().filter(event => event.type === 'user/message'
-      && (event.data as { source?: { summary?: string } }).source?.summary === 'Context pressure: prepare a handoff')
-    expect(noticesIn(live)).toHaveLength(1)
-
-    // Fresh rollover: the new generation gets its own notice budget.
-    pressureState.usageTokens = 200_000
-    adapter.enqueue(toolCallResponse('call-rearm-nc', 'context_rollover', { handoff: 'rearm handoff' }))
-    adapter.enqueue(textResponse('new generation.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'hand off' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId ? current : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-    // The new generation observes the budget again on its next turn.
-    pressureState.usageTokens = 200_000
-    adapter.enqueue(textResponse('next generation turn.'))
-    next.followup(createUserMessage({ content: [{ type: 'text', text: 'continue' }], source: { kind: 'user' } }))
-    await next.whenIdle()
-    expect(noticesIn(next)).toHaveLength(1)
-  })
-
-  it('task acceptance no longer schedules standalone auto compaction', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('noauto-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('noauto-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    pressureState.usageTokens = 0
-    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('noauto-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Investigate the release', recipients: [memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    const live = ctx.agents.get(added.status.member.sessionId)!
-    await waitForIdle(ctx, live)
-    const read = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('noauto-read'), workspaceId, taskRef: started.task!.taskRef })
-    const claim = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('noauto-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: read.thread.revision, direction: 'own the fix' })
-    if (claim.kind !== 'committed') throw new Error(`expected committed claim, received ${claim.kind}`)
-    const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('noauto-human-read'), workspaceId, taskRef: started.task!.taskRef })
-    const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('noauto-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
-    if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
-    // The Member stays available with no compaction failure: acceptance is
-    // a semantic cue, never an unconditional summarization job. The
-    // compaction diagnostic surface is empty (no memberFailures entry).
-    const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!
-    expect(status.availability).toBe('active')
-    expect(status.presence === 'available' || status.presence === 'working').toBe(true)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('enriches an unread accept read with three-tier context advice priced by the current route', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('advice-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('advice-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('advice-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Ship the feature', recipients: [memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    const live = ctx.agents.get(added.status.member.sessionId)!
-    await waitForIdle(ctx, live)
-    const memberRead = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-member-read'), workspaceId, taskRef: started.task!.taskRef })
-    const claimed = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('advice-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: memberRead.thread.revision, direction: 'own it' })
-    if (claimed.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed.kind}`)
-    const readDone = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-done-read'), workspaceId, taskRef: started.task!.taskRef })
-    const done = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('advice-done'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (claimed as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: readDone.thread.revision })
-    if (done.kind !== 'committed') throw new Error(`expected committed done, received ${done.kind}`)
-    const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('advice-human-read'), workspaceId, taskRef: started.task!.taskRef })
-    const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('advice-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
-    if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
-
-    // Tier boundary: 127,999 (just below the 128K task-boundary threshold on
-    // a 320K window route) keeps the context.
-    pressureState.usageTokens = 127_999
-    const keep = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-keep'), workspaceId, taskRef: started.task!.taskRef })
-    expect(keep.contextAdvice).toMatchObject({ action: 'keep', usageTokens: 127_999, taskBoundaryThreshold: 128_000, handoffAt: 200_000 })
-    expect(keep.contextAdvice?.guidance).toContain('do not create a redundant checkpoint')
-
-    // A repeat read after the unread batch was consumed carries no advice:
-    // one acceptance advises once, through the read that acknowledged it.
-    const repeat = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-repeat'), workspaceId, taskRef: started.task!.taskRef })
-    expect(repeat.contextAdvice).toBeUndefined()
-
-    // 128,000 exactly: advise a fresh rollover after closeout. Each tier is
-    // priced through its own acceptance: the Task is reopened and accepted
-    // again so the acknowledging read re-establishes the trigger.
-    pressureState.usageTokens = 128_000
-    const reopenedForRollover = await ctx.agentTeam.changeTask({ requestId: requestId('advice-reopen-rollover'), workspaceId, taskRef: started.task!.taskRef, action: 'reopen', baseRevision: repeat.thread.revision })
-    if (reopenedForRollover.kind !== 'committed') throw new Error(`expected committed reopen, received ${reopenedForRollover.kind}`)
-    const memberReadRollover = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-member-read-rollover'), workspaceId, taskRef: started.task!.taskRef })
-    const claimedRollover = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('advice-claim-rollover'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: memberReadRollover.thread.revision, direction: 'own it for rollover' })
-    if (claimedRollover.kind !== 'committed') throw new Error(`expected committed claim, received ${claimedRollover.kind}`)
-    const readDoneRollover = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-done-read-rollover'), workspaceId, taskRef: started.task!.taskRef })
-    const doneRollover = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('advice-done-rollover'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (claimedRollover as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: readDoneRollover.thread.revision })
-    if (doneRollover.kind !== 'committed') throw new Error(`expected committed done, received ${doneRollover.kind}`)
-    const humanReadRollover = await ctx.agentTeam.readThread({ requestId: requestId('advice-human-read-rollover'), workspaceId, taskRef: started.task!.taskRef })
-    const acceptedRollover = await ctx.agentTeam.changeTask({ requestId: requestId('advice-accept-rollover'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanReadRollover.thread.revision })
-    if (acceptedRollover.kind !== 'committed') throw new Error(`expected committed accept, received ${acceptedRollover.kind}`)
-    const rollover = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-rollover'), workspaceId, taskRef: started.task!.taskRef })
-    expect(rollover.contextAdvice?.action).toBe('rollover')
-    expect(rollover.contextAdvice?.guidance).toContain('context_rollover')
-
-    // At the handoff budget the tier escalates to compact-now.
-    pressureState.usageTokens = 200_000
-    const rolloverRepeat = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-rollover-repeat'), workspaceId, taskRef: started.task!.taskRef })
-    expect(rolloverRepeat.contextAdvice).toBeUndefined()
-    const reopened = await ctx.agentTeam.changeTask({ requestId: requestId('advice-reopen'), workspaceId, taskRef: started.task!.taskRef, action: 'reopen', baseRevision: rolloverRepeat.thread.revision })
-    if (reopened.kind !== 'committed') throw new Error(`expected committed reopen, received ${reopened.kind}`)
-    const memberRead2 = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-member-read-2'), workspaceId, taskRef: started.task!.taskRef })
-    const claimed2 = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('advice-claim-2'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: memberRead2.thread.revision, direction: 'own it again' })
-    if (claimed2.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed2.kind}`)
-    const readDone2 = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-done-read-2'), workspaceId, taskRef: started.task!.taskRef })
-    const done2 = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('advice-done-2'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (claimed2 as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: readDone2.thread.revision })
-    if (done2.kind !== 'committed') throw new Error(`expected committed done, received ${done2.kind}`)
-    const humanRead2 = await ctx.agentTeam.readThread({ requestId: requestId('advice-human-read-2'), workspaceId, taskRef: started.task!.taskRef })
-    const accepted2 = await ctx.agentTeam.changeTask({ requestId: requestId('advice-accept-2'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead2.thread.revision })
-    if (accepted2.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted2.kind}`)
-    const compactNow = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-now'), workspaceId, taskRef: started.task!.taskRef })
-    expect(compactNow.contextAdvice?.action).toBe('compact-now')
-    expect(compactNow.contextAdvice?.guidance).toContain('context_compact')
-
-    // A reopen-after-accept that is still unread must NOT advise: the Task is
-    // open again, the acceptance no longer stands.
-    const reopened2 = await ctx.agentTeam.changeTask({ requestId: requestId('advice-reopen-2'), workspaceId, taskRef: started.task!.taskRef, action: 'reopen', baseRevision: compactNow.thread.revision })
-    if (reopened2.kind !== 'committed') throw new Error(`expected committed reopen, received ${reopened2.kind}`)
-    const staleAcceptRead = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('advice-read-stale'), workspaceId, taskRef: started.task!.taskRef })
-    expect(staleAcceptRead.contextAdvice).toBeUndefined()
-
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('prices the accept advice threshold from a narrow route and degrades to unavailable when measurement fails', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('narrow-advice-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('narrow-advice-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    adapter.resolveModelWindow = (model: string) => model === 'narrow' ? 112_000 : 320_000
-    await ctx.agentTeam.updateMember({ requestId: requestId('narrow-advice-pin'), memberId, handle: 'builder', description: 'Builds the implementation', model: { provider: 'mock', model: 'narrow' } })
-    pressureState.usageTokens = 0
-    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('narrow-advice-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Ship it', recipients: [memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    const live = ctx.agents.get(added.status.member.sessionId)!
-    await waitForIdle(ctx, live)
-    const memberRead = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('narrow-advice-read-claim'), workspaceId, taskRef: started.task!.taskRef })
-    const claimed = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('narrow-advice-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: memberRead.thread.revision, direction: 'narrow route' })
-    if (claimed.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed.kind}`)
-    const readDone = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('narrow-advice-read-done'), workspaceId, taskRef: started.task!.taskRef })
-    const done = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('narrow-advice-done'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (claimed as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: readDone.thread.revision })
-    if (done.kind !== 'committed') throw new Error(`expected committed done, received ${done.kind}`)
-    const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('narrow-advice-human-read'), workspaceId, taskRef: started.task!.taskRef })
-    const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('narrow-advice-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
-    if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
-
-    // Narrow route (112K window → 88K handoff): the threshold is
-    // min(128K, 88K) = 88K — 87,999 keeps, the fixed 128K number would be
-    // too late for this route.
-    pressureState.usageTokens = 87_999
-    const keep = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('narrow-advice-read-keep'), workspaceId, taskRef: started.task!.taskRef })
-    expect(keep.contextAdvice).toMatchObject({ action: 'keep', taskBoundaryThreshold: 88_000 })
-    expect(keep.contextAdvice?.usageTokens).toBe(87_999)
-
-    // Meter failure degrades to an explicit unavailable advice, never a
-    // fabricated threshold verdict and never a failed read.
-    const reopened = await ctx.agentTeam.changeTask({ requestId: requestId('narrow-advice-reopen'), workspaceId, taskRef: started.task!.taskRef, action: 'reopen', baseRevision: keep.thread.revision })
-    if (reopened.kind !== 'committed') throw new Error(`expected committed reopen, received ${reopened.kind}`)
-    const memberRead2 = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('narrow-advice-read-2'), workspaceId, taskRef: started.task!.taskRef })
-    const claimed2 = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('narrow-advice-claim-2'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: memberRead2.thread.revision, direction: 'again' })
-    if (claimed2.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed2.kind}`)
-    const readDone2 = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('narrow-advice-read-done-2'), workspaceId, taskRef: started.task!.taskRef })
-    const done2 = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('narrow-advice-done-2'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (claimed2 as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: readDone2.thread.revision })
-    if (done2.kind !== 'committed') throw new Error(`expected committed done, received ${done2.kind}`)
-    const humanRead2 = await ctx.agentTeam.readThread({ requestId: requestId('narrow-advice-human-read-2'), workspaceId, taskRef: started.task!.taskRef })
-    const accepted2 = await ctx.agentTeam.changeTask({ requestId: requestId('narrow-advice-accept-2'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead2.thread.revision })
-    if (accepted2.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted2.kind}`)
-    pressureState.failFor.add(added.status.member.sessionId)
-    const degraded = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('narrow-advice-read-degraded'), workspaceId, taskRef: started.task!.taskRef })
-    // The read still succeeded (durable watermark advanced) with an
-    // explicit unavailable advice instead of numbers.
-    expect(degraded.thread.revision).toBeGreaterThanOrEqual(accepted2.thread.revision)
-    expect(degraded.contextAdvice?.action).toBe('unavailable')
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('wakes a normal-accept contributor with both the accepted and completed Claim semantics', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('notify-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('notify-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const reviewer = await ctx.agentTeam.addMember({ requestId: requestId('notify-reviewer'), workspaceId, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('notify-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Ship both semantics', recipients: [builder.status.member.memberId, reviewer.status.member.memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
-    const reviewerAgent = ctx.agents.get(reviewer.status.member.sessionId)!
-    adapter.enqueue(textResponse('builder saw the task.'))
-    adapter.enqueue(textResponse('reviewer saw the task.'))
-    await waitForIdle(ctx, builderAgent)
-    await waitForIdle(ctx, reviewerAgent)
-    // Advance both members' read watermarks so their initial-start unread
-    // facts are consumed: a member with no unread facts is not woken by the
-    // other member's Claim mutations, which keeps the scripted wake turns
-    // below attributable to exactly one member at a time.
-    await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-initial-read'), workspaceId, taskRef: started.task!.taskRef })
-    await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-initial-read'), workspaceId, taskRef: started.task!.taskRef })
-
-    // builder: finished its Claim before the accept (normal flow). Each
-    // mutation wakes only the OTHER following member with an unread
-    // activity (a member's own activity is never unread to itself), so one
-    // scripted response per commit suffices; the mutating member itself
-    // stays idle and the helper resolves immediately for it.
-    adapter.enqueue(textResponse('reviewer saw the claim.'))
-    const builderRead = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-read'), workspaceId, taskRef: started.task!.taskRef })
-    const builderClaim = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('notify-builder-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: builderRead.thread.revision, direction: 'implement' })
-    if (builderClaim.kind !== 'committed') throw new Error(`expected committed claim, received ${builderClaim.kind}`)
-    await waitForIdle(ctx, builderAgent)
-    await waitForIdle(ctx, reviewerAgent)
-    // Consume the claim activity so later wake turns stay attributable to
-    // exactly one mutation at a time.
-    await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-claim-read'), workspaceId, taskRef: started.task!.taskRef })
-    adapter.enqueue(textResponse('reviewer saw the completion.'))
-    const builderRead2 = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-read-2'), workspaceId, taskRef: started.task!.taskRef })
-    const builderDone = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('notify-builder-done'), workspaceId, taskRef: started.task!.taskRef, action: 'done', claimRef: (builderClaim as { claim: { claimRef: AgentTeamClaimRef } }).claim.claimRef, baseRevision: builderRead2.thread.revision })
-    if (builderDone.kind !== 'committed') throw new Error(`expected committed done, received ${builderDone.kind}`)
-    await waitForIdle(ctx, builderAgent)
-    await waitForIdle(ctx, reviewerAgent)
-    await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-done-read'), workspaceId, taskRef: started.task!.taskRef })
-    // reviewer: still holds an active Claim at accept time (early accept).
-    adapter.enqueue(textResponse('builder saw the review claim.'))
-    const reviewerRead = await ctx.agentTeam.readThreadForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-read'), workspaceId, taskRef: started.task!.taskRef })
-    const reviewerClaim = await ctx.agentTeam.changeClaimForAgent(reviewerAgent, { requestId: requestId('notify-reviewer-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: reviewerRead.thread.revision, direction: 'review' })
-    if (reviewerClaim.kind !== 'committed') throw new Error(`expected committed claim, received ${reviewerClaim.kind}`)
-    await waitForIdle(ctx, reviewerAgent)
-    await waitForIdle(ctx, builderAgent)
-    await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('notify-builder-review-read'), workspaceId, taskRef: started.task!.taskRef })
-
-    const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('notify-human-read'), workspaceId, taskRef: started.task!.taskRef })
-    adapter.enqueue(textResponse('I saw the acceptance.'))
-    adapter.enqueue(textResponse('I saw the atomic completion.'))
-    // Register the idle waits BEFORE the commit as pure event listeners:
-    // both members are idle now and the helper would resolve immediately,
-    // so a dedicated listener-only wait is required to observe the wake
-    // turns the acceptance is about to start.
-    const idleAfterWake = (agent: { id: string }): Promise<void> => new Promise(resolve => {
-      const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
-        if (subject !== agent || status !== 'idle') return
-        dispose()
-        resolve()
+    it('names the atomic completion without an empty finished-Claim clause when the only Claim was early-accepted', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('emptyclause-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const builder = await ctx.agentTeam.addMember({ requestId: requestId('emptyclause-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('emptyclause-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Ship the early accept', recipients: [builder.status.member.memberId] })
+      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
+      const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
+      adapter.enqueue(textResponse('builder saw the task.'))
+      await waitForIdle(ctx, builderAgent)
+      await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('emptyclause-initial-read'), workspaceId, taskRef: started.task!.taskRef })
+      // The owner still holds an ACTIVE Claim at accept time (early accept):
+      // the accept completes it atomically, so acceptedOwn === completedOwn
+      // for this reader. The combined-semantics branch must not then render
+      // an empty "finished Claim" list — regression against the review
+      // finding on commit afd2c16.
+      const claimed = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('emptyclause-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: started.thread.revision, direction: 'implement' })
+      if (claimed.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed.kind}`)
+      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('emptyclause-human-read'), workspaceId, taskRef: started.task!.taskRef })
+      adapter.enqueue(textResponse('builder saw the atomic completion.'))
+      const builderIdle = new Promise<void>(resolve => {
+        const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
+          if (subject !== builderAgent || status !== 'idle') return
+          dispose()
+          resolve()
+        })
       })
-    })
-    const builderIdle = idleAfterWake(builderAgent)
-    const reviewerIdle = idleAfterWake(reviewerAgent)
-    const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('notify-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
-    if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
-
-    // Both contributors wake; the notice for the already-done owner names
-    // the acceptance of its done Claim, the early-completed one names the
-    // atomic completion. The two agents share one adapter, so attribute the
-    // wake requests by the responding session's own history, not by queue
-    // position: each agent's last request is the accept wake turn.
-    await builderIdle
-    await reviewerIdle
-    const builderClaimRef = (builderClaim as { claim: { claimRef: string } }).claim.claimRef
-    const reviewerClaimRef = (reviewerClaim as { claim: { claimRef: string } }).claim.claimRef
-    // Attribute the wake requests by agent id (the request's sessionId is
-    // the agent's session id), not by adapter queue position: the two agents
-    // share one adapter and their turns interleave.
-    const requestsFor = (agent: { id: string }): string[] =>
-      adapter.requestSessions.map((sessionId, at) => sessionId === agent.id ? at : -1)
-        .filter(at => at >= 0).map(at => JSON.stringify(adapter.requests[at]!.messages))
-    const builderRequest = requestsFor(builderAgent).at(-1)!
-    const reviewerRequest = requestsFor(reviewerAgent).at(-1)!
-    expect(builderRequest).toContain('accept')
-    expect(builderRequest).toContain(builderClaimRef)
-    expect(reviewerRequest).toContain(reviewerClaimRef)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('names the atomic completion without an empty finished-Claim clause when the only Claim was early-accepted', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('emptyclause-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const builder = await ctx.agentTeam.addMember({ requestId: requestId('emptyclause-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('emptyclause-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Ship the early accept', recipients: [builder.status.member.memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
-    adapter.enqueue(textResponse('builder saw the task.'))
-    await waitForIdle(ctx, builderAgent)
-    await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('emptyclause-initial-read'), workspaceId, taskRef: started.task!.taskRef })
-    // The owner still holds an ACTIVE Claim at accept time (early accept):
-    // the accept completes it atomically, so acceptedOwn === completedOwn
-    // for this reader. The combined-semantics branch must not then render
-    // an empty "finished Claim" list — regression against the review
-    // finding on commit afd2c16.
-    const claimed = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('emptyclause-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: started.thread.revision, direction: 'implement' })
-    if (claimed.kind !== 'committed') throw new Error(`expected committed claim, received ${claimed.kind}`)
-    const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('emptyclause-human-read'), workspaceId, taskRef: started.task!.taskRef })
-    adapter.enqueue(textResponse('builder saw the atomic completion.'))
-    const builderIdle = new Promise<void>(resolve => {
-      const dispose = ctx.on('agent/status', ({ agent: subject, status }) => {
-        if (subject !== builderAgent || status !== 'idle') return
-        dispose()
-        resolve()
-      })
-    })
-    const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('emptyclause-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
-    if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
-    await builderIdle
-    const claimRef = (claimed as { claim: { claimRef: string } }).claim.claimRef
-    const builderRequest = JSON.stringify(adapter.requests.at(-1)!.messages)
-    expect(builderRequest).toContain('accept')
-    // The single-Claim early-accept owner gets the completed semantics
-    // alone, naming the Claim the acceptance completed — never an empty
-    // "finished Claim" clause.
-    expect(builderRequest).toContain('your open Claim')
-    expect(builderRequest).toContain(claimRef)
-    expect(builderRequest).toContain('was completed with it')
-    expect(builderRequest).not.toContain('finished Claim')
-    expect(builderRequest).not.toMatch(/Claim\s{2,}/)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('derives the pressure budgets from the Member\'s current pinned route, honoring route changes', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('route-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    // A Member pinned to a narrow-window model: the mock adapter reports one
-    // context window, the pinned-model resolution must reflect the pinned
-    // route rather than whatever the last request happened to use.
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('route-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-    pressureState.usageTokens = 0
-    adapter.enqueue(textResponse('first turn on the default route.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'warm up' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-
-    // Pin a different route with a much smaller context window; the budgets
-    // must follow the pinned selection at the next pre-step even though the
-    // last persisted request/context still names the old default route.
-    await ctx.agentTeam.updateMember({ requestId: requestId('route-edit'), memberId, handle: 'builder', description: 'Builds the implementation', model: { provider: 'mock', model: 'narrow' } })
-    adapter.resolveModelWindow = (model: string) => model === 'narrow' ? 112_000 : 320_000
-    // 90K usage: below the wide-route handoff budget (200K) but above the
-    // narrow route's effective budgets (112K window → 96K hard, 88K handoff).
-    // The notice must fire for the NARROW budgets because the pinned route
-    // changed — and quote them, not the default route's.
-    pressureState.usageTokens = 90_000
-    adapter.enqueue(textResponse('under the narrow budget now.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'check the narrow budget' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    const notices = live.session.ownEvents().filter(event => event.type === 'user/message'
-      && (event.data as { source?: { summary?: string } }).source?.summary === 'Context pressure: prepare a handoff')
-    expect(notices).toHaveLength(1)
-    const notice = notices[0] as { type: 'user/message'; data: { content: ReadonlyArray<{ type: string; text?: string }> } }
-    const noticeText = notice.data.content[0]?.text ?? ''
-    // The notice quotes the NARROW route's budgets, not the default's.
-    expect(noticeText).toContain('the handoff budget is 88000')
-    expect(noticeText).toContain('the hard limit is 96000')
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('does not repeat the pressure notice after a Host restart within the same generation', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('prestart-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('prestart-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // At the handoff budget, exactly one notice lands in this generation.
-    pressureState.usageTokens = 200_000
-    adapter.enqueue(textResponse('working under pressure.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'under pressure' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    const noticeCount = () => live.session.ownEvents().filter(event => event.type === 'user/message'
-      && (event.data as { source?: { summary?: string } }).source?.summary === 'Context pressure: prepare a handoff').length
-    expect(noticeCount()).toBe(1)
-
-    // Host restart on the same Session: the durable notice (delivered or
-    // still spliced into the inbox) latches — no second notice in the same
-    // generation, and the Member stays available.
-    adapter.enqueue(textResponse('still going after the restart.'))
-    await ctx.agentTeam.suspendMember({ requestId: requestId('prestart-suspend'), memberId })
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    await ctx.agentTeam.resumeMember({ requestId: requestId('prestart-resume'), memberId })
-    const resumed = await waitFor(() => {
-      const agent = ctx.agents.get(sessionId)
-      return agent !== undefined && agent.status === 'idle' ? agent : undefined
-    })
-    pressureState.usageTokens = 210_000
-    adapter.enqueue(textResponse('one more turn after the restart.'))
-    resumed.followup(createUserMessage({ content: [{ type: 'text', text: 'keep working' }], source: { kind: 'user' } }))
-    await resumed.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
-    const after = resumed.session.ownEvents().filter(event => event.type === 'user/message'
-      && (event.data as { source?: { summary?: string } }).source?.summary === 'Context pressure: prepare a handoff').length
-    expect(after).toBe(1)
-    const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!
-    expect(status.availability).toBe('active')
-  })
-})
-
-describe('Agent Team recovery hardening (ticket 04)', () => {
-  it('refuses context_rollover while the Member owns jobs that would not survive the switch', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, jobsState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('jobs-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('jobs-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // A running job blocks the rollover; the rejection names it.
-    jobsState.jobs = [{ id: 'bash-1', label: 'long build', status: 'running', reported: false }]
-    adapter.enqueue(toolCallResponse('call-jobs-nc-1', 'context_rollover', { handoff: 'blocked by a running job' }))
-    adapter.enqueue(textResponse('collecting the job first.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'try switching with a running job' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    const firstResult = live.session.ownEvents().findLast(event => event.type === 'tool/result' && JSON.stringify((event as { data: { message: { content: unknown } } }).data.message.content).includes('long build'))
-    expect(firstResult).toBeDefined()
-
-    // A terminal-but-unreported job also blocks: disposal would discard its
-    // unreported output.
-    jobsState.jobs = [{ id: 'bash-2', label: 'finished silently', status: 'completed', reported: false }]
-    adapter.enqueue(toolCallResponse('call-jobs-nc-2', 'context_rollover', { handoff: 'blocked by unreported output' }))
-    adapter.enqueue(textResponse('reading the output first.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'try again with unreported output' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    const secondResult = live.session.ownEvents().findLast(event => event.type === 'tool/result' && JSON.stringify((event as { data: { message: { content: unknown } } }).data.message.content).includes('finished silently'))
-    expect(secondResult).toBeDefined()
-
-    // A reported terminal job does not block: the Member may switch.
-    jobsState.jobs = [{ id: 'bash-3', label: 'reported done', status: 'completed', reported: true }]
-    adapter.enqueue(toolCallResponse('call-jobs-nc-3', 'context_rollover', { handoff: 'clean switch' }))
-    adapter.enqueue(textResponse('switched.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'try now that everything is reported' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === added.status.member.memberId)
-      return current !== undefined && current.member.sessionId !== sessionId ? current : undefined
-    })
-    expect(renewed.member.sessionId).not.toBe(sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('keeps a delivered rollover handoff durable across a Host restart without duplicating it', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('hfix-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('hfix-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // One fresh rollover whose handoff delivers normally.
-    adapter.enqueue(toolCallResponse('call-hfix-nc', 'context_rollover', { handoff: 'the reconstructed handoff text' }))
-    adapter.enqueue(textResponse('continuing.'))
-    const live = ctx.agents.get(firstSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-    expect(archivedHandoffs(next)).toHaveLength(1)
-
-    // Host restart on the same ledger and Session store: the delivered
-    // handoff is durable in the new Session's own log, and the restart must
-    // not reconstruct a second one on top of it. This is also the race the
-    // write-behind retire drain runs against — the persisted decision goes
-    // through inspection (which awaits the drain), never a bare listing.
-    await ctx.agentTeam.suspendMember({ requestId: requestId('hfix-suspend'), memberId })
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    await ctx.agentTeam.resumeMember({ requestId: requestId('hfix-resume'), memberId })
-    const resumedStatus = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    const resumed = await waitFor(() => ctx.agents.get(resumedStatus.member.sessionId)!)
-    await resumed.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
-    expect(resumed.session.id).toBe(renewed.member.sessionId)
-    expect(archivedHandoffs(resumed)).toHaveLength(1)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('reconstructs the handoff when a restart lands between the rollover commit and its delivery', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('hgap-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('hgap-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Crash the rollover between its durable ledger commit and the handoff
-    // delivery: the new Session's activation fails (preset mount throws), so
-    // the binding is committed, the old generation is retired, and the
-    // handoff never lands in any log. The ledger's previous-Session record
-    // is the only remaining lineage fact.
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-hgap-nc', 'context_rollover', { handoff: 'the handoff that never delivered' }))
-    adapter.enqueue(textResponse('rolling over into the crash.'))
-    const live = ctx.agents.get(firstSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over now' }], source: { kind: 'user' } }))
-    const committed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
-    })
-    expect(committed.member.sessionId).not.toBe(firstSessionId)
-    expect(ctx.agents.get(committed.member.sessionId)).toBeUndefined()
-    expect(ctx.agents.get(firstSessionId)).toBeUndefined()
-
-    // Host restart on the same ledger: activation of the never-materialized
-    // Session goes through the create path with the ledger lineage, and the
-    // missing handoff is reconstructed from the previous Session's durable
-    // pending intent — delivered exactly once, before anything else.
-    presets.failingMount = false
-    adapter.enqueue(textResponse('picked up from the reconstructed handoff.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    const restarted = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    const resumed = await waitFor(() => ctx.agents.get(restarted.member.sessionId)!)
-    await resumed.whenIdle()
-    await waitFor(() => archivedHandoffs(resumed).length > 0 ? true : undefined)
-    await resumed.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
-    expect(archivedHandoffs(resumed)).toHaveLength(1)
-    const handoff = archivedHandoffs(resumed)[0] as { data: { content: Array<{ type: string; text: string }> } }
-    expect(handoff.data.content[0]?.text).toContain('the handoff that never delivered')
-    // The reconstructed Session carries its lineage for future restarts.
-    expect(resumed.session.header.parentSession).toBe(firstSessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('reconstructs a recorded checkpoint seed when a crash lands between the rollover commit and the new Session', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('seedcut-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('seedcut-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Record the anchor, then make noise past it.
-    adapter.enqueue(toolCallResponse('call-seedcut-cp', 'context_checkpoint', { name: 'stable anchor' }))
-    adapter.enqueue(textResponse('anchored.'))
-    const live = ctx.agents.get(firstSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'record the anchor' }], source: { kind: 'user' } }))
-    await waitFor(() => foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id }).checkpoints.some(entry => entry.turnEndSeq !== -1) ? true : undefined)
-    await live.whenIdle()
-    const anchorTurnEndSeq = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id }).checkpoints[0]!.turnEndSeq
-
-    adapter.enqueue(textResponse('noise past the anchor.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'make some noise' }], source: { kind: 'user' } }))
-    await waitFor(() => live.session.ownEvents().filter(event => event.type === 'assistant/message').length >= 2 ? true : undefined)
-    await live.whenIdle()
-
-    // Checkpoint return whose activation crashes after the ledger commit:
-    // the recorded seed envelope (source Session, exclusive prefix length,
-    // checkpoint ref) is the only surviving seed fact.
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-seedcut-nc', 'context_rollover', { handoff: 'resume from the anchor', checkpointRef: checkpointRefFor(firstSessionId, 'call-seedcut-cp') }))
-    adapter.enqueue(textResponse('returning to the anchor.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'return to the anchor' }], source: { kind: 'user' } }))
-    await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
+      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('emptyclause-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
+      await builderIdle
+      const claimRef = (claimed as { claim: { claimRef: string } }).claim.claimRef
+      const builderRequest = JSON.stringify(adapter.requests.at(-1)!.messages)
+      expect(builderRequest).toContain('accept')
+      // The single-Claim early-accept owner gets the completed semantics
+      // alone, naming the Claim the acceptance completed — never an empty
+      // "finished Claim" clause.
+      expect(builderRequest).toContain('your open Claim')
+      expect(builderRequest).toContain(claimRef)
+      expect(builderRequest).toContain('was completed with it')
+      expect(builderRequest).not.toContain('finished Claim')
+      expect(builderRequest).not.toMatch(/Claim\s{2,}/)
+      expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
     })
 
-    // Host restart: the never-materialized Session is recreated from the
-    // ledger's recorded seed — never a blank child.
-    presets.failingMount = false
-    adapter.enqueue(textResponse('resumed from the recorded seed.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    const restarted = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    const resumed = await waitFor(() => ctx.agents.get(restarted.member.sessionId)!)
-    await waitFor(() => archivedHandoffs(resumed).length > 0 ? true : undefined)
-    await resumed.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
+    it('blocks activation with a session-refused diagnostic when the current binding is refused, and a restart replays the deterministic refusal', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('ref-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('ref-add'), workspaceId, handle: 'refused', description: 'Refused binding', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const memberId = added.status.member.memberId
+      const sessionId = added.status.member.sessionId
+      expect(added.status.availability).toBe('active')
 
-    // Seeded child, not blank: the lineage parent is the seed source (the
-    // same Session here) and the inherited prefix is exactly the recorded
-    // exclusive cut through the anchor's turn end.
-    expect(resumed.session.header.parentSession).toBe(firstSessionId)
-    expect(resumed.session.header.isSeeded).toBe(true)
-    expect(resumed.session.inheritedEventCount).toBe(anchorTurnEndSeq + 1)
-    const inherited = resumed.session.snapshotEvents(0 as never, resumed.session.inheritedEventCount)
-    expect(inherited.at(-1)!.seq).toBe(anchorTurnEndSeq)
-    expect(inherited.length).toBeGreaterThan(0)
-    // The handoff is reconstructed exactly once on top of the seed.
-    expect(archivedHandoffs(resumed)).toHaveLength(1)
-    const handoff = archivedHandoffs(resumed)[0] as { data: { content: Array<{ type: string; text: string }> } }
-    expect(handoff.data.content[0]?.text).toContain('resume from the anchor')
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('redelivers the old generation\'s carried input after a crash between the rollover commit and the new Session', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('carry-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('carry-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Crash the rollover after its commit; the racing direct input lands in
-    // the old generation's inbox after the intent (durable splice → carried
-    // candidate in the old fold) and must survive the crash.
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-carry-nc', 'context_rollover', { handoff: 'the crash handoff' }))
-    adapter.enqueue(textResponse('rolling into the crash.'))
-    const live = ctx.agents.get(firstSessionId)!
-    let injected = false
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== firstSessionId || event.type !== 'turn/end' || injected) return
-      injected = true
-      queueMicrotask(() => {
-        live.followup(createUserMessage({ content: [{ type: 'text', text: 'Direct input that arrived right before the crash.' }], source: { kind: 'user' } }))
-      })
-    })
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over into the crash' }], source: { kind: 'user' } }))
-    const committed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
-    })
-    disposeObserver()
-    expect(injected).toBe(true)
-    expect(ctx.agents.get(committed.member.sessionId)).toBeUndefined()
-
-    // Host restart: the recreated generation receives the reconstructed
-    // handoff first, then the carried direct input behind it — exactly once,
-    // never before the handoff.
-    presets.failingMount = false
-    adapter.enqueue(textResponse('carrying on after the crash.'))
-    adapter.enqueue(textResponse('handled the carried input.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    const restarted = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    const resumed = await waitFor(() => ctx.agents.get(restarted.member.sessionId)!)
-    await waitFor(() => {
-      const bodies = resumed.session.ownEvents().filter(event => event.type === 'user/message')
-        .map(event => JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content))
-      return bodies.some(body => body.includes('Direct input that arrived right before the crash')) ? true : undefined
-    })
-    await resumed.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
-
-    const userEvents = resumed.session.ownEvents().filter(event => event.type === 'user/message')
-    const bodies = userEvents.map(event => (event as { data: { content: ReadonlyArray<{ type: string; text?: string }> } }).data.content
-      .filter(block => block.type === 'text').map(block => block.text ?? '').join(''))
-    const carried = bodies.filter(body => body.includes('Direct input that arrived right before the crash'))
-    expect(carried).toHaveLength(1)
-    const carriedIndex = bodies.findIndex(body => body.includes('Direct input that arrived right before the crash'))
-    const handoffPos = bodies.findIndex(body => body.includes('Context handoff'))
-    expect(handoffPos).toBeGreaterThanOrEqual(0)
-    expect(carriedIndex).toBeGreaterThan(handoffPos)
-    expect(archivedHandoffs(resumed)).toHaveLength(1)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('finishes a spent rollover intent at activation when a restart lands after the turn ended but before the swap', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, jobsState, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('recb-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('recb-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // A job that starts between the durable result and the swap makes the seam
-    // refuse the transition, leaving a SPENT pending intent in the projection
-    // while the old generation stays bound — the recoverable poison state.
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== sessionId || event.type !== 'turn/end') return
-      jobsState.jobs = [{ id: 'bash-recb', label: 'racing job', status: 'running', reported: false }]
-    })
-    adapter.enqueue(toolCallResponse('call-recb-nc', 'context_rollover', { handoff: 'the handoff a restart must finish' }))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over while a job races the seam' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, live)
-    await new Promise(resolve => setTimeout(resolve, 100))
-    disposeObserver()
-
-    const poisoned = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id, inheritedEventCount: live.session.inheritedEventCount })
-    expect(poisoned.pending).toMatchObject({ toolCallId: 'call-recb-nc', handoff: 'the handoff a restart must finish' })
-    expect(poisoned.pending?.turnEndSeq).not.toBe(-1)
-    expect(ctx.agentTeam.members().find(status => status.member.memberId === memberId)!.member.sessionId).toBe(sessionId)
-
-    // Host restart over the same ledger and Session store, with the job
-    // settled: activation alone must finish the interrupted transition.
-    jobsState.jobs = []
-    adapter.enqueue(textResponse('continuing after the recovered swap.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-
-    const renewed = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.member.sessionId !== sessionId ? status : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
-
-    // The recovered swap delivers the ORIGINAL intent's handoff exactly once.
-    const delivered = next.session.ownEvents().flatMap(event => event.type === 'user/message' && isHandoffMessage(event.data) ? [handoffOf(event.data)] : [])
-    expect(delivered).toHaveLength(1)
-    expect(delivered[0]?.previousSessionId).toBe(sessionId)
-    expect(delivered[0]?.newSessionId).toBe(renewed.member.sessionId)
-    expect(delivered[0]?.sections.find(section => section.name === 'HANDOFF')?.text).toBe('the handoff a restart must finish')
-    expect(archivedHandoffs(next)).toHaveLength(1)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('skips the carried-input replay once the current generation already ran, even when the previous Session log is corrupt', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('p1-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('p1-add'), workspaceId, handle: 'p1member', description: 'P1 replay skip', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const previousSessionId = added.status.member.sessionId
-
-    // Crash the rollover after its commit with racing direct input in the old
-    // generation's inbox (durable splice -> carried candidate).
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-p1-nc', 'context_rollover', { handoff: 'the P1 crash handoff' }))
-    adapter.enqueue(textResponse('rolling into the P1 crash.'))
-    const live = ctx.agents.get(previousSessionId)!
-    let injected = false
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== previousSessionId || event.type !== 'turn/end' || injected) return
-      injected = true
-      queueMicrotask(() => {
-        live.followup(createUserMessage({ content: [{ type: 'text', text: 'P1 carried input.' }], source: { kind: 'user' } }))
-      })
-    })
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over into the P1 crash' }], source: { kind: 'user' } }))
-    await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
-    })
-    disposeObserver()
-    expect(injected).toBe(true)
-    const currentSessionId = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!.member.sessionId
-
-    // First restart: the current generation heals, runs the handoff turn, and
-    // receives the carried input exactly once — it now has own turn activity.
-    presets.failingMount = false
-    adapter.enqueue(textResponse('carrying on after the P1 crash.'))
-    adapter.enqueue(textResponse('handled the P1 carried input.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    const secondFiber = await ctx.plugin(AgentTeam)
-    const firstRestart = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    expect(firstRestart.member.sessionId).toBe(currentSessionId)
-    const firstRestartAgent = await waitFor(() => ctx.agents.get(currentSessionId)!)
-    await waitFor(() => firstRestartAgent.session.ownEvents().some(event => event.type === 'turn/start') ? true : undefined)
-    await firstRestartAgent.whenIdle()
-
-    // The retired previous Session now reads as corrupt. The current
-    // generation already ran, so activation must skip the previous-Session
-    // inspect entirely instead of failing closed on every restart.
-    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-    let inspectedPrevious = 0
-    const info = vi.spyOn(ctx.logger, 'info')
-    ctx.sessionPersistence.open = async (id, access, options) => {
-      if (id === previousSessionId) {
-        inspectedPrevious += 1
-        throw new Error('corrupt session log: seq gap in committed region at line 2 (expected 3, got 2)')
+      // The Member's own current Session becomes deterministically refused.
+      // A Host restart re-activates from the persisted binding and must block
+      // with the structured refusal diagnostic — not a raw error string.
+      const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
+      ctx.sessionPersistence.open = async (id, access, options) => {
+        if (id === sessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source (test seam)')
+        return realOpen(id, access, options)
       }
-      return realOpen(id, access, options)
-    }
-    // Retire the Session cleanly before the restart, as a Host restart would
-    // find it: a raw fiber dispose races the JSONL retirement drain and can
-    // recreate the Session blank, which would mask the P1 skip behind the
-    // create path.
-    await ctx.agentTeam.suspendMember({ requestId: requestId('p1-suspend'), memberId })
-    await secondFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    adapter.enqueue(textResponse('p1 resumed after the corrupt previous Session.'))
-    await ctx.agentTeam.resumeMember({ requestId: requestId('p1-resume'), memberId })
-    const restarted = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    expect(restarted.member.sessionId).toBe(currentSessionId)
-    expect(restarted.diagnostic).toBeUndefined()
-    expect(inspectedPrevious).toBe(0)
-    expect(info.mock.calls.some(args => String(args[0]).includes('skipping carried-input replay'))).toBe(true)
-    info.mockRestore()
-
-    // No redelivery: the carried input stays at exactly one occurrence.
-    const resumed = await waitFor(() => ctx.agents.get(currentSessionId)!)
-    await resumed.whenIdle()
-    const bodies = resumed.session.ownEvents().filter(event => event.type === 'user/message')
-      .map(event => JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content))
-    expect(bodies.filter(body => body.includes('P1 carried input.'))).toHaveLength(1)
-  })
-
-  it('fails open with a warning when the previous Session log is corrupt and the new generation never ran', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('p2-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('p2-add'), workspaceId, handle: 'p2member', description: 'P2 fail-open', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const previousSessionId = added.status.member.sessionId
-
-    // Crash the rollover after its commit with racing direct input in the old
-    // generation's inbox: the new Session never runs before the restart.
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-p2-nc', 'context_rollover', { handoff: 'the P2 crash handoff' }))
-    adapter.enqueue(textResponse('rolling into the P2 crash.'))
-    const live = ctx.agents.get(previousSessionId)!
-    let injected = false
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== previousSessionId || event.type !== 'turn/end' || injected) return
-      injected = true
-      queueMicrotask(() => {
-        live.followup(createUserMessage({ content: [{ type: 'text', text: 'P2 carried input that must be skipped.' }], source: { kind: 'user' } }))
+      await initialFiber.dispose()
+      await new Promise(resolve => setImmediate(resolve))
+      await ctx.plugin(AgentTeam)
+      const blocked = await waitFor(() => {
+        const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        return status !== undefined && status.availability === 'unavailable' ? status : undefined
       })
-    })
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over into the P2 crash' }], source: { kind: 'user' } }))
-    await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
-    })
-    disposeObserver()
-    expect(injected).toBe(true)
+      expect(blocked.diagnostic).toMatchObject({ class: 'session-refused', sessionId, detail: 'cannot safely transform unclassified message source (test seam)' })
 
-    // The retired previous Session is corrupt; the fresh current Session has
-    // no own turn activity, so the replay's inspect hits the corruption and
-    // must fail open with a warning instead of blocking activation.
-    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-    const warn = vi.spyOn(ctx.logger, 'warn')
-    ctx.sessionPersistence.open = async (id, access, options) => {
-      if (id === previousSessionId) throw new Error('corrupt session log: seq gap in committed region at line 2 (expected 3, got 2)')
-      return realOpen(id, access, options)
-    }
-    presets.failingMount = false
-    adapter.enqueue(textResponse('carrying on after the P2 crash.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    const restarted = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    expect(restarted.diagnostic).toBeUndefined()
-    const resumed = await waitFor(() => ctx.agents.get(restarted.member.sessionId)!)
-    const replayWarnings = warn.mock.calls.map(args => String(args[0])).filter(text => text.includes('skipping the replay'))
-    expect(replayWarnings.length).toBeGreaterThan(0)
-    expect(replayWarnings.some(text => text.includes(previousSessionId) && text.includes('p2member'))).toBe(true)
-    // The corrupt Session's carried input is deliberately skipped: the direct
-    // input that would have ridden behind the handoff never surfaces.
-    await resumed.whenIdle()
-    const bodies = resumed.session.ownEvents().filter(event => event.type === 'user/message')
-      .map(event => JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content))
-    expect(bodies.some(body => body.includes('P2 carried input that must be skipped.'))).toBe(false)
-    warn.mockRestore()
-  })
-
-  it('fails open with a warning when the previous Session is refused by the session-format migration', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('p4-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('p4-add'), workspaceId, handle: 'p4member', description: 'P4 format refusal', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const previousSessionId = added.status.member.sessionId
-
-    // Same crash shape as the corruption case: the rollover committed, the new
-    // Session never ran, and direct input was racing in the old generation.
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-p4-nc', 'context_rollover', { handoff: 'the P4 refusal handoff' }))
-    adapter.enqueue(textResponse('rolling into the P4 crash.'))
-    const live = ctx.agents.get(previousSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over into the P4 crash' }], source: { kind: 'user' } }))
-    await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
+      // No write-side repair pass exists anymore: the read-time conversion owns
+      // V3 history, and this bundle no longer authors the refused wrapper
+      // shape. A restart therefore re-runs the activation, which replays the
+      // deterministic refusal and reports it again — never silently, and never
+      // claiming the refusal was healed.
+      const recovered = await ctx.agentTeam.recoverMember({ requestId: requestId('ref-recover'), workspaceId, memberId })
+      expect(recovered.status.availability).toBe('unavailable')
+      expect(recovered.status.diagnostic).toMatchObject({ class: 'session-refused', sessionId, detail: 'cannot safely transform unclassified message source (test seam)' })
+      expect(ctx.agents.get(sessionId)).toBeUndefined()
     })
 
-    // The retired Session is refused by the candidate's own migration audit:
-    // deterministic, so no retry can ever read it. Activation must fail open
-    // with a warning rather than leave the Member permanently unavailable.
-    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-    const warn = vi.spyOn(ctx.logger, 'warn')
-    ctx.sessionPersistence.open = async (id, access, options) => {
-      if (id === previousSessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source; source v0 artifact remains unchanged (test seam)')
-      return realOpen(id, access, options)
-    }
-    presets.failingMount = false
-    adapter.enqueue(textResponse('carrying on after the P4 refusal.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    const restarted = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    expect(restarted.diagnostic).toBeUndefined()
-    const replayWarnings = warn.mock.calls.map(args => String(args[0])).filter(text => text.includes('refused by the session-format migration'))
-    expect(replayWarnings.length).toBeGreaterThan(0)
-    expect(replayWarnings.some(text => text.includes(previousSessionId) && text.includes('p4member'))).toBe(true)
-    warn.mockRestore()
-  })
+    it('recovers a member by re-running activation once the refusal is gone', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('heal-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('heal-add'), workspaceId, handle: 'healing', description: 'Heal retry', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const memberId = added.status.member.memberId
+      const sessionId = added.status.member.sessionId
 
-  it('keeps the carried-input replay fail-closed for a non-corruption unreadable previous Session', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('p2f-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('p2f-add'), workspaceId, handle: 'p2fmember', description: 'P2 fail-closed boundary', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const previousSessionId = added.status.member.sessionId
-
-    // Same crash shape as the fail-open case, but the unreadable cause is a
-    // missing file (ENOENT), not log corruption: the bounded fail-open must
-    // NOT apply, and activation stays blocked with a diagnostic.
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-p2f-nc', 'context_rollover', { handoff: 'the fail-closed handoff' }))
-    adapter.enqueue(textResponse('rolling into the fail-closed crash.'))
-    const live = ctx.agents.get(previousSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over into the fail-closed crash' }], source: { kind: 'user' } }))
-    await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== previousSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
-    })
-
-    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-    ctx.sessionPersistence.open = async (id, access, options) => {
-      if (id === previousSessionId) throw Object.assign(new Error(`ENOENT: no such file or directory, scandir 'sessions/${previousSessionId}' (test seam)`), { code: 'ENOENT' })
-      return realOpen(id, access, options)
-    }
-    presets.failingMount = false
-    adapter.enqueue(textResponse('this turn must never run.'))
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    const failed = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'unavailable' && status.diagnostic?.class === 'session-unreadable' ? status : undefined
-    })
-    expect(failed.member.sessionId).not.toBe(previousSessionId)
-    expect(ctx.agents.get(failed.member.sessionId)).toBeUndefined()
-  })
-
-  it('blocks activation with a session-refused diagnostic when the current binding is refused, and a restart replays the deterministic refusal', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('ref-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('ref-add'), workspaceId, handle: 'refused', description: 'Refused binding', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    expect(added.status.availability).toBe('active')
-
-    // The Member's own current Session becomes deterministically refused.
-    // A Host restart re-activates from the persisted binding and must block
-    // with the structured refusal diagnostic — not a raw error string.
-    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-    ctx.sessionPersistence.open = async (id, access, options) => {
-      if (id === sessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source (test seam)')
-      return realOpen(id, access, options)
-    }
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    const blocked = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'unavailable' ? status : undefined
-    })
-    expect(blocked.diagnostic).toMatchObject({ class: 'session-refused', sessionId, detail: 'cannot safely transform unclassified message source (test seam)' })
-
-    // No write-side repair pass exists anymore: the read-time conversion owns
-    // V3 history, and this bundle no longer authors the refused wrapper
-    // shape. A restart therefore re-runs the activation, which replays the
-    // deterministic refusal and reports it again — never silently, and never
-    // claiming the refusal was healed.
-    const recovered = await ctx.agentTeam.recoverMember({ requestId: requestId('ref-recover'), workspaceId, memberId })
-    expect(recovered.status.availability).toBe('unavailable')
-    expect(recovered.status.diagnostic).toMatchObject({ class: 'session-refused', sessionId, detail: 'cannot safely transform unclassified message source (test seam)' })
-    expect(ctx.agents.get(sessionId)).toBeUndefined()
-  })
-
-  it('recovers a member by re-running activation once the refusal is gone', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('heal-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('heal-add'), workspaceId, handle: 'healing', description: 'Heal retry', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-
-    const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
-    ctx.sessionPersistence.open = async (id, access, options) => {
-      if (id === sessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source (test seam)')
-      return realOpen(id, access, options)
-    }
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'unavailable' ? status : undefined
-    })
-
-    // The refusal was transient (an out-of-band repair removed it): the
-    // restart retry path re-runs the activation, which now succeeds.
-    ctx.sessionPersistence.open = realOpen
-    const recovered = await ctx.agentTeam.recoverMember({ requestId: requestId('heal-recover'), workspaceId, memberId })
-    expect(recovered.status.availability).toBe('active')
-    expect(recovered.status.diagnostic).toBeUndefined()
-  })
-
-  it('logs a warning with the member handle when activation fails', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('p3-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('p3-add'), workspaceId, handle: 'p3member', description: 'P3 failure visibility', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-
-    // A restart against a broken preset fails the activation; the operator
-    // must see the member handle in a warning line, not only in the status
-    // diagnostic.
-    presets.failingMount = true
-    const warn = vi.spyOn(ctx.logger, 'warn')
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'unavailable' && status.diagnostic?.class === 'preset-composition' ? status : undefined
-    })
-    const failures = warn.mock.calls.map(args => String(args[0])).filter(text => text.includes('activation failed'))
-    expect(failures.length).toBeGreaterThan(0)
-    expect(failures.some(text => text.includes('p3member'))).toBe(true)
-    warn.mockRestore()
-  })
-
-  it('offers a delivered single-Thread Team boundary as a default checkpoint and rejects multi-Thread boundaries', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, archived } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('tbound-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('tbound-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // Thread A: a direct mention wakes the Member; the delivered notice
-    // quotes `Thread: <ref>` — one Thread's facts enter the context.
-    const started = await ctx.agentTeam.sendMessage({ requestId: requestId('tbound-a'), workspaceId, channelRef: channel.channel.channelRef, body: 'Builder, thread A work', recipients: [memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed send, received ${started.kind}`)
-    const threadA = started.thread.threadRef
-    adapter.enqueue(textResponse('thread A acknowledged.'))
-    await waitFor(() => live.session.ownEvents().some(event => event.type === 'user/message'
-      && JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('thread A work')) ? true : undefined)
-    await live.whenIdle()
-
-    // The timeline marks the Thread-A delivery boundary as a selectable
-    // default checkpoint with exactly that Thread attributed.
-    const timelineA = await ctx.agentTeam.contextTimelineForAgent(live, { memberId })
-    const boundaryA = timelineA.items.find(item => item.source === 'team-boundary')
-    expect(boundaryA).toBeDefined()
-    expect(boundaryA!.affectedThreads).toEqual([threadA])
-    expect(boundaryA!.restorable).toBe(true)
-
-    // Thread B arrives later: its boundary's RETAINED prefix spans both
-    // Threads, so it must not be selectable — the reason says so.
-    const second = await ctx.agentTeam.sendMessage({ requestId: requestId('tbound-b'), workspaceId, channelRef: channel.channel.channelRef, body: 'Builder, thread B work', recipients: [memberId] })
-    if (second.kind !== 'committed') throw new Error(`expected committed send, received ${second.kind}`)
-    const threadB = second.thread.threadRef
-    adapter.enqueue(textResponse('thread B acknowledged.'))
-    await waitFor(() => live.session.ownEvents().some(event => event.type === 'user/message'
-      && JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('thread B work')) ? true : undefined)
-    await live.whenIdle()
-    const timelineB = await ctx.agentTeam.contextTimelineForAgent(live, { memberId })
-    const boundaries = timelineB.items.filter(item => item.source === 'team-boundary')
-    // The newest boundary (thread B delivery) retains both Threads.
-    const newest = boundaries.find(item => item.affectedThreads.includes(threadB))
-    expect(newest).toBeDefined()
-    expect(newest!.restorable).toBe(false)
-    expect(newest!.reason).toContain('multiple Threads')
-    // The older single-Thread boundary stays restorable with its one Thread.
-    const older = boundaries.find(item => item.affectedThreads.length === 1)
-    expect(older).toBeDefined()
-    expect(older!.restorable).toBe(true)
-    expect(older!.checkpointRef).toBe(boundaryA!.checkpointRef)
-
-    // Return through the single-Thread boundary: exact seed prefix, handoff
-    // first, and the discarded suffix carries the thread-B noise.
-    adapter.enqueue(toolCallResponse('call-tbound-nc', 'context_rollover', { handoff: 'Back to the thread-A anchor.', checkpointRef: boundaryA!.checkpointRef }))
-    adapter.enqueue(textResponse('returned to the thread-A boundary.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'return to the thread-A boundary' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== sessionId ? current : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-    // Seeded at the boundary's completed-turn cut, in the same Session.
-    expect(next.session.header.parentSession).toBe(sessionId)
-    expect(next.session.header.isSeeded).toBe(true)
-    expect(next.session.inheritedEventCount).toBeGreaterThan(0)
-    const inherited = next.session.snapshotEvents(0 as never, next.session.inheritedEventCount)
-    // The retained prefix still contains thread A's delivered facts…
-    expect(JSON.stringify(inherited)).toContain('thread A work')
-    // …and discards everything after the boundary, including thread B.
-    expect(JSON.stringify(inherited)).not.toContain('thread B work')
-    expect(archived).toContain(sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('keeps default-boundary refs distinct across generations with the same event seq', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('xseq-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('xseq-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Generation 1 receives a direct mention; its notice delivery becomes a
-    // team boundary at some event seq in generation 1.
-    const first = await ctx.agentTeam.sendMessage({ requestId: requestId('xseq-a'), workspaceId, channelRef: channel.channel.channelRef, body: 'Gen1 thread work', recipients: [memberId] })
-    if (first.kind !== 'committed') throw new Error(`expected committed send, received ${first.kind}`)
-    const live = ctx.agents.get(firstSessionId)!
-    adapter.enqueue(textResponse('gen1 acknowledged.'))
-    await waitFor(() => live.session.ownEvents().some(event => event.type === 'user/message'
-      && JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('Gen1 thread work')) ? true : undefined)
-    await live.whenIdle()
-
-    // Fresh rollover; generation 2 receives its own mention whose notice
-    // delivery lands at the SAME event seq (both generations start at 0).
-    adapter.enqueue(toolCallResponse('call-xseq-nc', 'context_rollover', { handoff: 'gen2 handoff' }))
-    adapter.enqueue(textResponse('gen2 starting.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const secondSessionId = renewed.member.sessionId
-    const next = await waitFor(() => ctx.agents.get(secondSessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-
-    const second = await ctx.agentTeam.sendMessage({ requestId: requestId('xseq-b'), workspaceId, channelRef: channel.channel.channelRef, body: 'Gen2 thread work', recipients: [memberId] })
-    if (second.kind !== 'committed') throw new Error(`expected committed send, received ${second.kind}`)
-    adapter.enqueue(textResponse('gen2 acknowledged.'))
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message'
-      && JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('Gen2 thread work')) ? true : undefined)
-    await next.whenIdle()
-
-    // The generation-2 timeline walks the archived ancestor: BOTH
-    // generations' boundaries appear with distinct refs (no `seen`
-    // deduplication swallowing the ancestor), and returning through the
-    // ancestor's ref seeds from the ANCESTOR's events, not generation 2's.
-    const timeline = await ctx.agentTeam.contextTimelineForAgent(next, { memberId, limit: 24 })
-    const boundaries = timeline.items.filter(item => item.source === 'team-boundary')
-    expect(boundaries.length).toBeGreaterThanOrEqual(2)
-    const refs = boundaries.map(item => item.checkpointRef)
-    expect(new Set(refs).size).toBe(refs.length)
-    // Each boundary names its own source Session; their refs must differ
-    // even when the two deliveries anchor at the same event seq in their
-    // own Sessions.
-    const gen2Boundary = boundaries.find(item => item.sourceSessionId === secondSessionId)
-    const gen1Boundary = boundaries.find(item => item.sourceSessionId === firstSessionId)
-    expect(gen1Boundary).toBeDefined()
-    expect(gen2Boundary).toBeDefined()
-    expect(gen1Boundary!.checkpointRef).not.toBe(gen2Boundary!.checkpointRef)
-
-    // Returning through the ancestor boundary seeds generation 1's prefix:
-    // the retained context contains the gen1 delivery and NOT gen2's.
-    adapter.enqueue(toolCallResponse('call-xseq-return', 'context_rollover', { handoff: 'Back to the gen1 anchor.', checkpointRef: gen1Boundary!.checkpointRef }))
-    adapter.enqueue(textResponse('returned to gen1.'))
-    next.followup(createUserMessage({ content: [{ type: 'text', text: 'return to gen1' }], source: { kind: 'user' } }))
-    const returned = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== secondSessionId ? current : undefined
-    })
-    const third = await waitFor(() => ctx.agents.get(returned.member.sessionId)!)
-    await waitFor(() => third.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await third.whenIdle()
-    const inherited = third.session.snapshotEvents(0 as never, third.session.inheritedEventCount)
-    expect(JSON.stringify(inherited)).toContain('Gen1 thread work')
-    expect(JSON.stringify(inherited)).not.toContain('Gen2 thread work')
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('rejects a second consecutive start boundary as multi-Thread — preserved, not a defect', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('twostart-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('twostart-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // A delivered mention seeds Thread A's first-arrival boundary; then the
-    // Member starts a second Thread B of its own. Thread B's start boundary
-    // retains facts from BOTH Threads, so it must be refused — the
-    // multi-Thread rejection is the designed behavior (a return would drop
-    // the other Thread's knowledge), never something to "fix".
-    const notice = await ctx.agentTeam.sendMessage({ requestId: requestId('twostart-a'), workspaceId, channelRef: channel.channel.channelRef, body: 'Thread A context', recipients: [memberId] })
-    if (notice.kind !== 'committed') throw new Error(`expected committed send, received ${notice.kind}`)
-    adapter.enqueue(textResponse('thread A context read.'))
-    await waitFor(() => live.session.ownEvents().some(event => event.type === 'user/message'
-      && JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('Thread A context')) ? true : undefined)
-    await live.whenIdle()
-
-    await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('twostart-read'), workspaceId, threadRef: notice.thread.threadRef })
-    adapter.enqueue(toolCallResponse('call-twostart-b', 'team_message', { action: 'start', channelRef: channel.channel.channelRef, body: 'Member starts thread B' }))
-    adapter.enqueue(textResponse('started thread B.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'start thread B' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, live)
-    await new Promise(resolve => setTimeout(resolve, 50))
-
-    const timeline = await ctx.agentTeam.contextTimelineForAgent(live, { memberId, limit: 24 })
-    const boundaries = timeline.items.filter(item => item.source === 'team-boundary')
-    // The start of Thread B is labeled by action class.
-    const startBoundary = boundaries.find(item => item.name === 'Team message')
-    expect(startBoundary).toBeDefined()
-    // Its retained prefix spans both Threads' facts, so it is refused.
-    expect(startBoundary!.affectedThreads).toContain(notice.thread.threadRef)
-    expect(startBoundary!.restorable).toBe(false)
-    expect(startBoundary!.reason).toContain('multiple Threads')
-    // The first-arrival boundary of Thread A stays single-Thread and restorable.
-    const firstArrival = boundaries.find(item => item.affectedThreads.length === 1)
-    expect(firstArrival).toBeDefined()
-    expect(firstArrival!.restorable).toBe(true)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('attributes a claim-mutation boundary through its Task and rejects the cross-Thread mix', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('mix-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('mix-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const sessionId = added.status.member.sessionId
-    const live = ctx.agents.get(sessionId)!
-
-    // Thread A delivers a notice first; then the Member claims a Task on a
-    // DIFFERENT Thread B. The claim boundary must attribute BOTH Threads
-    // (A's delivered facts + B's claimed Task) and refuse selection — the
-    // old notice-text-only attribution would have wrongly seen one Thread.
-    const notice = await ctx.agentTeam.sendMessage({ requestId: requestId('mix-a'), workspaceId, channelRef: channel.channel.channelRef, body: 'Thread A context', recipients: [memberId] })
-    if (notice.kind !== 'committed') throw new Error(`expected committed send, received ${notice.kind}`)
-    adapter.enqueue(textResponse('thread A context read.'))
-    await waitFor(() => live.session.ownEvents().some(event => event.type === 'user/message'
-      && JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('Thread A context')) ? true : undefined)
-    await live.whenIdle()
-
-    const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('mix-b-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Task B on another thread', recipients: [memberId] })
-    if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-    const read = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('mix-b-read'), workspaceId, taskRef: started.task!.taskRef })
-    adapter.enqueue(toolCallResponse('call-mix-claim', 'team_claim', { action: 'claim', taskRef: started.task!.taskRef, baseRevision: read.thread.revision, direction: 'own task B' }))
-    adapter.enqueue(textResponse('claimed task B.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'claim task B' }], source: { kind: 'user' } }))
-    await live.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 50))
-
-    const timeline = await ctx.agentTeam.contextTimelineForAgent(live, { memberId, limit: 24 })
-    const boundaries = timeline.items.filter(item => item.source === 'team-boundary')
-    // The claim boundary (newest team boundary) carries both Threads.
-    const claimBoundary = boundaries[0]
-    expect(claimBoundary).toBeDefined()
-    expect(claimBoundary!.affectedThreads).toContain(notice.thread.threadRef)
-    expect(claimBoundary!.affectedThreads).toContain(started.thread.threadRef)
-    expect(claimBoundary!.restorable).toBe(false)
-    expect(claimBoundary!.reason).toContain('multiple Threads')
-    // And the boundary is refused as a return target.
-    adapter.enqueue(toolCallResponse('call-mix-return', 'context_rollover', { handoff: 'cross-thread attempt', checkpointRef: claimBoundary!.checkpointRef }))
-    adapter.enqueue(textResponse('the return was refused.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'try returning' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, live)
-    await new Promise(resolve => setTimeout(resolve, 100))
-    const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!
-    expect(current.member.sessionId).toBe(sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('delivers handoff, carried input, then the rederived Inbox in order across a live swap', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('order-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('order-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Unread Team facts exist at rollover time AND racing direct input
-    // arrives in the transition window: the new generation must read the
-    // handoff first, the carried input second, and the rederived Inbox
-    // third — the steer lane may never leapfrog the carried messages.
-    const unread = await ctx.agentTeam.sendMessage({ requestId: requestId('order-unread'), workspaceId, channelRef: channel.channel.channelRef, body: 'Unread thread facts before the swap', recipients: [memberId] })
-    if (unread.kind !== 'committed') throw new Error(`expected committed send, received ${unread.kind}`)
-
-    // Response budget: the pre-swap Inbox wake, the rollover tool turn, the
-    // carried-input turn, and the sequenced Inbox turn each consume one.
-    adapter.enqueue(textResponse('reading the unread facts first.'))
-    adapter.enqueue(toolCallResponse('call-order-nc', 'context_rollover', { handoff: 'order handoff' }))
-    adapter.enqueue(textResponse('carrying the input over.'))
-    adapter.enqueue(textResponse('inbox turn after the carried input.'))
-    const live = ctx.agents.get(firstSessionId)!
-    let injected = false
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== firstSessionId || event.type !== 'turn/end' || injected) return
-      // Only the rollover turn counts: the pending intent must already be
-      // durable, or the injected input would be consumed by that same turn
-      // instead of riding behind the handoff.
-      const state = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id })
-      if (state.pending === null) return
-      injected = true
-      queueMicrotask(() => {
-        live.followup(createUserMessage({ content: [{ type: 'text', text: 'Carried direct input in the transition window.' }], source: { kind: 'user' } }))
+      const realOpen = ctx.sessionPersistence.open.bind(ctx.sessionPersistence)
+      ctx.sessionPersistence.open = async (id, access, options) => {
+        if (id === sessionId) throw new SessionFormatUnsupportedError('cannot safely transform unclassified message source (test seam)')
+        return realOpen(id, access, options)
+      }
+      await initialFiber.dispose()
+      await new Promise(resolve => setImmediate(resolve))
+      await ctx.plugin(AgentTeam)
+      await waitFor(() => {
+        const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        return status !== undefined && status.availability === 'unavailable' ? status : undefined
       })
-    })
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over now' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    disposeObserver()
-    await waitFor(() => {
-      const bodies = next.session.ownEvents().filter(event => event.type === 'user/message')
-        .map(event => JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content))
-      return bodies.some(body => body.includes('Team Inbox has unread work')) ? true : undefined
-    })
-    await next.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
 
-    const bodies = next.session.ownEvents().filter(event => event.type === 'user/message')
-      .map(event => (event as { data: { content: ReadonlyArray<{ type: string; text?: string }> } }).data.content
-        .filter(block => block.type === 'text').map(block => block.text ?? '').join(''))
-    const handoffIndex = bodies.findIndex(body => body.includes('order handoff'))
-    const carriedIndex = bodies.findIndex(body => body.includes('Carried direct input in the transition window'))
-    const inboxIndex = bodies.findIndex(body => body.includes('Team Inbox has unread work'))
-    expect(handoffIndex).toBeGreaterThanOrEqual(0)
-    expect(carriedIndex).toBeGreaterThan(handoffIndex)
-    expect(inboxIndex).toBeGreaterThan(carriedIndex)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
+      // The refusal was transient (an out-of-band repair removed it): the
+      // restart retry path re-runs the activation, which now succeeds.
+      ctx.sessionPersistence.open = realOpen
+      const recovered = await ctx.agentTeam.recoverMember({ requestId: requestId('heal-recover'), workspaceId, memberId })
+      expect(recovered.status.availability).toBe('active')
+      expect(recovered.status.diagnostic).toBeUndefined()
+    })
 
-  it('does not duplicate carried input that a restart replays from a pending inbox splice, and keeps delivery order', async () => {
-    // Call 1 is the pre-crash rollover turn; call 2 is the recovered
-    // handoff turn — gated mid-request so the carried input stays observably
-    // PENDING (spliced, unclaimed, unsurfaced) while the handoff turn runs.
-    const adapter = new GatedAdapter(2)
-    const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('pendc-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('pendc-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
+    it('logs a warning with the member handle when activation fails', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, presets, teamFiber: initialFiber } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('p3-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('p3-add'), workspaceId, handle: 'p3member', description: 'P3 failure visibility', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const memberId = added.status.member.memberId
 
-    // Crash the rollover after its commit with racing direct input in the
-    // old generation's inbox (durable splice → carried candidate).
-    presets.failingMount = true
-    adapter.enqueue(toolCallResponse('call-pendc-nc', 'context_rollover', { handoff: 'the pending-carried handoff' }))
-    adapter.enqueue(textResponse('rolling into the crash.'))
-    const live = ctx.agents.get(firstSessionId)!
-    let injected = false
-    const disposeObserver = ctx.on('session/event', (session, event) => {
-      if (session.id !== firstSessionId || event.type !== 'turn/end' || injected) return
-      const state = foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id })
-      if (state.pending === null) return
-      injected = true
-      queueMicrotask(() => {
-        live.followup(createUserMessage({ content: [{ type: 'text', text: 'Pending-splice carried input.' }], source: { kind: 'user' } }))
+      // A restart against a broken preset fails the activation; the operator
+      // must see the member handle in a warning line, not only in the status
+      // diagnostic.
+      presets.failingMount = true
+      const warn = vi.spyOn(ctx.logger, 'warn')
+      await initialFiber.dispose()
+      await new Promise(resolve => setImmediate(resolve))
+      await ctx.plugin(AgentTeam)
+      await waitFor(() => {
+        const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        return status !== undefined && status.availability === 'unavailable' && status.diagnostic?.class === 'preset-composition' ? status : undefined
       })
+      const failures = warn.mock.calls.map(args => String(args[0])).filter(text => text.includes('activation failed'))
+      expect(failures.length).toBeGreaterThan(0)
+      expect(failures.some(text => text.includes('p3member'))).toBe(true)
+      warn.mockRestore()
     })
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over into the crash' }], source: { kind: 'user' } }))
-    await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId
-        && current.availability === 'unavailable'
-        && current.diagnostic?.class === 'preset-composition' ? current : undefined
-    })
-    disposeObserver()
-    expect(injected).toBe(true)
-    const newSessionId = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!.member.sessionId
-
-    // First restart: recovery steers the handoff (call 2, gated mid-request)
-    // and the carried input rides the follow-up lane behind it. While the
-    // handoff model call blocks, the carried input is provably in the
-    // PENDING state: queued in the live inbox, claimed by no turn, surfaced
-    // as no `user/message` — the exact claim-before-surface seam a crash
-    // between the two turns would hit.
-    presets.failingMount = false
-    await initialFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    const secondFiber = await ctx.plugin(AgentTeam)
-    const firstRestart = await waitFor(() => {
-      const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
-      return status !== undefined && status.availability === 'active' ? status : undefined
-    })
-    expect(firstRestart.member.sessionId).toBe(newSessionId)
-    await adapter.started.promise
-    const firstRestartAgent = (await waitFor(() => ctx.agents.get(newSessionId)!))!
-    const pendingCarried = [...firstRestartAgent.inbox.nextStep, ...firstRestartAgent.inbox.nextTurn]
-      .filter(message => JSON.stringify(message.content).includes('Pending-splice carried input'))
-    const surfacedCarried = firstRestartAgent.session.ownEvents().filter(event => event.type === 'user/message'
-      && JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content).includes('Pending-splice carried input'))
-    expect(pendingCarried.length).toBeGreaterThanOrEqual(1)
-    expect(surfacedCarried).toHaveLength(0)
-
-    // Release the gate: the handoff turn completes, the carried turn claims
-    // and surfaces the input exactly once. A crash HERE would replay the
-    // splice; a later restart must never duplicate the delivered message.
-    adapter.release.resolve()
-    await waitFor(() => {
-      const surfaced = firstRestartAgent.session.ownEvents().filter(event => event.type === 'user/message')
-        .map(event => JSON.stringify((event as { data: { content: readonly unknown[] } }).data.content))
-      return surfaced.some(body => body.includes('Pending-splice carried input')) ? true : undefined
-    })
-    await firstRestartAgent.whenIdle()
-
-    // Second Host restart after the carried input landed: delivered-id
-    // dedupe keeps it at exactly one, and the order stays stable.
-    await ctx.agentTeam.suspendMember({ requestId: requestId('pendc-suspend'), memberId })
-    await secondFiber.dispose()
-    await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
-    adapter.enqueue(textResponse('carried input handled.'))
-    await ctx.agentTeam.resumeMember({ requestId: requestId('pendc-resume'), memberId })
-    const resumed = await waitFor(() => {
-      const agent = ctx.agents.get(newSessionId)
-      return agent !== undefined && agent.status === 'idle' ? agent : undefined
-    })
-    await resumed.whenIdle()
-    await new Promise(resolve => setTimeout(resolve, 100))
-
-    const bodies = resumed.session.ownEvents().filter(event => event.type === 'user/message')
-      .map(event => (event as { data: { content: ReadonlyArray<{ type: string; text?: string }> } }).data.content
-        .filter(block => block.type === 'text').map(block => block.text ?? '').join(''))
-    const carried = bodies.filter(body => body.includes('Pending-splice carried input'))
-    expect(carried).toHaveLength(1)
-    const handoffPos = bodies.findIndex(body => body.includes('the pending-carried handoff'))
-    const carriedPos = bodies.findIndex(body => body.includes('Pending-splice carried input'))
-    expect(handoffPos).toBeGreaterThanOrEqual(0)
-    expect(carriedPos).toBeGreaterThan(handoffPos)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('rejects returning a small current child to an ancestor seed priced above the handoff budget', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('biga-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('biga-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Generation 1's only work turn records an anchor while "large": the
-    // meter reads far above the handoff budget for GENERATION 1's own
-    // replayed measurement. The current generation stays small (5K) so only
-    // the source-replayed pricing can catch the oversized ancestor seed —
-    // the old current-usage pricing would have estimated a few thousand
-    // tokens and waved the return through.
-    pressureState.usageTokens = 5_000
-    adapter.enqueue(toolCallResponse('call-biga-cp', 'context_checkpoint', { name: 'big anchor' }))
-    adapter.enqueue(textResponse('big anchor recorded.'))
-    const live = ctx.agents.get(firstSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'record the big anchor' }], source: { kind: 'user' } }))
-    await waitFor(() => foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id }).checkpoints.some(entry => entry.turnEndSeq !== -1) ? true : undefined)
-    await live.whenIdle()
-
-    // Fresh rollover into a small generation 2: the current child is cheap,
-    // but the ANCESTOR's anchor retains the ancestor's real size.
-    adapter.enqueue(toolCallResponse('call-biga-nc', 'context_rollover', { handoff: 'small fresh generation' }))
-    adapter.enqueue(textResponse('small generation running.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over fresh' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-    // The ancestor grew large by the time it is REPLAYED — no live
-    // generation sees the big number; only the source-replayed pricing
-    // (timeline and return guard) reads it.
-    pressureState.bySession.set(firstSessionId, 500_000)
-
-    // The timeline prices the ancestor anchor against the ANCESTOR's own
-    // measurement (replayed through the meter): the retained estimate stays
-    // above the handoff budget even though the current generation is tiny.
-    const timeline = await ctx.agentTeam.contextTimelineForAgent(next, { memberId })
-    const anchor = timeline.items.find(item => item.checkpointRef === checkpointRefFor(firstSessionId, 'call-biga-cp'))
-    expect(anchor).toBeDefined()
-    expect(anchor!.restorable).toBe(false)
-    expect(anchor!.reason).toContain('handoff budget')
-    // And the return is refused: a small child must not adopt an
-    // over-budget ancestor seed.
-    adapter.enqueue(toolCallResponse('call-biga-return', 'context_rollover', { handoff: 'attempt the big return', checkpointRef: anchor!.checkpointRef }))
-    adapter.enqueue(textResponse('the big return was refused.'))
-    next.followup(createUserMessage({ content: [{ type: 'text', text: 'try returning to the big anchor' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, next)
-    await new Promise(resolve => setTimeout(resolve, 100))
-    const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!
-    expect(current.member.sessionId).toBe(renewed.member.sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  it('fails closed when the ancestor seed source cannot be measured', async () => {
-    const adapter = new ScriptedAdapter()
-    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('unmeas-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const added = await ctx.agentTeam.addMember({ requestId: requestId('unmeas-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const memberId = added.status.member.memberId
-    const firstSessionId = added.status.member.sessionId
-
-    // Generation 1 records an anchor; a fresh rollover follows.
-    adapter.enqueue(toolCallResponse('call-unmeas-cp', 'context_checkpoint', { name: 'ancestor anchor' }))
-    adapter.enqueue(textResponse('anchor recorded.'))
-    const live = ctx.agents.get(firstSessionId)!
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'record the anchor' }], source: { kind: 'user' } }))
-    await waitFor(() => foldTeamContextProjection(live.session.ownEvents(), { sessionId: live.session.id }).checkpoints.some(entry => entry.turnEndSeq !== -1) ? true : undefined)
-    await live.whenIdle()
-
-    adapter.enqueue(toolCallResponse('call-unmeas-nc', 'context_rollover', { handoff: 'fresh generation' }))
-    adapter.enqueue(textResponse('fresh generation running.'))
-    live.followup(createUserMessage({ content: [{ type: 'text', text: 'roll over fresh' }], source: { kind: 'user' } }))
-    const renewed = await waitFor(() => {
-      const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)
-      return current !== undefined && current.member.sessionId !== firstSessionId ? current : undefined
-    })
-    const next = await waitFor(() => ctx.agents.get(renewed.member.sessionId)!)
-    await waitFor(() => next.session.ownEvents().some(event => event.type === 'user/message') ? true : undefined)
-    await next.whenIdle()
-
-    // The ancestor's measurement now fails (the meter throws for it): the
-    // ancestor anchor must become non-restorable with an explicit reason —
-    // never priced as zero — and the return must be refused outright.
-    pressureState.failFor.add(firstSessionId)
-    const timeline = await ctx.agentTeam.contextTimelineForAgent(next, { memberId })
-    const anchor = timeline.items.find(item => item.checkpointRef === checkpointRefFor(firstSessionId, 'call-unmeas-cp'))
-    expect(anchor).toBeDefined()
-    expect(anchor!.restorable).toBe(false)
-    expect(anchor!.reason).toContain('cannot be measured')
-
-    adapter.enqueue(toolCallResponse('call-unmeas-return', 'context_rollover', { handoff: 'attempt the unmeasurable return', checkpointRef: anchor!.checkpointRef }))
-    adapter.enqueue(textResponse('the unmeasurable return was refused.'))
-    next.followup(createUserMessage({ content: [{ type: 'text', text: 'try returning to the unmeasurable anchor' }], source: { kind: 'user' } }))
-    await waitForIdle(ctx, next)
-    await new Promise(resolve => setTimeout(resolve, 100))
-    const current = ctx.agentTeam.members().find(status => status.member.memberId === memberId)!
-    expect(current.member.sessionId).toBe(renewed.member.sessionId)
-    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
-  })
-
-  /** Count handoff-sourced user messages in one agent's own log. */
-  function archivedHandoffs(agent: ReturnType<Context['agents']['get']>): readonly unknown[] {
-    return agent!.session.ownEvents().filter(event => event.type === 'user/message'
-      && isHandoffMessage(event.data))
-  }
 })
+
 describe('Agent Team Member private memory directory sanitization (issue #7)', () => {
   it('derives a Windows-safe directory segment without touching the member ref', async () => {
     const { memberMemoryDirectoryName } = await import('../src/member-runtime.ts')
@@ -5502,5 +3135,276 @@ describe('Agent Team private memory scaffold language (issue #43 #4)', () => {
     await ctx.agentTeam.suspendMember({ requestId: requestId('scaffold-suspend'), memberId: added.status.member.memberId })
     await ctx.agentTeam.resumeMember({ requestId: requestId('scaffold-resume'), memberId: added.status.member.memberId })
     expect(await readFile(memoryPath, 'utf8')).toBe('# Member memory\n\nhand-written\n')
+  })
+})
+
+describe('Agent Team wake-slot generation swap (ticket 05)', () => {
+  /**
+   * One Member with a real log, priced above the context waterline, woken after
+   * `idleMs` of wall clock. The clock is moved rather than the timestamps: the
+   * decision reads `Date.now()` against the log's own event times.
+   */
+  async function coldMember(idleMs: number, contextTokens: number): Promise<{
+    readonly ctx: Context
+    readonly adapter: ScriptedAdapter
+    readonly memberId: AgentTeamMemberId
+    readonly sessionId: SessionId
+    readonly pressureState: { usageTokens: number; bySession: Map<string, number>; failFor: Set<string> }
+  }> {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+    const channel = await ctx.agentTeam.createChannel({ requestId: requestId(`wake-channel-${idleMs}`), workspaceId, name: 'engineering', description: 'Engineering work' })
+    const added = await ctx.agentTeam.addMember({ requestId: requestId(`wake-builder-${idleMs}`), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    adapter.enqueue(textResponse('First look done.'))
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+    await agent.whenIdle()
+    pressureState.bySession.set(added.status.member.sessionId, contextTokens)
+    await vi.advanceTimersByTimeAsync(idleMs)
+    return { ctx, adapter, memberId: added.status.member.memberId, sessionId: added.status.member.sessionId, pressureState }
+  }
+
+  it('swaps a generation that idled past the cache TTL with a large context, and the waking message opens the new one', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const { ctx, adapter, memberId, sessionId } = await coldMember(61 * 60_000, 130_000)
+      const workspaceId = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!.member.workspaceId
+      const channelRef = ctx.agentTeam.view({ workspaceId }).channels[0]!.channelRef
+
+      adapter.enqueue(textResponse('Read the waking message in the fresh context.'))
+      const sent = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('wake-message'), workspaceId,
+        channelRef, body: 'Please pick this up now', recipients: [memberId] })
+      expect(sent.kind).toBe('committed')
+
+      // The swap runs through the lifecycle queue; fake timers only move the
+      // clock, so the chain is driven by advancing the timer queue itself.
+      const successor = await vi.waitFor(() => {
+        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        if (current === undefined || current.member.sessionId === sessionId) throw new Error('swap not applied yet')
+        return current.member.sessionId
+      }, { timeout: 20_000 })
+      // The retired log is archived, never deleted, and the binding moved.
+      expect(ctx.workspaceRegistry.archivedSessionIds).toContain(sessionId)
+      // Availability flips to active only once the successor's Agent is live;
+      // reading it immediately after the binding moved sees the window in
+      // between, so wait for the settled value instead of a one-shot read.
+      await vi.waitFor(() => {
+        const availability = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.availability
+        if (availability !== 'active') throw new Error(`member not active yet: ${availability}`)
+      }, { timeout: 20_000 })
+      const fresh = await vi.waitFor(() => {
+        const live = ctx.agents.get(successor)
+        if (live === undefined || live.status !== 'idle') throw new Error('successor not idle yet')
+        return live
+      }, { timeout: 20_000 })
+      await fresh.whenIdle()
+
+      // The successor's first request carries the waking message and the
+      // ordinary per-step environment block — nothing announces a swap.
+      const firstRequest = JSON.stringify(adapter.requests.at(-1)!.messages)
+      expect(firstRequest).toContain('Please pick this up now')
+      expect(firstRequest).toContain('Team identity: you are @builder')
+      expect(firstRequest).not.toMatch(/handoff|new generation|previous context|context was (?:reset|rebuilt)/i)
+      expect(ctx.agentTeam['ledger']!.status().sequence).toBeGreaterThan(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('delivers into the same generation when the idle gap is under the cache TTL', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const { ctx, adapter, memberId, sessionId } = await coldMember(59 * 60_000, 130_000)
+      const workspaceId = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!.member.workspaceId
+      const channelRef = ctx.agentTeam.view({ workspaceId }).channels[0]!.channelRef
+      const agent = ctx.agents.get(sessionId)!
+
+      // Pricing a generation is a full replay, so it must stay behind the idle
+      // gate: a wake that fails the cheap gates never reaches the meter.
+      const meter = ctx.tokenMeter as { measure: (session: unknown) => unknown }
+      const measure = vi.spyOn(meter, 'measure')
+      adapter.enqueue(textResponse('Continuing in the same context.'))
+      const sent = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('warm-message'), workspaceId,
+        channelRef, body: 'Continue please', recipients: [memberId] })
+      expect(sent.kind).toBe('committed')
+      await agent.whenIdle()
+      expect(measure).not.toHaveBeenCalled()
+      measure.mockRestore()
+
+      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
+      expect(JSON.stringify(adapter.requests.at(-1)!.messages)).toContain('Continue please')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a small cold context on its own generation', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const { ctx, adapter, memberId, sessionId } = await coldMember(3 * 60 * 60_000, 40_000)
+      const workspaceId = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!.member.workspaceId
+      const channelRef = ctx.agentTeam.view({ workspaceId }).channels[0]!.channelRef
+      const agent = ctx.agents.get(sessionId)!
+
+      adapter.enqueue(textResponse('Continuing in the same context.'))
+      await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('small-message'), workspaceId,
+        channelRef, body: 'Continue please', recipients: [memberId] })
+      await agent.whenIdle()
+
+      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('Agent Team wake-slot swap delivery windows (ticket 05)', () => {
+  it('hands a DM to the swapped-in generation instead of reporting a delivery failure', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('dm-wake-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const sender = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-sender'), workspaceId, handle: 'sender', description: 'Sends', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const receiver = await ctx.agentTeam.addMember({ requestId: requestId('dm-wake-receiver'), workspaceId, handle: 'receiver', description: 'Receives', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const senderAgent = ctx.agents.get(sender.status.member.sessionId)!
+      const receiverAgent = ctx.agents.get(receiver.status.member.sessionId)!
+      adapter.enqueue(textResponse('First look done.'))
+      receiverAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await receiverAgent.whenIdle()
+      pressureState.bySession.set(receiver.status.member.sessionId, 130_000)
+      await vi.advanceTimersByTimeAsync(61 * 60_000)
+
+      adapter.enqueue(textResponse('Answering the DM from the fresh context.'))
+      await expect(ctx.agentTeam.dmForAgent(senderAgent, { requestId: requestId('dm-wake'), workspaceId,
+        recipientMemberId: receiver.status.member.memberId, body: 'are you back?' })).resolves.toBeDefined()
+
+      const successor = await vi.waitFor(() => {
+        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === receiver.status.member.memberId)
+        if (current === undefined || current.member.sessionId === receiver.status.member.sessionId) throw new Error('swap not applied yet')
+        return current.member.sessionId
+      }, { timeout: 20_000 })
+      const fresh = await vi.waitFor(() => {
+        const live = ctx.agents.get(successor)
+        if (live === undefined || live.status !== 'idle') throw new Error('successor not idle yet')
+        return live
+      }, { timeout: 20_000 })
+      await fresh.whenIdle()
+
+      // The relay landed in the successor: the DM was recorded durably and the
+      // swap never turned into an `AgentTeamDmDeliveryError`.
+      const relayed = adapter.requests.map(request => JSON.stringify(request.messages))
+        .some(messages => messages.includes('are you back?'))
+      expect(relayed).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('Agent Team cold-generation activation (ticket 05)', () => {
+  it('starts a fresh generation at startup instead of resuming a cold, large Session', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState, teamFiber } = await realHarness(adapter)
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [] })
+      const memberId = added.status.member.memberId
+      const sessionId = added.status.member.sessionId
+      const agent = ctx.agents.get(sessionId)!
+      adapter.enqueue(textResponse('First look done.'))
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+
+      pressureState.bySession.set(sessionId, 130_000)
+      await vi.advanceTimersByTimeAsync(61 * 60_000)
+
+      // A restart re-activates from the ledger binding alone: the stored log is
+      // priced first, and a cold generation is never even resumed.
+      await teamFiber.dispose()
+      await ctx.plugin(AgentTeam)
+
+      const successor = await vi.waitFor(() => {
+        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        if (current === undefined || current.member.sessionId === sessionId) throw new Error('swap not applied yet')
+        return current.member.sessionId
+      }, { timeout: 20_000 })
+      expect(ctx.agents.get(successor)).toBeDefined()
+      expect(ctx.agents.get(sessionId)).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('swaps a cold generation reached through resume, inside that request\'s own lifecycle chain', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState, archived } = await realHarness(adapter)
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('resume-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [] })
+      const memberId = added.status.member.memberId
+      const sessionId = added.status.member.sessionId
+      const agent = ctx.agents.get(sessionId)!
+      adapter.enqueue(textResponse('First look done.'))
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+
+      pressureState.bySession.set(sessionId, 130_000)
+      await vi.advanceTimersByTimeAsync(61 * 60_000)
+      await ctx.agentTeam.suspendMember({ requestId: requestId('resume-wake-suspend'), memberId })
+      adapter.enqueue(textResponse('Resumed into a fresh context.'))
+
+      // Resume activates the stored, cold Session from inside its own lifecycle
+      // chain; the swap that activation requests must run in that frame rather
+      // than queue behind the operation awaiting it.
+      const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('resume-wake'), memberId })
+      const successor = await vi.waitFor(() => {
+        const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
+        if (current === undefined || current.member.sessionId === sessionId) throw new Error('swap not applied yet')
+        return current.member.sessionId
+      }, { timeout: 20_000 })
+      expect(String(successor)).toMatch(/^agent-team-recycle-[0-9a-f]{64}$/)
+      expect(ctx.agents.get(successor)).toBeDefined()
+      expect(archived).toContain(sessionId)
+      expect(resumed.status.member.sessionId).toBe(sessionId)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resumes the stored Session at startup while the cache may still be warm', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState, teamFiber } = await realHarness(adapter)
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('boot-warm-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [] })
+      const memberId = added.status.member.memberId
+      const sessionId = added.status.member.sessionId
+      const agent = ctx.agents.get(sessionId)!
+      adapter.enqueue(textResponse('First look done.'))
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Take a first look.' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+
+      pressureState.bySession.set(sessionId, 130_000)
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+
+      await teamFiber.dispose()
+      await ctx.plugin(AgentTeam)
+
+      await vi.waitFor(() => {
+        const live = ctx.agents.get(sessionId)
+        if (live === undefined) throw new Error('not reactivated yet')
+      }, { timeout: 20_000 })
+      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

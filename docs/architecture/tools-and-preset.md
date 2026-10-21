@@ -6,42 +6,27 @@ The explicit `team-member` preset is the only Team Member composition. It adds c
 
 Every row `name:` is a bare specifier the Loader resolves against the profile, not against this bundle. A profile links this bundle and the host closure, so a row may name a host package or one of this bundle's own subpaths, and never a package nested inside this bundle's dependency tree. A name that resolves in a working tree can still leave the row `never started` in a real install, so a dependency's module reaches a row only through a re-export under this bundle's own name.
 
-The eleven tools are defined in `packages/tool-agent-team/src/` — the seven Team tools in `index.ts`, the four context tools in `context-tools.ts`; their contract is in [`tools.md`](../team-collaboration/tools.md). They mount under the isolated `team-member` preset. The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
+The seven tools are defined in `packages/tool-agent-team/src/index.ts`; their contract is in [`tools.md`](../team-collaboration/tools.md). They mount under the isolated `team-member` preset. The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
 
-All four context tools are the engine's own definitions: `context-tools.ts` builds `context_rollover`, `context_checkpoint`, `context_status`, and `context_compact` through the engine's `createContinuityTools`, supplying Team vocabulary and the host adapter rather than its own prose or validation. The engine's copy therefore always names a tool this surface has, and Team's own glossary travels through the engine's `timelineGuidance` seam.
+A Member has no context tool at all. Its Session is compacted in place by the engine when it grows large — the preset's `compaction-basic` row mounts this bundle's own `team-compaction-engine`, a `BasicCompactionEngine` subclass that only supplies the measured seven-section summary template, with `auto` on and the trigger at 256K. Generation swaps are Host decisions, never model ones, so there is nothing for a tool to schedule and nothing for a model to cite.
 
-One Team rule stays in the adapter, because the engine renders a row's `ref` on every row. A row that is not restorable answers with a short digest of that ref instead of the ref itself, so no non-selectable row ever carries a citable string.
-
-Member context self-management is Host-orchestrated on top of that preset. The `context_rollover` and `context_checkpoint` tools only validate and conclude/anchor the turn. At tool time the engine's gate refuses a `checkpointRef` the Member's own `context_status` does not list as restorable, and every ref that passes it is still prevalidated by the Host's seed resolver — the one the swap uses — so a ref that cannot succeed rejects as a model-visible error result instead of a fake `scheduled`. The mutable guard set (jobs, route limits) is revalidated at the commit seam.
-
-A single context-continuity coordinator (`ContextContinuityCoordinator` from `@contexera/dsh-context-continuity`) is bound to the Member lifecycle by `context-continuity-host.ts`, which also supplies the engine's message codec with Team's plugin id and the frozen handoff prose. It watches each Member Session's events, folds rollover and checkpoint intent from the durable `tool/call`+`tool/result` pairs, and executes the swap through the serialized lifecycle queue.
-
-The fold is the engine's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` supplies only the Team half:
-
-- the host hooks that resolve `context-checkpoint-*`/`team-boundary-*` refs, classify a boundary as `team-boundary`, `handoff`, or `compaction`, attribute a claim boundary to its ledger Thread, and recognize Team notices;
-- the adapter that reads the engine state.
-
-The unit carries the fork cut, so a seeded child's inherited prefix folds back to the same reference. The swap then runs in order:
+The generation swap is owned by `team-context-management.ts`, Team's own coordinator. It watches each Member Session's events, derives the pending intent from the durable `tool/call`+`tool/result` pairs (legacy logs still carry rollover pairs written by earlier builds; no current build produces them), and executes the swap through the serialized lifecycle queue:
 
 1. wait for true idle;
 2. recheck the owned-jobs guard at the commit seam;
 3. retire the old generation (dispose + archive, never delete);
-4. commit the idempotent `team/member-session-rolled-over` operation;
-5. activate a fresh Session — or a seeded Session for a checkpoint return, with the exact completed-turn prefix and its seed source as lineage parent;
-6. deliver the handoff via steer and any carried non-Team input via followup.
+4. commit the idempotent `team/member-session-recycled` operation as the Host actor;
+5. activate the fresh Session, parented at the one it replaces;
+6. deliver any carried non-Team input via followup, then rederive the Inbox.
 
-Intent is one-per-unresolved-turn at the fold. A second successful rollover call inside the same unresolved turn is first-wins, and a pending whose turn ended is the ready (or, after a restart, recoverable) intent — the coordinator's process lock rejects a later call on the normal in-flight path. Only once that lock is gone (the transition failed or never ran) can a later-turn successful rollover replace the ended intent, which is the retry path that recovers the Member after a seam failure.
+The successor's first model-facing context is its ordinary per-step injection — identity, `memory.md`, the workspace list — plus the message that woke it. There is no handoff envelope and no generation announcement: a successor told it received a handoff performs a handoff instead of reading its memory.
 
-The admission gate (`agent/turn-stopping` + `agent/pre-step`) is armed only for the outgoing generation's Agent instance so later input cannot open another old-generation model request. Quiet checkpoint continuations deliver exactly once (per-member latch in-process, the projection's durable delivery record across restarts).
+The fold is Team's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` carries the durable ref naming, the Team-notice rule, the boundary classification (`team-boundary`, `handoff`, `compaction`), the claim boundary's Task→Thread attribution, and the fork cut, so a seeded child's inherited prefix folds back to the same reference. `context-codec.ts` is the one writer of the two envelopes it reads back, byte-identical to what earlier builds wrote.
 
-Recovery is log-derived. A restart replays pending intent and finishes the swap; a restart between the durable rollover commit and the new Session's activation reconstructs the handoff from the ledger-recorded previous Session — even when the new Session never materialized before the crash — and the reconstruction is idempotent (a generation whose own log already carries a handoff never receives a second one).
+Crash recovery is log-derived. A restart replays a pending intent and finishes the swap; a legacy pending whose containing turn never ended durably is spent and is discarded instead of leaving the generation permanently un-swappable.
+
+Quiet checkpoint continuations deliver exactly once (per-member latch in-process, the projection's durable delivery record across restarts).
 
 Carried-input replay after a restart is bounded. A current generation that already started its own turns skips the replay (its carried input was delivered or superseded while it ran). An unreadable retired previous Session fails open with a warning for two bounded classes — log corruption (`corrupt session log`, whose torn tail the Host repairs) and a deterministic released-format refusal (`SessionFormatUnsupportedError`, which no retry can change) — while missing/IO and unknown causes stay fail-closed, so a retired generation's readability never gates the Member's activation once the current one has run.
 
 Whether a Member Session has durable persisted content is decided through session-persistence inspection (which awaits in-flight retirement drains), never a bare metadata listing that races a suspend's final flush.
-
-Context pressure is the engine's own policy (`ContextPressurePolicy`) over a Team host, riding the same pre-step seam. Budget thresholds derive from the live route's context window (200K handoff / 256K hard caps with a safety reserve). At the handoff budget one notice per generation leads with a self-summarized in-place `context_compact` and keeps `context_rollover` for work that has turned a page (re-armed after one); at the hard limit the policy forces an in-place compaction and fails closed when it cannot prove progress; a provider context-overflow failure gets one bounded compact-and-retry sequence.
-
-A step arriving into a large context after a long idle gap is put to the relatedness judge first. When the judge reads the arriving input as unrelated work, the policy keeps that input and steers one rollover instruction in its place, and the held input returns once the driver converges — or rides into the next generation when the rollover lands. Team supplies the per-Member readings (limits, surface, log span, compaction, work in hand) and the judge; the decision order, the notice latch and the fail-closed proof stay the engine's.
-
-In-place hard compaction never cancels the owner, so it stays exempt from the rollover job guard that rejects switches over running or unreported-terminal jobs.

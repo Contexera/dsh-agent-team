@@ -10,6 +10,7 @@ import type {
   AgentTeamAddMemberRequest,
   AgentTeamAttachmentId,
   AgentTeamAgentMember,
+  AgentTeamActor,
   AgentTeamArchiveChannelRequest,
   AgentTeamArchiveChannelResult,
   AgentTeamArchiveMemberRequest,
@@ -41,6 +42,7 @@ import type {
   AgentTeamActiveTaskThread,
   AgentTeamDmResult,
   AgentTeamDmSentOperation,
+  AgentTeamHostActor,
   AgentTeamHumanActor,
   AgentTeamInbox,
   AgentTeamInboxActor,
@@ -59,6 +61,7 @@ import type {
   AgentTeamMemberResumedOperation,
   AgentTeamMemberSessionRenewedOperation,
   AgentTeamMemberSessionRolledOverOperation,
+  AgentTeamMemberSessionRecycledOperation,
   AgentTeamMemberSessionRestartedOperation,
   AgentTeamMemberSuspendedOperation,
   AgentTeamMemberUpdatedOperation,
@@ -160,6 +163,18 @@ export function agentTeamHumanActor(): AgentTeamHumanActor {
   return HUMAN_ACTOR
 }
 
+const HOST_ACTOR: AgentTeamHostActor = Object.freeze({ kind: 'host', handle: 'agent-team' })
+
+function freezeActor(actor: AgentTeamActor): AgentTeamActor {
+  if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
+  if (actor.kind === 'human') return Object.freeze({ kind: 'human', memberId: actor.memberId, handle: actor.handle })
+  return Object.freeze({ kind: 'member', memberId: actor.memberId, handle: actor.handle })
+}
+
+export function agentTeamHostActor(): AgentTeamHostActor {
+  return HOST_ACTOR
+}
+
 /** Caller-owned payload of the idempotent Team initialization request. */
 export interface AgentTeamInitializeRequest {
   readonly requestId: AgentTeamRequestId
@@ -191,9 +206,10 @@ export interface AgentTeamAuthorizedRenewMemberSessionRequest {
 }
 
 /**
- * Member-authored intent to continue in its next private context generation.
- * The requestId and new Session id derive stably from the successful
- * `context_rollover` tool call so crash replay converges on one operation.
+ * The retired Member-authored rollover request. No current build produces one:
+ * the Host records its own swaps through {@link AgentTeamAuthorizedRecycleMemberSessionRequest}.
+ * Kept because the durable schema is a strict union — a ledger written by an
+ * earlier build still decodes through it.
  */
 export interface AgentTeamAuthorizedRolloverMemberSessionRequest {
   readonly requestId: AgentTeamRequestId
@@ -205,9 +221,9 @@ export interface AgentTeamAuthorizedRolloverMemberSessionRequest {
   readonly previousSessionId: SessionId
   /** The next generation Session, derived from the successful tool call. */
   readonly newSessionId: SessionId
-  /** Seq of the successful `context_rollover` tool result in the previous Session log. */
+  /** Seq of the retired rollover tool result in the previous Session log. */
   readonly handoffEventSeq: SessionSeq
-  /** Why the rollover happened: the model asked, or honored a pressure notice. */
+  /** Why the recorded rollover happened: the model asked, or honored a pressure notice. */
   readonly trigger: 'model' | 'pressure'
   /** Seed source Session for a checkpoint return; absent on a fresh rollover. */
   readonly sourceSessionId?: SessionId
@@ -215,6 +231,16 @@ export interface AgentTeamAuthorizedRolloverMemberSessionRequest {
   readonly sourceThroughSeq?: SessionLogOffset
   /** The checkpoint a return was addressed to; absent on a fresh rollover. */
   readonly checkpointRef?: AgentTeamContextCheckpointRef
+}
+
+/** Host-authorized recycling of one cold Member generation onto a fresh Session. */
+export interface AgentTeamAuthorizedRecycleMemberSessionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly memberId: AgentTeamMemberId
+  readonly actor: AgentTeamHostActor
+  readonly previousSessionId: SessionId
+  readonly newSessionId: SessionId
 }
 
 export interface AgentTeamAuthorizedJoinChannelRequest extends AgentTeamJoinChannelRequest {
@@ -779,13 +805,11 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Move one enabled Member onto its next context generation as itself. The
-   * actor is the calling Member — the Host executes the transition but is
-   * never the business actor — and the durable data records only the
-   * verifiable envelope (previous/new Session anchors, the successful handoff
-   * tool-result seq, checkpoint seed lineage, trigger). The private handoff
-   * prose stays in the Member's own Session log. An exact retry resolves to
-   * the recorded outcome; the same requestId with different data collides.
+   * The retired Member-actor rollover. No current flow calls it: a swap is the
+   * Host's decision and records itself through `recycleMemberSession`. It
+   * stays because a ledger written by an earlier build still replays through
+   * it, and an exact retry must still resolve to the recorded outcome while
+   * the same requestId with different data collides.
    */
   rolloverMemberSession(request: AgentTeamAuthorizedRolloverMemberSessionRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
     return this.enqueue(async () => {
@@ -823,16 +847,45 @@ export class AgentTeamLedger {
     })
   }
 
+  /**
+   * Move one enabled Member from a cold generation onto a fresh Session. The
+   * two existing transitions carry an authority this decision lacks — a renewal
+   * is Human intent, a rollover is the Member's own — so the Host records
+   * itself rather than borrowing either.
+   */
+  recycleMemberSession(request: AgentTeamAuthorizedRecycleMemberSessionRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameMemberSessionRecycled(existing, request)
+        return this.resolved(this.memberResult(existing))
+      }
+      if (request.actor.kind !== 'host') throw new Error('Member session recycling requires Host authority')
+      const prior = this.requireMember(request.memberId)
+      if (prior.state !== 'enabled') throw new Error(`Agent Member '${prior.handle}' is ${prior.state}; only enabled Members can recycle their Session`)
+      if (prior.sessionId !== request.previousSessionId) throw new Error(`Agent Member '${prior.handle}' is no longer bound to Session '${request.previousSessionId}'`)
+      if (request.newSessionId === request.previousSessionId) throw new Error(`Agent Member '${prior.handle}' already runs Session '${request.newSessionId}'`)
+      const member = Object.freeze({ ...prior, sessionId: request.newSessionId })
+      const operation: AgentTeamMemberSessionRecycledOperation = Object.freeze({
+        ...this.operationBase(request, this.nextSequence()), kind: 'team/member-session-recycled',
+        actor: Object.freeze({ ...request.actor }),
+        data: Object.freeze({ member, previousSessionId: request.previousSessionId, newSessionId: request.newSessionId }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.memberResult(operation))
+    })
+  }
+
   getMember(memberId: AgentTeamMemberId): AgentTeamAgentMember | undefined {
     return this.state.members.get(memberId)
   }
 
   /**
-   * The retired Session this Member most recently left through a renewal or
-   * rollover — the lineage parent a crash between the durable binding commit
-   * and the new Session's activation must reconstruct a handoff from. Read
-   * from the audit projection; the Member record itself only names the
-   * current Session.
+   * The retired Session this Member most recently left through a renewal or a
+   * swap — the lineage parent a crash between the durable binding commit and
+   * the new Session's activation recreates the successor from. Read from the
+   * audit projection; the Member record itself only names the current Session.
    */
   previousSessionForMember(memberId: AgentTeamMemberId): SessionId | undefined {
     return this.state.previousSessions.get(memberId)
@@ -840,11 +893,10 @@ export class AgentTeamLedger {
 
   /**
    * The latest session transition this Member committed: the retired Session
-   * and the target it moved onto, through either a renewal or a rollover.
-   * Crash recovery binds carried-input redelivery to the recorded target —
-   * the CURRENT Session being that target proves the old generation's
-   * unconsumed input still belongs here, regardless of whether the handoff
-   * itself already landed.
+   * and the target it moved onto, through a renewal or a swap. Crash recovery
+   * binds carried-input redelivery to the recorded target — the CURRENT
+   * Session being that target proves the old generation's unconsumed input
+   * still belongs here.
    */
   lastTransitionForMember(memberId: AgentTeamMemberId): { readonly previousSessionId: SessionId; readonly targetSessionId: SessionId } | undefined {
     const previousSessionId = this.state.previousSessions.get(memberId)
@@ -862,43 +914,6 @@ export class AgentTeamLedger {
     const task = this.state.tasks.get(taskRef)
     if (task === undefined) return undefined
     return this.visibleChannel(this.state.channels.get(task.channelRef)) === undefined ? undefined : task.threadRef
-  }
-
-  /**
-   * The seed envelope of this Member's most recent rollover, when that
-   * rollover was a checkpoint return: the recorded source Session, the
-   * exclusive end of its seeded prefix, and the checkpoint ref. A fresh
-   * rollover clears the envelope. Crash recovery reads this to rebuild the
-   * child generation from the recorded seed instead of an empty context.
-   */
-  rolloverSeedForMember(memberId: AgentTeamMemberId, targetSessionId: SessionId): { readonly sourceSessionId: SessionId; readonly sourceThroughSeq: SessionLogOffset; readonly checkpointRef: AgentTeamContextCheckpointRef } | undefined {
-    const seed = this.state.rolloverSeeds.get(memberId)
-    return seed?.targetSessionId === targetSessionId ? seed : undefined
-  }
-
-  /**
-   * Count one Member's active Claims on open Tasks in active Channels — the
-   * read-only input to the checkpoint single-Thread coverage guard: with
-   * more than one, a rewind cannot be proven to stay inside one Thread.
-   */
-  activeClaimCountForMember(memberId: AgentTeamMemberId): number {
-    return this.activeClaimsForMember(memberId).length
-  }
-
-  /**
-   * One Member's active Claims on open Tasks in active Channels, oldest
-   * first — the read-only input for the pressure notice's Claim labels.
-   */
-  activeClaimsForMember(memberId: AgentTeamMemberId): readonly AgentTeamClaim[] {
-    const active: AgentTeamClaim[] = []
-    for (const claim of this.state.claims.values()) {
-      if (claim.owner !== memberId || claim.state !== 'active') continue
-      const task = this.state.tasks.get(claim.taskRef)
-      if (task === undefined || task.resolution !== 'open') continue
-      if (this.visibleChannel(this.state.channels.get(task.channelRef)) === undefined) continue
-      active.push(claim)
-    }
-    return active.sort((a, b) => a.claimRef.localeCompare(b.claimRef))
   }
 
   listMembers(): readonly AgentTeamAgentMember[] {
@@ -2046,6 +2061,7 @@ export class AgentTeamLedger {
       case 'team/member-context-cleared':
       case 'team/member-session-renewed':
       case 'team/member-session-rolled-over':
+      case 'team/member-session-recycled':
       case 'team/member-updated':
       case 'team/member-removed':
         return this.memberWorkspaceScopes(operation.data.member.memberId)
@@ -2157,6 +2173,7 @@ export class AgentTeamLedger {
       case 'team/member-context-cleared':
       case 'team/member-session-renewed':
       case 'team/member-session-rolled-over':
+      case 'team/member-session-recycled':
       case 'team/member-updated':
       case 'team/channel-member-added':
       case 'team/thread-read':
@@ -2203,13 +2220,17 @@ export class AgentTeamLedger {
       // memberId is the durable Human authority; the handle is display-only
       // and may carry a configured name (old records carry the historic
       // literal), so replay never judges it here.
-      if (operation.actor.kind !== 'human' || operation.actor.memberId !== humanMemberId) {
+      if (operation.actor.kind !== 'human' || actorMemberId() !== humanMemberId) {
         throw new Error(`agent-team operation ${operation.sequence} has invalid Human authority`)
       }
     }
+    const actorMemberId = (): AgentTeamMemberId => {
+      if (operation.actor.kind === 'host') throw new Error(`agent-team operation ${operation.sequence} has no Member actor`)
+      return operation.actor.memberId
+    }
     const assertMember = (): AgentTeamAgentMember => {
       if (operation.actor.kind !== 'member') throw new Error(`agent-team operation ${operation.sequence} requires Member authority`)
-      const member = projection.members.get(operation.actor.memberId)
+      const member = projection.members.get(actorMemberId())
       if (member === undefined || member.state !== 'enabled' || member.handle !== operation.actor.handle) {
         throw new Error(`agent-team operation ${operation.sequence} has invalid Member authority`)
       }
@@ -2271,6 +2292,16 @@ export class AgentTeamLedger {
         || prior.sessionId !== operation.data.previousSessionId
         || operation.data.member.sessionId === operation.data.previousSessionId
         || !this.sameMemberFacts(prior, operation.data.member)) throw new Error('invalid Member session renewal')
+      return
+    }
+    if (operation.kind === 'team/member-session-recycled') {
+      if (operation.actor.kind !== 'host' || operation.actor.handle !== 'agent-team') throw new Error('invalid Member session recycling authority')
+      const prior = projection.members.get(operation.data.member.memberId)
+      if (prior === undefined || prior.state !== 'enabled'
+        || prior.sessionId !== operation.data.previousSessionId
+        || operation.data.member.sessionId !== operation.data.newSessionId
+        || operation.data.member.sessionId === operation.data.previousSessionId
+        || !this.sameMemberFacts(prior, operation.data.member)) throw new Error('invalid Member session recycling')
       return
     }
     if (operation.kind === 'team/member-session-rolled-over') {
@@ -2381,7 +2412,7 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/thread-attention-changed') {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
-      if (operation.data.memberId !== operation.actor.memberId) throw new Error('Attention operation has wrong actor')
+      if (operation.actor.kind === 'host' || operation.data.memberId !== operation.actor.memberId) throw new Error('Attention operation has wrong actor')
       const thread = projection.threads.get(operation.data.thread.threadRef)
       const task = operation.data.task
       const currentTask = thread?.taskRef === undefined ? undefined : projection.tasks.get(thread.taskRef)
@@ -2404,7 +2435,7 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/thread-read') {
       if (operation.actor.kind === 'member') assertMember(); else assertHuman()
       const data = operation.data
-      if (data.memberId !== operation.actor.memberId) throw new Error('Thread read has wrong actor')
+      if (operation.actor.kind === 'host' || data.memberId !== operation.actor.memberId) throw new Error('Thread read has wrong actor')
       const target = threadReadTargetOf(data)
       if (isThreadReadSnapshot(data)) this.validateLegacyThreadReadSnapshot(data, projection, target)
       else this.validateThreadReadReceipt(data, projection, target)
@@ -2423,7 +2454,7 @@ export class AgentTeamLedger {
         || task.status !== 'todo' || task.resolution !== 'open'
         || thread.revision !== operation.sequence || task.threadRef !== thread.threadRef || thread.taskRef !== task.taskRef
         || !this.sameThread(thread, { ...priorThread, taskRef: task.taskRef, revision: operation.sequence })
-        || activity.kind !== 'promote' || activity.sequence !== operation.sequence || activity.actor !== operation.actor.memberId
+        || activity.kind !== 'promote' || activity.sequence !== operation.sequence || activity.actor !== actorMemberId()
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef) throw new Error('invalid Thread promotion')
       this.addRef(refs, task.taskRef)
       this.addRef(refs, activity.activityRef)
@@ -2436,7 +2467,7 @@ export class AgentTeamLedger {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
       const { message, task, thread } = operation.data
       const channel = projection.channels.get(message.channelRef)
-      if (channel === undefined || channel.workspaceId !== operation.data.workspaceId || message.sender !== operation.actor.memberId
+      if (channel === undefined || channel.workspaceId !== operation.data.workspaceId || message.sender !== actorMemberId()
         || message.sequence !== operation.sequence || thread.revision !== operation.sequence
         || message.threadRef !== thread.threadRef
         || (task === undefined ? message.taskRef !== undefined || thread.taskRef !== undefined
@@ -2470,7 +2501,7 @@ export class AgentTeamLedger {
       const priorThread = projection.threads.get(thread.threadRef)
       if (priorTask === undefined || priorThread === undefined || priorThread.revision !== operation.data.baseRevision
         || !this.sameTaskIdentity(priorTask, task) || task.threadRef !== thread.threadRef || task.taskRef !== thread.taskRef
-        || thread.revision !== operation.sequence || activity.sequence !== operation.sequence || activity.actor !== operation.actor.memberId
+        || thread.revision !== operation.sequence || activity.sequence !== operation.sequence || activity.actor !== actorMemberId()
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef || activity.claimRef !== claim.claimRef
         || (actor !== undefined && !this.participatesInChannelWorkspaceFrom(projection, task.channelRef, actor.memberId))) throw new Error('invalid Claim operation')
       const creates = operation.kind === 'team/claim-created'
@@ -2478,7 +2509,7 @@ export class AgentTeamLedger {
       if (activity.kind !== expectedKind || claim.taskRef !== task.taskRef || claim.threadRef !== thread.threadRef) throw new Error('invalid Claim activity')
       if (operation.actor.kind !== 'member') throw new Error('invalid Claim authority')
       if ((creates && projection.claims.has(claim.claimRef))
-        || (creates && claim.owner !== operation.actor.memberId) || (creates && claim.state !== 'active')) throw new Error('invalid Claim creation')
+        || (creates && claim.owner !== actorMemberId()) || (creates && claim.state !== 'active')) throw new Error('invalid Claim creation')
       const previousClaim = projection.claims.get(claim.claimRef)
       if (!creates && (previousClaim === undefined || previousClaim.state !== 'active' || !this.sameClaimIdentity(previousClaim, claim)
         || (operation.actor.kind === 'member' && previousClaim.owner !== operation.actor.memberId)
@@ -2486,8 +2517,8 @@ export class AgentTeamLedger {
       if (task.status !== this.deriveResolvedTaskStatus(task, new Map(projection.claims).set(claim.claimRef, claim).values())) throw new Error('invalid Claim Task status')
       this.addRef(refs, activity.activityRef)
       if (creates) this.addRef(refs, claim.claimRef)
-      const expectedInbox = creates && !this.isFollowingFrom(projection, thread.threadRef, operation.actor.memberId)
-        ? this.inboxDelta([this.startAttention(operation.actor.memberId, thread.threadRef, operation.sequence)])
+      const expectedInbox = creates && !this.isFollowingFrom(projection, thread.threadRef, actorMemberId())
+        ? this.inboxDelta([this.startAttention(actorMemberId(), thread.threadRef, operation.sequence)])
         : this.inboxDelta()
       if (!isDeepStrictEqual(operation.data.inbox, expectedInbox)) throw new Error('invalid Claim inbox projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs)
@@ -2500,7 +2531,7 @@ export class AgentTeamLedger {
       const priorThread = projection.threads.get(thread.threadRef)
       if (priorTask === undefined || priorThread === undefined || priorThread.revision !== operation.data.baseRevision
         || task.threadRef !== thread.threadRef || !this.sameThread(thread, { ...priorThread, revision: operation.sequence })
-        || activity.sequence !== operation.sequence || activity.actor !== operation.actor.memberId
+        || activity.sequence !== operation.sequence || activity.actor !== actorMemberId()
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef) throw new Error('invalid Task operation')
       const expectedResolution = activity.kind === 'accept' ? 'accepted' : activity.kind === 'close' ? 'closed' : 'open'
       const expectedStatus = expectedResolution === 'accepted' ? 'done' : expectedResolution === 'closed' ? 'closed'
@@ -2810,6 +2841,12 @@ export class AgentTeamLedger {
       target.previousSessions.set(operation.data.member.memberId, operation.data.previousSessionId)
       // A Human-side renewal is always a fresh start: a stale checkpoint
       // seed from an earlier rollover must never re-seed it.
+      target.rolloverSeeds.delete(operation.data.member.memberId)
+      return
+    }
+    if (operation.kind === 'team/member-session-recycled') {
+      target.members.set(operation.data.member.memberId, operation.data.member)
+      target.previousSessions.set(operation.data.member.memberId, operation.data.previousSessionId)
       target.rolloverSeeds.delete(operation.data.member.memberId)
       return
     }
@@ -3836,7 +3873,7 @@ export class AgentTeamLedger {
     return actor
   }
 
-  private assertHumanActor(actor: AgentTeamHumanActor): void {
+  private assertHumanActor(actor: AgentTeamActor): void {
     const initialization = this.initialization()
     // memberId is the durable Human authority; the handle is display-only.
     if (actor.kind !== 'human' || actor.memberId !== initialization.data.humanMemberId) {
@@ -4358,6 +4395,12 @@ export class AgentTeamLedger {
       || operation.data.checkpointRef !== request.checkpointRef) this.throwRequestCollision(request.requestId)
   }
 
+  private assertSameMemberSessionRecycled(operation: AgentTeamOperation, request: AgentTeamAuthorizedRecycleMemberSessionRequest): asserts operation is AgentTeamMemberSessionRecycledOperation {
+    if (operation.kind !== 'team/member-session-recycled' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.member.memberId !== request.memberId || operation.data.member.sessionId !== request.newSessionId
+      || operation.data.previousSessionId !== request.previousSessionId) this.throwRequestCollision(request.requestId)
+  }
+
   private assertSameChannelUpdate(operation: AgentTeamOperation, request: AgentTeamAuthorizedUpdateChannelRequest): asserts operation is AgentTeamChannelUpdatedOperation {
     if (operation.kind !== 'team/channel-updated' || !this.sameActor(operation.actor, request.actor)
       || operation.data.workspaceId !== request.workspaceId || operation.data.channel.channelRef !== request.channelRef
@@ -4519,8 +4562,10 @@ export class AgentTeamLedger {
       && left.privateMemoryPath === right.privateMemoryPath
   }
 
-  private sameActor(left: AgentTeamHumanActor | AgentTeamMemberActor, right: AgentTeamHumanActor | AgentTeamMemberActor): boolean {
-    return left.kind === right.kind && left.memberId === right.memberId && left.handle === right.handle
+  private sameActor(left: AgentTeamActor, right: AgentTeamActor): boolean {
+    if (left.kind !== right.kind || left.handle !== right.handle) return false
+    if (left.kind === 'host') return true
+    return right.kind !== 'host' && left.memberId === right.memberId
   }
 
   private sameList<T>(left: readonly T[], right: readonly T[]): boolean {
@@ -4562,7 +4607,7 @@ export class AgentTeamLedger {
     return Object.freeze({ receipt: this.receipt(operation), channel: operation.data.channel })
   }
 
-  private memberResult(operation: AgentTeamMemberAddedOperation | AgentTeamMemberSuspendedOperation | AgentTeamMemberResumedOperation | AgentTeamMemberSessionRestartedOperation | AgentTeamMemberSessionRenewedOperation | AgentTeamMemberSessionRolledOverOperation | AgentTeamMemberUpdatedOperation): AgentTeamDurableMemberResult {
+  private memberResult(operation: AgentTeamMemberAddedOperation | AgentTeamMemberSuspendedOperation | AgentTeamMemberResumedOperation | AgentTeamMemberSessionRestartedOperation | AgentTeamMemberSessionRenewedOperation | AgentTeamMemberSessionRolledOverOperation | AgentTeamMemberSessionRecycledOperation | AgentTeamMemberUpdatedOperation): AgentTeamDurableMemberResult {
     return Object.freeze({ receipt: this.receipt(operation), member: operation.data.member })
   }
 
@@ -4648,9 +4693,9 @@ export class AgentTeamLedger {
       releasedClaims: operation.data.claims, removedAttention: operation.data.inbox.attention.removed })
   }
 
-  private operationBase(request: { readonly requestId: AgentTeamRequestId; readonly actor: AgentTeamHumanActor | AgentTeamMemberActor }, sequence: number) {
+  private operationBase(request: { readonly requestId: AgentTeamRequestId; readonly actor: AgentTeamActor }, sequence: number) {
     return { sequence, operationId: this.createOperationId(), requestId: request.requestId, occurredAt: this.createOccurredAt(),
-      actor: Object.freeze({ ...request.actor }), previousOperationId: this.state.ordered.at(-1)?.operationId ?? null }
+      actor: freezeActor(request.actor), previousOperationId: this.state.ordered.at(-1)?.operationId ?? null }
   }
 
   private nextSequence(): number {

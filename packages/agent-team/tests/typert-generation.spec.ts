@@ -22,7 +22,6 @@ const EXPECTED_REMOTE_METHODS = [
   'changeTask',
   'changes',
   'clearMemberContext',
-  'contextJudge',
   'createChannel',
   'environment',
   'getAttachment',

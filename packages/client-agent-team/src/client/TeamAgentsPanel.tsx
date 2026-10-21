@@ -48,14 +48,14 @@ type RolloverFollow =
   | { readonly kind: 'followed'; readonly nextSessionId: MemberSessionId }
 
 /**
- * Follow a model-initiated Session rollover exactly once.
+ * Follow a Host-initiated Session swap exactly once.
  *
- * A rollover moves a Member's Session binding with no Client action. When the
+ * A swap moves a Member's Session binding with no Client action. When the
  * conversation seat is showing that Member's previous live Session, the panel
  * follows to the new one — but only once the refreshed status is active, so the
  * commit window (binding moved, new Session not yet live) never redirects to a
  * Session that does not exist. The seat must still show the previous Session at
- * completion as well: a rollover observed while unavailable stays pending, and
+ * completion as well: a swap observed while unavailable stays pending, and
  * navigating away before it completes cancels the follow instead of pulling the
  * pane back.
  */
