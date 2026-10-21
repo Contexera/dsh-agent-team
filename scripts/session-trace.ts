@@ -111,6 +111,8 @@ function readMemberAddresses(dshHome: string): MemberAddress[] {
         case 'team/member-added':
         case 'team/member-updated':
         case 'team/member-session-renewed':
+        case 'team/member-session-rolled-over':
+        case 'team/member-session-recycled':
         case 'team/member-resumed':
           members.set(member.memberId, member)
           break

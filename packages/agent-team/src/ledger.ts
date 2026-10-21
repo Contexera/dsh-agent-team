@@ -911,43 +911,6 @@ export class AgentTeamLedger {
     return this.visibleChannel(this.state.channels.get(task.channelRef)) === undefined ? undefined : task.threadRef
   }
 
-  /**
-   * The seed envelope of this Member's most recent rollover, when that
-   * rollover was a checkpoint return: the recorded source Session, the
-   * exclusive end of its seeded prefix, and the checkpoint ref. A fresh
-   * rollover clears the envelope. Crash recovery reads this to rebuild the
-   * child generation from the recorded seed instead of an empty context.
-   */
-  rolloverSeedForMember(memberId: AgentTeamMemberId, targetSessionId: SessionId): { readonly sourceSessionId: SessionId; readonly sourceThroughSeq: SessionLogOffset; readonly checkpointRef: AgentTeamContextCheckpointRef } | undefined {
-    const seed = this.state.rolloverSeeds.get(memberId)
-    return seed?.targetSessionId === targetSessionId ? seed : undefined
-  }
-
-  /**
-   * Count one Member's active Claims on open Tasks in active Channels — the
-   * read-only input to the checkpoint single-Thread coverage guard: with
-   * more than one, a rewind cannot be proven to stay inside one Thread.
-   */
-  activeClaimCountForMember(memberId: AgentTeamMemberId): number {
-    return this.activeClaimsForMember(memberId).length
-  }
-
-  /**
-   * One Member's active Claims on open Tasks in active Channels, oldest
-   * first — the read-only input for the pressure notice's Claim labels.
-   */
-  activeClaimsForMember(memberId: AgentTeamMemberId): readonly AgentTeamClaim[] {
-    const active: AgentTeamClaim[] = []
-    for (const claim of this.state.claims.values()) {
-      if (claim.owner !== memberId || claim.state !== 'active') continue
-      const task = this.state.tasks.get(claim.taskRef)
-      if (task === undefined || task.resolution !== 'open') continue
-      if (this.visibleChannel(this.state.channels.get(task.channelRef)) === undefined) continue
-      active.push(claim)
-    }
-    return active.sort((a, b) => a.claimRef.localeCompare(b.claimRef))
-  }
-
   listMembers(): readonly AgentTeamAgentMember[] {
     return Object.freeze([...this.state.members.values()])
   }

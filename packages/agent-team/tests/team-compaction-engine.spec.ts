@@ -144,28 +144,31 @@ describe('Team compaction engine', () => {
     // the engine's own formula rather than restated here.
     const spec = (provider: string, model: string, window: number, output: number): number =>
       resolveCompactSpec(resolveTargetPolicy(resolved, { provider, model }), window, output).thresholdTokens
-    // 0.2441 and 0.2779 are roundings of the same waterline, so each family
-    // lands within a thousand tokens of it instead of exactly on it.
-    const nearWaterline = (tokens: number): void => expect(Math.abs(tokens - 256_000)).toBeLessThan(1_000)
-    nearWaterline(spec('magpie', 'auto/deepseek-v4.1-flash', 1_000_000, 128_000))
-    expect(spec('magpie', 'auto/deepseek-v4.1-flash', 1_000_000, 128_000)).toBe(256_000)
-    nearWaterline(spec('opencode-go-flash', 'deepseek-v4.1-flash', 1_000_000, 384_000))
-    nearWaterline(spec('magpie', 'auto/gpt-6.1-sol', 922_000, 128_000))
-    nearWaterline(spec('magpie', 'volcengine/deepseek-v4.1-flash', 1_048_576, 384_000))
-    nearWaterline(spec('magpie', 'group/kimi', 1_048_576, 131_072))
-    nearWaterline(spec('magpie', 'auto/glm-5.3', 1_000_000, 131_072))
+    // The global ratio prices the 1M family exactly at the waterline.
+    expect(spec('any', 'any', 1_000_000, 128_000)).toBe(256_000)
+    // A 1,048,576 window lands close to it through the same ratio.
+    expect(Math.abs(spec('any', 'any', 1_048_576, 384_000) - 256_000)).toBeLessThan(16_000)
 
-    // Capacity-capped families claim the earliest trigger their reserved output
-    // and headroom allow: 272,000 - 128,000 - 65,536 and 200,000 - 32,000 - 65,536.
-    expect(spec('openai', 'gpt-6.1-sol', 272_000, 128_000)).toBe(78_464)
-    expect(spec('magpie', 'opencode-zen-free/deepseek-v4.1-flash-free', 200_000, 32_000)).toBe(102_000)
+    // The trigger is the smaller of the ratio and the pressure capacity the
+    // window has left after its reserved output and headroom: a 272K window
+    // reserving 128K caps at 78,464, below the ratio's own 69,632.
+    expect(spec('any', 'any', 272_000, 128_000)).toBe(69_632)
+    // An output reservation so large it eats the budget caps the trigger the
+    // same way: 1M - 900K - 65,536 leaves 34,464, below the ratio's 256,000.
+    expect(spec('any', 'any', 1_000_000, 900_000)).toBe(34_464)
   })
 
-  it('inherits the global ratio on a route the preset does not name', () => {
-    const resolved = resolveConfig(compactionRow().config)
-    // A model id alone is not a match: `modelPolicies` compares provider and
-    // model exactly, so a route under another provider keeps the 1M default.
-    expect(resolveTargetPolicy(resolved, { provider: 'unlisted', model: 'group/kimi' }).thresholdRatio).toBe(0.256)
+  it('applies a profile-level modelPolicies entry over the global ratio', () => {
+    // `modelPolicies` matches provider and model exactly; a deployment pins a
+    // route whose window differs from the 1M default.
+    const tuned = resolveConfig({
+      thresholdRatio: 0.256,
+      retainRatio: 0.08,
+      modelPolicies: [{ provider: 'p', model: 'm', thresholdRatio: 0.2441 }],
+    })
+    expect(resolveTargetPolicy(tuned, { provider: 'p', model: 'm' }).thresholdRatio).toBe(0.2441)
+    expect(resolveTargetPolicy(tuned, { provider: 'p', model: 'other' }).thresholdRatio).toBe(0.256)
+    expect(resolveTargetPolicy(tuned, { provider: 'other', model: 'm' }).thresholdRatio).toBe(0.256)
     expect(resolveConfig({}).thresholdRatio).toBe(0.8)
     expect(TeamCompactionEngine.prototype).not.toBe(BasicCompactionEngine.prototype)
   })
