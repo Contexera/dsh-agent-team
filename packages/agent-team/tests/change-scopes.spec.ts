@@ -8,6 +8,7 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, agentTeamDomainSpec } from '../src/index.ts'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
@@ -38,6 +39,7 @@ async function harness(): Promise<{ readonly ctx: Context; readonly facility: Do
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)
@@ -83,6 +85,7 @@ async function restartHarness(pool: MemoryMediaPool): Promise<{ readonly ctx: Co
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)

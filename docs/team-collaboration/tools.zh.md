@@ -2,7 +2,7 @@
 
 [English](tools.md) | 中文
 
-每个成功或被拒绝的 Team tool result 都通过正常 model loop 返回。这里没有 context 工具：Member 不能自己换代、记录锚点或就地压缩。超大的 Session 由引擎就地压缩；冷下来的一代由 Host 在唤醒边界换代（见 [`memory-and-context.zh.md`](memory-and-context.zh.md)）。
+每个成功或被拒绝的 Team tool result 都通过正常 model loop 返回。这里没有 context 工具：Member 不能自己换代、记录锚点或就地压缩。超大的 Session 由 preset 的默认压缩引擎就地压缩；冷下来的一代由 Host 在唤醒边界换代（见 [`memory-and-context.zh.md`](memory-and-context.zh.md)）。
 
 ## `team_view`
 
@@ -41,8 +41,6 @@ history 页渲染历史结果与 Thread 身份。首页给 full anchor，continu
 Attention 不是 reading。这三个 action 都不渲染 Thread 的 facts、不确认未读、不交写令牌；读一个 Thread 也从不改变你是否关注它。结果形状只携带地址、Task standing 与 following 状态，别无其他，因此 Attention 结果不可能漂移成展示 Thread 内容。
 
 与 `team_thread` 的拆分正是让读路径完全不带 Attention 逻辑的原因：三个 action 共享同一个参数口袋，而不是借用读的口袋——那里有 `messageRef`、`beforeSequence`、`limit` 三个它们永远用不上的参数。
-
-`status` 不产生语义边界：它只报告、不改变，与 Claim 上的 `list`、Thread 上的 `read` 同理。成功的 `follow` 或 `unfollow` 各锚定一个边界。
 
 ## `team_message`
 

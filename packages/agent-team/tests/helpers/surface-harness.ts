@@ -4,6 +4,7 @@ import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './memory-backend.ts'
+import { provideQuietTokenMeter } from './team-host-fixture.ts'
 import AgentTeam from '../../src/index.ts'
 
 export interface TeamHarness {
@@ -31,6 +32,9 @@ export async function harness(): Promise<TeamHarness> {
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  // The Host reads context pressure through the token meter at its wake
+  // boundary; a zero-usage meter keeps pressure out of every surface assertion.
+  provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)
   return { ctx, fiber, facility, workspaceId }

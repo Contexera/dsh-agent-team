@@ -699,58 +699,14 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
   'team/member-session-renewed': {
     stored: memberSessionRenewed,
     legacyShapes: [],
-    retry: {
-      same: async () => {
-        const out = await ledger.renewMemberSession({
-          requestId: memberSessionRenewed.requestId,
-          actor: human,
-          workspaceId: alpha,
-          memberId,
-          sessionId: memberSessionRenewed.data.member.sessionId,
-        })
-        expect(out.value.member.sessionId, 'the renew mapper answers with the stored Session move').toBe(memberSessionRenewed.data.member.sessionId)
-        return out
-      },
-      changed: () => ledger.renewMemberSession({
-        requestId: memberSessionRenewed.requestId,
-        actor: human,
-        workspaceId: alpha,
-        memberId,
-        sessionId: SessionId('session:protocol-other'),
-      }),
-    },
+    retry: { replayOnly: 'legacy replay-only kind: the Human clear-context Remote and its renewal writer were removed, so only old-ledger replay reads it' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },
   'team/member-session-rolled-over': {
     stored: memberSessionRolledOver,
     legacyShapes: [],
-    retry: {
-      same: async () => {
-        const out = await ledger.rolloverMemberSession({
-          requestId: memberSessionRolledOver.requestId,
-          actor: memberActor,
-          workspaceId: alpha,
-          memberId,
-          previousSessionId: memberSessionRolledOver.data.previousSessionId,
-          newSessionId: memberSessionRolledOver.data.member.sessionId,
-          handoffEventSeq: memberSessionRolledOver.data.handoffEventSeq,
-          trigger: memberSessionRolledOver.data.trigger,
-        })
-        expect(out.value.member.sessionId, 'the rollover mapper answers with the stored Session move').toBe(memberSessionRolledOver.data.member.sessionId)
-        return out
-      },
-      changed: () => ledger.rolloverMemberSession({
-        requestId: memberSessionRolledOver.requestId,
-        actor: memberActor,
-        workspaceId: alpha,
-        memberId,
-        previousSessionId: memberSessionRolledOver.data.previousSessionId,
-        newSessionId: memberSessionRolledOver.data.member.sessionId,
-        handoffEventSeq: SessionSeq(8),
-        trigger: memberSessionRolledOver.data.trigger,
-      }),
-    },
+    retry: { replayOnly: 'legacy replay-only kind: the Member-authored rollover path is gone, so only old-ledger replay reads it' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },

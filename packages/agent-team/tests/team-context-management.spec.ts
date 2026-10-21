@@ -6,7 +6,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { TeamContextManagement, teamRolloverIdentity, type TeamContextState, type TeamTransitionPlan } from '../src/team-context-management.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberId } from '../src/types.ts'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
@@ -44,7 +44,6 @@ function management(options: {
 }) {
   let reads = 0
   return new TeamContextManagement({
-    agentForMember: id => (id === MEMBER_ID ? options.agent : undefined),
     memberForAgent: candidate => (candidate === options.agent ? member : undefined),
     projectionForMember: () => options.states[Math.min(reads++, options.states.length - 1)],
     executeTransition: options.executeTransition ?? (() => Promise.resolve()),
@@ -63,29 +62,6 @@ describe('the Team generation coordinator', () => {
     const digest = '57207ab4cee751e63f481d7e232f2ba9a73efdacd4a0021173b874998bd38dc4'
     expect(String(identity.newSessionId)).toBe(`agent-team-rollover-${digest}`)
     expect(identity.requestId).toBe(`agent-team:rollover:${digest}`)
-  })
-
-  it('swaps on the live turn end, and only after idle', async () => {
-    // The live path: the intent's own durable result opens the transition and
-    // the containing turn's end releases it. The turn-end event precedes driver
-    // convergence, so nothing may swap until the Agent reports idle.
-    const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
-    const { agent, idler } = fakeAgent()
-    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-live', resultSeq: 4, turn: 2, turnEndSeq: -1 }
-    const coordinator = management({ agent, states: [{ ...idleState, pending }], executeTransition })
-
-    coordinator.onSessionEvent(MEMBER_ID, agent, { type: 'tool/result', seq: 4, data: {} } as unknown as SessionEvent)
-    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(true)
-
-    coordinator.onSessionEvent(MEMBER_ID, agent, { type: 'turn/end' } as SessionEvent)
-    expect(executeTransition).not.toHaveBeenCalled()
-    idler()
-    await new Promise(resolve => setImmediate(resolve))
-
-    expect(executeTransition).toHaveBeenCalledTimes(1)
-    expect(executeTransition.mock.calls[0]?.[0]).toBe(MEMBER_ID)
-    expect(executeTransition.mock.calls[0]?.[1]).toMatchObject({ previousSessionId: SESSION_ID, carriedInput: [] })
-    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(false)
   })
 
   it('discards a legacy intent whose turn never ended instead of blocking the generation forever', async () => {
@@ -109,7 +85,7 @@ describe('the Team generation coordinator', () => {
     expect(logs).toHaveLength(1)
   })
 
-  it('finishes a recovered intent whose turn ended before the crash, carrying no captured input', async () => {
+  it('finishes a recovered legacy intent whose turn ended before the crash', async () => {
     const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
     const { agent } = fakeAgent()
     const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-done', resultSeq: 9, turn: 3, turnEndSeq: 12 }
@@ -120,14 +96,11 @@ describe('the Team generation coordinator', () => {
 
     expect(executeTransition).toHaveBeenCalledTimes(1)
     const plan = executeTransition.mock.calls[0]![1]
-    // A recovered swap carries the durable envelope only: nothing was captured
-    // in process, so the successor starts from its own durable context.
     expect(plan).toMatchObject({ previousSessionId: SESSION_ID })
-    expect(plan.carriedInput).toEqual([])
     expect(String(plan.newSessionId)).toMatch(/^agent-team-rollover-[0-9a-f]{64}$/)
   })
 
-  it('leaves the generation recoverable when the swap rejects', async () => {
+  it('releases the lock when the swap rejects, without claiming the generation still runs', async () => {
     const logs: string[] = []
     const { agent } = fakeAgent()
     const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-fail', resultSeq: 1, turn: 0, turnEndSeq: 3 }
@@ -141,53 +114,10 @@ describe('the Team generation coordinator', () => {
     coordinator.recoverPendingTransition(MEMBER_ID, agent, SESSION_ID)
     await new Promise(resolve => setImmediate(resolve))
 
-    // The lock is released so a later turn can retry; the durable binding is
-    // untouched, which is what makes the previous generation recoverable.
+    // The lock is released so a later wake can try again, and the line states
+    // the failure without promising which side of the commit it happened on.
     expect(coordinator.isTransitioning(MEMBER_ID)).toBe(false)
-    expect(logs.join('\n')).toContain('still running')
-  })
-
-  it('starts a transition only on the intent\'s own durable result', () => {
-    const { agent } = fakeAgent()
-    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-x', resultSeq: 7, turn: 1, turnEndSeq: -1 }
-    const coordinator = management({ agent, states: [{ ...idleState, pending }] })
-
-    coordinator.onSessionEvent(MEMBER_ID, agent, { type: 'tool/result', seq: 6, data: {} } as unknown as SessionEvent)
-    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(false)
-    coordinator.onSessionEvent(MEMBER_ID, agent, { type: 'tool/result', seq: 7, data: { error: 'failed' } } as unknown as SessionEvent)
-    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(false)
-    coordinator.onSessionEvent(MEMBER_ID, agent, { type: 'tool/result', seq: 7, data: {} } as unknown as SessionEvent)
-    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(true)
-  })
-
-  it('refuses the swap once the Agent behind the intent has already been replaced', async () => {
-    // The delivery target is read at swap time, not when the intent landed:
-    // between the two the Member may have moved to another generation, and
-    // swapping for the old Agent would retire the wrong generation.
-    const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
-    const first = fakeAgent()
-    const second = fakeAgent()
-    const pending = { handoff: 'note', relatedFiles: [], toolCallId: 'call-replaced', resultSeq: 4, turn: 2, turnEndSeq: -1 }
-    const coordinator = new TeamContextManagement({
-      // The delivery target is read at swap time, not when the intent landed:
-      // between the two the Member may have moved to another generation, and
-      // swapping for the old Agent would retire the wrong generation.
-      agentForMember: id => (id === MEMBER_ID ? second.agent : undefined),
-      memberForAgent: candidate => (candidate === undefined ? undefined : member),
-      projectionForMember: () => ({ ...idleState, pending }),
-      executeTransition,
-      messages: { continuation: continuationFor },
-      log: () => {},
-    })
-
-    coordinator.onSessionEvent(MEMBER_ID, first.agent, { type: 'tool/result', seq: 4, data: {} } as unknown as SessionEvent)
-    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(true)
-    coordinator.onSessionEvent(MEMBER_ID, first.agent, { type: 'turn/end' } as SessionEvent)
-    first.idler()
-    await new Promise(resolve => setImmediate(resolve))
-
-    expect(executeTransition).not.toHaveBeenCalled()
-    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(false)
+    expect(logs.join('\n')).toContain('context swap did not complete: still running')
   })
 
   it('starts a Host-requested swap immediately, with a successor derived from the retired Session', async () => {
@@ -198,7 +128,7 @@ describe('the Team generation coordinator', () => {
     await coordinator.requestRecycle(MEMBER_ID, member)
 
     expect(executeTransition).toHaveBeenCalledTimes(1)
-    expect(executeTransition.mock.calls[0]![1]).toMatchObject({ previousSessionId: SESSION_ID, carriedInput: [] })
+    expect(executeTransition.mock.calls[0]![1]).toMatchObject({ previousSessionId: SESSION_ID })
     expect(String(executeTransition.mock.calls[0]![1].newSessionId)).toMatch(/^agent-team-recycle-[0-9a-f]{64}$/)
     expect(coordinator.isTransitioning(MEMBER_ID)).toBe(false)
   })

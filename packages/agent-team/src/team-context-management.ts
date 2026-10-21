@@ -1,15 +1,14 @@
 /**
- * Team's own context-generation coordinator: turns a Member's durable rollover
- * intent into its next generation, at an idle boundary only — a swap under an
- * open turn would retire the generation still running it. Owns process locks
- * only; everything else is reconstructible from the ledger and the Session log.
+ * Serializes Host-requested generation swaps and restores legacy rollover
+ * intents and checkpoint continuations. Owns process locks only; committed
+ * transitions remain recoverable from the ledger and Session log.
  * @module @contexera/dsh-agent-team/team-context-management
  */
 
 import { createHash } from 'node:crypto'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import { SessionId as SessionIdBrand } from '@deepseek-ai/dsh-session'
 import type { AgentTeamAgentMember, AgentTeamMemberId, AgentTeamRequestId } from './types.ts'
 import type { TeamContextProjectionState } from './context-projection.ts'
@@ -17,11 +16,8 @@ import { wakeRecycleIdentity, type TransitionIdentity } from './wake-recycle.ts'
 
 export type TeamContextState = Pick<TeamContextProjectionState, 'pending' | 'checkpoints' | 'continuations'>
 
-type TeamPendingIntent = NonNullable<TeamContextState['pending']>
-
 export interface TeamTransitionPlan extends TransitionIdentity {
   readonly previousSessionId: SessionId
-  readonly carriedInput: readonly UserMessage[]
 }
 
 /** The generation-boundary messages, built by the wiring that owns the codec. */
@@ -30,17 +26,12 @@ export interface TeamContextMessages {
 }
 
 export interface TeamContextManagementOptions {
-  readonly agentForMember: (memberId: AgentTeamMemberId) => Agent | undefined
   readonly memberForAgent: (agent: Agent) => AgentTeamAgentMember | undefined
   readonly projectionForMember: (memberId: AgentTeamMemberId, sessionId: SessionId) => TeamContextState | undefined
   readonly executeTransition: (memberId: AgentTeamMemberId, plan: TeamTransitionPlan) => Promise<void>
   readonly messages: TeamContextMessages
   readonly log: (message: string) => void
 }
-
-type MemberTransition =
-  | { readonly kind: 'rollover'; readonly agent: Agent; readonly intent: TeamPendingIntent; turnEnded: boolean }
-  | { readonly kind: 'recycle' }
 
 /** Durable identity of one rollover: a result seq is session-local and collides across generations. */
 export function teamRolloverIdentity(previousSessionId: SessionId, toolCallId: string): TransitionIdentity {
@@ -49,7 +40,7 @@ export function teamRolloverIdentity(previousSessionId: SessionId, toolCallId: s
 }
 
 export class TeamContextManagement {
-  private readonly members = new Map<AgentTeamMemberId, MemberTransition>()
+  private readonly members = new Set<AgentTeamMemberId>()
   private readonly settleWaiters = new Map<AgentTeamMemberId, Array<() => void>>()
   private readonly scheduledContinuations = new Set<string>()
   private readonly spentIntents = new Set<string>()
@@ -73,15 +64,6 @@ export class TeamContextManagement {
     })
   }
 
-  onSessionEvent(memberId: AgentTeamMemberId, agent: Agent, event: SessionEvent): void {
-    if (this.disposed) return
-    if (event.type === 'tool/result') {
-      this.onToolResult(memberId, agent, event)
-      return
-    }
-    if (event.type === 'turn/end') this.onTurnEnd(memberId, agent)
-  }
-
   dispose(): void {
     this.disposed = true
     this.settleAll()
@@ -90,51 +72,15 @@ export class TeamContextManagement {
     this.spentIntents.clear()
   }
 
-  private onToolResult(memberId: AgentTeamMemberId, agent: Agent, event: SessionEvent & { readonly type: 'tool/result' }): void {
-    if (event.data.error !== undefined) return
-    const member = this.options.memberForAgent(agent)
-    if (member === undefined) return
-    const pending = this.options.projectionForMember(memberId, member.sessionId)?.pending
-    if (pending == null || pending.resultSeq !== event.seq) return
-    if (this.members.has(memberId)) return
-    this.members.set(memberId, { kind: 'rollover', agent, intent: pending, turnEnded: false })
-  }
-
-  private onTurnEnd(memberId: AgentTeamMemberId, agent: Agent): void {
-    this.scheduleCheckpointContinuations(memberId, agent)
-    const transition = this.members.get(memberId)
-    if (transition === undefined || transition.kind !== 'rollover' || transition.turnEnded) return
-    const intent = transition.intent
-    const member = this.options.memberForAgent(agent)
-    if (member === undefined || transition.agent !== agent) return
-    transition.turnEnded = true
-    // The turn-end event precedes driver convergence, so the swap waits for idle.
-    void agent.whenIdle().then(() => {
-      if (this.disposed) return
-      if (this.members.get(memberId) !== transition) return
-      if (this.options.agentForMember(memberId) !== agent) {
-        // The Member moved to another generation while this one finished its
-        // turn: drop the lock, or every later swap for it would be refused.
-        this.members.delete(memberId)
-        this.settleMember(memberId)
-        return
-      }
-      void this.performTransition(memberId, member, teamRolloverIdentity(member.sessionId, intent.toolCallId))
-    }, error => {
-      this.options.log(`context rollover idle wait failed: ${failureText(error)} (member ${memberId})`)
-      this.members.delete(memberId)
-    })
-  }
-
   /**
-   * Start the generation swap a Host wake decision asked for. Unlike the
-   * retired tool path there is no durable intent to wait for: the decision is
-   * already taken, and the identity derives from the retired Session so a
-   * crash between commit and activation converges on the same successor.
+   * Start the generation swap a Host wake decision asked for. There is no
+   * durable intent to wait for: the decision is already taken, and the
+   * identity derives from the retired Session so a crash between commit and
+   * activation converges on the same successor.
    */
   requestRecycle(memberId: AgentTeamMemberId, member: AgentTeamAgentMember): Promise<void> {
     if (this.disposed || this.members.has(memberId)) return Promise.resolve()
-    this.members.set(memberId, { kind: 'recycle' })
+    this.members.add(memberId)
     return this.performTransition(memberId, member, wakeRecycleIdentity(member.sessionId))
   }
 
@@ -144,18 +90,13 @@ export class TeamContextManagement {
     identity: TransitionIdentity,
   ): Promise<void> {
     try {
-      // Inside the guard as well as the await: a host that throws before
-      // returning a promise loses the swap just as completely.
       await this.options.executeTransition(memberId, {
         previousSessionId: member.sessionId,
         newSessionId: identity.newSessionId,
         requestId: identity.requestId,
-        // No process-local capture exists: the successor's Inbox and any queued
-        // input are rederived from the durable log.
-        carriedInput: [],
       })
     } catch (error) {
-      this.options.log(`context rollover failed, leaving the previous generation recoverable: ${failureText(error)} (member ${memberId})`)
+      this.options.log(`context swap did not complete: ${failureText(error)} (member ${memberId})`)
     } finally {
       this.members.delete(memberId)
       this.settleMember(memberId)
@@ -171,14 +112,17 @@ export class TeamContextManagement {
     for (const memberId of this.settleWaiters.keys()) this.settleMember(memberId)
   }
 
-  /** Crash-recovery hook the Host runs during activation: finish a swap a restart interrupted. */
+  /**
+   * Crash-recovery hook the Host runs during activation: finish a rollover a
+   * restart interrupted. Only a log written by the retired tool path can carry
+   * an intent; its turn must have ended durably, because no live event can
+   * complete it afterwards.
+   */
   recoverPendingTransition(memberId: AgentTeamMemberId, agent: Agent, sessionId: SessionId): void {
     if (this.disposed || this.members.has(memberId)) return
     const state = this.options.projectionForMember(memberId, sessionId)
     const pending = state?.pending
     if (state === undefined || pending == null) return
-    // An intent whose turn never ended durably is spent: no live event can
-    // complete it, and honouring it would leave the generation un-swappable.
     if (pending.turnEndSeq === -1) {
       const spent = `${memberId}:${sessionId}:${pending.toolCallId}`
       if (!this.spentIntents.has(spent)) {
@@ -189,7 +133,7 @@ export class TeamContextManagement {
     }
     const member = this.options.memberForAgent(agent)
     if (member === undefined) return
-    this.members.set(memberId, { kind: 'rollover', agent, intent: pending, turnEnded: true })
+    this.members.add(memberId)
     void this.performTransition(memberId, member, teamRolloverIdentity(member.sessionId, pending.toolCallId))
   }
 
@@ -205,26 +149,6 @@ export class TeamContextManagement {
         this.scheduledContinuations.delete(latchKey(memberId, checkpoint.checkpointRef))
         this.options.log(`context continuation repair failed: ${failureText(error)}`)
       }
-    }
-  }
-
-  private scheduleCheckpointContinuations(memberId: AgentTeamMemberId, agent: Agent): void {
-    const state = this.options.projectionForMember(memberId, agent.session.id)
-    if (state === undefined) return
-    for (const checkpoint of state.checkpoints) {
-      if (!this.claimContinuationLatch(memberId, state, checkpoint)) continue
-      const latch = latchKey(memberId, checkpoint.checkpointRef)
-      void agent.whenIdle().then(() => {
-        if (this.disposed) return
-        try {
-          agent.followup(this.options.messages.continuation(checkpoint.checkpointRef))
-        } catch (error) {
-          this.scheduledContinuations.delete(latch)
-          this.options.log(`context continuation scheduling failed: ${failureText(error)} (member ${memberId})`)
-        }
-      }, () => {
-        this.scheduledContinuations.delete(latch)
-      })
     }
   }
 

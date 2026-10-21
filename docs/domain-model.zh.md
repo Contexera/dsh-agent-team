@@ -118,9 +118,9 @@ presence/availability 行不正常时，背后的结构化原因（绝不持久�
 
 ## Context Generation（上下文代际）
 
-一个 Member Session 的两个上下文边界之间的工作上下文。全新代际从零开始：它第一眼看到的就是每步的常规注入（身份、`memory.md`、Workspace 列表）加上唤醒它的那条消息，且从不被告知换代发生过。ledger 记录当前绑定（任一时刻每个 Member 恰好一个）以及最近一次 renewal 或换代的上一 Session。上下文历史本身保存在各 Session 日志中。Member 身份、模型、私有记忆、skills、Claims 和 Attention，代代都保留。
+一个 Member Session 的两个代际边界之间的工作上下文。全新代际从零开始：它第一眼看到的就是每步的常规注入（身份、`memory.md`、Workspace 列表）加上唤醒它的那条消息，且从不被告知换代发生过。ledger 记录当前绑定（任一时刻每个 Member 恰好一个）以及最近一次 transition 的上一 Session。上下文历史本身保存在各 Session 日志中。Member 身份、模型、私有记忆、skills、Claims 和 Attention，代代都保留。
 
-换代完全是 Host 的决定。旧日志里仍可能带着早先版本写下的 checkpoint 锚点或 rollover 对；折叠层继续解码它们，让旧 ledger 与旧 Session 日志仍可读回，但当前构建不再产生其中任何一种。
+换代完全是 Host 的决定，在唤醒边界做出。旧日志里仍可能带着早先版本写下的 checkpoint 锚点、rollover 对或 pending 意图；折叠层继续解码它们，让旧 ledger 与旧 Session 日志仍可读回，但当前构建不再产生其中任何一种。
 
 ## Suspend
 

@@ -156,8 +156,8 @@ export interface AgentTeamMemberSessionRolledOverOperation extends AgentTeamOper
 /**
  * Durable Host-initiated recycling of one Member's Session: the Host judged a
  * live generation cold enough to replace before delivering the message that
- * woke it. The data is the binding transition alone — no handoff prose (the
- * successor's continuity is its own memory) and no checkpoint lineage.
+ * woke it. A live transition records the old log offset from which unanswered
+ * input must be replayed; no handoff prose or checkpoint lineage is copied.
  */
 export interface AgentTeamMemberSessionRecycledOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-session-recycled'
@@ -166,6 +166,7 @@ export interface AgentTeamMemberSessionRecycledOperation extends AgentTeamOperat
     readonly member: AgentTeamAgentMember
     readonly previousSessionId: SessionId
     readonly newSessionId: SessionId
+    readonly inputFromSeq?: SessionLogOffset
   }
 }
 

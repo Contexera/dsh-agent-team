@@ -1,5 +1,4 @@
 import type { WorkspaceId } from "@deepseek-ai/dsh-workspace"
-import type { SessionId as AgentTeamMemberSessionId, SessionLogOffset as AgentTeamMemberSessionLogOffset, SessionSeq as AgentTeamMemberSessionSeq } from "@deepseek-ai/dsh-session"
 import type {
   AgentTeamActivity,
   AgentTeamAgentMember,
@@ -12,7 +11,6 @@ import type {
   AgentTeamClaimActivity,
   AgentTeamClaimRef,
   AgentTeamConfirmationToken,
-  AgentTeamContextCheckpointRef,
   AgentTeamDirectMarker,
   AgentTeamMemberCapabilities,
   AgentTeamMemberId,
@@ -189,49 +187,6 @@ export interface AgentTeamRecoverMemberRequest {
 /** Result of a recovery nudge; runtime-only steering, so there is no ledger receipt. */
 export interface AgentTeamRecoverMemberResult {
   readonly status: AgentTeamAgentMemberStatus
-}
-
-/** Human intent to start one enabled Member's next turn from an empty context. */
-export interface AgentTeamClearMemberContextRequest {
-  readonly requestId: AgentTeamRequestId
-  readonly workspaceId: WorkspaceId
-  readonly memberId: AgentTeamMemberId
-}
-
-/** The Member keeps identity, memory, and binding; its sessionId moves to a fresh Session and the previous log stays archived on disk. */
-export interface AgentTeamClearMemberContextResult {
-  readonly receipt: AgentTeamOperationReceipt
-  readonly status: AgentTeamAgentMemberStatus
-}
-
-/**
- * The retired Member-authored rollover request. No current build produces one;
- * the Host records its own swaps as `team/member-session-recycled`. The shape
- * stays because a ledger written by an earlier build still decodes through it.
- */
-export interface AgentTeamRolloverSessionRequest {
-  readonly requestId: AgentTeamRequestId
-  readonly workspaceId: WorkspaceId
-  readonly memberId: AgentTeamMemberId
-  /** The Session the Member must still be bound to at commit time. */
-  readonly previousSessionId: AgentTeamMemberSessionId
-  /** The next generation Session, derived from the successful tool call. */
-  readonly newSessionId: AgentTeamMemberSessionId
-  /** Seq of the retired rollover tool result in the previous Session log. */
-  readonly handoffEventSeq: AgentTeamMemberSessionSeq
-  /** Why the rollover happened: the model asked, or honored a pressure notice. */
-  readonly trigger: 'model' | 'pressure'
-  /** Seed source Session for a checkpoint return; absent on a fresh rollover. */
-  readonly sourceSessionId?: AgentTeamMemberSessionId
-  /** Exclusive end of the seeded source prefix (its exact length in the source log). */
-  readonly sourceThroughSeq?: AgentTeamMemberSessionLogOffset
-  /** The checkpoint a return was addressed to; absent on a fresh rollover. */
-  readonly checkpointRef?: AgentTeamContextCheckpointRef
-}
-
-export interface AgentTeamRolloverSessionResult {
-  readonly receipt: AgentTeamOperationReceipt
-  readonly member: AgentTeamAgentMember
 }
 
 /** Human intent to remove one Agent Member from one Channel. */

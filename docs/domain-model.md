@@ -110,9 +110,9 @@ The `class` routes which recovery action actually helps: a non-remediable refusa
 
 ## Context Generation
 
-One Member Session's working context between two context boundaries. A fresh generation starts empty: its first model-facing context is the ordinary per-step injection (identity, `memory.md`, the Workspace list) plus whatever message woke it, and it is never told a generation changed. The ledger records the current binding (one per Member at all times) and the previous Session of the latest renewal or swap; the Session logs themselves hold the context history. Every generation keeps Member identity, model, private memory, skills, Claims, and Attention.
+One Member Session's working context between two generation boundaries. A fresh generation starts empty: its first model-facing context is the ordinary per-step injection (identity, `memory.md`, the Workspace list) plus whatever message woke it, and it is never told a generation changed. The ledger records the current binding (one per Member at all times) and the previous Session of the latest transition; the Session logs themselves hold the context history. Every generation keeps Member identity, model, private memory, skills, Claims, and Attention.
 
-A swap is the Host's decision alone. A legacy log may still carry a checkpoint anchor or a rollover pair written by an earlier build; the fold keeps decoding them so old ledgers and old Session logs still read back, but no current build produces either.
+A swap is the Host's decision alone, taken at a wake boundary. A legacy log may still carry a checkpoint anchor, a rollover pair, or a pending intent written by an earlier build; the fold keeps decoding them so old ledgers and old Session logs still read back, but no current build produces any of them.
 
 ## Suspend
 

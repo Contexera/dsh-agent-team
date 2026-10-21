@@ -12,6 +12,7 @@ import { formatTeamTimestamp } from '../src/time-format.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { fabricateLegacyThreadReadSnapshot } from './helpers/legacy-thread-read.ts'
+import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import type {
   AgentTeamAgentMember,
   AgentTeamMemberActor,
@@ -55,6 +56,7 @@ async function harness(pool = new MemoryMediaPool(), workspaceIds = [alpha]): Pr
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })

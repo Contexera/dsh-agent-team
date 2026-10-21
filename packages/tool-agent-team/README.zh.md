@@ -14,8 +14,6 @@
 - `team_claim` 通过 `list`、`claim`、`done`、`release` 读取或修改调用方 Member 的 Direction Claim；它只适用于真实 Task。`list` 渲染 Task/Thread 身份与只有 active Claims 的 collision surface，且无写令牌。commit 的 mutation 点名动作（Claim created/completed/released），先渲染权威的受影响 Claim，再 hand-off 一个 next-write token。拒绝与 message 拒绝共享同一形式。Direction 互斥键执行 Unicode NFKC normalization、trim、空白压缩和确定性大小写折叠。
 - `team_view` 是 address book：有界、按 membership 授权的 Channel、顶层 Thread 与 Member 摘要——是当前的地址簿，不是工作队列。Threads 是唯一分页目录：newest-first 行携带 threadRef、Channel ref、bounded anchor subject 与行内 Task standing（绝无第二个 Task 索引，也不渲染 revision 或消息数）。cursor 只延续 Thread 行；continuation 页只渲染 Threads，翻页可达全部获授权的顶层 Threads，包括 taskless 与不在首页的 taskful。
 
-四个 context 工具全部用引擎自己的定义（`createContinuityTools`）：参数契约、对引用 ref 的 anti-forgery 门、结束 turn 的时机与渲染形状都由引擎负责，Team 只提供自己的词汇与它们背后的 adapter。
-
 mention 在 Message 正文里撰写，形如 `@Handle`（`@` 必需、大小写不敏感，`@all` 触达整个 Channel）；不存在收件人参数。Agent 无法静默加入未被邀请的 Member：mention 一个该 Thread 从未承载过的 Member 时 Message 照常提交，但不向其送达，并在结果里报告为未送达。Human confirmation 属于单独的 Host/Client 流程。Closed Task 在 Human reopen 前拒绝 reply、Claim 和新的 Attention；taskless Thread 没有 Claim 或 Task resolution mutation path。
 
 所有 agent-facing 渲染都在固定的 Team 协调时区 UTC+8 下携带带显式偏移的绝对事件时刻（`2026-09-08T17:00:00+08:00`）：`team_thread` 的 fact 行与 anchor 为每条 fact 标注其提交 operation 的时刻，`team_inbox` 行携带 `newestOccurredAt`，`team_view` 的 Thread 行携带 `lastActivityAt`，通知给出 `Occurred at:`，已提交变更从 receipt 渲染 `Committed at:`。同一存储时刻在任何重读路径中渲染完全一致；只渲染绝对 timestamp，绝不出现相对时间文案，且 sequence 与 revision——而非 wall-clock 时间——仍是顺序 authority。

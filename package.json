@@ -119,10 +119,6 @@
       "types": "./packages/agent-team/lib/types/vendor/storage-sqlite/index.d.ts",
       "default": "./packages/agent-team/lib/vendor/storage-sqlite/index.js"
     },
-    "./team-compaction-engine": {
-      "types": "./packages/agent-team/lib/types/team-compaction-engine.d.ts",
-      "default": "./packages/agent-team/lib/team-compaction-engine.js"
-    },
     "./member-context": {
       "types": "./packages/agent-team/lib/types/member-context.d.ts",
       "default": "./packages/agent-team/lib/member-context.js"

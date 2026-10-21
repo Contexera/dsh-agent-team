@@ -8,7 +8,6 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
-import { stableRequestUuid } from './request-scoped-id.ts'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -37,12 +36,12 @@ import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
-import { TEAM_CONTEXT_CODEC } from './context-codec.ts'
+import { createCheckpointContinuationMessage } from './context-codec.ts'
 import { TeamContextManagement, type TeamTransitionPlan } from './team-context-management.ts'
 import { decideWakeRecycle, DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig, type WakeRecyclePlan } from './wake-recycle.ts'
-import { AGENT_TEAM_PLUGIN_ID, isAgentTeamSource } from './context-source.ts'
+import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { surfaceVisibilityProbe, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER } from './surface-visibility.ts'
-import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, TeamContextProjectionHost, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
+import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
@@ -112,8 +111,6 @@ import type {
   AgentTeamPutAttachmentResult,
   AgentTeamRecoverMemberRequest,
   AgentTeamRecoverMemberResult,
-  AgentTeamClearMemberContextRequest,
-  AgentTeamClearMemberContextResult,
   AgentTeamDmRequest,
   AgentTeamDmResult,
   AgentTeamOperationId,
@@ -324,6 +321,7 @@ export default class AgentTeam extends TypertRemoteService {
   static Config = TEAM_HOST_ROW_SETTINGS_SCHEMA
   static inject = [
     'storageDomain',
+    'tokenMeter',
     'workspaceRegistry',
     'agents',
     'agentDefaultModel',
@@ -336,8 +334,6 @@ export default class AgentTeam extends TypertRemoteService {
   private domain?: Domain<typeof agentTeamDomainSpec>
   private ledger?: AgentTeamLedger
   private readonly handles = new Map<AgentTeamMemberId, AgentHandle>()
-  /** Live Member per session id; drives the root session/event listener. */
-  private readonly memberBySessionId = new Map<SessionId, AgentTeamMemberId>()
   /** Live selection refs let model edits take effect without disposing the Session. */
   private readonly modelSelections = new Map<AgentTeamMemberId, ModelSelectionRef>()
   /** Agent ids with a turn in flight; restarts must wait for the boundary. */
@@ -396,19 +392,7 @@ export default class AgentTeam extends TypertRemoteService {
     wake: memberId => { this.injectRecovery(memberId) },
     report: fact => { this.reportRecovery(fact) },
   })
-  /**
-   * Team's domain half of the continuity projection: the durable ref naming,
-   * the Team-notice rule, and the boundary judgement (committed messages,
-   * claim changes, first Thread arrivals). Its claim attribution resolves the
-   * Task's Thread through the ledger, which is why the resolver reads
-   * `this.ledger` lazily — the fold may run before the domain is open, and an
-   * unattributed boundary is still a valid anchor.
-   */
-  private readonly contextProjectionHost = new TeamContextProjectionHost({
-    threadForTask: taskRef => this.ledger?.threadForTask(taskRef),
-  })
   private readonly contextManagement = new TeamContextManagement({
-    agentForMember: memberId => this.handles.get(memberId)?.agent,
     memberForAgent: agent => this.memberForAgent(agent),
     projectionForMember: (memberId, sessionId) => {
       const handle = this.handles.get(memberId)
@@ -417,7 +401,7 @@ export default class AgentTeam extends TypertRemoteService {
     },
     executeTransition: (memberId, plan) => this.executeMemberTransition(memberId, plan),
     messages: {
-      continuation: checkpointRef => TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(checkpointRef),
+      continuation: checkpointRef => createCheckpointContinuationMessage(checkpointRef),
     },
     log: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
   })
@@ -430,6 +414,7 @@ export default class AgentTeam extends TypertRemoteService {
    * single writer queue.
    */
   private readonly memberLifecycleTails = new Map<AgentTeamMemberId, Promise<void>>()
+  private readonly retiringAgents = new WeakSet<Agent>()
   private readonly enteredMemberChains = new AsyncLocalStorage<ReadonlySet<AgentTeamMemberId>>()
   private readonly enteredAdditionChains = new AsyncLocalStorage<ReadonlySet<AgentTeamRequestId>>()
   /**
@@ -567,7 +552,8 @@ export default class AgentTeam extends TypertRemoteService {
   private measureLiveContext(agent: Agent): number | null {
     try {
       return this.ctx.tokenMeter.measure(agent.session).totalTokens
-    } catch {
+    } catch (error) {
+      this.ctx.logger.warn(`agent-team: could not price Session '${agent.id}' for the wake swap: ${failureDetail(error)}; the generation is kept`)
       return null
     }
   }
@@ -575,19 +561,27 @@ export default class AgentTeam extends TypertRemoteService {
   private measureStoredContext(sessionId: SessionId, inspection: StoredSessionInspection): number | null {
     try {
       const session = Session.create(sessionId, inspection.events, inspection.header, inspection.inheritedEventCount)
+      const inbox = this.ctx.sessionProjections.stateOf(session, 'inbox')
+      if (inbox === undefined || [...inbox['next-turn'], ...inbox['next-step']].some(message => this.isOrdinaryInput(message))) return null
       return this.ctx.tokenMeter.measure(session).totalTokens
-    } catch {
+    } catch (error) {
+      this.ctx.logger.warn(`agent-team: could not price Session '${sessionId}' for the wake swap: ${failureDetail(error)}; the generation is kept`)
       return null
     }
   }
 
   private async recycleColdGeneration(member: AgentTeamAgentMember, agent: Agent): Promise<Error | undefined> {
+    const queued = this.queuedInputOf(agent)
+    if (queued.length > 0) {
+      this.ctx.logger.info(`agent-team: ${this.memberScope(member.memberId, agent.id)} keeps its generation: ${queued.length} queued message(s) are still waiting for a turn`)
+      return undefined
+    }
     const plan = await this.planWakeForMember(member, agent)
     if (plan.action !== 'recycle') return undefined
     this.ctx.logger.info(`agent-team: waking ${this.memberScope(member.memberId, agent.id)} swaps its cold generation: idle ${plan.idleMs}ms over ${plan.thresholds.idleMs}ms, context ${plan.contextTokens} over ${plan.thresholds.minContextTokens}`)
     await this.contextManagement.requestRecycle(member.memberId, { ...member, sessionId: agent.session.id })
     if (this.handles.has(member.memberId)) return undefined
-    return new Error('the generation swap could not complete; the Member stays on its previous generation')
+    return new Error('the generation swap did not finish; the recorded Session transition is finished by the next wake or by Member recovery')
   }
 
   private async wakeGateFor(agent: Agent): Promise<Error | undefined> {
@@ -712,7 +706,7 @@ export default class AgentTeam extends TypertRemoteService {
     // The registration rides this plugin's fiber — unloading Team removes the
     // key (and its cached cells) from later drives and snapshots.
     this.ctx.effect(() => this.ctx.root.sessionProjections.register(
-      createTeamContextProjectionDefinition(this.contextProjectionHost),
+      createTeamContextProjectionDefinition(),
     ), 'agentTeam.contextProjection')
     this.ctx.on('agent/error', ({ agent, error }) => {
       const member = this.memberForAgent(agent)
@@ -771,22 +765,6 @@ export default class AgentTeam extends TypertRemoteService {
       this.setPreTurnCancellation(member.memberId, pending.sessionId)
       this.emitMemberPresenceChanged(member)
     })
-    // The store's dispatch carrier is untagged, so a scope-tagged listener
-    // inside the Agent setup would receive nothing; one root listener that
-    // maps the session id back to its Member is the seam that works (same
-    // shape as the `agent/status` listener above). The first turn of a
-    // freshly published Member cannot race this: `handles.set()` precedes the
-    // same activation continuation that publishes the Agent, so by the time
-    // any tool call streams, the map lookup succeeds.
-    this.ctx.on('session/event', (session, event) => {
-      const memberId = this.memberBySessionId.get(session.id)
-      if (memberId === undefined) return
-      const handle = this.handles.get(memberId)
-      if (handle === undefined || handle.agent.session.id !== session.id) return
-      // Context management reacts only after a successful durable tool/result;
-      // the projection (not this listener) decides what that means.
-      this.contextManagement.onSessionEvent(memberId, handle.agent, event)
-    })
     const domain = await this.ctx.storageDomain.open(agentTeamDomainSpec)
     this.ctx.effect(() => async () => {
       this.accepting = false
@@ -830,18 +808,24 @@ export default class AgentTeam extends TypertRemoteService {
     await this.sweepWorkspaceParticipations(ledger)
     for (const member of ledger.listMembers()) {
       if (member.state === 'enabled') {
-        // A renewal or rollover that committed but never finished leaves no
-        // live handle to reveal it: startup derives the outstanding effects
-        // from the ledger and the registry's archive set. A Workspace fault
-        // must not keep the Member from running on its recorded binding, so
-        // the ordinary activation path still runs when the retire half cannot
-        // be finished here.
+        // A swap that committed but never finished leaves no live handle to
+        // reveal it: startup derives the outstanding effects from the ledger
+        // and the registry's archive set. A Workspace fault must not keep the
+        // Member from running, so the ordinary activation path still runs when
+        // the retire half cannot be finished here.
         try {
           await this.finishMemberTransition(member.memberId, { knownSessions: persistedSessions })
         } catch (error) {
           this.ctx.logger.warn(`agent-team: could not finish the recorded Session transition for member '${member.handle}': ${error instanceof Error ? error.message : String(error)}`)
         }
-        if (!this.handles.has(member.memberId)) await this.activateMember(member, undefined, persistedSessions)
+        // Activation reads the binding as it stands NOW: finishing the
+        // transition above may have moved the Member onto its successor, and
+        // activating the row this loop was entered with would resume the
+        // generation the ledger already retired.
+        const current = ledger.getMember(member.memberId)
+        if (current !== undefined && !this.handles.has(current.memberId)) {
+          await this.activateMember(current, undefined, persistedSessions)
+        }
       } else {
         // Every other durable state converges through the same effect table
         // its operation runs after the commit, so a crash or a failed call
@@ -1157,80 +1141,6 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Start one enabled Member from a new context: dispose the live handle,
-   * archive the previous Session (its log stays on disk for history), and
-   * activate a fresh Session under a new sessionId, so preset, tools, private
-   * memory, and model selection all reload while the next turn carries no
-   * history. The durable operation moves the Member's sessionId; identity,
-   * memory path, and binding survive. A new id is what keeps the Web Client
-   * seat live: a disposed generation's resident instance keeps its `removed`
-   * bit forever, so renewing under the same id would leave a permanently
-   * grayed session view.
-   */
-  @Remote('clearMemberContext')
-  async clearMemberContext(request: AgentTeamClearMemberContextRequest): Promise<AgentTeamClearMemberContextResult> {
-    return this.enqueueLifecycle(request.memberId, async () => {
-      this.requireAccepting()
-      this.requireWorkspace(request.workspaceId)
-      const stored = this.requireLedger().getMember(request.memberId)
-      if (stored === undefined || !this.requireLedger().participatesIn(request.memberId, request.workspaceId)) throw new Error(`unknown Member '${request.memberId}' in workspace '${request.workspaceId}'`)
-      if (stored.state !== 'enabled') throw new Error(`Agent Member '${stored.handle}' is ${stored.state}; only enabled Members can start from a new context`)
-      // Derived from the requestId, not fresh, so an exact retry restates this
-      // same id and the ledger resolves it instead of colliding. It is a
-      // uuid-shaped digest rather than the caller's text: nothing a caller
-      // wrote reaches a Session directory name, the Client's Session list, or a
-      // log path, and no escaping is involved.
-      const sessionId = SessionId(`agent-team-${stableRequestUuid('member-session-renewal', request.requestId)}`)
-
-      // A renewal this request already committed IS the desired binding: its
-      // retire or activation effects may still be outstanding, so finish them
-      // first, then answer with the recorded result either way. A repeat never
-      // commits a second binding, and never reports an effect that did not run
-      // as though it had — the status below carries that truth.
-      if (this.requireLedger().hasCommitted(request.requestId)) {
-        try {
-          await this.finishMemberTransition(request.memberId)
-        } catch (error) {
-          this.ctx.logger.warn(`agent-team: could not finish the recorded context renewal for member '${stored.handle}': ${error instanceof Error ? error.message : String(error)}`)
-        }
-        const recorded = await this.requireLedger().renewMemberSession({ ...request, sessionId, actor: agentTeamHumanActor() })
-        const current = this.requireLedger().getMember(request.memberId) ?? stored
-        return Object.freeze({ receipt: recorded.value.receipt, status: this.memberStatus(current) })
-      }
-
-      const active = this.handles.get(request.memberId)
-      if (active === undefined) {
-        // With no live generation to retire, an earlier transition may be what
-        // left the Member here; finishing it is what lets this request run at
-        // all. With none, the ordinary no-session refusal below stands.
-        await this.finishMemberTransition(request.memberId)
-      }
-      const retiring = this.handles.get(request.memberId)
-      if (retiring === undefined) throw new Error(`Agent Member '${stored.handle}' has no active session to clear`)
-      if (this.runningAgents.has(retiring.agent.id)) throw new Error(`Agent Member '${stored.handle}' is still running; wait for the current turn to end before starting from a new context`)
-      const result = await this.requireLedger().renewMemberSession({ ...request, sessionId, actor: agentTeamHumanActor() })
-      if (!result.committed) {
-        // Another caller recorded this requestId between the check above and
-        // the write; report its recorded outcome as the retry path does.
-        const current = this.requireLedger().getMember(request.memberId) ?? stored
-        return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(current) })
-      }
-      this.emitCommitted(result.value.receipt)
-      const renewed = result.value.member
-      // This request retired the previous generation itself, so the activation
-      // is planned rather than recovered: pass the fork parent it just left.
-      await this.finishMemberTransition(renewed.memberId, { forkedFrom: stored.sessionId })
-      const reactivated = this.handles.get(request.memberId)
-      if (reactivated === undefined) {
-        // Reactivation failed; the activation diagnostic carries the reason and
-        // the durable renewal stays honest about the attempt.
-        throw new Error(`Agent Member '${stored.handle}' failed to start a new context: ${this.memberFailures.get(request.memberId)?.activation ?? 'unknown error'}`)
-      }
-      return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(renewed) })
-    })
-  }
-
-  /**
    * Finish one Member's committed Session transition, whichever half a failure
    * interrupted. The ledger already records the binding the Member should run
    * and the Session it left, so only external effects remain and each is
@@ -1309,7 +1219,6 @@ export default class AgentTeam extends TypertRemoteService {
    */
   private async retireMemberGeneration(memberId: AgentTeamMemberId, active: AgentHandle, previousSessionId: SessionId): Promise<void> {
     this.recovery.stopTracking(memberId, 'session-disposed')
-    this.memberBySessionId.delete(previousSessionId)
     await this.waitLogged('wait-external', { label: this.memberLabel(memberId), sessionId: previousSessionId },
       'for the retired Agent to release its Session write path',
       () => this.disposeWithWakeGuard(active))
@@ -1325,21 +1234,12 @@ export default class AgentTeam extends TypertRemoteService {
       () => this.ctx.workspaceRegistry.archiveSession(previousSessionId))
   }
 
-  private async retireReplacedGeneration(memberId: AgentTeamMemberId, active: AgentHandle | undefined, plan: TeamTransitionPlan): Promise<readonly UserMessage[]> {
-    if (active === undefined) {
-      await this.archiveRetiredSession(plan.previousSessionId)
-      return []
-    }
-    await this.retireMemberGeneration(memberId, active, plan.previousSessionId)
-    const finalEvents = active.agent.session.ownEvents()
-    const finalState = foldTeamContextProjection(
-      finalEvents,
-      { sessionId: active.agent.session.id, inheritedEventCount: active.agent.session.inheritedEventCount },
-      this.contextProjectionHost,
-    )
-    const carriedById = new Map(plan.carriedInput.map(message => [message.id, message]))
-    for (const message of carriedInputOf(finalState, finalEvents)) carriedById.set(message.id, message)
-    return [...carriedById.values()]
+  private isOrdinaryInput(message: UserMessage): boolean {
+    return !this.isTeamWake(message) && !isAgentTeamContextSource(message)
+  }
+
+  private queuedInputOf(agent: Agent): readonly UserMessage[] {
+    return [...agent.inbox.nextTurn, ...agent.inbox.nextStep].filter(message => this.isOrdinaryInput(message))
   }
 
   private async archiveRetiredSession(sessionId: SessionId): Promise<void> {
@@ -1349,10 +1249,8 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * Execute one prepared generation swap at a true idle boundary: commit the
    * idempotent Host-actor operation, retire the previous generation, and
-   * activate the fresh Session. Input the retired generation never answered is
-   * delivered after activation; the Team Inbox is rederived, never copied.
-   *
-   * The successor starts from its own durable context alone — there is no
+   * activate the fresh Session. The Team Inbox is rederived, never copied, and
+   * the successor starts from its own durable context alone — there is no
    * handoff envelope, because a successor that is told it received one performs
    * the handoff instead of reading its memory.
    */
@@ -1364,15 +1262,15 @@ export default class AgentTeam extends TypertRemoteService {
       if (stored.sessionId !== plan.previousSessionId) throw new Error(`Agent Member '${stored.handle}' is no longer bound to the recycled Session`)
       const active = this.handles.get(memberId)
       if (active !== undefined) {
-        // A generation the swap reached while its last turn is still converging
-        // waits rather than failing; Host shutdown releases the wait, and the
-        // recheck below still refuses to commit against a turn that never idled.
-        if (this.runningAgents.has(active.agent.id)) {
-          await this.waitLogged('wait-turn', { label: stored.handle, sessionId: stored.sessionId },
-            'for the turn to converge before the Session transition',
-            () => Promise.race([active.agent.whenIdle(), this.shutdown.promise]))
-        }
+        // Public idle status also includes maintenance; whenIdle waits for both.
+        await this.waitLogged('wait-turn', { label: stored.handle, sessionId: stored.sessionId },
+          'for the turn to converge before the Session transition',
+          () => Promise.race([active.agent.whenIdle(), this.shutdown.promise]))
         if (this.runningAgents.has(active.agent.id)) throw new Error(`Agent Member '${stored.handle}' is still running; the recycle must wait for idle`)
+        const queued = this.queuedInputOf(active.agent)
+        if (queued.length > 0) {
+          throw new Error(`the context recycle is deferred: this generation has ${queued.length} queued message(s) that would not survive the switch`)
+        }
         // Disposal cancels the Agent's jobs, so a case that would silently
         // discard unfinished or unreported output keeps the old generation.
         const blockingJobs = this.ownedJobsBlockingRecycle(active.agent)
@@ -1380,32 +1278,40 @@ export default class AgentTeam extends TypertRemoteService {
           throw new Error(`the context recycle is refused: this Member now owns jobs that would not survive the switch (${blockingJobs.join(', ')})`)
         }
       }
-      const recycled = await this.requireLedger().recycleMemberSession({
+      const commit = (inputFromSeq?: SessionLogOffset) => this.requireLedger().recycleMemberSession({
         requestId: plan.requestId,
         workspaceId: stored.workspaceId,
         memberId,
         previousSessionId: plan.previousSessionId,
         newSessionId: plan.newSessionId,
         actor: agentTeamHostActor(),
+        ...(inputFromSeq === undefined ? {} : { inputFromSeq }),
+      })
+      const recycled = active === undefined ? await commit() : await active.agent.runMaintenance(async () => {
+        // Maintenance holds later waking input in the durable inbox until the
+        // ledger has recorded where its successor must start replaying.
+        const result = await commit(active.agent.session.seq)
+        this.retiringAgents.add(active.agent)
+        active.agent.cancel({ kind: 'disposed' }, { keepInbox: true })
+        return result
       })
       this.emitCommitted(recycled.value.receipt)
-      const carriedInput = await this.retireReplacedGeneration(memberId, active, plan)
+      if (active === undefined) await this.archiveRetiredSession(plan.previousSessionId)
+      else await this.retireMemberGeneration(memberId, active, plan.previousSessionId)
       // Linear succession: the new Session's lineage parent is the one it
-      // replaces. Activation defers the Inbox wake so carried input and the
-      // rederived notice keep their order behind it.
+      // replaces. Activation defers the Inbox wake until input replay completes.
       await this.activateMember(recycled.value.member, undefined, undefined, plan.previousSessionId, { deferNotify: true })
       const reactivated = this.handles.get(memberId)
       if (reactivated === undefined) {
         throw new Error(`Agent Member '${stored.handle}' failed to activate its next context: ${this.memberFailures.get(memberId)?.activation ?? 'unknown error'}`)
       }
-      for (const message of carriedInput) reactivated.agent.followup(message)
       const notifications = this.requireLedger().notificationFacts(recycled.value.member.memberId)
       if (notifications.length > 0) {
         this.notifyMember(reactivated.agent, {
           kind: 'transition',
           requestId: plan.requestId,
           previousSessionId: plan.previousSessionId,
-        }, carriedInput.length > 0)
+        })
       }
     })
   }
@@ -2100,7 +2006,7 @@ export default class AgentTeam extends TypertRemoteService {
   private async replayCarriedInput(member: AgentTeamAgentMember, agent: Agent, generationStarted: boolean): Promise<number> {
     const transition = this.requireLedger().lastTransitionForMember(member.memberId)
     if (transition === undefined || transition.targetSessionId !== agent.session.id) return 0
-    if (generationStarted) return this.skipCarriedInput(member.memberId, agent.session.id, 'started-generation')
+    if (generationStarted && transition.inputFromSeq === undefined) return this.skipCarriedInput(member.memberId, agent.session.id, 'started-generation')
     let inspectionEvents: readonly SessionEvent[]
     let inspectionInherited: SessionLogOffset
     const previousRead = await this.sessionReader.read(transition.previousSessionId)
@@ -2114,8 +2020,8 @@ export default class AgentTeam extends TypertRemoteService {
     inspectionInherited = previousRead.inspection.inheritedEventCount
     const state = foldTeamContextProjection(
       inspectionEvents,
-      { sessionId: transition.previousSessionId, inheritedEventCount: inspectionInherited },
-      this.contextProjectionHost,
+      { sessionId: transition.previousSessionId, inheritedEventCount: inspectionInherited,
+        ...(transition.inputFromSeq === undefined ? {} : { inputFromSeq: transition.inputFromSeq }) },
     )
     const carried = carriedInputOf(state, inspectionEvents)
     if (carried.length === 0) return 0
@@ -2364,6 +2270,11 @@ export default class AgentTeam extends TypertRemoteService {
           throw new PresetCompositionError(error instanceof Error ? error.message : String(error), { cause: error })
         }
         installModelSelection(agentCtx, selected)
+        agentCtx.on('agent/pre-step', async ({ agent }, next) => {
+          // The original inbox insertion is the durable replay source even if
+          // this driver already claimed it; requeueing can reorder later input.
+          return this.retiringAgents.has(agent) ? { kind: 'reject' as const } : next()
+        })
         return {
           commit: () => {
             // The member scope composes no sandbox-policy service (the preset
@@ -2403,7 +2314,6 @@ export default class AgentTeam extends TypertRemoteService {
       this.memberRuntime.recordAppliedCapabilities(member.memberId, member.capabilities)
       await workspace.attachSession(member.sessionId)
       this.handles.set(member.memberId, created)
-      this.memberBySessionId.set(member.sessionId, member.memberId)
       this.modelSelections.set(member.memberId, selected)
       this.clearMemberFailure(member.memberId, 'activation')
       this.clearMemberFailure(member.memberId, 'preTurnCancellation')
@@ -2418,7 +2328,6 @@ export default class AgentTeam extends TypertRemoteService {
         const state = foldTeamContextProjection(
           created.agent.session.ownEvents(),
           { sessionId: created.agent.session.id, inheritedEventCount },
-          this.contextProjectionHost,
         )
         if (state.pending !== null) this.contextManagement.recoverPendingTransition(member.memberId, created.agent, member.sessionId)
         // A restart between one checkpoint's durable result and its quiet
@@ -2429,20 +2338,11 @@ export default class AgentTeam extends TypertRemoteService {
         // this Session. A crash after the binding flipped but before the
         // carried enqueue still replays here.
         recoveryCarried = await this.replayCarriedInput(member, created.agent, generationStarted)
-      } else if (forkedFrom === undefined && lineageParent !== undefined) {
-        // A restart recreated a Session that never materialized before the
-        // crash (the swap committed, its activation failed, and this create
-        // path just rebuilt it from the ledger binding alone): the retired
-        // generation's unconsumed input — the durable fold, the same truth the
-        // live transition uses — is what the successor still owes.
+      } else if (lineageParent !== undefined) {
         recoveryCarried = await this.replayCarriedInput(member, created.agent, generationStarted)
       }
-      // The ordinary Inbox wake runs LAST, so carried input and rederived Team
-      // facts keep their order behind it. When recovery redelivered carried
-      // input, the wake is sequenced behind it (its own follow-up turn) so the
-      // steer lane can never leapfrog those messages. A swap activation defers
-      // the wake entirely — its caller delivers carried input first and
-      // rederives the Inbox afterwards.
+      // Give carried input its own turn before the rederived Inbox notice;
+      // steering the notice could otherwise overtake that input.
       if (options?.deferNotify !== true) {
         this.notifyMember(created.agent, {
           kind: 'activation',
@@ -2450,7 +2350,10 @@ export default class AgentTeam extends TypertRemoteService {
         }, recoveryCarried > 0)
       }
     } catch (error) {
-      if (created !== undefined) await this.disposeWithWakeGuard(created)
+      if (created !== undefined) {
+        await this.disposeWithWakeGuard(created)
+        if (this.handles.get(member.memberId) === created) this.handles.delete(member.memberId)
+      }
       this.modelSelections.delete(member.memberId)
       this.memberRuntime.forgetMember(member.memberId)
       const message = error instanceof Error ? error.message : String(error)
@@ -2663,8 +2566,45 @@ export default class AgentTeam extends TypertRemoteService {
       if (handle !== undefined) {
         this.afterCommit(`notification for '${this.memberLabel(memberId)}'`,
           () => this.notifyMember(handle.agent, { kind: 'commit', receipt, operationKind: operation.kind }))
+        continue
       }
+      this.afterCommit(`transition repair for '${this.memberLabel(memberId)}'`, () => {
+        void this.finishRecordedTransitionThenNotify(memberId, { kind: 'commit', receipt, operationKind: operation.kind })
+      })
     }
+  }
+
+  /**
+   * Finish a recorded Session transition that a failed retire or activation
+   * left outstanding, inside the Member's own lifecycle chain, and then
+   * rederive its Inbox for the successor.
+   */
+  private async finishRecordedTransitionThenNotify(memberId: AgentTeamMemberId, cause: NotificationCause): Promise<void> {
+    if (!this.accepting || this.contextManagement.isTransitioning(memberId)) return
+    let finished = false
+    try {
+      finished = await this.enqueueLifecycle(memberId, async () => {
+        const member = this.requireLedger().getMember(memberId)
+        if (member === undefined || member.state !== 'enabled' || this.handles.has(memberId)) return false
+        // The swap that owns this Member is still running: its own activation
+        // is the effect this would duplicate.
+        if (this.contextManagement.isTransitioning(memberId)) return false
+        if (this.requireLedger().lastTransitionForMember(memberId) === undefined) return false
+        await this.finishMemberTransition(memberId)
+        return true
+      })
+    } catch (error) {
+      if (!this.accepting) return
+      this.ctx.logger.warn(`agent-team: could not finish the recorded Session transition for ${this.memberScope(memberId)}: ${failureDetail(error)}`)
+      return
+    }
+    if (!finished) return
+    const live = this.handles.get(memberId)
+    if (live === undefined) {
+      this.ctx.logger.warn(`agent-team: ${this.memberScope(memberId)} is still without a live session after finishing its recorded Session transition: ${this.memberFailures.get(memberId)?.activation?.detail ?? 'activation did not report a reason'}; it stays unavailable until Member recovery or the next startup retries the activation`)
+      return
+    }
+    this.notifyMember(live.agent, cause)
   }
 
   /**
@@ -3047,7 +2987,6 @@ export default class AgentTeam extends TypertRemoteService {
         () => this.disposeWithWakeGuard(handle))
       this.handles.delete(memberId)
     }
-    this.memberBySessionId.delete(member.sessionId)
     this.modelSelections.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
     this.clearMemberFailure(memberId, 'activation')

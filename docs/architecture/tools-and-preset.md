@@ -8,25 +8,35 @@ Every row `name:` is a bare specifier the Loader resolves against the profile, n
 
 The seven tools are defined in `packages/tool-agent-team/src/index.ts`; their contract is in [`tools.md`](../team-collaboration/tools.md). They mount under the isolated `team-member` preset. The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
 
-A Member has no context tool at all. Its Session is compacted in place by the engine when it grows large — the preset's `compaction-basic` row mounts this bundle's own `team-compaction-engine`, a `BasicCompactionEngine` subclass that only supplies the measured seven-section summary template, with `auto` on and the trigger at 256K. Generation swaps are Host decisions, never model ones, so there is nothing for a tool to schedule and nothing for a model to cite.
+A Member has no context tool at all. Its Session is compacted in place by the Harness's own `@deepseek-ai/dsh-compaction-basic` — the preset's `compaction-basic` row names that package unmodified, with `auto` on and the ratio configuration described in [`memory-and-context.md`](../team-collaboration/memory-and-context.md). Generation swaps are Host decisions, never model ones, so there is nothing for a tool to schedule and nothing for a model to cite.
 
-The generation swap is owned by `team-context-management.ts`, Team's own coordinator. It watches each Member Session's events, derives the pending intent from the durable `tool/call`+`tool/result` pairs (legacy logs still carry rollover pairs written by earlier builds; no current build produces them), and executes the swap through the serialized lifecycle queue:
+The generation swap is owned by `team-context-management.ts`, Team's own coordinator. It starts from a Host wake decision rather than a durable intent, executes through the serialized lifecycle queue, and takes the successor's identity from the retired Session so a crash converges on one successor:
 
 1. wait for true idle;
-2. recheck the owned-jobs guard at the commit seam;
-3. retire the old generation (dispose + archive, never delete);
-4. commit the idempotent `team/member-session-recycled` operation as the Host actor;
+2. recheck the owned-jobs guard and the ordinary-input queue at the commit seam — a queued ordinary message defers the swap;
+3. inside `agent.runMaintenance`, commit the idempotent `team/member-session-recycled` operation as the Host actor, recording `inputFromSeq` (the retired log's offset) when a live generation exists;
+4. retire the old generation: its pre-step gate rejects the step without a model request, then dispose and archive (never delete); the original inbox insertions remain in the log even if already claimed;
 5. activate the fresh Session, parented at the one it replaces;
-6. deliver any carried non-Team input via followup, then rederive the Inbox.
+6. fold the retired log from `inputFromSeq`, drop every message the successor already holds by id, deliver the rest by followup, then rederive the Inbox from the ledger.
+
+Maintenance is what makes the commit safe against input arriving mid-swap: the loop is parked there, so a new message waits in the durable inbox instead of reaching the generation being retired. A failed commit releases maintenance and the old generation continues; a committed one retires it, and startup or recovery finishes a swap interrupted before the replay.
 
 The successor's first model-facing context is its ordinary per-step injection — identity, `memory.md`, the workspace list — plus the message that woke it. There is no handoff envelope and no generation announcement: a successor told it received a handoff performs a handoff instead of reading its memory.
 
-The fold is Team's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` carries the durable ref naming, the Team-notice rule, the boundary classification (`team-boundary`, `handoff`, `compaction`), the claim boundary's Task→Thread attribution, and the fork cut, so a seeded child's inherited prefix folds back to the same reference. `context-codec.ts` is the one writer of the two envelopes it reads back, byte-identical to what earlier builds wrote.
+The fold is Team's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` owns the durable checkpoint-ref naming, the Team-notice rule, the fork cut, and the folded state a generation reads back: its checkpoints with their turn-end delivery state, at most one legacy rollover intent, the continuation delivery records, and the unconsumed non-Team input the retired generation never consumed. The tool names it still decodes (`context_rollover`, `new_context`, `context_checkpoint`) are decoders for logs written by earlier builds, not tool aliases.
 
-Crash recovery is log-derived. A restart replays a pending intent and finishes the swap; a legacy pending whose containing turn never ended durably is spent and is discarded instead of leaving the generation permanently un-swappable.
+`context-codec.ts` writes the one envelope this build still produces, the quiet checkpoint continuation. Recognition of that envelope, and of the two shapes earlier builds wrote, lives in `context-source.ts`; the handoff writer survives only as a test helper for those legacy shapes.
 
-Quiet checkpoint continuations deliver exactly once (per-member latch in-process, the projection's durable delivery record across restarts).
+Crash recovery is log-derived. An interrupted swap is finished from the recorded binding and the retired Session, and a legacy pending intent whose containing turn never ended durably is spent and discarded instead of leaving the generation permanently un-swappable.
 
-Carried-input replay after a restart is bounded. A current generation that already started its own turns skips the replay (its carried input was delivered or superseded while it ran). An unreadable retired previous Session fails open with a warning for two bounded classes — log corruption (`corrupt session log`, whose torn tail the Host repairs) and a deterministic released-format refusal (`SessionFormatUnsupportedError`, which no retry can change) — while missing/IO and unknown causes stay fail-closed, so a retired generation's readability never gates the Member's activation once the current one has run.
+Carried-input replay is bounded and keyed by Message id. A swap records `inputFromSeq`, the retired log's offset at commit, so the fold counts only input at or after that boundary, and the retired Session's log is the only source — no message content is held in memory for the carry. A successor that already started its own turns is not skipped for that reason: the boundary and the successor's own log and inbox queues decide which messages it still lacks. Only a legacy transition without `inputFromSeq` skips the replay along its started generation.
+
+`agent-instructions` messages are regenerated by the successor rather than replayed as standalone turns.
+
+A canceled inbox splice does not identify who removed the message. Replay must preserve input cleared by disposal, so an explicit queue removal or replacement racing this swap can also be replayed. Ordinary Session cancel retains pending input by design; this limitation concerns queue editing during the transition.
+
+An unreadable retired previous Session fails open with a warning for two bounded classes — log corruption (`corrupt session log`, whose torn tail the Host repairs) and a deterministic released-format refusal (`SessionFormatUnsupportedError`, which no retry can change) — while missing, IO, and unknown causes stay fail-closed. A wake swap with an input boundary keeps this check even after its successor has run.
 
 Whether a Member Session has durable persisted content is decided through session-persistence inspection (which awaits in-flight retirement drains), never a bare metadata listing that races a suspend's final flush.
+
+The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, no prior generation, unreadable activity time, a cache possibly still warm, and a context below the waterline each answer resume, and only a cold gap over a large enough context recycles. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) owns the thresholds and the configuration group.

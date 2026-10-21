@@ -789,25 +789,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const builderMember = memberStatuses.find((status: { member: { handle: string } }) => status.member.handle === 'builder')!
   const builderAgent = scaffold.ctx.agents.get(builderMember.member.sessionId)!
 
-  // Fixture seam, not an assertion change: the adjacent Harness scaffold's
-  // fixture-less adapter reports route capacity on a top-level field the
-  // canonical LlmResolvedModelInfo shape never reads, so the Member's route
-  // would price as unknown and the pressure policy fail-closed would reject
-  // every pre-step. The canonical durable route record — the same
-  // `request/context` event a real first request appends — matches the
-  // Member's default selection and carries the route's real capacity, so
-  // the Host's persisted-route fast path prices the turn normally. The
-  // journey still proves a plain composer prompt lands on the Member's live
-  // Session below; nothing about the delivery assertion changes.
-  {
-    const selection = scaffold.ctx.agentDefaultModel.currentSelection()
-    builderAgent.session.append('request/context', {
-      provider: selection.provider,
-      model: selection.model,
-      contextWindow: 128_000,
-    })
-  }
-
   // Clicking the Agent card keeps Team mode mounted and swaps only the right
   // pane: the conversation shadow stands down so the shipped root renders the
   // Member Session between the Team sidebars. A Member session has no human
@@ -829,13 +810,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => memberInput.count()).toBe(1)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-composer.png'), fullPage: true })
 
-  // With clear-context retired there is no Human-initiated rollover in this
-  // journey: the embedded Member Session simply stays live for its current
-  // generation (model-driven context rollover and the Client follow are
-  // covered by the member-lifecycle integration tests and the Client
-  // component suite; the full model-driven browser journey lands with
-  // ticket 04). The pane keeps rendering the Member's live Session — blank
-  // hero, composer enabled, Team mode mounted.
   await expect.poll(() => page.evaluate(() => ({
     channel: document.querySelectorAll('[data-team-channel]').length,
     mode: document.documentElement.dataset.agentTeamMode ?? null,
@@ -1678,7 +1652,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // anything while `scrollWidth` really exceeds `clientWidth`.
   const wideTableHead = '| 序号 | 会话 | 耗时 | 工具 | 读取 | 写入 | 命中 |'
   const wideTableRule = '| --- | --- | --- | --- | --- | --- | --- |'
-  const wideTableBody = '| 182 | pulse | 26.7 min | 83 | 0 | 0 | skill,bash,write,message,read,context_search |'
+  const wideTableBody = '| 182 | pulse | 26.7 min | 83 | 0 | 0 | skill,bash,write,team_message,read,team_attention |'
   const wideTable = `${wideTableHead}\n${wideTableRule}\n${wideTableBody}`
   const wideTableCases = [
     { marker: '宽表回归验收', body: `### 宽表回归验收\n\n${wideTable}` },

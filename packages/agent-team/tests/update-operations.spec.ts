@@ -11,6 +11,7 @@ import AgentTeam from '../src/index.ts'
 import { AgentTeamLedger } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
+import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import type { AgentTeamChannelRef, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -38,6 +39,7 @@ async function harness(pool = new MemoryMediaPool()): Promise<{ readonly ctx: Co
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)

@@ -6,7 +6,7 @@
 
 ## Service 约定
 
-Service 使用 `ctx.storageDomain`、`ctx.workspaceRegistry`、`ctx.agents`、`ctx.agentDefaultModel`、`ctx.agentPresets`、`ctx.tools`、`ctx.sessions` 和 `ctx.sessionPersistence`，并在 Cordis 发布 `ctx.agentTeam` 前打开带版本的 `agent_team` Domain。首次启动为稳定 Human Member 追加一条 `team/initialized` operation；后续启动重放同一 operation，不追加新记录。
+Service 使用 `ctx.storageDomain`、`ctx.workspaceRegistry`、`ctx.agents`、`ctx.agentDefaultModel`、`ctx.agentPresets`、`ctx.tools`、`ctx.tokenMeter`、`ctx.sessionProjections` 和 `ctx.sessionPersistence`，并在 Cordis 发布 `ctx.agentTeam` 前打开带版本的 `agent_team` Domain。首次启动为稳定 Human Member 追加一条 `team/initialized` operation；后续启动重放同一 operation，不追加新记录。
 
 `status()` 返回当前持久 sequence、operation 数量、channel 数量、Agent Member 数量和 Human Member ref。它不发起模型请求，也不写 storage。`validateLedger()` 对照持久 operation table 检查包内 projection。invariant companion 在挂载时完整重导该表——重放不通过的账本会让启动失败——但当这期间没有任何提交落地时，它会复用账本构造期已经跑过的那次记录级重放：该复用只能用一次，并受三项同一性检查把关（记录条数、末条 sequence、末条 operation id），而这三项只有 operations 表的唯一写者——账本的 commit 路径——能改变。期间任何一次提交、以及此后的每次校验，都会重新重放持久记录。此后每批提交只跑一次，且安排在这次提交调用返回**之后**执行，所以打开 Thread 不会等待 O(账本) 的重放。漂移由这次延后重放记录日志，并在随后每次提交上重新抛出，直到某次重放干净为止。
 
@@ -44,7 +44,7 @@ Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默
 
 Team-enabled preset 在自身 Agent scope 注册七个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
 
-Member 上下文只有两个机制，且没有模型工具。preset 的 `compaction-basic` 行挂的是本 bundle 的 `team-compaction-engine`——一个只在 7 节实测摘要模板上有差别的 `BasicCompactionEngine` 子类——`auto` 打开，触发点是绝对的 256K 水位。换代是 Host 的决定：`team-context-management.ts` 响应 durable 的 pending 意图，等真正 idle、复查 owned-jobs guard、以 Host actor 提交幂等的 `team/member-session-recycled` operation、退役旧 Session（dispose 并归档，绝不删除）、再激活一代新的、lineage parent 指向被替换的那一代。携带的非 Team 输入作为独立 turn 跟随，Inbox 重新派生。身份、模型、私有记忆、skills、Claims 和 Attention 全部保留，进程内状态在崩溃后可从 durable log 重建。Host 侧 clear-context Remote 保留为无可见 Client 入口的迁移逃生门。
+Member 上下文只有两个机制，且没有模型工具。preset 的 `compaction-basic` 行原样挂 Harness 的 `@deepseek-ai/dsh-compaction-basic`，`auto` 打开并配 preset 声明的比例，所以 Session 就地压缩；这些数值归 [`../../docs/team-collaboration/memory-and-context.zh.md`](../../docs/team-collaboration/memory-and-context.zh.md)。换代是唤醒边界上 Host 的决定：`team-context-management.ts` 等真正 idle、复查 owned-jobs guard、以 Host actor 提交幂等的 `team/member-session-recycled` operation、退役旧 Session（dispose 并归档，绝不删除）、再激活一代新的、lineage parent 指向被替换的那一代。身份、模型、私有记忆、skills、Claims 和 Attention 全部保留，进程内状态在崩溃后可从 durable log 重建。没有任何 Remote 写入口会 renew、rollover 或重置 Member 的上下文。
 
 ## Model Experience
 

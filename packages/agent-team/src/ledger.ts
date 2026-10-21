@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
-import type { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
   AgentTeamActivity,
@@ -24,7 +24,6 @@ import type {
   AgentTeamChannelRef,
   AgentTeamChannelUpdatedOperation,
   AgentTeamReleaseSnapshot,
-  AgentTeamContextCheckpointRef,
   AgentTeamClaim,
   AgentTeamClaimActivity,
   AgentTeamClaimsReleasedActivity,
@@ -59,10 +58,7 @@ import type {
   AgentTeamMemberId,
   AgentTeamMemberRemovedOperation,
   AgentTeamMemberResumedOperation,
-  AgentTeamMemberSessionRenewedOperation,
-  AgentTeamMemberSessionRolledOverOperation,
   AgentTeamMemberSessionRecycledOperation,
-  AgentTeamMemberSessionRestartedOperation,
   AgentTeamMemberSuspendedOperation,
   AgentTeamMemberUpdatedOperation,
   AgentTeamMemberWorkspaceJoinedOperation,
@@ -195,44 +191,6 @@ export interface AgentTeamAuthorizedSetMemberStateRequest extends AgentTeamSetMe
   readonly actor: AgentTeamHumanActor
 }
 
-/** Host-authorized intent to move one enabled Member onto a fresh Session id. */
-export interface AgentTeamAuthorizedRenewMemberSessionRequest {
-  readonly requestId: AgentTeamRequestId
-  readonly workspaceId: WorkspaceId
-  readonly memberId: AgentTeamMemberId
-  /** The freshly minted Session the Member transitions onto. */
-  readonly sessionId: SessionId
-  readonly actor: AgentTeamHumanActor
-}
-
-/**
- * The retired Member-authored rollover request. No current build produces one:
- * the Host records its own swaps through {@link AgentTeamAuthorizedRecycleMemberSessionRequest}.
- * Kept because the durable schema is a strict union — a ledger written by an
- * earlier build still decodes through it.
- */
-export interface AgentTeamAuthorizedRolloverMemberSessionRequest {
-  readonly requestId: AgentTeamRequestId
-  readonly workspaceId: WorkspaceId
-  readonly memberId: AgentTeamMemberId
-  /** The calling Member; must be the target Member itself. */
-  readonly actor: AgentTeamMemberActor
-  /** The Session the Member must still be bound to at commit time. */
-  readonly previousSessionId: SessionId
-  /** The next generation Session, derived from the successful tool call. */
-  readonly newSessionId: SessionId
-  /** Seq of the retired rollover tool result in the previous Session log. */
-  readonly handoffEventSeq: SessionSeq
-  /** Why the recorded rollover happened: the model asked, or honored a pressure notice. */
-  readonly trigger: 'model' | 'pressure'
-  /** Seed source Session for a checkpoint return; absent on a fresh rollover. */
-  readonly sourceSessionId?: SessionId
-  /** Exclusive end of the seeded source prefix (its exact length in the source log). */
-  readonly sourceThroughSeq?: SessionLogOffset
-  /** The checkpoint a return was addressed to; absent on a fresh rollover. */
-  readonly checkpointRef?: AgentTeamContextCheckpointRef
-}
-
 /** Host-authorized recycling of one cold Member generation onto a fresh Session. */
 export interface AgentTeamAuthorizedRecycleMemberSessionRequest {
   readonly requestId: AgentTeamRequestId
@@ -241,6 +199,7 @@ export interface AgentTeamAuthorizedRecycleMemberSessionRequest {
   readonly actor: AgentTeamHostActor
   readonly previousSessionId: SessionId
   readonly newSessionId: SessionId
+  readonly inputFromSeq?: SessionLogOffset
 }
 
 export interface AgentTeamAuthorizedJoinChannelRequest extends AgentTeamJoinChannelRequest {
@@ -424,10 +383,7 @@ interface Projection {
   /** Ref index over the Message facts, written by `appendMessageFact` alone. */
   readonly messagesByRef: Map<AgentTeamMessageRef, AgentTeamMessage>
   readonly attentionByThread: Map<AgentTeamThreadRef, Set<AgentTeamMemberId>>
-  /** Latest retired Session id per Member, from the most recent renewal or rollover record. */
-  readonly previousSessions: Map<AgentTeamMemberId, SessionId>
-  /** Latest rollover seed envelope per Member, keyed to its target Session; absent on fresh rollovers and renewals. */
-  readonly rolloverSeeds: Map<AgentTeamMemberId, { readonly targetSessionId: SessionId; readonly sourceSessionId: SessionId; readonly sourceThroughSeq: SessionLogOffset; readonly checkpointRef: AgentTeamContextCheckpointRef }>
+  readonly sessionTransitions: Map<AgentTeamMemberId, { readonly previousSessionId: SessionId; readonly inputFromSeq?: SessionLogOffset }>
   /** Top-level anchor Message per Thread; the first topLevel Message wins, like the linear scan it replaces. */
   readonly anchorByThread: Map<AgentTeamThreadRef, AgentTeamMessage>
   /** Display ordinal per Task, in per-Channel creation order; workspace filtering happens at read time. */
@@ -474,7 +430,7 @@ function emptyProjection(): Projection {
     claims: new Map(), tasks: new Map(), threads: new Map(), attention: new Map(), directMarkers: new Map(), activityMarkers: new Map(),
     orderedFacts: [], claimsByTask: new Map(), factsByThread: new Map(), channelRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
     messagesByRef: new Map(),
-    attentionByThread: new Map(), previousSessions: new Map(), rolloverSeeds: new Map(),
+    attentionByThread: new Map(), sessionTransitions: new Map(),
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByChannel: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
     directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map() }
@@ -776,83 +732,7 @@ export class AgentTeamLedger {
     return this.setMemberState(request, 'enabled')
   }
 
-  /**
-   * Move one enabled Member onto a fresh Session: the durable operation
-   * records the sessionId transition while identity, memory, and binding
-   * survive. The Host disposes the old handle and archives the previous
-   * Session log around this write, so the next turn starts empty.
-   */
-  renewMemberSession(request: AgentTeamAuthorizedRenewMemberSessionRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
-    return this.enqueue(async () => {
-      const existing = this.state.byRequest.get(request.requestId)
-      if (existing !== undefined) {
-        this.assertSameMemberSessionRenewed(existing, request)
-        return this.resolved(this.memberResult(existing))
-      }
-      this.assertHumanActor(request.actor)
-      const prior = this.requireMember(request.memberId)
-      if (prior.state !== 'enabled') throw new Error(`Agent Member '${prior.handle}' is ${prior.state}; only enabled Members can start from a new context`)
-      if (prior.sessionId === request.sessionId) throw new Error(`Agent Member '${prior.handle}' already runs Session '${request.sessionId}'`)
-      const member = Object.freeze({ ...prior, sessionId: request.sessionId })
-      const operation: AgentTeamMemberSessionRenewedOperation = Object.freeze({
-        ...this.operationBase(request, this.nextSequence()), kind: 'team/member-session-renewed',
-        data: Object.freeze({ member, previousSessionId: prior.sessionId }),
-      })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.memberResult(operation))
-    })
-  }
-
-  /**
-   * The retired Member-actor rollover. No current flow calls it: a swap is the
-   * Host's decision and records itself through `recycleMemberSession`. It
-   * stays because a ledger written by an earlier build still replays through
-   * it, and an exact retry must still resolve to the recorded outcome while
-   * the same requestId with different data collides.
-   */
-  rolloverMemberSession(request: AgentTeamAuthorizedRolloverMemberSessionRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
-    return this.enqueue(async () => {
-      const existing = this.state.byRequest.get(request.requestId)
-      if (existing !== undefined) {
-        this.assertSameMemberSessionRolledOver(existing, request)
-        return this.resolved(this.memberResult(existing))
-      }
-      if (request.actor.kind !== 'member') throw new Error('Member session rollover requires Member authority')
-      const prior = this.requireMember(request.memberId)
-      if (request.actor.memberId !== request.memberId) throw new Error(`Agent Member '${prior.handle}' cannot roll over another Member's Session`)
-      if (prior.state !== 'enabled') throw new Error(`Agent Member '${prior.handle}' is ${prior.state}; only enabled Members can roll over their Session`)
-      if (prior.sessionId === request.newSessionId) throw new Error(`Agent Member '${prior.handle}' already runs Session '${request.newSessionId}'`)
-      if (prior.sessionId !== request.previousSessionId) throw new Error(`Agent Member '${prior.handle}' is no longer bound to Session '${request.previousSessionId}'`)
-      if ((request.checkpointRef !== undefined) !== (request.sourceSessionId !== undefined)) throw new Error('rollover checkpoint fields must appear together')
-      if (request.sourceSessionId !== undefined && request.sourceThroughSeq === undefined) throw new Error('rollover checkpoint seed requires a through sequence')
-      if (request.sourceThroughSeq !== undefined && request.sourceSessionId === undefined) throw new Error('rollover through sequence requires a source Session')
-      const member = Object.freeze({ ...prior, sessionId: request.newSessionId })
-      const operation: AgentTeamMemberSessionRolledOverOperation = Object.freeze({
-        ...this.operationBase(request, this.nextSequence()), kind: 'team/member-session-rolled-over',
-        data: Object.freeze({
-          member,
-          previousSessionId: request.previousSessionId,
-          newSessionId: request.newSessionId,
-          handoffEventSeq: request.handoffEventSeq,
-          trigger: request.trigger,
-          ...(request.sourceSessionId === undefined ? {} : { sourceSessionId: request.sourceSessionId }),
-          ...(request.sourceThroughSeq === undefined ? {} : { sourceThroughSeq: request.sourceThroughSeq }),
-          ...(request.checkpointRef === undefined ? {} : { checkpointRef: request.checkpointRef }),
-        }),
-      })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.memberResult(operation))
-    })
-  }
-
-  /**
-   * Move one enabled Member from a cold generation onto a fresh Session. The
-   * two existing transitions carry an authority this decision lacks — a renewal
-   * is Human intent, a rollover is the Member's own — so the Host records
-   * itself rather than borrowing either.
-   */
+  /** Move one enabled Member from a cold generation onto a fresh Session. */
   recycleMemberSession(request: AgentTeamAuthorizedRecycleMemberSessionRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
@@ -861,6 +741,7 @@ export class AgentTeamLedger {
         return this.resolved(this.memberResult(existing))
       }
       if (request.actor.kind !== 'host') throw new Error('Member session recycling requires Host authority')
+      if (request.inputFromSeq !== undefined && (!Number.isSafeInteger(request.inputFromSeq) || request.inputFromSeq < 0)) throw new Error('Member session recycling requires a non-negative input log offset')
       const prior = this.requireMember(request.memberId)
       if (prior.state !== 'enabled') throw new Error(`Agent Member '${prior.handle}' is ${prior.state}; only enabled Members can recycle their Session`)
       if (prior.sessionId !== request.previousSessionId) throw new Error(`Agent Member '${prior.handle}' is no longer bound to Session '${request.previousSessionId}'`)
@@ -869,7 +750,8 @@ export class AgentTeamLedger {
       const operation: AgentTeamMemberSessionRecycledOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/member-session-recycled',
         actor: Object.freeze({ ...request.actor }),
-        data: Object.freeze({ member, previousSessionId: request.previousSessionId, newSessionId: request.newSessionId }),
+        data: Object.freeze({ member, previousSessionId: request.previousSessionId, newSessionId: request.newSessionId,
+          ...(request.inputFromSeq === undefined ? {} : { inputFromSeq: request.inputFromSeq }) }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
@@ -882,38 +764,26 @@ export class AgentTeamLedger {
   }
 
   /**
-   * The retired Session this Member most recently left through a renewal or a
-   * swap — the lineage parent a crash between the durable binding commit and
-   * the new Session's activation recreates the successor from. Read from the
-   * audit projection; the Member record itself only names the current Session.
+   * The retired Session this Member most recently left through a swap — the
+   * lineage parent a crash between the durable binding commit and the new
+   * Session's activation recreates the successor from. Read from the audit
+   * projection; the Member record itself only names the current Session.
    */
   previousSessionForMember(memberId: AgentTeamMemberId): SessionId | undefined {
-    return this.state.previousSessions.get(memberId)
+    return this.state.sessionTransitions.get(memberId)?.previousSessionId
   }
 
   /**
    * The latest session transition this Member committed: the retired Session
-   * and the target it moved onto, through a renewal or a swap. Crash recovery
-   * binds carried-input redelivery to the recorded target — the CURRENT
-   * Session being that target proves the old generation's unconsumed input
-   * still belongs here.
+   * and the target it moved onto. Crash recovery binds carried-input
+   * redelivery to the recorded target — the CURRENT Session being that target
+   * proves the old generation's unconsumed input still belongs here.
    */
-  lastTransitionForMember(memberId: AgentTeamMemberId): { readonly previousSessionId: SessionId; readonly targetSessionId: SessionId } | undefined {
-    const previousSessionId = this.state.previousSessions.get(memberId)
+  lastTransitionForMember(memberId: AgentTeamMemberId): { readonly previousSessionId: SessionId; readonly targetSessionId: SessionId; readonly inputFromSeq?: SessionLogOffset } | undefined {
+    const transition = this.state.sessionTransitions.get(memberId)
     const member = this.state.members.get(memberId)
-    if (previousSessionId === undefined || member === undefined) return undefined
-    return { previousSessionId, targetSessionId: member.sessionId }
-  }
-
-  /**
-   * The Thread a Task overlay lives on, or undefined for an unknown or
-   * non-visible-Channel Task. Read-only input for attributing claim-mutation
-   * boundaries to the Thread whose context they entered.
-   */
-  threadForTask(taskRef: AgentTeamTaskRef): AgentTeamThreadRef | undefined {
-    const task = this.state.tasks.get(taskRef)
-    if (task === undefined) return undefined
-    return this.visibleChannel(this.state.channels.get(task.channelRef)) === undefined ? undefined : task.threadRef
+    if (transition === undefined || member === undefined) return undefined
+    return { ...transition, targetSessionId: member.sessionId }
   }
 
   listMembers(): readonly AgentTeamAgentMember[] {
@@ -2838,30 +2708,20 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/member-session-renewed') {
       target.members.set(operation.data.member.memberId, operation.data.member)
-      target.previousSessions.set(operation.data.member.memberId, operation.data.previousSessionId)
-      // A Human-side renewal is always a fresh start: a stale checkpoint
-      // seed from an earlier rollover must never re-seed it.
-      target.rolloverSeeds.delete(operation.data.member.memberId)
+      target.sessionTransitions.set(operation.data.member.memberId, { previousSessionId: operation.data.previousSessionId })
       return
     }
     if (operation.kind === 'team/member-session-recycled') {
       target.members.set(operation.data.member.memberId, operation.data.member)
-      target.previousSessions.set(operation.data.member.memberId, operation.data.previousSessionId)
-      target.rolloverSeeds.delete(operation.data.member.memberId)
+      target.sessionTransitions.set(operation.data.member.memberId, {
+        previousSessionId: operation.data.previousSessionId,
+        ...(operation.data.inputFromSeq === undefined ? {} : { inputFromSeq: operation.data.inputFromSeq }),
+      })
       return
     }
     if (operation.kind === 'team/member-session-rolled-over') {
       target.members.set(operation.data.member.memberId, operation.data.member)
-      target.previousSessions.set(operation.data.member.memberId, operation.data.previousSessionId)
-      // A checkpoint return records its seed envelope: a crash between this
-      // commit and the new Session's activation rebuilds the child from the
-      // recorded source instead of an empty context.
-      const { sourceSessionId, sourceThroughSeq, checkpointRef } = operation.data
-      if (sourceSessionId !== undefined && sourceThroughSeq !== undefined && checkpointRef !== undefined) {
-        target.rolloverSeeds.set(operation.data.member.memberId, { targetSessionId: operation.data.newSessionId, sourceSessionId, sourceThroughSeq, checkpointRef })
-      } else {
-        target.rolloverSeeds.delete(operation.data.member.memberId)
-      }
+      target.sessionTransitions.set(operation.data.member.memberId, { previousSessionId: operation.data.previousSessionId })
       return
     }
     if (operation.kind === 'team/channel-updated') {
@@ -4380,25 +4240,11 @@ export class AgentTeamLedger {
     if (operation.kind !== kind || !this.sameActor(operation.actor, request.actor) || operation.data.member.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
   }
 
-  private assertSameMemberSessionRenewed(operation: AgentTeamOperation, request: AgentTeamAuthorizedRenewMemberSessionRequest): asserts operation is AgentTeamMemberSessionRenewedOperation {
-    if (operation.kind !== 'team/member-session-renewed' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.member.memberId !== request.memberId || operation.data.member.sessionId !== request.sessionId) this.throwRequestCollision(request.requestId)
-  }
-
-  private assertSameMemberSessionRolledOver(operation: AgentTeamOperation, request: AgentTeamAuthorizedRolloverMemberSessionRequest): asserts operation is AgentTeamMemberSessionRolledOverOperation {
-    if (operation.kind !== 'team/member-session-rolled-over' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.member.memberId !== request.memberId || operation.data.member.sessionId !== request.newSessionId
-      || operation.data.previousSessionId !== request.previousSessionId || operation.data.handoffEventSeq !== request.handoffEventSeq
-      || operation.data.trigger !== request.trigger
-      || operation.data.sourceSessionId !== request.sourceSessionId
-      || operation.data.sourceThroughSeq !== request.sourceThroughSeq
-      || operation.data.checkpointRef !== request.checkpointRef) this.throwRequestCollision(request.requestId)
-  }
-
   private assertSameMemberSessionRecycled(operation: AgentTeamOperation, request: AgentTeamAuthorizedRecycleMemberSessionRequest): asserts operation is AgentTeamMemberSessionRecycledOperation {
     if (operation.kind !== 'team/member-session-recycled' || !this.sameActor(operation.actor, request.actor)
       || operation.data.member.memberId !== request.memberId || operation.data.member.sessionId !== request.newSessionId
-      || operation.data.previousSessionId !== request.previousSessionId) this.throwRequestCollision(request.requestId)
+      || operation.data.previousSessionId !== request.previousSessionId
+      || operation.data.inputFromSeq !== request.inputFromSeq) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameChannelUpdate(operation: AgentTeamOperation, request: AgentTeamAuthorizedUpdateChannelRequest): asserts operation is AgentTeamChannelUpdatedOperation {
@@ -4548,13 +4394,9 @@ export class AgentTeamLedger {
   }
 
   private sameMemberIdentity(left: AgentTeamAgentMember, right: AgentTeamAgentMember): boolean {
-    return left.memberId === right.memberId && left.sessionId === right.sessionId && left.workspaceId === right.workspaceId
-      && left.handle === right.handle && left.description === right.description && left.presetId === right.presetId
-      && isDeepStrictEqual(left.model ?? undefined, right.model ?? undefined)
-      && left.privateMemoryPath === right.privateMemoryPath
+    return left.sessionId === right.sessionId && this.sameMemberFacts(left, right)
   }
 
-  /** sameMemberIdentity minus the sessionId: every durable Member fact a session renewal must carry over unchanged. */
   private sameMemberFacts(left: AgentTeamAgentMember, right: AgentTeamAgentMember): boolean {
     return left.memberId === right.memberId && left.workspaceId === right.workspaceId
       && left.handle === right.handle && left.description === right.description && left.presetId === right.presetId
@@ -4607,7 +4449,7 @@ export class AgentTeamLedger {
     return Object.freeze({ receipt: this.receipt(operation), channel: operation.data.channel })
   }
 
-  private memberResult(operation: AgentTeamMemberAddedOperation | AgentTeamMemberSuspendedOperation | AgentTeamMemberResumedOperation | AgentTeamMemberSessionRestartedOperation | AgentTeamMemberSessionRenewedOperation | AgentTeamMemberSessionRolledOverOperation | AgentTeamMemberSessionRecycledOperation | AgentTeamMemberUpdatedOperation): AgentTeamDurableMemberResult {
+  private memberResult(operation: AgentTeamMemberAddedOperation | AgentTeamMemberSuspendedOperation | AgentTeamMemberResumedOperation | AgentTeamMemberSessionRecycledOperation | AgentTeamMemberUpdatedOperation): AgentTeamDurableMemberResult {
     return Object.freeze({ receipt: this.receipt(operation), member: operation.data.member })
   }
 

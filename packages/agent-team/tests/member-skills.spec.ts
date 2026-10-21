@@ -9,7 +9,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam from '../src/index.ts'
 import type { AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
-import { mountTeamMemberHost } from './helpers/team-host-fixture.ts'
+import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 const originalDshHome = process.env.DSH_HOME
@@ -31,7 +31,10 @@ function memberSkillsHarness() {
   return mountTeamMemberHost({
     cleanups,
     // No turn runs here, but the route must resolve rather than reject.
-    prepare: ctx => { ctx.llm.registerAdapter(['mock'], new EmptyAdapter()) },
+    prepare: ctx => {
+      provideQuietTokenMeter(ctx)
+      ctx.llm.registerAdapter(['mock'], new EmptyAdapter())
+    },
     presetPlugins: [
       { id: 'member-context', name: '@contexera/dsh-agent-team/member-context' },
       { id: 'team-tools', name: '@contexera/dsh-agent-team/tools' },

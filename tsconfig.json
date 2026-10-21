@@ -38,9 +38,6 @@
       "@contexera/dsh-agent-team/sqlite-backend": [
         "./packages/agent-team/src/vendor/storage-sqlite/index.ts"
       ],
-      "@contexera/dsh-agent-team/team-compaction-engine": [
-        "./packages/agent-team/src/team-compaction-engine.ts"
-      ],
       "@contexera/dsh-agent-team/member-context": [
         "./packages/agent-team/src/member-context.ts"
       ],

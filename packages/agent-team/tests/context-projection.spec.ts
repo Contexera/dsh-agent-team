@@ -1,38 +1,29 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createToolResultMessage, createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/dsh-session'
+import {
+  checkpointRefFor,
+  carriedInputOf,
+  createTeamContextProjectionDefinition,
+  foldTeamContextProjection,
+  type TeamContextProjectionState,
+} from '../src/context-projection.ts'
+import { AGENT_TEAM_PLUGIN_ID, continuationCheckpointRefOf } from '../src/context-source.ts'
+import { createCheckpointContinuationMessage } from '../src/context-codec.ts'
 
 /** Fixed Session identity for every fold in this spec; checkpoint refs key on it. */
 const SID = 'agent-team-test-session'
-import {
-  CONTEXT_CHECKPOINT_TOOL_NAME,
-  CONTEXT_ROLLOVER_TOOL_NAME,
-  NEW_CONTEXT_TOOL_NAME,
-  boundaryRefFor,
-  checkpointRefFor,
-  continuationDelivered,
-  createTeamContextProjectionDefinition,
-  foldTeamContextProjection,
-  TeamContextProjectionHost,
-  type TeamContextProjectionState,
-} from '../src/context-projection.ts'
-import { AGENT_TEAM_PLUGIN_ID, continuationCheckpointRefOf, handoffOf } from '../src/context-source.ts'
-import { TEAM_CONTEXT_CODEC } from '../src/context-codec.ts'
 
-/**
- * Team's projection host with no ledger attached: boundary attribution that
- * resolves through the ledger (a claim mutation's Task→Thread) stays empty,
- * exactly as it does before the domain is open. Cases that need a resolved
- * attribution build their own host.
- */
-const PROJECTION_HOST = new TeamContextProjectionHost()
+/** Recorded tool names of the retired context tools: literals, because the logs carry them. */
+const CONTEXT_ROLLOVER_TOOL_NAME = 'context_rollover'
+const CONTEXT_CHECKPOINT_TOOL_NAME = 'context_checkpoint'
+const NEW_CONTEXT_TOOL_NAME = 'new_context'
 
-/** Fold one log through the engine's unit with Team's config — the production path. */
+/** Fold one log through the unit Team registers, with no Host attached. */
 function fold(events: readonly SessionEvent[], inheritedEventCount?: SessionLogOffset, sessionId: string = SID): TeamContextProjectionState {
   return foldTeamContextProjection(
     events,
     { sessionId, ...(inheritedEventCount === undefined ? {} : { inheritedEventCount }) },
-    PROJECTION_HOST,
   )
 }
 
@@ -55,18 +46,14 @@ function contextToolCall(turn: number, callId: string, name: string, args: objec
     data: { turn, step: 1, callId: callId as never, name, arguments: JSON.stringify(args) } } as SessionEvent
 }
 
-function toolResult(turn: number, callId: string, options: { isError?: boolean; internalError?: boolean; meta?: object } = {}): SessionEvent {
+function toolResult(turn: number, callId: string, options: { isError?: boolean; internalError?: boolean } = {}): SessionEvent {
   const message = createToolResultMessage({
     callId: callId as never,
     content: [{ type: 'text', text: options.isError === true ? 'Error: rejected' : 'ok' }],
     isError: options.isError === true,
   })
-  // Durable tool/result events persist the presentationMeta projection at
-  // the DATA level (agent-loop appendToolResult), never inside the message
-  // content blocks — tests that smuggle meta into content would fold green
-  // against a wrong implementation reading the same wrong place.
   return { type: 'tool/result', seq: nextSeq(), time: 0,
-    data: { turn, step: 1, message, ...(options.internalError === true ? { error: { name: 'ToolError', code: 'BOOM' } } : {}), ...(options.meta === undefined ? {} : { meta: options.meta }) } } as SessionEvent
+    data: { turn, step: 1, message, ...(options.internalError === true ? { error: { name: 'ToolError', code: 'BOOM' } } : {}) } } as SessionEvent
 }
 
 function userMessageEvent(message: UserMessage): SessionEvent {
@@ -280,7 +267,7 @@ describe('AgentTeam context projection — legacy rollover intent decode', () =>
       ...legacyNewContextPair(1, 'call-1', { handoff: 'live', relatedFiles: [{ path: 'src/index.ts', reason: 'in progress' }] }),
       turnEnd(1),
     ]
-    const definition = createTeamContextProjectionDefinition(PROJECTION_HOST)
+    const definition = createTeamContextProjectionDefinition()
     // `init` seeds the Session identity and the inherited cut from the
     // header — the definition itself closes over neither.
     let live = definition.init({ id: SID } as never, 0 as never)
@@ -365,6 +352,35 @@ describe('AgentTeam context projection — checkpoints', () => {
   })
 })
 
+describe('AgentTeam committed wake-swap input recovery', () => {
+  it('replays only unanswered post-boundary input without a legacy rollover intent', () => {
+    const message = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
+    const before = message('before boundary')
+    const answered = message('already answered')
+    const pending = message('arrived while committing')
+    const relay = createUserMessage({ content: [{ type: 'text', text: 'direct relay' }],
+      source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'relay' } })
+    const instructions = createUserMessage({ content: [{ type: 'text', text: 'regenerated context' }],
+      source: { kind: 'agent-instructions', form: 'instructions', changes: [] } as never })
+    const notice = createUserMessage({ content: [{ type: 'text', text: 'unread' }],
+      source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox has unread work.' } })
+    const inserted = (messages: UserMessage[]): SessionEvent => ({ type: 'agent/inbox/spliced', seq: nextSeq(), time: 0,
+      data: { target: 'next-turn', start: 0, inserted: messages } }) as SessionEvent
+    const events: SessionEvent[] = [inserted([before])]
+    const boundary = eventSeq + 1
+    events.push(inserted([answered]), turnStart(1), userMessageEvent(answered), {
+      type: 'assistant/message', seq: nextSeq(), time: 0, data: { turn: 1, step: 1, message: {} },
+    } as SessionEvent, turnEnd(1), inserted([pending, relay, notice, instructions]), {
+      type: 'agent/inbox/spliced', seq: nextSeq(), time: 0,
+      data: { target: 'next-turn', start: 0, removedCount: 2, inserted: [], outcome: 'canceled' },
+    } as SessionEvent)
+    const state = foldTeamContextProjection(events, { sessionId: SID, inputFromSeq: boundary })
+    expect(state.pending).toBeNull()
+    expect(carriedInputOf(state, events)).toEqual([pending, relay])
+    expect(carriedInputOf(fold(events), events)).toEqual([])
+  })
+})
+
 describe('AgentTeam context projection — quiet continuation delivery', () => {
   it('a delivered continuation notice marks delivery for its checkpoint', () => {
     const events: SessionEvent[] = [
@@ -376,17 +392,17 @@ describe('AgentTeam context projection — quiet continuation delivery', () => {
     // Nothing is delivered yet: the durable record is the message in the log,
     // never a scheduled-but-unwritten intent (the live latch is the
     // coordinator's, and it re-arms from this record after a restart).
-    expect(continuationDelivered(fold(events), checkpointRef)).toBe(false)
+    expect(fold(events).continuations).toEqual([])
     const delivered = fold([
       ...events,
-      userMessageEvent(TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(checkpointRef as never)),
+      userMessageEvent(createCheckpointContinuationMessage(checkpointRef)),
     ])
-    expect(continuationDelivered(delivered, checkpointRef)).toBe(true)
+    expect(delivered.continuations).toEqual([{ checkpointRef, deliveredSeq: events.at(-1)!.seq + 1 }])
   })
 
   it('a repeated continuation notice keeps the first delivery seq', () => {
     const checkpointRef = checkpointRefFor(SID, 'call-x')
-    const continuation = TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(checkpointRef as never)
+    const continuation = createCheckpointContinuationMessage(checkpointRef)
     const events: SessionEvent[] = [
       turnStart(1),
       ...checkpointPair(1, 'call-x', 'anchor'),
@@ -401,423 +417,15 @@ describe('AgentTeam context projection — quiet continuation delivery', () => {
     const state = fold(events)
     expect(state.continuations).toHaveLength(1)
     expect(state.continuations[0]!.deliveredSeq).toBe(events[5]!.seq)
-    expect(continuationDelivered(state, checkpointRef)).toBe(true)
   })
 })
 
 describe('AgentTeam context sources', () => {
-  it('the handoff message carries the snapshot form, envelope, and prose section', () => {
-    const message = TEAM_CONTEXT_CODEC.createHandoffMessage({
-      handoff: 'objective: finish the parser\nnext step: run tests',
-      previousSessionId: 'agent-team-old',
-      newSessionId: 'agent-team-new',
-      trigger: 'model',
-      handoffEventSeq: 42,
-      relatedFiles: [{ path: 'src/parser.ts', reason: 'rewritten' }],
-    })
-    // The envelope rides the producer-owned `snapshot` source only: format
-    // V4 admits exactly that shape, so a passing admission and a readable
-    // envelope are the same assertion.
-    expect(message.source).toMatchObject({ kind: AGENT_TEAM_PLUGIN_ID, form: 'snapshot' })
-    expect(handoffOf(message)).toMatchObject({
-      previousSessionId: 'agent-team-old',
-      newSessionId: 'agent-team-new',
-      trigger: 'model',
-      handoffEventSeq: 42,
-      relatedFiles: ['src/parser.ts'],
-    })
-    expect(handoffOf(message)?.sections[0]).toEqual({ name: 'HANDOFF', text: 'objective: finish the parser\nnext step: run tests' })
-    expect(message.content[0]).toMatchObject({ type: 'text' })
-  })
-
   it('checkpoint continuation notices recognize themselves regardless of body text', () => {
     const checkpointRef = checkpointRefFor(SID, 'call-cp')
-    const message = TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(checkpointRef as never)
+    const message = createCheckpointContinuationMessage(checkpointRef)
     expect(message.source).toMatchObject({ kind: AGENT_TEAM_PLUGIN_ID, form: 'snapshot' })
     expect(continuationCheckpointRefOf(message)).toBe(checkpointRef)
-  })
-})
-
-describe('AgentTeam context projection — timeline boundaries', () => {
-  it('a handoff delivery becomes a handoff boundary resolved by its turn end', () => {
-    const events = [
-      turnStart(1),
-      userMessageEvent(TEAM_CONTEXT_CODEC.createHandoffMessage({ handoff: 'seed text', previousSessionId: 'session:a' as never, newSessionId: 'session:b' as never, trigger: 'model', handoffEventSeq: 5 as never })),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]).toMatchObject({ kind: 'handoff', label: 'context handoff', turnEndSeq: events.at(-1)!.seq })
-  })
-
-  it('a Team claim mutation result becomes a team boundary; list calls do not', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-claim', 'team_claim', { action: 'claim', taskRef: 'task:x', baseRevision: 1, direction: 'do it' }),
-      toolResult(1, 'call-claim'),
-      contextToolCall(1, 'call-list', 'team_claim', { action: 'list', taskRef: 'task:x' }),
-      toolResult(1, 'call-list'),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]).toMatchObject({ kind: 'team-boundary', label: 'Team task claim change' })
-  })
-
-  it('a structured Team notice is a team boundary on its Thread\'s first arrival; a relay DM and a checkpoint continuation are not', () => {
-    const notice = createUserMessage({ content: [{ type: 'text', text: 'Direct Team mention\nThread: thread:4d5e6f70-8b9c-4d5e-0f1a-2b3c4d5e6f70' }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox has unread work.' } })
-    // The relay rides the converted shape of released V3 history — the
-    // read-time rename — proving the fold recognizes it identically.
-    const relay = createUserMessage({ content: [{ type: 'text', text: 'dm' }], source: { kind: `plugin:${AGENT_TEAM_PLUGIN_ID}`, form: 'relay' } })
-    const continuation = TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(checkpointRefFor(SID, 'call-cp'))
-    const events = [
-      turnStart(1),
-      userMessageEvent(notice),
-      userMessageEvent(relay),
-      userMessageEvent(continuation),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.kind).toBe('team-boundary')
-    // The boundary label states WHAT first arrived (the Thread), not the
-    // notice's own generic "unread work" account — that is the decision
-    // surface a checkpointRef pick needs.
-    expect(state.boundaries[0]!.label).toBe('First arrival: thread:4d5e6f70-8b9c-4d5e-0f1a-2b3c4d5e6f70')
-  })
-
-  it('a structured Team notice without a summary keeps the generic delivery label on first arrival', () => {
-    // form: 'instructions' plugin messages carry no summary; they are still
-    // Team-owned structured deliveries, so the label falls back generically.
-    const instructions = createUserMessage({ content: [{ type: 'text', text: 'identity\nThread: thread:5e6f7081-9c0d-4e5f-1a2b-3c4d5e6f7081' }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'instructions' } })
-    const events = [turnStart(1), userMessageEvent(instructions), turnEnd(1)]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]).toMatchObject({ kind: 'team-boundary', label: 'First arrival: thread:5e6f7081-9c0d-4e5f-1a2b-3c4d5e6f7081' })
-  })
-
-  it('a pre-compaction notice is a compaction boundary', () => {
-    // The converted shape of released V3 history: the compaction boundary must
-    // classify converted history exactly like a fresh write.
-    const preCompaction = createUserMessage({ content: [{ type: 'text', text: 'persist conclusions' }], source: { kind: `plugin:${AGENT_TEAM_PLUGIN_ID}`, form: 'notice', summary: 'Compaction is imminent; consider persisting key conclusions.' } })
-    const events = [turnStart(1), userMessageEvent(preCompaction), turnEnd(1)]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]).toMatchObject({ kind: 'compaction' })
-  })
-
-  it('inherited boundaries and checkpoints are invisible to a seeded child fold', () => {
-    const parentEvents = [
-      turnStart(1),
-      ...checkpointPair(1, 'call-inherited', 'anchor'),
-      turnEnd(1),
-      turnStart(2),
-      userMessageEvent(TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(checkpointRefFor(SID, 'call-inherited'))),
-      turnEnd(2),
-    ]
-    const inherited = parentEvents.length
-    const childEvents = [...parentEvents, turnStart(3), turnEnd(3)]
-    const state = fold(childEvents, inherited as SessionLogOffset)
-    expect(state.checkpoints).toHaveLength(0)
-    expect(state.boundaries).toHaveLength(0)
-    expect(state.continuations).toHaveLength(0)
-  })
-
-  it('folding one event at a time matches the cold fold of the same log', () => {
-    const events: SessionEvent[] = [
-      turnStart(1),
-      ...checkpointPair(1, 'call-live-cp', 'anchor'),
-      turnEnd(1),
-      turnStart(2),
-      contextToolCall(2, 'call-live-claim', 'team_claim', { action: 'claim', taskRef: 'task:live', baseRevision: 1, direction: 'd' }),
-      toolResult(2, 'call-live-claim'),
-      turnEnd(2),
-      turnStart(3),
-      userMessageEvent(createUserMessage({ content: [{ type: 'text', text: 'notice' }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox has unread work.' } })),
-      turnEnd(3),
-    ]
-    const cold = fold(events)
-    const definition = createTeamContextProjectionDefinition(PROJECTION_HOST)
-    let live = definition.init({ id: SID } as never, 0 as never)
-    for (const event of events) {
-      live = definition.apply(live, event)
-    }
-    expect(live).toEqual(cold)
-  })
-})
-
-describe('AgentTeam context projection — effect-anchored team boundaries', () => {
-  /** One structured Team notice user message. */
-  function teamNotice(summary: string, body = 'notice body'): UserMessage {
-    return createUserMessage({ content: [{ type: 'text', text: body }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary } })
-  }
-
-  it('a Thread\'s FIRST delivered notice is a boundary; re-deliveries of the same Thread are not', () => {
-    const events = [
-      turnStart(1),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f task handover')),
-      turnEnd(1),
-      turnStart(2),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f another update')),
-      turnEnd(2),
-      turnStart(3),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f yet another update')),
-      turnEnd(3),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.kind).toBe('team-boundary')
-  })
-
-  it('a second Thread\'s first notice is still a boundary; per-Thread first arrival only', () => {
-    const events = [
-      turnStart(1),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:1a2b3c4d-5e6f-4a5b-8c9d-0e1f2a3b4c5d first')),
-      turnEnd(1),
-      turnStart(2),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:2b3c4d5e-6f7a-4b5c-9d0e-1f2a3b4c5d6e first')),
-      turnEnd(2),
-      turnStart(3),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:1a2b3c4d-5e6f-4a5b-8c9d-0e1f2a3b4c5d again — not a first arrival')),
-      turnEnd(3),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(2)
-  })
-
-  it('a progress nudge and a recovery notice never produce boundaries', () => {
-    const events = [
-      turnStart(1),
-      userMessageEvent(teamNotice('Progress visibility reminder', 'You have made 20 tool calls…')),
-      turnEnd(1),
-      turnStart(2),
-      userMessageEvent(teamNotice('Recovery: continue your interrupted work.', 'recovery facts')),
-      turnEnd(2),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(0)
-  })
-
-  it('a committed team_message reply produces a boundary; typed rejections do not', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-msg-ok', 'team_message', { action: 'reply', threadRef: 'thread:reply-target', baseRevision: 8, body: 'committed reply' }),
-      toolResult(1, 'call-msg-ok', { meta: { kind: 'committed', threadRef: 'thread:reply-target', revision: 9, messageRef: 'message:m1' } }),
-      turnEnd(1),
-      turnStart(2),
-      contextToolCall(2, 'call-msg-unread', 'team_message', { action: 'reply', threadRef: 'thread:reply-target', baseRevision: 8, body: 'blocked by unread' }),
-      toolResult(2, 'call-msg-unread', { meta: { kind: 'unread_required', threadRef: 'thread:reply-target', revision: 9, unreadCount: 2, directCount: 0 } }),
-      turnEnd(2),
-      turnStart(3),
-      contextToolCall(3, 'call-msg-stale', 'team_message', { action: 'reply', threadRef: 'thread:reply-target', baseRevision: 7, body: 'stale revision' }),
-      toolResult(3, 'call-msg-stale', { meta: { kind: 'stale_revision', threadRef: 'thread:reply-target', expectedRevision: 7, revision: 9 } }),
-      turnEnd(3),
-      turnStart(4),
-      contextToolCall(4, 'call-msg-notfollowing', 'team_message', { action: 'reply', threadRef: 'thread:reply-target', baseRevision: 9, body: 'mentions a non-follower', mentions: ['member:x'] }),
-      toolResult(4, 'call-msg-notfollowing', { meta: { kind: 'member_not_following', memberIds: ['member:x'] } }),
-      turnEnd(4),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.label).toBe('Team message')
-  })
-
-  it('a failed (error) team_message result produces no boundary — the failure-face contract', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-msg-err', 'team_message', { action: 'start', channelRef: 'channel:c', body: 'boom' }),
-      toolResult(1, 'call-msg-err', { isError: true }),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(0)
-  })
-
-  it('a committed start attributes through its presentationMeta; no meta means no boundary', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-start-meta', 'team_message', { action: 'start', channelRef: 'channel:c', body: 'fresh thread' }),
-      toolResult(1, 'call-start-meta', { meta: { kind: 'committed', threadRef: 'thread:born-here', revision: 1, messageRef: 'message:m2' } }),
-      turnEnd(1),
-      turnStart(2),
-      contextToolCall(2, 'call-start-legacy', 'team_message', { action: 'start', channelRef: 'channel:c', body: 'pre-meta era log' }),
-      toolResult(2, 'call-start-legacy'),
-      turnEnd(2),
-    ]
-    const state = fold(events)
-    // The meta-bearing start is a boundary; the legacy no-meta start is not —
-    // old logs refold under the new semantics without their start boundaries.
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.label).toBe('Team message')
-  })
-
-  it('a dm-sent result produces no boundary — dm is not a Thread fact', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-dm', 'team_message', { action: 'dm', memberRef: 'member:peer', body: 'quick sync' }),
-      toolResult(1, 'call-dm', { meta: { kind: 'dm-sent', recipientMemberId: 'member:peer', recipientHandle: 'peer', delivered: true } }),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(0)
-  })
-
-  it('successful follow and unfollow produce attention boundaries; a failed follow does not', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-follow', 'team_thread', { action: 'follow', threadRef: 'thread:follow-target' }),
-      toolResult(1, 'call-follow'),
-      turnEnd(1),
-      turnStart(2),
-      contextToolCall(2, 'call-unfollow', 'team_thread', { action: 'unfollow', threadRef: 'thread:follow-target' }),
-      toolResult(2, 'call-unfollow'),
-      turnEnd(2),
-      turnStart(3),
-      contextToolCall(3, 'call-follow-err', 'team_thread', { action: 'follow', threadRef: 'thread:gone' }),
-      toolResult(3, 'call-follow-err', { isError: true }),
-      turnEnd(3),
-      turnStart(4),
-      contextToolCall(4, 'call-read', 'team_thread', { action: 'read', threadRef: 'thread:follow-target' }),
-      toolResult(4, 'call-read'),
-      turnEnd(4),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(2)
-    expect(state.boundaries.every(boundary => boundary.label === 'Team attention change')).toBe(true)
-  })
-
-  it('reads and views never produce boundaries — the read path is not an anchor', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-inbox', 'team_inbox', { limit: 10 }),
-      toolResult(1, 'call-inbox'),
-      turnEnd(1),
-      turnStart(2),
-      contextToolCall(2, 'call-view', 'team_view', {}),
-      toolResult(2, 'call-view'),
-      turnEnd(2),
-      turnStart(3),
-      contextToolCall(3, 'call-read', 'team_thread', { action: 'read', threadRef: 'thread:any' }),
-      toolResult(3, 'call-read'),
-      turnEnd(3),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(0)
-  })
-
-  it('a follow recorded under the legacy team_thread name still decodes to an attention boundary', () => {
-    // Sessions written before the attention split carry their follow/unfollow
-    // calls as `team_thread`. Refolding one of those logs must still resolve
-    // them to boundaries: dropping them silently would cost every old Session
-    // two anchors with no error anywhere.
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-follow-legacy', 'team_thread', { action: 'follow', threadRef: 'thread:old-followed' }),
-      toolResult(1, 'call-follow-legacy'),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.label).toBe('Team attention change')
-    expect(state.boundaries[0]!.attributions).toEqual(['thread:old-followed'])
-  })
-
-  it('a follow recorded under team_attention decodes the same way as the legacy name', () => {
-    // The two names must agree, or the same fold would give old Sessions
-    // boundaries that new ones do not get.
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-follow-current', 'team_attention', { action: 'follow', threadRef: 'thread:new-followed' }),
-      toolResult(1, 'call-follow-current'),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.label).toBe('Team attention change')
-    expect(state.boundaries[0]!.attributions).toEqual(['thread:new-followed'])
-  })
-
-  it('a status call on either attention name produces no boundary', () => {
-    // status reports Attention and changes nothing, on both the current and
-    // the legacy tool: the same non-event rule `list` follows on claims.
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-status-current', 'team_attention', { action: 'status', threadRef: 'thread:s' }),
-      toolResult(1, 'call-status-current'),
-      turnEnd(1),
-      turnStart(2),
-      contextToolCall(2, 'call-status-legacy', 'team_thread', { action: 'status', threadRef: 'thread:s' }),
-      toolResult(2, 'call-status-legacy'),
-      turnEnd(2),
-    ]
-    expect(fold(events).boundaries).toHaveLength(0)
-  })
-
-  it('a claim mutation still produces its boundary (preserved behavior, renamed label)', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-claim', 'team_claim', { action: 'claim', taskRef: 'task:x', baseRevision: 1, direction: 'do it' }),
-      toolResult(1, 'call-claim'),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.label).toBe('Team task claim change')
-  })
-
-  it('cold-refold of a v2-shaped log (no seenThreads field) matches folding from empty', () => {
-    // A log recorded under the OLD semantics: notice re-deliveries and a
-    // claim mutation. After the stateVersion bump the persisted v2 row is
-    // unusable (restoreFloor pulls the floor to 0) and the full log refolds
-    // from empty under the NEW semantics — claim boundary preserved, notice
-    // semantics converged. The assertion is state equality with a from-empty
-    // fold of the same log, never a row transform.
-    const events = [
-      turnStart(1),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:3c4d5e6f-7a8b-4c5d-0e1f-2a3b4c5d6e7f first')),
-      turnEnd(1),
-      turnStart(2),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:3c4d5e6f-7a8b-4c5d-0e1f-2a3b4c5d6e7f repeat')),
-      turnEnd(2),
-      turnStart(3),
-      contextToolCall(3, 'call-old-claim', 'team_claim', { action: 'claim', taskRef: 'task:old', baseRevision: 1, direction: 'd' }),
-      toolResult(3, 'call-old-claim'),
-      turnEnd(3),
-    ]
-    const refolded = fold(events)
-    expect(refolded.boundaries).toHaveLength(2)
-    expect(refolded.boundaries.some(boundary => boundary.label === 'Team task claim change')).toBe(true)
-    expect(refolded.boundaries.filter(boundary => boundary.kind === 'team-boundary' && boundary.label === 'First arrival: thread:3c4d5e6f-7a8b-4c5d-0e1f-2a3b4c5d6e7f')).toHaveLength(1)
-  })
-
-  it('a first-arrival notice boundary labels the Thread it introduces, not the notice summary', () => {
-    // The inbox notice summary says only "unread work" — the timeline's
-    // decision surface needs WHAT arrived (which Thread first entered the
-    // context), so the boundary label is rewritten from the first-arrival
-    // facts, never the notice's own account.
-    const events = [
-      turnStart(1),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Direct Team mention\nThread: thread:4d5e6f70-8b9c-4d5e-0f1a-2b3c4d5e6f70 task handover')),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.label).toBe('First arrival: thread:4d5e6f70-8b9c-4d5e-0f1a-2b3c4d5e6f70')
-  })
-
-  it('a first-arrival boundary introducing two Threads labels both, in delivery order', () => {
-    // One delivered notice may quote two Threads that are both new to this
-    // Session (e.g. a handover mention plus its Task thread); the label
-    // carries both first arrivals so the model sees the full attribution
-    // before deciding whether the anchor is single-Thread selectable.
-    const events = [
-      turnStart(1),
-      userMessageEvent(teamNotice('Team Inbox has unread work.', 'Thread: thread:1a2b3c4d-5e6f-4a5b-8c9d-0e1f2a2b4c5d and\nThread: thread:2b3c4d5e-6f7a-4b5c-9d0e-1f2a3b4c5d6e both new')),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.label).toBe('First arrival: thread:1a2b3c4d-5e6f-4a5b-8c9d-0e1f2a2b4c5d, thread:2b3c4d5e-6f7a-4b5c-9d0e-1f2a3b4c5d6e')
   })
 })
 
@@ -842,74 +450,5 @@ describe('AgentTeam context projection — the engine unit Team registers', () =
     expect(child.inheritedEventCount).toBe(parent.length)
     expect(child.checkpoints).toEqual([])
     expect(child.sessionId).toBe('agent-team-child')
-  })
-
-  it('boundary refs are Session-scoped: an ancestor boundary never collides with this generation\'s', () => {
-    const seq = 7
-    expect(boundaryRefFor('agent-team-generation-one', seq)).not.toBe(boundaryRefFor('agent-team-generation-two', seq))
-    const notice = createUserMessage({ content: [{ type: 'text', text: 'Thread: thread:aaaa1111-2222-4333-8444-555566667777' }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox has unread work.' } })
-    const event = userMessageEvent(notice)
-    const first = fold([turnStart(1), event, turnEnd(2)], undefined, 'agent-team-generation-one')
-    const second = fold([turnStart(1), { ...event, seq: event.seq }, turnEnd(2)], undefined, 'agent-team-generation-two')
-    // Both generations anchor the boundary at the same event seq; only the
-    // Session identity in the ref keeps the two apart.
-    expect(first.boundaries[0]!.resultSeq).toBe(second.boundaries[0]!.resultSeq)
-    const firstRef = boundaryRefFor('agent-team-generation-one', first.boundaries[0]!.resultSeq)
-    const secondRef = boundaryRefFor('agent-team-generation-two', second.boundaries[0]!.resultSeq)
-    expect(firstRef).toBe(boundaryRefFor('agent-team-generation-one', event.seq))
-    expect(secondRef).toBe(boundaryRefFor('agent-team-generation-two', event.seq))
-    expect(firstRef).not.toBe(secondRef)
-  })
-
-  it('a claim boundary is attributed to its Task\'s Thread through the ledger; without a resolution it stays unattributed', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-claim', 'team_claim', { action: 'claim', taskRef: 'task:x', baseRevision: 1, direction: 'do it' }),
-      toolResult(1, 'call-claim'),
-      turnEnd(1),
-    ]
-    const attributed = foldTeamContextProjection(
-      events,
-      { sessionId: SID },
-      new TeamContextProjectionHost({ threadForTask: () => 'thread:owner' as never }),
-    )
-    expect(attributed.boundaries[0]!.attributions).toEqual(['thread:owner'])
-    // The default host carries no ledger: the boundary still anchors the
-    // timeline, it is simply not selectable as a single-Thread return target.
-    expect(fold(events).boundaries[0]!.attributions).toEqual([])
-  })
-
-  it('a claim boundary with an unknown Task keeps its anchor and drops only the attribution', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-claim-unknown', 'team_claim', { action: 'done', taskRef: 'task:gone', baseRevision: 2 }),
-      toolResult(1, 'call-claim-unknown'),
-      turnEnd(1),
-    ]
-    const state = foldTeamContextProjection(events, { sessionId: SID }, new TeamContextProjectionHost({ threadForTask: () => undefined }))
-    expect(state.boundaries).toHaveLength(1)
-    expect(state.boundaries[0]!.attributions).toEqual([])
-  })
-
-  it('attention and committed-message boundaries carry the Thread they touched', () => {
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-follow', 'team_thread', { action: 'follow', threadRef: 'thread:followed' }),
-      toolResult(1, 'call-follow'),
-      turnEnd(1),
-      turnStart(2),
-      contextToolCall(2, 'call-reply', 'team_message', { action: 'reply', threadRef: 'thread:replied', baseRevision: 3, body: 'x' }),
-      toolResult(2, 'call-reply', { meta: { kind: 'committed', threadRef: 'thread:replied', revision: 4, messageRef: 'message:m' } }),
-      turnEnd(2),
-    ]
-    const state = fold(events)
-    expect(state.boundaries.map(boundary => boundary.attributions)).toEqual([['thread:followed'], ['thread:replied']])
-  })
-
-  it('a first-arrival notice records the Threads it introduced as seen topics', () => {
-    const notice = createUserMessage({ content: [{ type: 'text', text: 'Thread: thread:aaaa1111-2222-4333-8444-555566667777 and\nThread: thread:bbbb2222-3333-4444-8555-666677778888' }], source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox has unread work.' } })
-    const state = fold([turnStart(1), userMessageEvent(notice), turnEnd(1)])
-    expect(state.seenTopics).toEqual(['thread:aaaa1111-2222-4333-8444-555566667777', 'thread:bbbb2222-3333-4444-8555-666677778888'])
-    expect(state.boundaries[0]!.attributions).toEqual(state.seenTopics)
   })
 })

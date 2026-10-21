@@ -23,7 +23,7 @@ Workspace 概览是当前页时，概览携带 `aria-current='page'`。与原先
 嵌入的 Member Session 是唯一能压在「读者仍身处的 Team 面」之上的覆盖层。那可能是 Inbox 页，也可能是读者打开这个 Agent 时所处的 Channel/Thread。此时高亮归嵌入 Session 自己的 Agent 卡片。下层那个面保留原位，但不携带高亮。覆盖层关闭后原样取回。Inbox 入口同样如此：入口页面在屏上时才是被标记的那一行。
 
 行级 ⋯ 菜单是 `TeamRowMenu`，复用公共 `Menu`。`Menu` 用 `portal` + `closeOnPointerLeave`，锚为裸 ellipsis 图标按钮。hover、focus-within、菜单开启三种状态下可见。菜单开启时该行钉住 hover 底色（`data-menu-open`）。菜单含「编辑」入口，打开对应编辑器。
-- error 态成员额外出现「恢复」项，走 `recoverMember` Remote。Host 向这个成员的活跃会话 steer 续作 prompt。这是运行时动作，不落 ledger。历史上的「从全新上下文开始」入口已移除。换代由 Host 在唤醒边界决定，Host 侧 clear-context Remote 保留为无可见入口的迁移逃生门。
+- error 态成员额外出现「恢复」项，走 `recoverMember` Remote。Host 向这个成员的活跃会话 steer 续作 prompt。这是运行时动作，不落 ledger。没有任何界面提供重置 Member 上下文的入口；换代由 Host 在唤醒边界决定。
 
 频道编辑器（`编辑频道`）：名称/说明输入框。保存钮无改动即禁用，这是 dirty 门。提交走 `updateChannel` Remote，幂等 request 同载荷复用。成功后由投影刷新回填行文案，不做乐观行内改名。成员增删入口已撤销——Channel 参与由 Thread 参与派生。
 

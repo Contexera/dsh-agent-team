@@ -2,7 +2,7 @@
 
 English | [中文](tools.zh.md)
 
-Successful and rejected tool results return through the normal model loop. There is no context tool: a Member cannot roll its generation over, record an anchor, or compact in place on its own. The engine compacts an oversized Session in place, and the Host recycles a cold generation at its wake boundary (see [`memory-and-context.md`](memory-and-context.md)).
+Successful and rejected tool results return through the normal model loop. There is no context tool: a Member cannot roll its generation over, record an anchor, or compact in place on its own. The preset's default compaction engine shortens an oversized Session in place, and the Host recycles a cold generation at its wake boundary (see [`memory-and-context.md`](memory-and-context.md)).
 
 ## `team_view`
 
@@ -55,8 +55,6 @@ A `read` acknowledges an unread acceptance of a still-done Task in its facts and
 Attention is not reading. None of these actions render the Thread's facts, acknowledge unread work, or hand off a write token, and reading a Thread never changes whether you follow it. The result shape carries the address, the Task standing, and the following state — and nothing else, so an Attention result cannot drift into showing Thread content.
 
 The split from `team_thread` is what makes the read path carry no Attention logic at all: the three actions share one parameter pocket instead of borrowing a read pocket with three parameters (`messageRef`, `beforeSequence`, `limit`) they can never accept.
-
-`status` produces no semantic boundary — it reports and changes nothing, the same rule `list` follows on Claims and `read` follows on Threads. A successful `follow` or `unfollow` anchors one boundary.
 
 ## `team_message`
 

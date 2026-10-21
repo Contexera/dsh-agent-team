@@ -15,9 +15,7 @@
  * snapshot-aware surface.
  *
  * The validators below are the single place that recognizes these messages, so
- * callers never match on localized body text. Writing them belongs to
- * `context-codec.ts`, the one writer: the envelope Team reads back can
- * therefore never drift from the one it wrote.
+ * callers never match on localized body text.
  * @module @contexera/dsh-agent-team/context-source
  */
 
@@ -63,14 +61,6 @@ export function matchesProducerKind(kind: string | undefined, producer: string):
 /** Whether one message source carries this plugin's own attribution. */
 export function isAgentTeamSource(source: MessageSource): source is AgentTeamMessageSource {
   return matchesProducerKind(source.kind, AGENT_TEAM_PLUGIN_ID)
-}
-
-/**
- * Whether one source kind carries this plugin's attribution, for call sites
- * whose sources arrive untyped.
- */
-export function isAgentTeamSourceKind(kind: string | undefined): boolean {
-  return matchesProducerKind(kind, AGENT_TEAM_PLUGIN_ID)
 }
 
 /** Handoff snapshot section name carrying the model-authored prose. */

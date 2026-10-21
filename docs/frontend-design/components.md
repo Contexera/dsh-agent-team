@@ -66,7 +66,7 @@ Membership law follows the Host: joining needs `availability === 'active'` (the 
 ## Team settings page
 Settings carries the Team's one surface: the `settings.section` entry `team-settings` (「团队」), offered in ordinary mode only, because Team mode's sidebar takeover puts the settings panel out of reach. The shell draws the nav rail and the content column, so the section draws its own 18px/600 heading and then rows in the shipped settings language — 16px/0 padding over a hairline separator, a 14px/22px title above a 12px/18px tertiary description, 12px between controls. It reuses the shipped `Button` and `Input` rather than restating them.
 
-The page holds two writable groups that answer to two different documents, and it never renders one as the other. Identity reads and writes through the Team Remote, while the judge's endpoint is one group of the Team Host row's settings section and writes through the settings provider. A form rendered wholesale over that namespace would put identity fields into the judge's group and address a flat `apiBase` at the wrong path.
+The page writes one thing: identity, read and written through the Team Remote. It renders no group of the Team Host row's settings section, so a flat field name can never be addressed at the wrong path.
 
 Because the nav lists that entry among the Harness's own pages, a 13px tertiary intro under the heading names what owns the page and where a change applies. That header renders in every state — including a failed read — so the page never leaves "whose Team is this?" open. The name row is a form: a 36×200px field whose primary Save button owns the submit, so Enter saves a dirty field and Tab reaches that button as the next stop.
 
@@ -82,12 +82,12 @@ The section reports a rejected write's Host message in place rather than leaving
 
 The Client's namespace constant is pinned by a test against the Host's own, so the two halves cannot drift silently.
 
-At 390×844 the shipped panel keeps its 188px nav rail — it has no media query — which leaves the content column about 106px wide. The section therefore carries its own `@container (max-width: 420px)` rule that stacks each row's copy over its controls, drops the 48px right padding wide rows reserve for controls, lets the field and buttons take the full column, and gives the judge's answer its own line, flush with the row, its glyph leading the sentence. The browser acceptance asserts no horizontal overflow there and measures that glyph against the first line it leads.
+At 390×844 the shipped panel keeps its 188px nav rail — it has no media query — which leaves the content column about 106px wide. The section therefore carries its own `@container (max-width: 420px)` rule that stacks each row's copy over its controls, drops the 48px right padding wide rows reserve for controls, and lets the field and buttons take the full column. The browser acceptance asserts no horizontal overflow there.
 
 ## Environment check
 Above the version footnote the page states one fact about the installation rather than about the Human: which DSH line this bundle runs against, and whether that line is inside the range the bundle declares. It is a second projection (`environment-check.ts`, `TeamEnvironmentCheck`), deliberately not a field of the identity store — it is read once, never written back, and the settings page is its only renderer.
 
-It opens on the same hairline that separates the page's other rows. The verdict answers a question about this installation rather than about the endpoint above it, and without that rule it reads as part of the judge's own group.
+It opens on the same hairline that separates the page's other rows. The verdict answers a question about this installation rather than about the Human above it, and without that rule the block reads as part of the identity row.
 
 Three verdicts, never a fourth, and never a guess. A fact the Host cannot establish is `undetermined`, which is a settled answer rather than a failed request: the block has no retry, and an unreachable Host renders nothing at all rather than borrowing that word.
 

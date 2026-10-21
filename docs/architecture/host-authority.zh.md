@@ -42,16 +42,15 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 | 完全没有活动 handle | reactivate | activation 本身就失败了 |
 | 其余情况 | steer 一条 resume 提示 | Member 活着、组合完成、绑定正常——其余状态都已被上面几行接走 |
 
-带活动 handle 的 error 态 Member 落在最后一行：`recoverMember` 会 steer 它，而如果原因仍在，下一轮会再失败一次。选之前先分清两件事：模型路由坏了或网关拒收，要改的是路由而不是恢复 Member，在路由通之前 steer 什么也救不回来。真正需要 `clearMemberContext` 的是无法自行收尾的上下文世代——它会让下一条 Session 不带历史。
+带活动 handle 的 error 态 Member 落在最后一行：`recoverMember` 会 steer 它，而如果原因仍在，下一轮会再失败一次。选之前先分清两件事：模型路由坏了或网关拒收，要改的是路由而不是恢复 Member，在路由通之前 steer 什么也救不回来。恢复从不会重置上下文世代：绑定已经迁移的滞留 Member 由这条路径补完那条已记录的 transition，而 Remote 面上没有任何东西会 renew 或 rollover 一个 Session。
 
 Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲染。它由活动 surface 派生、不落盘。Host 重启后只有在有东西唤醒该 Member 时才会重新派生，所以一个没有被唤醒的 Member 在下次被操作触及前不显示原因。
 
 ## 变更流与 Projection
 - `changes()` 是流式 Remote，可声明一个 scope（workspace/channel/thread/presence）。省略 scope 时观察共享 Team 投影变化，不包含 presence。Host 先注册监听，再发送当前基线，之后只发送匹配的变更通知。消费者暂停期间，只保留最新待发送版本。取消或 Host 释放时关闭订阅。Thread read 与 `team/dm-sent` 不改变共享投影：既不推进版本，也不唤醒订阅者。Presence 使用进程内 epoch，其他 scope 使用最近一次共享投影提交的 ledger sequence。版本只在同一 scope 和 Host 生命周期内有意义。Host 只为受 operation 影响的 Members 重算 Inbox hints。
 - `TeamChangeStream` 在每个页面内通过 `ctx.remote.$stream()` 按 scope 共享一个逻辑流。Harness 管理共享的 `/api/remote.mux` WebSocket 和连接恢复。每次开场基线都会触发重新读取 Host，包括重连后的相同或更低版本。开场基线既补上首次读取与订阅之间的变化，也在没有新提交时恢复失败的读取。最后一个 listener 离开时释放这个 scope，插件释放时关闭所有 scope。传输失败在恢复前只报告一次。终止性错误直接报告，不走 Team 自有重试循环。没有长轮询回退、跨页面主从选举或单活跃页面限制。并发的补充读取合并通知。读取期间再收到通知，保留后续一轮读取，不用旧版本过滤重连基线。Human Inbox 徽标订阅无 scope 通知。订阅经 debounce 重拉 Inbox 合计，在本页 Thread read 后刷新。Presence 订阅更新 Member 可用状态，不唤醒 Inbox。通知只是重新读取的提示，不是第二份事实存储。
-- Host 对 Member Session 的 projection 改为增量折叠。context intent、clock baseline 与一次性 pressure notice 都派生自同一个 Session 自身的 events。现在三者都经 Session event cursor 读取。cursor 把折叠出的值记在自己消费到的日志位置旁边。`context-projection.ts` 提供折叠，`session-event-cursor.ts` 提供位置。因此一个日志第一次被读取时折一次，之后每次只折新追加的 events。cursor 假定日志只 append，并只校验能校验的部分。cursor 记住自己停在哪个事件的 sequence 与 type。fork 前缀变动、日志变短、这个事件被替换，都会触发从头重折。fork / resume / rollover 最坏只退回一次冷折，不会给出错画面。模块里点名记下这条残留，不掩盖。同一 sequence、同一 type 但内容被就地替换的事件，校验守卫看不见。这种情况只有违反 append-only 契约才可达。内容敏感的锚点也堵不住这个缺口：只有锚点位置被重读，更早已折位置被换掉同样放行。
-
-  以下冷路径仍全量折叠：activation、transition、timeline、carried-input 重放。这些路径读取完整被检视日志或外来日志。三项各自按 Member 保存一个 cursor，该 Member 的 Session 变化时替换。因此保留的折叠状态以 roster 为界，不随 Member 经历过的代数增长。
+- `contextContinuity` unit 经 Harness projection registry 增量折叠活动 Session 事件，只保留恢复所需的旧 intent、checkpoint、continuation 与未答复输入。激活与退休 Session 恢复也可全量折叠被检视日志。
+- Member clock baseline 经 `session-event-cursor.ts` 只消费追加事件。Session 身份、继承前缀、日志长度或锚点事件变化时从头重折。守卫依赖日志只追加的契约；同一 sequence、同一事件类型的就地替换不在检测范围内。
 - 读取投影按用途定界。`view` 只回答它自己那一页 fact 加上请求点名的 Thread：catalog 字段带的是这一页的 Task、Thread、显示序号与 Claim。只有 `includeCatalog` 才返回整个请求 scope 的 Task/Thread/Claim catalog，也就是模型侧 `team_view` 渲染的 address book 投影。
 - 一页读取沿 fact ledger 走到超出 limit 的第一个匹配为止。catalog 读取再多一次对 scope 内 Thread 的目录过滤，以及每个 Task 行一次活 Claim 查询。这些分量必须分开报告，不合并成一个总数：只报返回行数看不出这次读取走过了什么。
 - Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、`active task threads` 雷达）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
@@ -69,8 +68,9 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 ## Session 策略与上下文压力
 - Team 管理的 Agent sessions 使用显式 Team preset 和可信的 `danger-full-access` policy。这是面向可信 Workspace 的有意产品边界。
 - Host 激活 Member 时，通过 session-title service 用这个 Member 的 handle 命名没有标题的 Member session。这样普通 Session list 就会显示 Member identity。显式 rename 或任何已有 title 始终优先。命名失败不会导致 activation 失败。
-- Member 上下文的两个机制都在 Host 侧，模型没有对应工具（见 Tools and preset）：preset 的 compaction 引擎把过大的 Session 就地缩短；换代协调器在真正 idle 的边界换掉冷下来的一代，并以 Host actor 记录 `team/member-session-recycled`。
+- Member 上下文的两个机制都在 Host 侧，模型没有对应工具（见 Tools and preset）：由 preset 配置的 Harness `@deepseek-ai/dsh-compaction-basic` 把过大的 Session 就地缩短；换代协调器在唤醒边界换掉冷下来的一代，并以 Host actor 记录 `team/member-session-recycled`。压力与唤醒阈值归 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。
 - 换代窗口内的这一代报告 unavailable，并带 `rollover` diagnostic，直到新代激活。所以跟随该行的 Client 绝不会打开一个尚不存在的 Session。
+- 换代携带的是输入，不是上下文：commit 记下退役日志的偏移，新代只重放该边界及其之后的输入，并按 Message id 去重；即使输入已被 claim，也使用最初的 durable inbox 插入记录。不经过进程内存拷贝（见 [Tools and preset](tools-and-preset.zh.md)）。
 - Pending/error bookkeeping 只在进程内维护。只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。
 - 终止回合的恢复先读 Harness 的结构化失败，再看措辞。稳定的 code 单独决定结果。`RATE_LIMIT` 是 rate limiting，`TRANSPORT`/`TIMEOUT` 是 transient network，显式 429/503 响应是 rate limiting。其他任何 code（quota、auth、context、请求状态）无论 message 写什么都保持 manual。只有无 code 可用的错误才回落到窄 message 签名。
 - `agent/error` 负责终止回合恢复及其连续错误上限。无论走哪条路，失败都保留已记录的 Member diagnostic。
@@ -90,7 +90,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。
-- Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上，顺序为 mount → restrict → validate。validate 观察限制后的可见面。Activation 还在配置之上强制并集十一个 Team tools 与 `working_directory`。未知名 drop + warning，不阻断 activation。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+- Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上，顺序为 mount → restrict → validate。validate 观察限制后的可见面。Activation 还在配置之上强制并集七个 Team tools 与 `working_directory`。未知名 drop + warning，不阻断 activation。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
   Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
 

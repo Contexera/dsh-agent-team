@@ -12,7 +12,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
-import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
+import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamHostActor, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
 /**
  * Issue #21: the read projections must keep byte-identical semantics while
@@ -48,6 +48,10 @@ async function openLedger(): Promise<{ readonly ledger: AgentTeamLedger; readonl
 
 function memberActor(memberId: string, handle: string): AgentTeamMemberActor {
   return { kind: 'member', memberId: memberId as AgentTeamMemberId, handle }
+}
+
+function hostActor(): AgentTeamHostActor {
+  return { kind: 'host', handle: 'agent-team' }
 }
 
 describe('large-ledger projection equivalence (issue #21)', () => {
@@ -322,20 +326,33 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     // A Member that never moved has left no Session behind.
     expect(ledger.previousSessionForMember(memberId)).toBeUndefined()
 
-    // Human renewal, then a Member's own rollover, then another renewal: both
-    // writers feed the same index.
-    await ledger.renewMemberSession({ requestId: requestId('lineage-renew-1'), workspaceId: alpha, memberId, sessionId: session('1'), actor: human })
-    await ledger.rolloverMemberSession({ requestId: requestId('lineage-rollover'), workspaceId: alpha, memberId, actor: memberActor(memberId, 'lineage'),
-      previousSessionId: session('1'), newSessionId: session('2'), handoffEventSeq: 7 as never, trigger: 'model' })
-    await ledger.renewMemberSession({ requestId: requestId('lineage-renew-2'), workspaceId: alpha, memberId, sessionId: session('3'), actor: human })
-
-    expect(ledger.previousSessionForMember(memberId)).toBe(session('2'))
-    expect(ledger.lastTransitionForMember(memberId)).toEqual({ previousSessionId: session('2'), targetSessionId: session('3') })
+    // The Host's own swap is the one live transition writer today; the
+    // renewal and rollover records an earlier build wrote feed the same index
+    // on replay, so the fixture appends them as durable records instead of
+    // committing them through a request path that no longer exists.
+    await ledger.recycleMemberSession({ requestId: requestId('lineage-recycle-1'), workspaceId: alpha, memberId, actor: hostActor(),
+      previousSessionId: session('0'), newSessionId: session('1') })
+    expect(ledger.previousSessionForMember(memberId)).toBe(session('0'))
+    const head = [...table.entries()].find(([, operation]) => operation.sequence === ledger.status().sequence)!
+    await table.put('operation:lineage-legacy-renewed' as AgentTeamOperationId, {
+      sequence: ledger.status().sequence + 1,
+      operationId: 'operation:lineage-legacy-renewed' as AgentTeamOperationId,
+      requestId: 'lineage-legacy-renewed' as AgentTeamRequestId,
+      occurredAt: head[1].occurredAt,
+      actor: human,
+      previousOperationId: head[0],
+      kind: 'team/member-session-renewed',
+      data: {
+        member: { memberId, sessionId: session('2'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member', privateMemoryPath: '/tmp/lineage', state: 'enabled' },
+        previousSessionId: session('1'),
+      },
+    } as AgentTeamOperation)
 
     // Independent replay over the same table rebuilds the identical index.
-    expect(() => ledger.validate()).not.toThrow()
     const fresh = new AgentTeamLedger(table)
-    expect(fresh.previousSessionForMember(memberId)).toBe(session('2'))
+    expect(fresh.previousSessionForMember(memberId)).toBe(session('1'))
+    expect(fresh.lastTransitionForMember(memberId)).toEqual({ previousSessionId: session('1'), targetSessionId: session('2') })
+    expect(() => ledger.validate()).not.toThrow()
     // An unknown Member owns nothing rather than failing the read.
     expect(fresh.previousSessionForMember('member:unknown' as AgentTeamMemberId)).toBeUndefined()
   })

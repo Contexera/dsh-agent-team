@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamMemberCapabilities, AgentTeamModelSelection } from './types.ts'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
-import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
   AgentTeamActivityRef,
@@ -25,6 +25,7 @@ const memberIdSchema = z.string().regex(/^member:[^:]+$/).transform(value => val
 const workspaceIdSchema = z.string().min(1).transform(value => value as WorkspaceId)
 const sessionIdSchema = z.string().min(1).transform(value => value as SessionId)
 const sessionSeqSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionSeq)
+const sessionLogOffsetSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionLogOffset)
 const contextCheckpointRefSchema = z.string().regex(/^(context-checkpoint-[0-9a-f]{64}|team-boundary-[0-9a-f]{64})$/).transform(value => value as AgentTeamContextCheckpointRef)
 const channelRefSchema = z.string().regex(/^channel:[^:]+$/).transform(value => value as AgentTeamChannelRef)
 const messageRefSchema = z.string().regex(/^message:[^:]+$/).transform(value => value as AgentTeamMessageRef)
@@ -403,6 +404,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       member: memberSchema,
       previousSessionId: sessionIdSchema,
       newSessionId: sessionIdSchema,
+      inputFromSeq: sessionLogOffsetSchema.optional(),
     }).strict(),
   }).strict(),
   z.object({

@@ -16,6 +16,7 @@ import { ATTACHMENT_MAX_BYTES, attachmentsRoot, mediaTypeForPath, newAttachmentI
 import AgentTeam from '../src/index.ts'
 import { AgentTeamLedger } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
+import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import type { AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -46,6 +47,7 @@ async function harness(): Promise<{ readonly ctx: Context; readonly facility: Do
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
   let fiber = await ctx.plugin(AgentTeam)

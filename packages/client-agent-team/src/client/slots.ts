@@ -7,8 +7,6 @@ import type {
   AgentTeamArchiveMemberResult,
   AgentTeamChannelRef,
   AgentTeamClientMemberStatus,
-  AgentTeamClearMemberContextRequest,
-  AgentTeamClearMemberContextResult,
   AgentTeamCreateChannelRequest,
   AgentTeamCreateChannelResult,
   AgentTeamInbox,
@@ -114,12 +112,6 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     archiveChannel: (request: AgentTeamArchiveChannelRequest) => Promise<RemoteResult<AgentTeamArchiveChannelResult>>
     updateMember: (request: AgentTeamUpdateMemberRequest) => Promise<RemoteResult<AgentTeamMemberResult>>
     recoverMember: (request: AgentTeamRecoverMemberRequest) => Promise<RemoteResult<AgentTeamRecoverMemberResult>>
-    /**
-     * Host clear-context remote kept as a hidden migration escape hatch.
-     * The visible row action is retired: the Host recycles a Member's
-     * generation at its wake boundary (see docs/architecture/README.md).
-     */
-    clearMemberContext: (request: AgentTeamClearMemberContextRequest) => Promise<RemoteResult<AgentTeamClearMemberContextResult>>
     archiveMember: (request: AgentTeamArchiveMemberRequest) => Promise<RemoteResult<AgentTeamArchiveMemberResult>>
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => Promise<RemoteResult<AgentTeamJoinWorkspaceResult>>
     leaveWorkspace: (request: AgentTeamLeaveWorkspaceRequest) => Promise<RemoteResult<AgentTeamLeaveWorkspaceResult>>

@@ -24,7 +24,7 @@ dsh `0.1.7-rc.1` 线上 message source 由生产者署名。Session format V4 �
 
 早期版本内置的启动期写侧修复（`session-remediation.ts`）随 V4 切换一并移除。它发布的正是 V4 写入拒绝的 wrapper，针对的 0.1.5 前自定义 kind 在读时转换之前就被 released 迁移链拒绝。没有修复路径。此类 artifact 在每次重试中都保持确定性的 `session-refused` diagnostic。
 
-Host 的每一次逐 Session stored 读取都经过同一个 seam。`packages/agent-team/src/stored-session-reader.ts` 负责一次 `open → read → close`，句柄保证关闭。它把所有失败归一为五类：`missing`、`refused`、`corrupt`、`io`、`unknown`。其中第二类是确定性格式拒绝，携带 artifact 路径。消费方按类别选择策略，绝不匹配 Harness 错误文案。当前绑定激活与 checkpoint seed 解析对任何失败 fail-closed。carried-input replay 只对已退役世代的确定性 `refused`/`corrupt` 跳过。handoff 重建与 token 测量降级。timeline 在不可读祖先处截断 lineage。它以 `incompleteFrom` 显式报告，而不是静默断链。DSH persistence 接口变化只需在这个模块内适配一次。上游 JSONL backend 的 corruption 系列以裸 `Error` 抛出。seam 内部以这个稳定文案前缀识别。文案一旦变化即退化为 `unknown`。所有消费方对 `unknown` 走保守路径。
+Host 的每一次逐 Session stored 读取都经过同一个 seam。`packages/agent-team/src/stored-session-reader.ts` 负责一次 `open → read → close`，句柄保证关闭。它把所有失败归一为五类：`missing`、`refused`、`corrupt`、`io`、`unknown`。其中第二类是确定性格式拒绝，携带 artifact 路径。消费方按类别选择策略，绝不匹配 Harness 错误文案。当前绑定激活对任何失败 fail-closed；唤醒判定把读不出的 Session 当作 resume；carried-input replay 只对已退役世代的确定性 `refused`/`corrupt` 跳过。DSH persistence 接口变化只需在这个模块内适配一次。上游 JSONL backend 的 corruption 系列以裸 `Error` 抛出。seam 内部以这个稳定文案前缀识别。文案一旦变化即退化为 `unknown`。所有消费方对 `unknown` 走保守路径。
 
 成员重启是对格式拒绝的有界自愈。激活失败带 `session-refused` diagnostic 时，`recoverMember` 会重跑激活。瞬时性拒绝因此恢复。确定性拒绝则把同一失败重放进刷新后的 diagnostic，因为已不存在写侧修复。
 

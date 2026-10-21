@@ -186,11 +186,12 @@
                 # compaction (~180K removed), so automatic runs stay rare rather
                 # than firing every other step.
                 #
-                # The row names this bundle's own engine, not the Harness package
-                # nor a dependency's subpath: a row is resolved from the profile,
-                # which links this bundle and the host closure only.
+                # This is the Harness engine, unmodified: the summary template,
+                # the routed-policy summarization target, and the cap all stay
+                # upstream's, so a policy an operator adds to a route means what
+                # the Harness documents it means.
                 - id: compaction-basic
-                  name: '@contexera/dsh-agent-team/team-compaction-engine'
+                  name: '@deepseek-ai/dsh-compaction-basic'
                   config:
                     thresholdRatio: 0.256
                     retainRatio: 0.08
