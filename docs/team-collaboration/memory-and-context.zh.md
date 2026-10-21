@@ -5,18 +5,16 @@
 ## Member memory 维护
 `memory.md` 是有界路由索引，不是仓库。索引只装四样东西：身份与职责、必须每步生效的长期规则、当前在手，以及每个主题簇一行。`notes/` 按需读取，从不注入。Member 把索引常态保持在 8 KiB 以内，硬顶 16 KiB。超过硬顶，索引整块不再注入。注入块始终自带用量说明。维护手艺（什么配得上一行、三层结构、压实与降级）归内置 `member-memory-manager` core skill。skill 写作归 `member-skill-manager`，两套手艺同源。persona 只常驻一条：索引必须有界，细节留在索引点名的那篇笔记里。Member 首次生成的 `memory.md` 脚手架陈述同样的小节。
 
-## 上下文压力归属
-Member 的上下文压力是引擎端到端持有的策略。Host 把这份策略绑到某一个 Member 的读数上，执行策略决定的事。两个预算阈值从该 Member 的 live routed selection 派生。当前 step 已进入 prompt assembly，取当前 step 捕获的 selection，否则取 current selection。阈值经 LLM 服务解析：handoff 预算上限 200K，硬上限 256K，另留安全 reserve。达到 handoff 预算，Member 在该 generation 内收到一条结构化压力通知。通知的默认动作是就地 `context_compact`，摘要由 Member 自己写。`context_rollover` 留给「工作已翻页」的情形：同一 generation 内不重复通知，rollover 后重新武装。达到硬上限，Host 在转发下一个模型请求前强制一次原地 compaction。compaction 既无法证明 generation 前进、实测压力也没有下降，Member 会被 fail closed：拒绝该 step，不超限提交。
+## 上下文生命周期归属
+Member 的上下文只有两个机制，且都不由模型发起。
 
-Provider context-overflow 失败先走一条有界的 compact-and-retry 序列，再上浮。窗口无法测量的 route 会显式拒绝，绝不静默超限提交。已接受 Task 的自动 compaction 已经退役：除 Member 自己的显式选择外，压力策略是唯一的 compaction 触发器。
+**就地压缩。** preset 挂的是本 bundle 的 `team-compaction-engine`，一个 `BasicCompactionEngine` 子类，唯一差别是摘要模板：7 节按「后继者无法重建的东西」排序，所以摘要只点名文件、说明为什么重要，而不复述内容；同时写清有谁在等这件事。`auto` 打开，1M window 上触发比 0.256（即 256K 水位线），`modelPolicies` 让别的窗口落在同一水位；`retainRatio` 0.08 保留约 7 万 token 的原文尾部，于是一次压缩清掉约 18 万，而不是每隔一步就压。压缩绝不换代，也绝不取消 owner。
 
-进入大 context 的那一步如果隔了很久，先交给相关性 judge。judge 判为无关工作的输入会被扣住，不放行。原位置改投一条换代指令，等被扣的输入交回。这个 judge 就是 `jev` 服务。本 bundle 用 Host 行的 `jev.apiKey`（或该行指名的环境变量）自己挂载 `jev` 服务。所以 **key 就是这道门的开关**：行里没有 key，这道门保持关闭。部署自己挂了 `jev` 行，改读部署那一份，绝不重复挂载。
+**换代。** 换代是 Host 的决定，由 Team 自己的协调器（`team-context-management.ts`）在真正 idle 的边界执行：它自己记录这次迁移（`team/member-session-recycled`，Host actor），退役旧 Session（dispose 并归档，绝不删除），再激活一代新的、lineage parent 指向被替换的那一代。携带的非 Team 输入作为独立 turn 跟随，随后从 ledger 重导出 Inbox。协调器响应 Member Session 里 durable 的 pending 意图，因此 commit 与激活之间重启会补完欠下的换窗；旧日志里所属 turn 从未 durable 结束的意图视为 spent 直接丢弃，不会让该代永久无法换窗。
 
-门控的三个阈值属于 Host 行自己的配置：`gate.tokens`、`gate.idleMs`、`gate.judgeTimeoutMs`，每个都可省略。部署在自己 profile 的 `cordis.patch.yml` 里设置这三个阈值。行 id 是 `wowyuarm-agent-team-host`。引擎在每个生效的 step 上读一次：编辑作用于下一个被判断的 step，不需要重启。省略 `tokens` 或 `idleMs`，沿用引擎的默认值。省略 `judgeTimeoutMs`，拿到 Team 自己的预算——判官经网络到达。
+换代不给新代留下任何提示。新代第一眼看到的，就是每次 turn 都有的常规注入——身份、`memory.md`、Workspace 列表——加上唤醒它的那条消息。跨代连续性不是一份简报，而是工作过程中持续维护的 `memory.md`，之后自然读回。
 
-截止时间决定已配置的 judge 是否真被听到：一次判断耗时超过 `gate.judgeTimeoutMs`，该步不经门控直接放行。本 bundle 挂载的 judge 拿到的调用预算就是这个截止时间再减一秒。
-
-Memory 不是 authority。Memory 可能过时，不能覆盖 Workspace instructions、direct Human input 或 durable Team facts。Member 只记录已验证且持久的知识。credentials、sensitive data、guesses、chat logs、其他 Member 的 memory，以及 ledger 已拥有的 facts，都不得记录。
+两个机制都由 Host 掌控，所以模型完全没有 context 工具：没有 rollover、没有 checkpoint、没有 status，read 上也不附带任何建议。Member 说什么都不能启动、阻止或改变一次换代。
 
 ## Agent notification boundary
 Host 从 durable unread state 派生 Agent notifications。Host 经 Agent public safe-boundary API 注入一条有界、合并后的 context message。Idle Agent 会开始一个 turn。running 的 request 或 tool 在下一个 step boundary 收到 context，不会被中断。任何时候，durable Inbox 都是 authority：
@@ -35,7 +33,7 @@ Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 tur
 
 Web Client 的 Agent-row menu 提供两个 runtime recovery entrances，都不写 ledger。有 live session 的 error Member 显示「恢复」，Host 向 session 注入 continuation prompt。孤儿 composition 原地重建。activation failed 的 Member 显示「重启」，Host 重新执行这个 Member 的 activation。再次失败，仍以 diagnostic 显示在 sidebar。
 
-历史上的第三个入口「从全新上下文开始」已经移除。Member 现在用 `context_rollover` 工具自行管理上下文（见九工具协议）。Host 侧 clear-context Remote 保留为无可见入口的 hidden migration escape hatch。这个 Remote 保留 `team/member-session-renewed` operation schema，replay validation 一并保留。旧 ledger 仍可 replay。模型发起的 rollover 有一段中间态：ledger 绑定已迁移，新 Session 尚未就绪。这段时间内 Member 状态短暂显示为 unavailable。同时带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。跟随有两个条件：旧→新绑定发生变化，当前页面正是被观察的旧 live Session。归档视图不会跳转。
+历史上的第三个入口「从全新上下文开始」已经移除：Host 在唤醒边界换代。Host 侧 clear-context Remote 保留为无可见入口的 hidden migration escape hatch。这个 Remote 保留 `team/member-session-renewed` operation schema，replay validation 一并保留。旧 ledger 仍可 replay。换代有一段中间态：ledger 绑定已迁移，新 Session 尚未激活。这段时间内 Member 状态短暂显示为 unavailable。同时带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。跟随有两个条件：旧→新绑定发生变化，当前页面正是被观察的旧 live Session。归档视图不会跳转。
 
 ## Assembled acceptance
 `npm run test:browser` 用 credential-free Harness Web scaffold 验证 public Client 与 Host chain。代表性 trace 执行以下动作：

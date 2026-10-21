@@ -49,15 +49,15 @@
 
 ## 团队设置页（团队）
 - 设置面板里 Team 只有这一面：`settings.section` 的 `team-settings` 条目（「团队」），只在普通模式提供。Team 模式接管侧栏后，设置面板不可达。导航轨与内容列由 shell 画，所以本段自己画 18px/600 标题。其余行沿用 shipped 设置语言：16px/0 内边距配 border-l2 发丝线、14px/22px 标题叠 12px/18px tertiary 说明、控件间距 12px。按钮与输入框直接用 shipped `Button` 与 `Input`，不另起一份声明。因为导航轨把这个条目与 Harness 自己的页面排在一起，标题下方加一行 13px tertiary 引言，写明这一页属于谁、改动作用在哪里。这行页头在**每个状态**都渲染。读取失败时也在。页面不会把「这是谁的 Team」晾着不答。脚注写出版本号并链接仓库。升级提示行只在 Host 报告有时才出现。
-- 这一页装着两组可写字段，各自答不同的文档，而且**从不把一组渲染成另一组**。身份走 Team Remote 读写。jev 端点是 Team Host 行 settings 节里的一组，经 settings 提供方写入。整份渲染该命名空间的表单会把身份字段塞进 jev 组，也会把扁平的 `apiBase` 寻址到错误的路径。
+- 这一页只写一样东西：身份走 Team Remote 读写。页面不渲染 Team Host 行的任何 settings 节，所以一个扁平字段名不会被寻址到错误的路径。
 - 名字行是一个 form：36×200px 输入框，主色「保存」按钮持有 submit。脏字段里按 Enter 即保存，Tab 的下一站就是「保存」按钮。头像行画 40px 身份圆（`border-radius: 50%` 配 `corner-shape: round`）呈现图片或首字母。一个「更换头像」按钮驱动视觉隐藏的 `input[type="file"] accept="image/*"`，上限 10MB。只有在存有 `avatarRef` 时才多出「移除头像」。两处头像座位只在**这些字节真的能解码**时才画图。Host 按声明的 media type 收头像，不解码内容。手机拍的 HEIC 或传入途中损坏的字节会被存下来，再以画不出任何东西的 data URL 交回。`useAvatarImage` 按 URL 记住字节能否解码。画不出就与「已移除」一样显示首字母；而新上传的字节是另一个 URL，会自动重试。
 - `human-identity.ts` 是这份资料的唯一读取方。`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取。引用未变时复用已经解码好的头像。后续读取失败时保留上一次已接受的值。只有从未加载成功才是 unavailable。这时整面 `role="alert"` 并自带重试。它还在每次写入被接受后刷新。写入走 settings 命名空间。经由一个可选的 `ctx.inject(['remote.settings'])` 绑定取得的有两样：`remote.settings.update(namespace, patch, expectedRevision)` 与 `mutate(…, [{ op: 'unset', path: ['avatarRef'] }])`。未声明就读 `ctx.remote.settings` 会抛错。硬性激活依赖会在 settings 服务缺席时把整个 Client 拖下水，服务缺席只报不可用。写入被拒绝时在原位置显示 Host 的 message，而不是让「正在保存…」一直挂着。Client 侧的 namespace 常量由测试钉在 Host 自己的常量上，两半不会静默漂移。
-- 390×844 下 shipped 面板保留 188px 的导航轨，没有 media query。内容列只剩约 106px。所以本段自带 `@container (max-width: 420px)`。每行文案叠在控件上方，去掉宽版为控件预留的 48px 右内边距，输入框与按钮占满整列。jev 的答复另起一行并与行首齐平，图标领在句首。宽版图标是行尾那一行的收束。浏览器验收在窄宽度断言无横向溢出，并把图标与图标所领那一行的首句实测对齐。
+- 390×844 下 shipped 面板保留 188px 的导航轨，没有 media query。内容列只剩约 106px。所以本段自带 `@container (max-width: 420px)`。每行文案叠在控件上方，去掉宽版为控件预留的 48px 右内边距，输入框与按钮占满整列。浏览器验收在窄宽度断言无横向溢出。
 
 ## 环境检查（environment check）
 版本脚注之上，页面陈述这次安装的事实，不是 Human 的事实：这个 bundle 正跑在哪条 DSH 线上，以及那条线是否落在 bundle 自己声明的支持范围内。它是第二个投影：`environment-check.ts`、`TeamEnvironmentCheck`。第二个投影刻意不放进身份 store。投影只读一次，从不写回。唯一的渲染方就是设置页。
 
-它以页面其余行同一条发丝线开场。这条判定答的是这次安装，而不是上方那个端点。没有这条线，本块会被读成 jev 组自己的一部分。
+它以页面其余行同一条发丝线开场。这条判定答的是这次安装，而不是 Human 本人的事实。没有这条线，本块会被读成身份行自己的一部分。
 
 判定只有三档，不新增第四档，也从不猜测。Host 建立不起来的事实就是 `undetermined`，这是一个落定的回答、而不是一次失败的请求。本块没有重试。Host 联系不上时整块什么都不渲染，而不是借用这个词。
 
@@ -73,23 +73,13 @@
 
 本块用 `data-environment` 携带自己的判定。验收 journey 因此等待一个状态，而不是一段文案。
 
-## jev 端点组
-- 页面第二组装的是 jev 要用的端点：三个控件（apiBase、model、只写的 key）收在一个默认折叠的披露行之后。那一行本身就是控件。行上带着状态与箭头，展开才出现字段。展开后的组带 `role="group"`，以行标题为无障碍名。这一页有两个保存按钮，任何一个都不该在没有上下文的情况下被念出来。
-- 默认折叠。端点设一次就不再动，端点状态每次打开这一页都值得看见。折叠时控件**不在 DOM 里**、而不是被藏起来。只把内容藏起来的披露仍能被 Tab 摸到，也能被读屏念到。所以浏览器验收钉的是这种「不在场」：没有 `[data-team-judge]` 组体，没有字段。验收不只看样式。
-- 状态就是这一行、不是字段上方另起的一行。`remote.agentTeam.contextJudge` 回答 jev 此刻是否可达。这一行用「文本 + 14px 图标」陈述 Host 自己的答复，并由 `data-context-judge` 携带。三种值是 `enabled`、`no-key`、`unavailable`。只有 `unavailable` 取警示色：缺 key 是一个待做的步骤，端点不可达才是要去修的事。首次读取落定前这一行什么都不说。`detail` 始终是 Host 诊断，不变成用户文案。
-- 门控的三个阈值与 key 的环境变量同处一行，刻意不上页面。它们是 Team 自己管的行配置，部署仍可在自己的 patch 层设置。Client 只读 `jev` 这一组。中间一层投影适配器拍平该节的 `value`、`base`、`user` 三层，把每个控件名映射到控件真正的路径（`['jev','apiBase']`）。
-- 表单用的是 shipped 设置栈：`SettingsFormModel` 配 `SettingsForm`、`SettingsValueField`、`SettingsSecretField`。草稿、覆盖徽章、重置与保存的行为与 Harness 自己的设置页完全一致。所有写入都经 `ctx.configForms.get(namespace)`。revision 栅栏由写入通道持有，Host 的答复也由写入通道折回 mirror。没落地的保存保留草稿并如实说明，落地的保存会重读状态。
-- key 是**只写**的。Host 会 redact 字面值。这个控件每次加载都从空开始。空草稿不写任何东西。打开这一页永远不可能清掉已存的 key。「已配置」徽章来自 describe mirror 的 `secrets` 列表：这份状态唯一可读的地方。移除字面值是一次**显式的清除写入**，只在没有暂存草稿时才提供。写入会推动文档 revision，暂存的保存被文档 revision 栅栏住。
-- 这一组只在这次部署提供 settings 文档时才出现。段落本身照常注册：身份不依赖 settings 文档也能读写。settings 服务缺席时这一组直接不渲染。文档在场时这一组也自己答自己。只读文档禁用全部控件并说明。命名空间没被提供时，渲染表单自带的那行「没有提供」，而不是画出一堆没人接受的字段。
-- 表单是以**可观察的 seat**、而不是一个值交给页面的。slot entry 的注入 props 只算一次，并缓存到该 entry 的生命周期。首次渲染之后才应答的 settings 服务，本来会让这一组一直不出现，要刷新。页面自己的测试钉的就是「渲染之后再填 seat」。
-
 ## Channel 页与讨论面板（channel page / discussion panel）
 - Channel 页把同一条时间线读成两种视图。头部下方一条页签行在两者之间切换：`频道` 是 feed，`看板` 是按 Task 状态投影的四列看板。看板是第二种**读法**，不是第二个表面。它重排同一份投影，所以一个 Task 的状态、所有者、标题不会在两个视图之间出现分歧，也不会有哪个视图去拉另一个没拉过的东西。
 - 看板只读 feed 已经加载的那一段窗口，不读 Channel 的全部历史。为了填满四列而一直翻到 `hasMore` 为假，等于把每一条 top-level Message 都并进时间线，为了四列而废掉 feed 自己的分页；同时会把「打开一个页签」变成一次无界读取。看板拿更早工作的方式就是 feed 的 `加载更早消息`：一个入口、一个页大小，两个视图永远描述同一批事实。
 - 四列是 `待处理` / `进行中` / `待验收` / `已完成`。五个 Task 状态里 `done` 与 `closed` 合进「已完成」一列。已了结的卡片降透明度而不是隐藏。看板的职责是让在动的工作最响，同时让已完的仍可找到。空列只在列头写自己的 `0`，不画占位行：在计数已经说清的列里再放一行占位，是把同一件事说两遍。
 - 看板是唯一被允许超出 880px 阅读列的 Client 表面，上限 1240px。四个状态列是扫描型表面，压到阅读列宽度会让每一列都失去卡片宽度。四列等宽（`flex: 1` 配 `min-width: 0`），所以某一列标题更长也换不来更多宽度；底色用 `--dsw-alias-bg-module-platform`（shipped 给分组模块的凹陷底色），卡片自身的底层色因此读起来是浮起的。
 - 页签行是复合控件：`role="tablist"` 加两个 `role="tab"` 按钮，整组只有一个 tab stop（未选中那个 `tabIndex` 为 -1），每个页签通过 `aria-controls`/`aria-labelledby` 指明自己控制的 panel，Left/Right/Home/End 同时移动选中与焦点。它取 shipped 会话页自己那套页签语言：13px/16px、weight 500、36px 间距、`--dsw-alias-state-business-primary` 的 2px 下划线。下划线走伪元素并伸出盒底 1px，正好压在页头收口线上，两者读成同一条边（shipped 同款做法）。未选中页签取 tertiary，选中页取 business blue 而非墨色，因为 `--dsw-alias-brand-primary` 在这张 token 表里解析成中性黑；shipped 在自己那条页签上也陈述了同样的理由。
-- taskless Thread 在 feed 右侧的面板里打开，而不是替掉整页。面板就是讨论的全部：头部点名并给出「转为 Task」与关闭，正文用与任何时间线相同的日分隔与消息块读事实，脚部是普通 composer 且共用同一个 `thread:<threadRef>` 草稿键，所以写到一半的回复在面板与 Thread 页之间往返不会丢。Task 的入口照旧走 Thread 页，Claims 与验收在那里。
+- taskless Thread 在 feed 右侧的面板里打开，而不是替掉整页。面板就是讨论的全部：头部点名并给出「转为 Task」与关闭，正文用与任何时间线相同的日分隔与消息块读事实，脚部是普通 composer 且共用同一个 `thread:<threadRef>` 草稿键，所以写到一半的回复在面板与 Thread 页之间往返不会丢。Task 的入口照旧走 Thread 页，验收在那里。
 - 面板是 surface 自己的子元素，不是 feed 的：它与上方的页头带、下方的 feed 同处一列，从页顶贯到页底。正因如此，它的头部才能与身份行同带——与 `# name` 及描述共享同一个 10px 上内边与 30px 行高——而不是从页签行下方才开始；也正因如此，头部自己没有收口线：带自己的那条线已经结束了这一行，再并排画一条，等于在什么都没围住的地方声明边界。同一个理由，面板的 composer 与 feed 的 composer 站在同一条线上，上方不画线。
 - 面板的座位只在它打开时预留，且只预留在 feed 旁边。常驻的预留会长期把一条空带花在阅读面上，并让 feed 的每一行都为它付费；释放它的代价是读者开/关面板那一刻的一次重排，而那时读者的注意力已经移到面板上。
 - 打开面板是「决定在哪里读」，所以宽度归读者：打开时面板取 stage 的较大部分（52%，钳在 420–960px 之间），两道面之间的接缝可以把这份份额拖向任一侧。两侧读同一个变量，所以 feed 让出的正好是面板拿走的，面板也永远画不到 feed 上；一次拖拽只重绘，不重渲染任何一侧。座位按浏览器记住，重新打开时再按当时的 surface 钳一次，所以在宽窗口选定的宽度不会在窄窗口溢出。面板打开时页头带也让出同一份宽度，所以长描述会在接缝旁省略，而不是钻到接缝下面。接缝是真正的 separator 控件并带键盘路径——方向键微调、Shift 加大步长——否则纯指针的交互会把那些读者留在他们改不动的座位上。面板与 feed 共用 surface 的整个高度：头部坐在页头带的身份行里，两条 composer 站在同一条脚线上。
@@ -103,11 +93,10 @@
 - Panel 失败按 Panel 记：每个挂载中的 Panel 各自报告自己看到的那次断连。所以一次断连会在侧栏出现同一条消息，正文自身读取也失败时再在页面上出现一次。
 - Panel 失败行不带重试按钮：侧栏靠 change stream 自愈。断连只上报一次，传输恢复后唤醒全部 listener（见 [`host-authority.md`](../architecture/host-authority.md)）。
 
-## Thread 顶层栏与 Claim 面板（header band / claim panel）
-- Thread 顶层栏装的是返回行、Task 身份、运行风险区与 Claims 区，整条带由 `.surfaceHeader` 自己那一条底边收口。因此带内两个分区**只靠间距分层**。分区级 `border-top` 会在什么都没围住的地方再画一条线，带上方的组已经由带自己的边线结束。这里「分隔线条数」是可量测的设计属性而非口味问题。shipped DSH 的分隔线只画在组与组之间，见 `PluginInventorySettingsTab.module.css` 的 `.group + .group { border-top: 0.5px solid … }`。所以原先每个分区各带一条 `1px solid var(--dsw-alias-border-l2)` 既不合房规也是多余的。保留的是：页头带自己的 `border-bottom`（真实结构边界）与时间线里的未读边界线（语义边界）。
+## Thread 顶层栏（header band）
+- Thread 顶层栏装的是返回行、Task 身份与运行风险区，整条带由 `.surfaceHeader` 自己那一条底边收口。因此带内分区**只靠间距分层**。分区级 `border-top` 会在什么都没围住的地方再画一条线，带上方的组已经由带自己的边线结束。这里「分隔线条数」是可量测的设计属性而非口味问题。shipped DSH 的分隔线只画在组与组之间，见 `PluginInventorySettingsTab.module.css` 的 `.group + .group { border-top: 0.5px solid … }`。所以原先每个分区各带一条 `1px solid var(--dsw-alias-border-l2)` 既不合房规也是多余的。保留的是：页头带自己的 `border-bottom`（真实结构边界）与时间线里的未读边界线（语义边界）。
 - 顶层栏是**有高度预算**的，不只是「整齐」问题。两个 Member 处于错误态时，顶层栏占到 960px 视口里的 426px，把对话内容整个推到首屏以下。改成分区间距分层后同样内容只占 360px。
-- 一行 Claim 是**三条网格轨道且都有内容**：presence 点、身份加状态一组、direction。身份与状态共用第一行、direction 独占第二行。handle 因此不会变成在宽行尽头漂着的后缀。880px 下，旧单行布局会把 handle 放到 handle 所属 direction 之后 158px 处。状态也不会飘在行尾，离开状态所限定的那条 Claim。**窄屏不重排模板**。一套 `14px minmax(0, 1fr) auto` 模板在 1440 与 390 都成立，两端因此不会各自漂移。14px 的点列加上列表 22px 缩进，让每个点都落在上方 `Claims · N` 标题的同一条竖轴上。
-- 行首的 presence 点是这一行**唯一**的活跃指示器。在 handle 旁再加一个「可用」徽标，等于把同一件事说两遍。这类重复读者会先察觉、后命名。已完成的 Claim 带 `claimRowDone`。完成 Claim 的 direction 降到次级色，完成的工作不再与进行中的抢注意力。Claim 本身仍然可见。
+- 顶层栏只点名 Task 并说明它出了什么问题，**不装这个 Task 的工作队列**。Claim 以「记录它的那条事实」抵达读者：时间线里的活动行，以及 feed 入口行上画出的所有者。提前验收的确认弹窗仍会列出将一并完成的 Claim，因为那份清单就是验收据以判断的东西。没有哪个面按需列出 Claim，顶层栏因此只剩身份与真问题。
 - 运行风险行每个出错 Member 一行。行首是诊断结构化 class 的本地化名称：`session-refused`、`session-unreadable`、`preset-composition`、`rollover`、`runtime`、`activation`。这就是 `AgentTeamMemberDiagnostic.class` 这条策略轴。`restartOffered` 早已按这条轴分支。这条轴回答可本地化的「这是哪一类问题」。Host 的 `detail` 天生是英文，行内只截取 `detail` 首句。完整原文留在风险行 `title` 上。`AgentTeamClientMemberStatus` 本来就把整份 diagnostic 带到浏览器，因此这条轴不需要改 Host 协议。
 - 每个 class 一个句子 key，让可见行留在界面语言里，而不是把 Host 字符串直接贴进本地化界面。完全没有 diagnostic 的 Member 回落到 `runtime` 文案，而不是留空。
 - Task / Thread 身份下方那句开篇文字**在任意宽度、任意 Thread 类型下都只占一行**。实现是 `-webkit-line-clamp: 1`，同时写标准属性 `line-clamp`。完整原文留在 `title`。Task 标题本来就长且夹着不可断的 ref。讨论的开篇就是自己的锚消息，正文时间线里紧接着完整重复了一遍。所以别给开篇在页头带里留第二行。那等于把页头高度花在读者已经能看到的文字上，还让页头高度取决于别人当初打了多少字。压成一行后，很长的开篇与两个字的开篇页头同高（实测 taskless Thread 两种都是 114px）。

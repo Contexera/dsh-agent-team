@@ -18,9 +18,7 @@ This applies to any fresh environment: a new clone **or a `git worktree`**. A wo
    `--host-addon-only` exits without building off Linux/macOS, so the same step is safe on every platform. Do not reuse stale `lib/` or `node_modules/` from an earlier build — old artifacts can conceal declaration or runtime incompatibility.
 2. Build the Harness `apps/web` dist with `corepack pnpm build:web` if the workflow needs `test:browser`; the workspace install already provisioned its dependencies.
 3. Inside this repository, install with `corepack pnpm install`. Never run `npm install`: it silently breaks the workspace symlinks into the adjacent checkout's vendor packages, and the failure surfaces later as a misleading `Cannot find module 'zod'`.
-4. Link the Harness workspace, its vendor packages, and — when the resolution is the sibling checkout — the context-continuity engine into this repository's `node_modules` with `node scripts/link-harness-packages.mjs`, then build the bundle with `npm run build`.
-
-   The engine comes from wherever `scripts/continuity-dir.mjs` resolves it. A sibling `../dsh-context-continuity` checkout (development against an engine working tree, which must be built there first with `npm run build`) is linked into `node_modules`, while a clean checkout or CI uses the package the root `dependencies` installed from the registry and links nothing. `DSH_CONTEXT_CONTINUITY_DIR` points the resolution at another checkout.
+4. Link the Harness workspace and its vendor packages into this repository's `node_modules` with `node scripts/link-harness-packages.mjs`, then build the bundle with `npm run build`.
 
    Host tests resolve preset rows and the bundle's own unpublished rows (for example `@contexera/dsh-agent-team/member-context`) through real `node_modules` lookups from this repository root, exactly as a profile install of the published bundle would.
 5. Regenerate the TypeScript path facades against the fresh checkout with `node scripts/sync-paths.mjs`. A fresh clone must not trust the committed facades: no npm script rewrites them, and skipping this step leaves them pointing at the paths baked in at generation time. The read-only `check:facades` gate that `npm test` runs fails on exactly that mismatch. `sync-paths` also emits the `@deepseek-ai/dsh-client-locale/src/*` wildcard the test harness's locale-table import needs.
@@ -31,7 +29,6 @@ This applies to any fresh environment: a new clone **or a `git worktree`**. A wo
 | Variable | Required for | Notes |
 | --- | --- | --- |
 | `CHROME_PATH` | `test:browser` (optional) | Defaults to `/usr/bin/google-chrome`; set only when the sandbox Chrome lives elsewhere |
-| `DSH_CONTEXT_CONTINUITY_DIR` | isolated-checkout runs only | Points the engine resolution at another `dsh-context-continuity` checkout; unset for everyday work — the sibling checkout is preferred, then the installed package |
 | `DSH_HARNESS_DIR` | certification escapes only | Points at a tag-suffixed sibling checkout; unset for everyday work — the default name is the contract |
 | `DEEPSEEK_API_KEY` | `npm run preview` | Real-model preview fails fast without it; test and browser paths never need it |
 
@@ -43,13 +40,7 @@ This applies to any fresh environment: a new clone **or a `git worktree`**. A wo
 
 A resolved checkout that does not exist aborts immediately with the sibling Harness checkouts that do exist and pointers to the fix, instead of surfacing as the far-away symptoms above.
 
-**The engine pointer resolves a checkout or the installed package. ** `scripts/continuity-dir.mjs` is the single source of truth for `@contexera/dsh-context-continuity`. `DSH_CONTEXT_CONTINUITY_DIR` wins when set, then the sibling `dsh-context-continuity` checkout (development against an engine working tree — `link-harness-packages.mjs` links it into `node_modules` and `generate-typert.mjs` provisions it into its analysis package), then the package the root `dependencies` entry installed under `node_modules/@contexera/dsh-context-continuity` (a clean checkout or CI — nothing to link there).
-
-A resolution with no package layout aborts immediately with the candidates it tried and pointers to the fix.
-
-**The engine's install contract. ** The engine is published as `@contexera/dsh-context-continuity`, and the root manifest declares it as a regular dependency so the profile install brings it in alongside the bundle. Profiles run pnpm with `autoInstallPeers: false`, so a peer nothing else provides resolves for nobody, and the boot-critical closure gate in `shipping.spec.ts` counts dependencies among the reachable roots. CI therefore needs no engine step: `pnpm install` brings the prebuilt package in, and the link script skips a link that would point the package name at itself.
-
-Advancing the engine means updating that one entry and committing `pnpm-lock.yaml`; a local run that resolves the sibling checkout must have that checkout built (`npm run build` there).
+**The bundle's own dependencies are its whole external surface. ** Nothing outside the host closure and this repository is resolved by name any more: the root manifest declares `yaml` and `zod` alone, and both are linked into the Typert analysis package by `generate-typert.mjs` from this repository's own install. A profile install therefore brings nothing else in, and CI needs no extra provisioning step.
 
 **CI lanes. ** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) runs typecheck plus the full test suite on clean `ubuntu-latest` and `windows-latest` runners — on pull requests, pushes to `master`, and manual `workflow_dispatch`. Both lanes execute the same six-step environment contract above; the Windows lane runs every step through git bash (`shell: bash`) because the default pwsh breaks backslash line continuations, and links the harness packages through directory junctions so no symlink privilege is needed.
 

@@ -118,15 +118,9 @@ presence/availability 行不正常时，背后的结构化原因（绝不持久�
 
 ## Context Generation（上下文代际）
 
-一个 Member Session 的两个上下文边界之间的工作上下文。全新代际除了收到的 handoff，从零开始；checkpoint 回返的代际拿来源的精确 completed-turn 前缀作 seed。ledger 记录当前绑定（任一时刻每个 Member 恰好一个）以及最近一次 renewal/rollover 的上一 Session。上下文历史本身保存在各 Session 日志中。Member 身份、模型、私有记忆、skills、Claims 和 Attention，代代都保留。
+一个 Member Session 的两个上下文边界之间的工作上下文。全新代际从零开始：它第一眼看到的就是每步的常规注入（身份、`memory.md`、Workspace 列表）加上唤醒它的那条消息，且从不被告知换代发生过。ledger 记录当前绑定（任一时刻每个 Member 恰好一个）以及最近一次 renewal 或换代的上一 Session。上下文历史本身保存在各 Session 日志中。Member 身份、模型、私有记忆、skills、Claims 和 Attention，代代都保留。
 
-## Context Checkpoint（上下文检查点）
-
-Member 在自己 Session 里通过一次成功的 `context_checkpoint` 工具调用记下的命名锚点，且已 resolve。它在所属 turn 完成时 resolve；ref 由 tool call id 确定性派生。checkpoint 本身不改变任何东西：只有 Member 在 `context_rollover` 中引用它时才成为回返目标。seed 子代里继承的 checkpoints 仍是惰性历史。
-
-## Context Handoff（上下文交接）
-
-Member 经 `context_rollover` 传过去的私有桥接正文；它绝不是 ledger 事实。ledger 只记录可验证的信封（session 锚点、result sequence、trigger）。正文只在新代际 Session 日志里存一份，当新代际 Session 的第一份 model-facing context。崩溃落在 rollover 的 durable commit 和投递之间，正文就从上一 Session 的 durable intent 重建，且只重建一次。
+换代完全是 Host 的决定。旧日志里仍可能带着早先版本写下的 checkpoint 锚点或 rollover 对；折叠层继续解码它们，让旧 ledger 与旧 Session 日志仍可读回，但当前构建不再产生其中任何一种。
 
 ## Suspend
 

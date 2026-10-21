@@ -14,7 +14,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 
 ## Lifecycle 与通知
 - Agent lifecycle、JSON/SQLite replay、authorization、idempotency 和 revision checks 都留在 Host 侧。durable unread 变化可以通过 public Agent safe-boundary API 产生一条有界、经过合并的 Agent context notification。direct mentions 携带 Message 和 source。Task/Claim Activities 携带简要状态变化。ordinary unread 只携带不含正文的 Thread-first route，存在 Task 时再带 Task overlay。Promotion 与其他 Task transition 一样是 Task activity，通过 Activity markers 到达 followers。这类 notification 不是第二权威，也不保证模型恰好处理一次。
-- 已提交的 Session transition（`team/member-session-renewed`、`team/member-session-rolled-over`）记录的是 desired binding，而不是已完成的切换。retire 旧代与 activate 目标都是 ledger 写入之外的 Host 效果。startup 与 Member 的显式 recovery 动作都会补完被中断的 transition，依据记录的 previous Session。每个效果各自推导自己是否已完成。live handle 不能证明 archive 那一半跑过。因此重复请求返回已记录的 receipt 与诚实状态，不再提交一次绑定。
+- 已提交的 Session transition（`team/member-session-renewed`、`team/member-session-rolled-over`、`team/member-session-recycled`）记录的是 desired binding，而不是已完成的切换。retire 旧代与 activate 目标都是 ledger 写入之外的 Host 效果。startup 与 Member 的显式 recovery 动作都会补完被中断的 transition，依据记录的 previous Session。每个效果各自推导自己是否已完成。live handle 不能证明 archive 那一半跑过。重复请求只返回已记录的 receipt 与诚实状态，不再提交一次绑定。
 - 每个 durable Member state 只有一组期望的外部 effect，即 [Member Lifecycle](../domain-model.zh.md#member-lifecycle) 表。每一次 lifecycle operation 在 commit 之后重跑这组 effect。startup 对每个非 enabled Member 也重跑同一组。archive、suspension、remove 因此走同一条推导重跑收敛，不做第二次 durable 写入。即使 Workspace/Session/filesystem 调用被 crash 或失败打断，也一样收敛。
 - startup 绝不把非 enabled Member 激活为 enabled。启动阶段失败的 effect 只记日志，下一次 boot 重试，不让 boot 失败。同一 Member 的 lifecycle operation 按提交序串行；不同 Member 从不排在彼此的等待之后。
 - ledger append 之后剩下的是 delivery 效果：commit listeners、Client change invalidation、participation notice。每个受影响的 Member 还会收到一次 wake。每一项都经过同一条边界：失败只记日志，不让操作本身失败。失败的 listener 或 wake 仍以 committed result 作答，而不是虚假的回滚。只有 invariant divergence 继续 reject。失败的 Inbox wake 清掉这个 wake 记录的 notice state。因此，下一次触及该 Member 的 commit 重新推导同一批 durable Inbox facts 并重试，不追加第二次操作。DM 保留显式的 recorded-but-not-delivered 错误。
@@ -26,7 +26,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 | Cause | 产生它的事实 |
 | --- | --- |
 | `commit` | 任何触及该 Member 的已提交操作：提及、DM、Task 活动、promotion、被接受的回答 |
-| `transition` | 一条已记录的 `team/member-session-renewed` 或 `team/member-session-rolled-over`，其 retire 与 activation 效果没有按序完成；并按顺序排在 handoff 之后重新派生 Inbox |
+| `transition` | 一条已记录的 `team/member-session-renewed`、`team/member-session-recycled` 或旧式 `team/member-session-rolled-over`，其 retire 与 activation 效果没有按序完成；重新派生的 Inbox 排在携带输入之后 |
 | `activation` | 一次新的 activation，有 carried input 时带上旧 Session id |
 | `running` | Member 自身 `agent/status` 转为 `running`——每次转换一次，不是每步一次 |
 
@@ -69,9 +69,11 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 ## Session 策略与上下文压力
 - Team 管理的 Agent sessions 使用显式 Team preset 和可信的 `danger-full-access` policy。这是面向可信 Workspace 的有意产品边界。
 - Host 激活 Member 时，通过 session-title service 用这个 Member 的 handle 命名没有标题的 Member session。这样普通 Session list 就会显示 Member identity。显式 rename 或任何已有 title 始终优先。命名失败不会导致 activation 失败。
-- 已接受 Task 的自动 compaction 已退役。Member 上下文压力由引擎的策略决定，Host 把引擎策略绑到 Member 的读数上（见 Tools and preset）。预算阈值从当前 route 的 context window 派生。handoff 预算每 generation 一条通知。judge 判为无关的长间隔 step 被扣住，而不是放行。硬上限强制原地 compaction，并做 fail-closed 验证。provider context-overflow 获得一条有界 compact-and-retry。Pending/error bookkeeping 只在进程内维护。只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。
+- Member 上下文的两个机制都在 Host 侧，模型没有对应工具（见 Tools and preset）：preset 的 compaction 引擎把过大的 Session 就地缩短；换代协调器在真正 idle 的边界换掉冷下来的一代，并以 Host actor 记录 `team/member-session-recycled`。
+- 换代窗口内的这一代报告 unavailable，并带 `rollover` diagnostic，直到新代激活。所以跟随该行的 Client 绝不会打开一个尚不存在的 Session。
+- Pending/error bookkeeping 只在进程内维护。只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。
 - 终止回合的恢复先读 Harness 的结构化失败，再看措辞。稳定的 code 单独决定结果。`RATE_LIMIT` 是 rate limiting，`TRANSPORT`/`TIMEOUT` 是 transient network，显式 429/503 响应是 rate limiting。其他任何 code（quota、auth、context、请求状态）无论 message 写什么都保持 manual。只有无 code 可用的错误才回落到窄 message 签名。
-- 两级分工不变。`agent/request-error` 负责同一步的 pressure/compaction 重试。`agent/error` 负责终止回合恢复及其连续错误上限。无论走哪条路，失败都保留已记录的 Member diagnostic。
+- `agent/error` 负责终止回合恢复及其连续错误上限。无论走哪条路，失败都保留已记录的 Member diagnostic。
 - 在任何 `turn/start` 之前被丢弃的 Team 唤醒，是唯一一类背后没有 `agent/error` 的 error diagnostic。当一条 Team 自己的 Inbox 或 recovery 通知在 Agent 开启回合前离开队列、且不是 Host 自己做的替换或 dispose 时，Host 记一条 `runtime` 类 diagnostic，带上 `source: 'agent/inbox/discarded'`、该 Member 的 `sessionId` 和 `occurredAt`。Host 有意替换或拆除的通知不触发任何东西，所以普通的通知替换从不显示 error。被取消的 splice 不带 durable 原因，因此它和所有 runtime diagnostic 一样只在进程内维护。重启后，在下一次唤醒真正运行或再次取消之前什么都不显示。
 
 ## 私有记忆、归档与身份效应

@@ -110,15 +110,9 @@ The `class` routes which recovery action actually helps: a non-remediable refusa
 
 ## Context Generation
 
-One Member Session's working context between two context boundaries. A fresh generation starts empty except for the handoff delivery; a checkpoint-returned generation seeds the exact completed-turn prefix of its source. The ledger records the current binding (one per Member at all times) and the previous Session of the latest renewal/rollover; the Session logs themselves hold the context history. Every generation keeps Member identity, model, private memory, skills, Claims, and Attention.
+One Member Session's working context between two context boundaries. A fresh generation starts empty: its first model-facing context is the ordinary per-step injection (identity, `memory.md`, the Workspace list) plus whatever message woke it, and it is never told a generation changed. The ledger records the current binding (one per Member at all times) and the previous Session of the latest renewal or swap; the Session logs themselves hold the context history. Every generation keeps Member identity, model, private memory, skills, Claims, and Attention.
 
-## Context Checkpoint
-
-A named, resolved anchor recorded by a Member inside its own Session as a successful `context_checkpoint` tool pair. It resolves when the containing turn completes; the ref is deterministic from the tool call id. A checkpoint alone changes nothing — it becomes a `context_rollover` return target only when the Member cites it, and inherited checkpoints in a seeded child stay inert history.
-
-## Context Handoff
-
-The private bridge prose a Member passes to `context_rollover`; it is never a ledger fact. The ledger records only the verifiable envelope (session anchors, result sequence, trigger); the prose lives exactly once in the new generation's Session log as its first model-facing context. A crash between the durable rollover commit and delivery reconstructs it from the previous Session's durable intent, exactly once.
+A swap is the Host's decision alone. A legacy log may still carry a checkpoint anchor or a rollover pair written by an earlier build; the fold keeps decoding them so old ledgers and old Session logs still read back, but no current build produces either.
 
 ## Suspend
 

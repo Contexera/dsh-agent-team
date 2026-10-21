@@ -103,23 +103,6 @@ Two versions a reader could reasonably confuse are therefore kept apart: the run
 
 The block carries `data-environment` with its verdict, so an acceptance journey waits on a state rather than on prose.
 
-## Judge endpoint group
-The page's second group points jev at an endpoint: three controls — apiBase, model, and the write-only key — waiting behind a collapsed disclosure whose row is the whole control. The row carries the state and the chevron; the fields appear when it opens, and the opened body carries `role="group"` named by that title, because the page shows two saves and neither may be announced without context.
-
-Collapsed is the default because the endpoint is set once and then left alone, while its state is worth seeing every time the page opens. The controls are absent from the DOM while it is closed rather than hidden in it. A disclosure that only hides its content stays reachable by Tab and by a screen reader, so the browser acceptance pins that absence — no `[data-team-judge]` body, no fields — rather than the styling that suggests it.
-
-The state is that row rather than a line above the fields: `remote.agentTeam.contextJudge` answers whether jev is reachable, and the row states the Host's own answer as words plus a 14px glyph, carried on `data-context-judge` — `enabled`, `no-key`, `unavailable`. Only `unavailable` takes the warn colour, because a missing key is a step to take while an unreachable endpoint is something to fix. The row says nothing before the first read settles, and `detail` stays a Host diagnostic rather than user copy.
-
-The gate's thresholds and the key's environment variable share that same row and are deliberately absent: they are row configuration the Team owns, and a deployment can still set them in its own patch layer. The Client reads only the `jev` group, through a projection adapter that flattens the section's `value`, `base`, and `user` layers and maps each control name onto the path it really lives at (`['jev','apiBase']`).
-
-The form is the shipped settings stack — `SettingsFormModel` with `SettingsForm`, `SettingsValueField`, and `SettingsSecretField` — so drafts, override badges, reset, and the save behave as they do on the Harness's own settings pages. Every write goes through `ctx.configForms.get(namespace)`, which owns the revision fence and folds the Host's answer back into the mirror; a save that did not land keeps its drafts and says so, and a landed one re-reads the status.
-
-The key is write-only: the Host redacts the literal, so the control starts blank on every load, and a blank draft writes nothing — opening the page can never clear a stored key. The configured badge comes from the describe mirror's `secrets` list, the only place that state is readable. Removing a literal is an explicit clear of its own, offered only while no draft is staged, because a write moves the document revision a staged save is fenced to.
-
-The group is offered only while this deployment serves a settings document: the section is registered regardless, because identity is reachable without one, and an absent settings service simply leaves the group out. Inside a served document the group still answers for itself — a read-only document disables its controls and says so, and a namespace that is not served renders the form's own unavailable line instead of fields nothing would accept.
-
-The form reaches the page through an observable seat rather than as a value. A slot entry's injected props are computed once and cached for that entry's lifetime, so a settings service answering after the first render would otherwise leave the group off the page until a reload. Filling the seat after render is what the page's own test pins.
-
 ## Channel page and discussion panel
 The Channel page reads one timeline two ways. A tab strip under the header switches between them: `频道` is the feed, `看板` is a four-column board of the Task-status projection. The board is a second **reading**, not a second surface — it re-sorts the same projection, so a Task's state, owners, and title cannot disagree between the two views, and neither view fetches anything the other has not.
 
@@ -137,7 +120,7 @@ The tab strip is a composite control: `role="tablist"` with two `role="tab"` but
 
 It takes the shipped session page's own tab language — 13px/16px weight 500, a 36px gap, and a 2px underline in `--dsw-alias-state-business-primary`. The underline rides a pseudo-element and reaches 1px past the tab's box, so it ends flush with the header's closing rule and the two read as one edge — the shipped strip's own arrangement. The inactive tab is tertiary and the selected one is business blue rather than ink, because `--dsw-alias-brand-primary` resolves to neutral black in this token sheet; shipped states the same reason on its own strip.
 
-A taskless Thread opens beside the feed in a right-hand panel rather than replacing the page. The panel is a discussion's whole face: its head names it and offers promotion plus a close, its body reads the facts with the same day separators and runs as any timeline, and its foot is the ordinary composer at the same `thread:<threadRef>` draft key, so a half-written reply survives the trip between the panel and the Thread page. A Task's entry still walks into the Thread page, which is where Claims and acceptance live.
+A taskless Thread opens beside the feed in a right-hand panel rather than replacing the page. The panel is a discussion's whole face: its head names it and offers promotion plus a close, its body reads the facts with the same day separators and runs as any timeline, and its foot is the ordinary composer at the same `thread:<threadRef>` draft key, so a half-written reply survives the trip between the panel and the Thread page. A Task's entry still walks into the Thread page, which is where acceptance lives.
 
 The panel is the surface's own child, not the feed's: it spans the band above the feed as well as the feed itself, as one column from the top of the page to the bottom. That is what lets its head share the band's identity row — the same 10px top inset and 30px row as `# name` and its description — instead of starting under the tab strip.
 
@@ -164,18 +147,14 @@ The rail speaks the same two shapes at rail scale. A Panel's own failure line is
 
 A Panel's line carries no retry control; the rail heals from the change stream, which reports an outage once and wakes every listener when the transport answers again (see [`host-authority.md`](../architecture/host-authority.md)).
 
-## Thread header band and the Claim panel
-The Thread's header band carries the back row, the Task identity, the runtime-risk section, and the Claims section, and it closes with the one rule `.surfaceHeader` draws. The two sections inside it therefore separate by **space alone** — a section-level `border-top` would draw a second line around nothing, since the band's own rule already ends the group above.
+## Thread header band
+The Thread's header band carries the back row, the Task identity, and the runtime-risk section, and it closes with the one rule `.surfaceHeader` draws. A section inside it therefore separates by **space alone** — a section-level `border-top` would draw a second line around nothing, since the band's own rule already ends the group above.
 
 Separator count is a measurable property here, not a matter of taste: shipped DSH draws them *between* groups (`PluginInventorySettingsTab.module.css`, `.group + .group { border-top: 0.5px solid … }`), so the per-section `1px solid var(--dsw-alias-border-l2)` was both off-convention and redundant. What stays: the band's `border-bottom` (a real structural boundary) and the unread boundary line in the timeline (a semantic one).
 
 The band is height-budgeted rather than merely tidy — with two erroring Members it ran 426px of a 960px viewport and pushed the conversation below the fold, while sections that separate by space fit the same content in 360px.
 
-A Claim row is **three grid tracks that are all occupied**: the presence dot, the identity-and-state group, and the direction. Identity and its state share the first line and the direction owns the second. The handle is therefore never a suffix adrift at a wide row's far end (at 880px the old single-line layout left the handle 158px past the direction it belonged to), and the state never floats at the row's right edge away from the Claim it qualifies.
-
-The narrow breakpoint does not re-template the row: one `14px minmax(0, 1fr) auto` template holds at 1440 and at 390, so the two widths cannot drift apart, and the 14px dot column plus the list's 22px inset keep every dot on the same spine as the `Claims · N` title above them. The row's leading presence dot is the row's **only** liveness signal — an extra "available" badge beside the handle states one fact twice, which a reader notices before they can name it.
-
-A `done` Claim carries `claimRowDone`, stepping its direction down to secondary so finished work stops competing with live work, without hiding the Claim.
+The band names the Task and states what is wrong with it; it does not carry the Task's work queue. A Claim reaches the reader as the fact that recorded it — the activity line in the timeline — and as the owners drawn on a feed entry row, and the early-accept dialog still lists the open Claims it will complete, because that list is what the acceptance is decided on. No surface lists Claims on demand, so the band stays identity plus a real problem.
 
 The runtime-risk row is one line per erroring Member, and its leading token is the **localized name of the diagnostic's structured class** — `session-refused`, `session-unreadable`, `preset-composition`, `rollover`, `runtime`, `activation`, the policy axis `AgentTeamMemberDiagnostic.class` already carries and `restartOffered` already branches on.
 
