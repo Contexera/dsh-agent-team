@@ -129,5 +129,5 @@ export async function mountTeamMemberHost(options: TeamMemberHostOptions): Promi
 
 /** A token meter that always reports zero usage, so pressure is never the input under test. */
 export function provideQuietTokenMeter(ctx: Context): void {
-  ctx.provide('tokenMeter', { measure: () => ({ totalTokens: 0, nodes: [] }) })
+  ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: () => ({ totalTokens: 0, nodes: [] }) })
 }

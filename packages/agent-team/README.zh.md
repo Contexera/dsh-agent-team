@@ -44,7 +44,7 @@ Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默
 
 Team-enabled preset 在自身 Agent scope 注册七个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
 
-Member 上下文只有两个机制，且没有模型工具。preset 的 `compaction-basic` 行原样挂 Harness 的 `@deepseek-ai/dsh-compaction-basic`，`auto` 打开并配 preset 声明的比例，所以 Session 就地压缩；这些数值归 [`../../docs/team-collaboration/memory-and-context.zh.md`](../../docs/team-collaboration/memory-and-context.zh.md)。换代是唤醒边界上 Host 的决定：`team-context-management.ts` 等真正 idle、复查 owned-jobs guard、以 Host actor 提交幂等的 `team/member-session-recycled` operation、退役旧 Session（dispose 并归档，绝不删除）、再激活一代新的、lineage parent 指向被替换的那一代。身份、模型、私有记忆、skills、Claims 和 Attention 全部保留，进程内状态在崩溃后可从 durable log 重建。没有任何 Remote 写入口会 renew、rollover 或重置 Member 的上下文。
+Member 上下文只有两个机制，且没有模型工具。preset 的 `member-compaction-engine` 把摘要与持久化缩减交给 Harness，Team 则在每次请求前控制输入和输出预算；这些数值归 [`../../docs/team-collaboration/memory-and-context.zh.md`](../../docs/team-collaboration/memory-and-context.zh.md)。换代是唤醒边界上 Host 的决定：`team-context-management.ts` 等真正 idle、复查 owned-jobs guard、以 Host actor 提交幂等的 `team/member-session-recycled` operation、退役旧 Session（dispose 并归档，绝不删除）、再激活一代新的、lineage parent 指向被替换的那一代。身份、模型、私有记忆、skills、Claims 和 Attention 全部保留，进程内状态在崩溃后可从 durable log 重建。没有任何 Remote 写入口会 renew、rollover 或重置 Member 的上下文。
 
 ## Model Experience
 

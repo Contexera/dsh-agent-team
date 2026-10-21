@@ -175,27 +175,12 @@
                 compaction: true
                 toolResultPruner: true
               config:
-                # The engine manages pressure itself (`auto` defaults to true):
-                # a Member condenses its own context at the step boundary instead
-                # of waiting for the Host's hard-limit reduction. 0.256 of a 1M
-                # window is the 256K trigger the Team runs on; a deployment whose
-                # routes use other window sizes can add `modelPolicies` entries at
-                # the profile level to keep the same absolute waterline.
-                #
-                # `retainRatio` 0.08 leaves ~70K of verbatim tail after a 1M
-                # compaction (~180K removed), so automatic runs stay rare rather
-                # than firing every other step.
-                #
-                # This is the Harness engine, unmodified: the summary template,
-                # the routed-policy summarization target, and the cap all stay
-                # upstream's, so a policy an operator adds to a route means what
-                # the Harness documents it means.
+                # Team owns proactive admission; the Harness still supplies the
+                # summary template, durable transaction, and overflow retries.
                 - id: compaction-basic
-                  name: '@deepseek-ai/dsh-compaction-basic'
+                  name: '@contexera/dsh-agent-team/member-compaction-engine'
                   config:
-                    thresholdRatio: 0.256
-                    retainRatio: 0.08
-                    headroomTokens: 65536
+                    maxTokens: 16384
 
                 # The member session keeps the shipped composer, whose global command
                 # vocabulary is fully available; this row routes the member's own

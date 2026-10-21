@@ -68,7 +68,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 ## Session 策略与上下文压力
 - Team 管理的 Agent sessions 使用显式 Team preset 和可信的 `danger-full-access` policy。这是面向可信 Workspace 的有意产品边界。
 - Host 激活 Member 时，通过 session-title service 用这个 Member 的 handle 命名没有标题的 Member session。这样普通 Session list 就会显示 Member identity。显式 rename 或任何已有 title 始终优先。命名失败不会导致 activation 失败。
-- Member 上下文的两个机制都在 Host 侧，模型没有对应工具（见 Tools and preset）：由 preset 配置的 Harness `@deepseek-ai/dsh-compaction-basic` 把过大的 Session 就地缩短；换代协调器在唤醒边界换掉冷下来的一代，并以 Host actor 记录 `team/member-session-recycled`。压力与唤醒阈值归 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。
+- Member 上下文的两个机制都在 Host 侧，模型没有对应工具（见 Tools and preset）：Team 通过 preset 中的适配层控制请求预算，Harness 的 `BasicCompactionEngine` 把过大的 Session 就地缩短；换代协调器在唤醒边界换掉冷下来的一代，并以 Host actor 记录 `team/member-session-recycled`。压力与唤醒阈值归 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。
 - 换代窗口内的这一代报告 unavailable，并带 `rollover` diagnostic，直到新代激活。所以跟随该行的 Client 绝不会打开一个尚不存在的 Session。
 - 换代携带的是输入，不是上下文：commit 记下退役日志的偏移，新代只重放该边界及其之后的输入，并按 Message id 去重；即使输入已被 claim，也使用最初的 durable inbox 插入记录。不经过进程内存拷贝（见 [Tools and preset](tools-and-preset.zh.md)）。
 - Pending/error bookkeeping 只在进程内维护。只有进入 transaction 的 compactions 才会写入 durable Session history，绝不写入 Team ledger。

@@ -8,9 +8,17 @@
 ## 上下文生命周期归属
 Member 的上下文只有两个机制，且都不由模型发起。
 
-**就地压缩。** preset 挂的是 Harness 自己的 `@deepseek-ai/dsh-compaction-basic`，不做改动，`auto` 打开，配 Team 的比例：`thresholdRatio` 0.256、`retainRatio` 0.08、`headroomTokens` 65536。摘要模板、routed summarization target 与上限都保持上游的。压缩绝不换代，也绝不取消 owner。
+**就地压缩。** preset 挂载 `member-compaction-engine`，它是 Harness `BasicCompactionEngine` 的薄适配层。Team 负责主动请求准入；父类提供摘要模板、工具配对安全切分、持久化事务与 overflow 重试。压缩不换代，也不删除原始日志。
 
-Team 配的是比例，不是固定窗口：触发线是 `min(W × 0.256, W − output − 65536)`（`W` 为窗口 token 数），`retainRatio` 0.08 把消息预算的这个份额留作原文尾部。只有当剩余容量更大时比例才是生效的那一项——1M 窗口上阈值就是 256K，尾部保留约 7 万——更小的窗口、或为输出预留很多的窗口，按更低的那条值压缩。部署方用自己的其他模型时，在 profile 层加 per-model `modelPolicies` 来守住自己的水位线；bundle 不假设任何窗口大小。
+输入触发线是 `floor(min(B, W × 0.8, W − 16384))`，`B` 为 `memberCompaction.tokens`（默认 256000），`W` 为路由窗口。窗口未声明时仍执行绝对预算。1M、2M 模型在 256000 触发，272000 模型在 217600 触发。触发线不扣模型最大输出。准入前计入待发送消息、本次工具声明与 system prompt 增量。
+
+输入达到触发线后，Team 先裁剪工具结果，必要时请求一次上游强制缩减。这条路径的原文保留预算为零，不再保留大窗口的 0.16；上游仍可能保留最近的完整消息组。摘要输出独立设为 16384。缩减失败或仍未低于触发线时，明确结束 turn 并报告错误；尚未准入的输入保留在队列，不自动重试。
+
+每次请求的输出额度最多为 `W − 估算输入 − 4096`，不会提高原有额度。实际值写入 request header；解析下一次额度前会移除临时缩减，恢复的 loop 则从声明的 options 开始。输入计价仍是估算，因此保留 provider overflow 恢复。
+
+取消沿用 Agent 的 stop/dispose 语义；只有预算失败会恢复尚未准入的输入。窗口不超过 16384 token 时容纳不下本策略的固定预留，策略会退出，请求交给 Agent 自身的限制。
+
+这是触发线，不是物理上限：工具结果可在下一次请求前越线。`memberCompaction.enabled: false` 恢复上游压力判定，包括输出预留、headroom 与尾部保留策略。适配层只挂在 Team preset，普通 Session 不变。
 
 **换代。** 换代是 Host 在唤醒边界做出的决定，由 Team 自己的协调器（`team-context-management.ts`）执行。它以 Host actor 提交 `team/member-session-recycled`，退役旧 Session（dispose 并归档，绝不删除），再激活一代新的、lineage parent 指向被替换的那一代，随后从 ledger 重导出 Inbox。
 
@@ -48,6 +56,12 @@ Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 tur
 手动控制 Member 上下文已经不存在：没有 row action，也没有 Remote 写入口能开一代新的。ledger 保留较早的 transition kind（`team/member-session-renewed`、`team/member-session-rolled-over`）以便已记录的 ledger 仍可 replay，但没有任何代码再写它们。
 
 换代有一段中间态：ledger 绑定已迁移，新 Session 尚未激活。这段时间内 Member 状态显示为 unavailable，并带 "context rollover in progress" diagnostic。这个 Member 的 Session 正嵌入右栏时，Client 只跟随一次到新 Session。归档视图不会跳转。
+
+**验收边界。** 一次 Thread read 若 ack 了某个 Task 的验收，会给读者自己的边界，但只在这次验收结束的是读者自己名下的工作时才触发：只是关注该 Thread 的观察者同样会看到这条 unread accept，Host 不会打扰它。
+
+Host 追加一条 `<system-reminder>`，要求 Member 把持久结论写进 `memory.md` 索引及其指向的 note。实测 context 达到或超过 128000 token 时，同一边界还会在 Agent 空闲后压缩当前代：验收通常发生在 turn 中，而引擎只压缩空闲 Agent。
+
+边界不传递任何东西，既没有 handoff 也没有公告，所以提醒只在真会发生时陈述后果；preset 未挂载压缩引擎时，提醒不会声称会压缩。
 
 ## Assembled acceptance
 `npm run test:browser` 用 credential-free Harness Web scaffold 验证 public Client 与 Host chain。代表性 trace 执行以下动作：

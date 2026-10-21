@@ -36,6 +36,15 @@ export const TEAM_INBOX_NOTICE_SUMMARY = 'Team Inbox has unread work.'
 
 export const TEAM_RECOVERY_NOTICE_SUMMARY = 'Recovery: continue your interrupted work.'
 
+/** One-line account of the post-acceptance context reminder, read back by the wake guards. */
+export const TEAM_ACCEPTANCE_NOTICE_SUMMARY = 'Task accepted: record what is durable.'
+
+/** Whether a Team notice is the post-acceptance reminder rather than a wake the Host rederives. */
+export function isAcceptanceNotice(message: UserMessage): boolean {
+  const source = message.source
+  return isAgentTeamSource(source) && source.form === 'notice' && source.summary === TEAM_ACCEPTANCE_NOTICE_SUMMARY
+}
+
 export interface ContextCheckpointEntry {
   /** Opaque stable ref; the selection authority for a seeded return. */
   readonly checkpointRef: string
@@ -251,7 +260,7 @@ function createStep(inputFromSeq?: number): TeamContextStep {
       if (wakeBoundary) {
         const source = message.source
         if (matchesProducerKind(source.kind, 'agent-instructions') || isAgentTeamContextSource(message) || (isAgentTeamSource(source) && source.form === 'notice'
-          && (source.summary === TEAM_INBOX_NOTICE_SUMMARY || source.summary === TEAM_RECOVERY_NOTICE_SUMMARY))) continue
+          && (source.summary === TEAM_INBOX_NOTICE_SUMMARY || source.summary === TEAM_RECOVERY_NOTICE_SUMMARY || source.summary === TEAM_ACCEPTANCE_NOTICE_SUMMARY))) continue
       } else if (isRedeliverableTeamNotice(message)) continue
       if (state.carriedCandidates.some(candidate => candidate.messageId === message.id)) continue
       if (fresh.some(candidate => candidate.messageId === message.id)) continue

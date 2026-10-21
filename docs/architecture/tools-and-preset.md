@@ -8,7 +8,7 @@ Every row `name:` is a bare specifier the Loader resolves against the profile, n
 
 The seven tools are defined in `packages/tool-agent-team/src/index.ts`; their contract is in [`tools.md`](../team-collaboration/tools.md). They mount under the isolated `team-member` preset. The Web Client is the only Human control surface and delegates every mutation through `ctx.agentTeam` typed Remote; do not restore a slash-command adapter.
 
-A Member has no context tool at all. Its Session is compacted in place by the Harness's own `@deepseek-ai/dsh-compaction-basic` — the preset's `compaction-basic` row names that package unmodified, with `auto` on and the ratio configuration described in [`memory-and-context.md`](../team-collaboration/memory-and-context.md). Generation swaps are Host decisions, never model ones, so there is nothing for a tool to schedule and nothing for a model to cite.
+A Member has no context tool. The preset's `compaction-basic` row mounts Team's thin `member-compaction-engine` adapter: Team owns proactive admission, while the Harness's `BasicCompactionEngine` supplies the summary template, compaction transaction, and overflow recovery. [`memory-and-context.md`](../team-collaboration/memory-and-context.md) defines the budgets. Generation swaps remain Host decisions, never model ones.
 
 The generation swap is owned by `team-context-management.ts`, Team's own coordinator. It starts from a Host wake decision rather than a durable intent, executes through the serialized lifecycle queue, and takes the successor's identity from the retired Session so a crash converges on one successor:
 

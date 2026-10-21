@@ -119,6 +119,10 @@
       "types": "./packages/agent-team/lib/types/vendor/storage-sqlite/index.d.ts",
       "default": "./packages/agent-team/lib/vendor/storage-sqlite/index.js"
     },
+    "./member-compaction-engine": {
+      "types": "./packages/agent-team/lib/types/member-compaction-engine.d.ts",
+      "default": "./packages/agent-team/lib/member-compaction-engine.js"
+    },
     "./member-context": {
       "types": "./packages/agent-team/lib/types/member-context.d.ts",
       "default": "./packages/agent-team/lib/member-context.js"
@@ -182,6 +186,7 @@
     "@deepseek-ai/dsh-command-compact": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-compaction": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-compaction-basic": ">=0.2.1-rc.2 <0.2.2",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-home-paths": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-sandbox-policy": ">=0.2.1-rc.2 <0.2.2",
@@ -193,6 +198,7 @@
     "@deepseek-ai/dsh-skill-filesystem": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-storage-domain": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-token-meter": ">=0.2.1-rc.2 <0.2.2",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-tool-bash": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-tool-fs": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-tool-fs-search": ">=0.2.1-rc.2 <0.2.2",

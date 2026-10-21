@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs'
 import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -17,6 +16,7 @@ import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepse
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
+import { MEMBER_SUMMARY_TOKENS } from '../src/member-compaction.ts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const ROUTE = 'team-route'
@@ -73,31 +73,27 @@ class KeylessAdapter extends LlmAdapter {
 }
 
 describe('the preset compaction row', () => {
-  it('names the Harness engine and keeps the shipped waterline', () => {
+  it('names the Team admission adapter while keeping the engine ratios', () => {
     const row = shippedRow()
-    expect(row.name).toBe('@deepseek-ai/dsh-compaction-basic')
+    expect(row.name).toBe('@contexera/dsh-agent-team/member-compaction-engine')
     const exports = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { exports: Record<string, unknown> }
     expect(exports.exports['./team-compaction-engine']).toBeUndefined()
-    const resolution = createRequire(pathToFileURL(join(root, 'package.json')).href)
-    expect(JSON.parse(readFileSync(resolution.resolve(`${row.name}/package.json`), 'utf8')) as { name: string })
-      .toMatchObject({ name: row.name })
+    expect(exports.exports['./member-compaction-engine']).toBeDefined()
+    expect(row.config?.maxTokens).toBe(MEMBER_SUMMARY_TOKENS)
 
-    // The Loader validates a row against the plugin's Config before mounting,
-    // so the shipped text has to be a legal engine config on its own. `auto`
-    // is upstream's default now, which is what turns automatic compaction on
-    // without a bundle-owned field.
     const resolved = resolveConfig(BasicCompactionEngine.Config(row.config ?? {}) as never)
     expect(resolved).toMatchObject({
       auto: true,
-      thresholdRatio: 0.256,
-      retainRatio: 0.08,
+      thresholdRatio: 0.8,
+      retainRatio: 0.16,
       headroomTokens: 65_536,
+      maxTokens: 16_384,
       summarizationProvider: '',
       summarizationModel: '',
     })
   })
 
-  it('runs one automatic compaction that keeps the profile policy over a route', async () => {
+  it('preserves upstream automatic pressure and routed summary policy without an enabled Team budget', async () => {
     const adapter = new KeylessAdapter()
     const ctx = new Context()
     cleanups.push(() => ctx.fiber.dispose())
@@ -112,8 +108,6 @@ describe('the preset compaction row', () => {
     const configPath = join(profile, 'cordis.yml')
     await writeFile(configPath, yaml.stringify([{
       ...row,
-      // A deployment keeps the preset's config and adds its route policy at
-      // the profile level, as the shipped comment instructs.
       config: {
         ...row.config,
         modelPolicies: [{
@@ -134,8 +128,6 @@ describe('the preset compaction row', () => {
     await ctx.loader.await()
     const entry = [...ctx.loader.entries()].find(candidate => candidate.options.name === row.name)
     expect(entry?.fiber?.state, 'the preset row did not activate').toBeDefined()
-    // The row composed the module's own default class, not a subclass: the
-    // instance's prototype IS the prototype of what the Loader imported.
     const Engine = (entry?.moduleNamespace as { default?: typeof BasicCompactionEngine } | undefined)?.default
     expect(Engine).toBeDefined()
     expect(ctx.get('compaction')).toBeInstanceOf(Engine)

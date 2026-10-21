@@ -33,6 +33,9 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, teamPresetScopeMismatchMessage } from '../src/index.ts'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
+import { isAcceptanceNotice } from '../src/context-projection.ts'
+import { ACCEPTANCE_COMPACT_TOKENS } from '../src/acceptance-context.ts'
+import { MEMBER_COMPACT_TOKENS } from '../src/member-compaction.ts'
 import { RECOVERY_DELAY_MS } from '../src/recovery.ts'
 import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { MemoryStorageBackend } from './helpers/memory-backend.ts'
@@ -160,6 +163,13 @@ function waitForIdle(ctx: Context, agent: NonNullable<ReturnType<Context['agents
   })
 }
 
+/** Every acceptance reminder this Session's log holds, in arrival order. */
+function acceptanceReminders(agent: NonNullable<ReturnType<Context['agents']['get']>>): string[] {
+  return agent.session.ownEvents().flatMap(event => event.type === 'user/message' && isAcceptanceNotice(event.data)
+    ? [event.data.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')]
+    : [])
+}
+
 type PersistenceBackend = 'jsonl'
 
 class TestablePresets extends AgentPresetRegistry {
@@ -181,6 +191,7 @@ async function realHarness(
   adapter: LlmAdapter = new EmptyAdapter(),
   persistenceBackend: PersistenceBackend = 'jsonl',
   reopen?: { readonly root: string },
+  realCompaction = false,
 ): Promise<{
   readonly ctx: Context
   readonly workspaceId: WorkspaceId
@@ -205,7 +216,9 @@ async function realHarness(
   // The preset's compaction row points at a real file with a file: URL, so
   // its health check and the `compaction` service are both genuine.
   const compactionStub = join(root, 'compaction-stub.mjs')
-  await writeFile(compactionStub, [
+  await writeFile(compactionStub, realCompaction
+    ? `export { default } from ${JSON.stringify(pathToFileURL(resolve(import.meta.dirname, '../src/member-compaction-engine.ts')).href)}`
+    : [
     "export const name = 'test-compaction'",
     "export function apply(scope) { scope.provide('compaction', { compactNow: async () => null, compactIfNeeded: async () => null }) }",
     '',
@@ -241,7 +254,7 @@ async function realHarness(
   await ctx.plugin(AgentLoop, { agents: [] })
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
   const pressureState = { usageTokens: 0, bySession: new Map<string, number>(), failFor: new Set<string>() }
-  ctx.provide('tokenMeter', { measure: (session: { id: string }): { totalTokens: number; nodes: { seq: number; tokens: number }[] } => {
+  ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: (session: { id: string }): { totalTokens: number; nodes: { seq: number; tokens: number }[] } => {
     if (pressureState.failFor.has(session.id)) throw new Error('meter unavailable for this session')
     // One node at the head of the surface, so any retained prefix through an
     // anchor prices at the whole source's measured size - the shape the real
@@ -1945,7 +1958,7 @@ async function waitFor<T>(probe: () => T | undefined, timeoutMs = 60_000): Promi
 }
 
 describe('Agent Team Member lifecycle: context, acceptance, and activation (ticket 04)', () => {
-    it('task acceptance no longer schedules standalone auto compaction', async () => {
+    it('leaves an acceptance below the budget as a reminder alone', async () => {
       const adapter = new ScriptedAdapter()
       const { ctx, workspaceId, pressureState } = await realHarness(adapter)
       const channel = await ctx.agentTeam.createChannel({ requestId: requestId('noauto-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
@@ -1962,13 +1975,167 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('noauto-human-read'), workspaceId, taskRef: started.task!.taskRef })
       const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('noauto-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
       if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
-      // The Member stays available with no compaction failure: acceptance is
-      // a semantic cue, never an unconditional summarization job. The
-      // compaction diagnostic surface is empty (no memberFailures entry).
+      // Read the acceptance back as the contributor: a small context gets the
+      // reminder and nothing else — acceptance is a semantic cue, never an
+      // unconditional summarization job.
+      await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('noauto-contributor-read'), workspaceId, taskRef: started.task!.taskRef })
+      const queued = [...live.inbox.nextStep, ...live.inbox.nextTurn].filter(message => isAcceptanceNotice(message))
+      expect(queued).toHaveLength(1)
+      // The reminder must not promise a compaction the budget did not reach.
+      expect(JSON.stringify(queued[0]!.content)).not.toContain('compacted')
       const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)!
       expect(status.availability).toBe('active')
-      expect(status.presence === 'available' || status.presence === 'working').toBe(true)
       expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    })
+
+    it('compacts a contributor over the budget once the turn ends, and tells it so', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('budget-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('budget-add'), workspaceId, handle: 'builder', description: 'Builds the implementation', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const memberId = added.status.member.memberId
+      pressureState.usageTokens = 0
+      const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('budget-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Investigate the release', recipients: [memberId] })
+      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
+      const live = ctx.agents.get(added.status.member.sessionId)!
+      await waitForIdle(ctx, live)
+      const read = await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('budget-read'), workspaceId, taskRef: started.task!.taskRef })
+      const claim = await ctx.agentTeam.changeClaimForAgent(live, { requestId: requestId('budget-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: read.thread.revision, direction: 'own the fix' })
+      if (claim.kind !== 'committed') throw new Error(`expected committed claim, received ${claim.kind}`)
+      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('budget-human-read'), workspaceId, taskRef: started.task!.taskRef })
+      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('budget-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
+      pressureState.usageTokens = ACCEPTANCE_COMPACT_TOKENS + 1
+      const compactions: string[] = []
+      const engine = { compactNow: async (agent: { id: string }, signal: AbortSignal): Promise<null> => {
+        // The engine is only legal once the Agent settles: the loop refuses a
+        // maintenance phase while a turn runs.
+        compactions.push(`${agent.id}:${signal.aborted ? 'aborted' : 'live'}`)
+        return null
+      } }
+      const serviceFor = vi.spyOn(ctx.agentPresets, 'serviceFor').mockReturnValue(engine as never)
+      try {
+        await ctx.agentTeam.readThreadForAgent(live, { requestId: requestId('budget-contributor-read'), workspaceId, taskRef: started.task!.taskRef })
+        const queued = [...live.inbox.nextStep, ...live.inbox.nextTurn].filter(message => isAcceptanceNotice(message))
+        expect(queued).toHaveLength(1)
+        // The reminder states the consequence, because this time it is true.
+        expect(JSON.stringify(queued[0]!.content)).toContain('compacted once the Agent settles')
+        await waitFor(() => compactions.length > 0 ? compactions : undefined)
+        expect(compactions[0]!.startsWith(live.id)).toBe(true)
+      } finally {
+        serviceFor.mockRestore()
+      }
+    })
+
+    it('leaves a follower that owns no accepted work alone', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('bystander-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const builder = await ctx.agentTeam.addMember({ requestId: requestId('bystander-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const watcher = await ctx.agentTeam.addMember({ requestId: requestId('bystander-watcher'), workspaceId, handle: 'watcher', description: 'Watches the work', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      pressureState.usageTokens = 0
+      // Both are recipients, so both follow the Thread: the difference under
+      // test is that only the builder ever claimed work on it.
+      const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('bystander-task'), workspaceId, channelRef: channel.channel.channelRef, body: 'Investigate the release', recipients: [builder.status.member.memberId, watcher.status.member.memberId] })
+      if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
+      const builderAgent = ctx.agents.get(builder.status.member.sessionId)!
+      const watcherAgent = ctx.agents.get(watcher.status.member.sessionId)!
+      await waitForIdle(ctx, builderAgent)
+      await waitForIdle(ctx, watcherAgent)
+      const builderRead = await ctx.agentTeam.readThreadForAgent(builderAgent, { requestId: requestId('bystander-builder-read'), workspaceId, taskRef: started.task!.taskRef })
+      // The watcher follows the Thread but stays behind the accept, so the
+      // accept reaches it as ordinary unread rather than as a mention.
+      await ctx.agentTeam.readThreadForAgent(watcherAgent, { requestId: requestId('bystander-watcher-read'), workspaceId, taskRef: started.task!.taskRef })
+      const claim = await ctx.agentTeam.changeClaimForAgent(builderAgent, { requestId: requestId('bystander-claim'), workspaceId, taskRef: started.task!.taskRef, action: 'claim', baseRevision: builderRead.thread.revision, direction: 'own the fix' })
+      if (claim.kind !== 'committed') throw new Error(`expected committed claim, received ${claim.kind}`)
+      await waitForIdle(ctx, builderAgent)
+      await waitForIdle(ctx, watcherAgent)
+      // Drain the claim activity so the accept below is the only unread fact
+      // the watcher still holds.
+      await ctx.agentTeam.readThreadForAgent(watcherAgent, { requestId: requestId('bystander-watcher-claim-read'), workspaceId, taskRef: started.task!.taskRef })
+      const humanRead = await ctx.agentTeam.readThread({ requestId: requestId('bystander-human-read'), workspaceId, taskRef: started.task!.taskRef })
+      const accepted = await ctx.agentTeam.changeTask({ requestId: requestId('bystander-accept'), workspaceId, taskRef: started.task!.taskRef, action: 'accept', baseRevision: humanRead.thread.revision })
+      if (accepted.kind !== 'committed') throw new Error(`expected committed accept, received ${accepted.kind}`)
+      await waitForIdle(ctx, builderAgent)
+      await waitForIdle(ctx, watcherAgent)
+      // Over the budget, so only the ownership check can keep the watcher out.
+      pressureState.usageTokens = ACCEPTANCE_COMPACT_TOKENS * 2
+      const watcherRead = await ctx.agentTeam.readThreadForAgent(watcherAgent, { requestId: requestId('bystander-watcher-accept-read'), workspaceId, taskRef: started.task!.taskRef })
+      expect(watcherRead.facts.some(entry => entry.unread && entry.fact.kind === 'activity' && entry.fact.activity.kind === 'accept')).toBe(true)
+      expect([...watcherAgent.inbox.nextStep, ...watcherAgent.inbox.nextTurn].some(message => isAcceptanceNotice(message))).toBe(false)
+      expect(acceptanceReminders(watcherAgent)).toHaveLength(0)
+    })
+
+    it('resolves the same Host policy through the real preset engine scope', async () => {
+      const { ctx, workspaceId } = await realHarness(new ScriptedAdapter(), 'jsonl', undefined, true)
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('engine-scope'), workspaceId,
+        handle: 'builder', description: '', presetId: 'team-member', channelRefs: [] })
+      expect(added.status.availability).toBe('active')
+      const live = ctx.agents.get(added.status.member.sessionId)!
+      const engine = ctx.agentPresets.serviceFor(live, 'compaction') as unknown as { ctx: Context }
+      expect(engine.ctx.get('agentTeam')?.config.memberCompaction).toBe(ctx.agentTeam.config.memberCompaction)
+    })
+
+    it('compacts a Member through the preset engine at the configured budget', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('hard-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('hard-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const memberId = added.status.member.memberId
+      const live = ctx.agents.get(added.status.member.sessionId)!
+
+      const compactions: string[] = []
+      const engine = {
+        compactIfNeeded: async (_agent: unknown, trigger: string) => {
+          compactions.push(trigger)
+          pressureState.usageTokens = 0
+          return null
+        },
+      }
+      const serviceFor = vi.spyOn(ctx.agentPresets, 'serviceFor').mockImplementation((_agent, service) => service === 'compaction' ? engine as never : undefined)
+      try {
+        // Below the boundary, a turn runs to completion without compaction.
+        pressureState.usageTokens = MEMBER_COMPACT_TOKENS - 1
+        adapter.enqueue(textResponse('First answer.'))
+        live.followup(createUserMessage({ content: [{ type: 'text', text: 'First question?' }], source: { kind: 'user' } }))
+        await waitForIdle(ctx, live)
+        expect(compactions).toHaveLength(0)
+
+        pressureState.usageTokens = MEMBER_COMPACT_TOKENS + 1
+        adapter.enqueue(textResponse('Second answer.'))
+        live.followup(createUserMessage({ content: [{ type: 'text', text: 'Second question?' }], source: { kind: 'user' } }))
+        await waitFor(() => compactions.length > 0 ? compactions : undefined)
+        await waitForIdle(ctx, live)
+        expect(compactions).toHaveLength(1)
+        expect(compactions).toEqual(['context-overflow'])
+      } finally {
+        serviceFor.mockRestore()
+      }
+      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)).toBeDefined()
+    })
+
+    it('uses the window ratio for a 272K Member instead of skipping its budget', async () => {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
+      const channel = await ctx.agentTeam.createChannel({ requestId: requestId('small-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('small-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+      const live = ctx.agents.get(added.status.member.sessionId)!
+
+      adapter.resolveModelWindow = () => 272_000
+      let compacted = 0
+      const engine = {
+        compactIfNeeded: async () => { compacted += 1; pressureState.usageTokens = 0; return null },
+      }
+      const serviceFor = vi.spyOn(ctx.agentPresets, 'serviceFor').mockImplementation((_agent, service) => service === 'compaction' ? engine as never : undefined)
+      try {
+        pressureState.usageTokens = 217_601
+        adapter.enqueue(textResponse('Answer.'))
+        live.followup(createUserMessage({ content: [{ type: 'text', text: 'Question?' }], source: { kind: 'user' } }))
+        await waitForIdle(ctx, live)
+        expect(compacted).toBe(1)
+      } finally {
+        serviceFor.mockRestore()
+      }
     })
 
     it('wakes a normal-accept contributor with both the accepted and completed Claim semantics', async () => {
@@ -2947,17 +3114,19 @@ describe('Agent Team wake-slot generation swap (ticket 05)', () => {
       const channelRef = ctx.agentTeam.view({ workspaceId }).channels[0]!.channelRef
       const agent = ctx.agents.get(sessionId)!
 
-      // Pricing a generation is a full replay, so it must stay behind the idle
-      // gate: a wake that fails the cheap gates never reaches the meter.
-      const meter = ctx.tokenMeter as { measure: (session: unknown) => unknown }
-      const measure = vi.spyOn(meter, 'measure')
+      // Pricing a generation for the wake decision is a full replay, so it must
+      // stay behind the idle gate: a wake that fails the cheap gates never asks
+      // the Host to price the swap. The spy reads the Host's own pricing entry
+      // (not the shared meter, which the running 256K hard boundary reads every
+      // step), so the assertion names the wake decision alone.
+      const price = vi.spyOn(ctx.agentTeam as never as { measureLiveContext: (agent: unknown) => unknown }, 'measureLiveContext')
       adapter.enqueue(textResponse('Continuing in the same context.'))
       const sent = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('warm-message'), workspaceId,
         channelRef, body: 'Continue please', recipients: [memberId] })
       expect(sent.kind).toBe('committed')
       await agent.whenIdle()
-      expect(measure).not.toHaveBeenCalled()
-      measure.mockRestore()
+      expect(price).not.toHaveBeenCalled()
+      price.mockRestore()
 
       expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.member.sessionId).toBe(sessionId)
       expect(JSON.stringify(adapter.requests.at(-1)!.messages)).toContain('Continue please')

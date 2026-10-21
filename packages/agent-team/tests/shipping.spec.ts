@@ -147,16 +147,20 @@ describe('Agent Team shipping contract', () => {
     const profileFields = HUMAN_PROFILE_SETTINGS_SCHEMA.dict ?? {}
     expect(profileFields.name?.meta.volatile).toBe(true)
     expect(profileFields.avatarRef?.meta.volatile).toBe(true)
-    // The row carries the profile plus the wake-swap thresholds: the context
-    // engine's own knobs are gone, so a deployment's stale `gate`/`jev` values
-    // pass through the non-strict schema without becoming settings fields.
-    // The threshold group is one volatile node, so a write lands without a
-    // remount and the settings service can derive it at all.
+    // The row carries the profile, the wake-swap thresholds, and the hard
+    // compaction boundary: the context engine's own knobs are gone, so a
+    // deployment's stale `gate`/`jev` values pass through the non-strict
+    // schema without becoming settings fields. Each threshold group is one
+    // volatile node, so a write lands without a remount and the settings
+    // service can derive it at all.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
-    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'name', 'wakeRecycle'])
+    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'wakeRecycle'])
     expect(rowFields.wakeRecycle?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.wakeRecycle?.dict ?? {}).sort()).toEqual(['enabled', 'idleMs', 'minContextTokens'])
     expect(Object.values(rowFields.wakeRecycle?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
+    expect(rowFields.memberCompaction?.meta.volatile).toBe(true)
+    expect(Object.keys(rowFields.memberCompaction?.dict ?? {}).sort()).toEqual(['enabled', 'tokens'])
+    expect(Object.values(rowFields.memberCompaction?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
 
     expect(preset).toContain("name: '@contexera/dsh-agent-team/tools'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")

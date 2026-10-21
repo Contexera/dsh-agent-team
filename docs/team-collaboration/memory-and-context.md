@@ -10,9 +10,17 @@ Upkeep craft (what earns a line, the three tiers, compaction and demotion) is ow
 ## Context lifecycle ownership
 A Member's context has exactly two mechanisms, and neither is the model's to invoke.
 
-**In-place compaction.** The preset mounts the Harness's own `@deepseek-ai/dsh-compaction-basic`, unmodified, with `auto` on and Team's ratios: `thresholdRatio` 0.256, `retainRatio` 0.08, `headroomTokens` 65536. The summary template, the routed summarization target, and the cap stay upstream's. Compaction never changes generation and never cancels the owner.
+**In-place compaction.** The preset mounts `member-compaction-engine`, a thin adapter over the Harness's `BasicCompactionEngine`. Team owns proactive request admission; the parent supplies the summary template, tool-pair-safe reduction, durable transaction, and overflow retries. Compaction never changes generation or deletes the original log.
 
-Team configures ratios, not a fixed window: the trigger is `min(W × 0.256, W − output − 65536)` for a window of `W` tokens, and `retainRatio` 0.08 keeps that share of the message budget as verbatim tail. The ratio is the binding term only while the remaining capacity is larger — on a 1M window the threshold is 256K and roughly 70K of tail survives — so a smaller, or heavily output-reserved, window compacts at the lower value instead. A deployment on other models adds per-model `modelPolicies` at the profile level to hold its own waterline; the bundle assumes no window size.
+The input trigger is `floor(min(B, W × 0.8, W − 16384))`, where `B` is `memberCompaction.tokens` (default 256000) and `W` is the routed window. Without a declared window the absolute budget still applies. A 1M or 2M model triggers at 256000; a 272000 model triggers at 217600. Model maximum output is not subtracted from this trigger. Pending messages, assembled tools, and system-prompt growth are counted before admission.
+
+When input reaches the trigger, Team first prunes tool results, then requests one upstream forced reduction if needed. This path uses a zero retained-tail budget rather than retaining 0.16 of a large window; upstream may still preserve a recent balanced block. The summary output cap is independently set to 16384. A failed or insufficient reduction ends the turn explicitly; unadmitted input stays queued without an automatic retry.
+
+Each request's output allowance is capped at `W − estimated input − 4096`, never raised above its original allowance. The actual value is logged in the request header; a temporary reduction is removed before the next allowance is resolved, and a resumed loop starts from its declared options. Input pricing is heuristic, so provider overflow recovery remains necessary.
+
+Cancellation follows the Agent's own stop/dispose semantics; only budget failures restore unadmitted input. Windows of 16384 tokens or less cannot hold this policy's fixed reserve; the policy declines and leaves the request to the Agent's own limits.
+
+This is a trigger, not a physical ceiling: a tool result can cross it before the next request. `memberCompaction.enabled: false` restores upstream pressure handling, including its output reservation, headroom, and retained-tail policy. The adapter is mounted only in the Team preset; ordinary Sessions are unchanged.
 
 **Generation swaps.** A swap is a Host decision taken at a wake boundary and executed by Team's own coordinator (`team-context-management.ts`). It commits `team/member-session-recycled` as the Host actor, retires the old Session (dispose and archive, never delete), and activates a fresh one parented at the one it replaces, then rederives the Inbox.
 
@@ -44,6 +52,12 @@ Every delivery and recovery decision leaves one bounded line through the Host lo
 Manual control of a Member's context is gone: no row action and no Remote write starts a new generation. The ledger keeps the older transition kinds (`team/member-session-renewed`, `team/member-session-rolled-over`) readable so recorded ledgers still replay, but nothing writes them.
 
 While a swap's ledger binding has moved and the successor has not activated, the Member reads unavailable with a `context rollover in progress` diagnostic; when that Member's Session is embedded in the right rail, the Client follows the old→new binding once, and archived views never follow.
+
+**The acceptance boundary.** A Thread read that acknowledges the acceptance of a Task also hands the reader a boundary of its own, but only when that acceptance concluded work the reader owned — an observer following the Thread sees the same accept as unread and is left alone.
+
+The Host appends one `<system-reminder>` asking the Member to move durable conclusions into its `memory.md` index and the notes it names. At or above 128000 measured tokens the same boundary also compacts the generation, once the Agent settles: acceptance usually lands mid-turn, and the engine only compacts an idle Agent.
+
+Nothing crosses the boundary — no handoff, no announcement — so the reminder states the consequence only when it is true, and a preset that mounts no compaction engine is never told otherwise.
 
 ## Assembled acceptance
 `npm run test:browser` uses a credential-free Harness Web scaffold. It verifies default taskless Thread creation, default-off Human 「作为任务」, Human promotion and Host reread, taskless header/Claim gating, invitation confirmation, Agent Inbox read/reply, Human Channel/Thread state, reload persistence, desktop/390×844/keyboard paths, Team exit, and ordinary DSH restoration. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and body-free ordinary notification forms.

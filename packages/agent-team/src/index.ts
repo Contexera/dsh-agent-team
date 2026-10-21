@@ -16,6 +16,7 @@ import { installModelSelection, type Agent, type AgentHandle, type ModelSelectio
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
+import type { CompactionEngine } from '@deepseek-ai/dsh-compaction'
 import type {} from '@deepseek-ai/dsh-app-boot'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { scopeOf } from '@deepseek-ai/dsh-scope'
@@ -39,9 +40,11 @@ import { AgentTeamInvariantError } from './invariant.ts'
 import { createCheckpointContinuationMessage } from './context-codec.ts'
 import { TeamContextManagement, type TeamTransitionPlan } from './team-context-management.ts'
 import { decideWakeRecycle, DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig, type WakeRecyclePlan } from './wake-recycle.ts'
+import { createAcceptanceReminder, planAcceptanceContext } from './acceptance-context.ts'
+import { installMemberCompaction, DEFAULT_MEMBER_COMPACTION, type MemberCompactionConfig } from './member-compaction.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { surfaceVisibilityProbe, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER } from './surface-visibility.ts'
-import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
+import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
@@ -292,6 +295,7 @@ export interface Config {
   name: Volatile<string>
   avatarRef: Volatile<string | undefined>
   wakeRecycle: Volatile<WakeRecycleConfig>
+  memberCompaction: Volatile<MemberCompactionConfig>
 }
 
 /**
@@ -305,6 +309,12 @@ export const WAKE_RECYCLE_SETTINGS_SCHEMA = z.object({
   minContextTokens: z.number().min(0).default(DEFAULT_WAKE_RECYCLE.minContextTokens),
 }).default({}).volatile()
 
+/** Member input budget, checked before each request; a tool result can exceed it between requests. */
+export const MEMBER_COMPACTION_SETTINGS_SCHEMA = z.object({
+  enabled: z.boolean().default(DEFAULT_MEMBER_COMPACTION.enabled),
+  tokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MEMBER_COMPACTION.tokens),
+}).default({}).volatile()
+
 /**
  * The Host row's whole schema: the profile fields verbatim, so their volatility
  * and defaults stay owned by {@link HUMAN_PROFILE_SETTINGS_SCHEMA}. A patch
@@ -314,6 +324,7 @@ export const WAKE_RECYCLE_SETTINGS_SCHEMA = z.object({
 export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
   wakeRecycle: WAKE_RECYCLE_SETTINGS_SCHEMA,
+  memberCompaction: MEMBER_COMPACTION_SETTINGS_SCHEMA,
 })
 
 /** Host owner of the single Agent Team in one dshHome. */
@@ -370,6 +381,8 @@ export default class AgentTeam extends TypertRemoteService {
   }>()
   /** Team notice ids waiting for a turn boundary, keyed by the live Agent message id. */
   private readonly pendingTeamWakes = new Map<string, { readonly memberId: AgentTeamMemberId; readonly sessionId: SessionId }>()
+  /** Agents that already spent their one acceptance boundary; cleared when the Agent settles. */
+  private readonly acceptanceBoundaries = new WeakSet<Agent>()
   /** Notice removals initiated by Team itself, which are normal replacement/disposal operations. */
   private readonly expectedInboxDiscards = new Set<string>()
   /**
@@ -429,6 +442,8 @@ export default class AgentTeam extends TypertRemoteService {
     const promise = new Promise<void>(finish => { resolve = finish })
     return Object.freeze({ promise, resolve })
   })()
+  /** Aborts every Host-owned background operation that would otherwise outlive teardown. */
+  private readonly shutdownController = new AbortController()
   private accepting = true
   /** One adoption attempt per boot: the two readiness edges fire once each, and this keeps their attempt single. */
   private legacyAdoptionStarted = false
@@ -520,6 +535,10 @@ export default class AgentTeam extends TypertRemoteService {
 
   private wakeRecycleConfig(): WakeRecycleConfig {
     return this.config.wakeRecycle.get()
+  }
+
+  private memberCompactionConfig(): MemberCompactionConfig {
+    return this.config.memberCompaction.get()
   }
 
   /**
@@ -742,6 +761,7 @@ export default class AgentTeam extends TypertRemoteService {
       // above; without this wake, cached Client member rows keep showing the
       // Member as working after every turn until an unrelated change arrives.
       if (status === 'idle' && member !== undefined) {
+        this.acceptanceBoundaries.delete(agent)
         if (this.memberFailures.get(member.memberId)?.runtime === undefined) {
           this.recovery.onCleanTurnEnd(member.memberId)
         }
@@ -756,10 +776,13 @@ export default class AgentTeam extends TypertRemoteService {
       this.pendingTeamWakes.delete(message.id)
     })
     this.ctx.on('agent/inbox/discarded', ({ agent, message }) => {
+      // A discard this Host itself initiated is expected whatever tracked it: the
+      // acceptance reminder is not in `pendingTeamWakes`, so this check must not
+      // sit behind that lookup or the id would be retained forever.
+      if (this.expectedInboxDiscards.delete(message.id)) return
       const pending = this.pendingTeamWakes.get(message.id)
       if (pending === undefined) return
       this.pendingTeamWakes.delete(message.id)
-      if (this.expectedInboxDiscards.delete(message.id)) return
       const member = this.memberForAgent(agent)
       if (member === undefined || member.state !== 'enabled' || agent.id !== pending.sessionId) return
       this.setPreTurnCancellation(member.memberId, pending.sessionId)
@@ -772,6 +795,7 @@ export default class AgentTeam extends TypertRemoteService {
       // every wait (in-chain idle waits through the gate, boundary waits
       // through the runtime), so the chains below can drain to zero first.
       this.shutdown.resolve()
+      this.shutdownController.abort({ kind: 'disposed' })
       this.memberRuntime.releaseTurnWaits()
       this.recovery.dispose()
       this.contextManagement.dispose()
@@ -1857,7 +1881,97 @@ export default class AgentTeam extends TypertRemoteService {
     // A read that made no progress commits no operation and carries no receipt.
     const receipt = result.committed ? result.value.receipt : undefined
     if (receipt !== undefined) this.emitCommitted(receipt)
-    return this.withReplyContexts(result.value, request.workspaceId)
+    const read = this.withReplyContexts(result.value, request.workspaceId)
+    if (receipt !== undefined) this.afterAcceptanceRead(agent, actor.memberId, read)
+    return read
+  }
+
+  /**
+   * A read that acknowledged the acceptance of work this Member contributed to
+   * hands the reader its own boundary: one reminder to write down what is
+   * durable, and — above the acceptance budget — one compaction once the Agent
+   * settles. The advice is priced from the committed read, never persisted, and
+   * never reverses it.
+   */
+  private afterAcceptanceRead(agent: Agent, memberId: AgentTeamMemberId, read: AgentTeamThreadReadResult): void {
+    // A retiring Agent is about to be disposed; a reminder injected into its
+    // Session would be discarded unread.
+    if (this.retiringAgents.has(agent)) return
+    const task = read.task
+    if (task === undefined || task.resolution !== 'accepted' || task.status !== 'done') return
+    if (!this.acceptedOwnWork(read, memberId)) return
+    // One boundary per turn: several accepted reads in one turn must not queue
+    // several identical reminders or race two compactions.
+    if (this.acceptanceBoundaries.has(agent)) return
+    this.acceptanceBoundaries.add(agent)
+    const engine = this.compactionEngineFor(agent)
+    const plan = planAcceptanceContext({ usageTokens: this.measureContext(agent), canCompact: engine !== undefined })
+    try {
+      agent.followup(createAcceptanceReminder(plan.action))
+    } catch (error) {
+      this.ctx.logger.warn(`agent-team: could not deliver the acceptance reminder to ${this.memberScope(memberId, agent.id)}: ${failureDetail(error)}`)
+      return
+    }
+    if (plan.action === 'compact' && engine !== undefined) this.scheduleAcceptanceCompaction(agent, memberId, engine)
+  }
+
+  /**
+   * Whether this read acknowledged an acceptance that concluded the reader's own
+   * work. An observer following the Thread sees the same accept as unread, and a
+   * boundary that told it to close its books would be describing someone else's
+   * finished Task.
+   */
+  private acceptedOwnWork(read: AgentTeamThreadReadResult, memberId: AgentTeamMemberId): boolean {
+    const ledger = this.requireLedger()
+    return read.facts.some(entry => {
+      if (!entry.unread || entry.fact.kind !== 'activity') return false
+      const activity = entry.fact.activity
+      if (activity.kind !== 'accept') return false
+      const own = [...activity.acceptedClaimRefs ?? [], ...activity.completedClaimRefs ?? []]
+      return own.some(claimRef => ledger.getClaim(claimRef)?.owner === memberId)
+    })
+  }
+
+  /** Measured context, or undefined when the meter cannot price this Session. */
+  private measureContext(agent: Agent): number | undefined {
+    try {
+      return this.ctx.tokenMeter.measure(agent.session).totalTokens
+    } catch (error) {
+      this.ctx.logger.warn(`agent-team: could not price Session '${agent.id}' for the acceptance boundary: ${failureDetail(error)}`)
+      return undefined
+    }
+  }
+
+  /** The compaction engine in one Member Agent's preset scope, or undefined when it mounts none. */
+  private compactionEngineFor(agent: Agent): CompactionEngine | undefined {
+    return this.ctx.agentPresets.serviceFor(agent, 'compaction')
+  }
+
+  /**
+   * Compact once the Agent settles. Acceptance usually lands mid-turn, so the
+   * work is deferred to the boundary the engine requires: `compactNow` opens its
+   * own maintenance phase, which the loop refuses while a turn is running, and
+   * it is the only public entry that compacts without an open turn.
+   */
+  private scheduleAcceptanceCompaction(agent: Agent, memberId: AgentTeamMemberId, engine: CompactionEngine): void {
+    void this.runAcceptanceCompaction(agent, memberId, engine).catch(error => {
+      this.ctx.logger.warn(`agent-team: acceptance compaction failed for ${this.memberScope(memberId, agent.id)}: ${failureDetail(error)}`)
+    })
+  }
+
+  private async runAcceptanceCompaction(agent: Agent, memberId: AgentTeamMemberId, engine: CompactionEngine): Promise<void> {
+    await Promise.race([agent.whenIdle(), this.shutdown.promise])
+    if (this.shutdownController.signal.aborted || !this.accepting) return
+    // Re-read after every wait: a swap or a dispose may have replaced the Agent,
+    // and compacting a retiring Session would append a `compaction/start` to a
+    // log whose writer is being released.
+    if (this.retiringAgents.has(agent) || this.handles.get(memberId)?.agent !== agent) return
+    const result = await engine.compactNow(agent, this.shutdownController.signal)
+    if (result === null) {
+      this.ctx.logger.info(`agent-team: ${this.memberScope(memberId, agent.id)} had no compactable range at its acceptance boundary`)
+      return
+    }
+    this.ctx.logger.info(`agent-team: compacted ${this.memberScope(memberId, agent.id)} at its acceptance boundary: ${result.shadowedSeqs.length} history item(s), ~${result.shadowedTokenCount} tokens`)
   }
 
   /**
@@ -2270,6 +2384,10 @@ export default class AgentTeam extends TypertRemoteService {
           throw new PresetCompositionError(error instanceof Error ? error.message : String(error), { cause: error })
         }
         installModelSelection(agentCtx, selected)
+        installMemberCompaction(
+          agentCtx, agent, () => this.memberCompactionConfig(),
+          () => this.compactionEngineFor(agent), () => this.retiringAgents.has(agent),
+        )
         agentCtx.on('agent/pre-step', async ({ agent }, next) => {
           // The original inbox insertion is the durable replay source even if
           // this driver already claimed it; requeueing can reorder later input.
@@ -2826,8 +2944,13 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_INBOX_NOTICE_SUMMARY
   }
 
+  /**
+   * Every Team-authored notice, including the acceptance reminder: a queued one
+   * is Host context, not the Member's own unfinished input, so it must not read
+   * as work that pins the current generation.
+   */
   private isTeamWake(message: UserMessage): boolean {
-    return this.isInboxNotice(message) || this.isRecoveryNotice(message)
+    return this.isInboxNotice(message) || this.isRecoveryNotice(message) || isAcceptanceNotice(message)
   }
 
   private trackTeamWake(agent: Agent, message: UserMessage): void {

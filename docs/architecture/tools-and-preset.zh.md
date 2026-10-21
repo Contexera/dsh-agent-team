@@ -8,7 +8,7 @@
 
 七个 model-facing tools 都定义在 `packages/tool-agent-team/src/index.ts`。collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了测试可用，就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。
 
-Member 完全没有 context 工具。Session 变大时由 Harness 自己的 `@deepseek-ai/dsh-compaction-basic` 就地压缩：preset 的 `compaction-basic` 行原样点名这个包，`auto` 打开，比例配置写在 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。换代是 Host 的决定，不是模型的，所以工具面既没有可安排的事，也没有可引用的 ref。
+Member 没有 context 工具。preset 的 `compaction-basic` 行挂载 Team 的薄适配层 `member-compaction-engine`：Team 负责主动请求准入，Harness 的 `BasicCompactionEngine` 提供摘要模板、压缩事务与 overflow 恢复。预算定义归 [`memory-and-context.zh.md`](../team-collaboration/memory-and-context.zh.md)。换代仍是 Host 的决定，不是模型的。
 
 换代归 `team-context-management.ts`，Team 自己的协调器。它从 Host 的唤醒决定出发，而不是从 durable 意图出发，走串行 lifecycle queue 执行，并让新代身份从被退役的 Session 派生，因此崩溃后收敛到同一个后继：
 
