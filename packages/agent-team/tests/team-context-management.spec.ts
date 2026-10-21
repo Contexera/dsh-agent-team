@@ -160,6 +160,36 @@ describe('the Team generation coordinator', () => {
     expect(coordinator.isTransitioning(MEMBER_ID)).toBe(true)
   })
 
+  it('refuses the swap once the Agent behind the intent has already been replaced', async () => {
+    // The delivery target is read at swap time, not when the intent landed:
+    // between the two the Member may have moved to another generation, and
+    // swapping for the old Agent would retire the wrong generation.
+    const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
+    const first = fakeAgent()
+    const second = fakeAgent()
+    const pending = { toolCallId: 'call-replaced', resultSeq: 4, turn: 2, turnEndSeq: -1 }
+    const coordinator = new TeamContextManagement({
+      // The delivery target is read at swap time, not when the intent landed:
+      // between the two the Member may have moved to another generation, and
+      // swapping for the old Agent would retire the wrong generation.
+      agentForMember: id => (id === MEMBER_ID ? second.agent : undefined),
+      memberForAgent: candidate => (candidate === undefined ? undefined : member),
+      projectionForMember: () => ({ ...idleState, pending }),
+      executeTransition,
+      messages: { continuation: continuationFor },
+      log: () => {},
+    })
+
+    coordinator.onSessionEvent(MEMBER_ID, first.agent, { type: 'tool/result', seq: 4, data: {} } as unknown as SessionEvent)
+    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(true)
+    coordinator.onSessionEvent(MEMBER_ID, first.agent, { type: 'turn/end' } as SessionEvent)
+    first.idler()
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(executeTransition).not.toHaveBeenCalled()
+    expect(coordinator.isTransitioning(MEMBER_ID)).toBe(false)
+  })
+
   it('starts a Host-requested swap immediately, with a successor derived from the retired Session', async () => {
     const executeTransition = vi.fn((_memberId: AgentTeamMemberId, _plan: TeamTransitionPlan) => Promise.resolve())
     const { agent } = fakeAgent()

@@ -3186,7 +3186,11 @@ describe('Agent Team wake-slot generation swap (ticket 05)', () => {
       }, { timeout: 20_000 })
       // The retired log is archived, never deleted, and the binding moved.
       expect(ctx.workspaceRegistry.archivedSessionIds).toContain(sessionId)
-      expect(ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.availability).toBe('active')
+      const active = await vi.waitFor(() => {
+        const availability = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)?.availability
+        if (availability !== 'active') throw new Error(`member not active yet: ${availability}`)
+        return availability
+      }, { timeout: 20_000 })
       const fresh = await vi.waitFor(() => {
         const live = ctx.agents.get(successor)
         if (live === undefined || live.status !== 'idle') throw new Error('successor not idle yet')

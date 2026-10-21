@@ -127,7 +127,13 @@ export class TeamContextManagement {
     void agent.whenIdle().then(() => {
       if (this.disposed) return
       if (this.members.get(memberId) !== transition) return
-      if (this.options.agentForMember(memberId) !== agent) return
+      if (this.options.agentForMember(memberId) !== agent) {
+        // The Member moved to another generation while this one finished its
+        // turn: drop the lock, or every later swap for it would be refused.
+        this.members.delete(memberId)
+        this.settleMember(memberId)
+        return
+      }
       void this.performTransition(memberId, member, teamRolloverIdentity(member.sessionId, intent.toolCallId))
     }, error => {
       this.options.log(`context rollover idle wait failed: ${failureText(error)} (member ${memberId})`)
