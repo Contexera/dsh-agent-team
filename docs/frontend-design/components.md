@@ -94,6 +94,10 @@ The Client's namespace constant is pinned by a test against the Host's own, so t
 
 At 390×844 the shipped panel keeps its 188px nav rail — it has no media query — which leaves the content column about 106px wide. The section therefore carries its own `@container (max-width: 420px)` rule that stacks each row's copy over its controls, drops the 48px right padding wide rows reserve for controls, and lets the field and buttons take the full column. The browser acceptance asserts no horizontal overflow there.
 
+No horizontal-overflow probe catches the failure this group is prone to at that width: the shipped field lays its label and its 「已覆盖」 badge on one line, and in a ~106px column the label's own box collapses to zero width and paints one character per line. The field wrapper is therefore its own query container; under 200px the shipped field's row wraps so the badge sits beneath the label.
+
+The selectors anchor on the shipped markup's shape rather than a class the field does not offer, so a shape change leaves the shipped layout in place. The acceptance measures the label's rendered box: a zero-width or wrapped label fails it, not only overflow.
+
 ## Environment check
 Above the version footnote the page states one fact about the installation rather than about the Human: which DSH line this bundle runs against, and whether that line is inside the range the bundle declares. It is a second projection (`environment-check.ts`, `TeamEnvironmentCheck`), deliberately not a field of the identity store — it is read once, never written back, and the settings page is its only renderer.
 

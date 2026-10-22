@@ -66,20 +66,22 @@ function ContextSettings(props: { t: TeamSettingsProps['t']; face: TeamConfigFac
   return <section className={css.context} aria-labelledby={headingId}>
     <h3 className={css.groupHeading} id={headingId}>{t('memberCompactionTitle')}</h3>
     <SettingsForm labels={formLabels(t)} state={state} onSave={face.save} onDiscard={face.discard}>
-      <SettingsValueField
-        id="plugin-config-team-member-compaction-tokens"
-        label={t('memberCompactionTokens')}
-        hint={t('memberCompactionTokenHint')}
-        placeholder="256K"
-        overriddenLabel={t('overridden')}
-        resetLabel={t('reset')}
-        invalidLabel={t('memberCompactionTokenInvalid')}
-        numeric
-        disabled={!state.writable || state.saving}
-        {...state.tokens}
-        onEdit={(text) => { face.edit('tokens', text) }}
-        onReset={() => { face.resetField('tokens') }}
-      />
+      <div className={css.fieldStack}>
+        <SettingsValueField
+          id="plugin-config-team-member-compaction-tokens"
+          label={t('memberCompactionTokens')}
+          hint={t('memberCompactionTokenHint')}
+          placeholder="256K"
+          overriddenLabel={t('overridden')}
+          resetLabel={t('reset')}
+          invalidLabel={t('memberCompactionTokenInvalid')}
+          numeric
+          disabled={!state.writable || state.saving}
+          {...state.tokens}
+          onEdit={(text) => { face.edit('tokens', text) }}
+          onReset={() => { face.resetField('tokens') }}
+        />
+      </div>
     </SettingsForm>
   </section>
 }

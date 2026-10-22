@@ -3249,11 +3249,27 @@ it('configures the Team page identity from Settings in real Web', async () => {
   // The configuration group is a shipped field inside the same squeezed
   // column: its own box must fit the column rather than painting past it, and
   // the group adds no width the panel did not already have.
-  const narrowContext = await panel.getByRole('region', { name: '上下文' }).evaluate(element => ({
-    scrollWidth: element.scrollWidth,
-    clientWidth: element.clientWidth,
-  }))
+  const narrowContext = await panel.getByRole('region', { name: '上下文' }).evaluate((element) => {
+    const label = element.querySelector('label') as HTMLElement
+    const input = element.querySelector('input') as HTMLElement
+    return {
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      // A label with no room collapses to a zero-width box and paints one
+      // character per line; that is readable neither by a scrollWidth probe
+      // (the text wraps instead of overflowing) nor by the eye at 390px.
+      labelWidth: Math.round(label.getBoundingClientRect().width),
+      labelHeight: Math.round(label.getBoundingClientRect().height),
+      labelLineHeight: Number.parseFloat(getComputedStyle(label).lineHeight),
+      inputWidth: Math.round(input.getBoundingClientRect().width),
+    }
+  })
   expect(narrowContext.scrollWidth).toBeLessThanOrEqual(narrowContext.clientWidth)
+  expect(narrowContext.labelWidth).toBeGreaterThan(0)
+  // Four characters at 13px must sit on one line: a 1.5-line budget catches a
+  // wrapped label without pinning the shipped line-height's exact value.
+  expect(narrowContext.labelHeight).toBeLessThanOrEqual(narrowContext.labelLineHeight * 1.5)
+  expect(narrowContext.inputWidth).toBeGreaterThan(0)
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 

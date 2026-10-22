@@ -122,6 +122,33 @@
   margin: 0;
 }
 
+/* The field's own query container: it answers the width the group actually
+ * gets, not the width of the page section around it. */
+.fieldStack {
+  container-name: team-context;
+  container-type: inline-size;
+}
+
+/* The shipped field lays its label and its override badge on one line, and a
+ * ~106px column cannot hold both: the label's own box collapses to zero width
+ * and reads one character per line. While the group is that narrow, let the
+ * row wrap so the badge sits under the label instead of beside it.
+ *
+ * The two selectors name the shipped field's wrappers by shape (the row that
+ * holds the label group, and the label group itself) because the field owns its
+ * markup and offers no class hook. If that shape changes the rules stop
+ * matching and the field keeps the shipped layout — a narrow page that squeezes
+ * rather than a broken selector. */
+@container team-context (max-width: 200px) {
+  .context div:has(> div > label) {
+    flex-wrap: wrap;
+  }
+
+  .context div:has(> label) {
+    flex-basis: 100%;
+  }
+}
+
 .footnote {
   align-items: center;
   color: var(--dsw-alias-label-tertiary);
