@@ -16,7 +16,7 @@
    native 这一步是独立的构建，不会由别处替我们完成。host addon 被 gitignore。Harness 的 `test` script 会在自己的 Vitest 之前用 `build:native-system` 构建它。本仓库是直接对那个 checkout 跑 Vitest。全新 clone 缺了它会表现为宿主 Team 激活失败（`Agent is not an active Team Member`），而不是缺模块报错。 它在所有平台都安全：`--host-addon-only` 在非 Linux/macOS 上直接退出、不构建。 不要复用上一次构建遗留的 `lib/` 或 `node_modules/`——旧产物可能掩盖声明或运行时不兼容。
 2. 工作流需要 `test:browser` 时，用 `corepack pnpm build:web` 构建 Harness `apps/web` dist。workspace install 已备好它的依赖。
 3. 在本仓库内用 `corepack pnpm install` 安装依赖。绝不能运行 `npm install`。它会静默破坏指向相邻 checkout vendor 包的 workspace 符号链接。故障随后才以误导性的 `Cannot find module 'zod'` 暴露。
-4. 用 `node scripts/link-harness-packages.mjs` 链接三样东西进本仓库 `node_modules`：Harness 的 workspace、它的 vendor 包、相邻的 context-continuity 引擎。再 `npm run build` 构建 bundle。引擎按 `scripts/continuity-dir.mjs` 的解析结果提供。日常开发对引擎工作树时，相邻 checkout 会被链接进 `node_modules`。此时这个 checkout 必须已构建（`npm run build`）。干净 checkout/CI 则直接用根 `dependencies` 从 registry 装好的那份，不再链接。`DSH_CONTEXT_CONTINUITY_DIR` 可把解析指向另一个 checkout。宿主测试从本仓库根按真实 `node_modules` 查找解析 preset row 与 bundle 自身的未发布 row（如 `@contexera/dsh-agent-team/member-context`）。它与已发布 bundle 的 profile 安装布局一致。
+4. 用 `node scripts/link-harness-packages.mjs` 链接两样东西进本仓库 `node_modules`：Harness 的 workspace 与它的 vendor 包。再 `npm run build` 构建 bundle。宿主测试从本仓库根按真实 `node_modules` 查找解析 preset row 与 bundle 自身的未发布 row（如 `@contexera/dsh-agent-team/member-context`）。它与已发布 bundle 的 profile 安装布局一致。
 5. 用 `node scripts/sync-paths.mjs` 对准全新 checkout 重新生成 TypeScript path facades。全新 clone 不能信任仓库里已提交的 facades。没有任何 npm script 会重写它们。跳过这一步，facades 指向的仍是生成时固化的旧路径。`npm test` 里那道只读门 `check:facades` 正是对这种不一致报错。`sync-paths` 同时生成测试 harness 需要的 `@deepseek-ai/dsh-client-locale/src/*` 通配映射。
 6. 冒烟验证：`npm run typecheck && npm test`。全绿 = 环境正确。大面积假挂（见下）= 环境不对。先修环境，再查 diff。
 
@@ -25,7 +25,6 @@
 | 变量 | 何时需要 | 说明 |
 | --- | --- | --- |
 | `CHROME_PATH` | `test:browser`（可选） | 默认 `/usr/bin/google-chrome`；仅当沙箱 Chrome 不在默认位置时设置 |
-| `DSH_CONTEXT_CONTINUITY_DIR` | 仅隔离 checkout 场景 | 把引擎解析指向另一个 `dsh-context-continuity` checkout；日常保持未设——先找相邻目录，再退回 registry 装好的那份 |
 | `DSH_HARNESS_DIR` | 仅认证场景 | 指向带 tag 后缀的相邻 checkout；日常保持未设——默认名即契约 |
 | `DEEPSEEK_API_KEY` | `npm run preview` | 真实模型预览缺它即刻失败；测试与浏览器路径从不需要 |
 
@@ -35,9 +34,7 @@
 
 **checkout 指针集中化且 fail-fast。** `scripts/harness-dir.mjs` 是所有消费方（Vitest、`sync-paths`、`build-client`、`generate-typert`、浏览器/预览 runner）共同解析的单一事实源。`DSH_HARNESS_DIR` 设定时优先。其次读 `sync-paths` 写下的 `.generated-harness` 标记。测试自动跟随 facade 生成时的同一 checkout。认证轮生成后忘了带 env，两者也不会劈叉。最后落到默认相邻名。解析出的目录不存在时立即中止。中止时列出相邻真实存在的 Harness checkout 与修复指引，而不是等到跑测才炸出上面那些远端症状。
 
-**引擎指针：checkout 或已安装的包。** `scripts/continuity-dir.mjs` 是 `@contexera/dsh-context-continuity` 的唯一解析源。`DSH_CONTEXT_CONTINUITY_DIR` 优先。其次是相邻的 `dsh-context-continuity` checkout。对着引擎工作树开发时，`link-harness-packages.mjs` 会把它链接进 `node_modules`，`generate-typert.mjs` 会把它预置进分析包。最后是根 `dependencies` 装好的那份，位置在 `node_modules/@contexera/dsh-context-continuity`（干净 checkout/CI，无需链接）。解析不到任何包布局时立即 fail-fast，并列出尝试过的候选与修法。
-
-**引擎的安装契约。** 引擎以 `@contexera/dsh-context-continuity` 发布。根 manifest 将它声明为常规 dependency。profile 安装会把它随 bundle 一起装进来。原因有两层。profile 的 pnpm 以 `autoInstallPeers: false` 运行，没人提供的 peer 对谁都解析不到。`shipping.spec.ts` 的 boot-critical closure 关卡把 dependencies 也算作可达 root。因此 CI 不需要任何引擎步骤。`pnpm install` 会把已构建好的包装进来，链接脚本也会跳过那次会指向自身的链接。引擎前进时改这一个条目并提交 `pnpm-lock.yaml`。本地若解析到相邻 checkout，必须保证那份已构建（在其目录里 `npm run build`）。
+**本 bundle 自己的 dependencies 就是全部外部面。** 按名字解析的包只剩 host 闭包与本仓库自身：根 manifest 只声明 `yaml` 与 `zod`，两者都由 `generate-typert.mjs` 从本仓库自己的安装链接进 Typert 分析包。profile 安装因此不再多带任何包，CI 也不需要额外的准备步骤。
 
 **CI lanes。 ** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 在干净的 `ubuntu-latest` 与 `windows-latest` runner 上运行 typecheck 加完整测试套件。pull request、push 到 `master`、手动 `workflow_dispatch` 都会触发。 两条 lane 执行上面相同的六步环境契约。Windows lane 的每一步经 git bash（`shell: bash`）运行，因为默认 pwsh 会破坏反斜杠续行。harness 包经目录 junction 链接，无需 symlink 权限。 范围护栏：无 coverage matrix、无发布自动化、无 `test:browser`——浏览器验收始终是本地步骤。 Windows lane 是文件系统标识符类 bug（issue #7/#8）的回归防线。 唯一可调变量是 `DSH_HARNESS_TAG`。认证推进该 tag 时，workflow 的 env、本文档与 [`.hoplite/settings.json`](../../.hoplite/settings.json) 三处同步更新。三处靠手工保持一致。
 

@@ -71,7 +71,6 @@ interface HumanProfileSeed {
   readonly avatarRef?: string
   readonly version?: string
   readonly repoUrl?: string
-  readonly updateAvailable?: boolean
   readonly latestVersion?: string
 }
 
@@ -226,7 +225,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       status: options?.seedTaskStatus ?? 'todo', resolution: 'open' }, taskNumber: 1 }),
     thread: { threadRef: seedThreadRef, ...(taskless ? {} : { taskRef: seedTaskRef }), revision: 2 },
     // A seed carries no Claims, so the Host would project no owners either.
-    claimOwners: [],
+    liveClaimOwners: [],
     messageCount: 1,
     // A seed is the only fact on its Thread, so the newest fact instant is the
     // Message's own: the feed reads that equality as "no follow-up yet".
@@ -263,19 +262,6 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     ok: true as const,
     value: { status: memberRows.find(entry => entry.member.memberId === request.memberId) },
   }))
-  // The Host moves a renewed Member onto a freshly minted Session id, so the
-  // mock transitions the row the way the real renewal does.
-  let renewCounter = 0
-  const clearMemberContext = vi.fn(async (request: { requestId: string; memberId: string }) => {
-    renewCounter += 1
-    memberRows = memberRows.map(entry => entry.member.memberId === request.memberId
-      ? { ...entry, member: { ...entry.member, sessionId: `${entry.member.sessionId}-renewed-${renewCounter}` } }
-      : entry)
-    return {
-      ok: true as const,
-      value: { receipt: {}, status: memberRows.find(entry => entry.member.memberId === request.memberId) },
-    }
-  })
   // Archival hides the row: the mock transitions the member the way the real
   // archiveMember remote does (state archived, availability archived).
   const archiveMember = vi.fn(async (request: { requestId: string; memberId: string }) => {
@@ -320,13 +306,32 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const thread = { threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), revision: sequence }
     const attachments = request.attachments === undefined ? [] : request.attachments.map(id => ({ attachmentId: id, name: `file-${id}.png`, byteSize: 8, mediaType: 'image/png' }))
     const message = { messageRef: `message:${sequence}`, channelRef: request.channelRef, threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), sender: 'member:human', body: request.body, ...(attachments.length === 0 ? {} : { attachments }), topLevel: true, sequence, occurredAt: '2026-08-21T10:00:00.000Z' }
-    viewItems = [{ message, mentions: [], ...(task === undefined ? {} : { task, taskNumber: 1 }), thread, claimOwners: [], messageCount: 1, lastActivityAt: message.occurredAt }]
+    viewItems = [{ message, mentions: [], ...(task === undefined ? {} : { task, taskNumber: 1 }), thread, liveClaimOwners: [], messageCount: 1, lastActivityAt: message.occurredAt }]
     return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message, ...(task === undefined ? {} : { task }), thread, attention: [], directMarkers: [] } }
   })
   let changeVersion = 0
   let changeFailure: string | undefined
   const generationListeners = new Set<() => void>()
   const changeWaiters = new Set<{ request: AgentTeamChangesRequest; wake(): void }>()
+  const changeWaiterRegistrations = new Set<() => void>()
+  let changeRegistrations = 0
+  let changeOpens = 0
+  /**
+   * Resolves once every `changes` stream that has opened has also parked —
+   * registered its waiter and delivered the opening baseline. Until then a
+   * publish can be consumed by a stream still opening and seen by nobody. A
+   * spec awaiting this needs no sacrificial first publish: the badge's
+   * subscription from mount is already parked, so the wait is usually a
+   * no-op that returns after one microtask.
+   */
+  const changeSubscriptionsReady = async (): Promise<void> => {
+    while (changeOpens > changeRegistrations) {
+      await new Promise<void>(resolve => {
+        changeWaiterRegistrations.add(resolve)
+      })
+    }
+    await Promise.resolve()
+  }
   const wakeAll = (): void => {
     changeVersion += 1
     for (const waiter of changeWaiters) waiter.wake()
@@ -368,7 +373,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const thread = { ...(top.thread as object), taskRef: task.taskRef, revision: request.baseRevision + 1 }
     const activity = { activityRef: 'activity:promoted', kind: 'promote' as const, taskRef: task.taskRef, threadRef: request.threadRef, actor: 'member:human', sequence: request.baseRevision + 1 }
     // A promoted Task is brand-new with no Claims, so the Host projects no owners.
-    viewItems = viewItems.map(item => ({ ...item, task, thread, taskNumber: 1, claimOwners: [] }))
+    viewItems = viewItems.map(item => ({ ...item, task, thread, taskNumber: 1, liveClaimOwners: [] }))
     return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, activity, task, thread } }
   })
   const changeTask = vi.fn(async (request: { action: 'accept' | 'close' | 'reopen' }) => {
@@ -379,7 +384,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const thread = { ...(top.thread as object), revision: (top.thread as { revision: number }).revision + 1 }
     // Accept, close, and reopen all land outside the live statuses, so the
     // Host projects no owners after any of them.
-    viewItems = viewItems.map(item => ({ ...item, task, thread, claimOwners: [] }))
+    viewItems = viewItems.map(item => ({ ...item, task, thread, liveClaimOwners: [] }))
     return { ok: true as const, value: { kind: 'committed', receipt: {}, activity: { activityRef: `activity:${request.action}`, taskRef: 'task:1', threadRef: 'thread:1', actor: 'member:human', kind: request.action, sequence: (thread.revision as number) + 10 }, task, thread, claims: viewClaims } }
   })
   // Each read consumes the queue head as its remainingUnreadCount: the page's
@@ -409,7 +414,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     if (top === undefined) return { ok: false as const, error: { message: 'thread missing' } }
     return { ok: true as const, value: { task: top.task, thread: top.thread, anchor: top.message, anchorMentions: [], claims: viewClaims, facts: [], cursor: 0, hasMore: false } }
   })
-  /** One-shot history-read failure; cleared by the next successful read. */
+  /** Sticky history-read failure: every read fails with this message until a spec clears it by passing undefined. */
   let threadHistoryFailure: string | undefined
   // The Human author follows every seeded Thread; tests override the set to
   // drive the mention-candidate ranking.
@@ -482,12 +487,15 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     inboxHasMore = options?.hasMore ?? false
     wakeAll()
   }
-  const changes = vi.fn(async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
+  const changesStream = async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
     let pending = false
     let resume: (() => void) | undefined
     const waiter = { request, wake: () => { pending = true; resume?.() } }
     const abort = () => resume?.()
     changeWaiters.add(waiter)
+    changeRegistrations += 1
+    for (const resolve of changeWaiterRegistrations) resolve()
+    changeWaiterRegistrations.clear()
     signal?.addEventListener('abort', abort, { once: true })
     try {
       if (changeFailure !== undefined) throw new RemoteStreamCarrierError(changeFailure)
@@ -504,6 +512,10 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       changeWaiters.delete(waiter)
       signal?.removeEventListener('abort', abort)
     }
+  }
+  const changes = vi.fn((request: AgentTeamChangesRequest, signal?: AbortSignal) => {
+    changeOpens += 1
+    return changesStream(request, signal)
   })
   const failChanges = (message = 'transport down'): void => { changeFailure = message; wakeAll() }
   const recoverChanges = (): void => {
@@ -521,10 +533,10 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     // active Claim's owner while its Task is still live — so the fake carries
     // the same owners instead of leaving the seeded empty set behind.
     const taskStatus = (top.task as { status?: string } | undefined)?.status
-    const claimOwners = taskStatus === 'in_progress' || taskStatus === 'in_review'
+    const liveClaimOwners = taskStatus === 'in_progress' || taskStatus === 'in_review'
       ? [{ memberId: 'member:builder', name: 'builder' }]
       : []
-    viewItems = [{ ...top, messageCount: 2, lastActivityAt: activityAt, claimOwners }, { ...top, messageCount: 2, lastActivityAt: activityAt, claimOwners, message: { ...(top.message as object), messageRef: 'message:reply', sender: 'member:builder', body: 'agent reply', topLevel: false, sequence: 3, occurredAt: activityAt } }]
+    viewItems = [{ ...top, messageCount: 2, lastActivityAt: activityAt, liveClaimOwners }, { ...top, messageCount: 2, lastActivityAt: activityAt, liveClaimOwners, message: { ...(top.message as object), messageRef: 'message:reply', sender: 'member:builder', body: 'agent reply', topLevel: false, sequence: 3, occurredAt: activityAt } }]
     viewActivities = [{ activityRef: 'activity:claim', taskRef: 'task:1', threadRef: 'thread:1', actor: 'member:builder', kind: 'claim', claimRef: 'claim:1', sequence: 4 }]
     wakeAll()
   }
@@ -535,11 +547,10 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // draws the Human read the same Remotes, and the Host writes the page makes
   // land in the same seeded value — so one rename visibly moves the page, the
   // timeline, and the member refs together.
-  let humanProfileValue: { name: string; avatarRef?: string; version: string; repoUrl: string; updateAvailable: boolean; latestVersion?: string } = {
+  let humanProfileValue: { name: string; avatarRef?: string; version: string; repoUrl: string; latestVersion?: string } = {
     name: 'human',
     version: '0.1.13',
     repoUrl: 'https://github.com/Contexera/dsh-agent-team',
-    updateAvailable: false,
     ...options?.humanProfile,
   }
   // Both seeded before the Team Client mounts, so the first demand-driven read
@@ -568,7 +579,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       const { avatarRef: _avatarRef, ...rest } = humanProfileValue
       humanProfileValue = rest
     } else if (typeof request.avatarRef === 'string') humanProfileValue = { ...humanProfileValue, avatarRef: request.avatarRef }
-    const { version: _version, repoUrl: _repoUrl, updateAvailable: _updateAvailable, latestVersion: _latestVersion, ...profile } = humanProfileValue
+    const { version: _version, repoUrl: _repoUrl, latestVersion: _latestVersion, ...profile } = humanProfileValue
     return { ok: true as const, value: profile }
   })
   /** Seed the Human profile every identity read answers with. */
@@ -612,7 +623,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewChannels, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, clearMemberContext, archiveMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewChannels, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, archiveMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),
@@ -655,5 +666,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
-  return { runtime, team, view, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, clearMemberContext, archiveMember, modelCatalog, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory }
+  return { runtime, team, view, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewChannels, createChannel, updateChannel, archiveChannel, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedChannel, publishChannelUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
 }

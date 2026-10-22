@@ -1,10 +1,8 @@
 /**
  * Incremental Session-log fold with an identity guard.
  *
- * Several Host projections are pure left folds over one Member Session's own
- * events: context intent, the clock baseline, and the one-shot pressure
- * notice. Folding the whole log on every event makes each of them cost
- * O(session length) per step, so a long Session gets steadily slower. This
+ * The Member clock baseline folds one Session's own events. Folding the
+ * whole log on every event costs O(session length) per step. This
  * module keeps the fold value together with how far it has consumed the log,
  * so a step folds only the tail that arrived since — the same idiom the
  * Harness Session itself uses for its own derived folds.

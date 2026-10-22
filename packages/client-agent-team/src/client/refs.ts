@@ -164,14 +164,36 @@ const rememberResolvedMessageRef = messageStore.remember
 export const resolveUnknownMessageRefs = messageStore.resolveUnknown
 
 /**
+ * Pair each resolved entry with the ref that requested it and remember every
+ * resolved entry for immediate navigation.
+ *
+ * The Host keeps `resolved` in the same order as the input refs (one entry per
+ * resolvable input, unknowns omitted), and answers with full refs even for
+ * abbreviated inputs; an entry whose full ref does not extend the requested one
+ * therefore marks an unknown input and is skipped without consuming the entry.
+ * Each authored spelling is remembered as an alias of its resolution.
+ */
+function rememberAliasedResolutions<TEntry, TRef extends string>(
+  entries: readonly TEntry[],
+  refs: readonly TRef[],
+  remember: (entry: TEntry) => void,
+  refOf: (entry: TEntry) => TRef,
+  alias: (entry: TEntry, ref: TRef) => TEntry,
+): void {
+  let entryIndex = 0
+  for (const requested of refs) {
+    const entry = entries[entryIndex]
+    if (entry === undefined || !refKeyOf(refOf(entry)).startsWith(refKeyOf(requested))) continue
+    if (refOf(entry) !== requested) remember(alias(entry, requested))
+    remember(entry)
+    entryIndex += 1
+  }
+}
+
+/**
  * Click-path Host lookup shared by both ref kinds: remember every resolved
- * entry and hand them back for immediate navigation. The Host keeps
- * `resolved` in the same order as the input refs (one entry per resolvable
- * input, unknowns omitted); the pairing walk below relies on that contract,
- * so it must be preserved together with this implementation. The Host
- * answers with full refs even for abbreviated inputs; the returned entries
- * keep the input order, so the walk remembers each authored spelling as an
- * alias of its resolution.
+ * entry and hand them back for immediate navigation (see
+ * {@link rememberAliasedResolutions} for the ordering contract it relies on).
  */
 async function hostRefLookup<TEntry, TRef extends string>(
   remember: (entry: TEntry) => void,
@@ -182,16 +204,8 @@ async function hostRefLookup<TEntry, TRef extends string>(
 ): Promise<readonly TEntry[]> {
   const result = await request(refs)
   if (!result.ok) return []
-  const entries = result.value
-  let entryIndex = 0
-  for (const requested of refs) {
-    const entry = entries[entryIndex]
-    if (entry === undefined || !refKeyOf(refOf(entry)).startsWith(refKeyOf(requested))) continue
-    if (refOf(entry) !== requested) remember(alias(entry, requested))
-    remember(entry)
-    entryIndex += 1
-  }
-  return entries
+  rememberAliasedResolutions(result.value, refs, remember, refOf, alias)
+  return result.value
 }
 
 /**

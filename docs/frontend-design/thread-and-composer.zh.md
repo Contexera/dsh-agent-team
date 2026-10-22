@@ -49,7 +49,7 @@ Thread 里的一条 Message，可以通过「选中它所回答的那条 Message
 
 ## Thread / Task 入口行（channel 时间线内）
 - 语义：每个 top-level Channel 消息进入其 Thread 的唯一入口，形态是正文下方**一行**安静的行——既陈述状态，也负责开门。`Task #N` 是 home Channel 内 durable Task creation 的展示编号，不是稳定身份。跨视图导航使用 branded Task ref。
-- **开门之后去哪，取决于门后是什么**：taskful 入口走 `selectThread` 进 Thread 页（那里承载 Claims、验收与完整历史）；taskless 讨论不进新页，而是在 Channel 页自己的右侧面板里打开，读者身边仍留着 feed。见「Channel 页与讨论面板」。
+- **开门之后去哪，取决于门后是什么**：taskful 入口走 `selectThread` 进 Thread 页（那里承载验收与完整历史）；taskless 讨论不进新页，而是在 Channel 页自己的右侧面板里打开，读者身边仍留着 feed。见「Channel 页与讨论面板」。
 - 方位（本条的硬约束）：入口的任何状态都**不放在身份行上**。一个 run 里的后续消息没有自己的身份行内容，状态簇停在那里只会孤零零地悬在行尾；而任何靠右的落点都要读者为真正想看的价值横穿整列。状态改为**领起入口行**：与上方正文同一个左缘，且整条 feed 的所有入口共用一个 x。shipped DSH 的行也是这么做的（`SkillRow` 折叠态的首位槽、`JobListAction` 触发钮「点在前、计数在后」）。
 - 状态簇（`.stateCluster`）：**未走完的** taskful 入口依次是三样东西。第一，Task 在办 Claim 的所有者头像叠放。第二，`taskStatusDot(status)` 对应的 8px `TeamStateDot`。第三，本地化状态词。`in_progress`→ongoing、`in_review`→warning、`done`→done 走共享 `StateDot`。`todo` 是空心圆环、`closed` 是 tertiary 安静点。五个状态共用同一套形态语言。Claim 是 Host 事实而非装饰。只有 `in_progress`/`in_review` 的 Task 才有所有者。`released` 的 Claim 已不是工作，所有者按 Claim 顺序去重。taskless 入口不虚构状态点。
 - **已了结（done / closed）的 Task 整个簇退位，只领一个未读胶囊**：扫描已了结工作交给看板；在完工的行上画所有者叠放，回答的是没人问的问题。
@@ -63,5 +63,4 @@ Thread 里的一条 Message，可以通过「选中它所回答的那条 Message
 
 ### 状态胶囊与弹层
 - Thread 状态用公共 `Pill`（与 `Task #N` 同行）。
-- Claims 折叠用公共 `DisclosureRow`（`expandOnRowClick`，标题 `Claims · N`）。键盘闭环由原语保证。Claim 行缩进对齐标题文字。
 - 所有弹层走公共 `Modal`：打开时焦点入内容区，关闭后焦点回到触发按钮（`queueMicrotask` 延迟聚焦模式）。

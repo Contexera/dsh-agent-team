@@ -1,5 +1,4 @@
 import type { WorkspaceId } from "@deepseek-ai/dsh-workspace"
-import type { SessionId as AgentTeamMemberSessionId, SessionLogOffset as AgentTeamMemberSessionLogOffset, SessionSeq as AgentTeamMemberSessionSeq } from "@deepseek-ai/dsh-session"
 import type {
   AgentTeamActivity,
   AgentTeamAgentMember,
@@ -12,7 +11,6 @@ import type {
   AgentTeamClaimActivity,
   AgentTeamClaimRef,
   AgentTeamConfirmationToken,
-  AgentTeamContextCheckpointRef,
   AgentTeamDirectMarker,
   AgentTeamMemberCapabilities,
   AgentTeamMemberId,
@@ -22,6 +20,7 @@ import type {
   AgentTeamModelSelection,
   AgentTeamOperationId,
   AgentTeamRequestId,
+  AgentTeamLiveTaskStatus,
   AgentTeamTask,
   AgentTeamTaskActivity,
   AgentTeamTaskRef,
@@ -190,50 +189,6 @@ export interface AgentTeamRecoverMemberResult {
   readonly status: AgentTeamAgentMemberStatus
 }
 
-/** Human intent to start one enabled Member's next turn from an empty context. */
-export interface AgentTeamClearMemberContextRequest {
-  readonly requestId: AgentTeamRequestId
-  readonly workspaceId: WorkspaceId
-  readonly memberId: AgentTeamMemberId
-}
-
-/** The Member keeps identity, memory, and binding; its sessionId moves to a fresh Session and the previous log stays archived on disk. */
-export interface AgentTeamClearMemberContextResult {
-  readonly receipt: AgentTeamOperationReceipt
-  readonly status: AgentTeamAgentMemberStatus
-}
-
-/**
- * Member-authored intent (carried by its live Agent) to continue in its next
- * private context generation. The requestId and new Session id derive stably
- * from the successful `context_rollover` tool call so crash replay converges on
- * one operation and one generation.
- */
-export interface AgentTeamRolloverSessionRequest {
-  readonly requestId: AgentTeamRequestId
-  readonly workspaceId: WorkspaceId
-  readonly memberId: AgentTeamMemberId
-  /** The Session the Member must still be bound to at commit time. */
-  readonly previousSessionId: AgentTeamMemberSessionId
-  /** The next generation Session, derived from the successful tool call. */
-  readonly newSessionId: AgentTeamMemberSessionId
-  /** Seq of the successful `context_rollover` tool result in the previous Session log. */
-  readonly handoffEventSeq: AgentTeamMemberSessionSeq
-  /** Why the rollover happened: the model asked, or honored a pressure notice. */
-  readonly trigger: 'model' | 'pressure'
-  /** Seed source Session for a checkpoint return; absent on a fresh rollover. */
-  readonly sourceSessionId?: AgentTeamMemberSessionId
-  /** Exclusive end of the seeded source prefix (its exact length in the source log). */
-  readonly sourceThroughSeq?: AgentTeamMemberSessionLogOffset
-  /** The checkpoint a return was addressed to; absent on a fresh rollover. */
-  readonly checkpointRef?: AgentTeamContextCheckpointRef
-}
-
-export interface AgentTeamRolloverSessionResult {
-  readonly receipt: AgentTeamOperationReceipt
-  readonly member: AgentTeamAgentMember
-}
-
 /** Human intent to remove one Agent Member from one Channel. */
 export interface AgentTeamRemoveChannelMemberRequest {
   readonly requestId: AgentTeamRequestId
@@ -357,12 +312,11 @@ export interface AgentTeamHumanProfileResult {
   /** Repository home the footnote links to. */
   readonly repoUrl: string
   /**
-   * Whether a newer release is known. Best-effort and cached Host-side
-   * (npm `latest`, 12 h TTL, silent on any failure), so this stays false
-   * until a background refresh actually observes one; the footnote shows
-   * only the version + link until then.
+   * A newer published release, when one is known. Best-effort and cached
+   * Host-side (npm `latest`, 12 h TTL, silent on any failure), so this stays
+   * absent until a background refresh actually observes one; the footnote
+   * shows only the version + link until then.
    */
-  readonly updateAvailable: boolean
   readonly latestVersion?: string | undefined
 }
 
@@ -400,34 +354,6 @@ export interface AgentTeamEnvironmentResult {
   /** Lower bound of the declared range: the certified, actually-tested DSH line. */
   readonly certifiedDshVersion?: string | undefined
   readonly supportRange?: AgentTeamEnvironmentSupportRange | undefined
-}
-
-/** Relatedness-judge read: carries no input; the answer is the Host's own state. */
-export interface AgentTeamContextJudgeRequest {
-}
-
-/**
- * What the Team settings surface states about the long-gap gate's judge. It
- * carries only what the settings document cannot: whether a judge is actually
- * reachable, why it is not, and the gate's effective thresholds — which are row
- * configuration, so the Host resolves an omitted field against the engine's own
- * default rather than letting a second copy of those numbers exist.
- */
-export interface AgentTeamContextJudgeResult {
-  /** Whether a judge is reachable for the next step. */
-  readonly enabled: boolean
-  /** Why no judge is reachable; absent when one is. */
-  readonly reason?: 'no-key' | 'unavailable' | undefined
-  /** Host-side diagnostic behind `unavailable`; not rendered as user copy. */
-  readonly detail?: string | undefined
-  /** The environment variable this deployment reads the judge's key from. */
-  readonly keyEnv: string
-  /** The gate's thresholds in force: row configuration resolved against the engine's defaults. */
-  readonly gate: {
-    readonly tokens: number
-    readonly idleMs: number
-    readonly judgeTimeoutMs: number
-  }
 }
 
 /**
@@ -536,13 +462,20 @@ export interface AgentTeamStaleRevision {
   readonly expectedRevision: number
   readonly revision: number
   /**
+   * How the token the writer used relates to this Thread's revisions, absent
+   * when it was one this Thread really reached — a plain race. `unknown` is a
+   * token from before the Thread's first fact, which may simply have been read
+   * a moment too early; `unrecognized` is a token this Thread's revisions
+   * skipped over, so the writer copied it from another Thread or invented it.
+   */
+  readonly staleTokenKind?: 'unknown' | 'unrecognized'
+  /**
    * The facts committed inside `(expectedRevision, revision]` — what changed
    * between the token the writer used and the current one. Same shape as a
    * Thread read's facts. Absent when the increment carries nothing renderable
    * or the ledger predates the field.
    */
   readonly facts?: readonly AgentTeamThreadReadFact[]
-  readonly tokenUnrecognized?: boolean
 }
 
 /** An Agent tried to address an Agent who is not already following. */
@@ -754,7 +687,8 @@ export interface AgentTeamInboxItem {
   /** Instant of the newest unread fact — on the 「最近活跃」 slice, of the newest fact. */
   readonly newestOccurredAt: string
   readonly newestActor: AgentTeamInboxActor
-  readonly claimOwners: readonly AgentTeamInboxActor[]
+  /** Owners of the Task's live Claims, in claim order, deduped. */
+  readonly liveClaimOwners: readonly AgentTeamInboxActor[]
   readonly attention?: AgentTeamThreadAttention
 }
 
@@ -781,24 +715,6 @@ export interface AgentTeamThreadReadRequest {
   readonly taskRef?: AgentTeamTaskRef
 }
 
-/**
- * Private, read-time context guidance for one acceptance the reading Member
- * just acknowledged. Host-computed after the durable read committed; never a
- * ledger fact, never persisted, and absent unless this read acknowledged an
- * unread acceptance of a Task that is still done.
- */
-export interface AgentTeamContextAdvice {
-  /** Current measured usage of the reading Member's context; absent when unmeasured. */
-  readonly usageTokens?: number | undefined
-  readonly taskBoundaryThreshold?: number | undefined
-  /** Effective handoff budget of the Member's current route; absent when unmeasured. */
-  readonly handoffAt?: number | undefined
-  /** Effective hard limit of the Member's current route; absent when unmeasured. */
-  readonly hardLimit?: number | undefined
-  readonly action: 'keep' | 'rollover' | 'compact-now' | 'unavailable'
-  readonly guidance: string
-}
-
 export interface AgentTeamThreadReadResult {
   /**
    * Receipt of the durable read this response committed; absent when the read
@@ -819,8 +735,6 @@ export interface AgentTeamThreadReadResult {
   readonly earlierFactCount?: number
   readonly attention?: AgentTeamThreadAttention
   readonly consumedDirectMarkers: readonly AgentTeamDirectMarker[]
-  /** Present only when this read acknowledged an unread acceptance of a still-done Task. */
-  readonly contextAdvice?: AgentTeamContextAdvice
 }
 
 /** Non-mutating Thread history request. */
@@ -885,7 +799,7 @@ export interface AgentTeamViewItem {
    * and has no Member view of its own. Empty on a taskless item, and on a done
    * or closed one, whose Claims are history that the state word already tells.
    */
-  readonly claimOwners: readonly AgentTeamInboxActor[]
+  readonly liveClaimOwners: readonly AgentTeamInboxActor[]
   readonly messageCount: number
   /** Instant of the latest fact on this Thread (message or activity), projected from its committing operation. */
   readonly lastActivityAt: string
@@ -907,7 +821,7 @@ export interface AgentTeamActiveTaskThread {
   readonly channelRef: AgentTeamChannelRef
   /** The Task's ordinal inside its home Channel. */
   readonly taskNumber?: number
-  readonly status: AgentTeamTask['status']
+  readonly status: AgentTeamLiveTaskStatus
   /** The Thread's opening line, trimmed and capped at 120 characters — the same bound the Inbox row uses. */
   readonly subject: string
   /** Owners of the Task's live Claims, in claim order, deduped — the same rule the Inbox row and Channel feed use. */

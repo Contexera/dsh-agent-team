@@ -165,7 +165,7 @@ describe('team_attention renders Attention only', () => {
     // fact, an anchor, a watermark, or a write token, so no render of it can
     // drift into showing Thread content.
     const schema = teamTools().get('team_attention')!.output.schema as Record<string, any>
-    for (const absent of ['facts', 'anchor', 'claims', 'readThroughSequence', 'remainingUnreadCount', 'message', 'cursor', 'hasMore', 'contextAdvice']) {
+    for (const absent of ['facts', 'anchor', 'claims', 'readThroughSequence', 'remainingUnreadCount', 'message', 'cursor', 'hasMore']) {
       expect(schema.properties[absent]).toBeUndefined()
     }
     // The Attention state itself is the one required field: an Attention result
@@ -252,20 +252,6 @@ describe('team_thread read orients by structured facts', () => {
     expect(text).not.toContain('(unread activity)')
   })
 
-  it('an advice-carrying read keeps its guidance section and the token after it', () => {
-    const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, {
-      kind: 'read', threadRef: THREAD, taskRef: TASK, revision: 8190, status: 'done', resolution: 'accepted', following: true,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor body', sequence: 1 },
-      claims: [],
-      facts: [{ sequence: 8190, kind: 'activity', activity: 'accept', actor: 'human', taskRef: TASK, unread: true, direct: false }],
-      readThroughSequence: 8190, remainingUnreadCount: 0,
-      contextAdvice: { usageTokens: 96_000, taskBoundaryThreshold: 128_000, handoffAt: 200_000, hardLimit: 256_000, action: 'keep', guidance: 'Keep the current context.' },
-    })
-    expect(text).toContain('Context guidance — 96,000 tokens used')
-    expect(text).toContain('Action: keep. Keep the current context.')
-    expect(text.indexOf('Context guidance')).toBeLessThan(text.indexOf('Next write'))
-  })
-
   it('a read with no new facts states it explicitly and still hands off the token', () => {
     const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, {
       kind: 'read', threadRef: THREAD, revision: 9010, following: true,
@@ -297,7 +283,7 @@ describe('team_thread history renders deep orientation only', () => {
     expect(text).toContain(`Anchor ${anchor.sequence} [member:reeve]`)
     expect(text).toContain(anchor.body)
     expect(text).toContain('History cursor 8973; hasMore=true — older facts exist; page again with beforeSequence set to the cursor.')
-    // No current Claims snapshot, no advice, no token.
+    // No current Claims snapshot, no context recommendation, no token.
     expect(text).not.toContain('Active Claims')
     expect(text).not.toContain('Context guidance')
     expect(text).not.toContain('baseRevision')
@@ -427,7 +413,7 @@ describe('team_message renders its outcome', () => {
     // so the refusal names the copying mistake and drops the increment lines,
     // which would otherwise present facts as missed when none were.
     const copied = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 4711, body: 'x' }, {
-      kind: 'stale_revision', threadRef: THREAD, expectedRevision: 4711, revision: 8394, tokenUnrecognized: true,
+      kind: 'stale_revision', threadRef: THREAD, expectedRevision: 4711, revision: 8394, staleTokenKind: 'unrecognized',
       facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
@@ -539,7 +525,7 @@ describe('team_claim renders the affected Claim', () => {
     // renders its own rejections: a member that closes a Claim with a token
     // from another Thread gets the same correction, not the race sentence.
     const copied = renderText(teamTools().get('team_claim')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
-      kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', tokenUnrecognized: true,
+      kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', staleTokenKind: 'unrecognized',
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
       facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })

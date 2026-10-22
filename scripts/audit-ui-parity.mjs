@@ -410,16 +410,26 @@ const GEOMETRY = [
   ['conversation.module.css', '.messageBody [data-document] .messageMarkdown p', [['margin', '16px 0']], 'document block gap'],
   ['conversation.module.css', '.messageBody [data-document] .messageMarkdown li + li', [['margin-top', '6px']], 'document list-item gap'],
   ['conversation.module.css', '.messageBody [data-document] .messageMarkdown :where(h1, h2, h3, h4, h5, h6)', [['margin', '24px 0 8px']], 'document section-heading margins'],
+  ['channel.module.css', '.panel', [['width', 'var(--team-panel-width, 460px)']], 'the discussion panel\'s seat is one variable the drag handle writes, so a drag repaints without re-rendering the feed; a literal width here would make the handle write a value nothing reads'],
+  ['channel.module.css', '.feedStage[data-panel="open"]', [['padding-right', 'var(--team-panel-width, 460px)']], 'the feed gives up exactly what the panel takes: the same variable on both sides of the seam, so the panel can never paint over the feed it sits beside'],
   ['conversation.module.css', '.messageBody .messageMarkdown pre', [['font-size', 'calc(13px + var(--dsh-code-font-delta, 0px))']], 'a fenced block rides the Settings code-size axis on the same px-delta pattern as the content axis: 0.2.1-rc.2 rewrote the primitive\'s `--dsw-font-markdown-code-block` onto `--dsh-code-font-delta`, so a literal 13px here would hold the words still while the leading around them moved with the setting'],
 ]
+
+// A rule preceded by a comment keeps that comment inside the captured
+// selector text, so comparisons and reports start after the last comment.
+function bareSelector(rule) {
+  return rule.selector.replace(/^[\s\S]*\*\//, '').trim()
+}
+
+/** {@link bareSelector} with runs of whitespace collapsed onto one line. */
+function collapsedSelector(rule) {
+  return bareSelector(rule).replace(/\s+/g, ' ').trim()
+}
 
 function findRuleBody(file, selector) {
   const css = readFileSync(join(clientDir, file), 'utf8')
   for (const rule of collectRules(css)) {
-    // A rule preceded by a comment keeps that comment inside the captured
-    // selector text; compare only the selector after the last comment.
-    const bare = rule.selector.replace(/^[\s\S]*\*\//, '').trim()
-    if (bare === selector) return rule.body
+    if (bareSelector(rule) === selector) return rule.body
   }
   return undefined
 }
@@ -446,7 +456,7 @@ for (const [file, selector, expected, what] of GEOMETRY) {
 for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.css'))) {
   const css = stripNestedAtRules(readFileSync(join(clientDir, file), 'utf8'), file)
   for (const rule of collectRules(css)) {
-    const selector = rule.selector.replace(/^[\s\S]*\*\//, '').replace(/\s+/g, ' ').trim()
+    const selector = collapsedSelector(rule)
     for (const declaration of rule.body.matchAll(/(?:^|;)\s*border(?:-(?:top|right|bottom|left))?(?:-width)?\s*:\s*([^;]+)/g)) {
       const fraction = declaration[1].match(/\d*\.\d+px/)
       if (fraction) {
@@ -527,7 +537,7 @@ if (asTaskPill === '') {
   }
 }
 
-const labelRule = collectRules(composerCss).find(rule => rule.selector.replace(/^[\s\S]*\*\//, '').trim() === '.asTaskLabel')
+const labelRule = collectRules(composerCss).find(rule => bareSelector(rule) === '.asTaskLabel')
 if (labelRule === undefined) {
   note('error', 'composer.module.css .asTaskLabel', 'the mode label class is gone; a mode keeps a visible word')
 } else if (/display\s*:\s*none|visibility\s*:\s*hidden/.test(labelRule.body)) {
@@ -563,7 +573,7 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   for (const rule of collectRules(css)) {
     if (!FULL_ROUND.test(rule.body)) continue
     if (!/corner-shape:\s*round/.test(rule.body)) {
-      const bare = rule.selector.replace(/^[\s\S]*\*\//, '').replace(/\s+/g, ' ').trim().slice(0, 60)
+      const bare = collapsedSelector(rule).slice(0, 60)
       note('error', `${file} ${bare}`, 'full-round radius without `corner-shape: round`; the platform superellipse squares capsule ends off')
     }
   }
@@ -611,7 +621,7 @@ function isTranslucentToken(token) {
 for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.css'))) {
   const css = readFileSync(join(clientDir, file), 'utf8')
   for (const rule of collectRules(stripNestedAtRules(css, file))) {
-    const bare = rule.selector.replace(/^[\s\S]*\*\//, '').trim()
+    const bare = bareSelector(rule)
     const surface = rule.body.match(/background(?:-color)?\s*:\s*var\((--dsw-[\w-]+)/)
     if (surface === null || !SURFACE_TOKENS.has(surface[1]) || !isTranslucentToken(surface[1])) continue
     if (/backdrop-filter\s*:/.test(rule.body)) continue

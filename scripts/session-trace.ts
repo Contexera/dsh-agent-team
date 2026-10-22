@@ -25,7 +25,6 @@ import { Context } from '@deepseek-ai/cordis'
 import SessionStore from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionQueryEngine from '@deepseek-ai/dsh-session-query'
-// @ts-expect-error untyped shared resolution module
 import { harnessDir } from './harness-dir.mjs'
 
 const DEFAULT_TIMELINE_LIMIT = 200
@@ -112,6 +111,8 @@ function readMemberAddresses(dshHome: string): MemberAddress[] {
         case 'team/member-added':
         case 'team/member-updated':
         case 'team/member-session-renewed':
+        case 'team/member-session-rolled-over':
+        case 'team/member-session-recycled':
         case 'team/member-resumed':
           members.set(member.memberId, member)
           break
@@ -215,6 +216,23 @@ interface DerivedFields {
   toolName?: string
 }
 
+interface TimelineRow {
+  sessionId: string
+  seq: number
+  type: string
+  time: number
+  surface: string
+  derived: DerivedFields
+}
+
+/** Turn/step/callId/toolName for a contiguous run of rows, read from one raw-event window. */
+async function hydrateDerived(comp: Composition, sessionId: string, rows: readonly TimelineRow[]): Promise<TimelineRow[]> {
+  if (rows.length === 0) return []
+  const window = await rawWindow(comp, sessionId, rows[0]!.seq, rows.at(-1)!.seq)
+  const bySeq = new Map(window.map(e => [e.seq, e]))
+  return rows.map(r => ({ ...r, derived: deriveFields(bySeq.get(r.seq) ?? { seq: r.seq, type: r.type, time: r.time }) }))
+}
+
 function deriveFields(event: SessionEventView): DerivedFields {
   const data = event.data
   if (data === undefined || data === null || typeof data !== 'object') return {}
@@ -241,7 +259,8 @@ interface ListRow {
   lastEventTime: number | null
   eventCount: number
   agentPreset: string | null
-  archived: boolean
+  /** No session log exists for this Member's recorded Session id. */
+  logMissing: boolean
   inTeamWorkspaces: boolean
   activeWithinDays: boolean
 }
@@ -262,7 +281,7 @@ async function cmdList(comp: Composition, dshHome: string, includeAll: boolean, 
         lastEventTime: null,
         eventCount: 0,
         agentPreset: null,
-        archived: true,
+        logMissing: true,
         inTeamWorkspaces: false,
         activeWithinDays: false,
       })
@@ -278,7 +297,7 @@ async function cmdList(comp: Composition, dshHome: string, includeAll: boolean, 
       lastEventTime: last?.time ?? null,
       eventCount: events.length,
       agentPreset: session.header.agentPreset ?? null,
-      archived: false,
+      logMissing: false,
       inTeamWorkspaces: TEAM_CWDS.includes(session.header.cwd ?? ''),
       activeWithinDays: last !== undefined && Date.now() - last.time < RECENT_ACTIVITY_MS,
     })
@@ -286,7 +305,7 @@ async function cmdList(comp: Composition, dshHome: string, includeAll: boolean, 
   rows.sort((a, b) => (b.lastEventTime ?? 0) - (a.lastEventTime ?? 0))
   const visible = includeAll
     ? rows
-    : rows.filter(r => r.archived || (r.inTeamWorkspaces && r.activeWithinDays))
+    : rows.filter(r => r.logMissing || (r.inTeamWorkspaces && r.activeWithinDays))
   const filters = includeAll
     ? 'none (--all)'
     : `cwd in team workspaces AND last activity within ${RECENT_ACTIVITY_MS / (24 * 60 * 60 * 1000)} days`
@@ -307,7 +326,7 @@ async function cmdList(comp: Composition, dshHome: string, includeAll: boolean, 
   console.log(`team member sessions — ${visible.length} shown (${filters})`)
   console.log(line('MEMBER', 'EVENTS', 'LAST ACTIVITY', 'PRESET', ''))
   for (const r of visible) {
-    const note = r.archived ? 'archived (current-gen log absent)' : r.inTeamWorkspaces ? '' : 'other cwd'
+    const note = r.logMissing ? 'session log missing' : r.inTeamWorkspaces ? '' : 'other cwd'
     console.log(line(r.handle, String(r.eventCount), fmtTime(r.lastEventTime), r.agentPreset ?? '—', note))
   }
   console.log('\nnext: session-trace.ts timeline <MEMBER>   (add --json for full fields incl. sessionId/cwd)')
@@ -330,34 +349,20 @@ async function cmdTimeline(comp: Composition, dshHome: string, member: string, o
     return true
   })
 
-  type Row = { sessionId: string; seq: number; type: string; time: number; surface: string; derived: DerivedFields }
   const toolPrefix = opts.toolPrefix
-  let matched: Row[]
+  const asRows = (events: readonly SessionEventRecordView[]): TimelineRow[] =>
+    events.map(r => ({ ...r, sessionId: address.sessionId, derived: {} }))
+  let matched: TimelineRow[]
   if (toolPrefix === undefined) {
-    matched = filtered.map(r => ({ ...r, sessionId: address.sessionId, derived: {} as DerivedFields }))
+    matched = asRows(filtered)
   } else {
-    const calls = filtered.filter(r => r.type === 'tool/call')
-    const hydrated: Row[] = []
-    if (calls.length > 0) {
-      const window = await rawWindow(comp, address.sessionId, calls[0]!.seq, calls.at(-1)!.seq)
-      const bySeq = new Map(window.map(e => [e.seq, e]))
-      for (const r of calls) {
-        const derived = deriveFields(bySeq.get(r.seq) ?? { seq: r.seq, type: r.type, time: r.time })
-        if (typeof derived.toolName === 'string' && derived.toolName.startsWith(toolPrefix)) {
-          hydrated.push({ ...r, sessionId: address.sessionId, derived })
-        }
-      }
-    }
-    matched = hydrated
+    const hydrated = await hydrateDerived(comp, address.sessionId, asRows(filtered.filter(r => r.type === 'tool/call')))
+    matched = hydrated.filter(r => r.derived.toolName?.startsWith(toolPrefix) === true)
   }
 
   const start = Math.max(0, matched.length - opts.limit)
   let rows = matched.slice(start)
-  if (toolPrefix === undefined && rows.length > 0) {
-    const window = await rawWindow(comp, address.sessionId, rows[0]!.seq, rows.at(-1)!.seq)
-    const bySeq = new Map(window.map(e => [e.seq, e]))
-    rows = rows.map(r => ({ ...r, derived: deriveFields(bySeq.get(r.seq) ?? { seq: r.seq, type: r.type, time: r.time }) }))
-  }
+  if (toolPrefix === undefined) rows = await hydrateDerived(comp, address.sessionId, rows)
 
   const truncated = start > 0
   if (opts.json) {

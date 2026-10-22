@@ -1,7 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import AgentTeam, { AgentTeamDmDeliveryError, markAgentTeamPreset } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
-import { registerContextTools } from './context-tools.ts'
 import { service, workspaceOf, workspaceParam } from './host-access.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 import type {
@@ -11,11 +10,9 @@ import type {
   AgentTeamMessageRef,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
-  AgentTeamThreadReadFact,
   AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { AgentTeamContextAdvice } from '@contexera/dsh-agent-team/types'
 
 export const name = 'wowyuarm-agent-team-tools'
 export const inject = ['tools']
@@ -70,16 +67,6 @@ interface ReplyContextView {
 
 type FactView = MessageFactView | ActivityFactView
 
-/** Model-facing view of read-time context advice; absent fields mean unmeasured. */
-interface ContextAdviceView {
-  readonly usageTokens?: number
-  readonly taskBoundaryThreshold?: number
-  readonly handoffAt?: number
-  readonly hardLimit?: number
-  readonly action: string
-  readonly guidance: string
-}
-
 /** Model-facing view of one Claim, shared by the read collision surface and claim outcomes. */
 interface ClaimView {
   readonly claimRef: string
@@ -110,16 +97,6 @@ function activityFactView(
     ...(activity.acceptedClaimRefs === undefined || activity.acceptedClaimRefs.length === 0 ? {} : { acceptedClaimRefs: [...activity.acceptedClaimRefs] }),
     ...(activity.releasedClaimRefs === undefined || activity.releasedClaimRefs.length === 0 ? {} : { releasedClaimRefs: [...activity.releasedClaimRefs] }),
     ...(markers === undefined ? {} : { unread: markers.unread, direct: markers.direct }),
-  }
-}
-
-function adviceView(advice: AgentTeamContextAdvice): ContextAdviceView {
-  return {
-    ...(advice.usageTokens === undefined ? {} : { usageTokens: advice.usageTokens }),
-    ...(advice.taskBoundaryThreshold === undefined ? {} : { taskBoundaryThreshold: advice.taskBoundaryThreshold }),
-    ...(advice.handoffAt === undefined ? {} : { handoffAt: advice.handoffAt }),
-    ...(advice.hardLimit === undefined ? {} : { hardLimit: advice.hardLimit }),
-    action: advice.action, guidance: advice.guidance,
   }
 }
 
@@ -210,16 +187,15 @@ type RejectedFact = {
 }
 
 /**
- * One typed-rejection renderer parameterized by the mutation noun, shared by
- * team_message and team_claim. Outcome first, action-local recovery facts,
- * then the facts that gated the write and the single recovery route: the new
- * facts render here in the same result, and the current revision is written
- * back as the next write token — so a rejected writer learns WHAT changed and
- * WHICH token to use without paying a separate read round-trip.
+ * One typed-rejection renderer shared by team_message and team_claim. Outcome
+ * first, action-local recovery facts, then the facts that gated the write and
+ * the single recovery route: the new facts render here in the same result, and
+ * the current revision is written back as the next write token — so a rejected
+ * writer learns WHAT changed and WHICH token to use without paying a separate
+ * read round-trip.
  */
 function rejectionLines(
-  noun: 'message' | 'Claim mutation',
-  value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly tokenUnrecognized?: boolean; readonly facts?: readonly RejectedFact[] },
+  value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly staleTokenKind?: 'unknown' | 'unrecognized'; readonly facts?: readonly RejectedFact[] },
 ): string[] {
   const identity = [
     value.threadRef === undefined ? '' : value.threadRef,
@@ -243,7 +219,7 @@ function rejectionLines(
     // a first line claiming the Thread changed, followed by a sentence saying
     // nothing was inserted, reads as one surface contradicting itself, which
     // is worse than the vagueness this whole change removes.
-    const unrecognized = value.tokenUnrecognized === true
+    const unrecognized = value.staleTokenKind === 'unrecognized'
     return [
       ...(unrecognized ? ['Not committed — that write token was never a revision this Thread reached (stale_revision).']
         : ['Not committed — the Thread changed after your last read (stale_revision).']),
@@ -432,14 +408,10 @@ const teamThread = defineTool({
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
       } } },
       facts: { type: 'array', required: true, items: FACT_SCHEMA },
-      contextAdvice: { type: 'object', additionalProperties: false, properties: {
-        usageTokens: { type: 'number' }, taskBoundaryThreshold: { type: 'number' }, handoffAt: { type: 'number' }, hardLimit: { type: 'number' },
-        action: { type: 'string', required: true }, guidance: { type: 'string', required: true },
-      } },
     } },
     // Renders are the only channel a tool result reaches the model through.
     // read renders outcome → context → orientation → active collision surface
-    // → facts → watermark/advice, and hands off the opaque next-write token
+    // → facts → watermark, and hands off the opaque next-write token
     // only when no unread remains. history renders deep orientation and never
     // the current collision surface or any write token.
     render: (args, value) => {
@@ -512,7 +484,6 @@ const teamThread = defineTool({
       // instead of assuming the batch is the Thread.
       const earlier = value.earlierFactCount ?? 0
       if (earlier > 0) lines.push(`Earlier facts: ${earlier} — read older ones with team_thread.history.`)
-      if (value.contextAdvice !== undefined) lines.push('', ...adviceLines(value.contextAdvice))
       if (remaining === 0) lines.push('', nextWriteLine(value.revision))
       return [{ type: 'text', text: lines.join('\n') }]
     },
@@ -566,7 +537,7 @@ const teamThread = defineTool({
     }
     if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'read' }))
     const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base })
-    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), ...(read.contextAdvice === undefined ? {} : { contextAdvice: adviceView(read.contextAdvice) }), ...taskNumberOf(read.task) })
+    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), ...taskNumberOf(read.task) })
   },
 })
 
@@ -623,8 +594,8 @@ function threadResult(
   snapshot: Awaited<ReturnType<AgentTeam['readThreadForAgent']>> | ReturnType<AgentTeam['threadHistoryForAgent']>,
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
   facts: FactView[],
-  extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; contextAdvice?: ContextAdviceView; taskNumber?: number; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string } } = {},
-): { workspaceId: string; channelRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; claims: ClaimView[]; facts: FactView[]; contextAdvice?: ContextAdviceView } {
+  extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; taskNumber?: number; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string } } = {},
+): { workspaceId: string; channelRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; claims: ClaimView[]; facts: FactView[] } {
   return {
     workspaceId, channelRef: snapshot.anchor.channelRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
@@ -637,15 +608,6 @@ function threadResult(
     claims: snapshot.claims.map(claimView),
     facts,
   }
-}
-
-/** Render one read-time acceptance advice; unavailable never prints a fabricated number. */
-function adviceLines(advice: ContextAdviceView): string[] {
-  const measured = advice.usageTokens !== undefined && advice.taskBoundaryThreshold !== undefined && advice.handoffAt !== undefined && advice.hardLimit !== undefined
-  const summary = measured
-    ? `${advice.usageTokens!.toLocaleString('en-US')} tokens used; Task-boundary threshold ${advice.taskBoundaryThreshold!.toLocaleString('en-US')}; normal handoff at ${advice.handoffAt!.toLocaleString('en-US')}; hard limit ${advice.hardLimit!.toLocaleString('en-US')}.`
-    : 'Context usage could not be measured for this acceptance.'
-  return [`Context guidance — ${summary}`, `Action: ${advice.action}. ${advice.guidance}`]
 }
 
 /**
@@ -731,7 +693,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
       kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, revision: { type: 'number' },
       expectedRevision: { type: 'number' }, messageRef: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } }, unreadCount: { type: 'number' }, directCount: { type: 'number' },
       facts: { type: 'array', items: FACT_SCHEMA },
-      undeliveredMentions: { type: 'array', items: { type: 'string' } }, occurredAt: { type: 'string' }, tokenUnrecognized: { type: 'boolean' },
+      undeliveredMentions: { type: 'array', items: { type: 'string' } }, occurredAt: { type: 'string' }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
     } },
     render: (_args, value) => {
       if (value.kind === 'committed' && value.messageRef !== undefined && value.threadRef !== undefined && value.revision !== undefined) {
@@ -745,7 +707,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
           nextWriteLine(value.revision),
         ].join('\n') }]
       }
-      return [{ type: 'text', text: rejectionLines('message', value).join('\n') }]
+      return [{ type: 'text', text: rejectionLines(value).join('\n') }]
     },
     // Minimal durable projection for the Host's context timeline: the
     // structured outcome identity (never the render text). The effect-anchor
@@ -798,7 +760,7 @@ function messageOutcome(result: Awaited<ReturnType<AgentTeam['sendMessageForAgen
     ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
   if (result.kind === 'stale_revision') return { kind: result.kind, ...(result.taskRef === undefined ? {} : { taskRef: result.taskRef }), threadRef: result.threadRef,
     expectedRevision: result.expectedRevision, revision: result.revision,
-    ...(result.tokenUnrecognized === undefined ? {} : { tokenUnrecognized: result.tokenUnrecognized }),
+    ...(result.staleTokenKind === undefined ? {} : { staleTokenKind: result.staleTokenKind }),
     ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
   throw new Error('Agents cannot receive invitation confirmations')
 }
@@ -822,7 +784,7 @@ const teamClaim = defineTool({
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
       } },
       claims: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true } } } },
-      facts: { type: 'array', items: FACT_SCHEMA }, tokenUnrecognized: { type: 'boolean' },
+      facts: { type: 'array', items: FACT_SCHEMA }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
     } },
     // A committed mutation renders the authoritative affected Claim first —
     // the Host result carries it; the full archive is never appended. list
@@ -848,7 +810,7 @@ const teamClaim = defineTool({
           nextWriteLine(value.revision),
         ].join('\n') }]
       }
-      return [{ type: 'text', text: rejectionLines('Claim mutation', value).join('\n') }]
+      return [{ type: 'text', text: rejectionLines(value).join('\n') }]
     },
   },
   async execute(args, exec) {
@@ -880,7 +842,7 @@ const teamClaim = defineTool({
       ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
     return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef, expectedRevision: result.expectedRevision,
       revision: result.revision, status: listed.task.status, claims,
-      ...(result.kind === 'stale_revision' && result.tokenUnrecognized !== undefined ? { tokenUnrecognized: result.tokenUnrecognized } : {}),
+      ...(result.kind === 'stale_revision' && result.staleTokenKind !== undefined ? { staleTokenKind: result.staleTokenKind } : {}),
       ...(result.kind === 'stale_revision' && result.facts !== undefined ? { facts: result.facts.map(entry => readFactView(entry)) } : {}) }
   },
 })
@@ -1001,5 +963,4 @@ export function apply(ctx: Context): void {
   ctx.tools.register(teamDm)
   ctx.tools.register(teamClaim)
   ctx.tools.register(teamView)
-  registerContextTools(ctx)
 }

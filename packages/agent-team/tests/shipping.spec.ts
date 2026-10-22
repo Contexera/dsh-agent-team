@@ -9,9 +9,9 @@ import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import * as Persona from '@deepseek-ai/dsh-persona'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
-import { HUMAN_PROFILE_SETTINGS_NAMESPACE, HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
+import { HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA } from '../src/index.ts'
-// @ts-expect-error untyped shared resolution module
 import { dshPeerRanges } from '../../../scripts/dsh-peers.mjs'
 
 const root = resolve(import.meta.dirname, '../../../')
@@ -147,25 +147,16 @@ describe('Agent Team shipping contract', () => {
     const profileFields = HUMAN_PROFILE_SETTINGS_SCHEMA.dict ?? {}
     expect(profileFields.name?.meta.volatile).toBe(true)
     expect(profileFields.avatarRef?.meta.volatile).toBe(true)
-    // The same row carries the long-gap gate. It is volatile like the rest,
-    // because a non-volatile field is one the settings service can neither show
-    // nor write — it would exist only in a deployment's patch layer, and the
-    // deadline a judge can answer within is a property of the endpoint rather
-    // than of the bundle. Its three thresholds stay optional, so an omitted one
-    // keeps the engine's own default.
+    // The row carries the profile plus the wake-swap thresholds: the context
+    // engine's own knobs are gone, so a deployment's stale `gate`/`jev` values
+    // pass through the non-strict schema without becoming settings fields.
+    // The threshold group is one volatile node, so a write lands without a
+    // remount and the settings service can derive it at all.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
-    expect(rowFields.gate?.meta.volatile).toBeUndefined()
-    const gateFields = rowFields.gate?.dict ?? {}
-    expect(Object.keys(gateFields)).toEqual(['tokens', 'idleMs', 'judgeTimeoutMs'])
-    for (const field of Object.values(gateFields)) expect(field.meta.volatile).toBe(true)
-    // The judge's own fields are the volatile kind, because the Team settings
-    // surface is where a Human enables the gate: every field has to reach the
-    // running Host, and the key alone is a secret — so a read reports that it is
-    // set and never its value.
-    const judgeFields = rowFields.jev?.dict ?? {}
-    expect(Object.keys(judgeFields)).toEqual(['apiKey', 'apiKeyEnv', 'model', 'apiBase'])
-    for (const field of Object.values(judgeFields)) expect(field.meta.volatile).toBe(true)
-    expect(judgeFields.apiKey?.meta.role).toBe('secret')
+    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'name', 'wakeRecycle'])
+    expect(rowFields.wakeRecycle?.meta.volatile).toBe(true)
+    expect(Object.keys(rowFields.wakeRecycle?.dict ?? {}).sort()).toEqual(['enabled', 'idleMs', 'minContextTokens'])
+    expect(Object.values(rowFields.wakeRecycle?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
 
     expect(preset).toContain("name: '@contexera/dsh-agent-team/tools'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")
@@ -295,15 +286,10 @@ describe('Agent Team shipping contract', () => {
     expect(manifest.files).toContain('packages/agent-team/lib/**/*')
     expect(manifest.files).toContain('packages/client-agent-team/lib/**/*')
     expect(manifest.name).toBe('@contexera/dsh-agent-team')
-    // The context-continuity engine rides as a regular dependency, never a
-    // peer: profiles set autoInstallPeers: false, so a peer nothing else
-    // provides resolves for nobody — the external-layout e2e crashed exactly
-    // there before this was fixed (0.1.14 gate, 2026-09-22). The jev judge
-    // rides the same way for the same reason, and one more: the Host mounts it
-    // itself from the row's key, so its code has to be in the tree.
+    // Only this bundle's own two regular dependencies remain: the external
+    // context engine and its judge are gone, so nothing here resolves a
+    // package the profile would have to install for us.
     expect(manifest.dependencies).toEqual({
-      '@contexera/dsh-context-continuity': '^0.4.0',
-      '@contexera/dsh-jev': '^0.1.4',
       yaml: '^2.9.1',
       zod: '^4.4.3',
     })
@@ -526,8 +512,6 @@ describe('Agent Team Member persona', () => {
     for (const rule of [
       // The Team tool family, named in prose so a Member knows the surface exists.
       'team_view', 'team_inbox', 'team_thread', 'team_message', 'team_claim',
-      // The context lifecycle: park, anchor, read where you stand, shorten in place.
-      'context_rollover', 'context_checkpoint', 'context_status', 'context_compact',
       // Branded refs are written with exactly one colon.
       'never a double colon',
       // Work on a Task is announced with a Claimed direction before it starts.

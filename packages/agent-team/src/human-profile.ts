@@ -2,16 +2,6 @@ import z from '@deepseek-ai/schemastery'
 import { parse } from 'yaml'
 import { bundleVersionOf, readInstalledManifest } from './installed-manifest.ts'
 
-/**
- * Settings namespace of the Human profile: the Team Host row's id in
- * `cordis.patch.yml`, which is what the settings service addresses a form and a
- * write by AND the id the profile-document write patches. It is addressed by
- * this constant, never by the running Host's `ctx.fiber.entry`: a Remote call
- * runs under its caller's context, so that lookup names the RPC gateway's row.
- * `shipping.spec.ts` pins the constant to the row the composition declares.
- */
-export const HUMAN_PROFILE_SETTINGS_NAMESPACE = 'wowyuarm-agent-team-host'
-
 /** Fallback display name before any user override is stored. */
 export const HUMAN_PROFILE_DEFAULT_NAME = 'human'
 
@@ -108,16 +98,12 @@ export function parseLegacyHumanProfile(yamlText: string): LegacyHumanProfileFie
 /**
  * Decide what adoption may write: nothing unless the stored profile is still
  * the pristine default, so a value the Human re-entered after the upgrade
- * always wins, and never the legacy default name itself. The current profile
- * carries explicit `undefined` on `avatarRef` — the Host getter spreads the
- * live Config read — and that shape does not satisfy the optional-property
- * form under exactOptionalPropertyTypes; taking it directly keeps the Host
- * call cast-free. The returned fields are exactly the ops the profile page
- * would have written; byte existence for `avatarRef` is the caller's I/O and
- * must already hold.
+ * always wins, and never the legacy default name itself. The returned fields
+ * are exactly the ops the profile page would have written; byte existence for
+ * `avatarRef` is the caller's I/O and must already hold.
  */
 export function planLegacyAdoption(
-  current: { readonly name: string; readonly avatarRef?: string | undefined },
+  current: { readonly name: string; readonly avatarRef?: string },
   legacy: LegacyHumanProfileFields,
 ): { readonly name?: string; readonly avatarRef?: string } | undefined {
   if (current.name !== HUMAN_PROFILE_DEFAULT_NAME || current.avatarRef !== undefined) return undefined

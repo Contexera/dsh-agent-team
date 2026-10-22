@@ -291,9 +291,9 @@ describe('Team agent surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
 
-    // The manual clear-context row action is retired: Members manage their
-    // own context through the context_rollover tool, and every row menu —
-    // available, working, error, unavailable — omits the entry entirely.
+    // The manual clear-context row action is retired: the Host recycles a
+    // generation at the wake boundary, and every row menu — available,
+    // working, error, unavailable — omits the entry entirely.
     for (const handle of ['builder', 'worker', 'failed', 'offline']) {
       fireEvent.click(b.view.getByRole('button', { name: `${handle} 的操作` }))
       const menu = await within(document.body).findByRole('menu')
@@ -548,9 +548,8 @@ describe('Team archival surfaces', () => {
     const readChannels = b.viewChannels.getMockImplementation()!
     const readMembers = b.members.getMockImplementation()!
     await b.view.findByText('还没有频道')
-    // The opening probe consumes the first publish silently, so the second one
-    // is what refreshes the mounted Panels — here with an emptied roster.
-    b.publishChannelUpdate()
+    // The roster refresh the panels read on wake, here with an emptied roster.
+    await b.changeSubscriptionsReady()
     b.members.mockResolvedValue({ ok: true, value: [] } as never)
     b.publishChannelUpdate()
     await b.view.findByText('还没有 Agent')

@@ -12,7 +12,9 @@ import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.
 import AgentTeam from '../src/index.ts'
 import { AgentTeamLedger, AGENT_TEAM_HUMAN_HANDLE, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
-import { assertValidHumanName, HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_SETTINGS_NAMESPACE, HUMAN_PROFILE_VERSION, normalizeHumanName, parseLegacyHumanProfile, planLegacyAdoption } from '../src/human-profile.ts'
+import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
+import { assertValidHumanName, HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_VERSION, normalizeHumanName, parseLegacyHumanProfile, planLegacyAdoption } from '../src/human-profile.ts'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from '../src/human-avatar.ts'
 import type { AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
@@ -209,6 +211,7 @@ describe('legacy human profile adoption on boot', () => {
     ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
     ctx.provide('tools', { schemas: () => [] })
     ctx.provide('sessionPersistence', { list: async () => [] })
+    provideQuietTokenMeter(ctx)
     ctx.provide('settings', {
       configure: () => () => {},
       mutate: async (namespace: string, ops: unknown) => { mutations.push({ namespace, ops }) },

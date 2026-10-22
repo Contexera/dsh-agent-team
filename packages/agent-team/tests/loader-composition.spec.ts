@@ -13,6 +13,7 @@ import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import AgentTeam from '../src/index.ts'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
+import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { AgentTeamRequestId } from '../src/types.ts'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -99,6 +100,9 @@ async function load(pool: MemoryMediaPool, adapter?: LlmAdapter | null): Promise
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessions', { flush: async () => true })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  // Team reads context pressure through the token meter at its wake boundary;
+  // this composition mounts only the bundle rows, so the service is a stub.
+  provideQuietTokenMeter(ctx)
   // `undefined` leaves the LLM runtime unmounted: a Host row that does not
   // hard-inject the service must still save a model when the service is absent.
   if (adapter !== null) {

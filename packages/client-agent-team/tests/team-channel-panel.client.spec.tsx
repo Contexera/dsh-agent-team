@@ -68,6 +68,37 @@ describe('Team Channel discussion panel', () => {
     await b.runtime.dispose()
   })
 
+  it('offers each Message the same row actions the Thread page does', async () => {
+    const b = await seedPanel()
+    fireEvent.click(await b.view.findByRole('button', { name: '打开讨论' }))
+    const panel = await b.view.findByRole('complementary', { name: '讨论' })
+    const row = (await within(panel).findByText('帮我看看这个方案')).closest('article')!
+    // Copy and quote, on the panel's own rows: a reader who turned to the panel
+    // reads the same Thread the page renders, so it cannot be the one surface
+    // where a Message has no actions.
+    expect(row.querySelector('[data-message-card]')).toBeTruthy()
+    expect(row.querySelector('[data-copy-message]')).toBeTruthy()
+    const quote = row.querySelector('[data-quote-message]')
+    expect(quote).toBeTruthy()
+    fireEvent.click(quote!)
+    // The quote fills the composer the panel already owns, so the reply the
+    // reader writes lands under the Message they picked.
+    const banner = await waitFor(() => {
+      const found = panel.querySelector('[data-reply-banner]')
+      expect(found).toBeTruthy()
+      return found!
+    })
+    expect(banner.textContent).toContain('引用')
+    fireEvent.change(within(panel).getByRole('textbox', { name: '消息内容' }), { target: { value: '面板里的引用回复' } })
+    fireEvent.click(within(panel).getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(b.reply).toHaveBeenCalledWith(expect.objectContaining({
+      threadRef: 'thread:1',
+      body: '面板里的引用回复',
+      replyToMessageRef: row.getAttribute('data-message-ref'),
+    })))
+    await b.runtime.dispose()
+  })
+
   it('promotes the discussion and walks the reader into the Thread page', async () => {
     const b = await seedPanel()
     fireEvent.click(await b.view.findByRole('button', { name: '打开讨论' }))

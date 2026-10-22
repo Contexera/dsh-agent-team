@@ -2,7 +2,8 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
-import { ATTACHMENT_MAX_BYTES, sanitizeFileName, sanitizeMediaType } from './attachments.ts'
+import { sanitizeFileName, sanitizeMediaType } from './attachments.ts'
+import { HUMAN_AVATAR_MAX_BYTES } from './human-settings.ts'
 
 /**
  * Persistent human avatar store. Layout mirrors the composer attachment
@@ -42,7 +43,7 @@ export async function writeHumanAvatar(
   bytes: Buffer,
 ): Promise<{ avatarRef: string; path: string; name: string; byteSize: number; mediaType: string }> {
   if (bytes.byteLength === 0) throw new Error('human avatar must not be empty')
-  if (bytes.byteLength > ATTACHMENT_MAX_BYTES) throw new Error(`human avatar exceeds the ${ATTACHMENT_MAX_BYTES} byte limit`)
+  if (bytes.byteLength > HUMAN_AVATAR_MAX_BYTES) throw new Error(`human avatar exceeds the ${HUMAN_AVATAR_MAX_BYTES} byte limit`)
   const storedMediaType = assertAvatarMediaType(mediaType)
   const name = sanitizeFileName(rawName)
   const avatarRef = randomUUID()

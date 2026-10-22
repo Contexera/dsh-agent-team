@@ -1,291 +1,377 @@
 /**
- * Team's projection contribution to the context-continuity engine: the durable
- * ref naming, the Team-notice rule, and the domain judgement that decides which
- * events anchor a timeline boundary and what each boundary is attributable to.
+ * Team's own Session projection: the durable ref naming and the fold every Host
+ * registers.
  *
- * The fold itself is the engine's (`createContextProjectionDefinition`): one
- * registered unit per Host folds every Session's durable log and owns the
- * universal structure — checkpoints, the pending rollover intent, quiet
- * continuation delivery, carry candidates, open calls, turn cursors. This
- * module supplies only what the engine deliberately refuses to know:
- *
- * - the durable refs Team's existing logs already carry
- *   (`context-checkpoint-<sha256>`, `team-boundary-<sha256>`), frozen because
- *   recorded history is read back through them;
- * - which queued messages are Team-owned notices the successor rederives;
- * - which successful Team calls anchor a boundary, and which Threads each
- *   boundary is attributable to. A claim mutation resolves its Task's Thread
- *   through the ledger; that binding is written once at Task creation, so a
- *   re-fold reproduces the same attribution, and a missing ledger or mapping
- *   yields no attribution instead of failing the fold.
- *
- * The remaining exports are read views over the engine's state that Team still
- * owns: the anchor lookups the rollover guard revalidates a cited ref through,
- * the accumulated Thread attribution that guard and the timeline both judge a
- * boundary by, and carried-message resolution — the engine keys carry
- * candidates by message id, and the durable log is where the message body
- * lives.
+ * Every tool name here is a log decoder, never a tool alias: `context_rollover`, its predecessor
+ * `new_context`, and `context_checkpoint` no longer exist as tools, but a
+ * Member's Session log written under them still folds — a pending intent parked
+ * by an earlier build has to keep decoding so a live generation can finish or
+ * discard its swap.
  * @module @contexera/dsh-agent-team/context-projection
  */
 
 import { createHash } from 'node:crypto'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import {
-  CONTEXT_CHECKPOINT_TOOL_NAME,
-  CONTEXT_ROLLOVER_TOOL_NAME,
-  createContextProjectionDefinition,
-  foldContextProjection as foldEngineContextProjection,
-  type AnchorCandidate,
-  type ContextCheckpointEntry,
-  type ContextFoldTarget,
-  type ContextProjectionConfig,
-  type ContextProjectionHost,
-  type ContextProjectionState,
-  type DomainBoundary,
-  type DomainBoundaryContribution,
-  type DomainBoundaryInput,
-} from '@contexera/dsh-context-continuity'
-import { handoffOf, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
-import { TEAM_CONTEXT_CODEC } from './context-continuity-host.ts'
-import type { AgentTeamContextCheckpointRef, AgentTeamTaskRef, AgentTeamThreadRef } from './types/entities.ts'
+import type { SessionEvent, SessionHeader, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
+import { z } from 'zod'
+import { continuationCheckpointRefOf, isAgentTeamContextSource, isAgentTeamSource, matchesProducerKind } from './context-source.ts'
+import type { AgentTeamContextCheckpointRef } from './types/entities.ts'
 
-const PRE_COMPACTION_NOTICE_SUMMARY = 'Compaction is imminent; consider persisting key conclusions.'
+export const CONTEXT_CONTINUITY_PROJECTION_KEY = 'contextContinuity'
 
-const TEAM_CLAIM_TOOL_NAME = 'team_claim'
+/** Decoder name of the retired rollover tool. */
+const CONTEXT_ROLLOVER_TOOL_NAME = 'context_rollover'
 
-const TEAM_MESSAGE_TOOL_NAME = 'team_message'
+/** Decoder name of the retired checkpoint tool. */
+const CONTEXT_CHECKPOINT_TOOL_NAME = 'context_checkpoint'
 
-const TEAM_ATTENTION_TOOL_NAME = 'team_attention'
+/** Legacy decoder name of the rollover tool, before it was renamed. */
+const NEW_CONTEXT_TOOL_NAME = 'new_context'
 
-/**
- * Legacy decoder name: attention moved `team_thread` → `team_attention`, and
- * Sessions recorded before the split still carry durable `team_thread`
- * follow/unfollow call/result pairs. The fold keeps decoding them — cold refolds
- * and crash recovery of existing Members depend on old events still resolving
- * intent — but this is a log decoder, not a tool alias: no new call can carry
- * the old name, because `team_thread` no longer registers `follow`/`unfollow`.
- */
-const LEGACY_TEAM_THREAD_TOOL_NAME = 'team_thread'
+/** Every recorded name a retired rollover call may carry. */
+const TEAM_ROLLOVER_TOOL_NAMES: readonly string[] = [CONTEXT_ROLLOVER_TOOL_NAME, NEW_CONTEXT_TOOL_NAME]
 
-const TEAM_MESSAGE_BOUNDARY_LABEL = 'Team message'
-const TEAM_ATTENTION_BOUNDARY_LABEL = 'Team attention change'
-const TEAM_CLAIM_BOUNDARY_LABEL = 'Team task claim change'
+export const TEAM_INBOX_NOTICE_SUMMARY = 'Team Inbox has unread work.'
 
-const HANDOFF_BOUNDARY_LABEL = 'context handoff'
+export const TEAM_RECOVERY_NOTICE_SUMMARY = 'Recovery: continue your interrupted work.'
 
-const COMPACTION_BOUNDARY_LABEL = 'compaction notice'
-
-const TEAM_BOUNDARY_KINDS = ['team-boundary', 'handoff', 'compaction'] as const
-
-type TeamBoundaryKind = typeof TEAM_BOUNDARY_KINDS[number]
-
-/** One anchor Team contributes: the engine stores the kind opaquely, Team reads it back. */
-type TeamBoundaryContribution = DomainBoundaryContribution & { readonly kind: TeamBoundaryKind }
-
-/**
- * Notice summaries that are pure reminders, never semantic Team facts: a
- * recovery instruction must not become a return anchor. `Progress visibility
- * reminder` is a historical decoder — the progress-nudge system was removed,
- * but session logs recorded before its removal still carry those notices, and
- * the fold keeps recognizing them (same pattern as the legacy `new_context`
- * tool name below).
- */
-const REMINDER_NOTICE_SUMMARIES = new Set(['Progress visibility reminder', 'Recovery: continue your interrupted work.'])
-
-/** Whether one notice summary is a pure reminder (never a semantic Team fact). */
-export function isReminderNoticeSummary(summary: string): boolean {
-  return REMINDER_NOTICE_SUMMARIES.has(summary)
+export interface ContextCheckpointEntry {
+  /** Opaque stable ref; the selection authority for a seeded return. */
+  readonly checkpointRef: string
+  readonly name: string
+  readonly resultSeq: number
+  readonly turn: number
+  /** Seq of the resolving `turn/end`; -1 until resolved. */
+  readonly turnEndSeq: number
 }
 
-/** Stable tool names the fold recognizes under their current names. */
-export { CONTEXT_CHECKPOINT_TOOL_NAME, CONTEXT_ROLLOVER_TOOL_NAME }
+export interface PendingRolloverIntent {
+  readonly handoff: string
+  readonly checkpointRef?: string | undefined
+  readonly relatedFiles: readonly {
+    readonly path: string
+    readonly reason: string
+  }[]
+  readonly toolCallId: string
+  readonly resultSeq: number
+  readonly turn: number
+  /** Seq of the `turn/end` that released the intent; -1 until observed. */
+  readonly turnEndSeq: number
+}
 
-/**
- * Legacy decoder name: the rollover tool was renamed `new_context` →
- * `context_rollover`, and Sessions recorded before the rename still carry
- * durable `new_context` call/result pairs. The fold keeps decoding them —
- * pending rollovers and crash recovery of existing Members depend on old
- * events still resolving intent — but this is a log decoder, not a tool
- * alias: no new call can carry the old name.
- */
-export const NEW_CONTEXT_TOOL_NAME = 'new_context'
+export interface ContinuationDeliveryState {
+  readonly checkpointRef: string
+  /** Seq of the delivered notice; -1 until delivered. */
+  readonly deliveredSeq: number
+}
 
-/** Every recorded tool name a rollover call may carry, current name first. */
-export const TEAM_ROLLOVER_TOOL_NAMES: readonly string[] = [CONTEXT_ROLLOVER_TOOL_NAME, NEW_CONTEXT_TOOL_NAME]
+export interface CarriedCandidate {
+  readonly messageId: string
+  readonly surfacedTurn: number
+  readonly consumed: boolean
+}
+
+export interface TeamContextProjectionState {
+  /** The Session this state folds; it keys every durable ref the fold derives. */
+  readonly sessionId: string
+  /** Fork-inherited prefix length; events below it belong to the ancestor. */
+  readonly inheritedEventCount: number
+  readonly checkpoints: readonly ContextCheckpointEntry[]
+  /** Rollover intent awaiting its containing turn end, at most one. */
+  readonly pending: PendingRolloverIntent | null
+  readonly continuations: readonly ContinuationDeliveryState[]
+  readonly carriedCandidates: readonly CarriedCandidate[]
+  /** The most recently opened turn; `user/message` carries no turn of its own. */
+  readonly lastTurn: number
+  readonly openCalls: readonly {
+    readonly callId: string
+    readonly name: string
+    readonly arguments: string
+  }[]
+}
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    contextContinuity: TeamContextProjectionState
+  }
+}
+
+const relatedFileSchema = z.object({ path: z.string().min(1), reason: z.string() }).strict()
+const openCallSchema = z.object({ callId: z.string().min(1), name: z.string(), arguments: z.string() }).strict()
+const checkpointEntrySchema = z.object({
+  checkpointRef: z.string().min(1),
+  name: z.string(),
+  resultSeq: z.number().int().nonnegative(),
+  turn: z.number().int().nonnegative(),
+  turnEndSeq: z.number().int(),
+}).strict()
+const pendingIntentSchema = z.object({
+  handoff: z.string(),
+  checkpointRef: z.string().min(1).optional(),
+  relatedFiles: z.array(relatedFileSchema),
+  toolCallId: z.string().min(1),
+  resultSeq: z.number().int().nonnegative(),
+  turn: z.number().int().nonnegative(),
+  turnEndSeq: z.number().int(),
+}).strict()
+const carriedCandidateSchema = z.object({
+  messageId: z.string().min(1),
+  surfacedTurn: z.number().int(),
+  consumed: z.boolean(),
+}).strict()
+
+/** Cached rows are validated with this before seeding a fold, so an older shape is discarded, never forward-applied. */
+export const contextProjectionStateSchema: z.ZodType<TeamContextProjectionState> = z.object({
+  sessionId: z.string().min(1),
+  inheritedEventCount: z.number().int().nonnegative(),
+  checkpoints: z.array(checkpointEntrySchema),
+  pending: pendingIntentSchema.nullable(),
+  continuations: z.array(z.object({ checkpointRef: z.string().min(1), deliveredSeq: z.number().int() }).strict()),
+  carriedCandidates: z.array(carriedCandidateSchema),
+  lastTurn: z.number().int().nonnegative(),
+  openCalls: z.array(openCallSchema),
+}).strict()
+
+export interface ContextFoldTarget {
+  readonly sessionId: string
+  /** Omit for a Session whose log inherited no prefix. */
+  readonly inheritedEventCount?: number
+  /** Committed wake-swap boundary; omitted for legacy-only folds. */
+  readonly inputFromSeq?: number
+}
 
 export function checkpointRefFor(sessionId: string, callId: string): AgentTeamContextCheckpointRef {
   return `context-checkpoint-${createHash('sha256').update(JSON.stringify([sessionId, callId])).digest('hex')}` as AgentTeamContextCheckpointRef
 }
 
-export function boundaryRefFor(sessionId: string, seq: number): AgentTeamContextCheckpointRef {
-  return `team-boundary-${createHash('sha256').update(JSON.stringify([sessionId, seq])).digest('hex')}` as AgentTeamContextCheckpointRef
+export function isRedeliverableTeamNotice(message: UserMessage): boolean {
+  return isAgentTeamSource(message.source) && !isAgentTeamContextSource(message)
 }
 
-export function isTeamNotice(message: UserMessage): boolean {
-  const source = message.source
-  return isAgentTeamSource(source) && !isAgentTeamContextSource(message)
+function emptyContextProjectionState(target: ContextFoldTarget): TeamContextProjectionState {
+  return {
+    sessionId: target.sessionId,
+    inheritedEventCount: target.inheritedEventCount ?? 0,
+    checkpoints: [],
+    pending: null,
+    continuations: [],
+    carriedCandidates: [],
+    lastTurn: 0,
+    openCalls: [],
+  }
 }
 
-function isTeamEffectToolName(name: string): boolean {
-  return name === TEAM_CLAIM_TOOL_NAME || name === TEAM_MESSAGE_TOOL_NAME || name === TEAM_ATTENTION_TOOL_NAME || name === LEGACY_TEAM_THREAD_TOOL_NAME
-}
+const nonBlankString = z.string().refine(value => value.trim() !== '')
+const rolloverArgumentsSchema = z.object({
+  handoff: nonBlankString,
+  checkpointRef: z.string().min(1).optional(),
+  relatedFiles: z.array(relatedFileSchema).optional(),
+}).passthrough()
+const checkpointArgumentsSchema = z.object({ name: nonBlankString }).passthrough()
 
-function isAttentionToolName(name: string): boolean {
-  return name === TEAM_ATTENTION_TOOL_NAME || name === LEGACY_TEAM_THREAD_TOOL_NAME
-}
-
-function parseArguments(raw: string): Record<string, unknown> | undefined {
-  let parsed: unknown
+function parseArguments(raw: string): unknown {
   try {
-    parsed = JSON.parse(raw)
+    return JSON.parse(raw)
   } catch {
     return undefined
   }
-  return typeof parsed === 'object' && parsed !== null ? parsed as Record<string, unknown> : undefined
 }
 
-function actionOf(raw: string): unknown {
-  return parseArguments(raw)?.action
-}
-
-function argumentsAreClaimMutation(raw: string): boolean {
-  const action = actionOf(raw)
-  return action === 'claim' || action === 'done' || action === 'release'
-}
-
-function argumentsAreAttentionMutation(raw: string): boolean {
-  const action = actionOf(raw)
-  return action === 'follow' || action === 'unfollow'
-}
-
-function argumentsAreMessageCommit(raw: string): boolean {
-  const action = actionOf(raw)
-  return action === 'start' || action === 'reply'
-}
-
-function threadRefIn(raw: string): AgentTeamThreadRef | undefined {
-  const threadRef = parseArguments(raw)?.threadRef
-  return typeof threadRef === 'string' && threadRef !== '' ? threadRef as AgentTeamThreadRef : undefined
-}
-
-function threadsQuotedInMessage(message: UserMessage): readonly string[] {
-  const refs: string[] = []
-  const text = message.content.filter(block => block.type === 'text').map(block => block.text ?? '').join('\n')
-  for (const match of text.matchAll(/Thread: (thread:[0-9a-f-]{6,})/g)) {
-    if (!refs.includes(match[1]!)) refs.push(match[1]!)
-  }
-  return refs
-}
-
-export interface TeamContextProjectionOptions {
-  readonly threadForTask?: (taskRef: AgentTeamTaskRef) => AgentTeamThreadRef | undefined
-}
-
-export class TeamContextProjectionHost implements ContextProjectionHost {
-  constructor(private readonly options: TeamContextProjectionOptions = {}) {}
-
-  checkpointRefFor(sessionId: string, toolCallId: string): AgentTeamContextCheckpointRef {
-    return checkpointRefFor(sessionId, toolCallId)
-  }
-
-  boundaryRefFor(sessionId: string, seq: number): AgentTeamContextCheckpointRef {
-    return boundaryRefFor(sessionId, seq)
-  }
-
-  isEphemeralNotice(message: UserMessage): boolean {
-    return isTeamNotice(message)
-  }
-
-  tracksCall(name: string, raw: string): boolean {
-    if (!isTeamEffectToolName(name)) return false
-    if (name === TEAM_CLAIM_TOOL_NAME) return argumentsAreClaimMutation(raw)
-    if (isAttentionToolName(name)) return argumentsAreAttentionMutation(raw)
-    return argumentsAreMessageCommit(raw)
-  }
-
-  domainBoundaryOf(input: DomainBoundaryInput): DomainBoundaryContribution | undefined {
-    return input.source === 'user-message'
-      ? this.boundaryFromUserMessage(input)
-      : this.boundaryFromToolResult(input)
-  }
-
-  boundaryRestorableFor(candidate: AnchorCandidate): string | undefined {
-    return candidate.kind === 'handoff' || candidate.kind === 'compaction'
-      ? `source '${candidate.kind}' is not a restorable checkpoint`
-      : undefined
-  }
-
-  private boundaryFromUserMessage(input: DomainBoundaryInput & { source: 'user-message' }): TeamBoundaryContribution | undefined {
-    const { message, seenTopics } = input
-    if (handoffOf(message) !== undefined) {
-      return { kind: 'handoff', label: HANDOFF_BOUNDARY_LABEL, topics: [] }
-    }
-    const source = message.source
-    if (!isAgentTeamSource(source)) return undefined
-    if (source.form === 'relay') return undefined
-    if (source.form === 'notice' && source.summary === PRE_COMPACTION_NOTICE_SUMMARY) {
-      return { kind: 'compaction', label: COMPACTION_BOUNDARY_LABEL, topics: [] }
-    }
-    if (source.form === 'notice' && source.summary !== undefined && isReminderNoticeSummary(source.summary)) return undefined
-    const firstArrivals = threadsQuotedInMessage(message).filter(ref => !seenTopics.includes(ref))
-    if (firstArrivals.length === 0) return undefined
-    return { kind: 'team-boundary', label: `First arrival: ${firstArrivals.join(', ')}`, topics: firstArrivals }
-  }
-
-  private boundaryFromToolResult(input: DomainBoundaryInput & { source: 'tool-result' }): TeamBoundaryContribution | undefined {
-    const { name, arguments: raw, meta } = input
-    if (name === TEAM_CLAIM_TOOL_NAME) {
-      const taskRef = parseArguments(raw)?.taskRef
-      const threadRef = typeof taskRef === 'string' && taskRef !== ''
-        ? this.options.threadForTask?.(taskRef as AgentTeamTaskRef)
-        : undefined
-      return { kind: 'team-boundary', label: TEAM_CLAIM_BOUNDARY_LABEL, topics: threadRef === undefined ? [] : [threadRef] }
-    }
-    if (isAttentionToolName(name)) {
-      const threadRef = threadRefIn(raw)
-      return { kind: 'team-boundary', label: TEAM_ATTENTION_BOUNDARY_LABEL, topics: threadRef === undefined ? [] : [threadRef] }
-    }
-    if (name === TEAM_MESSAGE_TOOL_NAME) {
-      if (meta === undefined || typeof meta !== 'object' || meta === null) return undefined
-      const { kind, threadRef } = meta as { kind?: unknown; threadRef?: unknown }
-      if (kind !== 'committed' || typeof threadRef !== 'string' || threadRef === '') return undefined
-      return { kind: 'team-boundary', label: TEAM_MESSAGE_BOUNDARY_LABEL, topics: [threadRef] }
-    }
-    return undefined
-  }
-}
-
-export function createTeamContextProjectionConfig(host: ContextProjectionHost): ContextProjectionConfig {
+function parseRolloverArguments(raw: string): { handoff: string; checkpointRef?: string; relatedFiles: readonly { path: string; reason: string }[] } | undefined {
+  const parsed = rolloverArgumentsSchema.safeParse(parseArguments(raw))
+  if (!parsed.success) return undefined
   return {
-    codec: TEAM_CONTEXT_CODEC,
-    host,
-    rolloverToolNames: TEAM_ROLLOVER_TOOL_NAMES,
-    checkpointToolName: CONTEXT_CHECKPOINT_TOOL_NAME,
+    handoff: parsed.data.handoff,
+    ...(parsed.data.checkpointRef === undefined ? {} : { checkpointRef: parsed.data.checkpointRef }),
+    relatedFiles: parsed.data.relatedFiles ?? [],
+  }
+}
+
+function parseCheckpointName(raw: string): string | undefined {
+  const parsed = checkpointArgumentsSchema.safeParse(parseArguments(raw))
+  return parsed.success ? parsed.data.name : undefined
+}
+
+type TeamContextStep = (state: TeamContextProjectionState, event: SessionEvent) => TeamContextProjectionState
+
+function createStep(inputFromSeq?: number): TeamContextStep {
+  const isRolloverCall = (name: string): boolean => TEAM_ROLLOVER_TOOL_NAMES.includes(name)
+
+  const applyToolResult = (state: TeamContextProjectionState, event: SessionEvent & { type: 'tool/result' }): TeamContextProjectionState => {
+    const message = event.data.message
+    const index = state.openCalls.findIndex(call => call.callId === message.toolCallId)
+    if (index === -1) return state
+    const recorded = state.openCalls[index]!
+    const openCalls = state.openCalls.filter(call => call.callId !== recorded.callId)
+    if (message.isError === true || event.data.error !== undefined) return { ...state, openCalls }
+    const seq = event.seq
+    const turn = event.data.turn
+    if (isRolloverCall(recorded.name)) {
+      const parsed = parseRolloverArguments(recorded.arguments)
+      if (parsed === undefined) return { ...state, openCalls }
+      // One intent per unresolved turn; an intent whose turn already ended is
+      // ready, not spent, so a later-turn success can replace it once the
+      // in-process lock is gone — that is the retry path.
+      if (state.pending !== null && state.pending.turnEndSeq === -1) return { ...state, openCalls }
+      return {
+        ...state,
+        openCalls,
+        pending: {
+          handoff: parsed.handoff,
+          ...(parsed.checkpointRef === undefined ? {} : { checkpointRef: parsed.checkpointRef }),
+          relatedFiles: parsed.relatedFiles,
+          toolCallId: recorded.callId,
+          resultSeq: seq,
+          turn,
+          turnEndSeq: -1,
+        },
+      }
+    }
+    if (recorded.name === CONTEXT_CHECKPOINT_TOOL_NAME) {
+      const name = parseCheckpointName(recorded.arguments)
+      if (name === undefined) return { ...state, openCalls }
+      const entry: ContextCheckpointEntry = {
+        checkpointRef: checkpointRefFor(state.sessionId, recorded.callId),
+        name,
+        resultSeq: seq,
+        turn,
+        turnEndSeq: -1,
+      }
+      return { ...state, openCalls, checkpoints: [...state.checkpoints, entry] }
+    }
+    return { ...state, openCalls }
+  }
+
+  const applyInboxSpliced = (state: TeamContextProjectionState, inserted: readonly UserMessage[], seq: number): TeamContextProjectionState => {
+    const wakeBoundary = inputFromSeq !== undefined && seq >= inputFromSeq
+    if ((state.pending === null && !wakeBoundary) || inserted.length === 0) return state
+    const fresh: CarriedCandidate[] = []
+    for (const message of inserted) {
+      if (wakeBoundary) {
+        const source = message.source
+        if (matchesProducerKind(source.kind, 'agent-instructions') || isAgentTeamContextSource(message) || (isAgentTeamSource(source) && source.form === 'notice'
+          && (source.summary === TEAM_INBOX_NOTICE_SUMMARY || source.summary === TEAM_RECOVERY_NOTICE_SUMMARY))) continue
+      } else if (isRedeliverableTeamNotice(message)) continue
+      if (state.carriedCandidates.some(candidate => candidate.messageId === message.id)) continue
+      if (fresh.some(candidate => candidate.messageId === message.id)) continue
+      fresh.push({ messageId: message.id, surfacedTurn: -1, consumed: false })
+    }
+    if (fresh.length === 0) return state
+    return { ...state, carriedCandidates: [...state.carriedCandidates, ...fresh] }
+  }
+
+  const applyUserMessage = (state: TeamContextProjectionState, event: SessionEvent & { type: 'user/message' }): TeamContextProjectionState => {
+    let next = state
+    // Surfaced is not consumed: the loop appends `user/message` before the step
+    // runs, so a cancellation can still land between them.
+    if (next.carriedCandidates.some(candidate => !candidate.consumed && candidate.messageId === event.data.id)) {
+      next = {
+        ...next,
+        carriedCandidates: next.carriedCandidates.map(candidate => candidate.messageId === event.data.id && !candidate.consumed
+          ? { ...candidate, surfacedTurn: next.lastTurn }
+          : candidate),
+      }
+    }
+    const continuationRef = continuationCheckpointRefOf(event.data)
+    if (continuationRef === undefined) return next
+    const existing = next.continuations.find(entry => entry.checkpointRef === continuationRef)
+    if (existing !== undefined) {
+      if (existing.deliveredSeq !== -1) return next
+      return {
+        ...next,
+        continuations: next.continuations.map(entry => entry.checkpointRef === continuationRef ? { ...entry, deliveredSeq: event.seq } : entry),
+      }
+    }
+    return { ...next, continuations: [...next.continuations, { checkpointRef: continuationRef, deliveredSeq: event.seq }] }
+  }
+
+  const applyAssistantMessage = (state: TeamContextProjectionState, event: SessionEvent & { type: 'assistant/message' }): TeamContextProjectionState => {
+    if (state.carriedCandidates.length === 0 || event.data.interrupted === true) return state
+    let changed = false
+    const carriedCandidates = state.carriedCandidates.map(candidate => {
+      if (candidate.consumed || candidate.surfacedTurn !== event.data.turn) return candidate
+      changed = true
+      return { ...candidate, consumed: true }
+    })
+    return changed ? { ...state, carriedCandidates } : state
+  }
+
+  const applyTurnEnd = (state: TeamContextProjectionState, seq: number, turn: number): TeamContextProjectionState => {
+    let changed = false
+    // Only the turn that produced the call resolves it: a turn end from a later
+    // turn must never close an intent whose own turn never durably ended, or a
+    // spent intent would be revived by the next restart.
+    const checkpoints = state.checkpoints.map(entry => {
+      if (entry.turnEndSeq !== -1 || entry.turn !== turn) return entry
+      changed = true
+      return { ...entry, turnEndSeq: seq }
+    })
+    let pending = state.pending
+    if (pending !== null && pending.turnEndSeq === -1 && pending.turn === turn) {
+      pending = { ...pending, turnEndSeq: seq }
+      changed = true
+    }
+    return changed ? { ...state, checkpoints, pending } : state
+  }
+
+  return (state, event) => {
+    // The ancestor's events are that generation's facts: folding them here would
+    // key its checkpoints to this Session and arm its intent as this one's.
+    if (event.seq < state.inheritedEventCount) return state
+    switch (event.type) {
+      case 'tool/call': {
+        const { name, arguments: raw } = event.data
+        if (!isRolloverCall(name) && name !== CONTEXT_CHECKPOINT_TOOL_NAME) return state
+        return { ...state, openCalls: [...state.openCalls, { callId: event.data.callId, name, arguments: raw }] }
+      }
+      case 'tool/result':
+        return applyToolResult(state, event)
+      case 'turn/start':
+        return event.data.turn === state.lastTurn ? state : { ...state, lastTurn: event.data.turn }
+      case 'turn/end':
+        return applyTurnEnd(state, event.seq, event.data.turn)
+      case 'user/message':
+        return applyUserMessage(state, event)
+      case 'assistant/message':
+        return applyAssistantMessage(state, event)
+      case 'agent/inbox/spliced':
+        return applyInboxSpliced(state, event.data.inserted, event.seq)
+      default:
+        return state
+    }
   }
 }
 
 export function foldTeamContextProjection(
   events: readonly SessionEvent[],
   target: ContextFoldTarget,
-  host: ContextProjectionHost = new TeamContextProjectionHost(),
-): ContextProjectionState {
-  return foldEngineContextProjection(events, createTeamContextProjectionConfig(host), target)
+): TeamContextProjectionState {
+  const step = createStep(target.inputFromSeq)
+  let state = emptyContextProjectionState(target)
+  for (const event of events) state = step(state, event)
+  return state
 }
 
-export function createTeamContextProjectionDefinition(host: ContextProjectionHost): ReturnType<typeof createContextProjectionDefinition> {
-  return createContextProjectionDefinition(createTeamContextProjectionConfig(host))
+/** Register once per Host: the framework keeps one unit per key for every Session. */
+export function createTeamContextProjectionDefinition(): ProjectionDefinition<typeof CONTEXT_CONTINUITY_PROJECTION_KEY, TeamContextProjectionState> {
+  const step = createStep()
+  return {
+    key: CONTEXT_CONTINUITY_PROJECTION_KEY,
+    stateVersion: 3,
+    stateSchema: contextProjectionStateSchema,
+    init: (header: SessionHeader, inheritedEventCount: SessionLogOffset) => emptyContextProjectionState({
+      sessionId: header.id,
+      inheritedEventCount: Number(inheritedEventCount),
+    }),
+    apply: (state, event) => step(state, event),
+  }
 }
 
-export function checkpointByRef(state: ContextProjectionState, checkpointRef: string): ContextCheckpointEntry | undefined {
-  return state.checkpoints.find(entry => entry.checkpointRef === checkpointRef && entry.turnEndSeq !== -1)
-}
-
-export function boundaryByRef(state: ContextProjectionState, ref: string): DomainBoundary | undefined {
-  return state.boundaries.find(boundary => boundaryRefFor(state.sessionId, boundary.resultSeq) === ref)
-}
-
-export function carriedInputOf(state: ContextProjectionState, events: readonly SessionEvent[]): readonly UserMessage[] {
+export function carriedInputOf(
+  state: TeamContextProjectionState,
+  events: readonly SessionEvent[],
+): readonly UserMessage[] {
   const outstanding = state.carriedCandidates.filter(candidate => !candidate.consumed)
   if (outstanding.length === 0) return []
   const byId = new Map<string, UserMessage>()

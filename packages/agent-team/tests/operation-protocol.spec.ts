@@ -44,6 +44,7 @@ import type {
   AgentTeamChannelRef,
   AgentTeamChangeScope,
   AgentTeamClaim,
+  AgentTeamHostActor,
   AgentTeamHumanActor,
   AgentTeamInboxDelta,
   AgentTeamMemberActor,
@@ -72,6 +73,7 @@ const previousOperationId = 'operation:protocol-seed' as AgentTeamOperationId
 const memberId = 'member:protocol' as AgentTeamMemberId
 const memberHandle = 'protocol-agent'
 const memberActor: AgentTeamMemberActor = { kind: 'member', memberId, handle: memberHandle }
+const hostActor: AgentTeamHostActor = { kind: 'host', handle: 'agent-team' }
 const otherMemberId = 'member:protocol-other' as AgentTeamMemberId
 
 /**
@@ -118,7 +120,7 @@ const taskfulThread: AgentTeamThread = { threadRef: humanThread, taskRef: fixtur
 const plainThread: AgentTeamThread = { threadRef: humanThread, revision: 6 }
 const fixtureClaimRef = 'claim:protocol-fixture' as AgentTeamClaim['claimRef']
 
-function opBase(operationId: string, value: string, sequence: number, actor: AgentTeamActor = human) {
+function opBase<A extends AgentTeamActor>(operationId: string, value: string, sequence: number, actor: A = human as A) {
   return {
     sequence,
     operationId: operationId as AgentTeamOperationId,
@@ -208,6 +210,17 @@ const memberSessionRolledOver: Op<'team/member-session-rolled-over'> = {
     newSessionId: SessionId('session:protocol-next'),
     handoffEventSeq: SessionSeq(7),
     trigger: 'model',
+  },
+}
+
+const memberSessionRecycled: Op<'team/member-session-recycled'> = {
+  ...opBase('operation:protocol-28', 'request:protocol-member-session-recycled', 28, hostActor),
+  previousOperationId,
+  kind: 'team/member-session-recycled',
+  data: {
+    member: { ...fixtureMember, sessionId: SessionId('session:protocol-fresh') },
+    previousSessionId: SessionId('session:protocol'),
+    newSessionId: SessionId('session:protocol-fresh'),
   },
 }
 
@@ -686,56 +699,40 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
   'team/member-session-renewed': {
     stored: memberSessionRenewed,
     legacyShapes: [],
-    retry: {
-      same: async () => {
-        const out = await ledger.renewMemberSession({
-          requestId: memberSessionRenewed.requestId,
-          actor: human,
-          workspaceId: alpha,
-          memberId,
-          sessionId: memberSessionRenewed.data.member.sessionId,
-        })
-        expect(out.value.member.sessionId, 'the renew mapper answers with the stored Session move').toBe(memberSessionRenewed.data.member.sessionId)
-        return out
-      },
-      changed: () => ledger.renewMemberSession({
-        requestId: memberSessionRenewed.requestId,
-        actor: human,
-        workspaceId: alpha,
-        memberId,
-        sessionId: SessionId('session:protocol-other'),
-      }),
-    },
+    retry: { replayOnly: 'legacy replay-only kind: the Human clear-context Remote and its renewal writer were removed, so only old-ledger replay reads it' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },
   'team/member-session-rolled-over': {
     stored: memberSessionRolledOver,
     legacyShapes: [],
+    retry: { replayOnly: 'legacy replay-only kind: the Member-authored rollover path is gone, so only old-ledger replay reads it' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/member-session-recycled': {
+    stored: memberSessionRecycled,
+    legacyShapes: [],
     retry: {
       same: async () => {
-        const out = await ledger.rolloverMemberSession({
-          requestId: memberSessionRolledOver.requestId,
-          actor: memberActor,
+        const out = await ledger.recycleMemberSession({
+          requestId: memberSessionRecycled.requestId,
+          actor: hostActor,
           workspaceId: alpha,
           memberId,
-          previousSessionId: memberSessionRolledOver.data.previousSessionId,
-          newSessionId: memberSessionRolledOver.data.member.sessionId,
-          handoffEventSeq: memberSessionRolledOver.data.handoffEventSeq,
-          trigger: memberSessionRolledOver.data.trigger,
+          previousSessionId: memberSessionRecycled.data.previousSessionId,
+          newSessionId: memberSessionRecycled.data.newSessionId,
         })
-        expect(out.value.member.sessionId, 'the rollover mapper answers with the stored Session move').toBe(memberSessionRolledOver.data.member.sessionId)
+        expect(out.value.member.sessionId, 'the recycle mapper answers with the stored Session move').toBe(memberSessionRecycled.data.newSessionId)
         return out
       },
-      changed: () => ledger.rolloverMemberSession({
-        requestId: memberSessionRolledOver.requestId,
-        actor: memberActor,
+      changed: () => ledger.recycleMemberSession({
+        requestId: memberSessionRecycled.requestId,
+        actor: hostActor,
         workspaceId: alpha,
         memberId,
-        previousSessionId: memberSessionRolledOver.data.previousSessionId,
-        newSessionId: memberSessionRolledOver.data.member.sessionId,
-        handoffEventSeq: SessionSeq(8),
-        trigger: memberSessionRolledOver.data.trigger,
+        previousSessionId: memberSessionRecycled.data.previousSessionId,
+        newSessionId: SessionId('session:protocol-other-fresh'),
       }),
     },
     legacy: { normalize: 'none', repair: 'none' },
@@ -1182,12 +1179,11 @@ async function seedLedger(): Promise<void> {
   }))
   if (fromMember.kind !== 'committed') throw new Error(`seed message committed as '${fromMember.kind}'`)
   expect(fromMember.thread.threadRef, 'seed Thread must take the deterministic ref the fixtures pin').toBe(memberThread)
-  await ensureFollow(human, humanThread, 'seed:follow-human')
-  await ensureFollow(memberActor, memberThread, 'seed:follow-member')
+  await followThreadForLegacyRepair(human, humanThread, 'seed:follow-human')
+  await followThreadForLegacyRepair(memberActor, memberThread, 'seed:follow-member')
 }
 
-/** Legacy channel-scope repair only fires where someone follows a seeded Thread. */
-async function ensureFollow(actor: AgentTeamHumanActor | AgentTeamMemberActor, threadRef: AgentTeamThreadRef, value: string): Promise<void> {
+async function followThreadForLegacyRepair(actor: AgentTeamHumanActor | AgentTeamMemberActor, threadRef: AgentTeamThreadRef, value: string): Promise<void> {
   if (ledger.attentionStatus(actor, { workspaceId: alpha, threadRef }).attention !== undefined) return
   await ledger.changeAttention({ requestId: requestId(value), actor, workspaceId: alpha, threadRef, action: 'follow' })
 }

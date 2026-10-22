@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react'
-import type { MutableRefObject } from 'react'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 
 export function useEditDialogSave<Request>({ save, onCommitted, onClose }: {
@@ -9,13 +8,20 @@ export function useEditDialogSave<Request>({ save, onCommitted, onClose }: {
 }): {
   readonly saving: boolean
   readonly error: string | undefined
-  readonly pendingRequest: MutableRefObject<Request | undefined>
-  readonly save: (request: Request) => Promise<void>
+  /**
+   * Submit one request. `build` receives the still-pending request — the one a
+   * previous attempt sent and the Host has not yet answered — so a retry of an
+   * unchanged form re-mints nothing; anything else starts a new operation.
+   */
+  readonly save: (build: (previous: Request | undefined) => Request) => Promise<void>
+  /** Forget the pending request: an edit means the next submit is a new operation. */
+  readonly invalidate: () => void
 } {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
   const pendingRequest = useRef<Request>()
-  const submit = async (request: Request): Promise<void> => {
+  const submit = async (build: (previous: Request | undefined) => Request): Promise<void> => {
+    const request = build(pendingRequest.current)
     pendingRequest.current = request
     setSaving(true)
     setError(undefined)
@@ -34,5 +40,10 @@ export function useEditDialogSave<Request>({ save, onCommitted, onClose }: {
       setSaving(false)
     }
   }
-  return { saving, error, pendingRequest, save: submit }
+  return {
+    saving,
+    error,
+    save: submit,
+    invalidate: () => { pendingRequest.current = undefined },
+  }
 }

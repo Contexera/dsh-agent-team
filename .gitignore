@@ -5,6 +5,9 @@ lib/
 .DS_Store
 artifacts/
 .scratch/local/
+# Open work items are working material; they enter history only as archive/
+# entries when closed.
+.scratch/active/
 # Local generation-time state: sync-paths.mjs rewrites it per run (a cert
 # generation records the tag-suffixed checkout name). Never commit it.
 .generated-harness

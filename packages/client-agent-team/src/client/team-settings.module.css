@@ -1,9 +1,8 @@
-/* The Team settings page: two identity rows, the judge's endpoint group, the
- * environment check and the version footnote in one column. Geometry follows
- * the shipped settings page (760px column, 18px heading) and the shipped
- * preference row (16px/0 padding, border-l2 separator, 12px control gap); the
- * controls themselves are the shipped Button/Input atoms and the shipped
- * settings form's own fields, so only their seats are styled here. */
+/* The Team settings page: two identity rows, the environment check and the
+ * version footnote in one column. Geometry follows the shipped settings page
+ * (760px column, 18px heading) and the shipped preference row (16px/0 padding,
+ * border-l2 separator, 12px control gap); the controls themselves are the
+ * shipped Button/Input atoms, so only their seats are styled here. */
 
 .section {
   container-type: inline-size;
@@ -43,8 +42,6 @@
   padding: 16px 0;
 }
 
-/* The last identity row is followed by the judge group, whose own top rule is
- * the separator; a trailing rule here would draw a second line beside it. */
 .row:last-child {
   border-bottom: none;
 }
@@ -111,129 +108,6 @@
   line-height: 40px;
 }
 
-/* The judge's group opens on the rule that closes the identity rows: one
- * settings document, read as two groups. Its header is the whole row — the
- * state of jev stands there, and the controls that decide it wait behind the
- * disclosure, because the endpoint is set once and then left alone. */
-.group {
-  border-top: 1px solid var(--dsw-alias-border-l2);
-  display: flex;
-  flex-direction: column;
-}
-
-.groupToggle {
-  align-items: center;
-  background: none;
-  border: 0;
-  color: var(--dsw-alias-label-primary);
-  cursor: pointer;
-  display: flex;
-  font: inherit;
-  gap: 6px;
-  min-width: 0;
-  padding: 14px 0;
-  text-align: left;
-  width: 100%;
-}
-
-.groupToggle:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: 2px;
-}
-
-.groupChevron {
-  color: var(--dsw-alias-label-tertiary);
-  display: inline-flex;
-  flex: none;
-}
-
-.groupTitle {
-  flex: none;
-  font-size: 14px;
-  line-height: 22px;
-}
-
-/* A group's title row without a disclosure control. It repeats the toggle's
- * own padding so every group's title sits the same distance below the rule
- * above it, whether or not it can be collapsed. */
-.groupHeader {
-  align-items: center;
-  display: flex;
-  gap: 6px;
-  padding: 14px 0;
-}
-
-/* The row's answer, at the far end of the line it belongs to. The glyph is
- * decorative — the sentence carries the verdict — and only an unreachable
- * endpoint takes a warning color, because a missing key is a step to take
- * rather than something broken. */
-.status {
-  align-items: center;
-  color: var(--dsw-alias-label-tertiary);
-  display: inline-flex;
-  font-size: 12px;
-  gap: 4px;
-  line-height: 18px;
-  margin-left: auto;
-  min-width: 0;
-  text-align: right;
-}
-
-.statusIcon {
-  color: currentColor;
-  flex: none;
-  height: 14px;
-  width: 14px;
-}
-
-.status[data-context-judge='enabled'] {
-  color: var(--dsw-alias-label-secondary);
-}
-
-.status[data-context-judge='enabled'] .statusIcon {
-  color: var(--dsw-alias-state-success-primary);
-}
-
-.status[data-context-judge='unavailable'] {
-  color: var(--dsw-alias-state-warn-label);
-}
-
-/* The expanded body: what the endpoint is for, then the three controls the
- * shipped settings form draws. */
-.groupBody {
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 4px;
-}
-
-.groupHint {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-  margin: 0;
-  padding-bottom: 4px;
-}
-
-/* The clear sits under the write-only control it belongs to, and says why it is
- * unavailable while a draft is staged. */
-.clearRow {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-bottom: 4px;
-}
-
-.clearHint {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-  margin: 0;
-}
-
-/* The environment check answers a question about this installation rather than
- * about the endpoint above it, so it opens on the same rule that separates the
- * page's other rows: without it the verdict reads as the jev row's own. */
 .environment {
   border-top: 1px solid var(--dsw-alias-border-l2);
   padding-top: 16px;
@@ -287,10 +161,7 @@
 /* The settings shell keeps its 188px nav rail at every viewport (shipped
  * `.panel` is `max-width: calc(100vw - 48px)` with a `flex: none` rail), so on a
  * phone the content column is ~100px wide. Rather than let a field and its
- * seats squeeze out of the column, the row stacks, the judge's answer moves
- * under the title it answers for, and the shipped field head turns into a
- * column of its own — at that width a label and its override badges cannot
- * share a line, and the badges would otherwise be painted over the label. The
+ * seats squeeze out of the column, the row stacks and the controls wrap. The
  * section is its own container, so this answers the width it actually gets, not
  * the viewport. */
 @container (max-width: 420px) {
@@ -311,43 +182,5 @@
   .controls {
     flex-wrap: wrap;
   }
-
-  .groupToggle {
-    flex-wrap: wrap;
-  }
-
-  /* The answer takes a line of its own, flush with the row it answers for, and
-   * its glyph leads the sentence instead of hanging at the middle of a wrapped
-   * block: at this width the sentence itself takes two or three lines, and a
-   * glyph parked in a column of its own would push every line 18px right. */
-  .status {
-    align-items: flex-start;
-    margin-left: 0;
-    text-align: left;
-    width: 100%;
-  }
-
-  .groupBody [class*='head'] {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .groupBody [class*='head'] > * {
-    flex: none;
-  }
-
-  .clearRow {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 }
 
-/* A refused settings write, stated under the control that made it: the switch
-   must not sit in a state the Host never accepted without saying so. */
-.groupNotice {
-  color: var(--dsw-alias-state-error-primary);
-  font-size: 12px;
-  line-height: 18px;
-  margin: 0;
-}

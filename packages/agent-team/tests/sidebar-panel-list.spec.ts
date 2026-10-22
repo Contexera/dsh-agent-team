@@ -8,7 +8,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-// @ts-expect-error untyped shared resolution module
 import { harnessDir } from '../../../scripts/harness-dir.mjs'
 
 const sidebarRoot = join(harnessDir, 'packages/client/ui-sidebar/src/client/SidebarRoot.tsx')

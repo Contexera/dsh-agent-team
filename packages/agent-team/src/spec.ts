@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamMemberCapabilities, AgentTeamModelSelection } from './types.ts'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
-import type { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
   AgentTeamActivityRef,
@@ -25,6 +25,7 @@ const memberIdSchema = z.string().regex(/^member:[^:]+$/).transform(value => val
 const workspaceIdSchema = z.string().min(1).transform(value => value as WorkspaceId)
 const sessionIdSchema = z.string().min(1).transform(value => value as SessionId)
 const sessionSeqSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionSeq)
+const sessionLogOffsetSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionLogOffset)
 const contextCheckpointRefSchema = z.string().regex(/^(context-checkpoint-[0-9a-f]{64}|team-boundary-[0-9a-f]{64})$/).transform(value => value as AgentTeamContextCheckpointRef)
 const channelRefSchema = z.string().regex(/^channel:[^:]+$/).transform(value => value as AgentTeamChannelRef)
 const messageRefSchema = z.string().regex(/^message:[^:]+$/).transform(value => value as AgentTeamMessageRef)
@@ -37,6 +38,7 @@ const attachmentIdSchema = z.string().min(1).transform(value => value as AgentTe
 const actorSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('human'), memberId: memberIdSchema, handle: z.string().min(1) }).strict(),
   z.object({ kind: z.literal('member'), memberId: memberIdSchema, handle: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal('host'), handle: z.literal('agent-team') }).strict(),
 ])
 
 const operationBase = {
@@ -272,12 +274,12 @@ const claimOperation = (kind: 'team/claim-created' | 'team/claim-done' | 'team/c
 }).strict()
 
 /**
- * The five departure-fact collections a releasing operation persists. All four
- * release kinds carry this snapshot under their own `kind` literal and their own
- * identifying fields; the durable half that must stay identical lives here once,
- * so a new release kind cannot silently drop or invent a field.
+ * The departure facts a releasing operation persists. Every release kind
+ * carries this snapshot under its own `kind` literal and its own identifying
+ * fields; the durable half that must stay identical lives here once, so a new
+ * release kind cannot silently drop or invent a field.
  */
-const releaseSnapshotFields = {
+const releaseSnapshotSchema = {
   claims: z.array(claimSchema),
   activities: z.array(claimsReleasedActivitySchema),
   tasks: z.array(taskSchema),
@@ -358,7 +360,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     kind: z.literal('team/member-archived'),
     data: z.object({
       member: memberSchema,
-      ...releaseSnapshotFields,
+      ...releaseSnapshotSchema,
     }).strict(),
   }).strict(),
   z.object({
@@ -397,6 +399,17 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/member-session-recycled'),
+    data: z.object({
+      member: memberSchema,
+      previousSessionId: sessionIdSchema,
+      newSessionId: sessionIdSchema,
+      inputFromSeq: sessionLogOffsetSchema.optional(),
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/channel-updated'),
     data: z.object({ workspaceId: workspaceIdSchema, channel: channelSchema }).strict(),
   }).strict(),
@@ -420,7 +433,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       workspaceId: workspaceIdSchema,
       channelRef: channelRefSchema,
       memberId: memberIdSchema,
-      ...releaseSnapshotFields,
+      ...releaseSnapshotSchema,
     }).strict(),
   }).strict(),
   z.object({
@@ -439,7 +452,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     data: z.object({
       workspaceId: workspaceIdSchema,
       memberId: memberIdSchema,
-      ...releaseSnapshotFields,
+      ...releaseSnapshotSchema,
     }).strict(),
   }).strict(),
   z.object({
@@ -449,7 +462,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     data: z.object({
       workspaceId: workspaceIdSchema,
       channel: channelSchema,
-      ...releaseSnapshotFields,
+      ...releaseSnapshotSchema,
     }).strict(),
   }).strict(),
   z.object({
@@ -534,7 +547,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     kind: z.literal('team/member-removed'),
     data: z.object({
       member: memberSchema,
-      ...releaseSnapshotFields,
+      ...releaseSnapshotSchema,
     }).strict(),
   }).strict(),
   z.object({
@@ -553,7 +566,14 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
 /** Durable validator for the closed Agent Team operation union; ledgers written before message occurredAt existed normalize on load. */
 export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = storedAgentTeamOperationSchema.transform(stampOperationMessages)
 
-/** Versioned durable Agent Team declaration; v1 is the first public ledger format and older local media reject at open. */
+/**
+ * Versioned durable Agent Team declaration; v1 is the first public ledger
+ * format and older local media reject at open. The number moves only when a
+ * stored record would mean something different: this layout has no migration,
+ * so a bump breaks every existing ledger. Adding an operation kind is not that
+ * — an older build's records keep parsing — which is why every additive kind
+ * since the public format landed at v1.
+ */
 export const agentTeamDomainSpec = defineDomain({
   name: 'agent_team',
   version: 1,

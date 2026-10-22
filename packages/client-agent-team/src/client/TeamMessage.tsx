@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from 'react'
 import { MarkdownText, Modal, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -8,7 +8,7 @@ import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
 import { cachedResolvedTaskRef, resolveUnknownTaskRefs, useResolvedTaskRefVersion, type ResolvedTaskRef } from './refs.ts'
 import { cachedResolvedThreadRef, resolveUnknownThreadRefs, useResolvedThreadRefVersion, type ResolvedThreadRef } from './refs.ts'
-import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, isSingleBrandedRef, memberHue, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, type MentionHandle } from './team-formatters.ts'
+import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, isSingleBrandedRef, memberHue, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, unshownMentionNames, type MentionHandle, type PlannedMessageBody } from './team-formatters.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import css from './conversation.module.css'
 
@@ -62,12 +62,12 @@ export interface TeamMessageProps {
   readonly onToggleCard?: ((messageRef: AgentTeamMessageRef) => void) | undefined
   /**
    * Whether this surface offers the row's actions at all — copy, and the
-   * reader's own mention notice. Absent, the surface offers them exactly when it
-   * offers a quote, which is how a row without this prop has always behaved.
-   * It is separate because withholding quotes is a policy about one action, and
-   * it must not take the others with it.
+   * reader's own mention notice. `inherit` (the default) offers them exactly
+   * when the surface also offers a quote; `always` offers them without one,
+   * because withholding quotes is a policy about one action and it must not
+   * take the others with it; `never` withholds them.
    */
-  readonly rowActions?: boolean
+  readonly rowActions?: 'inherit' | 'always' | 'never'
   readonly attachments?: readonly AgentTeamMessageAttachment[] | undefined
   /** The Human's uploaded avatar; only the Human's own row draws it, and absent
    * or undecodable bytes draw the initial on the business-tinted chip. */
@@ -100,10 +100,6 @@ export interface TeamMessageProps {
  */
 export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
-  // Only the Human's own row may draw a picture: the profile owns those bytes,
-  // and one seat painting the reader's face for another author would name two
-  // people alike. A seat draws it while those bytes decode; anything else keeps
-  // the initial, which is what the fallback promises.
   const identityImage = useAvatarImage(human ? avatarUrl : undefined)
   // Literal bodies carry mention chips inline — Human input always, and
   // plain-prose Agent bodies where literal rendering loses nothing. Rich
@@ -116,47 +112,22 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   // The chip names what the body names, not what the Host delivered to: a
   // Thread reaches its Human in every row, and only the words can mention them.
   const mentionedInBody = bodyMentionsHuman(body, readerName)
-  // The fallback row lists mentions the body text does not carry. The reader's
-  // own name never belongs there: their name is either chipped in place or not
-  // named at all. Neither does an author the quote line already names — the
-  // quote states that delivery itself, and a bare chip under it would read as a
-  // mention the body never wrote. A quote that no longer resolves names nobody,
-  // so there the chip is the only place the delivery still shows.
+  // The fallback row lists mentions the body text does not carry, minus the
+  // reader's own name and the author the quote line already names.
   const quoteAuthor = replyTo === undefined ? undefined : replyTo.senderName.replace(/^@/, '')
-  const fallbackNames = plan.fallbackNames.filter(name => name !== readerName && name !== quoteAuthor)
+  const fallbackNames = unshownMentionNames(plan.fallbackNames, readerName, quoteAuthor)
   const displayBody = plan.displayBody
-  const { richAgentBody } = plan
-  // Resolved refs re-label once the Host lookup lands; the version tokens
-  // refresh literal links and rendered Markdown prose.
-  const taskRefVersion = useResolvedTaskRefVersion()
-  const threadRefVersion = useResolvedThreadRefVersion()
-  const bodyTaskRefs = plan.taskRefs
-  const bodyTaskRefKey = bodyTaskRefs.join(',')
-  const bodyThreadRefs = plan.threadRefs
-  const bodyThreadRefKey = bodyThreadRefs.join(',')
-  useEffect(() => {
-    if (onResolveTaskRefs !== undefined && bodyTaskRefKey !== '') void resolveUnknownTaskRefs(bodyTaskRefs, onResolveTaskRefs)
-    if (onResolveThreadRefs !== undefined && bodyThreadRefKey !== '') void resolveUnknownThreadRefs(bodyThreadRefs, onResolveThreadRefs)
-  }, [onResolveTaskRefs, onResolveThreadRefs, bodyTaskRefKey, bodyThreadRefKey, taskRefVersion, threadRefVersion])
-  const taskLabel = useCallback((taskNumber: number): string => t?.('taskLabel', { number: taskNumber }) ?? `Task #${taskNumber}`, [t])
-  // Thread chips carry the cited Thread's opening-line gist, so one taskless
-  // Thread no longer reads exactly like the next. Unresolvable refs never
-  // reach this label — they stay plain text (see renderRefs).
-  const threadChipLabel = useCallback((title: string): string => {
-    const base = t?.('threadLabel') ?? 'Thread'
-    return title === '' ? base : `${base} · ${title}`
-  }, [t])
-  // Channel chips name the cited Channel; member chips name the cited Member
-  // with a handle — deliberately distinct from `@mention` chips, which notify.
-  const channelChipLabel = useCallback((name: string): string => t?.('channelLabel', { name }) ?? `Channel · ${name}`, [t])
-  const memberChipLabel = useCallback((name: string): string => t?.('memberLabel', { name }) ?? `Member · @${name}`, [t])
-  // Markdown chrome (code-copy buttons, footnotes heading) is locale copy the
-  // cordis-free primitive receives via props. Stable per locale revision — a
-  // fresh object per render would rebuild the component table every chunk.
-  const markdownLabels = useMemo<MarkdownLabels>(() => ({
-    code: { copyLabel: t?.('copyCode') ?? 'Copy', copiedLabel: t?.('copiedCode') ?? 'Copied' },
-    footnotes: t?.('markdownFootnotes') ?? 'Footnotes',
-  }), [t])
+  const { markdownRef, markdownLabels, taskLabel, renderRefs } = useResolvedBodyRefs({
+    plan,
+    mentionNames,
+    onOpenRef,
+    onOpenMemberSession,
+    onResolveTaskRefs,
+    onResolveThreadRefs,
+    channelNameOf,
+    memberOf,
+    t,
+  })
   // Long bodies start clamped behind the expand control. The default derives
   // from the body alone; the toggle itself is per-mount view state nothing
   // persists.
@@ -187,72 +158,20 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   }, [messageRef, onToggleCard])
   const clampable = shouldClampMessage(displayBody)
   const clamped = clampable && !expanded
-  const markdownRef = useRef<HTMLDivElement>(null)
-  useLayoutEffect(() => {
-    const root = markdownRef.current
-    if (!richAgentBody || root === null || onOpenRef === undefined) return
-    const textNodes = markdownProseTextNodes(root)
-    const styledRefCodes = markdownStyledRefCodeElements(root)
-    const taskRefs = [...new Set([...textNodes.map(node => node.data), ...styledRefCodes.map(code => code.textContent ?? '')]
-      .flatMap(text => splitBrandedRefs(text)
-        .filter(segment => segment.ref?.startsWith('task:') === true)
-        .map(segment => segment.ref as AgentTeamTaskRef)))]
-    const threadRefs = [...new Set([...textNodes.map(node => node.data), ...styledRefCodes.map(code => code.textContent ?? '')]
-      .flatMap(text => splitBrandedRefs(text)
-        .filter(segment => segment.ref?.startsWith('thread:') === true)
-        .map(segment => segment.ref as AgentTeamThreadRef)))]
-    if (onResolveTaskRefs !== undefined && taskRefs.length > 0) void resolveUnknownTaskRefs(taskRefs, onResolveTaskRefs)
-    if (onResolveThreadRefs !== undefined && threadRefs.length > 0) void resolveUnknownThreadRefs(threadRefs, onResolveThreadRefs)
-    for (const code of styledRefCodes) renderResolvedMarkdownCodeRef(code, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)
-    for (const node of textNodes) renderResolvedMarkdownText(node, mentionNames ?? [], taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)
-    for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-task-ref]')) {
-      const taskRef = button.dataset.taskRef as AgentTeamTaskRef | undefined
-      const hit = taskRef === undefined ? undefined : cachedResolvedTaskRef(taskRef)
-      if (taskRef !== undefined && hit !== undefined) button.textContent = taskLabel(hit.taskNumber)
-    }
-    for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-thread-ref]')) {
-      const threadRef = button.dataset.threadRef as AgentTeamThreadRef | undefined
-      const hit = threadRef === undefined ? undefined : cachedResolvedThreadRef(threadRef)
-      if (threadRef !== undefined && hit !== undefined) button.textContent = threadChipLabel(hit.title)
-    }
-  }, [richAgentBody, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, taskRefVersion, threadRefVersion, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf, mentionNames])
-  useEffect(() => {
-    const root = markdownRef.current
-    if (!richAgentBody || root === null || onOpenRef === undefined) return
-    const openTask = (event: Event): void => {
-      const target = event.target
-      if (!(target instanceof Element)) return
-      const button = target.closest('button[data-ref], button[data-task-ref], button[data-thread-ref], button[data-member-session]')
-      if (button === null || !root.contains(button)) return
-      if (button instanceof HTMLElement) {
-        // Member chips carry their session, not a Team ref: the same jump
-        // the agent card performs. Every other chip resolves to onOpenRef.
-        const sessionId = button.dataset.memberSession as SessionId | undefined
-        if (sessionId !== undefined) {
-          onOpenMemberSession?.(sessionId)
-          return
-        }
-        const ref = button.dataset.ref ?? button.dataset.taskRef ?? button.dataset.threadRef
-        if (ref !== undefined) onOpenRef(ref)
-      }
-    }
-    root.addEventListener('click', openTask)
-    return () => { root.removeEventListener('click', openTask) }
-  }, [richAgentBody, onOpenRef, onOpenMemberSession])
   const bodyNode = plan.render === 'inline' && plan.inline !== undefined
     ? <div className={css.messageText}>
         {plan.inline.segments.map((segment, index) => segment.mention
           ? <span key={index} className={css.mention} data-mention-human={readerName !== undefined && segment.name === readerName ? '' : undefined}>{segment.text}</span>
-          : <Fragment key={index}>{renderRefs(segment.text, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)}</Fragment>)}
+          : <Fragment key={index}>{renderRefs(segment.text)}</Fragment>)}
       </div>
     : plan.render === 'literal'
-      ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)}</div>
+      ? <div className={css.messageText}>{onOpenRef === undefined ? displayBody : renderRefs(displayBody)}</div>
       : <div ref={markdownRef} className={css.messageMarkdown}><MarkdownText key={`${displayBody}:${onOpenRef === undefined ? 'literal' : 'refs'}`} text={displayBody} labels={markdownLabels} /></div>
   return (
     <article className={css.messageRow} data-human={human || undefined} data-grouped={grouped || undefined} data-mentions-me={mentionedInBody || undefined} data-message-ref={messageRef} data-replying-to={replyTarget || undefined} data-reply-flash={replyFlash || undefined} data-card-open={cardOpen || undefined} onClick={onToggleCard === undefined ? undefined : toggleCard}>
-      {identityImage.src === undefined
+      {identityImage.image.kind === 'initial'
         ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{senderName.replace('@', '').slice(0, 1).toUpperCase()}</div>
-        : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
+        : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.image.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
       {/* A continuation row has no identity line for its own time, so the time
           sits in the avatar seat under where the face would be — out of the
           reading path, and off the row's right edge where the words live. The
@@ -325,7 +244,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
           the row is under the pointer or the caret. The card is the only raised
           surface in a Message row — the row itself stays flat, so one hovered
           Message gains a layer instead of the whole timeline gaining texture. */}
-      {(rowActions ?? onReply !== undefined) && <div className={css.messageCard} data-message-card="">
+      {(rowActions !== 'never' && (rowActions === 'always' || onReply !== undefined)) && <div className={css.messageCard} data-message-card="">
         {mentionedInBody && <span className={css.cardMention} data-mentions-you="">{t?.('mentionsMe') ?? 'Mentioned you'}</span>}
         <button type="button" className={css.cardAction} data-copy-message="" onClick={copyMessage}
           aria-label={t?.('copyMessageLabel') ?? 'Copy this message'}>
@@ -340,6 +259,116 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
     </article>
   )
 })
+
+/**
+ * The Message's own ref/mention resolution, kept inside the component so the
+ * Task-ref subscription a memoized row holds never detaches when its caller
+ * skips a render.
+ */
+function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSession, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, t }: {
+  readonly plan: PlannedMessageBody
+  readonly mentionNames?: readonly MentionHandle[] | undefined
+  readonly onOpenRef: ((ref: string) => void) | undefined
+  readonly onOpenMemberSession: ((sessionId: SessionId) => void) | undefined
+  readonly onResolveTaskRefs: ((taskRefs: readonly AgentTeamTaskRef[]) => Promise<readonly ResolvedTaskRef[]>) | undefined
+  readonly onResolveThreadRefs: ((threadRefs: readonly AgentTeamThreadRef[]) => Promise<readonly ResolvedThreadRef[]>) | undefined
+  readonly channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined
+  readonly memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined
+  readonly t: TeamConversationProps['t'] | undefined
+}): {
+  /** Attach to the Markdown wrapper; the post-render chip pass walks this root. */
+  readonly markdownRef: RefObject<HTMLDivElement>
+  readonly markdownLabels: MarkdownLabels
+  readonly taskLabel: (taskNumber: number) => string
+  readonly renderRefs: (text: string) => ReactNode
+} {
+  const { richAgentBody } = plan
+  // Resolved refs re-label once the Host lookup lands; the version tokens
+  // refresh literal links and rendered Markdown prose.
+  const taskRefVersion = useResolvedTaskRefVersion()
+  const threadRefVersion = useResolvedThreadRefVersion()
+  const bodyTaskRefs = plan.taskRefs
+  const bodyTaskRefKey = bodyTaskRefs.join(',')
+  const bodyThreadRefs = plan.threadRefs
+  const bodyThreadRefKey = bodyThreadRefs.join(',')
+  useEffect(() => {
+    if (onResolveTaskRefs !== undefined && bodyTaskRefKey !== '') void resolveUnknownTaskRefs(bodyTaskRefs, onResolveTaskRefs)
+    if (onResolveThreadRefs !== undefined && bodyThreadRefKey !== '') void resolveUnknownThreadRefs(bodyThreadRefs, onResolveThreadRefs)
+  }, [onResolveTaskRefs, onResolveThreadRefs, bodyTaskRefKey, bodyThreadRefKey, taskRefVersion, threadRefVersion])
+  const taskLabel = useCallback((taskNumber: number): string => t?.('taskLabel', { number: taskNumber }) ?? `Task #${taskNumber}`, [t])
+  // Thread chips carry the cited Thread's opening-line gist, so one taskless
+  // Thread no longer reads exactly like the next. Unresolvable refs never
+  // reach this label — they stay plain text (see renderRefs).
+  const threadChipLabel = useCallback((title: string): string => {
+    const base = t?.('threadLabel') ?? 'Thread'
+    return title === '' ? base : `${base} · ${title}`
+  }, [t])
+  // Channel chips name the cited Channel; member chips name the cited Member
+  // with a handle — deliberately distinct from `@mention` chips, which notify.
+  const channelChipLabel = useCallback((name: string): string => t?.('channelLabel', { name }) ?? `Channel · ${name}`, [t])
+  const memberChipLabel = useCallback((name: string): string => t?.('memberLabel', { name }) ?? `Member · @${name}`, [t])
+  // Markdown chrome (code-copy buttons, footnotes heading) is locale copy the
+  // cordis-free primitive receives via props. Stable per locale revision — a
+  // fresh object per render would rebuild the component table every chunk.
+  const markdownLabels = useMemo<MarkdownLabels>(() => ({
+    code: { copyLabel: t?.('copyCode') ?? 'Copy', copiedLabel: t?.('copiedCode') ?? 'Copied' },
+    footnotes: t?.('markdownFootnotes') ?? 'Footnotes',
+  }), [t])
+  const markdownRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const root = markdownRef.current
+    if (!richAgentBody || root === null || onOpenRef === undefined) return
+    const textNodes = markdownProseTextNodes(root)
+    const styledRefCodes = markdownStyledRefCodeElements(root)
+    const taskRefs = [...new Set([...textNodes.map(node => node.data), ...styledRefCodes.map(code => code.textContent ?? '')]
+      .flatMap(text => splitBrandedRefs(text)
+        .filter(segment => segment.ref?.startsWith('task:') === true)
+        .map(segment => segment.ref as AgentTeamTaskRef)))]
+    const threadRefs = [...new Set([...textNodes.map(node => node.data), ...styledRefCodes.map(code => code.textContent ?? '')]
+      .flatMap(text => splitBrandedRefs(text)
+        .filter(segment => segment.ref?.startsWith('thread:') === true)
+        .map(segment => segment.ref as AgentTeamThreadRef)))]
+    if (onResolveTaskRefs !== undefined && taskRefs.length > 0) void resolveUnknownTaskRefs(taskRefs, onResolveTaskRefs)
+    if (onResolveThreadRefs !== undefined && threadRefs.length > 0) void resolveUnknownThreadRefs(threadRefs, onResolveThreadRefs)
+    for (const code of styledRefCodes) renderResolvedMarkdownCodeRef(code, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)
+    for (const node of textNodes) renderResolvedMarkdownText(node, mentionNames ?? [], taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)
+    for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-task-ref]')) {
+      const taskRef = button.dataset.taskRef as AgentTeamTaskRef | undefined
+      const hit = taskRef === undefined ? undefined : cachedResolvedTaskRef(taskRef)
+      if (taskRef !== undefined && hit !== undefined) button.textContent = taskLabel(hit.taskNumber)
+    }
+    for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-thread-ref]')) {
+      const threadRef = button.dataset.threadRef as AgentTeamThreadRef | undefined
+      const hit = threadRef === undefined ? undefined : cachedResolvedThreadRef(threadRef)
+      if (threadRef !== undefined && hit !== undefined) button.textContent = threadChipLabel(hit.title)
+    }
+  }, [richAgentBody, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, taskRefVersion, threadRefVersion, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf, mentionNames])
+  useEffect(() => {
+    const root = markdownRef.current
+    if (!richAgentBody || root === null || onOpenRef === undefined) return
+    const openTask = (event: Event): void => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const button = target.closest('button[data-ref], button[data-task-ref], button[data-thread-ref], button[data-member-session]')
+      if (button === null || !root.contains(button)) return
+      if (button instanceof HTMLElement) {
+        const sessionId = button.dataset.memberSession as SessionId | undefined
+        if (sessionId !== undefined) {
+          onOpenMemberSession?.(sessionId)
+          return
+        }
+        const ref = button.dataset.ref ?? button.dataset.taskRef ?? button.dataset.threadRef
+        if (ref !== undefined) onOpenRef(ref)
+      }
+    }
+    root.addEventListener('click', openTask)
+    return () => { root.removeEventListener('click', openTask) }
+  }, [richAgentBody, onOpenRef, onOpenMemberSession])
+  const renderRefs = useCallback((text: string): ReactNode =>
+    renderRefsFromText(text, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf),
+  [onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf])
+  return { markdownRef, markdownLabels, taskLabel, renderRefs }
+}
 
 /** Text nodes that Markdown rendered as prose rather than code or a link. */
 function markdownProseTextNodes(root: HTMLElement): Text[] {
@@ -518,7 +547,7 @@ function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHa
 }
 
 /** Render one literal text run, linkifying branded refs when navigation is available. */
-function renderRefs(text: string, onOpenRef: ((ref: string) => void) | undefined, onOpenMemberSession: ((sessionId: SessionId) => void) | undefined, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, channelChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): ReactNode {
+function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | undefined, onOpenMemberSession: ((sessionId: SessionId) => void) | undefined, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, channelChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): ReactNode {
   if (onOpenRef === undefined) return text
   return splitBrandedRefs(text).map((segment, index) => {
     if (segment.ref === undefined) return <Fragment key={index}>{segment.text}</Fragment>

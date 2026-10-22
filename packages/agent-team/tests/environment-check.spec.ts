@@ -110,7 +110,13 @@ describe('undetermined, the one answer for a fact that is not established', () =
   })
 
   it('covers an unreadable support range', () => {
-    expect(evaluateEnvironment(manifestWith({}), '0.1.7-rc.1', '0.1.15').verdict).toBe('undetermined')
+    const report = evaluateEnvironment(manifestWith({}), '0.1.7-rc.1', '0.1.15')
+    expect(report.verdict).toBe('undetermined')
+    // The running version is deliberately withheld: an unstatable line is a
+    // reason to show no comparison, and printing the version anyway would
+    // invite exactly the hand-written version the page withholds for.
+    expect(report.dshVersion).toBeUndefined()
+    expect(report.reason).toBe('the declared dsh support range is unreadable or drifted')
   })
 
   it('covers a drifted dsh peer declaration that nothing actually violates', () => {
@@ -120,7 +126,9 @@ describe('undetermined, the one answer for a fact that is not established', () =
       '@deepseek-ai/dsh-workspace': RANGE,
       '@deepseek-ai/dsh-agent': '>=0.1.7-rc.1 <0.2.0',
     })
-    expect(evaluateEnvironment(drifted, '0.1.7-rc.1', '0.1.15').verdict).toBe('undetermined')
+    const report = evaluateEnvironment(drifted, '0.1.7-rc.1', '0.1.15')
+    expect(report.verdict).toBe('undetermined')
+    expect(report.dshVersion).toBeUndefined()
   })
 
   it('prefers a real violation over an unstatable range', () => {

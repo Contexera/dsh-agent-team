@@ -4,6 +4,7 @@ import type {
   AgentTeamClientMemberStatus,
   AgentTeamConfirmationToken,
   AgentTeamMemberId,
+  AgentTeamMessageRef,
   AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
@@ -14,18 +15,21 @@ import { Button, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-prim
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
+import { TeamPanelHandle } from './TeamPanelHandle.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
 import { formatActivity, mentionedMemberIds } from './team-formatters.ts'
 import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames } from './thread-facts.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { chunkRunsWithDays } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
-import { hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, type ResolvedMemberRef } from './refs.ts'
+import { cachedResolvedMessageRef, hostMessageRefLookup, hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, resolveUnknownMessageRefs, useResolvedMessageRefVersion, type ResolvedMemberRef } from './refs.ts'
 import channelCss from './channel.module.css'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
 
 interface TeamChannelPanelProps {
+  /** The surface this panel is seated in: it owns the width the handle writes. */
+  readonly surface: HTMLElement | null
   readonly workspaceId: WorkspaceId
   readonly channelRef: AgentTeamChannelRef
   readonly threadRef: AgentTeamThreadRef
@@ -51,6 +55,7 @@ interface TeamChannelPanelProps {
   readonly selectChannel: TeamConversationProps['selectChannel']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
+  readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly channelNameOf: (ref: AgentTeamChannelRef) => string | undefined
   readonly memberOf: (ref: AgentTeamMemberId) => ResolvedMemberRef | undefined
@@ -72,11 +77,11 @@ type ReadProjection = Awaited<ReturnType<TeamChannelPanelProps['readThread']>> e
   : never
 
 /**
- * A taskless Thread's whole face beside its feed: read, answer, and — when the
- * discussion turns into work — promote. Quoting, Claims, and acceptance stay on
- * the Thread page, which a promoted Thread walks into anyway.
+ * A taskless Thread's whole face beside its feed: read, answer, quote, and — when
+ * the discussion turns into work — promote. Claims and acceptance stay on the
+ * Thread page, which a promoted Thread walks into anyway.
  */
-export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
+export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
@@ -98,7 +103,10 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
+  const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
+  const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
   const mountedRef = useRef(false)
+  const rootRef = useRef<HTMLElement | null>(null)
   const currentFactsRef = useRef<readonly AgentTeamThreadFact[]>([])
   const sequenceRef = useRef(0)
   const readRequestIdRef = useRef<AgentTeamRequestId>(mintRequestId())
@@ -307,6 +315,39 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
+  const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
+  const messageRefVersion = useResolvedMessageRefVersion()
+  useEffect(() => {
+    const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
+    if (replyTarget !== undefined && !refs.includes(replyTarget)) refs.push(replyTarget)
+    if (refs.length > 0) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
+  }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion])
+
+  const replyContexts = useMemo(() => {
+    const contexts = new Map<AgentTeamMessageRef, { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef }>()
+    const nameOf = (memberId: AgentTeamMemberId): string => {
+      if (memberId === humanMemberId) return humanName
+      const status = members.find(candidate => candidate.member.memberId === memberId)
+      return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
+    }
+    for (const fact of currentFacts) {
+      if (fact.kind !== 'message' || fact.message.replyToMessageRef === undefined) continue
+      const parent = cachedResolvedMessageRef(fact.message.replyToMessageRef)
+      contexts.set(fact.message.messageRef, parent === undefined
+        ? { senderName: t('memberUnknown'), excerpt: '', messageRef: fact.message.replyToMessageRef }
+        : { senderName: nameOf(parent.sender), excerpt: parent.excerpt, messageRef: parent.messageRef })
+    }
+    return contexts
+  }, [currentFacts, messageRefVersion, members, humanMemberId, humanName, t])
+
+  const handleReply = useCallback((messageRef: AgentTeamMessageRef): void => { setReplyTarget(messageRef) }, [])
+  const handleToggleCard = useCallback((messageRef: AgentTeamMessageRef): void => {
+    setOpenCard(current => current === messageRef ? undefined : messageRef)
+  }, [])
+  const jumpToMessage = useCallback((messageRef: AgentTeamMessageRef): void => {
+    const row = rootRef.current?.querySelector(`[data-message-ref="${messageRef}"]`)
+    if (row instanceof HTMLElement) row.scrollIntoView({ block: 'center' })
+  }, [])
 
   const renderFact = (fact: AgentTeamThreadFact, grouped = false) => {
     if (fact.kind === 'message') {
@@ -334,6 +375,13 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
         showGroupedTime
+        cardOpen={openCard === fact.message.messageRef}
+        onToggleCard={handleToggleCard}
+        messageRef={fact.message.messageRef}
+        {...(replyContexts.has(fact.message.messageRef) ? { replyTo: replyContexts.get(fact.message.messageRef)!, onOpenReplyTo: jumpToMessage } : {})}
+        onReply={handleReply}
+        rowActions="always"
+        replyTarget={replyTarget === fact.message.messageRef}
         {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
       />
     }
@@ -406,7 +454,7 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
         return
       }
       const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
+      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
       if (!result.ok) {
         setError(result.error.message)
         return
@@ -423,6 +471,7 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
         })
         setProjection(current => current === undefined ? current : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
         drafts.clear(draftKey)
+        setReplyTarget(undefined)
         setPendingFiles([])
         setReplyRequestId(undefined)
         setConfirmation(undefined)
@@ -457,7 +506,8 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
   const resolvedTaskNumber = task === undefined ? undefined : taskNumberOf(task.taskRef)
   const title = `${t('threadLabel')} · #${channelName}`
 
-  return <aside className={channelCss.panel} aria-label={t('threadLabel')} data-team-panel={threadRef}>
+  return <aside ref={rootRef} className={channelCss.panel} aria-label={t('threadLabel')} data-team-panel={threadRef} data-team-thread={threadRef}>
+    <TeamPanelHandle surface={surface} label={t('panelResize')} />
     <div className={channelCss.panelHead}>
       <span className={channelCss.panelTitle} title={title}>{title}</span>
       {task === undefined && thread !== undefined && <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>}
@@ -475,24 +525,31 @@ export function TeamChannelPanel({ workspaceId, channelRef, threadRef, channelNa
         <Button size="sm" onClick={() => { setAutoReadExhausted(false); void drainUnread() }} disabled={loading}>{t('retry')}</Button>
       </div>}
     </section>
-    {projection !== undefined && thread !== undefined && <div className={channelCss.panelFoot}>
-      <TeamComposer
-        key={draftKey}
-        members={members}
-        followerMemberIds={followerIds}
-        channelPeerMemberIds={channelMemberIds}
-        drafts={drafts}
-        draftKey={draftKey}
-        pending={pending}
-        {...(statusMessage === undefined ? {} : { confirmation: statusMessage })}
-        {...(error === undefined ? {} : { error })}
-        onEdit={clearSendState}
-        onSubmit={() => { void sendReply() }}
-        placeholder={t('replyPlaceholder')}
-        pendingFiles={pendingFiles}
-        onFilesChange={setPendingFiles}
-        t={t}
-      />
-    </div>}
+    {projection !== undefined && thread !== undefined && <TeamComposer
+      key={draftKey}
+      members={members}
+      followerMemberIds={followerIds}
+      channelPeerMemberIds={channelMemberIds}
+      drafts={drafts}
+      draftKey={draftKey}
+      pending={pending}
+      {...(statusMessage === undefined ? {} : { confirmation: statusMessage })}
+      {...(error === undefined ? {} : { error })}
+      onEdit={clearSendState}
+      onSubmit={() => { void sendReply() }}
+      placeholder={t('replyPlaceholder')}
+      pendingFiles={pendingFiles}
+      onFilesChange={setPendingFiles}
+      {...(replyTarget === undefined ? {} : {
+        replyTo: (() => {
+          const target = cachedResolvedMessageRef(replyTarget)
+          return target === undefined
+            ? { senderName: t('memberUnknown'), excerpt: '' }
+            : { memberId: target.sender, senderName: memberName(target.sender), excerpt: target.excerpt }
+        })(),
+        onCancelReply: () => { setReplyTarget(undefined) },
+      })}
+      t={t}
+    />}
   </aside>
 }

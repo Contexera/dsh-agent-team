@@ -600,7 +600,7 @@ describe('TeamMessage quote line and card actions', () => {
     // off still copies, and still tells the reader the Message names them.
     const { container } = render(
       <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="@Iris 可以"
-        mentionNames={[{ name: 'Iris', also: ['human'] }]} readerName="Iris" rowActions t={t} />,
+        mentionNames={[{ name: 'Iris', also: ['human'] }]} readerName="Iris" rowActions="always" t={t} />,
     )
     const card = container.querySelector('[data-message-card]')
     expect(card).not.toBeNull()

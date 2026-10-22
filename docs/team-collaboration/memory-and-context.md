@@ -7,20 +7,30 @@ English | [中文](memory-and-context.zh.md)
 
 Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`. The persona carries only the resident rule that the index stays bounded and that detail lives in the note it names, and a Member's first-run `memory.md` scaffold states the same sections.
 
-## Context pressure ownership
-The engine owns Member context pressure end to end as policy; the Host binds that policy to one Member's readings and performs what it decides.
+## Context lifecycle ownership
+A Member's context has exactly two mechanisms, and neither is the model's to invoke.
 
-Two budget thresholds derive from the Member's live routed selection — the selection captured for the current step when it entered prompt assembly, its current selection otherwise — resolved through the LLM service (capped at 200K handoff / 256K hard, with a safety reserve). At the handoff budget one pressure notice per generation leads with an in-place `context_compact` the Member summarizes itself and keeps `context_rollover` for work that has turned a page — repeating is suppressed for that generation and re-armed after a rollover.
+**In-place compaction.** The preset mounts the Harness's own `@deepseek-ai/dsh-compaction-basic`, unmodified, with `auto` on and Team's ratios: `thresholdRatio` 0.256, `retainRatio` 0.08, `headroomTokens` 65536. The summary template, the routed summarization target, and the cap stay upstream's. Compaction never changes generation and never cancels the owner.
 
-At the hard limit the Host forces an in-place compaction before the next model request is forwarded, and a Member whose compaction provably advances neither its generation nor its measured pressure is failed closed (the step is rejected rather than submitted over the Team limit).
+Team configures ratios, not a fixed window: the trigger is `min(W × 0.256, W − output − 65536)` for a window of `W` tokens, and `retainRatio` 0.08 keeps that share of the message budget as verbatim tail. The ratio is the binding term only while the remaining capacity is larger — on a 1M window the threshold is 256K and roughly 70K of tail survives — so a smaller, or heavily output-reserved, window compacts at the lower value instead. A deployment on other models adds per-model `modelPolicies` at the profile level to hold its own waterline; the bundle assumes no window size.
 
-A provider context-overflow failure gets one bounded compact-and-retry sequence before surfacing. A route whose window cannot be measured is an explicit rejection, never a silent over-limit submission. Accepted-Task auto compaction is retired: pressure policy is the only compaction trigger besides the Member's own explicit choice.
+**Generation swaps.** A swap is a Host decision taken at a wake boundary and executed by Team's own coordinator (`team-context-management.ts`). It commits `team/member-session-recycled` as the Host actor, retires the old Session (dispose and archive, never delete), and activates a fresh one parented at the one it replaces, then rederives the Inbox.
 
-A step arriving into a large context after a long idle gap is put to the relatedness judge first: an input the judge reads as unrelated work is kept instead of admitted, and one rollover instruction takes its place until the held input returns. The judge is the `jev` service, which this bundle mounts itself from the Host row's `jev.apiKey` — or from the environment variable that row names — so a key is what enables the gate, and a row that states none leaves the gate off. A deployment that mounts its own `jev` row is read instead, and never mounted twice.
+The successor's identity derives from the retired Session, so a restart between the commit and the activation finishes the same swap rather than minting a second one. An older log's pending intent or checkpoint anchor is read only for legacy recovery; no current build writes one.
 
-The gate's three thresholds are the Host row's own configuration: `gate.tokens`, `gate.idleMs`, and `gate.judgeTimeoutMs`, each optional. A deployment sets them in its own `cordis.patch.yml`, by the row id `wowyuarm-agent-team-host`, and the engine reads each one at the step it applies to, so an edit reaches the next judged step without a restart. An omitted `tokens` or `idleMs` keeps the engine's default; an omitted `judgeTimeoutMs` gets Team's own budget, because a judge is reached over a network.
+The ordinary swap has one trigger: a wake aimed at an idle Member, whether that wake is a notification, a DM, or an activation at startup or resume. It is strict — the generation must have been idle longer than 60 minutes and measure more than 128000 context tokens — and every fact it cannot establish answers resume, the conservative direction because a swap that should not have happened costs a Member its working trail.
 
-The deadline is the field that decides whether a configured judge is ever heard: a judgement that takes longer than `gate.judgeTimeoutMs` leaves the step ungated. The judge this bundle mounts is therefore given a call budget one second inside that deadline.
+`wakeRecycle` is a volatile Host-row group (`enabled`, `idleMs`, `minContextTokens`); the Team settings page renders no form for it, and `enabled: false` turns the swap off.
+
+The cold path decides from storage, not from a live Agent: a stored Session is rebuilt from its own log and its inbox inspected, and a pending ordinary message there keeps that generation instead of recycling it; a live generation is asked the same question from its queue before any context pricing.
+
+A generation holding unprocessed non-Team input keeps its continuity. While a queued ordinary message is pending, the swap declines to start. Past that point the commit runs inside `agent.runMaintenance`, so a message arriving mid-swap waits in the durable inbox instead of reaching the retiring generation, and the retiring generation rejects any later step without spending a model request. Its original inbox insertions remain available for replay even after a claim.
+
+What crosses a generation is inbox input at and after the recorded boundary, carried as Message ids: replay is bounded by that offset, deduplicated against what the successor already holds, and is not a general carry of working context.
+
+A swap leaves no mark on what the successor is told. Its first model-facing context is the same per-step injection every turn carries — identity, `memory.md`, the Workspace list — followed by the message that woke it. Continuity across a generation is not a briefing: it is `memory.md` being maintained while the work happens and read back afterwards.
+
+Because both mechanisms are Host-controlled, the model has no context tool at all: no rollover, no checkpoint, no status, and no advice riding a Thread read. Nothing a Member can say starts, prevents, or steers a swap.
 
 ## Agent notification boundary
 Host derives bounded coalesced notifications from durable unread state. Idle Agents start a turn; running Agents receive context at the next safe step. Direct mentions include Message body, sender, Channel, optional Task overlay, Thread, and Message ref. Task/Claim Activities include actor, transition, and affected Task/Thread/Claim refs. Ordinary unread exposes only a body-free Thread-first route with its unread count; taskful summaries may name the Task. No notice renders a revision or write token. Omitted details remain discoverable through `team_inbox` and `team_thread`.
@@ -31,9 +41,9 @@ Automatic recovery acts only on two conservatively matched error families — tr
 
 Every delivery and recovery decision leaves one bounded line through the Host logger: an Inbox wake names the Member id, the Session, the request and operation that caused it, and the attempt it spent, and says a queued notice is not yet read by the model. Unchanged facts spend no second attempt and add no line above diagnostic level. A failed wake logs at warn, keeps the committed operation as its result, and clears its signature for the next rederivation; automatic recovery reports its classification, count, wait, wakeup, stand-down, and the reason tracking ended.
 
-The former manual "start from a fresh context" row action is retired: Members manage their own context through `context_rollover`, and the Human-side clear-context Remote stays as a hidden migration escape hatch with no visible entry point.
+Manual control of a Member's context is gone: no row action and no Remote write starts a new generation. The ledger keeps the older transition kinds (`team/member-session-renewed`, `team/member-session-rolled-over`) readable so recorded ledgers still replay, but nothing writes them.
 
-That Remote keeps its `team/member-session-renewed` operation schema and replay validation, so ledgers that recorded it still replay. During a model-initiated rollover the Member reads unavailable with a `context rollover in progress` diagnostic; when that Member's Session is embedded in the right rail, the Client follows the old→new binding once, and archived views never follow.
+While a swap's ledger binding has moved and the successor has not activated, the Member reads unavailable with a `context rollover in progress` diagnostic; when that Member's Session is embedded in the right rail, the Client follows the old→new binding once, and archived views never follow.
 
 ## Assembled acceptance
 `npm run test:browser` uses a credential-free Harness Web scaffold. It verifies default taskless Thread creation, default-off Human 「作为任务」, Human promotion and Host reread, taskless header/Claim gating, invitation confirmation, Agent Inbox read/reply, Human Channel/Thread state, reload persistence, desktop/390×844/keyboard paths, Team exit, and ordinary DSH restoration. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and body-free ordinary notification forms.

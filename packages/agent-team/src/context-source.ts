@@ -15,10 +15,7 @@
  * snapshot-aware surface.
  *
  * The validators below are the single place that recognizes these messages, so
- * callers never match on localized body text. Writing them belongs to the
- * context-continuity engine's codec, which Team constructs with its own plugin
- * identity and prose (`context-continuity-host.ts`): one writer, so the
- * envelope Team reads back can never drift from the one it wrote.
+ * callers never match on localized body text.
  * @module @contexera/dsh-agent-team/context-source
  */
 
@@ -66,14 +63,6 @@ export function isAgentTeamSource(source: MessageSource): source is AgentTeamMes
   return matchesProducerKind(source.kind, AGENT_TEAM_PLUGIN_ID)
 }
 
-/**
- * Whether one source kind carries this plugin's attribution, for call sites
- * whose sources arrive untyped.
- */
-export function isAgentTeamSourceKind(kind: string | undefined): boolean {
-  return matchesProducerKind(kind, AGENT_TEAM_PLUGIN_ID)
-}
-
 /** Handoff snapshot section name carrying the model-authored prose. */
 export const HANDOFF_SECTION_NAME = 'HANDOFF'
 
@@ -91,7 +80,7 @@ export interface AgentTeamContextHandoff {
   readonly newSessionId: string
   /** Why the rollover happened. */
   readonly trigger: 'model' | 'pressure'
-  /** Seq of the successful `context_rollover` tool result in the previous Session log. */
+  /** Seq of the retired rollover tool result in the previous Session log. */
   readonly handoffEventSeq: number
   /** The checkpoint a return was seeded from; absent on a fresh rollover. */
   readonly checkpointRef?: string

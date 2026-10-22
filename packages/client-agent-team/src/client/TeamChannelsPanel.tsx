@@ -6,7 +6,6 @@ import type {
   AgentTeamClientMemberStatus,
   AgentTeamCreateChannelRequest,
   AgentTeamMemberId,
-  AgentTeamUpdateChannelRequest,
   AgentTeamView,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -358,7 +357,7 @@ function ChannelEditorDialog({ channel, updateChannel, onCommitted, onClose, t }
 }) {
   const [name, setName] = useState(channel.name)
   const [description, setDescription] = useState(channel.description)
-  const { saving, error, pendingRequest, save } = useEditDialogSave({
+  const { saving, error, save, invalidate } = useEditDialogSave({
     save: updateChannel,
     onCommitted,
     onClose,
@@ -370,16 +369,14 @@ function ChannelEditorDialog({ channel, updateChannel, onCommitted, onClose, t }
     const normalizedName = name.trim()
     const normalizedDescription = description.trim()
     if (saving || !dirty || normalizedName === '') return
-    const samePending = pendingRequest.current !== undefined && pendingRequest.current.channelRef === channel.channelRef
-      && pendingRequest.current.name === normalizedName && pendingRequest.current.description === normalizedDescription
-    const request: AgentTeamUpdateChannelRequest = samePending ? pendingRequest.current! : {
+    await save(previous => previous !== undefined && previous.channelRef === channel.channelRef
+      && previous.name === normalizedName && previous.description === normalizedDescription ? previous : {
       requestId: mintRequestId(),
       workspaceId: channel.workspaceId,
       channelRef: channel.channelRef,
       name: normalizedName,
       description: normalizedDescription,
-    }
-    await save(request)
+    })
   }
 
   return (
@@ -395,11 +392,11 @@ function ChannelEditorDialog({ channel, updateChannel, onCommitted, onClose, t }
       <form id="team-channel-edit-form" className={createCss.form} onSubmit={event => { void submit(event) }}>
         <label className={createCss.field}>
           <span>{t('channelName')}</span>
-          <Input className={createCss.input!} value={name} onChange={event => { setName(event.target.value); pendingRequest.current = undefined }} disabled={saving} autoFocus />
+          <Input className={createCss.input!} value={name} onChange={event => { setName(event.target.value); invalidate() }} disabled={saving} autoFocus />
         </label>
         <label className={createCss.field}>
           <span>{t('channelDescription')}{t('optionalSuffix')}</span>
-          <Input className={createCss.input!} value={description} placeholder={t('agentDescriptionPlaceholder')} onChange={event => { setDescription(event.target.value); pendingRequest.current = undefined }} disabled={saving} />
+          <Input className={createCss.input!} value={description} placeholder={t('agentDescriptionPlaceholder')} onChange={event => { setDescription(event.target.value); invalidate() }} disabled={saving} />
         </label>
         {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
       </form>

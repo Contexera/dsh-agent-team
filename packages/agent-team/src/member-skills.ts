@@ -12,11 +12,19 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SkillCandidate, SkillProvider, SkillProviderControl, SkillProviderObservation, SkillRegistry } from '@deepseek-ai/dsh-skill'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 
-/** Live selection state shared with the Host: `undefined` loads every discovered skill. */
-export type MemberSkillSelectionRef = {
-  current: readonly string[] | undefined
-  /** Set by the provider; swaps the selection and invalidates the catalog cache. */
-  swap: (allow: readonly string[] | undefined) => void
+/**
+ * Handle to one mounted Member skill provider: the selection swap the Host's
+ * edit path drives, and the disposer that unmounts the provider.
+ */
+export interface MemberSkillProviderMount {
+  /**
+   * Swap the live selection filter and drop cached catalogs, so the next
+   * catalog query sees the new selection. `undefined` loads every discovered
+   * skill.
+   */
+  readonly swap: (allow: readonly string[] | undefined) => void
+  /** Unregister the provider. */
+  readonly dispose: () => void
 }
 
 /** Per-Member provider configuration; the private directory is provisioned before mounting. */
@@ -25,8 +33,8 @@ export interface MemberSkillsConfig {
   readonly skillsDirectory: string
   /** Read-only bundled skills shipped with the plugin (e.g. the meta skill). */
   readonly bundledSkillsDirectory: string | undefined
-  /** Live selection ref; an edit swaps the array and invalidates the catalog. */
-  readonly selection: MemberSkillSelectionRef
+  /** The selection this Member's provider starts with; `undefined` loads every discovered skill. */
+  readonly initialSelection: readonly string[] | undefined
 }
 
 /**
@@ -43,37 +51,38 @@ export interface MemberSkillsConfig {
  * without the skill registry keeps its Members; they simply carry no private
  * skill catalog.
  */
-export function mountMemberSkillProvider(agentCtx: Context, config: MemberSkillsConfig): () => void {
-  const selection = config.selection
-  // A no-op swap stands in for deployments without the skill registry, so
-  // the Host's edit path never sees a half-initialized ref.
-  selection.swap = () => {}
+export function mountMemberSkillProvider(agentCtx: Context, config: MemberSkillsConfig): MemberSkillProviderMount | undefined {
   const skills = agentCtx.get('skills') as SkillRegistry | undefined
-  if (skills === undefined) return () => {}
-  return skills.registerProvider(control => {
-    const provider = new MemberPrivateSkillProvider(agentCtx, control, config, selection)
-    // The ref swap updates the live filter and drops cached catalogs through
-    // the provider's own registration, so the next catalog query (and the
-    // next step's durable replacement catalog) sees the new selection.
-    selection.swap = (allow: readonly string[] | undefined) => {
-      selection.current = allow
-      control.invalidate()
-    }
-    return provider
+  // No skill registry: this Member carries no private catalog, and there is no
+  // selection for the edit path to swap. Absent is the honest answer — a no-op
+  // handle would pretend a filter exists.
+  if (skills === undefined) return undefined
+  let mounted: MemberPrivateSkillProvider | undefined
+  const dispose = skills.registerProvider(control => {
+    mounted = new MemberPrivateSkillProvider(agentCtx, control, config)
+    return mounted
   })
+  return {
+    swap: (allow: readonly string[] | undefined) => mounted?.select(allow),
+    dispose,
+  }
 }
 
 /** One Member's bundled-plus-private skill roots wrapped as a filtered registry provider. */
 class MemberPrivateSkillProvider implements SkillProvider {
   readonly name: string
   private readonly wrapped: FileSystemSkillProvider
+  private readonly control: SkillProviderControl
+  /** `undefined` loads every discovered skill. */
+  private allow: readonly string[] | undefined
 
   constructor(
     ctx: Context,
     control: SkillProviderControl,
     config: MemberSkillsConfig,
-    private readonly selection: MemberSkillSelectionRef,
   ) {
+    this.control = control
+    this.allow = config.initialSelection
     this.name = `member-private:${config.skillsDirectory}`
     // Two Team-owned roots, no project/user/global leakage: the bundled
     // read-only core skills first, then the Member's writable private
@@ -91,6 +100,12 @@ class MemberPrivateSkillProvider implements SkillProvider {
     })
   }
 
+  /** Replace the live filter and drop cached catalogs, so the next query sees it. */
+  select(allow: readonly string[] | undefined): void {
+    this.allow = allow
+    this.control.invalidate()
+  }
+
   /**
    * Filter the wrapped discovery to the Member's selection. Filtering is
    * list()-output only — the directory is still scanned and watched, so this
@@ -98,7 +113,7 @@ class MemberPrivateSkillProvider implements SkillProvider {
    */
   async list(options: Parameters<SkillProvider['list']>[0]): Promise<readonly SkillCandidate[] | SkillProviderObservation> {
     const output = await this.wrapped.list(options)
-    const allow = this.selection.current
+    const allow = this.allow
     if (allow === undefined) return output
     const allowed = new Set(allow)
     return filterObservation(output, candidate => allowed.has(candidate.name))

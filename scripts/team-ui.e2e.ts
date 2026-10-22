@@ -96,19 +96,18 @@ async function settleLayout(page: Page): Promise<void> {
 }
 
 /**
- * One Task's Thread door in the Channel feed. The door button carries the
- * accessible name — with or without an unread count, so the prefix form has to
- * carry the full-width opening bracket — while the entry line
- * (`data-thread-entry`) is the row that holds the state cluster beside it.
- * `:has()` keeps the exact/prefix pair on one button, so `Task #1` can never
- * resolve to `Task #10`.
+ * One Task's Thread entry line in the Channel feed. The row carries
+ * `data-thread-entry-door` as a stable marker — the Task number, or `thread`
+ * for a taskless Thread — so a selector never has to parse the rendered
+ * accessible name, whose wording is localized and whose unread form appends a
+ * count inside a full-width bracket.
  */
-function taskEntrySelector(taskNumber: number): string {
-  return `[data-team-channel] [data-thread-entry]:has(> button[aria-label="打开 Task #${taskNumber}"], > button[aria-label^="打开 Task #${taskNumber}（"]) > button`
+function taskEntryLineSelector(taskNumber: number): string {
+  return `[data-team-channel] [data-thread-entry-door="${taskNumber}"]`
 }
 
-function taskEntryLineSelector(taskNumber: number): string {
-  return `[data-team-channel] [data-thread-entry]:has(> button[aria-label="打开 Task #${taskNumber}"], > button[aria-label^="打开 Task #${taskNumber}（"])`
+function taskEntrySelector(taskNumber: number): string {
+  return `${taskEntryLineSelector(taskNumber)} > button`
 }
 
 /** One Task's Thread door: the locator form of {@link taskEntrySelector}. */
@@ -773,12 +772,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-edit-modal.png'), fullPage: true })
   await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()
 
-  // The manual clear-context entry is retired (ticket 01): Members manage
-  // their own context through the context_rollover tool, so every row menu must
-  // omit the entry entirely and no confirm dialog exists. Model-initiated
-  // rollover and the live follow are covered by the member-lifecycle
-  // integration tests and the Client component suite; the full
-  // model-driven browser journey lands with ticket 04.
+  // The manual clear-context entry is retired: the Host recycles a Member's
+  // generation at its wake boundary, so every row menu must omit the entry
+  // entirely and no confirm dialog exists. The swap itself is covered by the
+  // member-lifecycle integration tests and the Client component suite.
   await builderRow.hover()
   await builderRow.getByRole('button', { name: 'builder 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑 Agent' }).waitFor()
@@ -791,25 +788,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const memberStatuses = scaffold.ctx.agentTeam.members({ workspaceId: memberWorkspace.id })
   const builderMember = memberStatuses.find((status: { member: { handle: string } }) => status.member.handle === 'builder')!
   const builderAgent = scaffold.ctx.agents.get(builderMember.member.sessionId)!
-
-  // Fixture seam, not an assertion change: the adjacent Harness scaffold's
-  // fixture-less adapter reports route capacity on a top-level field the
-  // canonical LlmResolvedModelInfo shape never reads, so the Member's route
-  // would price as unknown and the pressure policy fail-closed would reject
-  // every pre-step. The canonical durable route record — the same
-  // `request/context` event a real first request appends — matches the
-  // Member's default selection and carries the route's real capacity, so
-  // the Host's persisted-route fast path prices the turn normally. The
-  // journey still proves a plain composer prompt lands on the Member's live
-  // Session below; nothing about the delivery assertion changes.
-  {
-    const selection = scaffold.ctx.agentDefaultModel.currentSelection()
-    builderAgent.session.append('request/context', {
-      provider: selection.provider,
-      model: selection.model,
-      contextWindow: 128_000,
-    })
-  }
 
   // Clicking the Agent card keeps Team mode mounted and swaps only the right
   // pane: the conversation shadow stands down so the shipped root renders the
@@ -832,13 +810,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => memberInput.count()).toBe(1)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-composer.png'), fullPage: true })
 
-  // With clear-context retired there is no Human-initiated rollover in this
-  // journey: the embedded Member Session simply stays live for its current
-  // generation (model-driven context rollover and the Client follow are
-  // covered by the member-lifecycle integration tests and the Client
-  // component suite; the full model-driven browser journey lands with
-  // ticket 04). The pane keeps rendering the Member's live Session — blank
-  // hero, composer enabled, Team mode mounted.
   await expect.poll(() => page.evaluate(() => ({
     channel: document.querySelectorAll('[data-team-channel]').length,
     mode: document.documentElement.dataset.agentTeamMode ?? null,
@@ -1249,13 +1220,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(channelBand!.barColor).not.toBe('rgba(0, 0, 0, 0)')
   // The band is one 76px figure at the top inset the shipped header uses.
   expect(channelBand!.bandHeight).toBeLessThanOrEqual(80)
-  // The identity seat is one declaration on the shared conversation surface, so
-  // the Channel feed reads the seat the Thread page reads. Declaring it on
-  // `[data-team-thread]` left this surface on the `var()` fallback instead —
-  // invisible while both resolved alike, and a broken text column the moment the
-  // seat moved. A custom property is inherited and never re-resolved, so reading
-  // it off the Channel root is exactly the question. The face is measured too: a
-  // fallback equal to the declaration would satisfy that read on its own.
+  // The seat is one declaration on the shared conversation surface, so the feed
+  // reads what a Thread's reading seat reads. Reading it off the Channel root is
+  // the question: a custom property is inherited, never re-resolved there. The
+  // face is measured too, since a fallback equal to the declaration satisfies it.
   const channelSeat = await page.evaluate(() => {
     const root = document.querySelector('[data-team-channel]')
     const face = document.querySelector('[data-team-channel] article [class*="messageIdentity"], [data-team-channel] article [class*="messageIdentityImage"]')
@@ -1298,17 +1266,28 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await panel.waitFor()
   await expect.poll(async () => await page.getByRole('heading', { name: '# delivery' }).count()).toBe(1)
   await expect.poll(async () => await page.locator('[data-team-channel]').count()).toBe(1)
-  // The panel is a discussion's face, not a Task's: no Claims disclosure and no
-  // acceptance control, because a taskless Thread has neither. Scoped to the
-  // panel, since the feed beside it still holds a Task's own door.
+  // The panel is a discussion's face, not a Task's: no acceptance control,
+  // because a taskless Thread has none. The feed beside it holds a Task's door.
   expect(await panel.getByRole('button', { name: '验收' }).count()).toBe(0)
-  expect(await panel.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   const promote = page.getByRole('button', { name: '转为 Task' })
   await promote.waitFor()
-  // The panel covers the stage whole at 390px rather than sitting beside a feed
-  // too narrow to read, and neither one overflows the viewport.
+  // The panel covers the feed at 390px rather than sitting beside one too narrow
+  // to read, and neither overflows the viewport. The band keeps its own width:
+  // the open panel must not also reserve a column up there, which would squeeze
+  // the identity row to nothing and leave the tabs one glyph per line — a
+  // clipped surface hides that from a page-level overflow check, so the band's
+  // own box is measured against the surface's.
   await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0))
     .toBeGreaterThanOrEqual(Math.round((await page.locator('[data-team-channel]').boundingBox())?.width ?? 0) - 2)
+  const narrowBand = await page.evaluate(() => {
+    const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
+    const surface = box(document.querySelector('[data-team-channel]'))
+    const headerRow = box(document.querySelector('[data-team-channel] [class*="headerRow"]'))
+    if (surface === undefined || headerRow === undefined) return null
+    return { surfaceWidth: Math.round(surface.width), headerRowWidth: Math.round(headerRow.width) }
+  })
+  expect(narrowBand).not.toBeNull()
+  expect(narrowBand!.headerRowWidth).toBe(narrowBand!.surfaceWidth - 24)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
@@ -1328,6 +1307,104 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(panelSplit).not.toBeNull()
   expect(panelSplit!.timelineRight).toBeLessThanOrEqual(panelSplit!.panelLeft + 1)
   expect(panelSplit!.timelineWidth).toBeGreaterThanOrEqual(520)
+  // The panel is the surface the reader turned to, and it runs the surface whole:
+  // its head shares the band's identity row — same top, same height — rather than
+  // starting under the tab strip, and its foot shares the feed composer's line
+  // rather than floating above it. Each is an equation between two boxes measured
+  // in one render, so a change to either seat alone shows up here.
+  const bandEdges = await page.evaluate(() => {
+    const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
+    const surface = box(document.querySelector('[data-team-channel]'))
+    const headerRow = box(document.querySelector('[data-team-channel] [class*="headerRow"]'))
+    const panel = box(document.querySelector('[data-team-panel]'))
+    const panelHead = box(document.querySelector('[data-team-panel] [class*="panelHead"]'))
+    const panelFoot = box(document.querySelector('[data-team-panel] [data-team-composer]'))
+    const feedFoot = box(document.querySelector('[data-team-channel] [data-panel] [data-team-composer]'))
+    if (surface === undefined || headerRow === undefined || panel === undefined || panelHead === undefined) return null
+    return {
+      surfaceTop: Math.round(surface.top), surfaceBottom: Math.round(surface.bottom),
+      panelTop: Math.round(panel.top), panelBottom: Math.round(panel.bottom),
+      headerRowTop: Math.round(headerRow.top), headerRowHeight: Math.round(headerRow.height),
+      panelHeadTop: Math.round(panelHead.top), panelHeadHeight: Math.round(panelHead.height),
+      panelFootBottom: panelFoot === undefined ? null : Math.round(panelFoot.bottom),
+      feedFootBottom: feedFoot === undefined ? null : Math.round(feedFoot.bottom),
+    }
+  })
+  expect(bandEdges).not.toBeNull()
+  expect(bandEdges!.panelTop).toBe(bandEdges!.surfaceTop)
+  expect(bandEdges!.panelBottom).toBe(bandEdges!.surfaceBottom)
+  expect(bandEdges!.panelHeadTop).toBe(bandEdges!.headerRowTop)
+  expect(bandEdges!.panelHeadHeight).toBe(bandEdges!.headerRowHeight)
+  expect(bandEdges!.panelFootBottom).toBe(bandEdges!.feedFootBottom)
+  // A discussion panel is resizable: the seam is a real separator control, and a
+  // drag re-seats the panel while the feed gives up exactly what the panel takes.
+  const handle = page.locator('[data-team-panel-handle]')
+  await handle.waitFor()
+  expect(await handle.getAttribute('role')).toBe('separator')
+  const seam = async (): Promise<{ panel: number, feed: number }> => await page.evaluate(() => {
+    const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
+    const panel = box(document.querySelector('[data-team-panel]'))
+    const feed = box(document.querySelector('[data-team-channel] [data-panel] section[aria-label]'))
+    return { panel: Math.round(panel?.width ?? 0), feed: Math.round(feed?.width ?? 0) }
+  })
+  const before = await seam()
+  // Dragging the seam left hands the panel the width the feed gives up.
+  const handleBox = await handle.boundingBox()
+  expect(handleBox).not.toBeNull()
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2 - 40, handleBox!.y + 200)
+  await page.mouse.move(handleBox!.x + handleBox!.width / 2 - 120, handleBox!.y + 200)
+  await page.mouse.up()
+  await expect.poll(async () => (await seam()).panel).toBeGreaterThan(before.panel + 100)
+  const dragged = await seam()
+  expect(Math.abs((before.panel + before.feed) - (dragged.panel + dragged.feed))).toBeLessThanOrEqual(2)
+  await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-resized.png'), fullPage: true })
+  // The choice survives a reload and reopens at the same seat, and the keyboard
+  // path reaches a seat too: a pointer-only affordance would leave those readers
+  // stuck with whatever the drag left behind.
+  // The stored seat is the clamped integer; the painted box may differ by its
+  // own border, so the two are compared with that tolerance rather than as text.
+  const storedWidth = await page.evaluate(() => Number(localStorage.getItem('dsh.agent-team.panel-width.v1')))
+  expect(Math.abs(storedWidth - dragged.panel)).toBeLessThanOrEqual(1)
+  await page.reload()
+  await page.locator('[data-team-channel]').first().waitFor()
+  const reopened = page.locator('[data-team-channel] article').filter({ hasText: '这是一条不作为任务的讨论' })
+  await reopened.getByRole('button', { name: '打开讨论' }).click()
+  await page.locator('[data-team-panel]').waitFor()
+  await expect.poll(async () => (await seam()).panel).toBe(dragged.panel)
+  await page.locator('[data-team-panel-handle]').focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => (await seam()).panel).toBeLessThan(dragged.panel)
+  // The panel's Messages carry the Thread page's hover card: copy and quote.
+  const panelRow = page.locator('[data-team-panel] article').first()
+  await panelRow.hover()
+  await settleAnimations(page)
+  const panelCard = panelRow.locator('[data-message-card]')
+  await expect.poll(() => panelCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
+  // It clears its row as on the Thread page and stays wholly inside the body.
+  const panelCardPlacement = await panelRow.evaluate(element => {
+    const row = element.getBoundingClientRect()
+    const card = element.querySelector('[data-message-card]')!.getBoundingClientRect()
+    const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
+    const scroll = element.closest('section')!.getBoundingClientRect()
+    return {
+      clearanceToContent: Math.round(body.top - card.bottom),
+      clipTop: Math.round(card.top - scroll.top),
+    }
+  })
+  expect(panelCardPlacement.clearanceToContent).toBe(2)
+  expect(panelCardPlacement.clipTop).toBeGreaterThanOrEqual(0)
+  await panelCard.locator('[data-quote-message]').click()
+  const replyBanner = page.locator('[data-team-panel] [data-reply-banner]')
+  await replyBanner.waitFor()
+  await expect.poll(async () => await replyBanner.textContent()).toContain('引用')
+  await page.getByRole('button', { name: '取消引用' }).click()
+  await expect.poll(async () => await replyBanner.count()).toBe(0)
+  // The reveal belongs to the pointer here too: off the row, the card is gone.
+  await page.mouse.move(4, 4)
+  await expect.poll(() => panelCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
+  await settleAnimations(page)
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-desktop.png'), fullPage: true })
   await promote.focus()
   await page.keyboard.press('Enter')
@@ -1575,7 +1652,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // anything while `scrollWidth` really exceeds `clientWidth`.
   const wideTableHead = '| 序号 | 会话 | 耗时 | 工具 | 读取 | 写入 | 命中 |'
   const wideTableRule = '| --- | --- | --- | --- | --- | --- | --- |'
-  const wideTableBody = '| 182 | pulse | 26.7 min | 83 | 0 | 0 | skill,bash,write,message,read,context_search |'
+  const wideTableBody = '| 182 | pulse | 26.7 min | 83 | 0 | 0 | skill,bash,write,team_message,read,team_attention |'
   const wideTable = `${wideTableHead}\n${wideTableRule}\n${wideTableBody}`
   const wideTableCases = [
     { marker: '宽表回归验收', body: `### 宽表回归验收\n\n${wideTable}` },
@@ -2249,8 +2326,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   if (agentClaim.kind !== 'committed') throw new Error(`Agent Claim was rejected: ${agentClaim.kind}`)
 
-  await page.getByRole('button', { name: /Claims · 1/ }).click()
-  await page.getByText('实现验收功能', { exact: true }).waitFor()
+  // A Claim reaches this page only as the activity line that recorded it.
+  expect(await page.getByRole('button', { name: /Claims/ }).count()).toBe(0)
   await page.getByText(/认领了「实现验收功能」/).waitFor()
   await page.screenshot({ path: join(UI05_SHOTS, 'active-thread.png'), fullPage: true })
 
@@ -2931,10 +3008,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     for (const row of section.rows) {
       const item = hostRows.find(candidate => (candidate.previewText ?? '') === row.text)
       expect(item).toBeDefined()
-      expect(row.actorLabel).toBe(item!.claimOwners.length === 0
+      expect(row.actorLabel).toBe(item!.liveClaimOwners.length === 0
         ? `最新来自 @${item!.newestActor.name}`
-        : `由 ${item!.claimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
-      expect(row.actorWidth).toBe(clusterWidth(item!.claimOwners.length))
+        : `由 ${item!.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
+      expect(row.actorWidth).toBe(clusterWidth(item!.liveClaimOwners.length))
       // The text column follows the cluster that is really drawn: a row pays one
       // face's width per face it has and nothing for the stack it could have had.
       // Reserving the widest stack is what used to put 36px of empty space in
@@ -3090,12 +3167,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     .find(item => item.thread.threadRef === stackThreadRef)!
   // Every claimant the Host accepted is an owner on the row, and the row paid one
   // face per owner rather than the width of the stack it could have carried.
-  expect(stackItem.claimOwners.length).toBe(claimants.length)
-  expect(stackItem.claimOwners.map(owner => owner.name).sort()).toEqual(
+  expect(stackItem.liveClaimOwners.length).toBe(claimants.length)
+  expect(stackItem.liveClaimOwners.map(owner => owner.name).sort()).toEqual(
     claimants.map((entry: { member: { handle: string } }) => entry.member.handle).sort())
-  expect(stackBox.circles).toBe(Math.min(stackItem.claimOwners.length, 3) + (stackItem.claimOwners.length > 3 ? 1 : 0))
-  expect(stackBox.label).toBe(`由 ${stackItem.claimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
-  expect(stackBox.width).toBe(clusterWidth(stackItem.claimOwners.length))
+  expect(stackBox.circles).toBe(Math.min(stackItem.liveClaimOwners.length, 3) + (stackItem.liveClaimOwners.length > 3 ? 1 : 0))
+  expect(stackBox.label).toBe(`由 ${stackItem.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
+  expect(stackBox.width).toBe(clusterWidth(stackItem.liveClaimOwners.length))
   expect(stackBox.inset).toBe(stackBox.width + 8)
   // The row also states where its Task stands, behind the Task's own number and in
   // the pair every other Task surface prints: a dot and the word the Host's status
@@ -3391,8 +3468,8 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await betaArticle.waitFor()
   const chip = betaArticle.locator(`button[title="${alphaShort}"]`)
   await chip.waitFor()
-  // Chip titles cap at 40 characters (boundedThreadTitle): the 43-char
-  // anchor below renders truncated, and navigation still proves identity.
+  // Thread chip titles cap at 40 characters: the 43-char anchor below renders
+  // truncated, and navigation still proves identity.
   await expect.poll(() => chip.textContent()).toMatch(/ALPHA-ROOT-MARKER alpha discussion open…/)
   await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip.png'), fullPage: true })
   await chip.click()
@@ -3436,8 +3513,6 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await panel.getByRole('button', { name: '团队', exact: true }).click()
   const nameField = panel.getByLabel('名字')
   await nameField.waitFor()
-  // The Team page carries two saves — this row's and the judge group's — so the
-  // identity row is addressed through the one form it owns.
   const nameSave = panel.locator('form button[type="submit"]')
   // The Host has no override stored yet, so the page shows the historic default
   // and the version footnote's two facts: the bundle version and the repo link.
@@ -3622,175 +3697,4 @@ it('states the local environment check on the Team page', async () => {
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
 
-/**
- * The judge group on the Team page: one line of state above the three controls
- * that decide whether jev can be reached at all. The journey proves the whole
- * path — page → settings document → the Host's own judge → back into the status
- * line — because a write that landed and a write that merely staged look
- * identical on the page, so only that round trip tells them apart.
- *
- * The page is deliberately small: the gate's thresholds and the key's
- * environment variable share the same row and are Team's own business, so this
- * journey also pins their absence from the controls and from the copy.
- *
- * The key literal is written, then cleared: mounting and unmounting the judge
- * is the one state change this page can reach without a network call, and the
- * literal is a fixture that never leaves the temporary profile.
- */
-it('configures the jev endpoint from the Team page in real Web', async () => {
-  await installLocalBundle(false)
-  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
-  browser = await chromium.launch({ headless: true, executablePath: CHROME })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
-  const consoleWatch = watchConsole(page)
-  await page.goto(scaffold.authenticatedUrl)
-  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
 
-  await openSettings(page)
-  const panel = page.getByRole('dialog')
-  await panel.getByRole('button', { name: '团队', exact: true }).click()
-  const heading = panel.getByRole('heading', { name: '团队', exact: true })
-  await heading.waitFor()
-  const judgeToggle = panel.getByRole('button', { name: /^jev/ })
-  const judge = panel.locator('[data-team-judge]')
-
-  // A fresh profile holds no key: the row says so in one line and the controls
-  // that would change it are not on the page at all. A closed disclosure that
-  // merely hid its content would still be reachable by keyboard and by a screen
-  // reader, so the journey pins the absence rather than the styling.
-  const status = judgeToggle.locator('[data-context-judge]')
-  await status.waitFor()
-  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
-  expect(await status.textContent()).toContain('未配置 key')
-  expect(await judgeToggle.getAttribute('aria-expanded')).toBe('false')
-  expect(await judge.count()).toBe(0)
-  expect(await panel.getByRole('textbox', { name: 'apiBase' }).count()).toBe(0)
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-no-key.png'), fullPage: true })
-
-  // Opening it is what puts the three controls on the page — exactly those, and
-  // nothing else: the gate's thresholds and the key's environment variable share
-  // the same settings section and are Team's own business, so neither a control
-  // nor a number for them appears here. It is a real button, so the keyboard
-  // path a reader without a pointer has is the one that opens it.
-  await judgeToggle.focus()
-  await page.keyboard.press('Enter')
-  expect(await judgeToggle.getAttribute('aria-expanded')).toBe('true')
-  await judge.waitFor()
-  expect(await judge.textContent()).not.toContain('阈值')
-  expect(await judge.textContent()).not.toContain('环境变量')
-  expect(await judge.getByRole('textbox').count()).toBe(3)
-  expect(await judge.getByText('jev', { exact: true }).count()).toBe(0)
-  // Nothing is overridden in a fresh profile, so the endpoint controls start
-  // empty: the row states only what it states, and the engine's own defaults are
-  // never copied onto the page. The key is a password field — a stored literal
-  // never rides a response — so it starts blank and there is nothing to clear.
-  expect(await judge.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('')
-  expect(await judge.getByRole('textbox', { name: 'model' }).inputValue()).toBe('')
-  const keyField = judge.getByLabel('key', { exact: true })
-  expect(await keyField.getAttribute('type')).toBe('password')
-  expect(await keyField.getAttribute('autocomplete')).toBe('new-password')
-  expect(await keyField.inputValue()).toBe('')
-  expect(await judge.getByRole('button', { name: '清除 key' }).count()).toBe(0)
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-open.png'), fullPage: true })
-
-  // One save writes all three: the row now carries them, which is what the
-  // shipped overridden badge reports, and the judge mounts — the status line
-  // states the Host's own answer rather than the form's optimism.
-  await judge.getByRole('textbox', { name: 'apiBase' }).fill('https://openrouter.ai/api/v1')
-  await judge.getByRole('textbox', { name: 'model' }).fill('typesafe/jev-1.13')
-  await keyField.fill('sk-e2e-not-a-real-key')
-  await judge.getByRole('button', { name: '保存' }).click()
-  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('enabled')
-  expect(await status.textContent()).toContain('jev 已就绪')
-  await expect.poll(async () => await judge.getByRole('button', { name: '重置' }).count()).toBe(2)
-  expect(await keyField.inputValue()).toBe('')
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-enabled.png'), fullPage: true })
-
-  // Clearing is its own write, and unmounts the judge again. It is the page's
-  // own control, so it is also where the keyboard path is proven: Tab from the
-  // key field reaches it, it carries the one focus ring the language defines,
-  // and Enter is what clears.
-  const clearButton = judge.getByRole('button', { name: '清除 key' })
-  await clearButton.waitFor()
-  await keyField.click()
-  await page.keyboard.press('Tab')
-  const clearRing = await focusRing(page, '[role="dialog"] button:focus-visible')
-  expect(clearRing?.focusVisible).toBe(true)
-  expect(clearRing?.outlineStyle).not.toBe('none')
-  expect(clearRing?.outlineWidth).toBe('2px')
-  // The shot is taken while the ring is on the control, so the page's own
-  // control carries its focus state in the evidence rather than in prose.
-  await heading.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-key-configured.png'), fullPage: true })
-  await page.keyboard.press('Enter')
-  await expect.poll(async () => await status.getAttribute('data-context-judge')).toBe('no-key')
-  await expect.poll(async () => await judge.getByRole('button', { name: '清除 key' }).count()).toBe(0)
-  // The endpoint survives the key's removal: they are one row, but the clear
-  // writes exactly the one field it names.
-  expect(await judge.getByRole('textbox', { name: 'apiBase' }).inputValue()).toBe('https://openrouter.ai/api/v1')
-
-  // 390×844: the shipped panel keeps its 188px nav rail, so the page has to
-  // survive a column far narrower than its sentences. It must stay inside the
-  // panel and add no horizontal overflow of its own. The shot is taken with the
-  // judge group itself in view — the panel scrolls, so a full-page capture at
-  // the top would leave the row this rule restacks below the fold.
-  await page.setViewportSize({ width: 390, height: 844 })
-  await settleLayout(page)
-  await judgeToggle.scrollIntoViewIfNeeded()
-  // Two rules are measured here rather than eyeballed. The row's answer moves
-  // under the title it answers for, and the shipped field head turns into a
-  // column: at this width a label and its override badges cannot share a line,
-  // and side by side the badges are painted over the label's text.
-  const narrowGeometry = await judgeToggle.evaluate(toggle => {
-    const title = toggle.querySelector('[class*="groupTitle"]')!
-    const answer = toggle.querySelector('[data-context-judge]')!
-    const head = document.querySelector('[data-team-judge] [class*="head"]')!
-    const label = head.querySelector('label')!
-    const badges = head.querySelector('[class*="badges"]')
-    const titleBox = title.getBoundingClientRect()
-    const answerBox = answer.getBoundingClientRect()
-    const labelBox = label.getBoundingClientRect()
-    const badgesBox = badges?.getBoundingClientRect()
-    return {
-      answerBelowTitle: Math.round(answerBox.top - (titleBox.top + titleBox.height)),
-      labelWidth: Math.round(labelBox.width),
-      labelText: Math.round(label.scrollWidth),
-      badgesTop: badgesBox === undefined ? undefined : Math.round(badgesBox.top - labelBox.bottom),
-    }
-  })
-  expect(narrowGeometry.answerBelowTitle).toBeGreaterThanOrEqual(-1)
-  expect(narrowGeometry.labelWidth).toBeGreaterThanOrEqual(narrowGeometry.labelText)
-  expect(narrowGeometry.badgesTop).toBeGreaterThanOrEqual(-1)
-  // The answer is a sentence with a leading glyph, so at this width the glyph
-  // rides the first line of the text instead of hanging at the middle of a
-  // wrapped block, and the sentence starts where the glyph ends rather than in
-  // a column of its own.
-  const narrowAnswer = await status.evaluate(node => {
-    const glyph = node.querySelector('svg')!.getBoundingClientRect()
-    const text = node.querySelector('span')!.getBoundingClientRect()
-    return {
-      glyphTop: Math.round(glyph.top),
-      glyphRight: Math.round(glyph.right),
-      textTop: Math.round(text.top),
-      textLeft: Math.round(text.left),
-    }
-  })
-  expect(narrowAnswer.glyphTop - narrowAnswer.textTop).toBeLessThanOrEqual(4)
-  expect(narrowAnswer.textLeft).toBeGreaterThanOrEqual(narrowAnswer.glyphRight)
-  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-narrow-judge.png'), fullPage: true })
-  const narrow = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-  }))
-  expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
-  const statusBox = (await status.boundingBox())!
-  const panelBox = (await panel.boundingBox())!
-  expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1)
-  await page.setViewportSize({ width: 1440, height: 960 })
-  await settleLayout(page)
-
-  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
-}, 180_000)

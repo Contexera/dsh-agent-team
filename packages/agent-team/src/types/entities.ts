@@ -57,7 +57,17 @@ export interface AgentTeamMemberActor {
   readonly handle: string
 }
 
-export type AgentTeamActor = AgentTeamHumanActor | AgentTeamMemberActor
+/**
+ * The Host acting on a Member's Session — never a business actor. Automatic
+ * Session recycling is the only user: the model neither asked for it nor could
+ * refuse it, so Human or Member authority would be a false attribution.
+ */
+export interface AgentTeamHostActor {
+  readonly kind: 'host'
+  readonly handle: 'agent-team'
+}
+
+export type AgentTeamActor = AgentTeamHumanActor | AgentTeamMemberActor | AgentTeamHostActor
 
 /** Provider route plus provider-owned model id one Member can be pinned to. */
 export interface AgentTeamModelSelection {
@@ -354,9 +364,14 @@ export interface AgentTeamTask {
   readonly taskRef: AgentTeamTaskRef
   readonly channelRef: AgentTeamChannelRef
   readonly threadRef: AgentTeamThreadRef
-  readonly status: 'todo' | 'in_progress' | 'in_review' | 'done' | 'closed'
+  readonly status: AgentTeamTaskStatus
   readonly resolution: 'open' | 'accepted' | 'closed'
 }
+
+export type AgentTeamTaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done' | 'closed'
+
+/** The two statuses a live Claim keeps a Task in — the only ones a live-work surface lists. */
+export type AgentTeamLiveTaskStatus = Extract<AgentTeamTaskStatus, 'in_progress' | 'in_review'>
 
 /** Current projection of one collaboration Thread. */
 export interface AgentTeamThread {

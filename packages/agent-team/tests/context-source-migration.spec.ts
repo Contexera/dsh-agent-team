@@ -30,11 +30,12 @@ import {
   continuationCheckpointRefOf,
   handoffOf,
   isAgentTeamSource,
-  isAgentTeamSourceKind,
+  matchesProducerKind,
   isCheckpointContinuationMessage,
   isHandoffMessage,
 } from '../src/context-source.ts'
-import { TEAM_CONTEXT_CODEC } from '../src/context-continuity-host.ts'
+import { createCheckpointContinuationMessage } from '../src/context-codec.ts'
+import { createHandoffMessage } from './helpers/legacy-context-envelopes.ts'
 
 const handoffInput = {
   handoff: 'objective: finish the parser\nnext step: run tests',
@@ -71,14 +72,14 @@ describe('Agent Team message sources satisfy format V4 admission', () => {
     expect(() => assertV4RowAdmission(userRow({ kind: AGENT_TEAM_PLUGIN_ID, form: 'snapshot', sections: [{ name: HANDOFF_SECTION_NAME, text: 'prose' }] }))).not.toThrow()
   })
 
-  it('admits the rollover handoff and checkpoint continuation this build publishes', () => {
-    // The context-continuity engine's codec is the writer for both, so these
-    // two rows fence the one dependency that also has to move with this line:
-    // the engine writes the producer kind, never the retired wrapper.
-    const handoff = TEAM_CONTEXT_CODEC.createHandoffMessage(handoffInput)
+  it('admits the checkpoint continuation this build writes and the handoff shape old logs carry', () => {
+    // This package's own codec writes the continuation, so the row fences the
+    // producer kind it must keep writing. The handoff has no writer left; the
+    // row fences the old-log shape the read side still decodes.
+    const handoff = createHandoffMessage(handoffInput)
     expect(handoff.source.kind).toBe(AGENT_TEAM_PLUGIN_ID)
     expect(() => assertV4RowAdmission(userRow(handoff.source))).not.toThrow()
-    const continuation = TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage('context-checkpoint-abc')
+    const continuation = createCheckpointContinuationMessage('context-checkpoint-abc')
     expect(continuation.source.kind).toBe(AGENT_TEAM_PLUGIN_ID)
     expect(() => assertV4RowAdmission(userRow(continuation.source))).not.toThrow()
   })
@@ -98,7 +99,7 @@ describe('Agent Team message sources satisfy format V4 admission', () => {
 
 describe('Released V3 history reads back through the official conversion', () => {
   it('renames this plugin’s wrapper rows exactly as the read side expects', () => {
-    const handoff = TEAM_CONTEXT_CODEC.createHandoffMessage(handoffInput)
+    const handoff = createHandoffMessage(handoffInput)
     const converted = convertV3({
       kind: 'plugin',
       plugin: AGENT_TEAM_PLUGIN_ID,
@@ -134,7 +135,7 @@ describe('Released V3 history reads back through the official conversion', () =>
     // fallback-renamed one becomes `plugin:<its own id>`. Exact identity
     // matching must leave both outside this plugin's attribution.
     expect(convertV3({ kind: 'plugin', plugin: 'tool-jobs', form: 'notice', summary: 'job done' })['kind']).toBe('tool-jobs')
-    expect(isAgentTeamSourceKind('tool-jobs')).toBe(false)
+    expect(matchesProducerKind('tool-jobs', AGENT_TEAM_PLUGIN_ID)).toBe(false)
     const foreign = createUserMessage({
       content: [{ type: 'text', text: 'body' }],
       source: {
@@ -149,7 +150,7 @@ describe('Released V3 history reads back through the official conversion', () =>
 
   it('reads the checkpoint ref from a converted continuation by exact identity', () => {
     const ref = 'context-checkpoint-0123456789abcdef'
-    const continuation = TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(ref)
+    const continuation = createCheckpointContinuationMessage(ref)
     const restored = createUserMessage({
       content: [...continuation.content],
       source: {
@@ -172,7 +173,7 @@ describe('Released V3 history reads back through the official conversion', () =>
 
 describe('Agent Team message sources read back through the admitted slots', () => {
   it('recovers the whole handoff envelope from its named sections, in both shapes', () => {
-    const message = TEAM_CONTEXT_CODEC.createHandoffMessage(handoffInput)
+    const message = createHandoffMessage(handoffInput)
     expect(isHandoffMessage(message)).toBe(true)
     expect(handoffOf(message)).toMatchObject({
       previousSessionId: 'agent-team-previous',
@@ -204,7 +205,7 @@ describe('Agent Team message sources read back through the admitted slots', () =
 
   it('omits absent optional envelope facts instead of inventing them', () => {
     const { checkpointRef: _checkpointRef, relatedFiles: _relatedFiles, ...bare } = handoffInput
-    const message = TEAM_CONTEXT_CODEC.createHandoffMessage(bare)
+    const message = createHandoffMessage(bare)
     const handoff = handoffOf(message)
     expect(handoff).toBeDefined()
     expect(handoff?.checkpointRef).toBeUndefined()
@@ -212,7 +213,7 @@ describe('Agent Team message sources read back through the admitted slots', () =
   })
 
   it('round-trips a related path that contains a comma', () => {
-    const message = TEAM_CONTEXT_CODEC.createHandoffMessage({
+    const message = createHandoffMessage({
       ...handoffInput,
       relatedFiles: [{ path: 'src/a, b.ts', reason: 'odd but legal name' }, { path: 'src/parser.ts' }],
     })
@@ -244,7 +245,7 @@ describe('Agent Team message sources read back through the admitted slots', () =
 
   it('recovers the checkpoint ref from a continuation, exactly and by identity', () => {
     const ref = 'context-checkpoint-0123456789abcdef'
-    const message = TEAM_CONTEXT_CODEC.createCheckpointContinuationMessage(ref)
+    const message = createCheckpointContinuationMessage(ref)
     expect(continuationCheckpointRefOf(message)).toBe(ref)
     expect(isCheckpointContinuationMessage(message)).toBe(true)
     expect(isCheckpointContinuationMessage(message, ref)).toBe(true)

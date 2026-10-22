@@ -8,6 +8,18 @@ import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamThreadRef } from 
  */
 export type TeamDraftKey = `channel:${AgentTeamChannelRef}` | `thread:${AgentTeamThreadRef}`
 
+/** The conversation kind one draft key names. */
+export type TeamDraftKind = 'channel' | 'thread'
+
+/**
+ * Read the conversation kind back out of one draft key. The key format is this
+ * module's contract, so parsing it belongs here rather than in every consumer
+ * that needs the discriminant.
+ */
+export function draftKindOf(key: TeamDraftKey): TeamDraftKind {
+  return key.startsWith('channel:') ? 'channel' : 'thread'
+}
+
 /** One cached composer state; `recipients` mirrors the structured mention set. */
 export interface TeamDraftState {
   readonly draft: string
@@ -18,6 +30,17 @@ interface StoredDraft {
   draft: string
   recipientIds: AgentTeamMemberId[]
   savedAt: number
+}
+
+/**
+ * Whether one write would restate the stored entry. Rewriting identical
+ * content must not bump `savedAt` or notify: convergence effects re-run
+ * freely and would otherwise loop through persistence.
+ */
+function sameDraftEntry(previous: StoredDraft | undefined, next: StoredDraft): boolean {
+  return previous !== undefined && previous.draft === next.draft
+    && previous.recipientIds.length === next.recipientIds.length
+    && previous.recipientIds.every((id, index) => id === next.recipientIds[index])
 }
 
 const STORAGE_KEY = 'dsh.agent-team.drafts.v1'
@@ -128,11 +151,7 @@ export class TeamDraftStore {
       recipientIds: patch.recipientIds ?? previous?.recipientIds ?? [],
       savedAt: Date.now(),
     }
-    // Identical content must not bump savedAt or notify — convergence effects
-    // re-run freely and would otherwise loop through persistence.
-    if (previous !== undefined && previous.draft === next.draft
-      && previous.recipientIds.length === next.recipientIds.length
-      && previous.recipientIds.every((id, index) => id === next.recipientIds[index])) return
+    if (sameDraftEntry(previous, next)) return
     // An emptied composer leaves nothing worth restoring behind.
     if (next.draft === '' && next.recipientIds.length === 0) {
       this.clear(key)

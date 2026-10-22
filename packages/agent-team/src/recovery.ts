@@ -58,24 +58,32 @@ export function failureDetail(error: unknown): string {
   return typeof code === 'string' && code.length > 0 ? `${error.name} code '${code}': ${message}` : `${error.name}: ${message}`
 }
 
-/**
- * Classify one `agent/error` occurrence. Structured data outranks wording: a
- * Harness code decides alone (a message can never upgrade a terminal failure
- * back to recoverable), and the narrow message signatures run only when no
- * usable code exists at all — `UNKNOWN` means the Harness folded a foreign
- * error whose own taxonomy Team must not trust.
- */
+/** Classify one `agent/error` occurrence into the family automatic recovery may act on, or `undefined` when a wake cannot help. */
 export function classifyRecoverableError(error: unknown): RecoverableErrorKind | undefined {
+  // Structured data outranks wording: a Harness code decides alone (a message
+  // can never upgrade a terminal failure back to recoverable), and the narrow
+  // message signatures run only when no usable code exists at all — `UNKNOWN`
+  // means the Harness folded a foreign error whose own taxonomy Team must not
+  // trust.
   const { code, status } = structuredFailure(error)
-  if (code !== undefined && code !== 'UNKNOWN') {
-    if (code === 'RATE_LIMIT') return 'rate limiting'
-    if (code === 'TRANSPORT' || code === 'TIMEOUT') return 'transient network'
-    if (status === 429 || status === 503) return 'rate limiting'
-    return undefined
-  }
+  if (code !== undefined && code !== 'UNKNOWN') return kindFromProvenance(code, status)
   const message = failureMessage(error)
   if (RATE_LIMIT_PATTERNS.some(pattern => pattern.test(message))) return 'rate limiting'
   if (TRANSIENT_NETWORK_PATTERNS.some(pattern => pattern.test(message))) return 'transient network'
+  return undefined
+}
+
+/**
+ * Classify one Harness failure code. A code from the recoverable families maps
+ * directly; any other code is a provider, credential, quota, context, or
+ * request state a wake cannot fix, so it stays manual — a matching HTTP status
+ * is the one escape, for a transport that reports rate limiting as status
+ * alone.
+ */
+function kindFromProvenance(code: string, status: number | undefined): RecoverableErrorKind | undefined {
+  if (code === 'RATE_LIMIT') return 'rate limiting'
+  if (code === 'TRANSPORT' || code === 'TIMEOUT') return 'transient network'
+  if (status === 429 || status === 503) return 'rate limiting'
   return undefined
 }
 
@@ -236,9 +244,9 @@ export class RecoveryCoordinator {
   }
 
   dispose(): void {
-    // Deleting the entry the iterator is standing on is safe, and each Member's
-    // clear is reported before the next one is visited.
-    for (const memberId of this.episodes.keys()) this.stopTracking(memberId, 'host-disposed')
+    // Snapshot first: `stopTracking` deletes the entry it clears, and each
+    // Member's clear must be reported before the next one is visited.
+    for (const memberId of Array.from(this.episodes.keys())) this.stopTracking(memberId, 'host-disposed')
   }
 
   private emit(fact: RecoveryFact): void {

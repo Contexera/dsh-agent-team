@@ -18,6 +18,19 @@ const AGENTS = [
 
 const LONG_BODY = `长文样本（一条 Agent 回答超过 600 字的折叠阈值）：${'这段话会被反复续写，直到超过阈值，读者因此先看到裁切后的预览与底部渐隐，再决定要不要展开全文。'.repeat(16)}`
 
+/**
+ * Fixture seam: appends the canonical durable route record — the same
+ * `request/context` event a real first request appends — so the pressure
+ * policy finds the Member's route priceable instead of failing closed over a
+ * preview that never runs a turn.
+ */
+const recordPriceableRoute = (agent: {
+  session: { append: (type: 'request/context', data: { provider: string; model: string; contextWindow: number }) => unknown }
+}, contextWindow = 128_000): void => {
+  const selection = scaffold.ctx.agentDefaultModel.currentSelection()
+  agent.session.append('request/context', { provider: selection.provider, model: selection.model, contextWindow })
+}
+
 const wait = async (predicate: () => boolean, timeoutMs = 30_000): Promise<void> => {
   const started = Date.now()
   while (!predicate()) {
@@ -86,19 +99,8 @@ beforeAll(async () => {
 
   // Fixture seam, not a fixture bug: this lane resolves no model route for a
   // Member, so the pressure policy fails closed and every Member row would
-  // carry a runtime-fault banner over a preview that never runs a turn. The
-  // canonical durable route record — the same `request/context` event a real
-  // first request appends — makes the route priceable and the rows read clean.
-  {
-    const selection = scaffold.ctx.agentDefaultModel.currentSelection()
-    for (const agent of AGENTS) {
-      agentFor(agent.handle)!.session.append('request/context', {
-        provider: selection.provider,
-        model: selection.model,
-        contextWindow: 128_000,
-      })
-    }
-  }
+  // carry a runtime-fault banner over a preview that never runs a turn.
+  for (const agent of AGENTS) recordPriceableRoute(agentFor(agent.handle)!)
 
   const channel = await team.createChannel({
     requestId: 'ui-preview-channel' as never,

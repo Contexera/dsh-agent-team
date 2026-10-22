@@ -3,12 +3,14 @@ import type { AgentTeamClientMemberStatus, AgentTeamChannelRef, AgentTeamInbox, 
   AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { Button, IconChevronRightOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { TeamChannelPanel } from './TeamChannelPanel.tsx'
+import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
 import { TeamMessage } from './TeamMessage.tsx'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
@@ -48,6 +50,7 @@ interface TeamChannelPageProps {
   readonly selectChannel: TeamConversationProps['selectChannel']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
+  readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly t: TeamConversationProps['t']
 }
@@ -66,9 +69,13 @@ function mergeChannelView(current: AgentTeamView, fresh: AgentTeamView): AgentTe
     ...fresh,
     items,
     cursor: Math.min(fresh.cursor, current.cursor),
-    // Older retained items may precede even a saturated fresh window.
-    hasMore: fresh.hasMore || current.cursor < fresh.cursor,
+    hasMore: fresh.hasMore || hasOlderBeyondFreshWindow(current, fresh),
   }
+}
+
+/** Whether the retained items reach older than the fresh window's own start. */
+function hasOlderBeyondFreshWindow(current: AgentTeamView, fresh: AgentTeamView): boolean {
+  return current.cursor < fresh.cursor
 }
 
 /**
@@ -76,7 +83,7 @@ function mergeChannelView(current: AgentTeamView, fresh: AgentTeamView): AgentTe
  * newest fact on its Thread. That difference is exactly what "has follow-up
  * activity" means, and the Host projects both instants from the ledger.
  */
-function followUpAt(item: AgentTeamViewItem): string | undefined {
+function newerActivityAt(item: AgentTeamViewItem): string | undefined {
   const lastActivityAt: string | undefined = item.lastActivityAt
   return lastActivityAt === undefined || lastActivityAt === item.message.occurredAt ? undefined : lastActivityAt
 }
@@ -87,17 +94,25 @@ function followUpAt(item: AgentTeamViewItem): string | undefined {
  * prints the day it landed instead (see `ThreadEntryRow`), because the recency
  * there would only repeat the moment it resolved on every finished row.
  */
-function printedActivityAt(item: AgentTeamViewItem): string | undefined {
+function unresolvedFollowUpAt(item: AgentTeamViewItem): string | undefined {
   const status = item.task?.status
-  return status === 'done' || status === 'closed' ? undefined : followUpAt(item)
+  return status === 'done' || status === 'closed' ? undefined : newerActivityAt(item)
 }
 
-/** Host unread per Thread, keyed for the feed's rows: zero unread is the absence of a badge, not a row. */
-function unreadCounts(inbox: AgentTeamInbox): ReadonlyMap<AgentTeamThreadRef, number> {
-  return new Map(inbox.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
+/**
+ * Host unread per Thread, keyed for the feed's rows: zero unread is the absence
+ * of a badge, not a row. A failed read keeps the previous counts: a read failure
+ * must not render as "everything was consumed".
+ */
+function applyInboxRead(
+  previous: ReadonlyMap<AgentTeamThreadRef, number>,
+  result: RemoteResult<AgentTeamInbox>,
+): ReadonlyMap<AgentTeamThreadRef, number> {
+  if (!result.ok) return previous
+  return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, openMemberSession, t }: TeamChannelPageProps) {
+export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamChannelPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
@@ -116,6 +131,9 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   // The taskless Thread open in the feed's side panel. A Task's entry still
   // walks into the Thread page; only a discussion stays here.
   const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
+  // The surface the panel is seated in, which owns the panel-width variable: the
+  // drag handle writes it there, so a drag never re-renders this page.
+  const [panelSurface, setPanelSurface] = useState<HTMLElement | null>(null)
   // The composer draft lives in the keyed draft cache: view switches unmount
   // this page, and a refresh must not cost the half-written message either.
   // The composer owns the subscription — this page only reads a snapshot when
@@ -248,6 +266,23 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   }, [view])
 
   const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${channelLastItem?.message.messageRef ?? ''}`)
+
+  // Seat the panel from its surface: the saved choice, else this surface's
+  // default share. The surface is laid out after this effect first runs, so the
+  // seat follows its box — a one-shot pass would seat from a pre-layout width
+  // and leave it there. A dragged choice is re-clamped, never re-derived.
+  useEffect(() => {
+    if (panelSurface === null) return
+    const seat = () => {
+      if (panelSurface.offsetWidth === 0) return
+      const width = resolvePanelWidth(panelSurface.offsetWidth, readPanelWidthPreference())
+      panelSurface.style.setProperty('--team-panel-width', `${width}px`)
+    }
+    seat()
+    const observer = new ResizeObserver(seat)
+    observer.observe(panelSurface)
+    return () => { observer.disconnect() }
+  }, [panelSurface, panelThreadRef])
   const channel = view?.channels.find(item => item.channelRef === channelRef)
   const channelMemberIds = new Set(view?.members.filter(item => item.channelRef === channelRef).map(item => item.memberId) ?? [])
   const messageSender = (item: AgentTeamViewItem): AgentTeamMemberId => item.message.sender
@@ -277,12 +312,10 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       if (!mountedRef.current || sequence !== refreshSequenceRef.current) return false
       if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeChannelView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
       if (loadedMembers.ok) setMembers(loadedMembers.value); else setLoadError(loadedMembers.error.message)
-      // A failed inbox read keeps the last successful counts — a read failure
-      // must not render as "everything was consumed" (the sidebar badge holds
-      // the same policy) — while the failure itself surfaces through the
-      // error face below.
-      if (loadedInbox.ok) setUnreadByThread(unreadCounts(loadedInbox.value))
-      else setLoadError(loadedInbox.error.message)
+      // A failed inbox read keeps the last successful counts while the failure
+      // itself surfaces through the error face below.
+      if (!loadedInbox.ok) setLoadError(loadedInbox.error.message)
+      setUnreadByThread(current => applyInboxRead(current, loadedInbox))
       if (loaded.ok && loadedMembers.ok && loadedInbox.ok) setLoadError(undefined)
       return loaded.ok && loadedMembers.ok && loadedInbox.ok
     } catch (cause) {
@@ -415,7 +448,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     finally { setPending(false) }
   }
 
-  return <main className={css.surface} data-team-channel={channelRef}>
+  return <main className={css.surface} data-team-channel={channelRef} ref={setPanelSurface}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderWithTabs}`}>
       <header className={css.headerRow}>
         <div className={css.headerCopy}>
@@ -504,7 +537,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
               >
                 {item.message.topLevel && <ThreadEntryRow
                   item={item}
-                  owners={item.claimOwners}
+                  owners={item.liveClaimOwners}
                   unread={unread}
                   human={humanIdentity}
                   t={t}
@@ -539,40 +572,42 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       onAsTaskChange={setAsTask}
       t={t}
       /> : <div />}
-
-      {panelThreadRef !== undefined && channel !== undefined && <TeamChannelPanel
-        workspaceId={workspaceId}
-        channelRef={channelRef}
-        threadRef={panelThreadRef}
-        channelName={channel.name}
-        humanName={humanName}
-        {...(humanAvatarUrl === undefined ? {} : { humanAvatarUrl })}
-        {...(view?.humanMemberId === undefined ? {} : { humanMemberId: view.humanMemberId })}
-        members={members}
-        channelMemberIds={channelMemberIds}
-        drafts={drafts}
-        getAttachment={getAttachment}
-        putAttachment={putAttachment}
-        readThread={readThread}
-        loadThreadHistory={loadThreadHistory}
-        threadObservations={threadObservations}
-        reply={reply}
-        promoteThread={promoteThread}
-        subscribeChanges={subscribeChanges}
-        selectThread={selectThread}
-        selectChannel={selectChannel}
-        resolveTaskRefs={resolveTaskRefs}
-        resolveThreadRefs={resolveThreadRefs}
-        openMemberSession={openMemberSession}
-        channelNameOf={channelNameOf}
-        memberOf={memberOf}
-        taskNumberOf={taskNumberOf}
-        onRead={handlePanelRead}
-        onPromoted={handlePanelPromoted}
-        onClose={handlePanelClose}
-        t={t}
-      />}
     </div>}
+
+    {tab === 'feed' && panelThreadRef !== undefined && channel !== undefined && <TeamChannelPanel
+      surface={panelSurface}
+      workspaceId={workspaceId}
+      channelRef={channelRef}
+      threadRef={panelThreadRef}
+      channelName={channel.name}
+      humanName={humanName}
+      {...(humanAvatarUrl === undefined ? {} : { humanAvatarUrl })}
+      {...(view?.humanMemberId === undefined ? {} : { humanMemberId: view.humanMemberId })}
+      members={members}
+      channelMemberIds={channelMemberIds}
+      drafts={drafts}
+      getAttachment={getAttachment}
+      putAttachment={putAttachment}
+      readThread={readThread}
+      loadThreadHistory={loadThreadHistory}
+      threadObservations={threadObservations}
+      reply={reply}
+      promoteThread={promoteThread}
+      subscribeChanges={subscribeChanges}
+      selectThread={selectThread}
+      selectChannel={selectChannel}
+      resolveTaskRefs={resolveTaskRefs}
+      resolveThreadRefs={resolveThreadRefs}
+      resolveMessageRefs={resolveMessageRefs}
+      openMemberSession={openMemberSession}
+      channelNameOf={channelNameOf}
+      memberOf={memberOf}
+      taskNumberOf={taskNumberOf}
+      onRead={handlePanelRead}
+      onPromoted={handlePanelPromoted}
+      onClose={handlePanelClose}
+      t={t}
+    />}
   </main>
 }
 
@@ -624,8 +659,8 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   readonly onOpen: () => void
 }) {
   const taskNumber = item.taskNumber
-  const followUp = followUpAt(item)
-  const printedActivity = printedActivityAt(item)
+  const followUp = newerActivityAt(item)
+  const printedActivity = unresolvedFollowUpAt(item)
   // A resolved Task's gate slims to a footnote — no owner stack, no status
   // dot: the word and the day it landed say what is left to say, and the
   // board owns scanning resolved work now. Unread still counts beside it:
@@ -644,7 +679,7 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   // owner stack keeps its own accessible name — a labeled button prunes its
   // descendants from the accessibility tree — and so the control's name says
   // exactly what clicking it does.
-  return <span className={css.entryLine} data-thread-entry="">
+  return <span className={css.entryLine} data-thread-entry="" data-thread-entry-door={taskNumber ?? 'thread'}>
     {resolved ? <TeamCountBadge count={unread} /> : <ThreadStateCluster task={item.task} owners={owners} unread={unread} human={human} t={t} />}
     <button
       type="button"
@@ -687,7 +722,7 @@ function BoardCard({ item, unread, human, t, onOpen }: {
   // For resolved work the newest fact is the resolution itself — the date the
   // card prints is when it landed; for moving work it is when it last moved.
   const activityAt = item.lastActivityAt
-  const namedOwners = namedAvatarOwners(item.claimOwners, human)
+  const namedOwners = namedAvatarOwners(item.liveClaimOwners, human)
   return <button
     type="button"
     className={channelCss.boardCard}

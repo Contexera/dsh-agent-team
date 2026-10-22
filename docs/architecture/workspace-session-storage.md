@@ -16,7 +16,7 @@ The startup write-side repair pass that earlier lines shipped (`session-remediat
 
 Every per-Session stored read the Host performs goes through one seam, `packages/agent-team/src/stored-session-reader.ts`: one `open → read → close` cycle with the handle guaranteed closed, and every failure normalized into five categories — `missing`, `refused` (deterministic format refusals, carrying the artifact location), `corrupt`, `io`, and `unknown`.
 
-Consumers choose policy by category and never match Harness error text. Current-binding activation and checkpoint-seed resolution fail closed on any failure; carried-input replay skips only the deterministic `refused`/`corrupt` classes of a retired generation; handoff reconstruction and token measurement degrade; and the timeline truncates its lineage walk at an unreadable ancestor and reports `incompleteFrom` instead of silently ending. A DSH persistence-interface change is adapted in this one module.
+Consumers choose policy by category and never match Harness error text. Current-binding activation fails closed on any failure, the wake decision treats an unreadable Session as resume, and carried-input replay skips only the deterministic `refused`/`corrupt` classes of a retired generation. A DSH persistence-interface change is adapted in this one module.
 
 The shipped JSONL backend throws its corruption family as plain `Error`s, so corruption is matched by that stable message prefix inside the seam; if the text ever changes, the failure degrades to `unknown`, which every consumer treats conservatively.
 

@@ -12,6 +12,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamChannelRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
 import { isFactOnSurface } from '../src/surface-visibility.ts'
+import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 
 /**
  * Channel B's load-bearing agreement: the Host's real notice rendering and the
@@ -48,6 +49,7 @@ async function harness(): Promise<{ readonly ctx: Context }> {
   ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
   ctx.provide('tools', { schemas: () => [] })
   ctx.provide('sessionPersistence', { list: async () => [] })
+  provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })

@@ -20,11 +20,7 @@ export function isRunGap(previousOccurredAt: string | undefined, occurredAt: str
 
 const pad = (value: number): string => String(value).padStart(2, '0')
 
-export function timelineDayKey(occurredAt: string): string {
-  return localDateKey(occurredAt)
-}
-
-function localDateKey(occurredAt: string): string {
+export function localDateKey(occurredAt: string): string {
   const at = new Date(occurredAt)
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
 }

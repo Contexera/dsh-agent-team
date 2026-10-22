@@ -23,7 +23,7 @@ Workspace 概览是当前页时，概览携带 `aria-current='page'`。与原先
 嵌入的 Member Session 是唯一能压在「读者仍身处的 Team 面」之上的覆盖层。那可能是 Inbox 页，也可能是读者打开这个 Agent 时所处的 Channel/Thread。此时高亮归嵌入 Session 自己的 Agent 卡片。下层那个面保留原位，但不携带高亮。覆盖层关闭后原样取回。Inbox 入口同样如此：入口页面在屏上时才是被标记的那一行。
 
 行级 ⋯ 菜单是 `TeamRowMenu`，复用公共 `Menu`。`Menu` 用 `portal` + `closeOnPointerLeave`，锚为裸 ellipsis 图标按钮。hover、focus-within、菜单开启三种状态下可见。菜单开启时该行钉住 hover 底色（`data-menu-open`）。菜单含「编辑」入口，打开对应编辑器。
-- error 态成员额外出现「恢复」项，走 `recoverMember` Remote。Host 向这个成员的活跃会话 steer 续作 prompt。这是运行时动作，不落 ledger。历史上的「从全新上下文开始」入口已移除。Member 经 `context_rollover` 工具自管上下文，Host 侧 clear-context Remote 保留为无可见入口的迁移逃生门。
+- error 态成员额外出现「恢复」项，走 `recoverMember` Remote。Host 向这个成员的活跃会话 steer 续作 prompt。这是运行时动作，不落 ledger。没有任何界面提供重置 Member 上下文的入口；换代由 Host 在唤醒边界决定。
 
 频道编辑器（`编辑频道`）：名称/说明输入框。保存钮无改动即禁用，这是 dirty 门。提交走 `updateChannel` Remote，幂等 request 同载荷复用。成功后由投影刷新回填行文案，不做乐观行内改名。成员增删入口已撤销——Channel 参与由 Thread 参与派生。
 
@@ -32,7 +32,7 @@ Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。�
 Agent 卡片会话视图里，Agent 行的头像与文案整体是选择按钮。按钮读作 `打开 {name} 的会话`，点击不再退出 Team 模式。导航快照保留当前 Channel/Thread，并叠加运行时字段 `memberSessionId`。同时附 `returnToSessionId`，两者均不持久化。再调用 `sessions.open(memberSessionId)`。
 - `conversation` 影子此时让位。shipped 会话根在 Team 侧栏之间渲染这个 Member Session。任何显式 Team 导航（选工作区/Channel/Thread）都会关闭成员视图，并恢复导航前的 Team 位置。页脚「对话」关闭成员视图，还原 `returnToSessionId`，再离开 Team。普通外壳不会停在成员会话里。
 
-Member 经 `context_rollover` 换新上下文时，Agents 面板观察这个 Member 的旧→新 Session 绑定。Agents 面板仅在嵌入页正是被观察的旧 live Session id 时恰好跟随一次。归档视图不跳转。
+Member 换代时，Agents 面板观察这个 Member 的旧→新 Session 绑定。Agents 面板仅在嵌入页正是被观察的旧 live Session id 时恰好跟随一次。归档视图不跳转。
 
 窄屏 rail 三个图标按钮自上而下：收件箱（`IconQueueOutlineRegular`）→ 频道（`IconListPenOutlineRegular`）→ Agents（`IconAgentPresetOutlineRegular`），均为 16px。不复用 checklist（任务）或 user（成员）图标。收件箱图标是目的地。点击打开 Inbox 页并请求展开侧栏。频道/Agents 图标点击请求展开侧栏，并聚焦对应分区头部。
 

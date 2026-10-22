@@ -25,17 +25,12 @@ Neither slice names an archived Channel's Threads: archival ends participation a
 The Client merges the per-Workspace Inbox calls in the Client; there is no home-level Inbox ledger or Remote.
 
 ## Team Member context boundary
-The explicit `team-member` preset contains coding tools, background jobs, the skill loader tool, compaction, all eleven Team tools, Workspace instruction discovery, and private-memory context. Harness `agent-instructions` remains the sole loader for `AGENTS.md`/`CLAUDE.md`. Each Member private root has `memory.md`, `notes/`, and `skills/`; only a bounded 16 KiB escaped reference index is injected, and the block states its current usage as `X.X KiB / 16 KiB` with a percentage. Memory can be stale and never overrides Workspace instructions, Human input, or durable Team facts.
+The explicit `team-member` preset contains coding tools, background jobs, the skill loader tool, compaction, all seven Team tools, Workspace instruction discovery, and private-memory context. Harness `agent-instructions` remains the sole loader for `AGENTS.md`/`CLAUDE.md`. Each Member private root has `memory.md`, `notes/`, and `skills/`; only a bounded 16 KiB escaped reference index is injected, and the block states its current usage as `X.X KiB / 16 KiB` with a percentage. Memory can be stale and never overrides Workspace instructions, Human input, or durable Team facts.
 
 Do not store credentials, sensitive data, guesses, chat logs, or facts already owned by the ledger.
 
 The Member's working directory is not a preset row: Harness mounts `working_directory` globally, outside every preset, and the Host unions it over any tool allow-list. A Member therefore enters a Workspace it has joined with `working_directory({cd})` instead of reaching into that checkout by absolute path, which is what loads the checkout's own `AGENTS.md`. Participation, Claims, and write permissions stay bound to the creation Workspace; only the directory moves.
 
-The persona states the private-space physical facts (the injected absolute paths, never cwd-relative ones, the memory/notes discipline, and the reusable-assets boundary), plus one concise paragraph of context-management guidance:
-
-- keep the active context the smallest sufficient working set;
-- record a checkpoint before a risky phase and return to it through `context_rollover` when a phase collapses;
-- roll fresh through `context_rollover` when history stops paying for itself, persisting anything worth keeping to private memory/notes first;
-- a context change never rolls back external effects, so bridge current state in the handoff.
+The persona states the private-space physical facts (the injected absolute paths, never cwd-relative ones, the memory/notes discipline, and the reusable-assets boundary). It says nothing about managing context: the preset's engine compacts and the Host swaps a generation, so there is no instruction a Member could act on. Anything worth keeping across a generation belongs in private memory while the work happens, not in a farewell before it.
 
 All skill craft — what deserves to be a skill, directory-form layout, writing quality, credentials — lives in the bundled `member-skill-manager` meta skill, whose description routes skill-management work to itself. Loading any skill stays the Member's own judgment per task.

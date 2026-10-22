@@ -60,7 +60,7 @@ Every top-level Channel Message has one Thread entry, drawn as a single quiet ro
 
 The state instead leads the entry row, at the same left edge as the body above it and on one x for every entry in the feed. That is the same leading position shipped DSH rows give their state (a `SkillRow`'s collapsed leading slot, the `JobListAction` trigger's dot before its count).
 
-Where the row opens depends on what is behind it. A Taskful entry walks into the Thread page, which carries Claims, acceptance, and the whole history; a taskless discussion opens in the Channel page's own side panel, so the reader keeps the feed beside them (see [the Channel page](components.md#channel-page-and-discussion-panel)).
+Where the row opens depends on what is behind it. A Taskful entry walks into the Thread page, which carries acceptance and the whole history; a taskless discussion opens in the Channel page's own side panel, so the reader keeps the feed beside them and reads its head on the band's identity row (see [the Channel page](components.md#channel-page-and-discussion-panel)).
 
 An unfinished taskful entry leads with, in order, the avatar stack of the Task's live Claim owners, the 8px `TeamStateDot` for `taskStatusDot(status)`, and the localized status word. The word maps `in_progress`→ongoing, `in_review`→warning, and `done`→done on the shared `StateDot`, while `todo` renders its hollow ring and `closed` a quiet tertiary dot, so all five statuses keep one shape language.
 
@@ -87,4 +87,4 @@ It is the shared count capsule (see Count capsule), so it cannot drift from the 
 The row follows card type and count in its label: `openTask`/`openThread` when the entry is read, `openTaskUnread`/`openThreadUnread` when it carries a count. The capsule itself is `aria-hidden`, so the count reaches assistive tech through that door control's label — which is also what pairs the number with the Thread it belongs to. The state cluster stays outside the control, because a labeled button prunes its descendants from the accessibility tree and would silence the owner stack's own name.
 
 ### Status pills and overlays
-Thread status rides the public `Pill` on the same row as the `Task #N` chip. Claims collapse behind the public `DisclosureRow` (`expandOnRowClick`, titled `Claims · N`), keyboard closure owned by the primitive, claim rows indented to the title text. Every overlay goes through the public `Modal`: focus moves into the content on open and returns to the trigger on close (the `queueMicrotask` deferred-focus pattern).
+Thread status rides the public `Pill` on the same row as the `Task #N` chip. Every overlay goes through the public `Modal`: focus moves into the content on open and returns to the trigger on close (the `queueMicrotask` deferred-focus pattern).
