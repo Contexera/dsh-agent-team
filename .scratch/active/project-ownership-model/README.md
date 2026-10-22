@@ -15,22 +15,29 @@
 
 ## 当前前沿
 
-- 工单 [`01`](issues/01-project-rename-and-model-adoption.md) 为 `ready`，等待 Human 授权实施；02–04 依次被前一张阻塞。
-- `spec.md` §13 列出实施前需探针确认的三项，在 01 开工时先做。
+- 原四张工单拆为九张（原文保留在 `materials/superseded-issues/`）。拆分原因：稳定 profile 与开发 profile 共用 `$DSH_HOME/storages/agent_team.sqlite`，改名必须先发布一个“读得懂 Project 写法”的版本；原 02 范围过大，拆为规则版本机制、owner、主对话、投递四步，规则版本 2 的标记在 06 完成前不写入真实 ledger。
+- 01 已完成（`feat: read the project spelling of stored channel records`），等待发布到稳定 profile。
+- 02 正在进行；真实 `agent_team.sqlite` 的验收由 Human 在本地 dev profile 做。
+- `spec.md` §13 三项探针：DM 的 Workspace 边界已在 Host `sendDm` 校验；旧 accept 缺 `acceptedClaimRefs` 时已有回退，03 补测试；规则标记与启动恢复的写入顺序在 03 查清。
 - 无需要 Human 拍板的未决产品问题。
 
 ## 完成条件
 
-- [ ] 01 全仓改名（不改变行为）
-- [ ] 02 Owner、Main stream 与按责任投递；完成后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续
-- [ ] 03 Task 责任与任务看板
-- [ ] 04 事件评估的提醒
+- [x] 01 读得懂 Project 写法的发布
+- [ ] 02 Channel 全仓改名为 Project
+- [ ] 03 规则版本机制
+- [ ] 04 Agent owner 与 Project member 派生
+- [ ] 05 项目主对话与开 Thread 权限
+- [ ] 06 按责任投递、Inbox 与 Agent 指引；启用规则版本 2；之后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续
+- [ ] 07 Task board 投影与 `team_task`
+- [ ] 08 Task 负责人、转交与验收限制；启用规则版本 3
+- [ ] 09 待验收积压与停滞提醒
 - [ ] durable 结论进入正式文档双语对与 `CHANGELOG.md`
 - [ ] 面向外部使用者的升级说明：升级后所有项目只有 Human owner，需重新指定 Agent owner；先备份 `agent_team.sqlite`；不承诺降级
 
 ## 正式文档出口
 
-`docs/domain-model.zh.md`（Project、Project member、owner、accountable、Main stream）、`docs/team-collaboration/boundaries.zh.md`（权限与 fence）、`docs/team-collaboration/attention-and-messaging.zh.md`（Inbox、投递等级、mention 与回复）、`docs/team-collaboration/tools.zh.md`（七工具，含 `team_task`）、`docs/team-collaboration/model-and-time.zh.md`（事件评估的时间条件）、`docs/architecture/tools-and-preset.zh.md`（persona 与 core skill）、`docs/frontend-design/components.zh.md`（composer、卡片、看板）的双语对，以及 `CHANGELOG.md`。四张工单交付后，本目录移入 `.scratch/archive/<完成月份>/`，并按 `.scratch/AGENTS.md` 把该移动 amend 进交付它的 commit。
+`docs/domain-model.zh.md`（Project、Project member、owner、accountable、Main stream）、`docs/team-collaboration/boundaries.zh.md`（权限与 fence）、`docs/team-collaboration/attention-and-messaging.zh.md`（Inbox、投递等级、mention 与回复）、`docs/team-collaboration/tools.zh.md`（七工具，含 `team_task`）、`docs/team-collaboration/model-and-time.zh.md`（事件评估的时间条件）、`docs/architecture/tools-and-preset.zh.md`（persona 与 core skill）、`docs/frontend-design/components.zh.md`（composer、卡片、看板）的双语对，以及 `CHANGELOG.md`。九张工单交付后，本目录移入 `.scratch/archive/<完成月份>/`，并按 `.scratch/AGENTS.md` 把该移动 amend 进交付它的 commit。
 
 ## 调研证据
 
