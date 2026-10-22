@@ -1,23 +1,11 @@
-// Mechanical gate for the core skills that ship inside the bundle.
-//
-// `packages/agent-team/core-skills/**/*` is product content, not repository
-// documentation: a Member loads one of these skills by copying its directory
-// into its own private skills directory. Four properties hold by construction,
-// and this script is what keeps them holding:
-//
+// Mechanical gate for the core skills shipped in the bundle (`packages/agent-team/core-skills/**/*`, product
+// content a Member loads by copying a skill directory into its own skills directory). It enforces:
 //   1. the front matter names the skill exactly as its directory does;
 //   2. the description is a real index entry, not a stub;
-//   3. the whole skill (SKILL.md and everything beside it) stays inside a
-//      reviewed prompt budget — a Member pays for this text when it reads it;
-//   4. every relative link stays inside the skill directory, and every file
-//      under references/ is reachable from SKILL.md.
-//
-// (4) is the installer contract: only the skill directory is copied, so a link
-// that leaves it resolves on this machine and breaks on a user's.
-//
-// Like scripts/check-docs.mjs it runs standalone — no Harness checkout, no
-// Vitest config: `npm run check:core-skills`, which is also part of `npm test`.
-// `--root <dir>` points the same checks at another tree.
+//   3. the whole skill stays inside a reviewed prompt budget, because a Member pays for the text it reads;
+//   4. every relative link stays inside the skill directory (the installer copies only that directory),
+//      and every file under references/ is reachable from SKILL.md.
+// Runs standalone: `npm run check:core-skills` (also part of `npm test`); `--root <dir>` checks another tree.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { parse as parseYaml } from 'yaml'
 import { dirname, join, relative, resolve } from 'node:path'

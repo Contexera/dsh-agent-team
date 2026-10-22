@@ -33,11 +33,7 @@ export type AgentTeamClaimRef = Branded<'AgentTeamClaimRef'>
 /** Stable identifier of one public Thread Activity. */
 export type AgentTeamActivityRef = Branded<'AgentTeamActivityRef'>
 
-/**
- * Opaque, restorable reference to one completed-turn context checkpoint in a
- * Member's private Session lineage. Selection authority is the ref itself;
- * the human-readable name is display data only.
- */
+/** Opaque, restorable reference to one completed-turn context checkpoint in a Member's private Session lineage. The ref is the selection authority; the name is display only. */
 export type AgentTeamContextCheckpointRef = Branded<'AgentTeamContextCheckpointRef'>
 
 /** Process-local one-use authorization for one Human invitation. */
@@ -57,11 +53,7 @@ export interface AgentTeamMemberActor {
   readonly handle: string
 }
 
-/**
- * The Host acting on a Member's Session — never a business actor. Automatic
- * Session recycling is the only user: the model neither asked for it nor could
- * refuse it, so Human or Member authority would be a false attribution.
- */
+/** The Host acting on a Member's Session, never a business actor. Automatic Session recycling is the only user: the model neither asked for nor could refuse it, so Human or Member authority would misattribute it. */
 export interface AgentTeamHostActor {
   readonly kind: 'host'
   readonly handle: 'agent-team'
@@ -77,26 +69,11 @@ export interface AgentTeamModelSelection {
   readonly reasoningEffort?: ReasoningEffortId
 }
 
-/**
- * Durable capability intent of one Member, carried verbatim on the Member
- * entity through every lifecycle operation. Pure intent: names are not
- * validated against any known-tool list at commit time, so a Harness upgrade
- * that renames or removes tools can never make an old ledger unreplayable.
- * Divergence surfaces at activation as runtime-derived warnings, never as
- * persisted facts (stale persisted warnings would lie after Host restart or
- * Harness upgrades).
- */
+/** Durable capability intent of one Member, carried on the Member entity through every lifecycle operation. Names are not validated against known tools at commit time, so a Harness upgrade renaming tools cannot make an old ledger unreplayable; divergence surfaces at activation as runtime-derived warnings, never persisted. */
 export interface AgentTeamMemberCapabilities {
-  /**
-   * Absent = the Member sees all standard tools; present = the activation
-   * allow-list (unknown names drop with a warning; the Host always unions the
-   * Team tools and `working_directory` over it).
-   */
+  /** Absent = the Member sees all standard tools; present = the activation allow-list (unknown names drop with a warning; the Host always unions the Team tools and `working_directory` over it). */
   readonly tools?: { readonly allow?: readonly string[] } | undefined
-  /**
-   * Absent = auto-load every skill in the Member's private skills directory;
-   * present = only the listed skill names.
-   */
+  /** Absent = auto-load every skill in the Member's private skills directory; present = only the listed names. */
   readonly skills?: { readonly allow?: readonly string[] } | undefined
 }
 
@@ -114,22 +91,11 @@ export interface AgentTeamAgentMember {
   readonly capabilities?: AgentTeamMemberCapabilities | undefined
   /** Host-internal namespace; never exposed through Client projections. */
   readonly privateMemoryPath: string
-  /**
-   * Durable lifecycle state. `enabled`/`suspended` are the reversible working
-   * pair; `archived` hides the Member from every surface while keeping its
-   * Session log and private memory recoverable (no restore entry point yet,
-   * mirroring archived dsh sessions); `inactive` is irreversible removal with
-   * data cleanup.
-   */
+  /** Durable lifecycle state. `enabled`/`suspended` are the reversible working pair; `archived` hides the Member everywhere while keeping its Session log and private memory recoverable (no restore entry point yet); `inactive` is irreversible removal with data cleanup. */
   readonly state: 'enabled' | 'suspended' | 'inactive' | 'archived'
 }
 
-/**
- * Runtime-derived capability divergence between a Member's persisted intent
- * and the names known at activation time (for example after a Harness
- * upgrade renamed or removed a tool). Derived state only — never persisted;
- * recomputed at every activation so warnings never go stale.
- */
+/** Runtime-derived divergence between a Member's persisted capability intent and the names known at activation. Never persisted; recomputed at every activation. */
 export interface AgentTeamCapabilityWarning {
   /** The persisted allow-list entry that resolved to no known capability. */
   readonly name: string
@@ -137,28 +103,15 @@ export interface AgentTeamCapabilityWarning {
   readonly knownNames: readonly string[]
 }
 
-/**
- * Host projection combining durable intent with process-local availability.
- * The optional diagnostic is structured: `class` routes which action actually
- * helps (restart heals, restart is useless, transient), `detail` is the
- * human-readable reason, and a refused session carries its artifact location.
- */
+/** Host projection combining durable intent with process-local availability. The optional diagnostic is structured: `class` routes which action helps, `detail` is the human-readable reason, and a refused session carries its artifact location. */
 export interface AgentTeamAgentMemberStatus {
   readonly member: AgentTeamAgentMember
   readonly availability: 'active' | 'suspended' | 'inactive' | 'archived' | 'unavailable'
   readonly presence: 'available' | 'working' | 'error' | 'unavailable'
   readonly diagnostic?: AgentTeamMemberDiagnostic
-  /**
-   * Runtime-derived, activation-scoped capability warnings (see
-   * AgentTeamCapabilityWarning); empty while capabilities resolve cleanly.
-   */
+  /** Activation-scoped capability warnings; empty while capabilities resolve cleanly. */
   readonly capabilityWarnings?: readonly AgentTeamCapabilityWarning[] | undefined
-  /**
-   * Whether the live runtime surface reflects the stored configuration:
-   * 'applied' after a successful apply (edit or activation), 'pending' while
-   * there is no proof of effect (no live handle, a deferred edit, or a failed
-   * apply). Always present so readers never mistake absence for applied.
-   */
+  /** Whether the live runtime reflects the stored configuration: 'applied' after a successful apply, 'pending' while there is no proof (no live handle, deferred edit, or failed apply). Always present so absence is never mistaken for applied. */
   readonly capabilityState: 'applied' | 'pending'
 }
 
@@ -253,13 +206,7 @@ export interface AgentTeamReadMessageRequest {
   readonly messageRef: AgentTeamMessageRef
 }
 
-/**
- * One Message read back in full.
- *
- * The body is verbatim: a reader that needs the whole of what it is answering
- * gets the whole of it, not a summary. The quote a Message renders is
- * deliberately not this — see `AgentTeamResolvedMessageRef`.
- */
+/** One Message read back in full, body verbatim; the quote a Message renders is not this (see `AgentTeamResolvedMessageRef`). */
 export interface AgentTeamReadMessageResult {
   readonly messageRef: AgentTeamMessageRef
   readonly threadRef: AgentTeamThreadRef
@@ -270,13 +217,7 @@ export interface AgentTeamReadMessageResult {
   readonly body: string
 }
 
-/**
- * Look up the context of Messages cited by `replyToMessageRef`. A reply stores
- * only its parent's identity, so the author and the excerpt a reader sees are
- * resolved here from the ledger's own record — the quote can never disagree
- * with the Message it points at, and a parent outside the reader's loaded
- * history window still resolves.
- */
+/** Looks up the context of Messages cited by `replyToMessageRef`. A reply stores only its parent's identity; author and excerpt resolve here from the ledger, so the quote cannot disagree with its Message and a parent outside the loaded history window still resolves. */
 export interface AgentTeamResolveMessageRefsRequest {
   readonly workspaceId: WorkspaceId
   readonly messageRefs: readonly AgentTeamMessageRef[]
@@ -311,13 +252,7 @@ export interface AgentTeamChannel {
   readonly name: string
   readonly description: string
   readonly createdAtSequence: number
-  /**
-   * Durable lifecycle state. `archived` hides the Channel and its Threads from
-   * every surface while keeping all facts recoverable (no restore entry point
-   * yet, mirroring archived dsh sessions). Ledgers written before Channel
-   * archival existed omit the field; the record schema normalizes it to
-   * `active` at load time.
-   */
+  /** Durable lifecycle state. `archived` hides the Channel and its Threads everywhere while keeping all facts recoverable (no restore entry point yet). Older records omit the field; the schema normalizes it to `active` on load. */
   readonly state: 'active' | 'archived'
 }
 
@@ -344,18 +279,11 @@ export interface AgentTeamMessage {
   readonly sender: AgentTeamMemberId
   readonly body: string
   readonly attachments?: readonly AgentTeamMessageAttachment[] | undefined
-  /**
-   * The Message this one answers, when it was written as a reply. Absent on
-   * every Message that is not a reply, including every Message recorded before
-   * replies existed, so an older ledger reads back unchanged and needs no
-   * normalization. It stores the parent's identity only: the author and the
-   * excerpt are resolved at read time from the ledger's own ref index, so a
-   * reply can never disagree with the Message it quotes.
-   */
+  /** The Message this one answers, when written as a reply; absent otherwise (including Messages recorded before replies existed). Only the parent's identity is stored; author and excerpt resolve at read time from the ledger's ref index. */
   readonly replyToMessageRef?: AgentTeamMessageRef
   readonly topLevel: boolean
   readonly sequence: number
-  /** Wall-clock instant of the wrapping ledger operation; pre-occurredAt ledgers normalize on replay. */
+  /** Instant of the wrapping ledger operation. */
   readonly occurredAt: string
 }
 
@@ -382,13 +310,7 @@ export interface AgentTeamThread {
   readonly revision: number
 }
 
-/**
- * A Member's current attention period for one Thread.
- *
- * Its absence means the Member is not following. Read state is compact: all
- * follower-visible facts from `startSequence` through `readThroughSequence`
- * are acknowledged, except for sparse direct markers retained separately.
- */
+/** A Member's current attention period for one Thread. Absence means not following. Read state is compact: all follower-visible facts from `startSequence` through `readThroughSequence` are acknowledged, except sparse direct markers kept separately. */
 export interface AgentTeamThreadAttention {
   readonly memberId: AgentTeamMemberId
   readonly threadRef: AgentTeamThreadRef
@@ -466,12 +388,7 @@ export interface AgentTeamTaskActivity extends AgentTeamActivityBase {
   readonly releasedClaimRefs?: readonly AgentTeamClaimRef[] | undefined
   /** Active claims the Human acceptance completed alongside the Task; absent when none were active. */
   readonly completedClaimRefs?: readonly AgentTeamClaimRef[] | undefined
-  /**
-   * Every done Claim at acceptance time, including pre-finished ones — the
-   * durable discriminator accept markers deliver from. Always present on
-   * new accepts (possibly empty); legacy records predate it and keep the
-   * completed-only wake semantics.
-   */
+  /** Every done Claim at acceptance time, including pre-finished ones: the durable discriminator accept markers deliver from. Always present on new accepts (possibly empty); older records keep completed-only wake semantics. */
   readonly acceptedClaimRefs?: readonly AgentTeamClaimRef[] | undefined
 }
 
