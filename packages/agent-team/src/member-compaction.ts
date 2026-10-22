@@ -23,7 +23,10 @@ export const DEFAULT_MEMBER_COMPACTION: MemberCompactionConfig = Object.freeze({
 
 export function memberCompactionThreshold(tokens: number, contextWindow: number | undefined): number | undefined {
   if (contextWindow === undefined) return tokens
-  if (contextWindow <= MEMBER_CONTEXT_RESERVE) return undefined
+  // A window this small cannot hold the fixed context reserve plus a minimal
+  // output allowance: the trigger would fire on every request while no request
+  // could fit, so the route is left to the Agent's own limits instead.
+  if (contextWindow < MEMBER_CONTEXT_RESERVE + MEMBER_OUTPUT_RESERVE) return undefined
   return Math.floor(Math.min(tokens, contextWindow * MEMBER_WINDOW_RATIO, contextWindow - MEMBER_CONTEXT_RESERVE))
 }
 

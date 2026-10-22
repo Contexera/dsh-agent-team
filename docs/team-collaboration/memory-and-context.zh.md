@@ -18,7 +18,7 @@ Member 的上下文只有两个机制，且都不由模型发起。
 
 每次请求的输出额度最多为 `W − 估算输入 − 4096`，不会提高原有额度。实际值写入 request header；解析下一次额度前会移除临时缩减，恢复的 loop 则从声明的 options 开始。输入计价仍是估算，因此保留 provider overflow 恢复。
 
-取消沿用 Agent 的 stop/dispose 语义；只有预算失败会恢复尚未准入的输入。窗口不超过 16384 token 时容纳不下本策略的固定预留，策略会退出，请求交给 Agent 自身的限制。
+取消沿用 Agent 的 stop/dispose 语义；只有预算失败会恢复尚未准入的输入。窗口小到容不下 context 预留加最小输出额度（不满 20480 token）时，策略无法自洽，会直接退出，请求交给 Agent 自身的限制。
 
 这是触发线，不是物理上限：工具结果可在下一次请求前越线。`memberCompaction.enabled: false` 恢复上游压力判定，包括输出预留、headroom 与尾部保留策略。适配层只挂在 Team preset，普通 Session 不变。
 

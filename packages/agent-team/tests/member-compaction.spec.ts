@@ -16,7 +16,10 @@ describe('Member request budgets', () => {
 
   it('declines a window that cannot hold its own fixed reserve', () => {
     expect(memberCompactionThreshold(256_000, 16_384)).toBeUndefined()
+    expect(memberCompactionThreshold(256_000, 20_479)).toBeUndefined()
     expect(memberCompactionThreshold(256_000, 8_000)).toBeUndefined()
+    expect(memberCompactionThreshold(256_000, 20_480)).toBe(4_096)
+    expect(memberCompactionThreshold(256_000, 20_481)).toBe(4_097)
   })
 
   it('reduces a large output allowance without raising an explicit small one', () => {

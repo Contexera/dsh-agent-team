@@ -20,7 +20,7 @@ When input reaches the trigger, Team first prunes tool results, then requests on
 
 Each request's output allowance is capped at `W − estimated input − 4096`, never raised above its original allowance. The actual value is logged in the request header; a temporary reduction is removed before the next allowance is resolved, and a resumed loop starts from its declared options. Input pricing is heuristic, so provider overflow recovery remains necessary.
 
-Cancellation follows the Agent's own stop/dispose semantics; only budget failures restore unadmitted input. Windows of 16384 tokens or less cannot hold this policy's fixed reserve; the policy declines and leaves the request to the Agent's own limits.
+Cancellation follows the Agent's own stop/dispose semantics; only budget failures restore unadmitted input. A window too small to hold both the context reserve and a minimal output allowance — under 20480 tokens — cannot satisfy this policy at all, so the policy declines there and leaves the request to the Agent's own limits.
 
 This is a trigger, not a physical ceiling: a tool result can cross it before the next request. `memberCompaction.enabled: false` restores upstream pressure handling, including its output reservation, headroom, and retained-tail policy. The adapter is mounted only in the Team preset; ordinary Sessions are unchanged.
 
