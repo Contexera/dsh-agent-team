@@ -1,32 +1,12 @@
 version: 2
 updates:
-  # The pnpm lockfile is the install authority for every package in this repo.
-  # `@deepseek-ai/*` is excluded on purpose: the DSH range is a certified
-  # contract (docs/dsh-release-compatibility.md), moved only by a certification
-  # round — never by an automated bump.
-  # Three at a time, not five. A batch here is reviewed as "run the suite, merge
-  # if green" — every PR touches only the manifest and the lockfile, and the last
-  # batch moved vitest 4 to 5 with the suite unchanged — so an extra round costs
-  # one test run, while a long queue costs skipped review.
-  - package-ecosystem: npm
-    directory: /
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 3
-    ignore:
-      - dependency-name: "@deepseek-ai/*"
-      # The client bundle renders inside the Harness's own React (every
-      # Harness package pins react ^18.2.0), so React majors follow the
-      # certified Harness, never an automated bump.
-      - dependency-name: "react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "react-dom"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "@types/react-dom"
-        update-types: ["version-update:semver-major"]
-
+  # npm is deliberately absent. Half the PRs it opened here were withdrawn: four
+  # duplicated a manifest bump made by hand in the same week, two targeted
+  # dependencies that had already been deleted, and two could never merge -- our
+  # `zod` must resolve to the version the certified Harness resolves (a minor gap
+  # breaks Typert analysis), and the client renders inside the Harness's React 18.
+  # Repository security alerts cover the advisories this would have surfaced.
+  #
   # Workflows pin third-party actions to commit SHAs, so a new version only
   # arrives as an explicit dependency bump here.
   - package-ecosystem: github-actions
