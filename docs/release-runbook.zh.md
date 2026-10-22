@@ -16,7 +16,6 @@
 2. **起草材料**，然后送审（§4）——没有批准的文案就不发布。
 3. **扫版本面。** `npm run check:versions` 会回读每一处重述已认证 DSH 基线的地方并拒绝分裂的基线：它以 `.github/workflows/ci.yml` 里的 harness tag 为准，要求其余每一处声明同一个版本，并要求每条 `@deepseek-ai/dsh-*` peer 范围的下界都能接纳它。
    - 这些位置的清单在 [`scripts/check-version-consistency.mjs`](../scripts/check-version-consistency.mjs)——不要手工维护第二份。
-   - `.hoplite/settings.json` 里的声明位于一个 JSON 字符串中、引号是转义的，所以朴素的 `grep` 在那里什么都找不到；这道门读得对。
    - 这些位置只在该版本真正发布的同一轮里推进。
 4. **扫正文里被本次发布证伪的句子。** 在维护文档里检索那些以「发布尚未发生」为前提的表述——`latest` 是 `<上一个版本>`、某项能力被描述为尚未发布、某个 peer 范围被描述为待定，或一条把更旧的 DSH 线与最后仍支持它的 bundle 版本配在一起的 warm-line pin。修正文档的当前状态声明确实属于发布提交的一部分；改写已发布的历史则不属于（§7）。
 5. **确认工作树没有未提交的构建输入。** `prepack` 是 `npm run build`，而 `packages/*/lib/**` 在发布的 `files` 白名单内，所以未提交的 `src/` 改动会被打进 tarball。白名单之外的未跟踪文件（`scripts/`、`.scratch/`）不会被打包，也不阻塞发布。绝不要为了让工作树干净而 stash 或回退其他 Member 的工作——先弄清那是谁的。

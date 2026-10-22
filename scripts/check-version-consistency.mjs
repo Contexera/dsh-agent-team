@@ -40,7 +40,6 @@ const normalize = (version) => version.replace(/^dsh-v/u, '')
 // the marker would let history paragraphs that mention older versions participate.
 const spots = [
   { file: '.github/workflows/ci.yml', pattern: /DSH_HARNESS_TAG:\s*dsh-v(\S+)/u },
-  { file: '.hoplite/settings.json', pattern: /HARNESS_TAG=\\"dsh-v([^\\]+)\\"/u },
   { file: 'docs/development/environments-and-install.md', pattern: /currently[^\n`]*`dsh-v([^`]+)`/u },
   { file: 'docs/development/environments-and-install.md', pattern: /minimum compatible DSH version is[^\n`]*`([^`]+)`/u },
   { file: 'docs/development/environments-and-install.zh.md', pattern: /当前[^\n`]*`dsh-v([^`]+)`/u },
@@ -75,7 +74,8 @@ for (const { file, pattern } of spots) {
   }
 }
 
-// The CI tag is the machine source: it is what the setup script checks out.
+// The CI tag is the machine source. The Hoplite sandbox setup checks out the
+// peer lower bound instead, which (b) pins to this same version.
 const reference = stated.find((entry) => entry.file === '.github/workflows/ci.yml')?.version
 if (reference !== undefined) {
   for (const { file, version } of stated) {
