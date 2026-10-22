@@ -1,20 +1,8 @@
-// UI parity audit: mechanical consistency checks between the Team Client's
-// own CSS/TSX and the DSH 0.1.7 design language — the rc.2 baseline, re-verified
-// on the 0.2.0-rc.1 and 0.2.0-rc.2 lines — documented in
-// docs/frontend-design/principles-and-language.md §Design language alignment.
-// This is the repeatable
-// form of the manual audit that produced commit bb1ebba — run it after any
-// visible-UI change and after every DSH upgrade:
-//
-//   node scripts/audit-ui-parity.mjs
-//
-// The script is intentionally a static text audit: it reads the Team Client
-// sources and the harness checkout (through the shared harness-dir.mjs
-// pointer), applies the documented language rules, and prints a report.
-// Design judgment stays in docs; the script only reports mechanical drift.
-// It must stay green on the checkout the peers are certified against
-// (DSH_HARNESS_DIR points it at one): since the 0.2.0 peer move the shipped
-// theme defines every --dsw-* token the Team Client references.
+// UI parity audit: static text check of the Team Client's CSS/TSX against the DSH design language
+// (docs/frontend-design/principles-and-language.md §Design language alignment).
+// Run after visible-UI changes and DSH upgrades: node scripts/audit-ui-parity.mjs
+// Reads the client sources and the harness checkout (DSH_HARNESS_DIR via harness-dir.mjs) and reports mechanical drift only.
+// Must stay green on the checkout the peers are certified against.
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -28,12 +16,7 @@ const shippedDir = join(harnessDir, 'packages/client')
 const findings = []
 const note = (severity, where, what) => findings.push({ severity, where, what })
 
-// ---------------------------------------------------------------------------
-// Language rules (keep in sync with
-// docs/frontend-design/principles-and-language.md §Design language
-// alignment — the document is the authority, this table is its executable
-// mirror).
-// ---------------------------------------------------------------------------
+// Language rules: the document above is the authority, this table is its executable mirror.
 
 // The colour half of the focus ring. The platform sets `--dsw-focus-ring-color`
 // to transparent for pointer input on non-editable controls, so a ring must read
@@ -50,11 +33,8 @@ const LANGUAGE = {
   rowRadius: 8,
   chipRadius: 6,
   controlGap: 12,
-  // 0.1.7-rc.2 tokenized the ring. The fallback names the colour and the standard
-  // width. The language is this one string: a ring that reaches for another
-  // colour, or nests a second fallback under the business token, is the drift
-  // §2b catches — so the comparison is equality (whitespace normalized, so a
-  // wrapped declaration still passes), not a prefix match.
+  // The ring is this one string: another colour or a nested fallback is drift, so the
+  // comparison is equality (whitespace normalized), not a prefix match.
   focusRing: `var(--dsw-focus-ring-width, 2px) solid ${RING_COLOR}`,
   // A focus ring must be visible: an `outline: none` with no paired visible
   // replacement (background, box-shadow, color, underline) is a violation.
@@ -71,10 +51,6 @@ const FOCUS_EXEMPT = new Map([
   ['mentionOption', 'aria-activedescendant listbox row (selection, not focus)'],
 ])
 
-// ---------------------------------------------------------------------------
-// 1. Focus visibility: every interactive class (cursor: pointer) needs a
-//    focus-visible rule or a documented exemption.
-// ---------------------------------------------------------------------------
 
 function collectRules(css) {
   return [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(match => ({
@@ -136,12 +112,8 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// 2. Bare outline suppression: an outline removal must pair a ring-grade
-//    replacement in the same rule body. Background/color/opacity alone is
-//    hover feedback, not a focus indicator — shipped keeps the UA ring on
-//    small controls rather than substituting a hover fill.
-// ---------------------------------------------------------------------------
+// Background/color/opacity alone is hover feedback, not a focus indicator;
+// shipped keeps the UA ring on small controls rather than substituting a hover fill.
 
 const RING_GRADE = [
   /outline\s*:\s*(?!\s*(?:none|0)\b)/,
@@ -161,18 +133,10 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// 2b. Focus ring form: every ring the Team Client paints takes the shipped
-//     token form, so it inherits the platform's width and colour — including
-//     the pointer-modality suppression, which works by setting the colour
-//     variable (a literal colour would paint a ring over a mouse click that
-//     shipped suppresses). Offsets stay per component, as shipped declares
-//     them. Both forms are checked: the canonical `outline`, and the
-//     `box-shadow: 0 0 0 2px …` ring a control uses when an outline would
-//     collide with its own geometry — its colour must be the same chain, or the
-//     ring silently becomes two different rings (`--dsw-alias-border-l3` was
-//     one such drift). `outline: none` is section 2's business, not this one.
-// ---------------------------------------------------------------------------
+// Rings take the shipped token form so they inherit the platform's width and colour,
+// including pointer-modality suppression (a literal colour would paint over a mouse click).
+// Both the `outline` and the `box-shadow: 0 0 0 2px …` forms must carry the same colour chain.
+// Offsets stay per component.
 
 for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.css'))) {
   const css = readFileSync(join(clientDir, file), 'utf8')
@@ -192,11 +156,7 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. Hardcoded colors: the Team Client uses --dsw-alias-* tokens; hardcoded
-//    hex/rgb values are allowed only in the documented exceptions (static
-//    white on colored fills, avatar hue).
-// ---------------------------------------------------------------------------
+// Hardcoded colours are allowed only in the documented exceptions (static white on coloured fills, avatar hue).
 
 const colorExceptions = new Set([
   'composer.module.css', // .sendButton static #fff on info fill (matches shipped)
@@ -213,10 +173,7 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// 4. Control rhythm: 12px between sibling controls inside a composer/sidebar
-//    toolbar group (the shipped figma 75:8208 spacing).
-// ---------------------------------------------------------------------------
+// 12px between sibling controls inside a composer/sidebar toolbar group (shipped figma 75:8208).
 
 for (const file of ['composer.module.css', 'sidebar.module.css']) {
   const css = stripNestedAtRules(readFileSync(join(clientDir, file), 'utf8'), file)
@@ -229,13 +186,8 @@ for (const file of ['composer.module.css', 'sidebar.module.css']) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 5. Icon semantics: the composer attach control must use the paperclip, not
-//    the "+" (which in the base composer opens the command menu). Attach is a
-//    Team convention: 0.1.7 removed the shipped composer's own attach control
-//    (the file input is driven from the command menu), so the paperclip here
-//    is justified by the glyph's meaning, not by a shipped control to copy.
-// ---------------------------------------------------------------------------
+// The attach control uses the paperclip, not "+" (which opens the command menu in the base composer);
+// the shipped composer has no attach control, so the glyph is justified by its meaning.
 
 const composer = readFileSync(join(clientDir, 'TeamComposer.tsx'), 'utf8')
 const attachBlock = composer.match(/className=\{css\.attachButton\}[\s\S]{0,400}/)?.[0] ?? ''
@@ -249,32 +201,21 @@ if (!attachBlock.includes('Tooltip')) {
   note('warn', 'TeamComposer.tsx', 'attach button is not wrapped in a Tooltip (Team convention elsewhere)')
 }
 
-// ---------------------------------------------------------------------------
-// 6. Shipped reference drift: whether the harness checkout still defines the
-//    language primitives the Team parity relies on (a DSH upgrade may remove
-//    or rename them — this is the upgrade tripwire).
-// ---------------------------------------------------------------------------
+// Upgrade tripwire: the harness checkout must still define the primitives the Team parity relies on.
 
 const shippedInputBar = join(shippedDir, 'ui-conversation/src/client/skeleton/InputBar.tsx')
 const shippedComposerCss = join(shippedDir, 'ui-conversation/src/client/skeleton/InputBar.module.css')
 const shippedSidebarCss = join(shippedDir, 'ui-sidebar/src/client/SidebarRoot.module.css')
 for (const [label, file, needles] of [
-  // 0.1.7 renamed the icon set — the size left the name and the weight entered
-  // it (`IconPlusOutlineMedium`, `size` prop) — and dropped the composer's own
-  // attach control, so the paperclip no longer appears in the shipped composer.
+  // Shipped icon names carry the weight and take a `size` prop (`IconPlusOutlineMedium`).
   ['shipped composer icon language', shippedInputBar, ['IconPlusOutlineMedium', "t('input.commands')", 'aria-haspopup="listbox"']],
-  // 0.1.7-rc.2 tokenized the ring: the sidebar row writes
-  // `outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, …)`
-  // where 0.1.7-rc.1 wrote the `--dsw-alias-label-primary` literal. Either
-  // writing proves the reference is still the shipped row ring, so the daily
-  // checkout (rc.1) and an rc.2 certification checkout both pass.
+  // The sidebar row ring is written either tokenized or with the `--dsw-alias-label-primary`
+  // literal; either proves the reference is still the shipped row ring.
   ['shipped sidebar focus ring', shippedSidebarCss, ['panelRow:focus-visible', [
     'outline: 2px solid var(--dsw-alias-label-primary)',
     'outline: var(--dsw-focus-ring-width)',
   ]]],
-  // The labeled permission chip (`PermissionSelect.module.css`) and its 460px
-  // label cut were deleted in 0.1.7: mode chrome is the 8px `select`, and the
-  // composer narrows its control gaps at 560px instead of hiding a label.
+  // Mode chrome is the 8px `select`; the composer narrows control gaps at 560px instead of hiding a label.
   ['shipped mode control', shippedComposerCss, ['@container (max-width: 560px)', '.select {', 'max-width: 220px;', 'gap: 8px;']],
 ]) {
   let text
@@ -285,8 +226,7 @@ for (const [label, file, needles] of [
     continue
   }
   for (const needle of needles) {
-    // A needle may be a list of alternatives: the writing moved between DSH
-    // releases and either form still proves the same reference.
+    // A needle may list alternatives: the writing differs between DSH releases and any form proves the reference.
     const alternatives = Array.isArray(needle) ? needle : [needle]
     if (!alternatives.some(candidate => text.includes(candidate))) {
       note('warn', label, `shipped reference no longer contains ${alternatives.map(a => `'${a}'`).join(' or ')} — a DSH upgrade may have changed the language; re-verify docs`)
@@ -294,12 +234,7 @@ for (const [label, file, needles] of [
   }
 }
 
-// ---------------------------------------------------------------------------
-// 7. Shipped primitive existence: every named import the Team Client takes
-//    from @deepseek-ai/dsh-client-ui-primitives must still be exported by the
-//    harness checkout. This is the upgrade tripwire for primitive removals —
-//    MessageText disappeared in 0.1.5 while the docs still cited it.
-// ---------------------------------------------------------------------------
+// Upgrade tripwire: every primitive imported from @deepseek-ai/dsh-client-ui-primitives must still be exported by the harness checkout.
 
 function collectExportedNames(file, seen = new Set()) {
   const names = new Set()
@@ -347,23 +282,12 @@ if (shippedPrimitives.size === 0) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 8. Geometry language: the canonical controls keep the shipped dimensions —
-//    icon-only controls 28×28, the primary round action 34×34 with its -2px
-//    seat compensation, and one radius per surface role: list rows 12px, a menu
-//    surface 16px over its own 8px rows, dense two-line result rows and compact
-//    controls 8px, chips 6px. A refactor or a DSH upgrade must not silently
-//    move them.
-//    Line width is part of the same language: shipped declares its 164 neutral
-//    separators as `0.5px`, but Chromium rounds `border-width` up to a whole CSS
-//    pixel, so a computed 0.5px border reports and paints as 1px at device
-//    pixel ratios 1, 1.25 and 2 alike (probed against the shipped declarations
-//    in Chrome 138). The Team Client therefore writes the value that reaches
-//    the glass — `1px` — and the scan below keeps a fractional border width
-//    from coming back as a misleading "thinner" line. A genuine half pixel is
-//    the elevation box-shadow hairline the card-surface rule uses, which is why
-//    only border declarations are scanned.
-// ---------------------------------------------------------------------------
+// Canonical controls keep the shipped dimensions: icon-only 28×28, primary round action 34×34 with
+// -2px seat compensation, and one radius per role (list rows 12px, menu 16px over 8px rows,
+// dense rows and compact controls 8px, chips 6px).
+// Chromium rounds `border-width` up to a whole pixel, so shipped's `0.5px` separators paint as 1px;
+// the Team Client writes `1px` and the scan rejects fractional border widths. Half-pixel
+// elevation box-shadow hairlines are legitimate, so only border declarations are scanned.
 
 const GEOMETRY = [
   ['composer.module.css', '.attachButton', [['height', '28px'], ['width', '28px'], ['border-radius', '999px']], 'icon-only control is 28×28, radius 999px'],
@@ -466,11 +390,7 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// 9. Token existence: every --dsw-* token the Team Client references must be
-//    defined by the shipped client source. A renamed/removed token falls back
-//    silently, so the audit fails loudly instead — typos included.
-// ---------------------------------------------------------------------------
+// A renamed or removed --dsw-* token falls back silently, so every referenced token must be defined by the shipped client source.
 
 function walkFiles(dir, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -513,15 +433,9 @@ if (shippedTokens.size === 0) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 10. Mode control language: as-task is a mode (it changes what Send means),
-//     not an action, so it keeps a visible word label at every width.
-//     Reducing a mode to a bare glyph loses its state to a picture nobody
-//     agreed on, and a hover tooltip is not a label on touch. DSH 0.1.7 deleted
-//     the labeled permission chip and with it the 460px label cut: the base
-//     composer now keeps every mode's word and narrows its control gaps to 8px
-//     below 560px, which is the branch this check requires instead.
-// ---------------------------------------------------------------------------
+// as-task is a mode (it changes what Send means), so it keeps a visible word label at every width;
+// a bare glyph or hover tooltip is not a label on touch. The base composer narrows control gaps
+// to 8px below 560px, which is the branch this check requires.
 
 const MODE_NARROW_WIDTH = 560
 const composerCss = readFileSync(join(clientDir, 'composer.module.css'), 'utf8')
@@ -554,18 +468,10 @@ if (narrowBranch === null) {
   note('warn', 'composer.module.css', `control gaps narrow at ${narrowBranch[1]}px (shipped: ${MODE_NARROW_WIDTH}px)`)
 }
 
-// ---------------------------------------------------------------------------
-// 11. Corner-shape pairing: the shipped platform curves every rounded surface
-//     along superellipse(1.5) (ui-theme/src/styles/corner-shape.css), which
-//     deforms a circle into a squircle and squares off capsule ends. Every
-//     effectively uncapped radius — 50%, 100%, 999px, a pill radius — must
-//     therefore pair `corner-shape: round` in the same block. Shipped keeps
-//     100% coverage of this pairing; a new full-round control that forgets it is
-//     the drift this rule catches. The scan is textual: it reads the three
-//     uncapped radius forms, but a pill radius that only exceeds its box at one
-//     rendered size (say `border-radius: 12px` on a 24px row) is invisible here
-//     and belongs in GEOMETRY instead.
-// ---------------------------------------------------------------------------
+// Shipped curves rounded surfaces along superellipse(1.5) (ui-theme/src/styles/corner-shape.css),
+// which squares off capsule ends, so every effectively uncapped radius (50%, 100%, 999px) must pair
+// `corner-shape: round` in the same block. The scan is textual: a radius that exceeds its box only
+// at one size (`12px` on a 24px row) belongs in GEOMETRY.
 
 const FULL_ROUND = /border-radius:\s*(?:50%|100%|999px)\s*;/
 for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.css'))) {
@@ -579,17 +485,10 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// 12. Frosted surfaces: a token whose whole purpose is a floating surface must
-//     pair its translucency with the menu backdrop blur
-//     (`ui-primitives Menu.module.css`: `--dsw-specific-menu` +
-//     `--dsw-menu-backdrop-filter` + the elevation stroke and shadow).
-//     DSH 0.1.7 turned `--dsw-specific-menu` from an opaque layer token into
-//     `rgba(…, 0.5)`, which silently made an opaque popup unreadable while
-//     every existence check stayed green — a value change, not a rename.
-//     Only surface tokens are checked: interaction fills, skeletons and
-//     dividers are translucent by design and shipped leaves them unblurred.
-// ---------------------------------------------------------------------------
+// A floating-surface token must pair translucency with the menu backdrop blur
+// (`--dsw-specific-menu` + `--dsw-menu-backdrop-filter` + elevation stroke and shadow); the token is
+// translucent, so an opaque popup is unreadable while existence checks stay green.
+// Interaction fills, skeletons and dividers are translucent by design and are not checked.
 
 const SURFACE_TOKENS = new Set([
   '--dsw-specific-menu',
@@ -629,16 +528,9 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// 13. Popup roles: a trigger that opens the shared Menu renders `role="menu"`
-//     with `role="menuitem"` rows — the primitive owns that markup — so a
-//     trigger announcing `aria-haspopup="listbox"` promises the reader a popup
-//     they will never get, and a screen reader voices the wrong control class.
-//     Every `aria-haspopup` in the Team Client opens either that Menu or a
-//     dialog; the composer's mention picker is a genuine listbox, but it is
-//     driven from the textarea through `aria-activedescendant` and carries no
-//     haspopup attribute at all, so it is not in this rule's path.
-// ---------------------------------------------------------------------------
+// A trigger opening the shared Menu renders `role="menu"` with `menuitem` rows, so
+// `aria-haspopup="listbox"` promises a popup that never appears. The mention picker is a real
+// listbox driven by `aria-activedescendant` with no haspopup, so it is out of scope.
 
 for (const file of readdirSync(clientDir).filter(name => name.endsWith('.tsx'))) {
   const source = readFileSync(join(clientDir, file), 'utf8')
@@ -648,15 +540,8 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.tsx')))
   }
 }
 
-// ---------------------------------------------------------------------------
-// 14. Container queries: a `@container` block restyles descendants of the box
-//     that declares `container-type` — an element never answers a query about
-//     itself. A rule whose target is that container class is therefore dead CSS
-//     that reads exactly like a working narrow-width branch, and it silently
-//     keeps the wide layout at every width. Shipped declares its container on
-//     the composer row and queries the group inside it; this check keeps the
-//     same shape.
-// ---------------------------------------------------------------------------
+// A `@container` block restyles descendants of the container, never the container itself;
+// a rule targeting the container class is dead CSS that silently keeps the wide layout.
 
 for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.css'))) {
   const css = readFileSync(join(clientDir, file), 'utf8')
@@ -680,9 +565,6 @@ for (const file of readdirSync(clientDir).filter(name => name.endsWith('.module.
   }
 }
 
-// ---------------------------------------------------------------------------
-// Report
-// ---------------------------------------------------------------------------
 
 const bySeverity = { error: [], warn: [], info: [] }
 for (const finding of findings) bySeverity[finding.severity].push(finding)
