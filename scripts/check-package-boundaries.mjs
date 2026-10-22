@@ -1,29 +1,20 @@
 /**
  * Package-boundary check for the Agent Team plugin.
  *
- * The repository publishes one root package whose three `packages/*` directories
- * are build/export seams. A source file therefore reaches another seam through a
- * declared subpath (`@contexera/dsh-agent-team/remote`), never by climbing out of
- * its own package directory with a relative specifier. Such an import bypasses
- * the `exports` map and the generated `tsconfig*.json` path facades, which is the
- * contract that keeps generated artifacts swappable.
+ * The root package's three `packages/*` directories are build/export seams: a source file reaches
+ * another seam through a declared subpath (`@contexera/dsh-agent-team/remote`), never by climbing out
+ * of its package directory with a relative specifier, which bypasses the `exports` map and the generated
+ * `tsconfig*.json` path facades that keep generated artifacts swappable.
  *
- * `import type` is exempt: it is erased before runtime, so it cannot leak a
- * generated file into the bundle or create runtime coupling.
+ * `import type` is exempt: it is erased before runtime, so it cannot couple the bundle to a generated file.
  *
- * Deliberate scope limits, so the rule does not overreach:
- * - Only source is scanned. Test files explicitly wire directories together and
- *   may reach the repository's shared `scripts/` helpers.
- * - Only *escaping* relative specifiers are rejected. A path that stays inside
- *   the file's own package directory (`./x.ts`, `../y.ts`) is always fine.
- * - Declared subpaths other than the package's own are not cross-checked against
- *   the `exports` map; that would need a resolution engine and is not the defect
- *   this check exists to prevent.
+ * Scope limits:
+ * - Only source is scanned; tests wire directories together and may reach the shared `scripts/` helpers.
+ * - Only *escaping* relative specifiers are rejected; paths inside the file's own package are fine.
+ * - Declared subpaths are not cross-checked against the `exports` map; that needs a resolution engine.
  *
- * The import-kind logic is deliberately statement-based rather than a single
- * regular expression: a `[^;]*` style class spans newlines in a multiline file
- * and silently swallows the rest of the import block, which makes the check pass
- * while enforcing nothing.
+ * Import kinds are parsed per statement, not by one regular expression: a `[^;]*` class spans newlines
+ * and swallows the rest of the import block, so the check would pass while enforcing nothing.
  */
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
