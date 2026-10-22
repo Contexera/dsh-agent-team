@@ -133,9 +133,7 @@ export const zh = {
   humanSettingsUnavailable: '资料读不出来：{message}',
   humanSettingsVersion: '版本 {version}',
   humanSettingsUpdateAvailable: '有新版本 {version}，去查看发布说明',
-  // The environment check. The support line is stated in words, never as a bare
-  // semver range, and the tested-combination line prints only versions the Host
-  // could derive — the page adds no version of its own.
+  // The support line is stated in words, never as a bare semver range.
   environmentOkTitle: '在支持范围内',
   environmentOkDetail: '正在运行的 DSH {version} 在我们声明的支持范围内。',
   environmentOutOfRangeTitle: '不在支持范围内',
@@ -187,10 +185,7 @@ export const zh = {
   autoReadIncomplete: '仍有未读更新未能自动读取',
   olderHistory: '更早历史',
   runtimeRisk: '当前运行风险',
-  // The diagnostic's structured class is the localizable axis: it names what
-  // kind of problem this is, while the Host detail stays English and moves to
-  // the row's title. One label names the class, one sentence states it of the
-  // Member.
+  // The structured class is the localizable axis; the Host detail stays English and rides the row's title.
   riskClassSessionRefused: '会话被拒绝',
   riskClassSessionUnreadable: '会话不可读',
   riskClassPresetComposition: '预设装配失败',
@@ -414,8 +409,6 @@ export const en = {
   autoReadIncomplete: 'Some unread updates could not be read automatically',
   olderHistory: 'Older history',
   runtimeRisk: 'Current runtime risk',
-  // See the zh block: the structured class names the kind of problem, the
-  // sentence states it of the Member, and the Host detail rides the title.
   riskClassSessionRefused: 'Session refused',
   riskClassSessionUnreadable: 'Session unreadable',
   riskClassPresetComposition: 'Preset composition failed',
