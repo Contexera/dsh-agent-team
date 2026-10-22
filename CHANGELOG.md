@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Upgrade note**
 
+- Channel is about to be renamed to Project. This release already reads ledger records written with the Project spelling (`project:` refs, `projectRef` fields, `team/project-*` kinds) as the same records it writes itself, and still writes the Channel spelling. Install it on every profile that shares `$DSH_HOME/storages/` before any of them runs the renamed release, so the older profile can still open the shared ledger.
 - The generation swap records a new operation kind, `team/member-session-recycled`, in the durable ledger. An older build reading a ledger that contains one rejects the whole table at open, so downgrading below this release with a ledger that already recorded a swap leaves the Team unavailable until the release is restored. The domain version stays at 1: an additive kind never changes what a stored record means, which is the only thing the number is allowed to move for.
 
 **Changed**

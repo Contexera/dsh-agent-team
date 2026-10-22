@@ -27,7 +27,7 @@ const sessionIdSchema = z.string().min(1).transform(value => value as SessionId)
 const sessionSeqSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionSeq)
 const sessionLogOffsetSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionLogOffset)
 const contextCheckpointRefSchema = z.string().regex(/^(context-checkpoint-[0-9a-f]{64}|team-boundary-[0-9a-f]{64})$/).transform(value => value as AgentTeamContextCheckpointRef)
-const channelRefSchema = z.string().regex(/^channel:[^:]+$/).transform(value => value as AgentTeamChannelRef)
+const channelRefSchema = z.string().regex(/^(channel|project):[^:]+$/).transform(value => value.replace(/^project:/, 'channel:') as AgentTeamChannelRef)
 const messageRefSchema = z.string().regex(/^message:[^:]+$/).transform(value => value as AgentTeamMessageRef)
 const taskRefSchema = z.string().regex(/^task:[^:]+$/).transform(value => value as AgentTeamTaskRef)
 const threadRefSchema = z.string().regex(/^thread:[^:]+$/).transform(value => value as AgentTeamThreadRef)
@@ -548,8 +548,45 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
   }).strict(),
 ])
 
+/**
+ * Channel is being renamed to Project, and stored bytes are never rewritten, so a record may carry either spelling.
+ * Both decode to the Channel form; this lets a release before the rename open a ledger the renamed release already wrote into.
+ * Only the top-level kind and the renamed keys change here (refs normalize in `channelRefSchema`); message bodies pass through.
+ */
+const projectSpellingKinds: ReadonlyMap<string, string> = new Map([
+  ['team/project-created', 'team/channel-created'],
+  ['team/project-updated', 'team/channel-updated'],
+  ['team/project-archived', 'team/channel-archived'],
+  ['team/project-member-added', 'team/channel-member-added'],
+  ['team/project-member-removed', 'team/channel-member-removed'],
+])
+const projectSpellingKeys: ReadonlyMap<string, string> = new Map([
+  ['project', 'channel'],
+  ['projectRef', 'channelRef'],
+  ['projectRefs', 'channelRefs'],
+])
+
+function channelSpellingKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(channelSpellingKeys)
+  if (value === null || typeof value !== 'object') return value
+  const record = value as Record<string, unknown>
+  return Object.fromEntries(Object.entries(record).map(([key, entry]) => {
+    const renamed = projectSpellingKeys.get(key)
+    // An object holding both spellings keeps the Project key, which the strict schema then rejects.
+    return [renamed === undefined || Object.hasOwn(record, renamed) ? key : renamed, channelSpellingKeys(entry)]
+  }))
+}
+
+function channelSpelling(stored: unknown): unknown {
+  const renamed = channelSpellingKeys(stored)
+  if (renamed === null || typeof renamed !== 'object' || Array.isArray(renamed)) return renamed
+  const { kind } = renamed as { kind?: unknown }
+  const channelKind = typeof kind === 'string' ? projectSpellingKinds.get(kind) : undefined
+  return channelKind === undefined ? renamed : { ...renamed, kind: channelKind }
+}
+
 /** Durable validator for the closed Agent Team operation union; ledgers written before message occurredAt existed normalize on load. */
-export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = storedAgentTeamOperationSchema.transform(stampOperationMessages)
+export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = z.preprocess(channelSpelling, storedAgentTeamOperationSchema).transform(stampOperationMessages)
 
 /** Versioned durable declaration. The version moves only when a stored record would mean something different: there is no migration, so a bump breaks every existing ledger. Additive operation kinds stay at v1. */
 export const agentTeamDomainSpec = defineDomain({
