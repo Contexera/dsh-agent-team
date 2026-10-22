@@ -23,29 +23,17 @@ interface TeamInboxPageProps {
   readonly subscribeChanges: TeamConversationProps['subscribeChanges']
   readonly selectWorkspace: TeamConversationProps['selectWorkspace']
   readonly selectThread: TeamConversationProps['selectThread']
-  /** The Human's display name, from the Client's one identity projection. */
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
   readonly t: TeamConversationProps['t']
 }
 
-/**
- * How many 「最近活跃」 rows the merged page may show. The Host bounds each
- * Workspace's own slice; this is the single bound across every Workspace on
- * screen, so the section stays the same size no matter how many are open — and
- * it stays a way back into work rather than a second queue, which is why it is
- * shorter than the queue the reader is actually being asked to work through.
- */
+/** One bound across every Workspace so the 「最近活跃」 tail stays a way back into work, shorter than the queue. */
 const RECENT_ROWS_LIMIT = 5
 
 /**
- * Queue order, one total order across Workspaces: the Host's own keys —
- * mentions first, then the ledger sequence, then the Thread ref. Each Workspace
- * slice already arrives in this order, and it is also the Host's truncation
- * policy, so the merge re-applies it instead of inventing a second one: a row
- * that survived the cut on mentions must not sink below a merely newer row
- * after the merge. `newestSequence` is a global ledger position, so it stays
- * comparable across Workspaces.
+ * Queue order across Workspaces is the Host's own keys (mentions, ledger sequence, Thread ref). The Host truncates by
+ * this order, so re-apply it on merge: a row that survived the cut on mentions must not sink below a merely newer row.
  */
 function compareByHostInboxOrder(left: TeamInboxRow, right: TeamInboxRow): number {
   return right.item.directCount - left.item.directCount
@@ -54,38 +42,22 @@ function compareByHostInboxOrder(left: TeamInboxRow, right: TeamInboxRow): numbe
 }
 
 /**
- * The Human Inbox: one Inbox call per visible Workspace, rendering the Host's
- * two slices — the unread queue (「需要我」, mentions counted inside it rather
- * than alone) and the 「最近活跃」 tail of Threads the reader took part in.
- * Both merge across every Workspace into one list in the Host's own order,
- * mentions first and then newest, rather than by Workspace.
- * Opening the page never acknowledges anything — only a durable Thread read
- * advances the watermark and consumes a mention marker, so rows and the badge
- * drop after the Thread is opened through the existing auto-ack path. A Thread
- * holding unread is only ever in the queue: the Host already excludes it from
- * the tail, and this page never re-derives that judgement.
+ * The Human Inbox: one Inbox call per visible Workspace, merged in the Host's order into the Host's two slices: the unread
+ * queue (「需要我」) and the 「最近活跃」 tail. Opening the page acknowledges nothing; only a durable Thread read advances the
+ * watermark. A Thread with unread is only in the queue (the Host excludes it from the tail); this page never re-derives that.
  */
 export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, selectWorkspace, selectThread, humanName, humanAvatarUrl, t }: TeamInboxPageProps) {
   const workspaces = useWorkspaces(state => state.items)
   const [rows, setRows] = useState<readonly TeamInboxRow[]>()
   const [recentRows, setRecentRows] = useState<readonly TeamInboxRow[]>([])
-  // The Host names the Human's Member id on every Inbox row's payload; the
-  // page keeps it so a row can draw that one actor from the Client's own
-  // Human identity instead of the initials the stack gives every Agent.
+  // The Host names the Human's Member id on every row, so a row can draw that actor from the Client's Human identity.
   const [humanMemberId, setHumanMemberId] = useState<AgentTeamMemberId>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
-  // The Host caps the unread queue and reports whether it did; keeping that
-  // verdict is what stops a full page from reading as the whole queue. A failed
-  // read keeps the last verdict, matching the kept slices below it.
+  // Keeping the Host's cap verdict stops a full page from reading as the whole queue; a failed read keeps the last verdict.
   const [truncated, setTruncated] = useState(false)
-  // Only the first refresh owns the loading surface; later wakes refresh the
-  // rendered rows in place instead of flashing them back to skeleton.
   const loadedRef = useRef(false)
-  // Per-Workspace last successful slice: a Workspace whose read fails keeps
-  // its rows — a failed read must not empty this action queue for that
-  // Workspace (the sidebar badge holds the same keep-last-good policy) — and
-  // the next success overwrites the kept slice.
+  // Last successful slice per Workspace: a failed read must not empty this action queue for it (the sidebar badge keeps last-good too).
   const keptSlicesRef = useRef(new Map<string, { readonly items: readonly AgentTeamInboxItem[]; readonly recent: readonly AgentTeamInboxItem[] }>())
 
   const refresh = useCallback(async () => {
@@ -104,9 +76,7 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
     const asRows = (items: readonly AgentTeamInboxItem[], workspaceId: WorkspaceId, workspaceTitle: string): TeamInboxRow[] =>
       items.map(item => ({ workspaceId, workspaceTitle, item }))
     setRows(results.flatMap(result => asRows(result.items, result.workspaceId, result.workspaceTitle)).sort(compareByHostInboxOrder))
-    // The tail is one global bound rather than one per Workspace: the reader was
-    // promised five Threads to step back into, and every Workspace's slice is
-    // already capped on its own, so the merged list is trimmed here.
+    // Every Workspace's slice is already capped; trim the merged tail to the one global bound.
     setRecentRows(results.flatMap(result => asRows(result.recent, result.workspaceId, result.workspaceTitle))
       .sort(compareByHostInboxOrder).slice(0, RECENT_ROWS_LIMIT))
     setError(failure?.ok === false ? failure.message : undefined)
@@ -131,25 +101,15 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
     selectThread(row.item.thread.threadRef, row.item.channelRef, row.item.task?.taskRef, row.item.taskNumber)
   }
 
-  // The page rides the shared conversation seat: the same header band, 880px
-  // reading column, responsive gutters, and scrollbar gutter as Channel and
-  // Thread, so switching surfaces does not shift the content column.
+  // Shares the conversation seat's header band and reading column with Channel and Thread, so switching surfaces does not shift content.
   const totalUnread = rows?.reduce((sum, row) => sum + row.item.unreadCount, 0) ?? 0
   const totalMentions = rows?.reduce((sum, row) => sum + row.item.directCount, 0) ?? 0
-  // A row names its Workspace only while the rows on screen span more than one.
-  // With a single Workspace in the list the segment is a constant printed down
-  // every row, which spends the row's most readable position on something that
-  // never varies; the moment a second Workspace reaches the list it comes back,
-  // because two rows then have to be tellable apart. This reads the rows rather
-  // than the open Workspaces: a Workspace holding nothing to show here is not a
-  // reason to keep printing the name of the one that is.
+  // A row names its Workspace only while the rows on screen span more than one; a constant segment wastes the row's most readable position.
   const shownWorkspaces = new Set<string>()
   for (const row of rows ?? []) shownWorkspaces.add(row.workspaceTitle)
   for (const row of recentRows) shownWorkspaces.add(row.workspaceTitle)
   const showWorkspace = shownWorkspaces.size > 1
-  // One identity for every row on the page: the Host tells the rows which
-  // actor is the reader, the Client's identity projection says what that actor
-  // looks like. Either half missing leaves the stack on its initials fallback.
+  // Either half missing leaves the stack on its initials fallback.
   const human = humanMemberId === undefined
     ? undefined
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) } satisfies TeamAvatarHuman
@@ -160,8 +120,6 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
           <h1>{t('inboxTitle')}</h1>
           {rows !== undefined && rows.length > 0 && <p className={inboxCss.headerMeta}>
             <span>{t('inboxHeaderThreads', { count: rows.length })}</span>
-            {/* The one number the page is about leads the line; mentions join it
-                only when the queue actually holds one. */}
             <span className={inboxCss.headerUnread}>{t('inboxHeaderUnread', { count: totalUnread })}</span>
             {totalMentions > 0 && <span>{t('inboxHeaderMentions', { count: totalMentions })}</span>}
           </p>}
@@ -185,8 +143,7 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
                 <div className={inboxCss.list}>
                   {rows.map(row => <InboxQueueRow key={`${row.workspaceId} ${row.item.thread.threadRef}`} row={row} t={t} showWorkspace={showWorkspace} human={human} onOpen={() => { open(row) }} />)}
                 </div>
-                {/* A capped queue says so where the list ends: the rows above are
-                    the newest unread Threads, never a claim to be all of them. */}
+                {/* A capped queue says so where the list ends. */}
                 {truncated && <p className={inboxCss.queueMore} role="status">{t('inboxQueueMore')}</p>}
               </section>}
               {recentRows.length > 0 && <section className={inboxCss.section}>
@@ -203,26 +160,10 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
 }
 
 /**
- * One queue row, shaped like the shipped two-line result row: who is on this
- * Thread leads in the gutter, the identity line answers which Thread this is,
- * how much is waiting, and when it last moved, and the gist sits under it on the
- * same column as evidence for that identity rather than as the row's subject.
- *
- * The gutter carries the one thing every row has — who is on the work, or who
- * moved a Thread nobody has claimed — so a Thread that merely arrived and one
- * that named the reader open on the same edge instead of the quieter one opening
- * on a slot reserved for a count it does not hold. It is the grammar the Channel
- * feed's Thread entry row already speaks, where the people on the work lead the
- * row.
- *
- * Before the queue admitted every unread Thread, each row was a mention and the
- * rows were interchangeable; now that named and ambient unread share one list,
- * the row has to carry that difference itself. The count closes the identity
- * line and only its ink changes — the shared capsule fill for a row that names
- * the reader, a hairline for one that merely moved. The two numbers behind that
- * ink (unread, mentions) reach assistive tech through the capsule's own name,
- * because a second visible count beside the first would cost the row the one
- * thing it needs to stay scannable.
+ * One queue row, shaped like the shipped two-line result row. The gutter leads with who is on the work (or who moved an
+ * unclaimed Thread), the Channel feed's Thread entry grammar. The count closes the identity line and only its ink changes:
+ * capsule fill when the row names the reader, a hairline otherwise. Unread and mention counts reach assistive tech through
+ * the capsule's own name, so no second visible count competes.
  */
 function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
   readonly row: TeamInboxRow
@@ -234,8 +175,7 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
   const { item } = row
   const actor = item.newestActor
   const owners = item.liveClaimOwners
-  // The row's names come from the Client's Human identity where it applies, so
-  // the chip's letter and the label's name move together on a rename.
+  // Names come from the Human identity so the chip's letter and the label move together on a rename.
   const namedOwners = namedAvatarOwners(owners, human)
   const namedActor = namedAvatarOwners([actor], human)[0]!
   const named = item.directCount > 0
@@ -243,18 +183,9 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
     ? t('inboxRowUnreadMentions', { count: item.unreadCount, mentions: item.directCount })
     : t('inboxRowUnread', { count: item.unreadCount })
   return <button type="button" className={inboxCss.row} data-named={named || undefined} onClick={onOpen}>
-    {/* Who is on this Thread leads every row, in the slot the count used to
-        reserve: the cluster is there whatever the row holds, so a row never
-        opens on empty space and the one column the reader scans down answers
-        「谁」 before it answers anything else. A Task's live owners answer it
-        wherever there are any — the same stack, the same rule, and the same
-        words the Channel feed's Thread entry row leads with — and a Thread with
-        no live owner falls back to the person its newest fact came from, since
-        that is all anybody knows about it. Which of the two a row shows is the
-        Thread's own fact, never the section's: a Thread must not change shape on
-        its way from the queue into the 「最近活跃」 tail. The stack's own label is
-        what joins the control's accessible name — the avatars are presentational,
-        the row's visible text is the Thread, not the queue. */}
+    {/* The cluster leads every row so none opens on empty space. A Task's live owners show when there are any, else the person the
+        newest fact came from; this is the Thread's own fact, so it keeps its shape between the queue and the 「最近活跃」 tail.
+        The avatars are presentational: the stack's label joins the control's accessible name. */}
     <span className={inboxCss.rowActor}>
       {owners.length > 0
         ? <TeamAvatarStack owners={namedOwners} label={claimersLabel(namedOwners, t)} human={human} />
@@ -267,13 +198,8 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
         <span className={inboxCss.rowChannel}>#{item.channelName}</span>
         {' '}
         {item.taskNumber !== undefined && <span className={inboxCss.rowTask}>{t('taskLabel', { number: item.taskNumber })}</span>}
-        {/* Where the Task stands, in the pair the Channel feed's Thread entry row
-            and the Thread header already speak: an 8px state dot then its word, so
-            a reader picks the Thread back up knowing whether the work they left is
-            waiting for them or finished. It is the Task's own fact and it rides
-            the clamped provenance run, so a Thread that is merely a discussion
-            draws nothing extra and a squeezed seat shortens the standing along
-            with the Channel name instead of cutting a hole around it. */}
+        {/* The state dot and word, as in the Channel feed and the Thread header. A discussion draws nothing; it rides the clamped
+            provenance run so a squeezed seat shortens it with the Channel name. */}
         {item.task !== undefined && <>
           {' '}
           <span className={inboxCss.rowTaskState} data-team-task-state={item.task.status}>
@@ -282,10 +208,7 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
           </span>
         </>}
       </span>
-      {/* One capsule per row, closing the identity line beside the instant it
-          shares its subject with. A 「最近活跃」 row holds no unread, so it
-          renders no capsule at all — zero is the absence of a badge, not a badge
-          reading zero — and the row keeps its shape without it. */}
+      {/* A 「最近活跃」 row holds no unread, so it renders no capsule: zero is the absence of a badge. */}
       <TeamCountBadge count={item.unreadCount} tone={named ? 'solid' : 'hairline'} label={countLabel} />
       <time className={inboxCss.rowTime} dateTime={item.newestOccurredAt} title={formatAbsoluteTime(item.newestOccurredAt)}>{formatInboxTime(item.newestOccurredAt, t)}</time>
     </span>
