@@ -8,27 +8,10 @@ export const HUMAN_PROFILE_DEFAULT_NAME = 'human'
 /** Repository home for the version footnote link. */
 export const HUMAN_PROFILE_REPO_URL = 'https://github.com/Contexera/dsh-agent-team'
 
-/**
- * Bundle version shown in the settings footnote, and the current side of the
- * update check: the version of the package THIS Host runs from — the installed
- * manifest's, read once at load through `./installed-manifest.ts`, so a `link:`
- * checkout under the development profile and a registry tarball under stable
- * each state their own truth. It is not a hand-maintained string: the 0.1.14
- * bundle shipped with `0.1.13` written in it, which made the footnote name the
- * previous release and the update check offer the release the user already had.
- *
- * An unreadable or malformed manifest degrades to `'unknown'`: the Remote's
- * `version: string` contract holds and the update comparison simply compares
- * nothing. The footnote is informational only and never gates behavior.
- */
+/** Bundle version of the package this Host runs from, read once from the installed manifest; `'unknown'` when the manifest is unreadable or malformed. Informational only. */
 export const HUMAN_PROFILE_VERSION = bundleVersionOf(readInstalledManifest())
 
-/**
- * Schemastery schema of the Human profile: the Team Host row's Config. Both
- * fields are volatile, which is what lets an edit reach the running Host
- * without remounting it — and what makes the settings service derive a form
- * from this schema at all.
- */
+/** Schemastery schema of the Human profile (the Team Host row's Config). Both fields are volatile so edits reach the running Host without remounting. */
 export const HUMAN_PROFILE_SETTINGS_SCHEMA = z.object({
   name: z.string().default(HUMAN_PROFILE_DEFAULT_NAME).volatile(),
   // Schemastery fields are optional unless `.required()`: a missing avatarRef
@@ -47,14 +30,7 @@ export function assertValidHumanName(raw: string): string {
   return name
 }
 
-/**
- * The retired settings section this profile's facts lived in before rc.1.
- * rc.1 derives every settings form from a plugin's Config, and its legacy
- * `settings.yaml` importer maps a section to a composition entry id through a
- * closed built-in list — this third-party section matches nothing there, so
- * the import rejects it and the values survive only in the renamed document.
- * This Host owns the section, so adopting what is left belongs here.
- */
+/** Retired settings section. The Harness `settings.yaml` importer rejects it, so its values survive only in the renamed document; this Host adopts them. */
 export const LEGACY_HUMAN_PROFILE_SECTION = 'agent-team-human'
 
 /** Fields recoverable from the legacy section; either may be absent. */
@@ -63,12 +39,7 @@ export interface LegacyHumanProfileFields {
   readonly avatarRef?: string
 }
 
-/**
- * Read the legacy section out of one legacy settings document. An
- * unparsable document or a missing section means "nothing to adopt" rather
- * than an error — the file is retired input, not an authority — and each
- * field is validated independently so one bad field never costs the other.
- */
+/** Reads the legacy section from a legacy settings document. An unparsable document or missing section means nothing to adopt; each field is validated independently. */
 export function parseLegacyHumanProfile(yamlText: string): LegacyHumanProfileFields | undefined {
   let document: unknown
   try {
@@ -95,13 +66,7 @@ export function parseLegacyHumanProfile(yamlText: string): LegacyHumanProfileFie
   return { ...(name === undefined ? {} : { name }), ...(avatarRef === undefined ? {} : { avatarRef }) }
 }
 
-/**
- * Decide what adoption may write: nothing unless the stored profile is still
- * the pristine default, so a value the Human re-entered after the upgrade
- * always wins, and never the legacy default name itself. The returned fields
- * are exactly the ops the profile page would have written; byte existence for
- * `avatarRef` is the caller's I/O and must already hold.
- */
+/** Decides what adoption may write: nothing unless the stored profile is still the pristine default, and never the legacy default name. `avatarRef` byte existence is the caller's check. */
 export function planLegacyAdoption(
   current: { readonly name: string; readonly avatarRef?: string },
   legacy: LegacyHumanProfileFields,

@@ -1,24 +1,17 @@
 /**
- * Human presentation preference for the Team sidebar: whether each disclosure
- * section (workspaces / channels / agents) is expanded. The state lives in
- * this browser only — it is UI taste, never a shared Team fact, so nothing
- * here touches the ledger. Same storage discipline as `sidebar-order.ts`: one
- * localStorage key, defensive parsing, a read-through cache over the raw
- * payload so writes from other tabs are picked up, and an in-memory fallback
- * when storage is unavailable.
+ * Human presentation preference: whether each Team sidebar section is expanded. It lives in this browser only and is
+ * never a shared Team fact. Same storage discipline as `sidebar-order.ts`: a read-through cache so other tabs' writes are
+ * picked up, and an in-memory fallback when storage is unavailable.
  */
 import { useCallback, useSyncExternalStore } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
-/** Which sidebar section a collapse state belongs to. */
 export type TeamSidebarSectionKind = 'channels' | 'agents'
 
 const STORAGE_KEY = 'dsh.agent-team.sidebar-sections'
 
 function sectionKey(workspaceId: WorkspaceId | undefined, kind: TeamSidebarSectionKind): string | undefined {
-  // Both panels are per-workspace: the Team shell remounts them on workspace
-  // switch, and the Workspace selector above them is a field rather than a
-  // collapsible section, so it keeps no preference of its own.
+  // The Workspace selector is a field, not a collapsible section, so it keeps no preference.
   return workspaceId === undefined ? undefined : `${workspaceId}|${kind}`
 }
 
@@ -51,8 +44,6 @@ function storedCollapsed(): ReadonlySet<string> {
     cachedCollapsed = new Set(keys)
     return cachedCollapsed
   } catch {
-    // Corrupted payloads degrade to "no preference"; the next valid write
-    // replaces them.
     return new Set()
   }
 }
@@ -66,19 +57,14 @@ function writeCollapsed(collapsed: ReadonlySet<string>): void {
     cachedRaw = raw
     return
   } catch {
-    // Private mode and quota failures do not block folding; the session keeps
-    // serving the in-memory state above.
+    // Private mode and quota failures do not block folding; the in-memory state keeps serving.
     cachedRaw = MEMORY_ONLY
   }
 }
 
 const listeners = new Set<() => void>()
 
-/**
- * Effective expanded state for one sidebar section: `false` only when this
- * browser explicitly collapsed it. Booleans are primitives, so the snapshot
- * is naturally identity-stable for `useSyncExternalStore`.
- */
+/** `false` only when this browser explicitly collapsed it. */
 export function useSidebarSectionOpen(workspaceId: WorkspaceId | undefined, kind: TeamSidebarSectionKind): boolean {
   const key = sectionKey(workspaceId, kind)
   const subscribe = useCallback((listener: () => void) => {
@@ -90,11 +76,7 @@ export function useSidebarSectionOpen(workspaceId: WorkspaceId | undefined, kind
     () => key === undefined ? true : !storedCollapsed().has(key))
 }
 
-/**
- * The only mutation path: record one section's expanded state for this
- * browser. Unknown keys (missing workspace) no-op so an unloaded workspace
- * never persists a phantom preference.
- */
+/** The only mutation path. Unknown keys (missing workspace) no-op so an unloaded workspace never persists a phantom preference. */
 export function setSidebarSectionOpen(workspaceId: WorkspaceId | undefined, kind: TeamSidebarSectionKind, open: boolean): void {
   const key = sectionKey(workspaceId, kind)
   if (key === undefined) return

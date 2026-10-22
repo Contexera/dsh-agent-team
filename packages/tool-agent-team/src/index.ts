@@ -49,13 +49,7 @@ interface MessageFactView {
   readonly direct?: boolean
   /** The Message this one answers, when it is a reply. */
   readonly replyToMessageRef?: string
-  /**
-   * The same target, resolved for reading: who wrote it and its first line.
-   *
-   * Kept apart from `replyToMessageRef` on purpose — that is the ref you pass
-   * back to `team_message.reply`, this is what a reader sees, and one field
-   * carrying both meanings would make each of them wrong half the time.
-   */
+  /** The same target resolved for reading: who wrote it and its first line. Separate from `replyToMessageRef` (the ref you pass back to `team_message.reply`) because one field carrying both meanings would be wrong half the time. */
   readonly replyTo?: ReplyContextView
 }
 
@@ -100,12 +94,7 @@ function activityFactView(
   }
 }
 
-/**
- * The one deterministic bounded subject, shared by directory rows and Thread
- * orientation: whitespace collapses to one line, then one bounded cut with an
- * explicit truncation mark. Directory, read, and history orientation must
- * never disagree about what a Thread is about.
- */
+/** The one deterministic bounded subject for directory rows and Thread orientation: whitespace collapses to one line, then one bounded cut with an explicit truncation mark, so surfaces never disagree about what a Thread is about. */
 function boundedSubject(body: string): string {
   const collapsed = body.replaceAll(/\s+/gu, ' ').trim()
   return collapsed.length <= SUBJECT_BOUND ? collapsed : `${collapsed.slice(0, SUBJECT_BOUND - 1)}…`
@@ -142,12 +131,7 @@ function taskStanding(value: { taskRef?: string; status?: string; resolution?: s
   return `${value.taskRef}${value.taskNumber === undefined ? '' : ` (#${value.taskNumber})`}${value.status === undefined ? '' : `, ${value.status}${value.resolution === undefined ? '' : `/${value.resolution}`}`}`
 }
 
-/**
- * The one model-facing schema for a Thread fact, shared by the read result and
- * by the facts a rejected write carries back. One declaration keeps the two
- * surfaces structurally identical — a fact the model can read is a fact a
- * rejection can hand it.
- */
+/** The one model-facing schema for a Thread fact, shared by the read result and by the facts a rejected write carries back. */
 const FACT_SCHEMA = {
   type: 'object', additionalProperties: false, properties: {
     sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, body: { type: 'string' }, sender: { type: 'string' }, occurredAt: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } }, replyToMessageRef: { type: 'string' }, replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } }, activity: { type: 'string' }, actor: { type: 'string' }, taskRef: { type: 'string' }, claimRef: { type: 'string' }, claimRefs: { type: 'array', items: { type: 'string' } }, completedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } }, releasedClaimRefs: { type: 'array', items: { type: 'string' } }, unread: { type: 'boolean' }, direct: { type: 'boolean' },
@@ -158,13 +142,7 @@ function requestId(agentId: string, callId: string): AgentTeamRequestId {
   return `agent-team:tool:${agentId}:${callId}` as AgentTeamRequestId
 }
 
-/**
- * One fact as a rejection render receives it: the same fields a read renders,
- * but with the tag fields widened to plain strings. The render value arrives
- * through the tool's own output schema, where `kind` is a string rather than a
- * literal union — the discrimination `factLine` performs is the same one a
- * read performs, and it must not need a second, narrower type to do it.
- */
+/** One fact as a rejection render receives it: the read fields with tag fields widened to plain strings, because the tool's output schema types `kind` as a string rather than a literal union. */
 type RejectedFact = {
   readonly sequence: number
   readonly kind: string
@@ -186,14 +164,7 @@ type RejectedFact = {
   readonly direct?: boolean
 }
 
-/**
- * One typed-rejection renderer shared by team_message and team_claim. Outcome
- * first, action-local recovery facts, then the facts that gated the write and
- * the single recovery route: the new facts render here in the same result, and
- * the current revision is written back as the next write token — so a rejected
- * writer learns WHAT changed and WHICH token to use without paying a separate
- * read round-trip.
- */
+/** The typed-rejection renderer shared by team_message and team_claim: outcome, action-local recovery facts, the facts that gated the write, and the single recovery route. The current revision is written back as the next write token, so a rejected writer needs no separate read round-trip. */
 function rejectionLines(
   value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly staleTokenKind?: 'unknown' | 'unrecognized'; readonly facts?: readonly RejectedFact[] },
 ): string[] {
@@ -213,12 +184,7 @@ function rejectionLines(
   }
   if (value.kind === 'stale_revision') {
     const facts = value.facts ?? []
-    // A token this Thread never reached is not a race: the model copied it from
-    // another Thread or invented it, so the way out names that instead of
-    // pointing at facts that were never missed. The headline changes with it —
-    // a first line claiming the Thread changed, followed by a sentence saying
-    // nothing was inserted, reads as one surface contradicting itself, which
-    // is worse than the vagueness this whole change removes.
+        // A token this Thread never reached is not a race (it was copied from another Thread or invented), so the way out and the headline say that instead of claiming the Thread changed and then saying nothing was inserted.
     const unrecognized = value.staleTokenKind === 'unrecognized'
     return [
       ...(unrecognized ? ['Not committed — that write token was never a revision this Thread reached (stale_revision).']
@@ -237,13 +203,7 @@ function rejectionLines(
   ]
 }
 
-/**
- * The facts a rejection carries, rendered exactly as a Thread read renders
- * them — one shared `factLine`, so the two surfaces can never drift on shape.
- * A rejection with nothing to show stays silent rather than printing an empty
- * heading, and the count states the span so a truncated batch never reads as
- * the whole increment.
- */
+/** The facts a rejection carries, rendered by the same `factLine` as a Thread read. Nothing to show stays silent, and the count states the span so a truncated batch never reads as the whole increment. */
 function rejectedFactLines(facts: readonly RejectedFact[]): string[] {
   if (facts.length === 0) return []
   return ['', `${facts.length} new fact(s) since your last write:`, ...facts.map(fact => factLine(fact as FactView))]
@@ -263,11 +223,7 @@ const teamInbox = defineTool({
         taskNumber: { type: 'number' }, newestOccurredAt: { type: 'string' },
       } } },
     } },
-    // Triage surface only: totals plus both counters per row (direct renders
-    // even when zero), a bounded-list conclusion so truncation can never read
-    // as drained, and one route to the tool that can actually acknowledge the
-    // work. No subject, no body, no revision label, no write token: the inbox
-    // routes to a required current read, which supplies the write basis.
+        // Triage surface only: totals, both counters per row (direct renders even when zero), a bounded-list conclusion so truncation never reads as drained, and one route to the tool that acknowledges work. No subject, body, revision label, or write token: the required current read supplies the write basis.
     render: (_args, value) => {
       if (value.items.length === 0) {
         return [{ type: 'text', text: value.totalUnreadCount > 0
@@ -302,16 +258,7 @@ const teamInbox = defineTool({
   },
 })
 
-/**
- * Attention — following a Thread — is a different question from reading one.
- *
- * `status`, `follow`, and `unfollow` all answer "am I watching this Thread, and
- * should I be?", and all three take exactly the same parameters: the Thread
- * address and the routing Workspace. Reading takes that address plus paging and
- * message refs. Sharing one parameter pocket between them put three parameters
- * (`messageRef`, `beforeSequence`, `limit`) in front of three actions that can
- * never accept them, which is friction the action set created on its own.
- */
+/** Attention (following a Thread) is a different question from reading one. `status`, `follow`, and `unfollow` take exactly the Thread address and routing Workspace; sharing a parameter pocket with read would put `messageRef`, `beforeSequence`, and `limit` in front of actions that never accept them. */
 const teamAttention = defineTool({
   name: 'team_attention',
   description: `Read or change your Attention on one Thread — whether you are following it. status reports the current state and changes nothing; follow starts receiving that Thread's updates; unfollow stops them. Attention is not reading: none of these actions render the Thread's facts, acknowledge unread work, or hand off a write token, and reading a Thread never changes whether you follow it. Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task.`,
@@ -328,10 +275,7 @@ const teamAttention = defineTool({
       revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
       following: { type: 'boolean', required: true },
     } },
-    // Renders are the only channel a tool result reaches the model through.
-    // One outcome line, then the Attention state itself: the answer is a
-    // yes/no on one Thread, so there is no orientation, no fact list, and
-    // never a write token — a status read authorizes no mutation.
+        // Renders are the only channel a tool result reaches the model through. One outcome line plus the Attention state; a yes/no on one Thread needs no orientation, facts, or write token (a status read authorizes no mutation).
     render: (args, value) => {
       const standing = taskStanding(value)
       const source = `Workspace: ${value.workspaceId} · Channel: ${value.channelRef}`
@@ -409,17 +353,12 @@ const teamThread = defineTool({
       } } },
       facts: { type: 'array', required: true, items: FACT_SCHEMA },
     } },
-    // Renders are the only channel a tool result reaches the model through.
-    // read renders outcome → context → orientation → active collision surface
-    // → facts → watermark, and hands off the opaque next-write token
-    // only when no unread remains. history renders deep orientation and never
-    // the current collision surface or any write token.
+        // Renders are the only channel a tool result reaches the model through. read renders outcome → context → orientation → active collision surface → facts → watermark, handing off the next-write token only when no unread remains. history renders deep orientation and never the collision surface or a write token.
     render: (args, value) => {
       const standing = taskStanding(value)
       const source = `Workspace: ${value.workspaceId} · Channel: ${value.channelRef}`
       if (value.kind === 'message') {
-        // Verbatim, and the only action that is: the reader asked for this one
-        // Message because it has to answer it, so nothing is trimmed here.
+                // Verbatim, and the only action that is: the reader asked for this Message to answer it.
         const message = value.message!
         const at = message.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(message.occurredAt)}`
         return [{ type: 'text', text: [
@@ -433,9 +372,7 @@ const teamThread = defineTool({
       if (value.kind === 'history') {
         const facts = value.facts as FactView[]
         const lines = [source, `History for ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}`]
-        // First page (no beforeSequence supplied) orients on the full
-        // anchor; a continuation orients on the shared bounded subject. An
-        // anchor already selected as a fact never repeats.
+                // First page orients on the full anchor; a continuation on the shared bounded subject. An anchor already selected as a fact never repeats.
         if (!facts.some(fact => fact.sequence === value.anchor.sequence)) {
           if (args.beforeSequence === undefined) lines.push('', `Anchor ${value.anchor.sequence}${value.anchor.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(value.anchor.occurredAt)}`} [${value.anchor.sender}]${repliesToClause(value.anchor.replyToMessageRef, value.anchor.replyTo)}`, value.anchor.body)
           else lines.push(`  — ${boundedSubject(value.anchor.body)}`)
@@ -446,13 +383,11 @@ const teamThread = defineTool({
         lines.push('', `History cursor ${value.cursor}; hasMore=${value.hasMore ? 'true' : 'false'}${value.hasMore ? ' — older facts exist; page again with beforeSequence set to the cursor.' : ' — no older facts remain.'}`)
         return [{ type: 'text', text: lines.join('\n') }]
       }
-      // kind === 'read': outcome → context → orientation → collision
-      // surface → facts → watermark → token (iff nothing unread remains).
+            // kind === 'read': outcome → context → orientation → collision surface → facts → watermark → token (iff nothing unread remains).
       const facts = value.facts as FactView[]
       const acknowledged = facts.filter(fact => fact.unread === true).length
       const remaining = value.remainingUnreadCount ?? 0
-      // A read with nothing unread writes no durable operation, so the opening
-      // line claims a commit only when unread facts were actually acknowledged.
+            // A read with nothing unread writes no durable operation, so the opening line claims a commit only when unread facts were acknowledged.
       const lines = [
         source,
         acknowledged === 0
@@ -460,11 +395,7 @@ const teamThread = defineTool({
           : `Read committed — acknowledged ${acknowledged} unread update(s) on ${value.threadRef}; ${remaining} remain.`,
         `${value.threadRef}${standing === '' ? '' : ` · ${standing}`} · ${value.following ? 'following' : 'not following'}`,
       ]
-      // Orientation: A the anchor is one of the returned facts (renders as
-      // that fact once, no separate anchor); B any Host-supplied background
-      // fact carries positive `unread === false`, so the full anchor renders
-      // before the facts; C otherwise (continuation or unfollowed ad-hoc
-      // read) the shared bounded subject — never the full anchor.
+            // Orientation: A) the anchor is a returned fact (renders once, no separate anchor); B) a Host-supplied background fact carries `unread === false`, so the full anchor renders before the facts; C) otherwise (continuation or unfollowed ad-hoc read) the shared bounded subject, never the full anchor.
       const anchorInFacts = facts.some(fact => fact.sequence === value.anchor.sequence)
       const hasBackground = facts.some(fact => fact.unread === false)
       if (!anchorInFacts && hasBackground) lines.push('', `Anchor ${value.anchor.sequence}${value.anchor.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(value.anchor.occurredAt)}`} [${value.anchor.sender}]${repliesToClause(value.anchor.replyToMessageRef, value.anchor.replyTo)}`, value.anchor.body)
@@ -478,10 +409,7 @@ const teamThread = defineTool({
       if (facts.length === 0) lines.push('No new facts to acknowledge.')
       else lines.push(...facts.map(fact => factLine(fact)))
       lines.push('', `Read through sequence ${value.readThroughSequence}; ${remaining} unread update(s) remaining${remaining > 0 ? ` — ${recoveryFor('unread_remaining').sentence({})}` : '.'}`)
-      // What this bounded read answered with is the newest batch; the span
-      // before the watermark is the orientation it did not supply. Rendering
-      // the count is what lets a returning reader see the size of that span
-      // instead of assuming the batch is the Thread.
+            // The bounded read answered with the newest batch; the span before the watermark is orientation it did not supply, and rendering its count shows the returning reader the size of that span.
       const earlier = value.earlierFactCount ?? 0
       if (earlier > 0) lines.push(`Earlier facts: ${earlier} — read older ones with team_thread.history.`)
       if (remaining === 0) lines.push('', nextWriteLine(value.revision))
@@ -499,11 +427,7 @@ const teamThread = defineTool({
       const resolved = host.resolveTaskRefs({ workspaceId: base.workspaceId, taskRefs: [task.taskRef] }).resolved[0]
       return resolved === undefined ? {} : { taskNumber: resolved.taskNumber }
     }
-    // `messageRef` belongs to the `message` action alone. The parameter schema is
-    // implicitly open, so no schema refuses it on the actions that cannot use
-    // it — and a silent drop would tell a model that reached for it nothing at
-    // all. One guard before the branches covers every action that is not
-    // `message`, so a new read action cannot reopen the hole by omission.
+        // `messageRef` belongs to the `message` action alone. The parameter schema is implicitly open, so nothing refuses it elsewhere and a silent drop would tell the model nothing. One guard before the branches covers every other action, including future read actions.
     if (args.action !== 'message' && args.messageRef !== undefined) {
       throw new Error(recoveryFor('action_only_arguments').sentence({ action: args.action, parameter: 'messageRef', owner: 'message' }))
     }
@@ -516,9 +440,7 @@ const teamThread = defineTool({
     }
     if (args.action === 'message') {
       if (args.messageRef === undefined) throw new Error(recoveryFor('missing_message_ref').sentence({ refused: 'for action message' }))
-      // Reading one Message is authorized by the Thread that carries it, so the
-      // Thread ref is required here even though taskRef addresses the same
-      // Thread elsewhere in this tool.
+            // Reading one Message is authorized by the Thread that carries it, so threadRef is required even though taskRef addresses the same Thread elsewhere in this tool.
       if (args.threadRef === undefined) throw new Error(`message needs threadRef — ${recoveryFor('missing_thread_identity').sentence({})}`)
       if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'message' }))
       const readBack = host.readMessageForAgent(agent, {
@@ -526,8 +448,7 @@ const teamThread = defineTool({
         threadRef: args.threadRef as AgentTeamThreadRef,
         messageRef: args.messageRef as AgentTeamMessageRef,
       })
-      // The ordinary orientation is still returned, so every action of this tool
-      // answers with one shape; the Message read back rides alongside it.
+            // The ordinary orientation is still returned so every action answers with one shape; the Message read back rides alongside.
       const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
       const status = host.attentionStatusForAgent(agent, base)
       return threadResult('message', base.workspaceId, snapshot, status.attention, [], {
@@ -541,13 +462,7 @@ const teamThread = defineTool({
   },
 })
 
-/**
- * What a Message answers, as one bracketed clause.
- *
- * Resolved context when the reader's window could reach it, and the bare ref
- * otherwise: a ref is still the honest answer, and it is the one the reader can
- * hand to `team_thread message` to get the original text.
- */
+/** What a Message answers, as one bracketed clause: resolved context when the reader's window reaches it, otherwise the bare ref, which the reader can hand to `team_thread message` for the original text. */
 function repliesToClause(replyToMessageRef: string | undefined, replyTo: ReplyContextView | undefined): string {
   if (replyToMessageRef === undefined) return ''
   return replyTo === undefined
@@ -555,12 +470,7 @@ function repliesToClause(replyToMessageRef: string | undefined, replyTo: ReplyCo
     : ` (replies to @${replyTo.sender} — "${replyTo.excerpt}")`
 }
 
-/**
- * The one Host-read-fact → view projection, shared by a Thread read and by the
- * facts a rejected write carries back. Both surfaces must render a fact
- * identically, so neither gets its own mapping: a second copy is how the two
- * would drift, and the drift would be invisible until a model acted on it.
- */
+/** The one Host-read-fact → view projection, shared by a Thread read and by the facts a rejected write carries back, so the two surfaces cannot drift. */
 function readFactView(entry: {
   readonly fact: AgentTeamThreadFact
   readonly unread: boolean
@@ -610,16 +520,7 @@ function threadResult(
   }
 }
 
-/**
- * A direct message is not a Thread fact.
- *
- * `dm` takes a Member ref and a body and nothing else — no Thread, no Task, no
- * write token, no attachments. Sharing a pocket with `reply` meant the model
- * could hand a `threadRef` to a call that has no Thread to address, and be
- * refused for a shape the action never wanted. Keeping them apart also makes the
- * Host's own rule readable: a DM is a private note, so shared work belongs in a
- * Thread reply.
- */
+/** A direct message is not a Thread fact: `dm` takes a Member ref and a body only (no Thread, Task, write token, or attachments). Sharing a pocket with `reply` would let a model hand a `threadRef` to a call with no Thread to address. A DM is a private note; shared work belongs in a Thread reply. */
 const teamDm = defineTool({
   name: 'team_dm',
   description: 'Send one private direct message to a single enabled Agent Member in your Workspace. It takes a memberRef and a body and nothing else: no Thread, no Task, no write token, and no attachments, because a DM addresses a person rather than a conversation. Use it for quick clarifications and status syncs — never for task work, decisions, or anything that needs team visibility or traceability, which belongs in a Thread reply. If an exchange with the same Member runs past about three messages, move it to a Thread: every DM costs the recipient a full agent turn. A DM is recorded whether or not the recipient session could be woken, and the result says which happened; there is no automatic redelivery, so never blindly send a duplicate. The Human cannot be DMed.',
@@ -634,9 +535,7 @@ const teamDm = defineTool({
       recipientMemberId: { type: 'string', required: true }, recipientHandle: { type: 'string', required: true },
       delivered: { type: 'boolean', required: true }, deliveryNote: { type: 'string' }, occurredAt: { type: 'string' },
     } },
-    // Renders are the only channel a tool result reaches the model through.
-    // A DM is recorded either way, so the first line always says which it was:
-    // delivered, or recorded without a live session to wake.
+        // Renders are the only channel a tool result reaches the model through. A DM is recorded either way, so the first line says whether it was delivered or recorded without a live session to wake.
     render: (_args, value) => {
       if (value.delivered === false) return [{ type: 'text', text: [
         `Recorded, not delivered — DM to @${value.recipientHandle} (${value.recipientMemberId}).`,
@@ -649,15 +548,7 @@ const teamDm = defineTool({
   async execute(args, exec) {
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_dm requires an Agent session')
-    // The parameter pocket is the whole point of this tool, so a stray field is
-    // refused rather than ignored: a model that reached for a Thread write's
-    // shape meant a Thread reply, and silently dropping the field would send a
-    // private note where shared work was intended.
-    //
-    // This guard is hand-written because the tool parameter schema is implicitly
-    // open — the harness compiles a parameter table to `{type, properties,
-    // required}` with no `additionalProperties`, so no schema can refuse a key
-    // it does not name. Do not delete it as redundant.
+        // A stray field is refused rather than ignored: a model reaching for a Thread write's shape meant a Thread reply, and dropping the field would send a private note where shared work was intended. Hand-written because the harness compiles parameter tables to `{type, properties, required}` with no `additionalProperties`, so no schema can refuse an unnamed key. Not redundant.
     const stray = Object.keys(args).filter(key => key !== 'memberRef' && key !== 'body' && key !== 'workspace')
     if (stray.length > 0) throw new Error(`team_dm does not accept ${stray.join(', ')}; it takes memberRef and body only — a DM addresses a person, so shared work belongs in a team_message reply.`)
     if (args.memberRef === undefined) throw new Error(recoveryFor('dm_requires_member').sentence({}))
@@ -709,10 +600,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
       }
       return [{ type: 'text', text: rejectionLines(value).join('\n') }]
     },
-    // Minimal durable projection for the Host's context timeline: the
-    // structured outcome identity (never the render text). The effect-anchor
-    // fold reads `kind === 'committed'` + threadRef from the persisted
-    // tool/result meta — a start's Thread is born here, in the result.
+        // Minimal durable projection for the Host's context timeline: the structured outcome identity, never render text. The effect-anchor fold reads `kind === 'committed'` + threadRef from the persisted tool/result meta; a start's Thread is born in the result.
     presentationMeta: (_args, value): Record<string, string> => value.kind === 'committed' && value.threadRef !== undefined
       ? { kind: value.kind, threadRef: value.threadRef, ...(value.taskRef === undefined ? {} : { taskRef: value.taskRef }) }
       : { kind: value.kind },
@@ -745,8 +633,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
 
 function messageOutcome(result: Awaited<ReturnType<AgentTeam['sendMessageForAgent']>> | Awaited<ReturnType<AgentTeam['replyForAgent']>>, action: 'start' | 'reply') {
   if (result.kind === 'committed') {
-    // A start always delivers to the Members it names — they begin following the
-    // new Thread — so only a reply can report names the Thread has never carried.
+        // A start always delivers to the Members it names (they begin following the new Thread), so only a reply can report names the Thread has never carried.
     const undelivered = 'undeliveredMentions' in result ? result.undeliveredMentions : undefined
     return { kind: result.kind, action, threadRef: result.thread.threadRef,
       ...(result.task === undefined ? {} : { taskRef: result.task.taskRef }),
@@ -786,12 +673,7 @@ const teamClaim = defineTool({
       claims: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true } } } },
       facts: { type: 'array', items: FACT_SCHEMA }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
     } },
-    // A committed mutation renders the authoritative affected Claim first —
-    // the Host result carries it; the full archive is never appended. list
-    // renders the active collision surface and no write token: a current
-    // Thread read remains the required mutation basis. Rejections share the
-    // outcome-first recovery form and carry the facts that gated the write,
-    // plus the current revision as the next write token.
+        // A committed mutation renders the authoritative affected Claim first; the full archive is never appended. list renders the collision surface and no write token (a current Thread read remains the mutation basis). Rejections share the outcome-first recovery form and carry the gating facts plus the current revision as the next write token.
     render: (_args, value) => {
       if (value.kind === 'listed') {
         const active = value.claims.filter(claim => claim.state === 'active')
@@ -830,9 +712,7 @@ const teamClaim = defineTool({
     if ((args.action === 'done' || args.action === 'release') && (args.claimRef === undefined || args.direction !== undefined)) throw new Error(recoveryFor('claim_close_requires_ref').sentence({ action: args.action }))
     const result = await host.changeClaimForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action,
       baseRevision, ...(args.direction === undefined ? {} : { direction: args.direction }), ...(args.claimRef === undefined ? {} : { claimRef: args.claimRef as AgentTeamClaimRef }) })
-    // Structured compatibility: every mutation outcome re-reads the real
-    // Claim archive and Task status, exactly as the parent version did —
-    // the render layer is what omits the archive, never the structured value.
+        // Every mutation outcome re-reads the real Claim archive and Task status; the render layer omits the archive, never the structured value.
     const listed = host.listClaimsForAgent(agent, base)
     const claims = listed.claims.map(claimView)
     if (result.kind === 'committed') return { kind: result.kind, action: args.action, taskRef: result.task.taskRef, threadRef: result.thread.threadRef,
@@ -874,13 +754,7 @@ const teamView = defineTool({
       tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, channelRef: { type: 'string', required: true }, status: { type: 'string', required: true }, revision: { type: 'number' } } } },
       cursor: { type: 'number', required: true }, hasMore: { type: 'boolean', required: true }, page: { type: 'string' },
     } },
-    // Address book, newest Thread first: labelled sections, one bounded
-    // anchor subject per Thread row, Task standing inline on its Thread (no
-    // second Task index), and a footer that calls the value a Thread cursor.
-    // Continuation pages repeat only Threads — Channels and Members are
-    // current address context, not members of the Thread page. No message
-    // count and no revision label: neither changes the next legal action,
-    // which is reading, never writing from a directory snapshot.
+        // Address book, newest Thread first: labelled sections, one bounded subject per Thread row, Task standing inline (no second Task index), and a footer naming the value a Thread cursor. Continuation pages repeat only Threads. No message count or revision label: neither changes the next legal action, which is reading, never writing from a directory snapshot.
     render: (_args, value) => {
       const continuation = value.page === 'threads'
       const lines: string[] = [`Workspace: ${value.workspaceId}`]
@@ -915,9 +789,7 @@ const teamView = defineTool({
     if (agent === undefined) throw new Error('team_view requires an Agent session')
     const host = service(agent)
     const workspaceId = workspaceOf(args, agent)
-    // `includeCatalog` is what makes this the address book: the radar and the
-    // Task/Thread catalog of the whole Workspace scope, not just this page's own
-    // Threads. Every other `view` caller stays on the bounded page projection.
+        // `includeCatalog` makes this the address book: the radar and Task/Thread catalog of the whole Workspace scope, not just this page's Threads. Other `view` callers keep the bounded page projection.
     const view = host.viewForAgent(agent, { workspaceId, ...(args.channelRef === undefined ? {} : { channelRef: args.channelRef as never }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.cursor === undefined ? {} : { cursor: args.cursor }), topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true })
     const visibleMemberIds = new Set(view.members.map(membership => membership.memberId))
     return {
@@ -937,9 +809,7 @@ const teamView = defineTool({
           subject: boundedSubject(item.message.body), lastActivityAt: item.lastActivityAt,
           ...(task === undefined ? {} : { taskRef: task.taskRef, status: task.status, ...(item.taskNumber === undefined ? {} : { taskNumber: item.taskNumber }) }) }
       }),
-      // A Task's revision is its Thread's; it is omitted rather than reported as
-      // `0` when the Task's Thread is outside this directory page's scope. A
-      // fabricated revision would read as "this Thread has never been written".
+            // A Task's revision is its Thread's; omitted rather than reported as `0` when the Thread is outside this page's scope, since `0` would read as "never written".
       tasks: view.tasks.map(task => {
         const revision = view.threads.find(thread => thread.threadRef === task.threadRef)?.revision
         return { taskRef: task.taskRef, threadRef: task.threadRef, channelRef: task.channelRef, status: task.status,

@@ -14,23 +14,15 @@
   width: 100%;
   max-width: var(--dsh-composer-card-max-width, 780px);
   padding: 10px 0 0;
-  /* DSH 0.1.7 draws the card's stroke as the elevation hairline rather than a
-     1px layout border, in the l2 neutral one step above the menus' l1 — the
-     same recipe as `InputBar.module.css .card`. A full 1px in the dark-mode
-     thin alias (rgba(255,255,255,.06)) read lighter than shipped's l2 there,
-     and the hairline costs no layout. */
+  /* The card's stroke is the elevation hairline in the l2 neutral (as `InputBar.module.css .card`), not a 1px border: the
+     dark-mode thin alias read lighter than l2, and the hairline costs no layout. */
   border: 0;
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-panel, 22px);
   background: var(--dsw-specific-input-major, var(--dsw-alias-bg-layer-1));
   box-shadow: var(--dsw-elevation-soft);
-  /* Size container for the toolbar's narrow-card branch — shipped puts its own
-     container on the row and queries the group inside it
-     (`InputBar.module.css`). It has to be an ancestor of what the query
-     restyles: an element never answers a query about itself, so a
-     `@container` rule aimed at `.toolbar` only matches while `.toolbar` is a
-     descendant of the box that declares the container. Anonymous on purpose:
-     CSS modules hash container names per module sheet. */
+  /* Size container for the toolbar's narrow-card branch. It must be an ancestor of what the query restyles, since an element
+     never answers a query about itself. Anonymous because CSS modules hash container names per sheet. */
   container-type: inline-size;
 }
 
@@ -79,16 +71,9 @@
   opacity: 0.55;
 }
 
-/* Floating listbox card above the composer. `--dsw-specific-menu` turned
-   translucent in DSH 0.1.7 (rgba(248,249,250,.58) light, rgba(48,49,54,.5)
-   dark) and shipped pairs that translucency with the menu backdrop blur
-   (ui-primitives Menu.module.css). Without the blur the conversation behind
-   the card bleeds through its own rows and the suggestions stop reading; the
-   elevation stroke plus prominent shadow is the same floating-card recipe.
-   That recipe also fixes the shape: the shipped menu surface is 16px with 8px
-   rows (`Menu.module.css .list` and `.item`), and the row menus this app
-   already renders come from that primitive — a hand-rolled popover at another
-   radius would put two menu languages in one app. */
+/* Floating listbox card above the composer. `--dsw-specific-menu` is translucent, so the shipped menu backdrop blur is
+   required or the conversation bleeds through the rows. Shape follows the shipped menu surface (16px card, 8px rows,
+   `Menu.module.css`) so the app has one menu language. */
 .mentionMenu {
   position: absolute;
   right: 0;
@@ -102,7 +87,6 @@
   border-radius: var(--dsw-radius-lg, 16px);
   background: var(--dsw-specific-menu);
   backdrop-filter: var(--dsw-menu-backdrop-filter);
-  /* --dsw-elevation-prominent lays its hairline stroke from this color. */
   --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
   box-shadow: var(--dsw-elevation-prominent);
 }
@@ -136,17 +120,12 @@
   white-space: nowrap;
 }
 
-/* A candidate outside the conversation being written into stays pickable —
-   the Host addresses them too — so the distinction is weight, not absence.
-   The name drops to the secondary label alias while the row keeps its own
-   contrast. Weight alone carries it: the confirmation a Thread reply can
-   trigger is stated by the status line after the send, not on the row. */
+/* A candidate outside the conversation stays pickable (the Host addresses them too), so the distinction is weight, not absence. */
 .mentionOption[data-mention-inside='false'] .mentionName {
   color: var(--dsw-alias-label-secondary);
 }
 
-/* Icon-sized stand-in for the presence dot on the @all row: theme label
- * color, slightly smaller than the 16px member dots. */
+/* Icon-sized stand-in for the presence dot on the @all row. */
 .mentionAllDot {
   width: 8px;
   height: 8px;
@@ -168,22 +147,15 @@
   align-items: center;
   display: flex;
   justify-content: flex-end;
-  /* Same 12px control rhythm as the base composer's .row (figma 75:8208). The
-     send circle's own auto margin seats it alone at the right edge, so this gap
-     is what separates the attach circle and the as-task mode pill beside it. */
+  /* Same 12px control rhythm as the base composer's .row; the send circle's auto margin seats it alone at the right edge. */
   gap: 12px;
   min-height: 34px;
   padding: 2px 8px 6px;
 }
 
-/* as-task is a mode, not an action: it changes what Send means, so it keeps a
-   word label and sits in the shipped composer's modes seat beside the attach
-   control. The Harness Button atom renders no pressed visual for aria-pressed,
-   so the pill owns its on-state with primary fill; the hover rule has to
-   out-specify `.asTaskPill:hover:not(:disabled)` (0,3,0), or hovering a pressed
-   pill would swap the fill back to the hover wash. DSH 0.1.7 replaced the
-   labeled mode chip with the 8px-chip `select`, so the shape follows that
-   radius while the word label stays. */
+/* as-task is a mode, not an action, so it keeps a word label. The Harness Button atom renders no pressed visual for
+   aria-pressed, so the pill owns its on-state; the hover rule must out-specify `.asTaskPill:hover:not(:disabled)` (0,3,0),
+   or hovering a pressed pill swaps the fill to the hover wash. */
 .asTaskPill {
   align-items: center;
   background: transparent;
@@ -219,19 +191,15 @@
   white-space: nowrap;
 }
 
-/* Narrow card: DSH 0.1.7 drops the labeled permission chip and with it the
-   460px label cut — the composer now keeps every mode's word and narrows its
-   control gaps instead (`InputBar.module.css` @container (max-width: 560px)).
-   The mode label therefore stays visible at every width; `aria-label`, `title`
-   and `aria-pressed` carry the state to assistive tech as before. */
+/* The composer keeps every mode's word and narrows control gaps instead (`InputBar.module.css` @container (max-width: 560px));
+   `aria-label`, `title` and `aria-pressed` carry the state to assistive tech. */
 @container (max-width: 560px) {
   .toolbar {
     gap: 8px;
   }
 }
 
-/* Attach circle — mirrors the base composer's 28px "+" control so both
-   composers read as one design language (figma + control). */
+/* Mirrors the base composer's 28px "+" control. */
 .attachButton {
   background: var(--dsw-specific-selector);
   border: 0;
@@ -341,14 +309,9 @@
   display: inline-flex;
   height: 34px;
   justify-content: center;
-  /* The attach circle and the as-task mode pill share the left group, so the
-     primary action takes the right edge for itself. */
   margin-left: auto;
   padding: 0;
-  /* Opts out of the toolbar's 2px downward shift (same 2px top pad the base
-     composer's row uses): the send circle keeps its original seat while the
-     smaller controls sit lower. Transform, not margin, so flex centering
-     math is untouched. */
+  /* Opts out of the toolbar's 2px downward shift so the send circle keeps its seat. Transform, not margin, so flex centering is untouched. */
   transform: translateY(-2px);
   transition: background-color 100ms ease, opacity 100ms ease;
   width: 34px;
@@ -377,7 +340,6 @@
   padding: 0 16px;
 }
 
-/* Quiet "who gets notified" line; sits between the draft and the send action. */
 .notifyRow {
   color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-tertiary));
   font-size: 12px;
@@ -398,9 +360,8 @@
 
 @media (max-width: 600px) {
   .mentionOption {
-    /* The description is dropped below, so the row reads as two columns:
-       dropping to a third would leave the hidden cell holding the free
-       column and squeeze the name into `auto`. */
+    /* The description drops below, so the row is two columns: a third would leave the hidden cell holding the free column and
+       squeeze the name into `auto`. */
     grid-template-columns: 16px minmax(0, 1fr);
     min-height: 36px;
     padding-block: 6px;
@@ -417,13 +378,8 @@
   }
 }
 
-/* The reply banner states what the next send answers, above the input and
-   inside the composer card, so the target and the draft are read as one act. It
-   carries no rule of its own: the card already frames it, and the line belongs
-   to the composer's text column — the same inset the notify row under the input
-   uses — so the words line up with the draft they will send with. The quote's
-   left bar stays where it separates a Message from the body it answers, which a
-   framed banner never has to do. */
+/* The reply banner sits above the input inside the composer card so target and draft read as one act. No rule of its own:
+   the card frames it, and it aligns with the composer's text column like the notify row. */
 .replyBanner {
   align-items: center;
   display: flex;
@@ -455,9 +411,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* What pressing send will do is a fact about the action, not part of the quote:
-   the shared "will notify" row already states it, so the banner never repeats
-   it a second time. */
+/* The shared "will notify" row already states what send will do, so the banner never repeats it. */
 .replyBannerCancel {
   align-items: center;
   background: transparent;
