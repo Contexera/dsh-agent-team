@@ -48,12 +48,11 @@ export function assertValidHumanName(raw: string): string {
 }
 
 /**
- * The retired settings section this profile's facts lived in before rc.1.
- * rc.1 derives every settings form from a plugin's Config, and its legacy
- * `settings.yaml` importer maps a section to a composition entry id through a
- * closed built-in list — this third-party section matches nothing there, so
- * the import rejects it and the values survive only in the renamed document.
- * This Host owns the section, so adopting what is left belongs here.
+ * The retired settings section that held this profile's facts. The Harness
+ * `settings.yaml` importer maps sections to composition entry ids through a
+ * closed built-in list and rejects this third-party section, so the values
+ * survive only in the renamed document. This Host owns the section, so
+ * adopting what is left belongs here.
  */
 export const LEGACY_HUMAN_PROFILE_SECTION = 'agent-team-human'
 

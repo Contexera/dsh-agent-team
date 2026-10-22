@@ -677,8 +677,8 @@ export default class AgentTeam extends TypertRemoteService {
   /** Carry the first legacy document that still has the section into a pristine profile. */
   private async adoptLegacyHumanProfileNow(): Promise<void> {
     // A profile-launched Host always carries the profile context; a Host booted
-    // without one still adopts from the DSH home, which is where a pre-rc.1
-    // install kept the document. Read through `get`: cordis refuses a direct
+    // without one still adopts from the DSH home, which is where the
+    // document may still live. Read through `get`: cordis refuses a direct
     // `ctx.profileContext` for a service this plugin does not declare, and
     // adoption may not gate the Host on app-boot.
     const profileHome: string | undefined = this.ctx.get('profileContext')?.home
@@ -1153,10 +1153,8 @@ export default class AgentTeam extends TypertRemoteService {
     if (handle === undefined) {
       if (member.state !== 'enabled') throw new Error(`Agent Member '${member.handle}' is ${member.state}; only enabled Members can be restarted`)
       this.ctx.logger.info(`agent-team: restarting ${this.memberScope(request.memberId)} after a failed activation`)
-      // There is no write-side repair pass anymore: dsh 0.1.7 converts the
-      // released V3 history at read time, and this bundle no longer authors
-      // the old wrapper shape, so a refusal stays a deterministic failure the
-      // retry reports again rather than something the restart heals.
+      // A refusal stays a deterministic failure the retry reports again; the
+      // restart does not heal it.
       await this.reactivateMember(request.memberId)
       return Object.freeze({ status: this.memberStatus(member) })
     }
@@ -1740,8 +1738,7 @@ export default class AgentTeam extends TypertRemoteService {
    * fields written from the Human's own pages, where the last write wins. This
    * is not a hard boundary around a user-editable document — the settings
    * service's own document opener (and a text editor) can change the stored
-   * name without passing here, exactly as the retired section validator could
-   * not stop it.
+   * name without passing here.
    */
   @Remote('setHumanProfile')
   async setHumanProfile(request: AgentTeamSetHumanProfileRequest): Promise<AgentTeamSetHumanProfileResult> {
