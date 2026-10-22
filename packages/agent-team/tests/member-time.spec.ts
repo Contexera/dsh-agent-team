@@ -79,7 +79,7 @@ function replayLedgerAtConstruction(test: TeamHarness): AgentTeamLedger {
 
 async function addLedgerMember(
   ledger: AgentTeamLedger,
-  channelRef: string | undefined,
+  projectRef: string | undefined,
   memberId = `member:agent-${crypto.randomUUID()}`,
 ): Promise<{ readonly member: AgentTeamAgentMember; readonly actor: AgentTeamMemberActor }> {
   const member: AgentTeamAgentMember = {
@@ -94,17 +94,17 @@ async function addLedgerMember(
   }
   await ledger.addMember({ requestId: requestId(`add:${memberId}`), actor: agentTeamHumanActor(), member, handle: member.handle,
     description: member.description, presetId: member.presetId, workspaceId: alpha,
-    channelRefs: channelRef === undefined ? [] : [channelRef as never] })
+    projectRefs: projectRef === undefined ? [] : [projectRef as never] })
   return { member, actor: { kind: 'member', memberId: member.memberId, handle: member.handle } }
 }
 
 async function seededThread(): Promise<{ readonly test: TeamHarness; readonly ledger: AgentTeamLedger; readonly actor: AgentTeamMemberActor; readonly taskRef: AgentTeamTask['taskRef']; readonly humanRead: AgentTeamThreadReadResult }> {
   const test = await harness()
-  const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-  const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Implement member time awareness' })))
+  const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+  const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Implement member time awareness' })))
   const taskRef = started.task.taskRef
   const ledger = replayLedgerAtConstruction(test)
-  const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+  const { actor } = await addLedgerMember(ledger, project.project.projectRef)
   await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef, action: 'follow', actor })
   committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef,
     action: 'claim', direction: 'fold the clock baseline', baseRevision: started.thread.revision, actor })).value)
@@ -239,7 +239,7 @@ describe('discovery projections hang off the same per-fact source', () => {
     const { ledger, actor, taskRef } = await seededThread()
     const claimed = ledger.inbox(actor, { workspaceId: alpha }).items[0]!
     // The row answers 「谁在这个 Task 上」 with the ledger's own rule — the same one
-    // the Channel feed applies — resolved to handles here, because an Inbox row
+    // the Project feed applies — resolved to handles here, because an Inbox row
     // has no Member roster of its own to turn ids into them.
     expect(claimed.liveClaimOwners).toEqual([{ memberId: actor.memberId, name: actor.handle }])
     // The claimant drains its own unread before writing, and a released Claim is
@@ -257,8 +257,8 @@ describe('discovery projections hang off the same per-fact source', () => {
 
   it('names every live Claim owner in claim order, and only those still on the Task', async () => {
     const { ledger, actor, taskRef } = await seededThread()
-    const channelRef = ledger.inbox(actor, { workspaceId: alpha }).items[0]!.channelRef
-    const { actor: second } = await addLedgerMember(ledger, channelRef)
+    const projectRef = ledger.inbox(actor, { workspaceId: alpha }).items[0]!.projectRef
+    const { actor: second } = await addLedgerMember(ledger, projectRef)
     const secondRead = (await ledger.readThread({ requestId: requestId('second-read'), workspaceId: alpha, taskRef, actor: second })).value
     committed((await ledger.changeClaim({ requestId: requestId('second-claim'), workspaceId: alpha, taskRef,
       action: 'claim', direction: 'second direction', baseRevision: secondRead.thread.revision, actor: second })).value)
@@ -287,11 +287,11 @@ describe('discovery projections hang off the same per-fact source', () => {
 
   it('a taskless Thread names no owners at all', async () => {
     const { ledger, actor } = await seededThread()
-    const channelRef = ledger.inbox(actor, { workspaceId: alpha }).items[0]!.channelRef
+    const projectRef = ledger.inbox(actor, { workspaceId: alpha }).items[0]!.projectRef
     // The claimant opens a discussion of its own — writing a Thread's anchor is
     // what follows it — and the Human's answer is what puts that Thread in the
     // claimant's own Inbox.
-    const started = committed((await ledger.sendMessage({ requestId: requestId('taskless'), workspaceId: alpha, channelRef,
+    const started = committed((await ledger.sendMessage({ requestId: requestId('taskless'), workspaceId: alpha, projectRef,
       asTask: false, body: 'A discussion nobody claimed', actor })).value)
     committed((await ledger.reply({ requestId: requestId('taskless-reply'), workspaceId: alpha, threadRef: started.thread.threadRef,
       body: 'An answer', baseRevision: started.thread.revision, actor: agentTeamHumanActor() })).value)

@@ -40,15 +40,15 @@ A slot parent's `children` declaration is both render site and authority. Team's
 ## Client data and presentation boundary
 Client components do not reach into `ctx`, the operation ledger, or Host classes. Data and callbacks arrive through slot owner props, runtime props, declared stores, or injected faces. Presentation consumes Host projections and local navigation state and does not invent durable facts.
 
-New Channel composition defaults to taskless and exposes default-off 「作为任务」 for atomic Task creation. Taskless Threads retain reply/read/follow/Inbox behavior but gate status, Claims, and resolution controls until promotion. Promotion is non-optimistic and followed by rereading Thread and supplemental projections.
+New Project composition defaults to taskless and exposes default-off 「作为任务」 for atomic Task creation. Taskless Threads retain reply/read/follow/Inbox behavior but gate status, Claims, and resolution controls until promotion. Promotion is non-optimistic and followed by rereading Thread and supplemental projections.
 
 The Human Client consumes the Host's Inbox projection, never keeps a parallel Inbox authority, and acknowledges nothing by opening the page. That projection is the 「收件箱 / Inbox」 queue: a merged per-Workspace badge and page covering each reader's whole unread slice, where mentions are counted inside it, never its admission rule.
 
 It also carries a second 「最近活跃」 slice that an Agent's Inbox never does — the Threads that reader has written a Message in, so a Thread they replied to is theirs whether or not they follow it. That slice is newest activity first, each Workspace's own slice bounded to ten while the merged page shows at most five.
 
-Team navigation mode, Workspace selection, the last Channel/Thread, and the Inbox page position are browser-persisted; unread and Attention are Host-owned.
+Team navigation mode, Workspace selection, the last Project/Thread, and the Inbox page position are browser-persisted; unread and Attention are Host-owned.
 
-The Team sidebar keeps Channels/Agents ordering as a browser-only `localStorage` preference, merged over Remote defaults.
+The Team sidebar keeps Projects/Agents ordering as a browser-only `localStorage` preference, merged over Remote defaults.
 
 An embedded Member Session uses the shipped composer unmodified: the Team registers no member-session composer surface — no seat shadow, no trigger sources, no dock strip. rc.1 moved the trigger-menu overlay into `conversation.composer.bar`'s children, where a shadowing entry would inherit — and strand — the overlay. The Team's own command/member reference entry points carried no irreplaceable value over the shipped vocabulary, so they were removed together.
 

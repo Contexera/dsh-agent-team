@@ -7,7 +7,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
   AgentTeamActivityRef,
   AgentTeamAttachmentId,
-  AgentTeamChannelRef,
+  AgentTeamProjectRef,
   AgentTeamClaimRef,
   AgentTeamContextCheckpointRef,
   AgentTeamMemberId,
@@ -27,7 +27,7 @@ const sessionIdSchema = z.string().min(1).transform(value => value as SessionId)
 const sessionSeqSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionSeq)
 const sessionLogOffsetSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(value => value as SessionLogOffset)
 const contextCheckpointRefSchema = z.string().regex(/^(context-checkpoint-[0-9a-f]{64}|team-boundary-[0-9a-f]{64})$/).transform(value => value as AgentTeamContextCheckpointRef)
-const channelRefSchema = z.string().regex(/^(channel|project):[^:]+$/).transform(value => value.replace(/^project:/, 'channel:') as AgentTeamChannelRef)
+const projectRefSchema = z.string().regex(/^(project|channel):[^:]+$/).transform(value => value.replace(/^channel:/, 'project:') as AgentTeamProjectRef)
 const messageRefSchema = z.string().regex(/^message:[^:]+$/).transform(value => value as AgentTeamMessageRef)
 const taskRefSchema = z.string().regex(/^task:[^:]+$/).transform(value => value as AgentTeamTaskRef)
 const threadRefSchema = z.string().regex(/^thread:[^:]+$/).transform(value => value as AgentTeamThreadRef)
@@ -83,13 +83,13 @@ const memberSchema = z.object({
   state: z.union([z.literal('enabled'), z.literal('suspended'), z.literal('inactive'), z.literal('archived')]),
 }).strict()
 
-const channelSchema = z.object({
-  channelRef: channelRefSchema,
+const projectSchema = z.object({
+  projectRef: projectRefSchema,
   workspaceId: workspaceIdSchema,
   name: z.string().min(1),
   description: z.string(),
   createdAtSequence: z.number().int().positive(),
-  // Ledgers written before Channel archival existed omit the field.
+  // Ledgers written before Project archival existed omit the field.
   state: z.enum(['active', 'archived']).default('active'),
 }).strict()
 
@@ -108,7 +108,7 @@ function omitUndefined<T extends Record<string, unknown>>(value: T): T {
 
 const messageSchema = z.object({
   messageRef: messageRefSchema,
-  channelRef: channelRefSchema,
+  projectRef: projectRefSchema,
   threadRef: threadRefSchema,
   taskRef: taskRefSchema.optional(),
   sender: memberIdSchema,
@@ -146,7 +146,7 @@ function stampOperationMessages(operation: z.output<typeof storedAgentTeamOperat
 
 const taskSchema = z.object({
   taskRef: taskRefSchema,
-  channelRef: channelRefSchema,
+  projectRef: projectRefSchema,
   threadRef: threadRefSchema,
   status: z.union([z.literal('todo'), z.literal('in_progress'), z.literal('in_review'), z.literal('done'), z.literal('closed')]),
   resolution: z.union([z.literal('open'), z.literal('accepted'), z.literal('closed')]),
@@ -314,10 +314,10 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
-    kind: z.literal('team/channel-created'),
+    kind: z.literal('team/project-created'),
     data: z.object({
       workspaceId: workspaceIdSchema,
-      channel: channelSchema,
+      project: projectSchema,
       memberIds: z.array(memberIdSchema),
     }).strict(),
   }).strict(),
@@ -325,7 +325,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/member-added'),
-    data: z.object({ member: memberSchema, channelRefs: z.array(channelRefSchema) }).strict(),
+    data: z.object({ member: memberSchema, projectRefs: z.array(projectRefSchema) }).strict(),
   }).strict(),
   z.object({
     ...operationBase,
@@ -395,8 +395,8 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
-    kind: z.literal('team/channel-updated'),
-    data: z.object({ workspaceId: workspaceIdSchema, channel: channelSchema }).strict(),
+    kind: z.literal('team/project-updated'),
+    data: z.object({ workspaceId: workspaceIdSchema, project: projectSchema }).strict(),
   }).strict(),
   z.object({
     ...operationBase,
@@ -407,16 +407,16 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
-    kind: z.literal('team/channel-member-added'),
-    data: z.object({ workspaceId: workspaceIdSchema, channelRef: channelRefSchema, memberId: memberIdSchema }).strict(),
+    kind: z.literal('team/project-member-added'),
+    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema }).strict(),
   }).strict(),
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
-    kind: z.literal('team/channel-member-removed'),
+    kind: z.literal('team/project-member-removed'),
     data: z.object({
       workspaceId: workspaceIdSchema,
-      channelRef: channelRefSchema,
+      projectRef: projectRefSchema,
       memberId: memberIdSchema,
       ...releaseSnapshotSchema,
     }).strict(),
@@ -443,10 +443,10 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
-    kind: z.literal('team/channel-archived'),
+    kind: z.literal('team/project-archived'),
     data: z.object({
       workspaceId: workspaceIdSchema,
-      channel: channelSchema,
+      project: projectSchema,
       ...releaseSnapshotSchema,
     }).strict(),
   }).strict(),
@@ -549,44 +549,44 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
 ])
 
 /**
- * Channel is being renamed to Project, and stored bytes are never rewritten, so a record may carry either spelling.
- * Both decode to the Channel form; this lets a release before the rename open a ledger the renamed release already wrote into.
- * Only the top-level kind and the renamed keys change here (refs normalize in `channelRefSchema`); message bodies pass through.
+ * Project was called Channel before, and stored bytes are never rewritten, so a record may carry either spelling.
+ * Both decode to the Project form. Only the top-level kind and the renamed keys change here (refs normalize in
+ * `projectRefSchema`); message bodies pass through, and the Channel refs they cite still resolve.
  */
-const projectSpellingKinds: ReadonlyMap<string, string> = new Map([
-  ['team/project-created', 'team/channel-created'],
-  ['team/project-updated', 'team/channel-updated'],
-  ['team/project-archived', 'team/channel-archived'],
-  ['team/project-member-added', 'team/channel-member-added'],
-  ['team/project-member-removed', 'team/channel-member-removed'],
+const channelSpellingKinds: ReadonlyMap<string, string> = new Map([
+  ['team/channel-created', 'team/project-created'],
+  ['team/channel-updated', 'team/project-updated'],
+  ['team/channel-archived', 'team/project-archived'],
+  ['team/channel-member-added', 'team/project-member-added'],
+  ['team/channel-member-removed', 'team/project-member-removed'],
 ])
-const projectSpellingKeys: ReadonlyMap<string, string> = new Map([
-  ['project', 'channel'],
-  ['projectRef', 'channelRef'],
-  ['projectRefs', 'channelRefs'],
+const channelSpellingKeys: ReadonlyMap<string, string> = new Map([
+  ['channel', 'project'],
+  ['channelRef', 'projectRef'],
+  ['channelRefs', 'projectRefs'],
 ])
 
-function channelSpellingKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(channelSpellingKeys)
+function projectSpellingKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(projectSpellingKeys)
   if (value === null || typeof value !== 'object') return value
   const record = value as Record<string, unknown>
   return Object.fromEntries(Object.entries(record).map(([key, entry]) => {
-    const renamed = projectSpellingKeys.get(key)
-    // An object holding both spellings keeps the Project key, which the strict schema then rejects.
-    return [renamed === undefined || Object.hasOwn(record, renamed) ? key : renamed, channelSpellingKeys(entry)]
+    const renamed = channelSpellingKeys.get(key)
+    // An object holding both spellings keeps the Channel key, which the strict schema then rejects.
+    return [renamed === undefined || Object.hasOwn(record, renamed) ? key : renamed, projectSpellingKeys(entry)]
   }))
 }
 
-function channelSpelling(stored: unknown): unknown {
-  const renamed = channelSpellingKeys(stored)
+function projectSpelling(stored: unknown): unknown {
+  const renamed = projectSpellingKeys(stored)
   if (renamed === null || typeof renamed !== 'object' || Array.isArray(renamed)) return renamed
   const { kind } = renamed as { kind?: unknown }
-  const channelKind = typeof kind === 'string' ? projectSpellingKinds.get(kind) : undefined
-  return channelKind === undefined ? renamed : { ...renamed, kind: channelKind }
+  const projectKind = typeof kind === 'string' ? channelSpellingKinds.get(kind) : undefined
+  return projectKind === undefined ? renamed : { ...renamed, kind: projectKind }
 }
 
 /** Durable validator for the closed Agent Team operation union; ledgers written before message occurredAt existed normalize on load. */
-export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = z.preprocess(channelSpelling, storedAgentTeamOperationSchema).transform(stampOperationMessages)
+export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = z.preprocess(projectSpelling, storedAgentTeamOperationSchema).transform(stampOperationMessages)
 
 /** Versioned durable declaration. The version moves only when a stored record would mean something different: there is no migration, so a bump breaks every existing ledger. Additive operation kinds stay at v1. */
 export const agentTeamDomainSpec = defineDomain({

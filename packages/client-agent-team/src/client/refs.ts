@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
-  AgentTeamChannel, AgentTeamChannelRef, AgentTeamClientMemberStatus, AgentTeamMemberId,
+  AgentTeamProject, AgentTeamProjectRef, AgentTeamClientMemberStatus, AgentTeamMemberId,
   AgentTeamMessageRef,
   AgentTeamResolveMessageRefsRequest, AgentTeamResolveMessageRefsResult,
   AgentTeamResolveTaskRefsRequest, AgentTeamResolveTaskRefsResult, AgentTeamResolveThreadRefsRequest, AgentTeamResolveThreadRefsResult,
@@ -12,7 +12,7 @@ import type {
 /** Navigation facts for one branded Task ref, resolved once per session. */
 export interface ResolvedTaskRef {
   readonly taskRef: AgentTeamTaskRef
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly threadRef: AgentTeamThreadRef
   readonly taskNumber: number
 }
@@ -20,7 +20,7 @@ export interface ResolvedTaskRef {
 /** Navigation facts for one branded Thread ref, resolved once per session. */
 export interface ResolvedThreadRef {
   readonly threadRef: AgentTeamThreadRef
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly taskRef?: AgentTeamTaskRef
   readonly taskNumber?: number
   readonly title: string
@@ -216,12 +216,12 @@ export const jumpToTaskThread = (
   resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => Promise<RemoteResult<AgentTeamResolveTaskRefsResult>>,
   workspaceId: AgentTeamResolveTaskRefsRequest['workspaceId'],
   taskRef: AgentTeamTaskRef,
-  selectThread: (threadRef: AgentTeamThreadRef, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void,
+  selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void,
 ): void => {
   void resolveTaskRefs({ workspaceId, taskRefs: [taskRef] }).then(result => {
     if (!result.ok) return
     const hit = result.value.resolved[0]
-    if (hit !== undefined) selectThread(hit.threadRef, hit.channelRef, hit.taskRef, hit.taskNumber)
+    if (hit !== undefined) selectThread(hit.threadRef, hit.projectRef, hit.taskRef, hit.taskNumber)
   })
 }
 
@@ -229,12 +229,12 @@ export const jumpToThread = (
   resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => Promise<RemoteResult<AgentTeamResolveThreadRefsResult>>,
   workspaceId: AgentTeamResolveThreadRefsRequest['workspaceId'],
   threadRef: AgentTeamThreadRef,
-  selectThread: (threadRef: AgentTeamThreadRef, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void,
+  selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void,
 ): void => {
   void resolveThreadRefs({ workspaceId, threadRefs: [threadRef] }).then(result => {
     if (!result.ok) return
     const hit = result.value.resolved[0]
-    if (hit !== undefined) selectThread(hit.threadRef, hit.channelRef, hit.taskRef, hit.taskNumber)
+    if (hit !== undefined) selectThread(hit.threadRef, hit.projectRef, hit.taskRef, hit.taskNumber)
   })
 }
 
@@ -245,12 +245,12 @@ function uniqueByPrefix<T>(entries: readonly T[], keyOf: (entry: T) => string, a
   return hits.length === 1 ? hits[0] : undefined
 }
 
-/** Undefined when the loaded roster does not know the ref (the caller keeps plain text). Archived Channels never resolve. */
-export const rosterChannelName = (
-  channels: readonly AgentTeamChannel[],
-  channelRef: AgentTeamChannelRef,
+/** Undefined when the loaded roster does not know the ref (the caller keeps plain text). Archived Projects never resolve. */
+export const rosterProjectName = (
+  projects: readonly AgentTeamProject[],
+  projectRef: AgentTeamProjectRef,
 ): string | undefined =>
-  uniqueByPrefix(channels.filter(channel => channel.state === 'active'), channel => channel.channelRef, channelRef)?.name
+  uniqueByPrefix(projects.filter(project => project.state === 'active'), project => project.projectRef, projectRef)?.name
 
 /** Undefined when nobody on the roster answers to it. The Human resolves to a handle with no session, never a link. */
 export const rosterMember = (

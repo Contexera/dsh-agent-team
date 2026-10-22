@@ -7,7 +7,7 @@ import type { WorkspaceId as TeamWorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { harness } from './helpers/surface-harness.ts'
 
 /**
- * Channel B: the visible-surface exemption, exercised through the real write
+ * Project B: the visible-surface exemption, exercised through the real write
  * gate rather than a stand-in for it.
  *
  * The gate refuses a write while the reader has unread work. This suite proves
@@ -46,7 +46,7 @@ async function addLedgerMember(ledger: AgentTeamLedger, workspaceId: TeamWorkspa
     description: 'Test Agent', presetId: 'team-member', privateMemoryPath: `/tmp/${memberId}`, state: 'enabled',
   }
   const added = (await ledger.addMember({ requestId: `add:${memberId}` as AgentTeamRequestId, actor: agentTeamHumanActor(), member,
-    handle, description: member.description, presetId: member.presetId, workspaceId, channelRefs: [] })).value
+    handle, description: member.description, presetId: member.presetId, workspaceId, projectRefs: [] })).value
   return { actor: { kind: 'member', memberId: added.member.memberId, handle } }
 }
 
@@ -60,12 +60,12 @@ async function threadWithUnreadReply(
   workspaceId: TeamWorkspaceId,
   actor: AgentTeamMemberActor,
 ): Promise<{ readonly taskRef: AgentTeamTaskRef; readonly revision: number }> {
-  const channel = (await ledger.createChannel({ requestId: 'channel' as AgentTeamRequestId, workspaceId,
-    name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.channel
+  const project = (await ledger.createProject({ requestId: 'project' as AgentTeamRequestId, workspaceId,
+    name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.project
   // The human anchors the Thread: a Member that writes the anchor auto-follows
   // it, which would already satisfy the unread gate and hide what is under test.
   const started = (await ledger.sendMessage({ requestId: 'start' as AgentTeamRequestId, workspaceId,
-    channelRef: channel.channelRef, body: 'Thread anchor', asTask: true, actor: agentTeamHumanActor() })).value
+    projectRef: project.projectRef, body: 'Thread anchor', asTask: true, actor: agentTeamHumanActor() })).value
   if (started.kind !== 'committed' || started.task === undefined) throw new Error('setup failed')
   await ledger.changeAttention({ requestId: 'follow' as AgentTeamRequestId, workspaceId,
     taskRef: started.task.taskRef, action: 'follow', actor })

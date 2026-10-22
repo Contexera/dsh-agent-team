@@ -2,7 +2,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {
   AgentTeamAddMemberRequest,
-  AgentTeamArchiveChannelRequest,
+  AgentTeamArchiveProjectRequest,
   AgentTeamArchiveMemberRequest,
   AgentTeamClientMemberStatus,
   AgentTeamInboxRequest,
@@ -10,7 +10,7 @@ import type {
   AgentTeamThreadHistoryRequest,
   AgentTeamThreadObservationsRequest,
   AgentTeamThreadReadRequest,
-  AgentTeamCreateChannelRequest,
+  AgentTeamCreateProjectRequest,
   AgentTeamGetAttachmentRequest,
   AgentTeamJoinWorkspaceRequest,
   AgentTeamLeaveWorkspaceRequest,
@@ -23,7 +23,7 @@ import type {
   AgentTeamResolveTaskRefsRequest,
   AgentTeamResolveThreadRefsRequest,
   AgentTeamTaskRequest,
-  AgentTeamUpdateChannelRequest,
+  AgentTeamUpdateProjectRequest,
   AgentTeamUpdateMemberRequest,
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
@@ -162,7 +162,7 @@ function inboxQuery(request: AgentTeamInboxRequest): TeamQueryIdentity {
     key: `inbox:${request.workspaceId}:${request.limit ?? 'all'}`,
     covers: scope => scope === undefined
       || (scope.kind === 'workspace' && scope.workspaceId === request.workspaceId)
-      || scope.kind === 'channel'
+      || scope.kind === 'project'
       || scope.kind === 'thread',
   }
 }
@@ -176,15 +176,15 @@ function teamSharedRemotes(
   humanIdentity: TeamHumanIdentity,
 ): Record<string, unknown> {
   return {
-    loadChannels: (request: AgentTeamViewRequest) => ctx.remote.agentTeam.view(request),
+    loadProjects: (request: AgentTeamViewRequest) => ctx.remote.agentTeam.view(request),
     loadInbox: (request: AgentTeamInboxRequest) => queries.read(inboxQuery(request), () => ctx.remote.agentTeam.inbox(request)),
     subscribeReads: (listener: () => void) => reads.subscribe(listener),
     subscribeChanges: (scope: TeamChangeScope, listener: TeamChangeListener) => queries.subscribeChanges(scope, listener),
     drafts,
     humanIdentity,
     loadMembers: (request: AgentTeamMembersRequest) => queries.read(membersQuery(request), () => ctx.remote.agentTeam.members(request)),
-    updateChannel: (request: AgentTeamUpdateChannelRequest) => ctx.remote.agentTeam.updateChannel(request),
-    archiveChannel: (request: AgentTeamArchiveChannelRequest) => ctx.remote.agentTeam.archiveChannel(request),
+    updateProject: (request: AgentTeamUpdateProjectRequest) => ctx.remote.agentTeam.updateProject(request),
+    archiveProject: (request: AgentTeamArchiveProjectRequest) => ctx.remote.agentTeam.archiveProject(request),
     updateMember: (request: AgentTeamUpdateMemberRequest) => ctx.remote.agentTeam.updateMember(request),
     recoverMember: (request: AgentTeamRecoverMemberRequest) => ctx.remote.agentTeam.recoverMember(request),
     archiveMember: (request: AgentTeamArchiveMemberRequest) => ctx.remote.agentTeam.archiveMember(request),
@@ -198,7 +198,7 @@ function teamSharedRemotes(
   }
 }
 
-/** `main` writes the conversation; the sidebar's browser seat writes the roster and Channels. */
+/** `main` writes the conversation; the sidebar's browser seat writes the roster and Projects. */
 function teamSeatInject(
   ctx: ClientContext,
   navigation: TeamNavigation,
@@ -234,7 +234,7 @@ function teamSeatInject(
     } : {}),
     ...(name === 'sidebar.workspaces' ? {
       addMember: (request: AgentTeamAddMemberRequest) => ctx.remote.agentTeam.addMember(request),
-      createChannel: (request: AgentTeamCreateChannelRequest) => ctx.remote.agentTeam.createChannel(request),
+      createProject: (request: AgentTeamCreateProjectRequest) => ctx.remote.agentTeam.createProject(request),
     } : {}),
   }
 }

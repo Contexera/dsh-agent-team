@@ -20,6 +20,11 @@ export function member(agent: TeamToolAgent) {
   return current
 }
 
+/** Projects were called Channels, and Agents still cite the `channel:` refs their history shows. */
+export function projectRefOf(ref: string): string {
+  return ref.startsWith('channel:') ? `project:${ref.slice('channel:'.length)}` : ref
+}
+
 /** A collaboration address, never a cwd or Session switch. */
 export const workspaceParam = {
   type: 'string' as const,

@@ -12,7 +12,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
-import type { AgentTeamChannelRef, AgentTeamClaimRef, AgentTeamHostActor, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
+import type { AgentTeamProjectRef, AgentTeamClaimRef, AgentTeamHostActor, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
 /**
  * Issue #21: the read projections must keep byte-identical semantics while
@@ -59,9 +59,9 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     const { ledger, table } = await openLedger()
     await ledger.initialize()
 
-    const channelA = (await ledger.createChannel({ requestId: requestId('channel-a'), workspaceId: alpha, name: 'alpha-one', description: 'Alpha one', memberIds: [], actor: human })).value.channel
-    const channelB = (await ledger.createChannel({ requestId: requestId('channel-b'), workspaceId: alpha, name: 'alpha-two', description: 'Alpha two', memberIds: [], actor: human })).value.channel
-    const channelC = (await ledger.createChannel({ requestId: requestId('channel-c'), workspaceId: beta, name: 'beta-one', description: 'Beta one', memberIds: [], actor: human })).value.channel
+    const projectA = (await ledger.createProject({ requestId: requestId('project-a'), workspaceId: alpha, name: 'alpha-one', description: 'Alpha one', memberIds: [], actor: human })).value.project
+    const projectB = (await ledger.createProject({ requestId: requestId('project-b'), workspaceId: alpha, name: 'alpha-two', description: 'Alpha two', memberIds: [], actor: human })).value.project
+    const projectC = (await ledger.createProject({ requestId: requestId('project-c'), workspaceId: beta, name: 'beta-one', description: 'Beta one', memberIds: [], actor: human })).value.project
 
     const agentA = 'member:agent-a' as AgentTeamMemberId
     const agentB = 'member:agent-b' as AgentTeamMemberId
@@ -70,18 +70,18 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       memberId: memberId as AgentTeamMemberId, sessionId: SessionId(`session:${memberId}`), workspaceId, handle,
       description: `${handle} description`, presetId: 'team-member', privateMemoryPath: `/tmp/${handle}`, state: 'enabled' as const,
     })
-    await ledger.addMember({ requestId: requestId('member-a'), workspaceId: alpha, handle: 'scout', description: 'Scout work', presetId: 'team-member', channelRefs: [channelA.channelRef], actor: human, member: agentMember(agentA, 'scout', alpha) })
-    await ledger.addMember({ requestId: requestId('member-b'), workspaceId: alpha, handle: 'planner', description: 'Planner work', presetId: 'team-member', channelRefs: [channelA.channelRef, channelB.channelRef], actor: human, member: agentMember(agentB, 'planner', alpha) })
-    await ledger.addMember({ requestId: requestId('member-c'), workspaceId: beta, handle: 'builder', description: 'Builder work', presetId: 'team-member', channelRefs: [channelC.channelRef], actor: human, member: agentMember(agentC, 'builder', beta) })
+    await ledger.addMember({ requestId: requestId('member-a'), workspaceId: alpha, handle: 'scout', description: 'Scout work', presetId: 'team-member', projectRefs: [projectA.projectRef], actor: human, member: agentMember(agentA, 'scout', alpha) })
+    await ledger.addMember({ requestId: requestId('member-b'), workspaceId: alpha, handle: 'planner', description: 'Planner work', presetId: 'team-member', projectRefs: [projectA.projectRef, projectB.projectRef], actor: human, member: agentMember(agentB, 'planner', alpha) })
+    await ledger.addMember({ requestId: requestId('member-c'), workspaceId: beta, handle: 'builder', description: 'Builder work', presetId: 'team-member', projectRefs: [projectC.projectRef], actor: human, member: agentMember(agentC, 'builder', beta) })
 
     interface StartedThread {
       readonly label: string
-      readonly channelRef: AgentTeamChannelRef
+      readonly projectRef: AgentTeamProjectRef
       readonly workspaceId: typeof alpha | typeof beta
       readonly taskRef: AgentTeamTaskRef
       readonly threadRef: AgentTeamThreadRef
       revision: number
-      /** Display ordinal inside its home Channel, in creation order. */
+      /** Display ordinal inside its home Project, in creation order. */
       readonly taskNumber: number
       /** Message refs in ledger order, anchors and replies alike. */
       readonly messageRefs: string[]
@@ -91,19 +91,19 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     const threads: StartedThread[] = []
     const byLabel = new Map<string, StartedThread>()
     /** Every Message fact in true ledger order — anchors first, replies later. */
-    const factOrder: { readonly channelRef: AgentTeamChannelRef; readonly messageRef: string }[] = []
+    const factOrder: { readonly projectRef: AgentTeamProjectRef; readonly messageRef: string }[] = []
 
-    const startThread = async (label: string, channel: AgentTeamChannelRef, workspaceId: typeof alpha | typeof beta): Promise<StartedThread> => {
-      const started = await ledger.sendMessage({ asTask: true, requestId: requestId(`start-${label}`), workspaceId, channelRef: channel, body: `Task ${label}\nsecond line`, actor: human })
+    const startThread = async (label: string, project: AgentTeamProjectRef, workspaceId: typeof alpha | typeof beta): Promise<StartedThread> => {
+      const started = await ledger.sendMessage({ asTask: true, requestId: requestId(`start-${label}`), workspaceId, projectRef: project, body: `Task ${label}\nsecond line`, actor: human })
       if (started.value.kind !== 'committed') throw new Error(`expected committed start for ${label}`)
       const entry: StartedThread = {
-        label, channelRef: channel, workspaceId, taskRef: started.value.task!.taskRef, threadRef: started.value.thread.threadRef,
-        revision: started.value.thread.revision, taskNumber: threads.filter(thread => thread.channelRef === channel).length + 1,
+        label, projectRef: project, workspaceId, taskRef: started.value.task!.taskRef, threadRef: started.value.thread.threadRef,
+        revision: started.value.thread.revision, taskNumber: threads.filter(thread => thread.projectRef === project).length + 1,
         messageRefs: [started.value.message.messageRef], factSequences: [started.value.message.sequence],
       }
       threads.push(entry)
       byLabel.set(label, entry)
-      factOrder.push({ channelRef: channel, messageRef: started.value.message.messageRef })
+      factOrder.push({ projectRef: project, messageRef: started.value.message.messageRef })
       return entry
     }
     const reply = async (label: string, body: string, actor: typeof human | AgentTeamMemberActor, recipients?: readonly AgentTeamMemberId[]): Promise<void> => {
@@ -113,7 +113,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       thread.revision = replied.value.thread.revision
       thread.messageRefs.push(replied.value.message.messageRef)
       thread.factSequences.push(replied.value.message.sequence)
-      factOrder.push({ channelRef: thread.channelRef, messageRef: replied.value.message.messageRef })
+      factOrder.push({ projectRef: thread.projectRef, messageRef: replied.value.message.messageRef })
     }
     const follow = async (label: string, actor: typeof human | AgentTeamMemberActor, action: 'follow' | 'unfollow'): Promise<void> => {
       const thread = byLabel.get(label)!
@@ -121,9 +121,9 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       if (changed.committed !== true) throw new Error(`expected committed ${action} on ${label}`)
     }
 
-    for (let index = 0; index < 30; index += 1) await startThread(`a${index}`, channelA.channelRef, alpha)
-    for (let index = 0; index < 25; index += 1) await startThread(`b${index}`, channelB.channelRef, alpha)
-    for (let index = 0; index < 20; index += 1) await startThread(`c${index}`, channelC.channelRef, beta)
+    for (let index = 0; index < 30; index += 1) await startThread(`a${index}`, projectA.projectRef, alpha)
+    for (let index = 0; index < 25; index += 1) await startThread(`b${index}`, projectB.projectRef, alpha)
+    for (let index = 0; index < 20; index += 1) await startThread(`c${index}`, projectC.projectRef, beta)
 
     // Follows first, so later replies and mentions ride them.
     await follow('a0', memberActor(agentA, 'scout'), 'follow')
@@ -162,48 +162,48 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     expect(threads).toHaveLength(75)
     expect(threads.reduce((sum, thread) => sum + thread.factSequences.length, 0)).toBeGreaterThanOrEqual(100)
 
-    // ---- taskNumbers: per-Channel creation ordinals, workspace-filtered. ----
-    const viewA = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, limit: 1, includeCatalog: true })
-    expect(viewA.taskNumbers).toEqual(threads.filter(thread => thread.channelRef === channelA.channelRef).map(thread => ({ taskRef: thread.taskRef, taskNumber: thread.taskNumber })))
-    const viewB = ledger.view({ workspaceId: alpha, channelRef: channelB.channelRef, limit: 1, includeCatalog: true })
-    expect(viewB.taskNumbers).toEqual(threads.filter(thread => thread.channelRef === channelB.channelRef).map(thread => ({ taskRef: thread.taskRef, taskNumber: thread.taskNumber })))
+    // ---- taskNumbers: per-Project creation ordinals, workspace-filtered. ----
+    const viewA = ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: 1, includeCatalog: true })
+    expect(viewA.taskNumbers).toEqual(threads.filter(thread => thread.projectRef === projectA.projectRef).map(thread => ({ taskRef: thread.taskRef, taskNumber: thread.taskNumber })))
+    const viewB = ledger.view({ workspaceId: alpha, projectRef: projectB.projectRef, limit: 1, includeCatalog: true })
+    expect(viewB.taskNumbers).toEqual(threads.filter(thread => thread.projectRef === projectB.projectRef).map(thread => ({ taskRef: thread.taskRef, taskNumber: thread.taskNumber })))
     const viewWhole = ledger.view({ workspaceId: alpha, limit: 1, includeCatalog: true })
     expect(viewWhole.taskNumbers).toHaveLength(55)
     // limit bounds only items; the catalog slices stay complete.
-    expect(viewWhole.channels).toHaveLength(2)
+    expect(viewWhole.projects).toHaveLength(2)
     expect(viewWhole.threads).toHaveLength(55)
 
     // ---- view(): the walk from the matching end with an early hasMore. ----
-    const channelAFacts = factOrder.filter(fact => fact.channelRef === channelA.channelRef).map(fact => fact.messageRef)
+    const projectAFacts = factOrder.filter(fact => fact.projectRef === projectA.projectRef).map(fact => fact.messageRef)
     // 30 anchors + 30 agent replies + 5 Human mention replies + 1 catch-up update.
-    expect(channelAFacts).toHaveLength(66)
-    const first = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, limit: 1 })
-    expect(first.items.map(item => item.message.messageRef)).toEqual([channelAFacts[0]])
+    expect(projectAFacts).toHaveLength(66)
+    const first = ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: 1 })
+    expect(first.items.map(item => item.message.messageRef)).toEqual([projectAFacts[0]])
     expect(first.hasMore).toBe(true)
 
     // The first fact already came back in `first`; the cursor pages continue
-    // strictly after it and must rebuild the whole Channel timeline.
+    // strictly after it and must rebuild the whole Project timeline.
     const paged: string[] = first.items.map(item => item.message.messageRef)
     let cursor = first.cursor
     let hasMore = true
     let guard = 0
     while (hasMore && guard < 100) {
       guard += 1
-      const page = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, limit: 7, cursor })
+      const page = ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: 7, cursor })
       paged.push(...page.items.map(item => item.message.messageRef))
       hasMore = page.hasMore
       cursor = page.cursor
     }
-    for (let index = 0; index < Math.max(paged.length, channelAFacts.length); index += 1) {
-      if (paged[index] !== channelAFacts[index]) console.log('DIFF at', index, paged[index], channelAFacts[index])
+    for (let index = 0; index < Math.max(paged.length, projectAFacts.length); index += 1) {
+      if (paged[index] !== projectAFacts[index]) console.log('DIFF at', index, paged[index], projectAFacts[index])
     }
-    expect(paged).toEqual(channelAFacts)
-    expect(ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, limit: 66 }).hasMore).toBe(false)
-    expect(ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, limit: 65 }).hasMore).toBe(true)
+    expect(paged).toEqual(projectAFacts)
+    expect(ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: 66 }).hasMore).toBe(false)
+    expect(ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: 65 }).hasMore).toBe(true)
     // Reading backwards from the live tail returns the newest window, then
     // walks to the empty head where hasMore finally falls.
-    const latest = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, direction: 'before', limit: 20 })
-    expect(latest.items.map(item => item.message.messageRef)).toEqual(channelAFacts.slice(-20))
+    const latest = ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, direction: 'before', limit: 20 })
+    expect(latest.items.map(item => item.message.messageRef)).toEqual(projectAFacts.slice(-20))
     expect(latest.hasMore).toBe(true)
     const backwards: string[] = latest.items.map(item => item.message.messageRef)
     cursor = latest.cursor
@@ -211,15 +211,15 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     guard = 0
     while (hasMore && guard < 100) {
       guard += 1
-      const page = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, direction: 'before', limit: 7, cursor })
+      const page = ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, direction: 'before', limit: 7, cursor })
       backwards.unshift(...page.items.map(item => item.message.messageRef))
       hasMore = page.hasMore
       cursor = page.cursor
     }
-    expect(backwards).toEqual(channelAFacts)
+    expect(backwards).toEqual(projectAFacts)
     // topLevelOnly keeps exactly the Thread anchors.
-    const topLevel = ledger.view({ workspaceId: alpha, channelRef: channelA.channelRef, topLevelOnly: true, limit: 100 })
-    expect(topLevel.items.map(item => item.message.messageRef)).toEqual(threads.filter(thread => thread.channelRef === channelA.channelRef).map(thread => thread.messageRefs[0]))
+    const topLevel = ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, topLevelOnly: true, limit: 100 })
+    expect(topLevel.items.map(item => item.message.messageRef)).toEqual(threads.filter(thread => thread.projectRef === projectA.projectRef).map(thread => thread.messageRefs[0]))
 
     // ---- inbox(): one unread slice per reader, mentions counted inside it. ----
     const humanInbox = ledger.inbox(human, { workspaceId: alpha, limit: 100 })
@@ -235,7 +235,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       const source = threads.find(thread => thread.threadRef === item.thread.threadRef)!
       const mentioned = ['b2', 'b3', 'b4'].includes(source.label)
       expect(item).toMatchObject(mentioned ? { unreadCount: 1, directCount: 1 } : { unreadCount: 3, directCount: 0 })
-      expect(item.channelName).toBe(mentioned ? 'alpha-two' : 'alpha-one')
+      expect(item.projectName).toBe(mentioned ? 'alpha-two' : 'alpha-one')
       expect(item.previewText).toBe(`Task ${source.label}`)
       expect(item.taskNumber).toBe(source.taskNumber)
     }
@@ -260,11 +260,11 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     for (const label of ['a6', 'a7', 'a8', 'a9']) expect(unreadA[byLabel.get(label)!.threadRef]).toEqual({ unreadCount: 4, directCount: 1 })
     expect(Object.keys(unreadA)).toHaveLength(5)
     // Row material rides every slice now: the agent-facing rows carry their
-    // Channel name, Task ordinal, and opening line exactly like the Human
+    // Project name, Task ordinal, and opening line exactly like the Human
     // slice, so both render from one shape.
     for (const item of agentAInbox.items) {
       const source = threads.find(thread => thread.threadRef === item.thread.threadRef)!
-      expect(item.channelName).toBe('alpha-one')
+      expect(item.projectName).toBe('alpha-one')
       expect(item.previewText).toBe(`Task ${source.label}`)
       expect(item.taskNumber).toBe(source.taskNumber)
     }
@@ -272,7 +272,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     // planner's own replies never count; the plain Human update on a2 does.
     expect(agentBInbox.items.map(item => item.thread.threadRef)).toEqual([byLabel.get('a2')!.threadRef])
     expect(agentBInbox.totalUnreadCount).toBe(1)
-    // The beta Channel never leaks into an alpha Member's slice.
+    // The beta Project never leaks into an alpha Member's slice.
     expect(ledger.inbox(memberActor(agentC, 'builder'), { workspaceId: beta, limit: 100 }).items).toEqual([])
 
     // ---- threadObservations(): replay-order history plus live followers. ----
@@ -293,16 +293,16 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     // ---- Independent replay: the derived indexes rebuild identically. ----
     expect(() => ledger.validate()).not.toThrow()
     const fresh = new AgentTeamLedger(table)
-    expect(projectionSnapshot(fresh, channelA.channelRef)).toEqual(projectionSnapshot(ledger, channelA.channelRef))
+    expect(projectionSnapshot(fresh, projectA.projectRef)).toEqual(projectionSnapshot(ledger, projectA.projectRef))
   })
 
-  function projectionSnapshot(source: AgentTeamLedger, channelRef: AgentTeamChannelRef): Record<string, unknown> {
-    const thread = source.view({ workspaceId: alpha, channelRef, limit: 1, includeCatalog: true }).threads[0]!
+  function projectionSnapshot(source: AgentTeamLedger, projectRef: AgentTeamProjectRef): Record<string, unknown> {
+    const thread = source.view({ workspaceId: alpha, projectRef, limit: 1, includeCatalog: true }).threads[0]!
     return {
       inboxA: source.inbox(memberActor('member:agent-a', 'scout'), { workspaceId: alpha, limit: 100 }),
       inboxHuman: source.inbox(human, { workspaceId: alpha, limit: 100 }),
-      viewA: source.view({ workspaceId: alpha, channelRef, limit: 7 }),
-      viewTail: source.view({ workspaceId: alpha, channelRef, direction: 'before', limit: 5 }),
+      viewA: source.view({ workspaceId: alpha, projectRef, limit: 7 }),
+      viewTail: source.view({ workspaceId: alpha, projectRef, direction: 'before', limit: 5 }),
       observationsA0: source.threadObservations(human, { workspaceId: alpha, taskRef: thread.taskRef! }),
       observationsA5: source.threadObservations(human, { workspaceId: alpha, threadRef: thread.threadRef }),
       taskNumbers: source.view({ workspaceId: alpha, limit: 1, includeCatalog: true }).taskNumbers,
@@ -315,12 +315,12 @@ describe('large-ledger projection equivalence (issue #21)', () => {
   it('derives each Member\'s previous Session and last transition from the transition records', async () => {
     const { ledger, table } = await openLedger()
     await ledger.initialize()
-    const channel = (await ledger.createChannel({ requestId: requestId('lineage-channel'), workspaceId: alpha, name: 'lineage', description: 'Lineage', memberIds: [], actor: human })).value.channel
+    const project = (await ledger.createProject({ requestId: requestId('lineage-project'), workspaceId: alpha, name: 'lineage', description: 'Lineage', memberIds: [], actor: human })).value.project
     const memberId = 'member:lineage' as AgentTeamMemberId
     const session = (generation: string): SessionId => SessionId(`session:lineage-${generation}`)
     await ledger.addMember({
       requestId: requestId('lineage-member'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member',
-      channelRefs: [channel.channelRef], actor: human,
+      projectRefs: [project.projectRef], actor: human,
       member: { memberId, sessionId: session('0'), workspaceId: alpha, handle: 'lineage', description: 'Lineage member', presetId: 'team-member', privateMemoryPath: '/tmp/lineage', state: 'enabled' },
     })
     // A Member that never moved has left no Session behind.
@@ -364,12 +364,12 @@ describe('large-ledger projection equivalence (issue #21)', () => {
   it('answers per-Task Claim reads from a replay-derived Task bucket', async () => {
     const { ledger, table } = await openLedger()
     await ledger.initialize()
-    const channel = (await ledger.createChannel({ requestId: requestId('bucket-channel'), workspaceId: alpha, name: 'bucket', description: 'Bucket', memberIds: [], actor: human })).value.channel
+    const project = (await ledger.createProject({ requestId: requestId('bucket-project'), workspaceId: alpha, name: 'bucket', description: 'Bucket', memberIds: [], actor: human })).value.project
     const memberId = 'member:bucket-owner' as AgentTeamMemberId
     const actor = memberActor(memberId, 'bucket-owner')
     await ledger.addMember({
       requestId: requestId('bucket-member'), workspaceId: alpha, handle: 'bucket-owner', description: 'Bucket owner', presetId: 'team-member',
-      channelRefs: [channel.channelRef], actor: human,
+      projectRefs: [project.projectRef], actor: human,
       member: { memberId, sessionId: SessionId('session:bucket-owner'), workspaceId: alpha, handle: 'bucket-owner', description: 'Bucket owner',
         presetId: 'team-member', privateMemoryPath: '/tmp/bucket-owner', state: 'enabled' },
     })
@@ -379,7 +379,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     const expected = new Map<AgentTeamTaskRef, AgentTeamClaimRef[]>()
     const revisions = new Map<AgentTeamTaskRef, number>()
     for (let index = 0; index < 24; index += 1) {
-      const started = await ledger.sendMessage({ asTask: true, requestId: requestId(`bucket-task-${index}`), workspaceId: alpha, channelRef: channel.channelRef,
+      const started = await ledger.sendMessage({ asTask: true, requestId: requestId(`bucket-task-${index}`), workspaceId: alpha, projectRef: project.projectRef,
         body: `Claim bucket task ${index}`, actor: human })
       if (started.value.kind !== 'committed') throw new Error(`expected committed Task start ${index}`)
       const taskRef = started.value.task!.taskRef

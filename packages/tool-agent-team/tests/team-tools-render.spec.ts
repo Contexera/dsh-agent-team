@@ -3,7 +3,7 @@ import { renderText, teamTools, occurrences } from './render-text.ts'
 
 const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
 const TASK = 'task:3245ad40-43fd-4191-a416-7dcaf3a340f2'
-const CHANNEL = 'channel:046dd831-c679-4279-b6aa-7813476cf12e'
+const PROJECT = 'project:046dd831-c679-4279-b6aa-7813476cf12e'
 const WORKSPACES = [{ workspaceId: 'workspace:alpha', default: true }]
 const CLAIM = 'claim:326f0b21-a41c-4c47-be18-ad0d4ecfc139'
 
@@ -11,28 +11,28 @@ describe('team_view renders one address book', () => {
   it('first page: labelled sections, newest-first subjects, Task inline — no Task index, message count, or revision label', () => {
     const text = renderText(teamTools().get('team_view')!, {}, {
       workspaces: WORKSPACES,
-      channels: [{ channelRef: CHANNEL, name: 'general' }],
+      projects: [{ projectRef: PROJECT, name: 'general' }],
       members: [{ memberId: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', kind: 'agent', handle: 'Tars', description: 'builder', presence: 'available' }],
       threads: [
-        { threadRef: THREAD, channelRef: CHANNEL, revision: 8394, messageCount: 120, subject: 'Review the render contract', taskRef: TASK, status: 'in_progress', taskNumber: 7 },
-        { threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, revision: 100, messageCount: 3, subject: 'Should Member descriptions change after the rename?' },
+        { threadRef: THREAD, projectRef: PROJECT, revision: 8394, messageCount: 120, subject: 'Review the render contract', taskRef: TASK, status: 'in_progress', taskNumber: 7 },
+        { threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, messageCount: 3, subject: 'Should Member descriptions change after the rename?' },
       ],
-      tasks: [{ taskRef: TASK, threadRef: THREAD, channelRef: CHANNEL, status: 'in_progress', revision: 8394 }],
-      activeTaskThreads: [{ taskRef: TASK, threadRef: THREAD, channelRef: CHANNEL, status: 'in_progress', subject: 'Review the render contract', taskNumber: 7, lastActivityAt: '2026-09-27T10:00:00.000Z', members: [{ memberId: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', name: 'Tars' }] }],
+      tasks: [{ taskRef: TASK, threadRef: THREAD, projectRef: PROJECT, status: 'in_progress', revision: 8394 }],
+      activeTaskThreads: [{ taskRef: TASK, threadRef: THREAD, projectRef: PROJECT, status: 'in_progress', subject: 'Review the render contract', taskNumber: 7, lastActivityAt: '2026-09-27T10:00:00.000Z', members: [{ memberId: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', name: 'Tars' }] }],
       cursor: 8394, hasMore: true,
     })
     expect(text).toContain('Team directory')
-    expect(text).toContain('Channels — current')
+    expect(text).toContain('Projects — current')
     expect(text).toContain('Members — current')
-    // Sections come in order: Channels, Threads, Members.
-    expect(text.indexOf('Channels — current')).toBeLessThan(text.indexOf('Threads'))
+    // Sections come in order: Projects, Threads, Members.
+    expect(text.indexOf('Projects — current')).toBeLessThan(text.indexOf('Threads'))
     expect(text.indexOf('Threads')).toBeLessThan(text.indexOf('Members — current'))
     // Each Thread row carries its bounded subject and inline Task standing.
-    expect(text).toContain(`${THREAD} · ${CHANNEL} · ${TASK} (#7), in_progress — Review the render contract`)
-    expect(text).toContain('thread:aaaa1111-0000-4000-8000-000000000001 · channel:046dd831-c679-4279-b6aa-7813476cf12e · taskless — Should Member descriptions change after the rename?')
+    expect(text).toContain(`${THREAD} · ${PROJECT} · ${TASK} (#7), in_progress — Review the render contract`)
+    expect(text).toContain('thread:aaaa1111-0000-4000-8000-000000000001 · project:046dd831-c679-4279-b6aa-7813476cf12e · taskless — Should Member descriptions change after the rename?')
     // The active-task-threads radar follows Members, carrying status, claim owner, and subject.
     expect(text.indexOf('Members — current')).toBeLessThan(text.indexOf('Active task threads'))
-    expect(text).toContain(`${THREAD} · ${CHANNEL} · in_progress · #7 · @Tars — Review the render contract`)
+    expect(text).toContain(`${THREAD} · ${PROJECT} · in_progress · #7 · @Tars — Review the render contract`)
     // No second Task index: the taskful Thread appears once in the Threads section (and once in the radar).
     expect(occurrences(text, THREAD)).toBe(2)
     // No revision-labelled field, no message count, no write token.
@@ -43,11 +43,11 @@ describe('team_view renders one address book', () => {
 
   it('the footer names the Thread cursor and whether older anchors remain', () => {
     const text = renderText(teamTools().get('team_view')!, {}, {
-      workspaces: WORKSPACES, channels: [], members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 0, hasMore: false,
+      workspaces: WORKSPACES, projects: [], members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 0, hasMore: false,
     })
     expect(text).toContain('Thread cursor 0; hasMore=false — no older Threads remain.')
     const more = renderText(teamTools().get('team_view')!, {}, {
-      workspaces: WORKSPACES, channels: [], members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 8394, hasMore: true,
+      workspaces: WORKSPACES, projects: [], members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 8394, hasMore: true,
     })
     expect(more).toContain('Thread cursor 8394; hasMore=true — older Thread anchors exist; page again with this cursor.')
   })
@@ -55,13 +55,13 @@ describe('team_view renders one address book', () => {
   it('a continuation page renders only the Threads section', () => {
     const text = renderText(teamTools().get('team_view')!, { cursor: 8394 }, {
       workspaces: WORKSPACES,
-      channels: [{ channelRef: CHANNEL, name: 'general' }],
+      projects: [{ projectRef: PROJECT, name: 'general' }],
       members: [{ memberId: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', kind: 'agent', handle: 'Tars', description: 'builder', presence: 'available' }],
-      threads: [{ threadRef: THREAD, channelRef: CHANNEL, revision: 8394, messageCount: 120, subject: 'Review the render contract' }],
+      threads: [{ threadRef: THREAD, projectRef: PROJECT, revision: 8394, messageCount: 120, subject: 'Review the render contract' }],
       tasks: [], activeTaskThreads: [], cursor: 100, hasMore: false, page: 'threads',
     })
     expect(text).toContain('Threads')
-    expect(text).not.toContain('Channels — current')
+    expect(text).not.toContain('Projects — current')
     expect(text).not.toContain('Members — current')
     expect(text).not.toContain('Active task threads')
     expect(text).toContain('Thread cursor 100; hasMore=false')
@@ -88,13 +88,13 @@ describe('team_inbox renders triage, not a read', () => {
     const text = renderText(teamTools().get('team_inbox')!, {}, {
       totalUnreadCount: 9, totalDirectCount: 2, hasMore: false,
       items: [
-        { threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 2, taskNumber: 7 },
-        { threadRef: 'thread:bbbb2222-0000-4000-8000-000000000002', channelRef: CHANNEL, revision: 101, unreadCount: 3, directCount: 0 },
+        { threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 2, taskNumber: 7 },
+        { threadRef: 'thread:bbbb2222-0000-4000-8000-000000000002', projectRef: PROJECT, revision: 101, unreadCount: 3, directCount: 0 },
       ],
     })
     expect(text).toContain('Inbox — 9 unread update(s) total, 2 direct, across 2 Thread(s) shown')
-    expect(text).toContain('thread:aaaa1111-0000-4000-8000-000000000001 · channel:046dd831-c679-4279-b6aa-7813476cf12e · task:3245ad40-43fd-4191-a416-7dcaf3a340f2 (#7), in_progress · 4 unread, 2 direct')
-    expect(text).toContain('thread:bbbb2222-0000-4000-8000-000000000002 · channel:046dd831-c679-4279-b6aa-7813476cf12e · 3 unread, 0 direct')
+    expect(text).toContain('thread:aaaa1111-0000-4000-8000-000000000001 · project:046dd831-c679-4279-b6aa-7813476cf12e · task:3245ad40-43fd-4191-a416-7dcaf3a340f2 (#7), in_progress · 4 unread, 2 direct')
+    expect(text).toContain('thread:bbbb2222-0000-4000-8000-000000000002 · project:046dd831-c679-4279-b6aa-7813476cf12e · 3 unread, 0 direct')
     expect(text).toContain('team_thread read')
     expect(text).toContain('no write token')
   })
@@ -104,13 +104,13 @@ describe('team_inbox renders triage, not a read', () => {
     // would have to reconstruct from two differently-shaped numbers.
     const capped = renderText(teamTools().get('team_inbox')!, {}, {
       totalUnreadCount: 12, totalDirectCount: 5, hasMore: true,
-      items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, revision: 100, unreadCount: 7, directCount: 3 }],
+      items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, unreadCount: 7, directCount: 3 }],
     })
     expect(capped).toContain('more Threads sit beyond this page')
     expect(capped).toContain('up to 100 rows')
     const complete = renderText(teamTools().get('team_inbox')!, {}, {
       totalUnreadCount: 2, totalDirectCount: 0, hasMore: false,
-      items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, revision: 100, unreadCount: 2, directCount: 0 }],
+      items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, unreadCount: 2, directCount: 0 }],
     })
     expect(complete).not.toContain('beyond this page')
   })
@@ -123,7 +123,7 @@ describe('team_inbox renders triage, not a read', () => {
   it('renders no subject, body, revision label, or write token', () => {
     const text = renderText(teamTools().get('team_inbox')!, {}, {
       totalUnreadCount: 1, totalDirectCount: 1, hasMore: false,
-      items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', channelRef: CHANNEL, revision: 100, unreadCount: 1, directCount: 1 }],
+      items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, unreadCount: 1, directCount: 1 }],
     })
     expect(text).not.toContain('revision')
     expect(text).not.toContain('baseRevision')
@@ -133,19 +133,19 @@ describe('team_inbox renders triage, not a read', () => {
 
 describe('team_attention renders Attention only', () => {
   const base = {
-    workspaceId: 'workspace:alpha', channelRef: CHANNEL,
+    workspaceId: 'workspace:alpha', projectRef: PROJECT,
     kind: 'status', threadRef: THREAD, taskRef: TASK, taskNumber: 7, revision: 8394, status: 'in_progress', resolution: 'open', following: true,
   }
-  it('status renders one Attention outcome line under its Workspace/Channel source', () => {
+  it('status renders one Attention outcome line under its Workspace/Project source', () => {
     const text = renderText(teamTools().get('team_attention')!, { action: 'status', threadRef: THREAD }, base)
-    expect(text).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention status — following ${THREAD} · ${TASK} (#7), in_progress/open.`)
+    expect(text).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention status — following ${THREAD} · ${TASK} (#7), in_progress/open.`)
   })
 
   it('follow/unfollow render one Attention-changed line; no anchor, Claims, facts, revision label, or token', () => {
     const follow = renderText(teamTools().get('team_attention')!, { action: 'follow', threadRef: THREAD }, { ...base, kind: 'follow' })
-    expect(follow).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention changed — now following ${THREAD} · ${TASK} (#7), in_progress/open.`)
+    expect(follow).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention changed — now following ${THREAD} · ${TASK} (#7), in_progress/open.`)
     const unfollow = renderText(teamTools().get('team_attention')!, { action: 'unfollow', threadRef: THREAD }, { ...base, kind: 'unfollow', following: false })
-    expect(unfollow).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention changed — no longer following ${THREAD} · ${TASK} (#7), in_progress/open.`)
+    expect(unfollow).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention changed — no longer following ${THREAD} · ${TASK} (#7), in_progress/open.`)
     for (const text of [follow, unfollow]) {
       expect(text).not.toContain('revision')
       expect(text).not.toContain('baseRevision')
@@ -154,10 +154,10 @@ describe('team_attention renders Attention only', () => {
 
   it('a taskless Attention render omits Task standing', () => {
     const text = renderText(teamTools().get('team_attention')!, { action: 'status', threadRef: THREAD }, {
-      workspaceId: 'workspace:alpha', channelRef: CHANNEL,
+      workspaceId: 'workspace:alpha', projectRef: PROJECT,
       kind: 'status', threadRef: THREAD, revision: 8394, following: false,
     })
-    expect(text).toBe(`Workspace: workspace:alpha · Channel: ${CHANNEL}\nAttention status — not following ${THREAD}.`)
+    expect(text).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention status — not following ${THREAD}.`)
   })
 
   it('the output schema carries no read surface at all, because Attention is not reading', () => {
@@ -327,7 +327,7 @@ describe('team_thread history renders deep orientation only', () => {
 
 describe('team_message renders its outcome', () => {
   it('start: Committed — Thread created with refs and exactly one token', () => {
-    const text = renderText(teamTools().get('team_message')!, { action: 'start', channelRef: CHANNEL, body: 'x' }, {
+    const text = renderText(teamTools().get('team_message')!, { action: 'start', projectRef: PROJECT, body: 'x' }, {
       kind: 'committed', action: 'start', messageRef: 'message:9a1c', threadRef: THREAD, taskRef: TASK, revision: 8201,
     })
     expect(text).toContain('Committed — Thread created.')
@@ -378,7 +378,7 @@ describe('team_message renders its outcome', () => {
     // no Thread to address, so the parameter pocket cannot invite one. A model
     // that reaches for a threadRef here gets a schema refusal, not a runtime one.
     const parameters = teamTools().get('team_dm')!.parameters as Record<string, any>
-    for (const absent of ['threadRef', 'taskRef', 'channelRef', 'baseRevision', 'asTask', 'attachments', 'replyToMessageRef', 'action']) {
+    for (const absent of ['threadRef', 'taskRef', 'projectRef', 'baseRevision', 'asTask', 'attachments', 'replyToMessageRef', 'action']) {
       expect(parameters.properties[absent]).toBeUndefined()
     }
     expect(parameters.required).toContain('memberRef')
@@ -393,7 +393,7 @@ describe('team_message renders its outcome', () => {
     expect(unread).toContain('Not committed — unread_required.')
     expect(unread).toContain(`${THREAD} · ${TASK} · 2 unread, 1 direct`)
     expect(unread).toContain('team_thread read')
-    // Channel C: the gated facts render in the rejection itself, and the
+    // Project C: the gated facts render in the rejection itself, and the
     // current revision comes back as the next write token. This inverted the
     // old contract, which held that a rejection carried no facts and no token.
     expect(unread).toContain('the gated fact')
@@ -615,12 +615,12 @@ describe('team tools render absolute event instants in UTC+8', () => {
   it('inbox rows carry the newest unread instant; view rows carry last activity', () => {
     const inbox = renderText(teamTools().get('team_inbox')!, {}, {
       totalUnreadCount: 4, totalDirectCount: 1, hasMore: false,
-      items: [{ threadRef: THREAD, channelRef: CHANNEL, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 1, taskNumber: 7, newestOccurredAt: '2026-09-08T08:58:41.000Z' }],
+      items: [{ threadRef: THREAD, projectRef: PROJECT, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 1, taskNumber: 7, newestOccurredAt: '2026-09-08T08:58:41.000Z' }],
     })
     expect(inbox).toContain(`4 unread, 1 direct · newest 2026-09-08T16:58:41+08:00`)
     const view = renderText(teamTools().get('team_view')!, {}, {
-      workspaces: WORKSPACES, channels: [], members: [],
-      threads: [{ threadRef: THREAD, channelRef: CHANNEL, revision: 1, messageCount: 3, subject: 'Investigate startup failure', lastActivityAt: '2026-08-21T01:30:44.000Z' }],
+      workspaces: WORKSPACES, projects: [], members: [],
+      threads: [{ threadRef: THREAD, projectRef: PROJECT, revision: 1, messageCount: 3, subject: 'Investigate startup failure', lastActivityAt: '2026-08-21T01:30:44.000Z' }],
       tasks: [], activeTaskThreads: [], cursor: 0, hasMore: false,
     })
     expect(view).toContain('— Investigate startup failure · last activity 2026-08-21T09:30:44+08:00')

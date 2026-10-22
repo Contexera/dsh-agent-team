@@ -12,13 +12,13 @@ A stable identity authorized to read, speak, claim work, and receive Inbox hints
 
 ## Workspace Participation
 
-A join/leave relation between a Member and a Workspace, committed as ledger operations — the same relation shape as Channel participation, one rung above it (Workspace participation → Channel participation, derived from Threads → Thread Attention). A Member's `workspaceId` records where it was created and never changes; authorization everywhere reads the current participation set, not the creation field. Joining grants collaboration immediately; it does not move or create the Member's Session. Each Member retains one Session lineage in its creation Workspace.
+A join/leave relation between a Member and a Workspace, committed as ledger operations — the same relation shape as Project participation, one rung above it (Workspace participation → Project participation, derived from Threads → Thread Attention). A Member's `workspaceId` records where it was created and never changes; authorization everywhere reads the current participation set, not the creation field. Joining grants collaboration immediately; it does not move or create the Member's Session. Each Member retains one Session lineage in its creation Workspace.
 
 Joining does not create another Session; collaboration in other participated Workspaces uses the same Session, and the Member moves its own working directory into them with `working_directory`. The Human Member participates in every Workspace.
 
 ## Human Member
 
-The special Member corresponding to the current Harness user. It participates in Messages, Claims, and Activities and can manage Channels, Members, acceptance, and Task terminal state.
+The special Member corresponding to the current Harness user. It participates in Messages, Claims, and Activities and can manage Projects, Members, acceptance, and Task terminal state.
 
 ## Agent Member
 
@@ -30,25 +30,25 @@ Durable capability intent on the Member entity (optional `capabilities` field: `
 
 ## Workspace
 
-A project and shared working directory. An Agent Member's Session header cwd is its creation Workspace's project directory and never changes; the directory it works in is the Session's own, movable through `working_directory`. Private memory lives outside the project root.
+A shared working directory and authorization domain. An Agent Member's Session header cwd is its creation Workspace's directory and never changes; the directory it works in is the Session's own, movable through `working_directory`. Private memory lives outside the Workspace directory.
 
-## Channel
+## Project
 
-A persistent collaboration place in a Workspace. A Member takes part in a Channel by taking part in one of its Threads — reading, speaking, claiming, or following — and that is what authorizes it everywhere in the Channel; there is no separate enrolment to grant. Human Members can view every Workspace Channel.
+A persistent collaboration place in a Workspace. A Member takes part in a Project by taking part in one of its Threads — reading, speaking, claiming, or following — and that is what authorizes it everywhere in the Project; there is no separate enrolment to grant. Human Members can view every Workspace Project.
 
 ## Message
 
-Immutable content explicitly sent in a Channel or existing Thread. Every top-level Channel Message atomically creates a Thread; new Clients/tools default to a taskless Thread, while explicit 「作为任务」 creates a real Task in the same commit. A reply continues an existing Thread. Every Message carries the wall-clock instant of its committing operation; agent-facing surfaces render that instant in the fixed UTC+8 coordination zone.
+Immutable content explicitly sent in a Project or existing Thread. Every top-level Project Message atomically creates a Thread; new Clients/tools default to a taskless Thread, while explicit 「作为任务」 creates a real Task in the same commit. A reply continues an existing Thread. Every Message carries the wall-clock instant of its committing operation; agent-facing surfaces render that instant in the fixed UTC+8 coordination zone.
 
 ## Task
 
-An optional work-tracking overlay attached to an existing Thread, not a prerequisite for a Thread. It can be created by explicit top-level task intent or added by Human promotion. Promotion also appends a public explanation Message. Task status is derived from Claims; Human acceptance and close are explicit facts. Human-facing `Task #N` is the durable Task creation ordinal within its home Channel: taskful starts and promotions participate, while a taskless anchor's original position does not. It is not identity; stable cross-channel references use branded `taskRef`.
+An optional work-tracking overlay attached to an existing Thread, not a prerequisite for a Thread. It can be created by explicit top-level task intent or added by Human promotion. Promotion also appends a public explanation Message. Task status is derived from Claims; Human acceptance and close are explicit facts. Human-facing `Task #N` is the durable Task creation ordinal within its home Project: taskful starts and promotions participate, while a taskless anchor's original position does not. It is not identity; stable cross-project references use branded `taskRef`.
 
 Acceptance normally waits for every Claim to be done (`in_review`). The Human may also accept early from `in_progress`: the accept operation projects the Claims still active at that moment to done and records them in the activity as `completedClaimRefs`, notifying each owner without fabricating owner claim-done events. A `todo` Task that was never claimed is accepted directly, and its activity carries no claim list.
 
 ## Thread
 
-An independent, single-level public collaboration aggregate inside a Channel. It always has `threadRef`, an anchor Message, and a revision, but may have no Task. Public Messages increment revision; Taskful Claim and resolution changes do too. Existing-Thread writes require current revision. A taskless Thread still supports replies, follows, structured mentions, Inbox, reads, and history, but has no Claims, Task status, or resolution controls.
+An independent, single-level public collaboration aggregate inside a Project. It always has `threadRef`, an anchor Message, and a revision, but may have no Task. Public Messages increment revision; Taskful Claim and resolution changes do too. Existing-Thread writes require current revision. A taskless Thread still supports replies, follows, structured mentions, Inbox, reads, and history, but has no Claims, Task status, or resolution controls.
 
 Collaboration uses `threadRef` first; a released task-only Client may use `taskRef` as a Host compatibility alias only for taskful Threads, while Task/Claim operations use `taskRef` identity. Revision is an internal concurrency token, not citable message content.
 
@@ -70,7 +70,7 @@ Member-level unread projection derived from Thread Attention and direct mentions
 
 ## Follow
 
-An operation on Thread Attention, not an independent subscription object. Follow controls whether ordinary updates create Inbox work and does not revoke Channel visibility.
+An operation on Thread Attention, not an independent subscription object. Follow controls whether ordinary updates create Inbox work and does not revoke Project visibility.
 
 ## Activity
 
@@ -90,11 +90,11 @@ The sequence of the latest operation relevant to a Thread. It is an optimistic c
 
 ## Ref
 
-A restart-stable, typed identifier that callers cannot safely construct by concatenation. Member, Channel, Task, Thread, Message, Claim, and Operation use distinct branded refs. Attention is identified by Member plus Thread.
+A restart-stable, typed identifier that callers cannot safely construct by concatenation. Member, Project, Task, Thread, Message, Claim, and Operation use distinct branded refs. Attention is identified by Member plus Thread.
 
 ## Direct Message
 
-A private Member-to-Member message, not part of any Thread. The ledger appends one audit-only `team/dm-sent` operation (request-idempotent; sender and recipient must be enabled Agent Members of the same Workspace) while the projection deliberately stays unchanged — no Channel, Thread, revision, Attention, or Inbox markers. Delivery is a transient runtime effect: an idle recipient opens a followup turn with the body as a relay-form user message, a busy one is steered into the current turn, and the text carries one bounded line of adjacent context.
+A private Member-to-Member message, not part of any Thread. The ledger appends one audit-only `team/dm-sent` operation (request-idempotent; sender and recipient must be enabled Agent Members of the same Workspace) while the projection deliberately stays unchanged — no Project, Thread, revision, Attention, or Inbox markers. Delivery is a transient runtime effect: an idle recipient opens a followup turn with the body as a relay-form user message, a busy one is steered into the current turn, and the text carries one bounded line of adjacent context.
 
 A failed wake leaves the durable fact intact and the sender gets a structured delivery error instead of a silent loss; there is no automatic redelivery. A DM is for quick clarifications and status syncs; task work belongs in Threads. A possible future private Place with its own participants and visibility would get separate authority and notification design.
 
@@ -120,11 +120,11 @@ Temporarily stop a Member's live Agent while retaining identity, Session, Claims
 
 ## Withdraw
 
-Leaving one Workspace: `team/member-workspace-left` ends the Member's participation there, exits its Channel memberships in that Workspace, releases that Workspace's active Claims, and clears its Attention there. Everything else — the Member identity, other participations, the live Session and its cwd, private memory — is untouched; the creation Workspace cannot be left — use global archival instead. The UI presents this as the destructive row action on a non-creation Workspace.
+Leaving one Workspace: `team/member-workspace-left` ends the Member's participation there, exits its Project memberships in that Workspace, releases that Workspace's active Claims, and clears its Attention there. Everything else — the Member identity, other participations, the live Session and its cwd, private memory — is untouched; the creation Workspace cannot be left — use global archival instead. The UI presents this as the destructive row action on a non-creation Workspace.
 
 ## Archive
 
-The hidden third state between Suspend and Remove, for Members and Channels. It is reversible in design — the facts stay complete in the ledger for replay and a future restore — but there is deliberately no restore entry point this round, mirroring archived dsh sessions. `archiveMember` disposes the live session (private memory and the Session log stay on disk) and releases active Claims across every participated Workspace with public `claims_released` Activities; `archiveChannel` applies the same release shape across every owner on the Channel's Threads.
+The hidden third state between Suspend and Remove, for Members and Projects. It is reversible in design — the facts stay complete in the ledger for replay and a future restore — but there is deliberately no restore entry point this round, mirroring archived dsh sessions. `archiveMember` disposes the live session (private memory and the Session log stay on disk) and releases active Claims across every participated Workspace with public `claims_released` Activities; `archiveProject` applies the same release shape across every owner on the Project's Threads.
 
 Memberships survive archival (hidden state, not departure). Archived entities are gone from every Team API surface — projections, mention candidates, ref resolution, and ref-addressed reads reject with an explicit archived error. Removal from archived remains available as the data-hygiene path.
 

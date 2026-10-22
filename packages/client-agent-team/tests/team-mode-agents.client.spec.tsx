@@ -115,7 +115,7 @@ describe('Team agent surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await waitFor(() => expect(document.documentElement.dataset.agentTeamMode).toBe('team'))
     expect(mainViewSessionId(b)).toBe('ordinary-session')
-    expect(await b.view.findByRole('heading', { name: '频道' })).toBeTruthy()
+    expect(await b.view.findByRole('heading', { name: '项目' })).toBeTruthy()
     expect(b.view.getAllByText('Alpha')).toHaveLength(2)
     // The mode shadows the browser seat only: the shipped Settings row keeps the
     // footer in both modes, and the Team's own exit rides the browser seat.
@@ -138,9 +138,9 @@ describe('Team agent surfaces', () => {
   })
 
   it('loads Workspace Agents and creates a durable Member without optimistic rows', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    expect(await b.view.findByText('从左侧选择一个频道开始协作')).toBeTruthy()
+    expect(await b.view.findByText('从左侧选择一个项目开始协作')).toBeTruthy()
 
     expect(await b.view.findByText('builder')).toBeTruthy()
     expect(b.view.getByRole('img', { name: '可用' })).toBeTruthy()
@@ -156,7 +156,7 @@ describe('Team agent surfaces', () => {
     await waitFor(() => expect(document.activeElement).toBe(agentName))
     fireEvent.change(agentName, { target: { value: 'reviewer' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'Reviews changes' } })
-    expect(b.view.queryByRole('button', { name: /初始频道/ })).toBeNull()
+    expect(b.view.queryByRole('button', { name: /初始项目/ })).toBeNull()
     b.addMember.mockResolvedValueOnce({ ok: false, error: { message: 'connection lost' } } as never)
     fireEvent.click(b.view.getByRole('button', { name: '创建 Agent' }))
     expect((await b.view.findByRole('alert')).textContent).toContain('connection lost')
@@ -166,7 +166,7 @@ describe('Team agent surfaces', () => {
 
     expect(await b.view.findByText('reviewer')).toBeTruthy()
     expect(b.addMember).toHaveBeenLastCalledWith(expect.objectContaining({
-      workspaceId: 'w1', channelRefs: [], handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member',
+      workspaceId: 'w1', projectRefs: [], handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member',
     }))
     expect(b.addMember.mock.calls[0]![0].requestId).toBe(b.addMember.mock.calls[1]![0].requestId)
     await waitFor(() => expect(document.activeElement).toBe(addAgentTrigger))
@@ -177,8 +177,8 @@ describe('Team agent surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('creates an Agent with empty description, no Channels, and an optional model', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+  it('creates an Agent with empty description, no Projects, and an optional model', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
     fireEvent.click(b.view.getByRole('button', { name: '添加 Agent' }))
@@ -190,60 +190,60 @@ describe('Team agent surfaces', () => {
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: 'DeepSeek Chat' }))
     fireEvent.click(b.view.getByRole('button', { name: /推理强度/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: 'high' }))
-    // No Channel picker exists at creation; Channels join later from the Channel side.
-    expect(b.view.queryByText('选择初始频道')).toBeNull()
+    // No Project picker exists at creation; Projects join later from the Project side.
+    expect(b.view.queryByText('选择初始项目')).toBeNull()
     fireEvent.click(b.view.getByRole('button', { name: '创建 Agent' }))
     expect(await b.view.findByText('bare')).toBeTruthy()
     expect(b.addMember).toHaveBeenLastCalledWith(expect.objectContaining({
-      workspaceId: 'w1', handle: 'bare', description: '', presetId: 'team-member', channelRefs: [],
+      workspaceId: 'w1', handle: 'bare', description: '', presetId: 'team-member', projectRefs: [],
       model: { provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: 'high' },
     }))
     await b.runtime.dispose()
   })
 
-  it('creates a Channel atomically with selected available Members and manages committed membership', async () => {
+  it('creates a Project atomically with selected available Members and manages committed membership', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    expect(await b.view.findByText('还没有频道')).toBeTruthy()
-    fireEvent.click(b.view.getByRole('button', { name: '新建频道' }))
+    expect(await b.view.findByText('还没有项目')).toBeTruthy()
+    fireEvent.click(b.view.getByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API implementation' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     const unavailable = await within(document.body).findByRole('menuitem', { name: /offline/ }) as HTMLButtonElement
     expect(unavailable.disabled).toBe(true)
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    b.createChannel.mockResolvedValueOnce({ ok: false, error: { message: 'connection lost' } } as never)
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    b.createProject.mockResolvedValueOnce({ ok: false, error: { message: 'connection lost' } } as never)
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     expect((await b.view.findByRole('alert')).textContent).toContain('connection lost')
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
 
     expect(await b.view.findByText('# backend')).toBeTruthy()
-    expect(b.createChannel).toHaveBeenLastCalledWith(expect.objectContaining({
+    expect(b.createProject).toHaveBeenLastCalledWith(expect.objectContaining({
       workspaceId: 'w1', name: 'backend', description: 'API implementation', memberIds: ['member:builder'],
     }))
-    expect(b.createChannel.mock.calls[0]![0].requestId).toBe(b.createChannel.mock.calls[1]![0].requestId)
-    // Membership is derived from participation now, so a created Channel has
+    expect(b.createProject.mock.calls[0]![0].requestId).toBe(b.createProject.mock.calls[1]![0].requestId)
+    // Membership is derived from participation now, so a created Project has
     // no membership controls to drive.
     fireEvent.click(b.view.getByRole('button', { name: '# backend' }))
     expect(b.view.queryByRole('button', { name: '管理成员' })).toBeNull()
     await b.runtime.dispose()
   })
 
-  it('renames Channel display facts from the editor and refreshes the row', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+  it('renames Project display facts from the editor and refreshes the row', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     expect(await b.view.findByText('# engineering')).toBeTruthy()
 
     fireEvent.click(b.view.getByRole('button', { name: 'engineering 的操作' }))
-    fireEvent.click(await b.view.findByRole('menuitem', { name: '编辑频道' }))
-    const editor = b.view.getByRole('dialog', { name: '编辑频道' })
+    fireEvent.click(await b.view.findByRole('menuitem', { name: '编辑项目' }))
+    const editor = b.view.getByRole('dialog', { name: '编辑项目' })
     // Save stays disabled until something actually changes.
     expect(((within(editor).getByRole('button', { name: '保存' }) as HTMLButtonElement)).disabled).toBe(true)
     fireEvent.change(within(editor).getByLabelText('名称'), { target: { value: 'platform' } })
     fireEvent.change(within(editor).getByLabelText(/说明/), { target: { value: 'Infrastructure work' } })
     fireEvent.click(within(editor).getByRole('button', { name: '保存' }))
-    await waitFor(() => { expect(b.updateChannel).toHaveBeenCalledWith(expect.objectContaining({
-      workspaceId: 'w1', channelRef: 'channel:engineering', name: 'platform', description: 'Infrastructure work',
+    await waitFor(() => { expect(b.updateProject).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: 'w1', projectRef: 'project:engineering', name: 'platform', description: 'Infrastructure work',
     })) })
     // The committed rename rides the projection refresh, not an optimistic row edit.
     expect(await b.view.findByText('# platform')).toBeTruthy()
@@ -253,7 +253,7 @@ describe('Team agent surfaces', () => {
   })
 
   it('offers 恢复 and 重启 in the row menu only where they apply and routes both through the Host remote', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
 
@@ -287,7 +287,7 @@ describe('Team agent surfaces', () => {
   })
 
   it('retires the manual clear-context action and follows a Member rollover exactly once', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
 
@@ -301,12 +301,12 @@ describe('Team agent surfaces', () => {
       fireEvent.keyDown(document, { key: 'Escape' })
     }
 
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await new Promise(resolve => setTimeout(resolve, 30))
     b.members.mockImplementation(async () => ({ ok: true, value: [
       b.status('member:builder', 'w1', 'builder', 'available'),
     ].map(entry => ({ ...entry, member: { ...entry.member, sessionId: 'session:builder-next' } })) }))
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await waitFor(() => { expect(b.view.queryByRole('button', { name: '打开 worker 的会话' })).toBeNull() }, { timeout: 3000 })
     expect(b.openSession.mock.calls.some(([id]) => String(id).includes('builder-next'))).toBe(false)
 
@@ -320,7 +320,7 @@ describe('Team agent surfaces', () => {
     b.members.mockImplementation(async () => ({ ok: true, value: [
       { ...b.status('member:builder', 'w1', 'builder', 'unavailable', { class: 'rollover', detail: 'context rollover in progress' }), member: { ...b.status('member:builder', 'w1', 'builder', 'unavailable').member, sessionId: 'session:builder-next-2' } },
     ] }))
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(b.openSession.mock.calls.length).toBe(opened)
 
@@ -329,7 +329,7 @@ describe('Team agent surfaces', () => {
     b.members.mockImplementation(async () => ({ ok: true, value: [
       b.status('member:builder', 'w1', 'builder', 'available'),
     ].map(entry => ({ ...entry, member: { ...entry.member, sessionId: 'session:builder-next-2' } })) }))
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await new Promise(resolve => setTimeout(resolve, 80))
     expect(b.openSession.mock.calls.filter(([id]) => String(id).includes('builder-next-2')).length).toBe(0)
 
@@ -342,7 +342,7 @@ describe('Team agent surfaces', () => {
   })
 
   it('edits Agent identity and pins a Member model through the editor', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
 
@@ -372,7 +372,7 @@ describe('Team agent surfaces', () => {
   })
 
   it('opens the Member Session inside Team mode from the Agent card', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await b.runtime.sessions.add({ id: 'session:member:builder' as never, summary: { title: 'builder', cwd: '/work/alpha' } } as never)
     await b.view.findByText('builder')
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -400,7 +400,7 @@ describe('Team agent surfaces', () => {
 
     // Explicit Team navigation closes the embedded Member view again.
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    await waitFor(() => { expect(b.view.container.querySelector('[data-team-channel]')).toBeTruthy() })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy() })
     expect(b.view.container.querySelector('[data-phase]')).toBeNull()
     expect(card.getAttribute('aria-current')).toBeNull()
     await b.runtime.dispose()
@@ -411,7 +411,7 @@ describe('Team agent surfaces', () => {
     // an Agent, and the overlay embeds that Session over the page rather than
     // replacing it: the page keeps its place while exactly one row — the Agent
     // card — wears the marker, and the entry takes the marker back on the way out.
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await b.runtime.sessions.add({ id: 'session:member:builder' as never, summary: { title: 'builder', cwd: '/work/alpha' } } as never)
     await b.view.findByText('builder')
     const entry = b.view.getByRole('button', { name: /^收件箱/ })
@@ -437,7 +437,7 @@ describe('Team agent surfaces', () => {
   })
 
   it('rebinds the underlying session when leaving an embedded Member view, so an off-seat rollover never blanks the seat', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     // Added without taking the selection: the Human's ordinary session stays
     // the workspace service's `mainView` retention, the way a real Member
     // session exists beside it on the Host.
@@ -452,21 +452,21 @@ describe('Team agent surfaces', () => {
     await waitFor(() => { expect(mainViewSessionId(b)).toBe('session:member:builder') })
 
     fireEvent.click(b.view.getByRole('button', { name: '# engineering' }))
-    await waitFor(() => { expect(b.view.container.querySelector('[data-team-channel]')).toBeTruthy() })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy() })
     expect(mainViewSessionId(b)).toBe('ordinary-session')
     expect(b.openSession.mock.calls.filter(([id]) => id === 'ordinary-session')).toHaveLength(1)
-    const seat = b.view.container.querySelector('[data-team-channel]') as HTMLElement
+    const seat = b.view.container.querySelector('[data-team-project]') as HTMLElement
 
     await b.runtime.sessions.remove('session:member:builder')
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(mainViewSessionId(b)).toBe('ordinary-session')
-    expect(b.view.container.querySelector('[data-team-channel]')).toBe(seat)
+    expect(b.view.container.querySelector('[data-team-project]')).toBe(seat)
     expect(b.view.getByRole('heading', { name: '# engineering' })).toBeTruthy()
     await b.runtime.dispose()
   })
 
   it('keeps the departed Member retention when the return target is gone, without reopening the dead id', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await b.runtime.sessions.add({ id: 'session:member:builder' as never, summary: { title: 'builder', cwd: '/work/alpha' } } as never)
     await b.view.findByText('builder')
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -480,26 +480,26 @@ describe('Team agent surfaces', () => {
     // becoming a false return target.
     await b.runtime.sessions.remove('ordinary-session')
     fireEvent.click(b.view.getByRole('button', { name: '# engineering' }))
-    await waitFor(() => { expect(b.view.container.querySelector('[data-team-channel]')).toBeTruthy() })
+    await waitFor(() => { expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy() })
     expect(mainViewSessionId(b)).toBe('session:member:builder')
     // The dead target is never opened: unknown ids fail loud in the service.
     expect(b.openSession).not.toHaveBeenCalledWith('ordinary-session')
     await b.runtime.dispose()
   })
 
-  it('edits Agent facts without a Channel membership section', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+  it('edits Agent facts without a Project membership section', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
 
     fireEvent.click(b.view.getByRole('button', { name: 'builder 的操作' }))
     fireEvent.click(await b.view.findByRole('menuitem', { name: '编辑 Agent' }))
     const editor = b.view.getByRole('dialog', { name: '编辑 Agent' })
-    // Channel membership is managed from the Channel side: the editor carries
+    // Project membership is managed from the Project side: the editor carries
     // only handle, description, and model.
     expect(within(editor).queryByRole('button', { name: '添加' })).toBeNull()
     expect(within(editor).queryByRole('button', { name: '移除' })).toBeNull()
-    expect(within(editor).queryByText(/频道成员/)).toBeNull()
+    expect(within(editor).queryByText(/项目成员/)).toBeNull()
     expect(within(editor).getByLabelText('名称')).toBeTruthy()
     fireEvent.change(within(editor).getByLabelText(/说明/), { target: { value: 'Edited description' } })
     fireEvent.click(within(editor).getByRole('button', { name: '保存' }))
@@ -514,7 +514,7 @@ describe('Team agent surfaces', () => {
 
 describe('Team archival surfaces', () => {
   it('archives an Agent from the row menu behind a destructive confirm', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
 
@@ -538,34 +538,34 @@ describe('Team archival surfaces', () => {
     await waitFor(() => {
       expect(b.archiveMember).toHaveBeenCalledWith(expect.objectContaining({ memberId: 'member:builder' }))
     })
-    await b.publishChannelUpdate()
+    await b.publishProjectUpdate()
     await waitFor(() => expect(b.view.queryByRole('button', { name: 'builder 的操作' })).toBeNull())
     await b.runtime.dispose()
   })
 
   it('replaces the rail empty claims with one error line when the connection drops', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
-    const readChannels = b.viewChannels.getMockImplementation()!
+    const readProjects = b.viewProjects.getMockImplementation()!
     const readMembers = b.members.getMockImplementation()!
-    await b.view.findByText('还没有频道')
+    await b.view.findByText('还没有项目')
     // The roster refresh the panels read on wake, here with an emptied roster.
     await b.changeSubscriptionsReady()
     b.members.mockResolvedValue({ ok: true, value: [] } as never)
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await b.view.findByText('还没有 Agent')
 
     // The Host connection drops: each Panel reports the failure on the rail,
     // and a failed load must not additionally read as an empty workspace. The
     // reads fail too, exactly as they do when the transport is gone.
-    b.viewChannels.mockResolvedValue({ ok: false, error: { message: 'transport down' } } as never)
+    b.viewProjects.mockResolvedValue({ ok: false, error: { message: 'transport down' } } as never)
     b.members.mockResolvedValue({ ok: false, error: { message: 'transport down' } } as never)
     b.failChanges()
     expect((await b.view.findAllByText('transport down')).length).toBeGreaterThanOrEqual(2)
-    expect(b.view.queryByText('还没有频道')).toBeNull()
+    expect(b.view.queryByText('还没有项目')).toBeNull()
     expect(b.view.queryByText('还没有 Agent')).toBeNull()
 
-    b.seedChannel({ channelRef: 'channel:recovery', workspaceId: 'w1', name: 'recovery', description: 'created while cut off', createdAtSequence: 2 })
-    b.viewChannels.mockImplementation(readChannels)
+    b.seedProject({ projectRef: 'project:recovery', workspaceId: 'w1', name: 'recovery', description: 'created while cut off', createdAtSequence: 2 })
+    b.viewProjects.mockImplementation(readProjects)
     b.members.mockImplementation(readMembers)
     b.recoverChanges()
     await b.view.findByRole('button', { name: '# recovery' })
@@ -573,25 +573,25 @@ describe('Team archival surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('archives a Channel from the row menu behind a destructive confirm', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+  it('archives a Project from the row menu behind a destructive confirm', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('# engineering')
 
     fireEvent.click(b.view.getByRole('button', { name: 'engineering 的操作' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: '归档频道' }))
-    expect(b.view.getByRole('dialog', { name: '归档频道：engineering' })).toBeTruthy()
-    expect(b.view.getByRole('dialog', { name: '归档频道：engineering' }).textContent).toContain('暂无恢复入口')
-    expect(b.archiveChannel).not.toHaveBeenCalled()
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: '归档项目' }))
+    expect(b.view.getByRole('dialog', { name: '归档项目：engineering' })).toBeTruthy()
+    expect(b.view.getByRole('dialog', { name: '归档项目：engineering' }).textContent).toContain('暂无恢复入口')
+    expect(b.archiveProject).not.toHaveBeenCalled()
     fireEvent.click(b.view.getByRole('button', { name: '取消' }))
-    expect(b.view.queryByRole('dialog', { name: '归档频道：engineering' })).toBeNull()
+    expect(b.view.queryByRole('dialog', { name: '归档项目：engineering' })).toBeNull()
     fireEvent.click(b.view.getByRole('button', { name: 'engineering 的操作' }))
-    fireEvent.click(await within(document.body).findByRole('menuitem', { name: '归档频道' }))
-    fireEvent.click(await b.view.findByRole('button', { name: /^归档频道$/ }))
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: '归档项目' }))
+    fireEvent.click(await b.view.findByRole('button', { name: /^归档项目$/ }))
     await waitFor(() => {
-      expect(b.archiveChannel).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'w1', channelRef: 'channel:engineering' }))
+      expect(b.archiveProject).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'w1', projectRef: 'project:engineering' }))
     })
-    await b.publishChannelUpdate()
+    await b.publishProjectUpdate()
     await waitFor(() => expect(b.view.queryByRole('button', { name: 'engineering 的操作' })).toBeNull())
     await b.runtime.dispose()
   })
@@ -599,7 +599,7 @@ describe('Team archival surfaces', () => {
 
 describe('Team member editor partial update payload', () => {
   it('states the model explicitly and leaves capabilities alone', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await b.view.findByText('builder')
     fireEvent.click(b.view.getByRole('button', { name: 'builder 的操作' }))

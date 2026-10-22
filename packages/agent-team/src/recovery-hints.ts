@@ -78,8 +78,8 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
     sentence: () => 'Drain the Thread with team_thread read and copy the next-write token it renders, or reuse the one your own last committed mutation rendered.',
   },
   {
-    kind: 'start_requires_channel',
-    sentence: () => 'start opens a new Thread: copy a channelRef from team_view, and use reply instead when you already hold a threadRef.',
+    kind: 'start_requires_project',
+    sentence: () => 'start opens a new Thread: copy a projectRef from team_view, and use reply instead when you already hold a threadRef.',
   },
   {
     kind: 'dm_requires_member',

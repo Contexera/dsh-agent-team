@@ -40,8 +40,8 @@ import type {
   AgentTeamActivityRef,
   AgentTeamActor,
   AgentTeamAgentMember,
-  AgentTeamChannel,
-  AgentTeamChannelRef,
+  AgentTeamProject,
+  AgentTeamProjectRef,
   AgentTeamChangeScope,
   AgentTeamClaim,
   AgentTeamHostActor,
@@ -78,11 +78,11 @@ const otherMemberId = 'member:protocol-other' as AgentTeamMemberId
 
 /**
  * Deterministic seed refs: the seeded ledger counts one ref per kind, so the
- * first Channel and the first two Threads in the seed take exactly these
+ * first Project and the first two Threads in the seed take exactly these
  * values, and every fixture below can pin them without knowing random ids.
  * `seedLedger` asserts each one so a seed-order change fails loudly.
  */
-const channelRef = 'channel:protocol-1' as AgentTeamChannelRef
+const projectRef = 'project:protocol-1' as AgentTeamProjectRef
 const humanThread = 'thread:protocol-1' as AgentTeamThreadRef
 const memberThread = 'thread:protocol-2' as AgentTeamThreadRef
 
@@ -101,17 +101,17 @@ const fixtureMember: AgentTeamAgentMember = {
   privateMemoryPath: '/tmp/protocol-member',
   state: 'enabled',
 }
-const fixtureChannel: AgentTeamChannel = {
-  channelRef,
+const fixtureProject: AgentTeamProject = {
+  projectRef,
   workspaceId: alpha,
   name: 'protocol',
-  description: 'Protocol seed Channel',
+  description: 'Protocol seed Project',
   createdAtSequence: 2,
   state: 'active',
 }
 const fixtureTask: AgentTeamTask = {
   taskRef: 'task:protocol-fixture' as AgentTeamTaskRef,
-  channelRef,
+  projectRef,
   threadRef: humanThread,
   status: 'in_progress',
   resolution: 'open',
@@ -137,18 +137,18 @@ const initialized: Op<'team/initialized'> = {
   data: { humanMemberId: human.memberId },
 }
 
-const channelCreated: Op<'team/channel-created'> = {
-  ...opBase('operation:protocol-02', 'request:protocol-channel-created', 2),
+const projectCreated: Op<'team/project-created'> = {
+  ...opBase('operation:protocol-02', 'request:protocol-project-created', 2),
   previousOperationId,
-  kind: 'team/channel-created',
-  data: { workspaceId: alpha, channel: fixtureChannel, memberIds: [memberId] },
+  kind: 'team/project-created',
+  data: { workspaceId: alpha, project: fixtureProject, memberIds: [memberId] },
 }
 
 const memberAdded: Op<'team/member-added'> = {
   ...opBase('operation:protocol-03', 'request:protocol-member-added', 3),
   previousOperationId,
   kind: 'team/member-added',
-  data: { member: fixtureMember, channelRefs: [] },
+  data: { member: fixtureMember, projectRefs: [] },
 }
 
 const memberSuspended: Op<'team/member-suspended'> = {
@@ -224,11 +224,11 @@ const memberSessionRecycled: Op<'team/member-session-recycled'> = {
   },
 }
 
-const channelUpdated: Op<'team/channel-updated'> = {
-  ...opBase('operation:protocol-11', 'request:protocol-channel-updated', 11),
+const projectUpdated: Op<'team/project-updated'> = {
+  ...opBase('operation:protocol-11', 'request:protocol-project-updated', 11),
   previousOperationId,
-  kind: 'team/channel-updated',
-  data: { workspaceId: alpha, channel: fixtureChannel },
+  kind: 'team/project-updated',
+  data: { workspaceId: alpha, project: fixtureProject },
 }
 
 const memberUpdated: Op<'team/member-updated'> = {
@@ -238,20 +238,20 @@ const memberUpdated: Op<'team/member-updated'> = {
   data: { member: fixtureMember },
 }
 
-const channelMemberAdded: Op<'team/channel-member-added'> = {
-  ...opBase('operation:protocol-13', 'request:protocol-channel-member-added', 13),
+const projectMemberAdded: Op<'team/project-member-added'> = {
+  ...opBase('operation:protocol-13', 'request:protocol-project-member-added', 13),
   previousOperationId,
-  kind: 'team/channel-member-added',
-  data: { workspaceId: alpha, channelRef, memberId },
+  kind: 'team/project-member-added',
+  data: { workspaceId: alpha, projectRef, memberId },
 }
 
-const channelMemberRemoved: Op<'team/channel-member-removed'> = {
-  ...opBase('operation:protocol-14', 'request:protocol-channel-member-removed', 14),
+const projectMemberRemoved: Op<'team/project-member-removed'> = {
+  ...opBase('operation:protocol-14', 'request:protocol-project-member-removed', 14),
   previousOperationId,
-  kind: 'team/channel-member-removed',
+  kind: 'team/project-member-removed',
   data: {
     workspaceId: alpha,
-    channelRef,
+    projectRef,
     memberId,
     claims: [],
     activities: [],
@@ -283,13 +283,13 @@ const memberWorkspaceLeft: Op<'team/member-workspace-left'> = {
   },
 }
 
-const channelArchived: Op<'team/channel-archived'> = {
-  ...opBase('operation:protocol-17', 'request:protocol-channel-archived', 17),
+const projectArchived: Op<'team/project-archived'> = {
+  ...opBase('operation:protocol-17', 'request:protocol-project-archived', 17),
   previousOperationId,
-  kind: 'team/channel-archived',
+  kind: 'team/project-archived',
   data: {
     workspaceId: alpha,
-    channel: { ...fixtureChannel, state: 'archived' },
+    project: { ...fixtureProject, state: 'archived' },
     claims: [],
     activities: [],
     tasks: [],
@@ -307,7 +307,7 @@ const messageSent: Op<'team/message-sent'> = {
     mentions: [],
     message: {
       messageRef: 'message:protocol-fixture-1' as AgentTeamMessageRef,
-      channelRef,
+      projectRef,
       threadRef: humanThread,
       sender: human.memberId,
       body: 'protocol fixture message',
@@ -330,7 +330,7 @@ const threadReplied: Op<'team/thread-replied'> = {
     mentions: [],
     message: {
       messageRef: 'message:protocol-fixture-2' as AgentTeamMessageRef,
-      channelRef,
+      projectRef,
       threadRef: humanThread,
       sender: human.memberId,
       body: 'protocol fixture reply',
@@ -469,7 +469,7 @@ const threadReadSnapshot: Op<'team/thread-read'> = {
     claims: [],
     anchor: {
       messageRef: 'message:protocol-legacy-anchor' as AgentTeamMessageRef,
-      channelRef,
+      projectRef,
       threadRef: humanThread,
       sender: human.memberId,
       body: 'legacy anchor without an envelope instant',
@@ -526,7 +526,7 @@ interface ProtocolRow {
   /** Same-request comparison plus committed-result mapping, or an explicit replay-only absence. */
   readonly retry: RetryCoverage | { readonly replayOnly: string }
   /** Which load stage may rewrite this kind: `normalize` on decode, `repair` from a prior projection. */
-  readonly legacy: { readonly normalize: 'none' | 'pre-receipt-stamp'; readonly repair: 'none' | 'channel-inbox-legacy-scope' }
+  readonly legacy: { readonly normalize: 'none' | 'pre-receipt-stamp'; readonly repair: 'none' | 'project-inbox-legacy-scope' }
   /** Declared scope and Inbox effect; `no-op` and `wake-all` are statements, not omissions. */
   readonly intent: { readonly scopes: 'wake-all' | 'no-op' | 'derived'; readonly inbox: 'delta' | 'none' }
 }
@@ -548,7 +548,7 @@ const collision = /was reused with a different operation or payload/
 interface LedgerInternals {
   readonly state: { readonly byRequest: Map<AgentTeamRequestId, AgentTeamOperation> }
   normalizeOperation(operation: AgentTeamOperation, occurrences: Map<AgentTeamMessageRef, string>, instants: Map<number, string>): AgentTeamOperation
-  repairLegacyChannelCleanup(operation: AgentTeamOperation, projection: unknown): AgentTeamOperation
+  repairLegacyProjectCleanup(operation: AgentTeamOperation, projection: unknown): AgentTeamOperation
 }
 
 const internals = (target: AgentTeamLedger): LedgerInternals => target as unknown as LedgerInternals
@@ -575,29 +575,29 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'wake-all', inbox: 'none' },
   },
-  'team/channel-created': {
-    stored: channelCreated,
+  'team/project-created': {
+    stored: projectCreated,
     legacyShapes: [],
     retry: {
       same: async () => {
-        const out = await ledger.createChannel({
-          requestId: channelCreated.requestId,
+        const out = await ledger.createProject({
+          requestId: projectCreated.requestId,
           actor: human,
-          workspaceId: channelCreated.data.workspaceId,
-          name: channelCreated.data.channel.name,
-          description: channelCreated.data.channel.description,
-          memberIds: channelCreated.data.memberIds,
+          workspaceId: projectCreated.data.workspaceId,
+          name: projectCreated.data.project.name,
+          description: projectCreated.data.project.description,
+          memberIds: projectCreated.data.memberIds,
         })
-        expect(out.value.channel.channelRef, 'the create mapper answers with the stored Channel identity').toBe(channelRef)
+        expect(out.value.project.projectRef, 'the create mapper answers with the stored Project identity').toBe(projectRef)
         return out
       },
-      changed: () => ledger.createChannel({
-        requestId: channelCreated.requestId,
+      changed: () => ledger.createProject({
+        requestId: projectCreated.requestId,
         actor: human,
-        workspaceId: channelCreated.data.workspaceId,
+        workspaceId: projectCreated.data.workspaceId,
         name: 'protocol-renamed',
-        description: channelCreated.data.channel.description,
-        memberIds: channelCreated.data.memberIds,
+        description: projectCreated.data.project.description,
+        memberIds: projectCreated.data.memberIds,
       }),
     },
     legacy: { normalize: 'none', repair: 'none' },
@@ -615,7 +615,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
           handle: memberAdded.data.member.handle,
           description: memberAdded.data.member.description,
           presetId: memberAdded.data.member.presetId,
-          channelRefs: memberAdded.data.channelRefs,
+          projectRefs: memberAdded.data.projectRefs,
           member: memberAdded.data.member,
         })
         expect(out.value.member.memberId, 'the add mapper answers with the stored Member').toBe(memberId)
@@ -628,7 +628,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         handle: memberAdded.data.member.handle,
         description: 'A different description',
         presetId: memberAdded.data.member.presetId,
-        channelRefs: memberAdded.data.channelRefs,
+        projectRefs: memberAdded.data.projectRefs,
         member: memberAdded.data.member,
       }),
     },
@@ -738,29 +738,29 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },
-  'team/channel-updated': {
-    stored: channelUpdated,
+  'team/project-updated': {
+    stored: projectUpdated,
     legacyShapes: [],
     retry: {
       same: async () => {
-        const out = await ledger.updateChannel({
-          requestId: channelUpdated.requestId,
+        const out = await ledger.updateProject({
+          requestId: projectUpdated.requestId,
           actor: human,
-          workspaceId: channelUpdated.data.workspaceId,
-          channelRef: channelUpdated.data.channel.channelRef,
-          name: channelUpdated.data.channel.name,
-          description: channelUpdated.data.channel.description,
+          workspaceId: projectUpdated.data.workspaceId,
+          projectRef: projectUpdated.data.project.projectRef,
+          name: projectUpdated.data.project.name,
+          description: projectUpdated.data.project.description,
         })
-        expect(out.value.channel.channelRef, 'the update mapper answers with the stored Channel identity').toBe(channelRef)
+        expect(out.value.project.projectRef, 'the update mapper answers with the stored Project identity').toBe(projectRef)
         return out
       },
-      changed: () => ledger.updateChannel({
-        requestId: channelUpdated.requestId,
+      changed: () => ledger.updateProject({
+        requestId: projectUpdated.requestId,
         actor: human,
-        workspaceId: channelUpdated.data.workspaceId,
-        channelRef: channelUpdated.data.channel.channelRef,
+        workspaceId: projectUpdated.data.workspaceId,
+        projectRef: projectUpdated.data.project.projectRef,
         name: 'protocol-renamed',
-        description: channelUpdated.data.channel.description,
+        description: projectUpdated.data.project.description,
       }),
     },
     legacy: { normalize: 'none', repair: 'none' },
@@ -792,18 +792,18 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },
-  'team/channel-member-added': {
-    stored: channelMemberAdded,
+  'team/project-member-added': {
+    stored: projectMemberAdded,
     legacyShapes: [],
-    retry: { replayOnly: 'retired request path: Channel membership is derived from participation now, so nothing writes it — the apply/validate branches stay for old-ledger replay' },
+    retry: { replayOnly: 'retired request path: Project membership is derived from participation now, so nothing writes it — the apply/validate branches stay for old-ledger replay' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },
-  'team/channel-member-removed': {
-    stored: channelMemberRemoved,
+  'team/project-member-removed': {
+    stored: projectMemberRemoved,
     legacyShapes: [],
-    retry: { replayOnly: 'retired request path: Channel membership is derived from participation now, so nothing writes it — the apply/validate branches stay for old-ledger replay' },
-    legacy: { normalize: 'none', repair: 'channel-inbox-legacy-scope' },
+    retry: { replayOnly: 'retired request path: Project membership is derived from participation now, so nothing writes it — the apply/validate branches stay for old-ledger replay' },
+    legacy: { normalize: 'none', repair: 'project-inbox-legacy-scope' },
     intent: { scopes: 'derived', inbox: 'delta' },
   },
   'team/member-workspace-joined': {
@@ -855,28 +855,28 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'delta' },
   },
-  'team/channel-archived': {
-    stored: channelArchived,
+  'team/project-archived': {
+    stored: projectArchived,
     legacyShapes: [],
     retry: {
       same: async () => {
-        const out = await ledger.archiveChannel({
-          requestId: channelArchived.requestId,
+        const out = await ledger.archiveProject({
+          requestId: projectArchived.requestId,
           actor: human,
-          workspaceId: channelArchived.data.workspaceId,
-          channelRef: channelArchived.data.channel.channelRef,
+          workspaceId: projectArchived.data.workspaceId,
+          projectRef: projectArchived.data.project.projectRef,
         })
-        expect(out.value.channel.channelRef, 'the archival mapper answers with the stored Channel').toBe(channelRef)
+        expect(out.value.project.projectRef, 'the archival mapper answers with the stored Project').toBe(projectRef)
         return out
       },
-      changed: () => ledger.archiveChannel({
-        requestId: channelArchived.requestId,
+      changed: () => ledger.archiveProject({
+        requestId: projectArchived.requestId,
         actor: human,
         workspaceId: gamma,
-        channelRef: channelArchived.data.channel.channelRef,
+        projectRef: projectArchived.data.project.projectRef,
       }),
     },
-    legacy: { normalize: 'none', repair: 'channel-inbox-legacy-scope' },
+    legacy: { normalize: 'none', repair: 'project-inbox-legacy-scope' },
     intent: { scopes: 'derived', inbox: 'delta' },
   },
   'team/message-sent': {
@@ -888,7 +888,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
           requestId: messageSent.requestId,
           actor: human,
           workspaceId: messageSent.data.workspaceId,
-          channelRef: messageSent.data.message.channelRef,
+          projectRef: messageSent.data.message.projectRef,
           body: messageSent.data.message.body,
           asTask: false,
         })
@@ -899,7 +899,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         requestId: messageSent.requestId,
         actor: human,
         workspaceId: messageSent.data.workspaceId,
-        channelRef: messageSent.data.message.channelRef,
+        projectRef: messageSent.data.message.projectRef,
         body: 'a different body under the same request id',
         asTask: false,
       }),
@@ -1130,7 +1130,7 @@ function claimRetry(claim: Op<'team/claim-created' | 'team/claim-done' | 'team/c
   }
 }
 
-/** One Channel, one enabled Member, and two followed taskless Threads — the projection the fixtures point at. */
+/** One Project, one enabled Member, and two followed taskless Threads — the projection the fixtures point at. */
 async function seedLedger(): Promise<void> {
   const ctx = new Context()
   await ctx.plugin(Storage)
@@ -1157,25 +1157,25 @@ async function seedLedger(): Promise<void> {
     handle: memberHandle,
     description: fixtureMember.description,
     presetId: fixtureMember.presetId,
-    channelRefs: [],
+    projectRefs: [],
     member: fixtureMember,
   })
-  const created = committedValue(await ledger.createChannel({
-    requestId: requestId('seed:create-channel'),
+  const created = committedValue(await ledger.createProject({
+    requestId: requestId('seed:create-project'),
     actor: human,
     workspaceId: alpha,
-    name: fixtureChannel.name,
-    description: fixtureChannel.description,
+    name: fixtureProject.name,
+    description: fixtureProject.description,
     memberIds: [memberId],
   }))
-  expect(created.channel.channelRef, 'seed Channel must take the deterministic ref the fixtures pin').toBe(channelRef)
+  expect(created.project.projectRef, 'seed Project must take the deterministic ref the fixtures pin').toBe(projectRef)
   const fromHuman = committedValue(await ledger.sendMessage({
-    requestId: requestId('seed:human-message'), actor: human, workspaceId: alpha, channelRef, body: 'seed human thread', asTask: false,
+    requestId: requestId('seed:human-message'), actor: human, workspaceId: alpha, projectRef, body: 'seed human thread', asTask: false,
   }))
   if (fromHuman.kind !== 'committed') throw new Error(`seed message committed as '${fromHuman.kind}'`)
   expect(fromHuman.thread.threadRef, 'seed Thread must take the deterministic ref the fixtures pin').toBe(humanThread)
   const fromMember = committedValue(await ledger.sendMessage({
-    requestId: requestId('seed:member-message'), actor: memberActor, workspaceId: alpha, channelRef, body: 'seed member thread', asTask: false,
+    requestId: requestId('seed:member-message'), actor: memberActor, workspaceId: alpha, projectRef, body: 'seed member thread', asTask: false,
   }))
   if (fromMember.kind !== 'committed') throw new Error(`seed message committed as '${fromMember.kind}'`)
   expect(fromMember.thread.threadRef, 'seed Thread must take the deterministic ref the fixtures pin').toBe(memberThread)
@@ -1207,19 +1207,19 @@ describe('operation protocol coverage', () => {
     }
   })
 
-  it.each(Object.entries(protocol))('the Project spelling of %s decodes to the same record', (kind, row) => {
+  it.each(Object.entries(protocol))('the legacy Channel spelling of %s decodes to the same record', (kind, row) => {
     for (const shape of [row.stored, ...row.legacyShapes]) {
-      const projectSpelled: unknown = JSON.parse(JSON.stringify(shape)
-        .replace(/"team\/channel-/g, '"team/project-')
-        .replace(/"channel(Ref|Refs)?":/g, '"project$1":')
-        .replace(/"channel:/g, '"project:'))
-      expect(agentTeamOperationSchema.parse(projectSpelled), `${kind}: both spellings must replay as one record`).toEqual(agentTeamOperationSchema.parse(shape))
+      const channelSpelled: unknown = JSON.parse(JSON.stringify(shape)
+        .replace(/"team\/project-/g, '"team/channel-')
+        .replace(/"project(Ref|Refs)?":/g, '"channel$1":')
+        .replace(/"project:/g, '"channel:'))
+      expect(agentTeamOperationSchema.parse(channelSpelled), `${kind}: both spellings must replay as one record`).toEqual(agentTeamOperationSchema.parse(shape))
     }
   })
 
   it('rejects a record that holds both spellings of one field', () => {
-    const stored = row('team/channel-member-added').stored as Extract<AgentTeamOperation, { kind: 'team/channel-member-added' }>
-    const ambiguous = { ...stored, data: { ...stored.data, projectRef: stored.data.channelRef } }
+    const stored = row('team/project-member-added').stored as Extract<AgentTeamOperation, { kind: 'team/project-member-added' }>
+    const ambiguous = { ...stored, data: { ...stored.data, channelRef: stored.data.projectRef } }
     expect(agentTeamOperationSchema.safeParse(ambiguous).success, 'two spellings of one field must not silently merge').toBe(false)
   })
 
@@ -1238,7 +1238,7 @@ describe('operation protocol coverage', () => {
 
   it.each(Object.entries(protocol))('declared legacy load policy holds for %s', (kind, row) => {
     const normalize = (shape: AgentTeamOperation): AgentTeamOperation => internals(ledger).normalizeOperation(shape, new Map(), new Map())
-    const repair = (shape: AgentTeamOperation): AgentTeamOperation => internals(ledger).repairLegacyChannelCleanup(shape, internals(ledger).state)
+    const repair = (shape: AgentTeamOperation): AgentTeamOperation => internals(ledger).repairLegacyProjectCleanup(shape, internals(ledger).state)
     // The current stored shape is never rewritten on decode: normalization only
     // touches the pre-receipt shapes of an older format.
     expect(normalize(row.stored), `${kind}: normalize must leave the current stored shape untouched`).toEqual(row.stored)
@@ -1255,8 +1255,8 @@ describe('operation protocol coverage', () => {
     }
     for (const shape of [row.stored, ...row.legacyShapes]) {
       const fixed = repair(shape)
-      if (row.legacy.repair === 'channel-inbox-legacy-scope') {
-        expect(fixed, `${kind}: the legacy channel-scoped inbox must be repaired to the current Thread scope`).not.toEqual(shape)
+      if (row.legacy.repair === 'project-inbox-legacy-scope') {
+        expect(fixed, `${kind}: the legacy project-scoped inbox must be repaired to the current Thread scope`).not.toEqual(shape)
       } else {
         expect(fixed, `${kind}: prior-projection repair must leave this kind untouched`).toEqual(shape)
       }
@@ -1275,7 +1275,7 @@ describe('operation protocol coverage', () => {
         expect(scopes, `${kind}: derived scopes must stay scope objects`).not.toBeUndefined()
         const derived = scopes as readonly AgentTeamChangeScope[]
         expect(derived.length, `${kind}: a derived-scopes kind must wake at least one scope on this Team`).toBeGreaterThan(0)
-        for (const scope of derived) expect(['workspace', 'channel', 'thread'], `${kind}: scope kinds`).toContain(scope.kind)
+        for (const scope of derived) expect(['workspace', 'project', 'thread'], `${kind}: scope kinds`).toContain(scope.kind)
       }
       expect('inbox' in parsed.data, `${kind}: declared Inbox intent`).toBe(row.intent.inbox === 'delta')
     }

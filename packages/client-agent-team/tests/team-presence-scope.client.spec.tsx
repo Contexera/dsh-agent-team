@@ -10,29 +10,29 @@ beforeEach(() => { localStorage.clear() })
 
 describe('presence-scope wake wiring (issue #21)', () => {
   it('refreshes member rows on a presence wake without catalog or Inbox refetches', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await waitFor(() => expect(b.members.mock.calls.length).toBeGreaterThanOrEqual(1))
-    await waitFor(() => expect(b.viewChannels.mock.calls.length).toBeGreaterThanOrEqual(1))
+    await waitFor(() => expect(b.viewProjects.mock.calls.length).toBeGreaterThanOrEqual(1))
     await new Promise(resolve => setTimeout(resolve, 300))
     const inboxCalls = b.inbox.mock.calls.length
-    const channelCalls = b.viewChannels.mock.calls.length
+    const projectCalls = b.viewProjects.mock.calls.length
     const memberCalls = b.members.mock.calls.length
 
     b.publishPresence()
     await waitFor(() => expect(b.members.mock.calls.length).toBeGreaterThan(memberCalls))
     await new Promise(resolve => setTimeout(resolve, 300))
-    expect(b.viewChannels.mock.calls.length).toBe(channelCalls)
+    expect(b.viewProjects.mock.calls.length).toBe(projectCalls)
     expect(b.inbox.mock.calls.length).toBe(inboxCalls)
 
     // A workspace commit still refreshes the sidebar catalog.
-    b.publishChannelUpdate()
-    await waitFor(() => expect(b.viewChannels.mock.calls.length).toBeGreaterThan(channelCalls))
+    b.publishProjectUpdate()
+    await waitFor(() => expect(b.viewProjects.mock.calls.length).toBeGreaterThan(projectCalls))
     await b.runtime.dispose()
   })
 
   it('presence wake on an open Thread refreshes only the roster, never the view', async () => {
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seededMessages: [{ body: '开工任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -40,7 +40,7 @@ describe('presence-scope wake wiring (issue #21)', () => {
     await b.view.findByRole('heading', { name: 'Task #1' })
     await new Promise(resolve => setTimeout(resolve, 300))
     const inboxCalls = b.inbox.mock.calls.length
-    const channelCalls = b.viewChannels.mock.calls.length
+    const projectCalls = b.viewProjects.mock.calls.length
     const memberCalls = b.members.mock.calls.length
 
     // A presence wake moves member rows only (issue 03, criterion 4): the
@@ -50,7 +50,7 @@ describe('presence-scope wake wiring (issue #21)', () => {
     b.publishPresence()
     await waitFor(() => expect(b.members.mock.calls.length).toBeGreaterThan(memberCalls))
     await new Promise(resolve => setTimeout(resolve, 300))
-    expect(b.viewChannels.mock.calls.length).toBe(channelCalls)
+    expect(b.viewProjects.mock.calls.length).toBe(projectCalls)
     expect(b.inbox.mock.calls.length).toBe(inboxCalls)
     await b.runtime.dispose()
   })

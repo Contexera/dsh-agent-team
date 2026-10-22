@@ -4,9 +4,9 @@ import type {
   AgentTeamAgentMember,
   AgentTeamAgentMemberStatus,
   AgentTeamAttachmentId,
-  AgentTeamChannel,
-  AgentTeamChannelMembership,
-  AgentTeamChannelRef,
+  AgentTeamProject,
+  AgentTeamProjectMembership,
+  AgentTeamProjectRef,
   AgentTeamClaim,
   AgentTeamClaimActivity,
   AgentTeamClaimRef,
@@ -41,8 +41,8 @@ export interface AgentTeamOperationReceipt {
   readonly occurredAt: string
 }
 
-/** Human intent to create a Workspace Channel with its initial Members. */
-export interface AgentTeamCreateChannelRequest {
+/** Human intent to create a Workspace Project with its initial Members. */
+export interface AgentTeamCreateProjectRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
   readonly name: string
@@ -51,14 +51,14 @@ export interface AgentTeamCreateChannelRequest {
   readonly memberIds?: readonly AgentTeamMemberId[]
 }
 
-/** Result of creating or idempotently resolving a Channel and its initial Members. */
-export interface AgentTeamCreateChannelResult {
+/** Result of creating or idempotently resolving a Project and its initial Members. */
+export interface AgentTeamCreateProjectResult {
   readonly receipt: AgentTeamOperationReceipt
-  readonly channel: AgentTeamChannel
+  readonly project: AgentTeamProject
   readonly memberIds: readonly AgentTeamMemberId[]
 }
 
-/** Human intent to provision one team-managed Agent Member with initial Channels. */
+/** Human intent to provision one team-managed Agent Member with initial Projects. */
 export interface AgentTeamAddMemberRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
@@ -70,37 +70,37 @@ export interface AgentTeamAddMemberRequest {
   readonly model?: AgentTeamModelSelection
   /** Durable capability intent; see AgentTeamMemberCapabilities. */
   readonly capabilities?: AgentTeamMemberCapabilities
-  /** Existing Channels in this Workspace; may be empty — the Member joins Channels later and stays reachable through its DM view. */
-  readonly channelRefs: readonly AgentTeamChannelRef[]
+  /** Existing Projects in this Workspace; may be empty — the Member joins Projects later and stays reachable through its DM view. */
+  readonly projectRefs: readonly AgentTeamProjectRef[]
 }
 
-/** Human intent to rename one Channel's display facts. */
-export interface AgentTeamUpdateChannelRequest {
+/** Human intent to rename one Project's display facts. */
+export interface AgentTeamUpdateProjectRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly name: string
   /** Display purpose text; may be empty, matching creation. */
   readonly description: string
 }
 
-/** Result of updating or idempotently resolving one Channel's display facts. */
-export interface AgentTeamUpdateChannelResult {
+/** Result of updating or idempotently resolving one Project's display facts. */
+export interface AgentTeamUpdateProjectResult {
   readonly receipt: AgentTeamOperationReceipt
-  readonly channel: AgentTeamChannel
+  readonly project: AgentTeamProject
 }
 
-/** Human intent to archive one Channel: hidden everywhere, facts kept. */
-export interface AgentTeamArchiveChannelRequest {
+/** Human intent to archive one Project: hidden everywhere, facts kept. */
+export interface AgentTeamArchiveProjectRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
 }
 
-/** Result of Channel archival: hidden with every fact recoverable; active Claims on its Threads were released. */
-export interface AgentTeamArchiveChannelResult {
+/** Result of Project archival: hidden with every fact recoverable; active Claims on its Threads were released. */
+export interface AgentTeamArchiveProjectResult {
   readonly receipt: AgentTeamOperationReceipt
-  readonly channel: AgentTeamChannel
+  readonly project: AgentTeamProject
   readonly releasedClaims: readonly AgentTeamClaim[]
 }
 
@@ -172,18 +172,18 @@ export interface AgentTeamRecoverMemberResult {
   readonly status: AgentTeamAgentMemberStatus
 }
 
-/** Human intent to remove one Agent Member from one Channel. */
-export interface AgentTeamRemoveChannelMemberRequest {
+/** Human intent to remove one Agent Member from one Project. */
+export interface AgentTeamRemoveProjectMemberRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly memberId: AgentTeamMemberId
 }
 
-/** Result of Channel-scoped member cleanup. */
-export interface AgentTeamRemoveChannelMemberResult {
+/** Result of Project-scoped member cleanup. */
+export interface AgentTeamRemoveProjectMemberResult {
   readonly receipt: AgentTeamOperationReceipt
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly memberId: AgentTeamMemberId
   readonly releasedClaims: readonly AgentTeamClaim[]
   readonly removedAttention: readonly AgentTeamThreadAttentionKey[]
@@ -217,17 +217,17 @@ export interface AgentTeamLeaveWorkspaceResult {
   readonly removedAttention: readonly AgentTeamThreadAttentionKey[]
 }
 
-/** Human intent to add one Agent Member to one Channel. */
-export interface AgentTeamJoinChannelRequest {
+/** Human intent to add one Agent Member to one Project. */
+export interface AgentTeamJoinProjectRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly memberId: AgentTeamMemberId
 }
 
-export interface AgentTeamJoinChannelResult {
+export interface AgentTeamJoinProjectResult {
   readonly receipt: AgentTeamOperationReceipt
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly memberId: AgentTeamMemberId
 }
 
@@ -235,7 +235,7 @@ export interface AgentTeamJoinChannelResult {
 export interface AgentTeamSendMessageRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly body: string
   readonly recipients?: readonly AgentTeamMemberId[]
   /** Uploaded attachments to reference; the Host resolves and verifies each id. */
@@ -391,7 +391,7 @@ export interface AgentTeamConfirmationRequired {
   readonly kind: 'confirmation_required'
   readonly confirmationToken: AgentTeamConfirmationToken
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly recipients: readonly AgentTeamMemberId[]
   readonly taskRef?: AgentTeamTaskRef
   readonly threadRef?: AgentTeamThreadRef
@@ -427,7 +427,7 @@ export interface AgentTeamMemberNotFollowing {
   readonly kind: 'member_not_following'
   readonly memberIds: readonly AgentTeamMemberId[]
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly taskRef?: AgentTeamTaskRef
   readonly threadRef?: AgentTeamThreadRef
   readonly revision?: number
@@ -608,11 +608,11 @@ export interface AgentTeamInboxActor {
 /** One Thread summary containing no Message bodies. */
 export interface AgentTeamInboxItem {
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
-  /** The owning Channel's display name, so a row renders without a per-row Channel view. */
-  readonly channelName?: string
+  readonly projectRef: AgentTeamProjectRef
+  /** The owning Project's display name, so a row renders without a per-row Project view. */
+  readonly projectName?: string
   readonly task?: AgentTeamTask
-  /** The Task's ordinal inside its home Channel; absent on taskless Threads. */
+  /** The Task's ordinal inside its home Project; absent on taskless Threads. */
   readonly taskNumber?: number
   readonly thread: AgentTeamThread
   readonly unreadCount: number
@@ -726,17 +726,17 @@ export interface AgentTeamViewItem {
   readonly lastActivityAt: string
 }
 
-/** One in-flight Task Thread for the team_view「活跃 task thread」radar: claimed, moving work, so an unexpected edit or a Task a reader was about to pick up resolves to "someone is on this". Unlike the Inbox's 「最近活跃」 slice, admission is not participation: every active Task Thread in the reader's authorized Channels appears, including Threads still holding unread. */
+/** One in-flight Task Thread for the team_view「活跃 task thread」radar: claimed, moving work, so an unexpected edit or a Task a reader was about to pick up resolves to "someone is on this". Unlike the Inbox's 「最近活跃」 slice, admission is not participation: every active Task Thread in the reader's authorized Projects appears, including Threads still holding unread. */
 export interface AgentTeamActiveTaskThread {
   readonly taskRef: AgentTeamTaskRef
   readonly threadRef: AgentTeamThreadRef
-  readonly channelRef: AgentTeamChannelRef
-  /** The Task's ordinal inside its home Channel. */
+  readonly projectRef: AgentTeamProjectRef
+  /** The Task's ordinal inside its home Project. */
   readonly taskNumber?: number
   readonly status: AgentTeamLiveTaskStatus
   /** The Thread's opening line, trimmed and capped at 120 characters — the same bound the Inbox row uses. */
   readonly subject: string
-  /** Owners of the Task's live Claims, in claim order, deduped — the same rule the Inbox row and Channel feed use. */
+  /** Owners of the Task's live Claims, in claim order, deduped — the same rule the Inbox row and Project feed use. */
   readonly members: readonly AgentTeamInboxActor[]
   /** Instant of the newest fact on this Thread. */
   readonly lastActivityAt: string
@@ -744,7 +744,7 @@ export interface AgentTeamActiveTaskThread {
 
 export interface AgentTeamViewRequest {
   readonly workspaceId: WorkspaceId
-  readonly channelRef?: AgentTeamChannelRef
+  readonly projectRef?: AgentTeamProjectRef
   readonly threadRef?: AgentTeamThreadRef
   readonly limit?: number
   readonly cursor?: number
@@ -761,14 +761,14 @@ export interface AgentTeamView {
   readonly humanMemberId: AgentTeamMemberId
   /** Every Workspace the viewing Member participates in — the address book for the optional `workspace` selector; `default` marks the Workspace its Session roots in. */
   readonly workspaces: readonly AgentTeamWorkspaceParticipation[]
-  readonly channels: readonly AgentTeamChannel[]
-  readonly members: readonly AgentTeamChannelMembership[]
+  readonly projects: readonly AgentTeamProject[]
+  readonly members: readonly AgentTeamProjectMembership[]
   /** Catalog of the response's scope: visible Tasks, their Threads, ordinals, radar rows, and Claims. With `includeCatalog` this is the whole request scope; otherwise only the Tasks and Threads the fact page and named Thread carry. */
   readonly tasks: readonly AgentTeamTask[]
   readonly threads: readonly AgentTeamThread[]
   readonly taskNumbers: readonly { readonly taskRef: AgentTeamTaskRef; readonly taskNumber: number }[]
   readonly items: readonly AgentTeamViewItem[]
-  /** The「活跃 task thread」radar: in_progress / in_review Task Threads of the response's scope, newest activity first. With `includeCatalog` that is every such Thread in the reader's authorized Channels of this Workspace; otherwise only those the catalog carries. Independent of participation and unread state, so re-entry and pre-claim checks do not mistake in-flight work for a conflict. */
+  /** The「活跃 task thread」radar: in_progress / in_review Task Threads of the response's scope, newest activity first. With `includeCatalog` that is every such Thread in the reader's authorized Projects of this Workspace; otherwise only those the catalog carries. Independent of participation and unread state, so re-entry and pre-claim checks do not mistake in-flight work for a conflict. */
   readonly activeTaskThreads: readonly AgentTeamActiveTaskThread[]
   readonly claims: readonly AgentTeamClaim[]
   readonly activities: readonly AgentTeamActivity[]
@@ -787,7 +787,7 @@ export interface AgentTeamWorkspaceParticipation {
 /** One projection slice a Client can wait on; events wake only matching waiters. */
 export type AgentTeamChangeScope =
   | { readonly kind: 'workspace'; readonly workspaceId: WorkspaceId }
-  | { readonly kind: 'channel'; readonly channelRef: AgentTeamChannelRef }
+  | { readonly kind: 'project'; readonly projectRef: AgentTeamProjectRef }
   | { readonly kind: 'thread'; readonly threadRef: AgentTeamThreadRef }
   /** Presence-only lifecycle wake (Agent running/idle/failure) with no ledger commit: members/presence subscribers refresh, while workspace catalog and scope-less Inbox subscribers stay parked. */
   | { readonly kind: 'presence'; readonly workspaceId: WorkspaceId }
@@ -809,7 +809,7 @@ export interface AgentTeamStatus {
   readonly initialized: true
   readonly sequence: number
   readonly operationCount: number
-  readonly channelCount: number
+  readonly projectCount: number
   readonly agentMemberCount: number
   readonly humanMemberId: AgentTeamMemberId
 }

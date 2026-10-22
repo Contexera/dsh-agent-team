@@ -9,7 +9,7 @@ export interface TimelineScroll {
   scrollToBottom: () => void
 }
 
-/** Shared by Channel and Thread: follow new facts only while pinned to the bottom, and keep prepended history stable. The content key must change whenever rendered facts change. */
+/** Shared by Project and Thread: follow new facts only while pinned to the bottom, and keep prepended history stable. The content key must change whenever rendered facts change. */
 export function useTimelineScroll(contentKey: string): TimelineScroll {
   const ref = useRef<HTMLElement>(null)
   const pinnedRef = useRef(true)

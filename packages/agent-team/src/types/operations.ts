@@ -2,8 +2,8 @@ import type { SessionId, SessionLogOffset, SessionSeq } from "@deepseek-ai/dsh-s
 import type { WorkspaceId } from "@deepseek-ai/dsh-workspace"
 import type {
   AgentTeamAgentMember,
-  AgentTeamChannel,
-  AgentTeamChannelRef,
+  AgentTeamProject,
+  AgentTeamProjectRef,
   AgentTeamContextCheckpointRef,
   AgentTeamHostActor,
   AgentTeamOperationBase,
@@ -32,22 +32,22 @@ export interface AgentTeamInitializedOperation extends AgentTeamOperationBase {
   }
 }
 
-/** Durable creation of one Channel with its atomic initial memberships. */
-export interface AgentTeamChannelCreatedOperation extends AgentTeamOperationBase {
-  readonly kind: 'team/channel-created'
+/** Durable creation of one Project with its atomic initial memberships. */
+export interface AgentTeamProjectCreatedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-created'
   readonly data: {
     readonly workspaceId: WorkspaceId
-    readonly channel: AgentTeamChannel
+    readonly project: AgentTeamProject
     readonly memberIds: readonly AgentTeamMemberId[]
   }
 }
 
-/** Durable Agent Member creation with optional initial Channel memberships. */
+/** Durable Agent Member creation with optional initial Project memberships. */
 export interface AgentTeamMemberAddedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-added'
   readonly data: {
     readonly member: AgentTeamAgentMember
-    readonly channelRefs: readonly AgentTeamChannelRef[]
+    readonly projectRefs: readonly AgentTeamProjectRef[]
   }
 }
 
@@ -132,12 +132,12 @@ export interface AgentTeamMemberSessionRecycledOperation extends AgentTeamOperat
   }
 }
 
-/** Durable Human rename of one Channel's display facts; identity refs never change. */
-export interface AgentTeamChannelUpdatedOperation extends AgentTeamOperationBase {
-  readonly kind: 'team/channel-updated'
+/** Durable Human rename of one Project's display facts; identity refs never change. */
+export interface AgentTeamProjectUpdatedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-updated'
   readonly data: {
     readonly workspaceId: WorkspaceId
-    readonly channel: AgentTeamChannel
+    readonly project: AgentTeamProject
   }
 }
 
@@ -147,22 +147,22 @@ export interface AgentTeamMemberUpdatedOperation extends AgentTeamOperationBase 
   readonly data: { readonly member: AgentTeamAgentMember }
 }
 
-/** Durable addition of one Agent Member to one Channel. */
-export interface AgentTeamChannelMemberAddedOperation extends AgentTeamOperationBase {
-  readonly kind: 'team/channel-member-added'
+/** Durable addition of one Agent Member to one Project. */
+export interface AgentTeamProjectMemberAddedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-member-added'
   readonly data: {
     readonly workspaceId: WorkspaceId
-    readonly channelRef: AgentTeamChannelRef
+    readonly projectRef: AgentTeamProjectRef
     readonly memberId: AgentTeamMemberId
   }
 }
 
-/** Durable removal of one Agent Member from one Channel and Channel-scoped cleanup. */
-export interface AgentTeamChannelMemberRemovedOperation extends AgentTeamOperationBase {
-  readonly kind: 'team/channel-member-removed'
+/** Durable removal of one Agent Member from one Project and Project-scoped cleanup. */
+export interface AgentTeamProjectMemberRemovedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-member-removed'
   readonly data: {
     readonly workspaceId: WorkspaceId
-    readonly channelRef: AgentTeamChannelRef
+    readonly projectRef: AgentTeamProjectRef
     readonly memberId: AgentTeamMemberId
   } & AgentTeamReleaseSnapshot
 }
@@ -185,12 +185,12 @@ export interface AgentTeamMemberWorkspaceLeftOperation extends AgentTeamOperatio
   } & AgentTeamReleaseSnapshot
 }
 
-/** Durable archival of one Channel: it and its Threads leave every surface while facts stay recoverable. Every active Claim on its Threads releases (any owner) and affected Members' Attention and markers clear, so no Task stays stuck in progress and no phantom unread remains. */
-export interface AgentTeamChannelArchivedOperation extends AgentTeamOperationBase {
-  readonly kind: 'team/channel-archived'
+/** Durable archival of one Project: it and its Threads leave every surface while facts stay recoverable. Every active Claim on its Threads releases (any owner) and affected Members' Attention and markers clear, so no Task stays stuck in progress and no phantom unread remains. */
+export interface AgentTeamProjectArchivedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-archived'
   readonly data: {
     readonly workspaceId: WorkspaceId
-    readonly channel: AgentTeamChannel
+    readonly project: AgentTeamProject
   } & AgentTeamReleaseSnapshot
 }
 
@@ -332,7 +332,7 @@ export interface AgentTeamMemberRemovedOperation extends AgentTeamOperationBase 
   readonly data: { readonly member: AgentTeamAgentMember } & AgentTeamReleaseSnapshot
 }
 
-/** Durable audit record of one Member-to-Member direct message. A DM is pure delivery: no Channel/Thread/revision, Inbox attention, or markers. The ledger keeps it for audit, idempotent retries, and post-compaction traceability; the wake is a transient runtime effect. */
+/** Durable audit record of one Member-to-Member direct message. A DM is pure delivery: no Project/Thread/revision, Inbox attention, or markers. The ledger keeps it for audit, idempotent retries, and post-compaction traceability; the wake is a transient runtime effect. */
 export interface AgentTeamDmSentOperation extends AgentTeamOperationBase {
   readonly kind: 'team/dm-sent'
   readonly data: {
@@ -346,7 +346,7 @@ export interface AgentTeamDmSentOperation extends AgentTeamOperationBase {
 /** Closed union of durable Agent Team operations. */
 export type AgentTeamOperation =
   | AgentTeamInitializedOperation
-  | AgentTeamChannelCreatedOperation
+  | AgentTeamProjectCreatedOperation
   | AgentTeamMemberAddedOperation
   | AgentTeamMemberSuspendedOperation
   | AgentTeamMemberResumedOperation
@@ -356,13 +356,13 @@ export type AgentTeamOperation =
   | AgentTeamMemberSessionRenewedOperation
   | AgentTeamMemberSessionRolledOverOperation
   | AgentTeamMemberSessionRecycledOperation
-  | AgentTeamChannelUpdatedOperation
+  | AgentTeamProjectUpdatedOperation
   | AgentTeamMemberUpdatedOperation
-  | AgentTeamChannelMemberAddedOperation
-  | AgentTeamChannelMemberRemovedOperation
+  | AgentTeamProjectMemberAddedOperation
+  | AgentTeamProjectMemberRemovedOperation
   | AgentTeamMemberWorkspaceJoinedOperation
   | AgentTeamMemberWorkspaceLeftOperation
-  | AgentTeamChannelArchivedOperation
+  | AgentTeamProjectArchivedOperation
   | AgentTeamMessageSentOperation
   | AgentTeamThreadRepliedOperation
   | AgentTeamThreadPromotedOperation

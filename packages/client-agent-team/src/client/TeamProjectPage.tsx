@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { AgentTeamClientMemberStatus, AgentTeamChannelRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamSendMessageRequest, AgentTeamTask, AgentTeamView, AgentTeamViewItem,
+import type { AgentTeamClientMemberStatus, AgentTeamProjectRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamSendMessageRequest, AgentTeamTask, AgentTeamView, AgentTeamViewItem,
   AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -9,7 +9,7 @@ import type { TeamConversationProps } from './slots.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
-import { TeamChannelPanel } from './TeamChannelPanel.tsx'
+import { TeamProjectPanel } from './TeamProjectPanel.tsx'
 import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
 import { TeamMessage } from './TeamMessage.tsx'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
@@ -20,18 +20,18 @@ import { TeamStateDot } from './TeamStateDot.tsx'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
-import { rosterChannelName, rosterMember } from './refs.ts'
+import { rosterProjectName, rosterMember } from './refs.ts'
 import { chunkRunsWithDays, isRunGap } from './team-separators.ts'
-import channelCss from './channel.module.css'
+import projectCss from './project.module.css'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
 
-interface TeamChannelPageProps {
+interface TeamProjectPageProps {
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
-  readonly loadChannels: TeamConversationProps['loadChannels']
+  readonly loadProjects: TeamConversationProps['loadProjects']
   readonly subscribeChanges: TeamConversationProps['subscribeChanges']
   readonly loadMembers: TeamConversationProps['loadMembers']
   /** The Human's own unread per Thread: the Host's three-class judgement, never a Client guess. */
@@ -46,7 +46,7 @@ interface TeamChannelPageProps {
   readonly reply: TeamConversationProps['reply']
   readonly promoteThread: TeamConversationProps['promoteThread']
   readonly selectThread: TeamConversationProps['selectThread']
-  readonly selectChannel: TeamConversationProps['selectChannel']
+  readonly selectProject: TeamConversationProps['selectProject']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
   readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
@@ -55,7 +55,7 @@ interface TeamChannelPageProps {
 }
 
 /** Fresh window is authoritative for every Message it covers; older loaded Messages are retained. */
-function mergeChannelView(current: AgentTeamView, fresh: AgentTeamView): AgentTeamView {
+function mergeProjectView(current: AgentTeamView, fresh: AgentTeamView): AgentTeamView {
   const freshRefs = new Set(fresh.items.map(item => item.message.messageRef))
   const items = [...current.items.filter(item => !freshRefs.has(item.message.messageRef)), ...fresh.items]
     .sort((left, right) => left.message.sequence - right.message.sequence)
@@ -92,7 +92,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvatarUrl, loadChannels, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamChannelPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
@@ -110,12 +110,12 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   // The surface owns the panel-width variable; a drag writes it there so this page never re-renders.
   const [panelSurface, setPanelSurface] = useState<HTMLElement | null>(null)
   // The draft cache outlives this page across view switches; the composer owns the subscription so typing never re-renders the timeline.
-  const draftKey: TeamDraftKey = `channel:${channelRef}`
+  const draftKey: TeamDraftKey = `project:${projectRef}`
   const mountedRef = useRef(false)
   // True after the first load; later refreshes keep the rendered timeline.
   const loadedRef = useRef(false)
   const refreshSequenceRef = useRef(0)
-  const channelLastItem = view?.items[view.items.length - 1]
+  const projectLastItem = view?.items[view.items.length - 1]
   const tabIdPrefix = useId()
   const feedTabRef = useRef<HTMLButtonElement>(null)
   const boardTabRef = useRef<HTMLButtonElement>(null)
@@ -142,15 +142,15 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   }
   // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here.
   const openRef = (ref: string): void => {
-    if (ref.startsWith('channel:')) {
-      if (ref !== channelRef) selectChannel(ref as AgentTeamChannelRef)
+    if (ref.startsWith('project:')) {
+      if (ref !== projectRef) selectProject(ref as AgentTeamProjectRef)
       return
     }
     if (ref.startsWith('thread:')) {
       const match = view?.items.find(item => item.thread.threadRef === ref)
       if (match !== undefined) {
         if (match.task === undefined) { setPanelThreadRef(match.thread.threadRef); return }
-        selectThread(match.thread.threadRef, channelRef, match.task.taskRef, match.taskNumber)
+        selectThread(match.thread.threadRef, projectRef, match.task.taskRef, match.taskNumber)
         return
       }
       jumpToThread(resolveThreadRefs, workspaceId, ref as AgentTeamThreadRef, selectThread)
@@ -159,7 +159,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     if (ref.startsWith('task:')) {
       const match = view?.items.find(item => item.task?.taskRef === ref)
       if (match !== undefined) {
-        selectThread(match.thread.threadRef, channelRef, match.task?.taskRef, match.taskNumber)
+        selectThread(match.thread.threadRef, projectRef, match.task?.taskRef, match.taskNumber)
         return
       }
       jumpToTaskThread(resolveTaskRefs, workspaceId, ref as AgentTeamTaskRef, selectThread)
@@ -170,13 +170,13 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   const lookupThreadRefs = hostThreadRefLookup(resolveThreadRefs, workspaceId)
   // Keyed on roster content, not array identity, so memoized rows survive change bursts that leave the roster untouched.
   const rosterKey = useMemo(() => [
-    (view?.channels ?? []).map(channel => `${channel.channelRef}=${channel.name}=${channel.state}`).join(','),
+    (view?.projects ?? []).map(project => `${project.projectRef}=${project.name}=${project.state}`).join(','),
     members.map(status => `${status.member.memberId}=${status.member.handle}=${status.member.sessionId}=${status.availability}`).join(','),
     view?.humanMemberId ?? '',
   ].join(';'), [view, members])
-  const channelNameOf = useMemo(() => {
-    const channels = view?.channels ?? []
-    return (ref: AgentTeamChannelRef): string | undefined => rosterChannelName(channels, ref)
+  const projectNameOf = useMemo(() => {
+    const projects = view?.projects ?? []
+    return (ref: AgentTeamProjectRef): string | undefined => rosterProjectName(projects, ref)
   }, [rosterKey])
   const memberOf = useMemo(() => {
     const humanMemberId = view?.humanMemberId
@@ -195,23 +195,23 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     })
   }, [])
   const handlePanelPromoted = useCallback((taskRef: AgentTeamTaskRef): void => {
-    if (panelThreadRef !== undefined) selectThread(panelThreadRef, channelRef, taskRef, taskNumberOf(taskRef))
+    if (panelThreadRef !== undefined) selectThread(panelThreadRef, projectRef, taskRef, taskNumberOf(taskRef))
     setPanelThreadRef(undefined)
-  }, [panelThreadRef, channelRef, selectThread, taskNumberOf])
+  }, [panelThreadRef, projectRef, selectThread, taskNumberOf])
   const handlePanelClose = useCallback((): void => { setPanelThreadRef(undefined) }, [])
   const humanMemberId = view?.humanMemberId
   const humanIdentity: TeamAvatarHuman | undefined = humanMemberId === undefined
     ? undefined
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
 
-  // The window is the feed's: walking the Channel's remaining history would defeat the feed's pagination.
+  // The window is the feed's: walking the Project's remaining history would defeat the feed's pagination.
   const boardColumns = useMemo(() => {
     const taskful = (view?.items ?? []).filter((item): item is AgentTeamViewItem & { readonly task: AgentTeamTask } => item.task !== undefined)
     const byNumber = (left: AgentTeamViewItem, right: AgentTeamViewItem): number => (right.taskNumber ?? 0) - (left.taskNumber ?? 0)
     return BOARD_COLUMNS.map(column => ({ ...column, items: taskful.filter(item => column.match(item.task.status)).sort(byNumber) }))
   }, [view])
 
-  const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${channelLastItem?.message.messageRef ?? ''}`)
+  const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${projectLastItem?.message.messageRef ?? ''}`)
 
   // The surface is laid out after this effect first runs, so the seat follows its box; a dragged choice is re-clamped, never re-derived.
   useEffect(() => {
@@ -226,8 +226,8 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     observer.observe(panelSurface)
     return () => { observer.disconnect() }
   }, [panelSurface, panelThreadRef])
-  const channel = view?.channels.find(item => item.channelRef === channelRef)
-  const channelMemberIds = new Set(view?.members.filter(item => item.channelRef === channelRef).map(item => item.memberId) ?? [])
+  const project = view?.projects.find(item => item.projectRef === projectRef)
+  const projectMemberIds = new Set(view?.members.filter(item => item.projectRef === projectRef).map(item => item.memberId) ?? [])
   const messageSender = (item: AgentTeamViewItem): AgentTeamMemberId => item.message.sender
   const handleByMember = new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')]))
 
@@ -242,13 +242,13 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     }
     try {
       const [loaded, loadedMembers, loadedInbox] = await Promise.all([
-        loadChannels({ workspaceId, channelRef, direction: 'before', topLevelOnly: true, includeActivities: false, limit: 20 }),
+        loadProjects({ workspaceId, projectRef, direction: 'before', topLevelOnly: true, includeActivities: false, limit: 20 }),
         loadMembers({ workspaceId }),
         // The Host Inbox is the authority for unread; never re-derive it from message mentions.
         loadInbox({ workspaceId, limit: 100 }),
       ])
       if (!mountedRef.current || sequence !== refreshSequenceRef.current) return false
-      if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeChannelView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
+      if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeProjectView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
       if (loadedMembers.ok) setMembers(loadedMembers.value); else setLoadError(loadedMembers.error.message)
       if (!loadedInbox.ok) setLoadError(loadedInbox.error.message)
       setUnreadByThread(current => applyInboxRead(current, loadedInbox))
@@ -283,7 +283,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     setLoading(true)
     void refresh()
     const disposers = [
-      subscribeChanges({ kind: 'channel', channelRef }, update => {
+      subscribeChanges({ kind: 'project', projectRef }, update => {
         if (!mountedRef.current) return
         if (update.type === 'failed') { setLoadError(update.message); return }
         void refresh()
@@ -304,16 +304,16 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       refreshSequenceRef.current += 1
       for (const dispose of disposers) dispose()
     }
-  }, [workspaceId, channelRef])
+  }, [workspaceId, projectRef])
 
   const loadOlder = async () => {
     if (view === undefined || !view.hasMore || loadingOlder) return
     setLoadingOlder(true)
     try {
-      const result = await loadChannels({ workspaceId, channelRef, direction: 'before', topLevelOnly: true, includeActivities: false, cursor: view.cursor, limit: 20 })
+      const result = await loadProjects({ workspaceId, projectRef, direction: 'before', topLevelOnly: true, includeActivities: false, cursor: view.cursor, limit: 20 })
       if (!mountedRef.current) return
       if (!result.ok) { setError(result.error.message); return }
-      setView(current => current === undefined ? result.value : mergeChannelView(current, result.value))
+      setView(current => current === undefined ? result.value : mergeProjectView(current, result.value))
     } catch (cause) {
       if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
@@ -347,7 +347,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       const attachmentIds = upload.attachmentIds
       const request: AgentTeamSendMessageRequest = {
         requestId, workspaceId,
-        channelRef, body: draft.trim(), recipients: recipientIds,
+        projectRef, body: draft.trim(), recipients: recipientIds,
         asTask,
         ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }),
       }
@@ -374,48 +374,48 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     finally { setPending(false) }
   }
 
-  return <main className={css.surface} data-team-channel={channelRef} ref={setPanelSurface}>
+  return <main className={css.surface} data-team-project={projectRef} ref={setPanelSurface}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderWithTabs}`}>
       <header className={css.headerRow}>
         <div className={css.headerCopy}>
-          <div className={channelCss.headerIdentity}>
-            <h1>{channel === undefined ? '# …' : `# ${channel.name}`}</h1>
-            {channel !== undefined && channel.description !== '' && <p className={channelCss.headerDescription} title={channel.description}>{channel.description}</p>}
+          <div className={projectCss.headerIdentity}>
+            <h1>{project === undefined ? '# …' : `# ${project.name}`}</h1>
+            {project !== undefined && project.description !== '' && <p className={projectCss.headerDescription} title={project.description}>{project.description}</p>}
           </div>
         </div>
       </header>
-      <nav className={channelCss.tabs} role="tablist" aria-label={channel === undefined ? '# …' : `# ${channel.name}`} onKeyDown={onTabKeyDown}>
-        <button ref={feedTabRef} id={`${tabIdPrefix}-feed`} type="button" role="tab" aria-selected={tab === 'feed'} aria-controls={`${tabIdPrefix}-feed-panel`} tabIndex={tab === 'feed' ? 0 : -1} className={channelCss.tab} onClick={() => { setTab('feed') }}>{t('channelTabFeed')}</button>
-        <button ref={boardTabRef} id={`${tabIdPrefix}-board`} type="button" role="tab" aria-selected={tab === 'board'} aria-controls={`${tabIdPrefix}-board-panel`} tabIndex={tab === 'board' ? 0 : -1} className={channelCss.tab} onClick={() => { setTab('board') }}>{t('channelTabBoard')}</button>
+      <nav className={projectCss.tabs} role="tablist" aria-label={project === undefined ? '# …' : `# ${project.name}`} onKeyDown={onTabKeyDown}>
+        <button ref={feedTabRef} id={`${tabIdPrefix}-feed`} type="button" role="tab" aria-selected={tab === 'feed'} aria-controls={`${tabIdPrefix}-feed-panel`} tabIndex={tab === 'feed' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('feed') }}>{t('projectTabFeed')}</button>
+        <button ref={boardTabRef} id={`${tabIdPrefix}-board`} type="button" role="tab" aria-selected={tab === 'board'} aria-controls={`${tabIdPrefix}-board-panel`} tabIndex={tab === 'board' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('board') }}>{t('projectTabBoard')}</button>
       </nav>
     </div>
 
-    {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={channelCss.board}>
+    {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
       {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
       {boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
-      {boardColumns.some(column => column.items.length > 0) && <div className={channelCss.boardColumns}>
-        {boardColumns.map(column => <div className={channelCss.boardColumn} key={column.labelKey}>
-          <div className={channelCss.boardColumnHead}>{t(column.labelKey)}<span className={channelCss.boardColumnCount}>{column.items.length}</span></div>
+      {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
+        {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>
+          <div className={projectCss.boardColumnHead}>{t(column.labelKey)}<span className={projectCss.boardColumnCount}>{column.items.length}</span></div>
           {column.items.map(item => <BoardCard
             key={item.message.messageRef}
             item={item}
             unread={unreadByThread.get(item.thread.threadRef) ?? 0}
             human={humanIdentity}
             t={t}
-            onOpen={() => { selectThread(item.thread.threadRef, channelRef, item.task.taskRef, item.taskNumber) }}
+            onOpen={() => { selectThread(item.thread.threadRef, projectRef, item.task.taskRef, item.taskNumber) }}
           />)}
         </div>)}
       </div>}
     </section>}
 
-    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={channelCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
+    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={projectCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
       <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
-        {loading && channel === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingChannels')}</p></div>}
-        {!loading && channel === undefined && error === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('emptyChannels')}</p></div>}
-        {!loading && channel === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void refresh(true) }}>{t('retry')}</Button></div>}
+        {loading && project === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
+        {!loading && project === undefined && error === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('emptyProjects')}</p></div>}
+        {!loading && project === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void refresh(true) }}>{t('retry')}</Button></div>}
         {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
-        {channel !== undefined && view?.items.length === 0 && <div className={css.emptySurface}>
+        {project !== undefined && view?.items.length === 0 && <div className={css.emptySurface}>
           <div className={css.emptyState}>
             <strong>{t('emptyMessages')}</strong>
             <span>{t('emptyMessagesHint')}</span>
@@ -449,7 +449,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
                 onOpenRef={openRef}
                 onResolveTaskRefs={lookupTaskRefs}
                 onResolveThreadRefs={lookupThreadRefs}
-                channelNameOf={channelNameOf}
+                projectNameOf={projectNameOf}
                 memberOf={memberOf}
                 onOpenMemberSession={openMemberSession}
                 grouped={index > 0}
@@ -464,7 +464,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
                   t={t}
                   onOpen={() => {
                     if (item.task === undefined) setPanelThreadRef(item.thread.threadRef)
-                    else selectThread(item.thread.threadRef, channelRef, item.task.taskRef, item.taskNumber)
+                    else selectThread(item.thread.threadRef, projectRef, item.task.taskRef, item.taskNumber)
                   }}
                 />}
               </TeamMessage>
@@ -474,10 +474,10 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       </div>
       </section>
 
-      {channel !== undefined ? <TeamComposer
+      {project !== undefined ? <TeamComposer
       key={draftKey}
       members={members}
-      channelPeerMemberIds={channelMemberIds}
+      projectPeerMemberIds={projectMemberIds}
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}
@@ -493,17 +493,17 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       /> : <div />}
     </div>}
 
-    {tab === 'feed' && panelThreadRef !== undefined && channel !== undefined && <TeamChannelPanel
+    {tab === 'feed' && panelThreadRef !== undefined && project !== undefined && <TeamProjectPanel
       surface={panelSurface}
       workspaceId={workspaceId}
-      channelRef={channelRef}
+      projectRef={projectRef}
       threadRef={panelThreadRef}
-      channelName={channel.name}
+      projectName={project.name}
       humanName={humanName}
       {...(humanAvatarUrl === undefined ? {} : { humanAvatarUrl })}
       {...(view?.humanMemberId === undefined ? {} : { humanMemberId: view.humanMemberId })}
       members={members}
-      channelMemberIds={channelMemberIds}
+      projectMemberIds={projectMemberIds}
       drafts={drafts}
       getAttachment={getAttachment}
       putAttachment={putAttachment}
@@ -514,12 +514,12 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       promoteThread={promoteThread}
       subscribeChanges={subscribeChanges}
       selectThread={selectThread}
-      selectChannel={selectChannel}
+      selectProject={selectProject}
       resolveTaskRefs={resolveTaskRefs}
       resolveThreadRefs={resolveThreadRefs}
       resolveMessageRefs={resolveMessageRefs}
       openMemberSession={openMemberSession}
-      channelNameOf={channelNameOf}
+      projectNameOf={projectNameOf}
       memberOf={memberOf}
       taskNumberOf={taskNumberOf}
       onRead={handlePanelRead}
@@ -616,18 +616,18 @@ function BoardCard({ item, unread, human, t, onOpen }: {
   const namedOwners = namedAvatarOwners(item.liveClaimOwners, human)
   return <button
     type="button"
-    className={channelCss.boardCard}
+    className={projectCss.boardCard}
     {...(resolved ? { 'data-resolved': '' } : {})}
     aria-label={unread > 0 ? t('openTaskUnread', { number: taskNumber, count: unread }) : t('openTask', { number: taskNumber })}
     onClick={onOpen}
   >
-    <span className={channelCss.boardCardNum}>
+    <span className={projectCss.boardCardNum}>
       <TeamStateDot size={8} state={taskStatusDot(task.status)} />
       {t('taskLabel', { number: taskNumber })}
       <TeamCountBadge count={unread} />
     </span>
-    <span className={channelCss.boardCardTitle}>{formatTaskTitle(item.message.body)}</span>
-    <span className={channelCss.boardCardFoot}>
+    <span className={projectCss.boardCardTitle}>{formatTaskTitle(item.message.body)}</span>
+    <span className={projectCss.boardCardFoot}>
       {namedOwners.length === 0
         ? <span>{t('boardUnassigned')}</span>
         : <TeamAvatarStack owners={namedOwners} label={claimersLabel(namedOwners, t)} human={human} />}

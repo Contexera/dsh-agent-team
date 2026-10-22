@@ -73,7 +73,7 @@ export function scanBodyHandles(body: string, handles: readonly string[]): reado
   return Object.freeze(matches)
 }
 
-/** Resolves `@Handle` mentions authored in a Message body. Callers pass the candidates reachable in the Channel; other handles stay prose. `sender` is excluded, so the result works as a recipient set. */
+/** Resolves `@Handle` mentions authored in a Message body. Callers pass the candidates reachable in the Project; other handles stay prose. `sender` is excluded, so the result works as a recipient set. */
 export function resolveBodyMentions(
   body: string,
   candidates: readonly AgentTeamBodyMentionCandidate[],

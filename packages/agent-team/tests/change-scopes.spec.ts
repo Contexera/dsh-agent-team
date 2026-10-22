@@ -12,7 +12,7 @@ import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, agentTeamDomainSpec } from '../src/index.ts'
 import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
-import type { AgentTeamChangeScope, AgentTeamChannelRef, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
+import type { AgentTeamChangeScope, AgentTeamProjectRef, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 const alpha = WorkspaceId('workspace:alpha')
@@ -51,12 +51,12 @@ function ledgerAtBoot(facility: DomainFacility): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }
 
-async function commitMemberRecordDirectlyOnLedger(ledger: AgentTeamLedger, channelRef: AgentTeamChannelRef): Promise<AgentTeamMemberActor> {
+async function commitMemberRecordDirectlyOnLedger(ledger: AgentTeamLedger, projectRef: AgentTeamProjectRef): Promise<AgentTeamMemberActor> {
   const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberActor['memberId']
   const handle = 'reader'
   await ledger.addMember({
     requestId: requestId(`ledger-member-${memberId}`), workspaceId: alpha, handle, description: 'Reads work', presetId: 'team-member',
-    channelRefs: [channelRef], actor: agentTeamHumanActor(),
+    projectRefs: [projectRef], actor: agentTeamHumanActor(),
     member: {
       memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle, description: 'Reads work',
       presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' as const,
@@ -101,11 +101,11 @@ async function staysPendingAcrossMacrotask(promise: Promise<unknown>, ms = 15): 
   return !settled
 }
 
-async function startThread(ctx: Context, label: string): Promise<{ readonly threadRef: AgentTeamThreadRef; readonly taskRef: AgentTeamTaskRef; readonly channelRef: AgentTeamChannelRef; readonly revision: number }> {
-  const channel = await ctx.agentTeam.createChannel({ requestId: requestId(`channel-${label}`), workspaceId: alpha, name: label, description: `${label} work` })
-  const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId(`start-${label}`), workspaceId: alpha, channelRef: channel.channel.channelRef, body: `Task ${label}` })
+async function startThread(ctx: Context, label: string): Promise<{ readonly threadRef: AgentTeamThreadRef; readonly taskRef: AgentTeamTaskRef; readonly projectRef: AgentTeamProjectRef; readonly revision: number }> {
+  const project = await ctx.agentTeam.createProject({ requestId: requestId(`project-${label}`), workspaceId: alpha, name: label, description: `${label} work` })
+  const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId(`start-${label}`), workspaceId: alpha, projectRef: project.project.projectRef, body: `Task ${label}` })
   if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
-  return { threadRef: started.thread.threadRef, taskRef: started.task!.taskRef, channelRef: channel.channel.channelRef, revision: started.thread.revision }
+  return { threadRef: started.thread.threadRef, taskRef: started.task!.taskRef, projectRef: project.project.projectRef, revision: started.thread.revision }
 }
 
 describe('scoped Team change notifications', () => {
@@ -113,7 +113,7 @@ describe('scoped Team change notifications', () => {
     const { ctx, facility } = await harness()
     const thread = await startThread(ctx, 'derive-participation')
     const ledger = ledgerAtBoot(facility)
-    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.channelRef)
+    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.projectRef)
     const joinRequest = { requestId: requestId('derive-join'), workspaceId: beta,
       memberId: actor.memberId, actor: agentTeamHumanActor() }
     const joined = await ledger.joinWorkspace(joinRequest)
@@ -172,23 +172,23 @@ describe('scoped Team change notifications', () => {
     expect(await firstWaiter).toMatchObject({ version: own.receipt.sequence })
   })
 
-  it('wakes Channel and Workspace waiters through their own scopes', async () => {
+  it('wakes Project and Workspace waiters through their own scopes', async () => {
     const { ctx } = await harness()
     const thread = await startThread(ctx, 'mixed')
     const baseline = await changeBaseline(ctx.agentTeam)
-    const channelWaiter = nextChange(ctx.agentTeam, { kind: 'channel', channelRef: thread.channelRef })
+    const projectWaiter = nextChange(ctx.agentTeam, { kind: 'project', projectRef: thread.projectRef })
     const workspaceWaiter = nextChange(ctx.agentTeam, { kind: 'workspace', workspaceId: alpha })
-    expect(await staysPendingAcrossMacrotask(channelWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(projectWaiter)).toBe(true)
     expect(await staysPendingAcrossMacrotask(workspaceWaiter)).toBe(true)
 
-    await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'scout', description: 'Scouts work', presetId: 'team-member', channelRefs: [thread.channelRef] })
+    await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'scout', description: 'Scouts work', presetId: 'team-member', projectRefs: [thread.projectRef] })
     // Member lifecycle is workspace-scoped: the workspace waiter wakes, the
-    // Channel content waiter stays parked until Channel data changes.
+    // Project content waiter stays parked until Project data changes.
     expect(await workspaceWaiter).toMatchObject({ version: expect.any(Number) })
-    expect(await staysPendingAcrossMacrotask(channelWaiter)).toBe(true)
+    expect(await staysPendingAcrossMacrotask(projectWaiter)).toBe(true)
 
-    await ctx.agentTeam.reply({ requestId: requestId('channel-reply'), workspaceId: alpha, taskRef: thread.taskRef, body: 'Content', baseRevision: thread.revision })
-    const woken = await channelWaiter
+    await ctx.agentTeam.reply({ requestId: requestId('project-reply'), workspaceId: alpha, taskRef: thread.taskRef, body: 'Content', baseRevision: thread.revision })
+    const woken = await projectWaiter
     expect(woken.version).toBeGreaterThan(baseline.version)
   })
 
@@ -215,7 +215,7 @@ describe('scoped Team change notifications', () => {
     // has no live Agent): both are shared-projection commits, and the reply
     // leaves the Human's own Thread unread.
     const ledger = ledgerAtBoot(first.facility)
-    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.channelRef)
+    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.projectRef)
     const reply = (await ledger.reply({ requestId: requestId('restart-reply'), workspaceId: alpha, taskRef: thread.taskRef,
       body: 'Member work', baseRevision: thread.revision, actor })).value
     if (reply.kind !== 'committed') throw new Error(`expected committed member reply, received ${reply.kind}`)
@@ -298,7 +298,7 @@ describe('scoped Team change notifications', () => {
 
   it('validates change scopes before parking', async () => {
     const { ctx } = await harness()
-    await expect(changeBaseline(ctx.agentTeam, { kind: 'channel', channelRef: '' } as unknown as AgentTeamChangeScope)).rejects.toThrow(/non-empty ref/)
+    await expect(changeBaseline(ctx.agentTeam, { kind: 'project', projectRef: '' } as unknown as AgentTeamChangeScope)).rejects.toThrow(/non-empty ref/)
   })
 })
 
@@ -308,7 +308,7 @@ describe('ledger change scope and affected member derivation', () => {
     const thread = await startThread(ctx, 'derive')
     // Replay after every commit so the derived indexes include all operations.
     const ledger = ledgerAtBoot(facility)
-    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.channelRef)
+    const actor = await commitMemberRecordDirectlyOnLedger(ledger, thread.projectRef)
     // The member's reply is unread for the Human who follows their own Thread,
     // so the Human's read below has a watermark to advance and commits.
     const memberReply = (await ledger.reply({ requestId: requestId('derive-member-reply'), workspaceId: alpha, taskRef: thread.taskRef,
@@ -337,7 +337,7 @@ describe('ledger change scope and affected member derivation', () => {
     const replyOperation = ledger.getOperation(reply.receipt.operationId)
     expect(replyOperation).toBeDefined()
     expect(ledger.changeScopesOf(replyOperation!)).toEqual([
-      { kind: 'channel', channelRef: thread.channelRef },
+      { kind: 'project', projectRef: thread.projectRef },
       { kind: 'thread', threadRef: thread.threadRef },
     ])
     // The Human sender has no live handle, and the member never followed the
@@ -357,18 +357,18 @@ describe('ledger change scope and affected member derivation', () => {
     const ledger = new AgentTeamLedger(domain.table('operations'))
     await ledger.initialize()
 
-    const created = (await ledger.createChannel({
-      requestId: requestId('iso-channel'), workspaceId: alpha, name: 'isolated', description: 'Isolated work',
+    const created = (await ledger.createProject({
+      requestId: requestId('iso-project'), workspaceId: alpha, name: 'isolated', description: 'Isolated work',
       memberIds: [], actor: agentTeamHumanActor(),
     })).value
     const started = (await ledger.sendMessage({ asTask: true,
-      requestId: requestId('iso-start'), workspaceId: alpha, channelRef: created.channel.channelRef, body: 'Task', actor: agentTeamHumanActor(),
+      requestId: requestId('iso-start'), workspaceId: alpha, projectRef: created.project.projectRef, body: 'Task', actor: agentTeamHumanActor(),
     }))
     if (started.value.kind !== 'committed') throw new Error('expected committed start')
     const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberActor['memberId']
     await ledger.addMember({
       requestId: requestId('iso-member'), workspaceId: alpha, handle: 'follower', description: 'Follows work', presetId: 'team-member',
-      channelRefs: [created.channel.channelRef], actor: agentTeamHumanActor(),
+      projectRefs: [created.project.projectRef], actor: agentTeamHumanActor(),
       member: {
         memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle: 'follower',
         description: 'Follows work', presetId: 'team-member', privateMemoryPath: '/tmp/follower', state: 'enabled' as const,

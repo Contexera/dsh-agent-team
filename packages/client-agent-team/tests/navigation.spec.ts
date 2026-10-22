@@ -37,12 +37,12 @@ describe('TeamNavigation', () => {
 
   it('rehydrates the last Team location while ignoring unknown persisted fields', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      mode: 'team', workspaceId: 'workspace:old', channelRef: 'channel:old',
+      mode: 'team', workspaceId: 'workspace:old', projectRef: 'project:old',
       taskRef: 'task:old', threadRef: 'thread:old', taskNumber: 7, activeTab: 'inbox',
     }))
     const navigation = new TeamNavigation()
     expect(navigation.getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:old', channelRef: 'channel:old',
+      mode: 'team', workspaceId: 'workspace:old', projectRef: 'project:old',
       taskRef: 'task:old', threadRef: 'thread:old', taskNumber: 7,
     })
 
@@ -51,18 +51,23 @@ describe('TeamNavigation', () => {
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({ mode: 'team', workspaceId: 'workspace:existing' })
   })
 
-  it('persists Channel and Thread location across a new navigation instance', () => {
+  it('reopens a Project page saved before Projects were renamed from Channels', () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode: 'team', workspaceId: 'workspace:old', channelRef: 'channel:old' }))
+    expect(new TeamNavigation().getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:old', projectRef: 'project:old' })
+  })
+
+  it('persists Project and Thread location across a new navigation instance', () => {
     const navigation = new TeamNavigation()
     navigation.actions().selectWorkspace('workspace:one' as never)
     navigation.actions().enterTeam()
-    navigation.actions().selectThread('thread:1' as never, 'channel:1' as never, 'task:1' as never, 7)
+    navigation.actions().selectThread('thread:1' as never, 'project:1' as never, 'task:1' as never, 7)
 
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       taskRef: 'task:1', threadRef: 'thread:1', taskNumber: 7,
     })
     expect(new TeamNavigation().getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       taskRef: 'task:1', threadRef: 'thread:1', taskNumber: 7,
     })
   })
@@ -71,34 +76,34 @@ describe('TeamNavigation', () => {
     const navigation = new TeamNavigation()
     navigation.actions().selectWorkspace('workspace:one' as never)
     navigation.actions().enterTeam()
-    navigation.actions().selectThread('thread:plain' as never, 'channel:1' as never)
+    navigation.actions().selectThread('thread:plain' as never, 'project:1' as never)
 
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       threadRef: 'thread:plain',
     })
     expect(new TeamNavigation().getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       threadRef: 'thread:plain',
     })
   })
 
   it('ignores malformed and incomplete persisted state', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       threadRef: 'thread:plain',
     }))
     expect(new TeamNavigation().getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       threadRef: 'thread:plain',
     })
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       taskRef: 'task:orphaned', taskNumber: 7,
     }))
     expect(new TeamNavigation().getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
     })
 
     localStorage.setItem(STORAGE_KEY, '{broken')
@@ -109,20 +114,20 @@ describe('TeamNavigation', () => {
     const navigation = new TeamNavigation()
     navigation.actions().selectWorkspace('workspace:one' as never)
     navigation.actions().enterTeam()
-    navigation.actions().selectThread('thread:1' as never, 'channel:1' as never, 'task:1' as never, 7)
+    navigation.actions().selectThread('thread:1' as never, 'project:1' as never, 'task:1' as never, 7)
     navigation.actions().enterMemberSession('session:builder' as never, 'session:return' as never)
 
     expect(navigation.getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       taskRef: 'task:1', threadRef: 'thread:1', taskNumber: 7,
       memberSessionId: 'session:builder', returnToSessionId: 'session:return',
     })
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       taskRef: 'task:1', threadRef: 'thread:1', taskNumber: 7,
     })
     expect(new TeamNavigation().getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1',
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
       taskRef: 'task:1', threadRef: 'thread:1', taskNumber: 7,
     })
   })
@@ -147,7 +152,7 @@ describe('TeamNavigation', () => {
     }
     const steps: Array<(navigation: TeamNavigation) => void> = [
       navigation => { navigation.actions().selectWorkspace('workspace:two' as never) },
-      navigation => { navigation.actions().selectChannel('channel:2' as never) },
+      navigation => { navigation.actions().selectProject('project:2' as never) },
       navigation => { navigation.actions().selectThread('thread:9' as never) },
       // The Inbox entry is Team navigation too, and the one face an Agent
       // overlay can be opened from: asking for the page closes the overlay.
@@ -167,7 +172,7 @@ describe('TeamNavigation', () => {
     }
   })
 
-  it('opens the Inbox page as a durable location that Channel and Thread faces replace', () => {
+  it('opens the Inbox page as a durable location that Project and Thread faces replace', () => {
     const navigation = new TeamNavigation()
     navigation.actions().selectWorkspace('workspace:one' as never)
     navigation.actions().enterTeam()
@@ -181,15 +186,15 @@ describe('TeamNavigation', () => {
     expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', inbox: true })
 
     // Selecting a Thread from a row clears the Inbox face; Back then lands on
-    // that Thread's Channel — the Inbox is never pushed onto the back path.
-    navigation.actions().selectThread('thread:1' as never, 'channel:1' as never)
-    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1', threadRef: 'thread:1' })
+    // that Thread's Project — the Inbox is never pushed onto the back path.
+    navigation.actions().selectThread('thread:1' as never, 'project:1' as never)
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1', threadRef: 'thread:1' })
     navigation.actions().backToWorkspace()
-    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', channelRef: 'channel:1' })
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1' })
 
-    // A Channel or Workspace selection leaves the Inbox face as well.
+    // A Project or Workspace selection leaves the Inbox face as well.
     navigation.actions().selectInbox()
-    navigation.actions().selectChannel('channel:2' as never)
+    navigation.actions().selectProject('project:2' as never)
     expect(navigation.getSnapshot().inbox).toBeUndefined()
     navigation.actions().selectInbox()
     navigation.actions().selectWorkspace('workspace:two' as never)

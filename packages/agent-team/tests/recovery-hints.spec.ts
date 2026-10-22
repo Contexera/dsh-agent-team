@@ -21,7 +21,7 @@ const PRODUCED_KINDS: readonly string[] = Object.freeze([
   'history_only_arguments',
   'action_only_arguments',
   'missing_write_token',
-  'start_requires_channel',
+  'start_requires_project',
   'dm_requires_member',
   'claim_requires_direction',
   'claim_close_requires_ref',

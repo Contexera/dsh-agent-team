@@ -12,7 +12,7 @@
 状态     ：提交失败保留输入；durable mutation 以 Host 返回投影为准
 ```
 
-浏览器本地的呈现偏好（如 Team 侧栏 Channels/Agents 行序，`dsh.agent-team.sidebar-order`）属于 UI 偏好持久化：改动其口径时按上表验证拖拽与刷新后的 reconcile。
+浏览器本地的呈现偏好（如 Team 侧栏 Projects/Agents 行序，`dsh.agent-team.sidebar-order`）属于 UI 偏好持久化：改动其口径时按上表验证拖拽与刷新后的 reconcile。
 
 这组截图是本次变更的人工审查材料，不是像素级 snapshot test。完成一个 UI 工作项后，只有能说明验收结论的少量代表图可以提交到 `.scratch/archive/YYYY-MM/<work>/validation/`，并必须附带文件名、验收点和复跑命令。调试截图、重复截图、录屏、浏览器日志和每次 test run 的完整图片集保持在 `artifacts/` 或 `.scratch/local/`，不得提交。
 

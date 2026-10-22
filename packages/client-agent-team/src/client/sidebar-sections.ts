@@ -6,7 +6,7 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
-export type TeamSidebarSectionKind = 'channels' | 'agents'
+export type TeamSidebarSectionKind = 'projects' | 'agents'
 
 const STORAGE_KEY = 'dsh.agent-team.sidebar-sections'
 

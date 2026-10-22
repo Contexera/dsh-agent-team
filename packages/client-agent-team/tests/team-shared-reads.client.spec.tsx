@@ -36,7 +36,7 @@ const rosterTexts = (container: HTMLElement): string[] =>
   [...container.querySelectorAll('[draggable="true"]')].map(node => (node.textContent ?? '').trim())
 
 /**
- * The Channels panel's view answer with only the channel name swapped out;
+ * The Projects panel's view answer with only the project name swapped out;
  * every other field keeps the harness default shape so the panel's other
  * consumers stay intact.
  */
@@ -45,7 +45,7 @@ function viewPayload(name: string): { ok: true; value: Record<string, unknown> }
     ok: true,
     value: {
       humanMemberId: 'member:human',
-      channels: [{ channelRef: 'channel:engineering', workspaceId: 'w1', name, description: '', createdAtSequence: 1 }],
+      projects: [{ projectRef: 'project:engineering', workspaceId: 'w1', name, description: '', createdAtSequence: 1 }],
       members: [], tasks: [], threads: [], taskNumbers: [], items: [], claims: [], activities: [], cursor: 0, hasMore: false,
     },
   }
@@ -114,7 +114,7 @@ describe('shared client reads (issue 03)', () => {
     const before = b.members.mock.calls.length
     const sharedBefore = rosterCounters()?.shared ?? 0
 
-    // One projection-domain wake: the Channels panel and the Agents panel
+    // One projection-domain wake: the Projects panel and the Agents panel
     // both subscribe to the workspace scope and both refresh the same roster
     // query — they must share a single underlying read. The second consumer
     // joining the read in flight is the positive signal that sharing happened;
@@ -166,16 +166,16 @@ describe('shared client reads (issue 03)', () => {
     await b.runtime.dispose()
   })
 
-  it('D5: a late-arriving stale view response never replaces the newer channels rows', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+  it('D5: a late-arriving stale view response never replaces the newer projects rows', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await b.view.findByText('# engineering')
     await settleReads()
 
     const held = Promise.withResolvers<unknown>()
     let issued = 0
-    ;(b.viewChannels as unknown as { mockImplementation(fn: () => Promise<unknown>): void }).mockImplementation(async () => {
+    ;(b.viewProjects as unknown as { mockImplementation(fn: () => Promise<unknown>): void }).mockImplementation(async () => {
       issued += 1
-      return issued === 1 ? await held.promise : viewPayload('fresh-channel')
+      return issued === 1 ? await held.promise : viewPayload('fresh-project')
     })
 
     // Two distinct workspace wakes with one landing read in between, so the
@@ -183,7 +183,7 @@ describe('shared client reads (issue 03)', () => {
     b.publishWorkspaceUpdate()
     await waitFor(() => expect(issued).toBe(1))
     b.publishWorkspaceUpdate()
-    await b.view.findByText('# fresh-channel')
+    await b.view.findByText('# fresh-project')
 
     // The first read now lands late carrying the old rows: the panel must drop
     // it instead of painting it over the newer result. That guard is the only
@@ -191,32 +191,32 @@ describe('shared client reads (issue 03)', () => {
     // the deterministic point to assert from is the drained microtask queue the
     // guard runs on, while the exact issuance below pins what the two wakes
     // were allowed to cost.
-    held.resolve(viewPayload('stale-channel'))
+    held.resolve(viewPayload('stale-project'))
     await drainContinuations()
 
     expect(issued).toBe(2)
-    expect(b.view.queryByText('# stale-channel')).toBeNull()
-    expect(b.view.queryByText('# fresh-channel')).not.toBeNull()
+    expect(b.view.queryByText('# stale-project')).toBeNull()
+    expect(b.view.queryByText('# fresh-project')).not.toBeNull()
     await b.runtime.dispose()
   })
 
   it('D6: a failed members read never blocks the landed view rows', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await b.view.findByText('# engineering')
     await b.view.findByText('builder')
     await settleReads()
 
     ;(b.members as unknown as { mockImplementation(fn: () => Promise<unknown>): void })
       .mockImplementation(async () => ({ ok: false, error: { message: 'roster unavailable' } }))
-    ;(b.viewChannels as unknown as { mockImplementation(fn: () => Promise<unknown>): void })
-      .mockImplementation(async () => viewPayload('fresh-channel'))
+    ;(b.viewProjects as unknown as { mockImplementation(fn: () => Promise<unknown>): void })
+      .mockImplementation(async () => viewPayload('fresh-project'))
 
     b.publishWorkspaceUpdate()
 
     // The two legs carry independent freshness (the roster rides the shared
     // read layer, the catalog is still a direct read): one leg's failure must
     // not freeze the other leg's landed value...
-    await b.view.findByText('# fresh-channel')
+    await b.view.findByText('# fresh-project')
     // ...the failure stays visible on the error face...
     const alerts = await b.view.findAllByRole('alert')
     expect(alerts.some(node => node.textContent?.includes('roster unavailable'))).toBe(true)

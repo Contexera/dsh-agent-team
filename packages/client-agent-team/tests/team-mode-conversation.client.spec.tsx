@@ -14,32 +14,32 @@ afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
 describe('Team conversation surfaces', () => {
-  it('opens a selected Channel in the Team center and sends only after Host commit', async () => {
+  it('opens a selected Project in the Team center and sends only after Host commit', async () => {
     const b = await runtimeWithTeam({ remainingUnreadCounts: [1] })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
-    const backendChannel = await b.view.findByRole('button', { name: '# backend' })
-    fireEvent.click(backendChannel)
-    const channelRow = backendChannel.closest('article')!
-    expect(channelRow.getAttribute('aria-current')).toBe('page')
-    // Location moves to the leaf: the open Channel is the Channel list's only
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
+    const backendProject = await b.view.findByRole('button', { name: '# backend' })
+    fireEvent.click(backendProject)
+    const projectRow = backendProject.closest('article')!
+    expect(projectRow.getAttribute('aria-current')).toBe('page')
+    // Location moves to the leaf: the open Project is the Project list's only
     // aria-current='page', and the browsed Workspace row yields it. The panel
     // rail above keeps its own marker for the selected global panel, so the
     // two levels are asserted where each one lives.
-    const channelList = channelRow.parentElement!
-    expect([...channelList.querySelectorAll('[aria-current="page"]')]).toEqual([channelRow])
+    const projectList = projectRow.parentElement!
+    expect([...projectList.querySelectorAll('[aria-current="page"]')]).toEqual([projectRow])
     expect(b.view.container.querySelector('[data-team-workspace-trigger]')?.getAttribute('aria-current')).toBeNull()
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
-    const channelPage = b.view.container.querySelector('[data-team-channel]') as HTMLElement
-    // Membership is derived from participation now, so the Channel page offers
+    const projectPage = b.view.container.querySelector('[data-team-project]') as HTMLElement
+    // Membership is derived from participation now, so the Project page offers
     // no management entry point at all.
-    expect(within(channelPage).queryByRole('button', { name: '管理成员' })).toBeNull()
-    expect(b.view.queryByRole('dialog', { name: '频道成员' })).toBeNull()
+    expect(within(projectPage).queryByRole('button', { name: '管理成员' })).toBeNull()
+    expect(b.view.queryByRole('dialog', { name: '项目成员' })).toBeNull()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
     fireEvent.change(messageInput, { target: { value: 'hello team @b' } })
     fireEvent.click(b.view.getByRole('option', { name: /@builder/ }))
@@ -47,7 +47,7 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '作为任务' }))
     b.sendMessage.mockResolvedValueOnce({ ok: false, error: { message: 'send failed' } } as never)
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
-    expect((await within(channelPage).findByRole('alert')).textContent).toContain('send failed')
+    expect((await within(projectPage).findByRole('alert')).textContent).toContain('send failed')
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('hello team @builder ')
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(b.sendMessage).toHaveBeenLastCalledWith(expect.objectContaining({ body: 'hello team @builder', recipients: ['member:builder'], asTask: true })))
@@ -106,21 +106,21 @@ describe('Team conversation surfaces', () => {
     expect(b.reply).toHaveBeenCalledTimes(2)
     fireEvent.click(b.view.getByRole('button', { name: '重新打开' }))
     await waitFor(() => expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).disabled).toBe(false))
-    fireEvent.click(b.view.getByRole('button', { name: '返回频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '返回项目' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     await waitFor(() => expect(b.view.queryByText('agent reply')).toBeNull())
     await b.runtime.dispose()
   })
 
-  it("shows the Host's own unread on the Channel feed's Thread entries and drops it with the slice", async () => {
+  it("shows the Host's own unread on the Project feed's Thread entries and drops it with the slice", async () => {
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seededMessages: [{ body: '开工任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     // The unfiltered Inbox slice: this Thread needs the Human for 150 facts of
     // which only one is a mention, so the badge is not a mention count.
     b.seedInbox([{
-      workspaceId: 'w1', channelRef: 'channel:engineering',
+      workspaceId: 'w1', projectRef: 'project:engineering',
       thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 4 },
       unreadCount: 150, directCount: 1, newestSequence: 9, newestOccurredAt: '2026-08-21T09:30:00.000Z',
     }])
@@ -147,11 +147,11 @@ describe('Team conversation surfaces', () => {
 
   it('keeps the last successful unread counts when the inbox read fails', async () => {
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seededMessages: [{ body: '开工任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     b.seedInbox([{
-      workspaceId: 'w1', channelRef: 'channel:engineering',
+      workspaceId: 'w1', projectRef: 'project:engineering',
       thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 4 },
       unreadCount: 150, directCount: 1, newestSequence: 9, newestOccurredAt: '2026-08-21T09:30:00.000Z',
     }])
@@ -164,7 +164,7 @@ describe('Team conversation surfaces', () => {
     // surfaces on the error face.
     ;(b.inbox as unknown as { mockImplementation(fn: () => Promise<unknown>): void })
       .mockImplementation(async () => ({ ok: false, error: { message: 'inbox read failed' } }))
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
 
     const alerts = await b.view.findAllByRole('alert')
     expect(alerts.some(node => node.textContent?.includes('inbox read failed'))).toBe(true)
@@ -175,7 +175,7 @@ describe('Team conversation surfaces', () => {
 
   it('slims a resolved Task door to its number, status word, and landing day', async () => {
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskStatus: 'done',
       seededMessages: [{ body: '已经完成的任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
@@ -194,7 +194,7 @@ describe('Team conversation surfaces', () => {
   })
 
   it('keeps printing activity on a taskless discussion, which never resolves', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     fireEvent.change(await b.view.findByRole('textbox', { name: '消息内容' }), { target: { value: 'plain thread' } })
@@ -211,10 +211,10 @@ describe('Team conversation surfaces', () => {
   it('linkifies branded refs in agent plain-prose bodies that skip the mention path', async () => {
     const taskRef = 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e31'
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskRef: taskRef, seedThreadRef: 'thread:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e32',
       seededMessages: [
-        { body: `ref 样本：本 Task 是 ${taskRef}，对照散文 channel:engineering 应保持纯文本。`, occurredAt: '2026-08-21T09:00:00.000Z', sender: 'agent' },
+        { body: `ref 样本：本 Task 是 ${taskRef}，对照散文 project:engineering 应保持纯文本。`, occurredAt: '2026-08-21T09:00:00.000Z', sender: 'agent' },
       ],
     })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -230,7 +230,7 @@ describe('Team conversation surfaces', () => {
   it('resolves unknown task refs to task numbers and navigates on click', async () => {
     const citedRef = 'task:9c1b02aa-5d3e-4f0a-8b7c-1e2d3f4a5b6c'
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskRef: 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e51', seedThreadRef: 'thread:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e52',
       seededMessages: [{ body: `看 ${citedRef}`, occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
@@ -250,7 +250,7 @@ describe('Team conversation surfaces', () => {
   it('resolves abbreviated task refs in agent bodies and navigates with the full ref', async () => {
     const citedRef = 'task:9c1b02aa-5d3e-4f0a-8b7c-1e2d3f4a5b6c'
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskRef: 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e51', seedThreadRef: 'thread:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e52',
       seededMessages: [{ body: '审计来源 task:9c1b02，对照散文 task:cafe 保持纯文本', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
@@ -267,7 +267,7 @@ describe('Team conversation surfaces', () => {
 
   it('confirms early acceptance and lists the Claims completed with it', async () => {
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskStatus: 'in_progress',
       seededMessages: [{ body: '开工任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
@@ -308,17 +308,17 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('expands @all into every eligible channel member at pick time', async () => {
+  it('expands @all into every eligible project member at pick time', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'standup' } })
     // builder, worker, and failed join; offline (unavailable) does not.
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /worker/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /failed/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# standup' }))
     expect(await b.view.findByRole('heading', { name: '# standup' })).toBeTruthy()
 
@@ -334,7 +334,7 @@ describe('Team conversation surfaces', () => {
     fireEvent.keyDown(input, { key: 'Tab' })
     expect(input.value).toBe('请评审 @all ')
 
-    // The notify row lists the expansion snapshot: every channel member
+    // The notify row lists the expansion snapshot: every project member
     // whose presence is not unavailable — failed is error, not offline.
     await waitFor(() => expect(b.view.getByText(/将通知/).textContent).toContain('@builder'))
     expect(b.view.getByText(/将通知/).textContent).toContain('@worker')
@@ -356,7 +356,7 @@ describe('Team conversation surfaces', () => {
 
   it('quotes an author the Host delivers to, and nobody when the reader quotes themselves', async () => {
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seededMessages: [{ body: 'human opener', occurredAt: '2026-08-21T09:00:00.000Z', sender: 'human' }],
     })
     // The Agent's Message is a reply, not a second top-level seed: the feed
@@ -399,11 +399,11 @@ describe('Team conversation surfaces', () => {
   it('previews a hand-typed mention without turning it into an explicit recipient', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'review' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# review' }))
     expect(await b.view.findByRole('heading', { name: '# review' })).toBeTruthy()
     const input = await b.view.findByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
@@ -416,7 +416,7 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => expect(b.view.queryByText(/将通知/)).toBeNull())
 
     // The Host owns body resolution: the payload keeps explicit recipients
-    // empty, because a name the Channel cannot reach is prose, not a target.
+    // empty, because a name the Project cannot reach is prose, not a target.
     fireEvent.change(input, { target: { value: '请 @builder 看一下' } })
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(b.sendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -428,7 +428,7 @@ describe('Team conversation surfaces', () => {
 
   it('accepts an unclaimed todo Task directly without a confirm dialog', async () => {
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seededMessages: [{ body: '外部完成的任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -452,7 +452,7 @@ describe('Team conversation surfaces', () => {
     const linkedRef = 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e46'
     const mixedCodeRef = 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e47'
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskRef: taskRef, seedThreadRef: 'thread:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e42',
       seededMessages: [{
         body: `需求源头：${taskRef} 与 \`${taskRef}\`\n\n- **已核实**\n- 未知任务：${unknownRef}\n- 行内代码：\`${inlineCodeRef}\`\n- 混合代码：\`编号 ${mixedCodeRef}\`\n- [已有链接 ${linkedRef}](https://example.com/source)\n\n\`\`\`text\n${fencedCodeRef}\n\`\`\``,
@@ -487,7 +487,7 @@ describe('Team conversation surfaces', () => {
   it('renders a Lead-style dispatch: doubled-colon ref resolves and the spelled mention chipifies inline', async () => {
     const auditRef = 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e61'
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskRef: auditRef, seedThreadRef: 'thread:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e62',
       seededMessages: [{
         body: '@builder 实施 Client 的结构重构，来源于审计 Task `task::0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e61`：\n\n1. 先读 audit scratch 与现有 tests\n2. 回复边界后再 Claim\n\n完成后由 Lead 复核。',
@@ -501,7 +501,7 @@ describe('Team conversation surfaces', () => {
     // The message is rich Markdown: the spelled handle chipifies at its
     // prose position and the trailing fallback row stays empty entirely.
     const messageRow = await waitFor(() => {
-      const row = [...b.view.container.querySelectorAll('[data-team-channel] article')]
+      const row = [...b.view.container.querySelectorAll('[data-team-project] article')]
         .find(article => article.textContent?.includes('实施 Client 的结构重构'))
       expect(row).toBeTruthy()
       return row!
@@ -521,10 +521,10 @@ describe('Team conversation surfaces', () => {
   })
 
   it('uploads composer attachments as chips, sends their ids, and renders the strip', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     // Let the browser's one-time workspace selection settle first; a late
-    // selectWorkspace would strip the channel ref mid-test.
+    // selectWorkspace would strip the project ref mid-test.
     await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
@@ -571,7 +571,7 @@ describe('Team conversation surfaces', () => {
   })
 
   it('uploads thread reply attachments and passes their ids to reply', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true, remainingUnreadCounts: [1], seededMessages: [{ body: '开个任务', occurredAt: '2026-08-21T09:00:00.000Z' }] })
+    const b = await runtimeWithTeam({ initialProjects: true, remainingUnreadCounts: [1], seededMessages: [{ body: '开个任务', occurredAt: '2026-08-21T09:00:00.000Z' }] })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
@@ -579,7 +579,7 @@ describe('Team conversation surfaces', () => {
     const composer = b.view.container
     const chipCount = (): number => composer.querySelectorAll('ul[aria-label="添加附件"] > li').length
 
-    // The reply composer offers the same "+" picker as the Channel composer.
+    // The reply composer offers the same "+" picker as the Project composer.
     const input = composer.querySelector('input[type="file"]') as HTMLInputElement
     await waitFor(() => { fireEvent.change(input, { target: { files: [new File(['png'], 'evidence.png', { type: 'image/png' })] } }) })
     await waitFor(() => { expect(chipCount()).toBe(1) })
@@ -595,7 +595,7 @@ describe('Team conversation surfaces', () => {
   })
 
   it('turns pasted clipboard files into composer chips and sends their ids', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -630,15 +630,15 @@ describe('Team conversation surfaces', () => {
   })
 
   it('caches composer drafts across view switches and clears them on committed sends', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    // A second Channel gives the draft somewhere to switch away to.
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    // A second Project gives the draft somewhere to switch away to.
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
 
@@ -646,7 +646,7 @@ describe('Team conversation surfaces', () => {
     fireEvent.change(input, { target: { value: 'engineering draft' } })
     // Writes go straight through to the persisted cache.
     expect(JSON.parse(localStorage.getItem(TEAM_DRAFTS_STORAGE_KEY) ?? '{}')).toMatchObject({
-      'channel:channel:engineering': { draft: 'engineering draft', recipientIds: [] },
+      'project:project:engineering': { draft: 'engineering draft', recipientIds: [] },
     })
 
     // Switching views unmounts the page; returning restores from the cache.
@@ -668,33 +668,33 @@ describe('Team conversation surfaces', () => {
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem(TEAM_DRAFTS_STORAGE_KEY) ?? '{}') as Record<string, unknown>
-      expect(stored['channel:channel:engineering']).toBeUndefined()
+      expect(stored['project:project:engineering']).toBeUndefined()
     })
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('')
     await b.runtime.dispose()
   })
 
   it('rehydrates drafts from localStorage and prunes stale recipients on restore', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    // Open the seeded Channel first so the browser's one-time workspace
-    // selection settles before the new Channel row is clicked.
+    // Open the seeded Project first so the browser's one-time workspace
+    // selection settles before the new Project row is clicked.
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
-    fireEvent.click(b.view.getByRole('button', { name: '新建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
 
-    // Seed the cache under the Channel's REAL ref, then reload — the same
+    // Seed the cache under the Project's REAL ref, then reload — the same
     // content a fresh page load would rehydrate for this view.
-    const channelRef = b.runtime.ctx.teamNavigation.getSnapshot().channelRef!
+    const projectRef = b.runtime.ctx.teamNavigation.getSnapshot().projectRef!
     localStorage.setItem(TEAM_DRAFTS_STORAGE_KEY, JSON.stringify({
-      [`channel:${channelRef}`]: {
+      [`project:${projectRef}`]: {
         draft: 'hello team @builder',
         recipientIds: ['member:builder', 'member:ghost'],
         savedAt: Date.now(),
@@ -711,7 +711,7 @@ describe('Team conversation surfaces', () => {
     // only the recipients that are known Members still named in the draft.
     await waitFor(() => {
       const stored = JSON.parse(localStorage.getItem(TEAM_DRAFTS_STORAGE_KEY) ?? '{}') as Record<string, { recipientIds: string[] }>
-      return expect(stored[`channel:${channelRef}`]?.recipientIds).toEqual(['member:builder'])
+      return expect(stored[`project:${projectRef}`]?.recipientIds).toEqual(['member:builder'])
     })
     await b.runtime.dispose()
   })
@@ -719,12 +719,12 @@ describe('Team conversation surfaces', () => {
   it('opens a Thread and performs one baseline catch-up without repeated reads', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
@@ -737,7 +737,7 @@ describe('Team conversation surfaces', () => {
     b.loadThreadHistory.mockClear()
     b.threadObservations.mockClear()
     b.members.mockClear()
-    b.viewChannels.mockClear()
+    b.viewProjects.mockClear()
     b.changes.mockClear()
     fireEvent.click(b.view.getByRole('button', { name: '打开 Task #1' }))
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
@@ -753,7 +753,7 @@ describe('Team conversation surfaces', () => {
     expect(b.readThread).toHaveBeenCalledTimes(1)
     expect(b.loadThreadHistory).toHaveBeenCalledTimes(2)
     expect(b.members).toHaveBeenCalledTimes(1)
-    expect(b.viewChannels).toHaveBeenCalledTimes(1)
+    expect(b.viewProjects).toHaveBeenCalledTimes(1)
 
     // The page waits on its own thread scope. The workspace presence scope
     // rides the shared subscription the always-mounted sidebar Agents section holds:
@@ -767,7 +767,7 @@ describe('Team conversation surfaces', () => {
   })
 
   it('keeps the older-facts affordance when the history read fails, and recovers through it', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true,
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true,
       seededMessages: [{ body: 'capped history', occurredAt: '2026-09-13T03:00:00.000Z' }] })
     // The first paint's history read is the only source of the older-facts
     // cursor: a failed one must not take the affordance down with it, or the
@@ -790,7 +790,7 @@ describe('Team conversation surfaces', () => {
   it('ranks Thread followers first among mention candidates and scrolls the highlighted row into view', async () => {
     const taskRef = 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e71'
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskRef: taskRef, seedThreadRef: 'thread:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e72',
       seedFollowers: ['member:worker'],
       seededMessages: [{ body: 'rank task', occurredAt: '2026-08-21T09:00:00.000Z' }],
@@ -807,7 +807,7 @@ describe('Team conversation surfaces', () => {
       const replyInput = await b.view.findByRole('textbox', { name: '消息内容' })
       fireEvent.change(replyInput, { target: { value: '@' } })
       const replyMenu = await b.view.findByRole('listbox')
-      // The seeded Channel has no membership rows, so the Thread composer sees
+      // The seeded Project has no membership rows, so the Thread composer sees
       // the whole roster; the follower ranks above that roster order once the
       // observation read from the first paint round lands.
       await waitFor(() => expect(within(replyMenu).getAllByRole('option').map(option => option.textContent)).toEqual([
@@ -829,13 +829,13 @@ describe('Team conversation surfaces', () => {
 
   it('restores persisted Team mode, reconciles a stale Workspace, renders the rail, and unloads cleanly', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'stale' })
-    expect(await b.view.findByRole('heading', { name: '频道' })).toBeTruthy()
+    expect(await b.view.findByRole('heading', { name: '项目' })).toBeTruthy()
     await vi.waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot().workspaceId).toBe('w1'))
 
     fireEvent.click(b.view.getByRole('button', { name: 'Toggle fixture sidebar' }))
-    await waitFor(() => { expect(b.view.getByRole('button', { name: '频道' })).toBeTruthy() })
+    await waitFor(() => { expect(b.view.getByRole('button', { name: '项目' })).toBeTruthy() })
     expect(b.view.getByRole('button', { name: '对话' })).toBeTruthy()
-    expect(b.view.getByRole('button', { name: '频道' })).toBeTruthy()
+    expect(b.view.getByRole('button', { name: '项目' })).toBeTruthy()
     expect(b.view.queryByRole('button', { name: '新建工作区' })).toBeNull()
     await b.team.dispose()
     expect(await b.view.findByText('普通工作区')).toBeTruthy()
@@ -849,7 +849,7 @@ describe('Team conversation surfaces', () => {
 
   it('states the current Workspace on one line and switches through its menu', async () => {
     const b = await runtimeWithTeam({ mode: 'team' })
-    expect(await b.view.findByRole('heading', { name: '频道' })).toBeTruthy()
+    expect(await b.view.findByRole('heading', { name: '项目' })).toBeTruthy()
     // The selector renders in the wide sidebar only, and collapsing the fixture
     // keeps that wide surface mounted for another 150ms (SidebarRoot's collapse
     // settle) before the rail replaces it. Every assertion below reads the wide
@@ -884,18 +884,18 @@ describe('Team conversation surfaces', () => {
     await waitFor(() => { expect(b.view.getByRole('button', { name: '工作区，Beta' })).toBeTruthy() })
     // Picking closes the menu and leaves the content sections standing.
     expect(b.view.getByRole('button', { name: '工作区，Beta' }).getAttribute('aria-expanded')).toBe('false')
-    expect(b.view.getByRole('button', { name: '频道' })).toBeTruthy()
+    expect(b.view.getByRole('button', { name: '项目' })).toBeTruthy()
     await b.runtime.dispose()
   })
 
   it('opens a Thread on the first unread Message that names the reader', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seededMessages: [
       { body: '开篇', occurredAt: '2026-08-21T09:00:00.000Z' },
     ] })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     const entry = await b.view.findByRole('button', { name: '打开 Task #1' })
     const originalRead = b.readThread.getMockImplementation()!
-    const addressed = { messageRef: 'message:addressed', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1', sender: 'member:builder', body: '@human 这条要你看', topLevel: false, sequence: 3, occurredAt: '2026-08-21T09:03:00.000Z' }
+    const addressed = { messageRef: 'message:addressed', projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1', sender: 'member:builder', body: '@human 这条要你看', topLevel: false, sequence: 3, occurredAt: '2026-08-21T09:03:00.000Z' }
     const quiet = { ...addressed, messageRef: 'message:quiet', body: '不点名的进展', sequence: 2, occurredAt: '2026-08-21T09:02:00.000Z' }
     // The first read decides where the page opens, so the read itself is what
     // the test moves: one wide fact no one is called into, then the call.
@@ -924,7 +924,7 @@ describe('Team conversation surfaces', () => {
       // A call the reader has already seen never pulls the view again: with
       // nothing unread naming them the Thread opens at its latest fact.
       jumps.length = 0
-      fireEvent.click(b.view.getByRole('button', { name: '返回频道' }))
+      fireEvent.click(b.view.getByRole('button', { name: '返回项目' }))
       const readsBefore = b.readThread.mock.calls.length
       readWith(false)
       fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
@@ -941,12 +941,12 @@ describe('Team conversation surfaces', () => {
   it('states a continuation row\u2019s time under the pointer, with no line of its own', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
@@ -958,13 +958,13 @@ describe('Team conversation surfaces', () => {
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
     await waitFor(() => expect(b.loadThreadHistory).toHaveBeenCalled())
 
-    const anchor = { messageRef: 'message:anchor', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+    const anchor = { messageRef: 'message:anchor', projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:human', body: 'first task', topLevel: true, sequence: 2, occurredAt: '2026-08-21T09:00:00.000Z' }
     const turn = (ref: string, body: string, occurredAt: string, sequence: number) => ({ kind: 'message', sequence, mentions: [], message: {
-      messageRef: ref, channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+      messageRef: ref, projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:builder', body, topLevel: false, sequence, occurredAt } })
     const historyWith = (facts: unknown[]) => b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', channelRef: 'channel:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
       thread: { threadRef: 'thread:1', revision: 2 }, anchor, claims: [], facts, cursor: 0, hasMore: false,
     } } as never))
     const row = (ref: string) => document.querySelector(`[data-message-ref="${ref}"]`)
@@ -972,7 +972,7 @@ describe('Team conversation surfaces', () => {
     // A real waiting gap states nothing of its own in a Thread: the flow keeps
     // its spacing and the row states its own instant under the pointer.
     historyWith([turn('message:a', '先做一半', '2026-08-21T09:10:00.000Z', 3), turn('message:b', '再做一半', '2026-08-21T09:20:00.000Z', 4)])
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await waitFor(() => expect(row('message:b')).not.toBeNull())
     expect(document.querySelector('[role="separator"]')).toBeNull()
     const gapTime = row('message:b')!.querySelector('[data-gutter-time]')!.textContent
@@ -981,7 +981,7 @@ describe('Team conversation surfaces', () => {
     // The same pair inside one turn's flow: the same one statement, from the
     // same seat, and still no line.
     historyWith([turn('message:a', '先做一半', '2026-08-21T09:19:00.000Z', 3), turn('message:b', '再做一半', '2026-08-21T09:21:00.000Z', 4)])
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await waitFor(() => expect(row('message:b')!.querySelector('[data-gutter-time]')!.textContent).not.toBe(gapTime))
     expect(document.querySelector('[role="separator"]')).toBeNull()
 
@@ -991,12 +991,12 @@ describe('Team conversation surfaces', () => {
   it('acknowledges off-screen arrivals automatically and keeps only a pure jump hint', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
@@ -1010,13 +1010,13 @@ describe('Team conversation surfaces', () => {
     await vi.waitFor(() => expect(b.loadThreadHistory).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', limit: 100 })))
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    const anchor = { messageRef: 'message:anchor', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+    const anchor = { messageRef: 'message:anchor', projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:human', body: 'first task', topLevel: true, sequence: 2, occurredAt: '' }
     const historyWith = (facts: unknown[]) => b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', channelRef: 'channel:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
       thread: { threadRef: 'thread:1', revision: 2 }, anchor, claims: [], facts, cursor: 0, hasMore: false,
     } } as never))
-    const backfillFact = { kind: 'message', sequence: 1, message: { messageRef: 'message:old-1', channelRef: 'channel:1', threadRef: 'thread:1',
+    const backfillFact = { kind: 'message', sequence: 1, message: { messageRef: 'message:old-1', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:human', body: 'old backfill', topLevel: false, sequence: 1, occurredAt: '' }, mentions: [] }
 
 
@@ -1051,7 +1051,7 @@ describe('Team conversation surfaces', () => {
   })
 
   it('drops the jump hint the moment the reader returns to the tail', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -1067,14 +1067,14 @@ describe('Team conversation surfaces', () => {
     await vi.waitFor(() => expect(b.loadThreadHistory).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', limit: 100 })))
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    const anchor = { messageRef: 'message:anchor', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+    const anchor = { messageRef: 'message:anchor', projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:human', body: 'first task', topLevel: true, sequence: 2, occurredAt: '' }
-    const newFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', channelRef: 'channel:1', threadRef: 'thread:1',
+    const newFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:builder', body: 'fresh arrival one', topLevel: false, sequence: 9, occurredAt: '' }, mentions: [] }
-    const nextFact = { kind: 'message', sequence: 10, message: { messageRef: 'message:new-10', channelRef: 'channel:1', threadRef: 'thread:1',
+    const nextFact = { kind: 'message', sequence: 10, message: { messageRef: 'message:new-10', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:builder', body: 'fresh arrival two', topLevel: false, sequence: 10, occurredAt: '' }, mentions: [] }
     const historyWith = (facts: unknown[]) => b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', channelRef: 'channel:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts, cursor: 0, hasMore: false,
     } } as never))
 
@@ -1108,12 +1108,12 @@ describe('Team conversation surfaces', () => {
   it('acknowledges arrivals a bottom-pinned reader is watching instead of prompting a manual read', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
     fireEvent.click(b.view.getByRole('button', { name: /初始成员/ }))
     fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     const messageInput = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
@@ -1128,12 +1128,12 @@ describe('Team conversation surfaces', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(b.readThread).toHaveBeenCalledTimes(1)
 
-    const anchor = { messageRef: 'message:anchor', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+    const anchor = { messageRef: 'message:anchor', projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:human', body: 'first task', topLevel: true, sequence: 2, occurredAt: '' }
-    const watchedFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', channelRef: 'channel:1', threadRef: 'thread:1',
+    const watchedFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:builder', body: 'watched live', topLevel: false, sequence: 9, occurredAt: '' }, mentions: [] }
     b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', channelRef: 'channel:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts: [watchedFact], cursor: 0, hasMore: false,
     } } as never))
 
@@ -1141,7 +1141,7 @@ describe('Team conversation surfaces', () => {
     // jsdom never scrolls the reader away from the bottom, so the arriving
     // fact renders in front of them and must be acknowledged durably rather
     // than surfaced as a jump hint.
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     await waitFor(() => expect(b.view.queryByText(/↓ \d+ 条新更新/)).toBeNull())
     expect(await b.view.findByText('watched live')).toBeTruthy()
     await waitFor(() => expect(b.readThread).toHaveBeenCalledTimes(2))
@@ -1151,7 +1151,7 @@ describe('Team conversation surfaces', () => {
 
   it('drains a multi-round unread backlog automatically with fresh request ids', async () => {
     const b = await runtimeWithTeam({
-      initialChannels: true, remainingUnreadCounts: [25, 5, 0],
+      initialProjects: true, remainingUnreadCounts: [25, 5, 0],
       seededMessages: [{ body: '积压任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
@@ -1174,7 +1174,7 @@ describe('Team conversation surfaces', () => {
   })
 
   it('keeps the jump hint when the automatic acknowledgment read fails', async () => {
-    const b = await runtimeWithTeam({ initialChannels: true })
+    const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     await waitFor(() => { expect(b.view.container.querySelector('[data-team-workspace-trigger][aria-current="page"]')?.textContent).toContain('Alpha') })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -1190,12 +1190,12 @@ describe('Team conversation surfaces', () => {
     await vi.waitFor(() => expect(b.loadThreadHistory).toHaveBeenCalledWith(expect.objectContaining({ taskRef: 'task:1', limit: 100 })))
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    const anchor = { messageRef: 'message:anchor', channelRef: 'channel:1', threadRef: 'thread:1', taskRef: 'task:1',
+    const anchor = { messageRef: 'message:anchor', projectRef: 'project:1', threadRef: 'thread:1', taskRef: 'task:1',
       sender: 'member:human', body: 'first task', topLevel: true, sequence: 2, occurredAt: '' }
-    const failedFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', channelRef: 'channel:1', threadRef: 'thread:1',
+    const failedFact = { kind: 'message', sequence: 9, message: { messageRef: 'message:new-9', projectRef: 'project:1', threadRef: 'thread:1',
       taskRef: 'task:1', sender: 'member:builder', body: 'unacknowledged', topLevel: false, sequence: 9, occurredAt: '' }, mentions: [] }
     b.loadThreadHistory.mockImplementation(async () => ({ ok: true as const, value: {
-      task: { taskRef: 'task:1', channelRef: 'channel:1', status: 'todo', resolution: 'open' },
+      task: { taskRef: 'task:1', projectRef: 'project:1', status: 'todo', resolution: 'open' },
       thread: { threadRef: 'thread:1', revision: 3 }, anchor, claims: [], facts: [failedFact], cursor: 0, hasMore: false,
     } } as never))
 
@@ -1210,7 +1210,7 @@ describe('Team conversation surfaces', () => {
     fireEvent.scroll(timelineSection)
 
     b.readThread.mockRejectedValueOnce(new Error('acknowledgment transport failed') as never)
-    b.publishChannelUpdate()
+    b.publishProjectUpdate()
     // The durable read failed: the arrivals stay visible, the durable
     // acknowledgment surfaces as an error, and the pure jump hint remains
     // — still counting the arrival batch exactly once.
@@ -1220,19 +1220,19 @@ describe('Team conversation surfaces', () => {
     expect(b.view.queryByRole('button', { name: '标记为已读' })).toBeNull()
     await b.runtime.dispose()
   })
-  it('refreshes the sidebar Channel list from one workspace change', async () => {
+  it('refreshes the sidebar Project list from one workspace change', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
-    await b.view.findByText('还没有频道')
+    await b.view.findByText('还没有项目')
     expect(b.view.queryByRole('button', { name: '# gamma' })).toBeNull()
-    b.seedChannel({ channelRef: 'channel:gamma', workspaceId: 'w1', name: 'gamma', description: 'Gamma work', createdAtSequence: 2 })
-    b.publishChannelUpdate()
+    b.seedProject({ projectRef: 'project:gamma', workspaceId: 'w1', name: 'gamma', description: 'Gamma work', createdAtSequence: 2 })
+    b.publishProjectUpdate()
     await b.view.findByRole('button', { name: '# gamma' })
-    expect(b.view.queryByText('还没有频道')).toBeNull()
+    expect(b.view.queryByText('还没有项目')).toBeNull()
     await b.runtime.dispose()
   })
 
   it('anchors timeline days when messages span dates', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seededMessages: [
       { body: 'day one status', occurredAt: '2026-08-19T09:00:00.000Z' },
       { body: 'day two follow-up', occurredAt: '2026-08-21T04:00:00.000Z' },
     ] })
@@ -1246,7 +1246,7 @@ describe('Team conversation surfaces', () => {
   })
 
   it('states a wide same-sender gap in the row itself, not on a line', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seededMessages: [
       { body: 'burst one', occurredAt: '2026-08-21T09:00:00.000Z' },
       { body: 'burst two', occurredAt: '2026-08-21T09:01:00.000Z' },
       { body: 'later publication', occurredAt: '2026-08-21T11:30:00.000Z' },
@@ -1257,9 +1257,9 @@ describe('Team conversation surfaces', () => {
     // run, and the boundary is bare: the instant lives in the seat of the row
     // it separates.
     const rowOf = (body: string) => b.view.getByText(body).closest('article')
-    const channelDividers = b.view.getAllByRole('separator')
-    expect(channelDividers).toHaveLength(1)
-    expect(channelDividers[0]!.querySelector('time')).toBeNull()
+    const projectDividers = b.view.getAllByRole('separator')
+    expect(projectDividers).toHaveLength(1)
+    expect(projectDividers[0]!.querySelector('time')).toBeNull()
     expect(rowOf('later publication')!.querySelector('[data-gutter-time]')?.textContent).toBeTruthy()
 
     fireEvent.click(b.view.getAllByRole('button', { name: '打开 Task #1' })[0]!)
@@ -1274,12 +1274,12 @@ describe('Team conversation surfaces', () => {
   it('linkifies branded refs in plain bodies and navigates on click', async () => {
     const taskRef = 'task:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e21'
     const b = await runtimeWithTeam({
-      mode: 'team', workspaceId: 'w1', initialChannels: true,
+      mode: 'team', workspaceId: 'w1', initialProjects: true,
       seedTaskRef: taskRef, seedThreadRef: 'thread:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e22',
-      seededMessages: [{ body: `see ${taskRef} and channel:engineering for prose`, occurredAt: '2026-08-21T09:00:00.000Z' }],
+      seededMessages: [{ body: `see ${taskRef} and project:engineering for prose`, occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    // Only the fixed-prefix ref shape resolves; `channel:engineering` stays
+    // Only the fixed-prefix ref shape resolves; `project:engineering` stays
     // literal prose. The known Task relabels to its number once resolved.
     expect(b.view.queryByText(taskRef)).toBeNull()
     const link = await b.view.findByRole('button', { name: 'Task #1' })
@@ -1290,13 +1290,13 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('sends a Channel message as a taskless Thread unless As task is pressed', async () => {
+  it('sends a Project message as a taskless Thread unless As task is pressed', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
     fireEvent.change(b.view.getByLabelText(/说明/), { target: { value: 'API' } })
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     fireEvent.change(b.view.getByRole('textbox', { name: '消息内容' }), { target: { value: 'plain thread' } })
@@ -1323,9 +1323,9 @@ describe('Team conversation surfaces', () => {
   it('resets As task after a committed Task send and keeps it after a failed send', async () => {
     const b = await runtimeWithTeam()
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '新建频道' }))
+    fireEvent.click(await b.view.findByRole('button', { name: '新建项目' }))
     fireEvent.change(b.view.getByLabelText('名称'), { target: { value: 'backend' } })
-    fireEvent.click(b.view.getByRole('button', { name: '创建频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '创建项目' }))
     fireEvent.click(await b.view.findByRole('button', { name: '# backend' }))
     expect(await b.view.findByRole('heading', { name: '# backend' })).toBeTruthy()
     const toggle = () => b.view.getByRole('button', { name: '作为任务' })

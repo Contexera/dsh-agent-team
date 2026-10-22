@@ -36,7 +36,7 @@ export interface TeamMemberHost {
   readonly workspaceId: WorkspaceId
   readonly teamFiber: Awaited<ReturnType<Context['plugin']>>
   /** One throwaway checkout per requested extra: directories a Member can be invited into. */
-  readonly otherProjects: readonly string[]
+  readonly otherCheckouts: readonly string[]
 }
 
 /**
@@ -62,8 +62,8 @@ export interface TeamMemberHostOptions {
    * {@link provideQuietTokenMeter}).
    */
   readonly prepare?: ((ctx: Context) => void) | undefined
-  /** Sibling checkouts to create beside the project, for a Member invited into a second directory. */
-  readonly otherProjects?: number
+  /** Sibling checkouts to create beside the checkout, for a Member invited into a second directory. */
+  readonly otherCheckouts?: number
   readonly workingDirectory?: WorkingDirectorySeat
 }
 
@@ -76,10 +76,10 @@ export interface TeamMemberHostOptions {
  */
 export async function mountTeamMemberHost(options: TeamMemberHostOptions): Promise<TeamMemberHost> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-agent-team-host-'))
-  const project = join(root, 'project')
+  const checkout = join(root, 'checkout')
   const persistence = join(root, 'sessions')
-  const otherProjects = Array.from({ length: options.otherProjects ?? 0 }, (_, index) => join(root, `other-project-${index + 1}`))
-  await Promise.all([mkdir(project), mkdir(persistence), ...otherProjects.map(directory => mkdir(directory))])
+  const otherCheckouts = Array.from({ length: options.otherCheckouts ?? 0 }, (_, index) => join(root, `other-checkout-${index + 1}`))
+  await Promise.all([mkdir(checkout), mkdir(persistence), ...otherCheckouts.map(directory => mkdir(directory))])
   process.env.DSH_HOME = join(root, 'dsh-home')
 
   const ctx = new Context()
@@ -118,13 +118,13 @@ export async function mountTeamMemberHost(options: TeamMemberHostOptions): Promi
   ctx.provide('storageDomain', facility)
   const workspaceId = WorkspaceId('workspace:fixture')
   ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => id === workspaceId ? { id, path: project, attachSession: async () => {} } : undefined,
+    get: (id: WorkspaceId) => id === workspaceId ? { id, path: checkout, attachSession: async () => {} } : undefined,
     list: () => [],
     archiveSession: async () => {},
   })
   const teamFiber = await ctx.plugin(AgentTeam)
   options.cleanups.push(async () => { await ctx.fiber.dispose(); await facility.closeAll(); await rm(root, { recursive: true, force: true }) })
-  return { ctx, root, workspaceId, teamFiber, otherProjects }
+  return { ctx, root, workspaceId, teamFiber, otherCheckouts }
 }
 
 /** A token meter that always reports zero usage, so pressure is never the input under test. */

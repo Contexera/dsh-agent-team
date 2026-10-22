@@ -139,7 +139,7 @@ npm run test:browser
 
 - Remote mount 后 Team UI 注册；
 - Team mode 的进入、刷新恢复、退出和普通 DSH surface 恢复；
-- Channel、Thread、Member 等已有主流程；
+- Project、Thread、Member 等已有主流程；
 - 390×844 窄屏无横向溢出，键盘焦点与对话框可用；
 - 普通 Session 没有 Team tools、Team guidance 或 Team UI。
 

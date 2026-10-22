@@ -149,7 +149,7 @@ describe('Agent Team real composition', () => {
     expect(first.agentTeam.status()).toEqual(expect.objectContaining({
       sequence: 1,
       operationCount: 1,
-      channelCount: 0,
+      projectCount: 0,
       agentMemberCount: 0,
     }))
     await first.fiber.dispose()
@@ -164,9 +164,9 @@ describe('Agent Team real composition', () => {
     const pool = new MemoryMediaPool()
     const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000aa' as WorkspaceId
     const first = await load(pool)
-    const channel = await first.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
+    const project = await first.agentTeam.createProject({ requestId: requestId('project'), workspaceId, name: 'engineering', description: 'Engineering work' })
     const anchor = committed(await first.agentTeam.sendMessage({ requestId: requestId('anchor'), workspaceId,
-      channelRef: channel.channel.channelRef, body: 'Please investigate this' }))
+      projectRef: project.project.projectRef, body: 'Please investigate this' }))
     const reply = committed(await first.agentTeam.reply({ requestId: requestId('reply'), workspaceId,
       threadRef: anchor.thread.threadRef, baseRevision: anchor.thread.revision, body: 'Looking now',
       replyToMessageRef: anchor.message.messageRef }))
@@ -191,7 +191,7 @@ describe('Agent Team real composition', () => {
     const ctx = await load(pool, new RoutedAdapter())
     const added = await ctx.agentTeam.addMember({
       requestId: requestId('add-pinned'), workspaceId, handle: 'builder',
-      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
       model: { provider: 'mock', model: 'routed', reasoningEffort: 'high' as never },
     })
     // A committed creation is the point: the old undeclared property read
@@ -206,7 +206,7 @@ describe('Agent Team real composition', () => {
     const ctx = await load(pool, new RoutedAdapter())
     await expect(ctx.agentTeam.addMember({
       requestId: requestId('add-bad-provider'), workspaceId, handle: 'builder',
-      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
       model: { provider: 'no-such-provider', model: 'whatever' },
     })).rejects.toThrow(/provider 'no-such-provider' is not registered/)
   })
@@ -217,7 +217,7 @@ describe('Agent Team real composition', () => {
     const ctx = await load(pool, new RoutedAdapter(['low']))
     await expect(ctx.agentTeam.addMember({
       requestId: requestId('add-bad-effort'), workspaceId, handle: 'builder',
-      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
       model: { provider: 'mock', model: 'routed', reasoningEffort: 'high' as never },
     })).rejects.toThrow(/reasoning effort 'high' is not supported by mock\/routed/)
   })
@@ -228,7 +228,7 @@ describe('Agent Team real composition', () => {
     const ctx = await load(pool, null)
     const added = await ctx.agentTeam.addMember({
       requestId: requestId('add-no-llm'), workspaceId, handle: 'builder',
-      description: 'Builds the implementation', presetId: 'team-member', channelRefs: [],
+      description: 'Builds the implementation', presetId: 'team-member', projectRefs: [],
       model: { provider: 'mock', model: 'routed', reasoningEffort: 'high' as never },
     })
     // With no LLM service there is no adapter to validate against, so the

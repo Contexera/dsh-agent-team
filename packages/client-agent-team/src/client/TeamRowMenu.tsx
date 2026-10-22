@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { IconEllipsisOutlineRegular, Menu, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './sidebar.module.css'
 
-/** Overflow menu shared by sidebar Channel and Agent rows; the owning row stays pinned to its hover fill while open. */
+/** Overflow menu shared by sidebar Project and Agent rows; the owning row stays pinned to its hover fill while open. */
 export function TeamRowMenu({ label, items, onSelect, onOpenChange }: {
   readonly label: string
   readonly items: readonly MenuEntry[]

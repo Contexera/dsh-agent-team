@@ -2,7 +2,7 @@
   /* The face's box and the one place its size is stated: the seat for the initial or uploaded avatar, the width the continuation
      row's time centres in, and the indent the run hairlines hug. 34px is the shipped composer's primary round action. Chrome,
      not content: the content axis moves the words beside the face, never the face. Declared on the surface root because
-     Thread, Channel and Inbox all render Message faces under it. */
+     Thread, Project and Inbox all render Message faces under it. */
   --team-identity-seat: 34px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -108,7 +108,7 @@
 }
 
 /* One column for everyone, no per-message surface or width. The row's layer appears only under the reader, and only in a
-   Thread's reading seat (page and panel); the Channel feed keeps the language its entry rows own. */
+   Thread's reading seat (page and panel); the Project feed keeps the language its entry rows own. */
 .messageRow { align-items: flex-start; display: flex; gap: 10px; padding: 10px 0; position: relative; }
 .messageRow[data-grouped] { padding-top: 2px; }
 .messageRow[data-grouped] .messageIdentity,

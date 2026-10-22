@@ -247,10 +247,10 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('the Member whose function owns the area decides and the work continues')
     expect(preset).toContain('A gap in your own verification is yours to close')
     // One mention rule, and it is body-authored: the `@` is what makes a
-    // mention, `@all` reaches the Channel, and a Member an existing Thread has
+    // mention, `@all` reaches the Project, and a Member an existing Thread has
     // never carried is reported back rather than silently enrolled or refused.
     expect(preset).toContain('Mention a Member by writing `@Handle` in the Message body')
-    expect(preset).toContain('`@all` reaches every Member of the Channel')
+    expect(preset).toContain('`@all` reaches every Member of the Project')
     expect(preset).toContain('never carried still commits your message, but delivers nothing to that Member')
     expect(preset).not.toContain('pass structured Member refs in the mentions parameter')
     expect(preset).toContain('use the injected absolute paths')
@@ -508,7 +508,7 @@ describe('Agent Team Member persona', () => {
   // Token-level anchors, not sentences: rewording is Cole's issue 07 territory and
   // must stay free, while losing a whole rule has to fail. These are the rules the
   // persona is the only carrier of, chosen to not overlap the sentence assertions
-  // in the shipping contract above (reply channels, the token story, the two
+  // in the shipping contract above (reply projects, the token story, the two
   // message tiers, the private space).
   it('keeps the rules only the persona carries', async () => {
     const preset = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8').then(teamMemberPresetText)

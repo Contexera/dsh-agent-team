@@ -11,18 +11,18 @@ import type {
   AgentTeamAttachmentId,
   AgentTeamAgentMember,
   AgentTeamActor,
-  AgentTeamArchiveChannelRequest,
-  AgentTeamArchiveChannelResult,
+  AgentTeamArchiveProjectRequest,
+  AgentTeamArchiveProjectResult,
   AgentTeamArchiveMemberRequest,
   AgentTeamArchiveMemberResult,
-  AgentTeamChannel,
+  AgentTeamProject,
   AgentTeamChangeScope,
-  AgentTeamChannelArchivedOperation,
-  AgentTeamChannelCreatedOperation,
-  AgentTeamChannelMemberAddedOperation,
-  AgentTeamChannelMemberRemovedOperation,
-  AgentTeamChannelRef,
-  AgentTeamChannelUpdatedOperation,
+  AgentTeamProjectArchivedOperation,
+  AgentTeamProjectCreatedOperation,
+  AgentTeamProjectMemberAddedOperation,
+  AgentTeamProjectMemberRemovedOperation,
+  AgentTeamProjectRef,
+  AgentTeamProjectUpdatedOperation,
   AgentTeamReleaseSnapshot,
   AgentTeamClaim,
   AgentTeamClaimActivity,
@@ -34,8 +34,8 @@ import type {
   AgentTeamClaimRef,
   AgentTeamConfirmationRequired,
   AgentTeamConfirmationToken,
-  AgentTeamCreateChannelRequest,
-  AgentTeamCreateChannelResult,
+  AgentTeamCreateProjectRequest,
+  AgentTeamCreateProjectResult,
   AgentTeamDirectMarker,
   AgentTeamDmRequest,
   AgentTeamActiveTaskThread,
@@ -49,8 +49,8 @@ import type {
   AgentTeamInboxDelta,
   AgentTeamInboxItem,
   AgentTeamInitializedOperation,
-  AgentTeamJoinChannelRequest,
-  AgentTeamJoinChannelResult,
+  AgentTeamJoinProjectRequest,
+  AgentTeamJoinProjectResult,
   AgentTeamMemberActor,
   AgentTeamMemberAddedOperation,
   AgentTeamMemberArchivedOperation,
@@ -69,8 +69,8 @@ import type {
   AgentTeamOperation,
   AgentTeamOperationId,
   AgentTeamOperationReceipt,
-  AgentTeamRemoveChannelMemberRequest,
-  AgentTeamRemoveChannelMemberResult,
+  AgentTeamRemoveProjectMemberRequest,
+  AgentTeamRemoveProjectMemberResult,
   AgentTeamJoinWorkspaceRequest,
   AgentTeamJoinWorkspaceResult,
   AgentTeamLeaveWorkspaceRequest,
@@ -124,8 +124,8 @@ import type {
   AgentTeamPromoteThreadResult,
   AgentTeamThreadRepliedOperation,
   AgentTeamUnreadRequired,
-  AgentTeamUpdateChannelRequest,
-  AgentTeamUpdateChannelResult,
+  AgentTeamUpdateProjectRequest,
+  AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
   AgentTeamView,
   AgentTeamViewRequest,
@@ -178,7 +178,7 @@ export interface AgentTeamInitializeRequest {
   readonly humanMemberId: AgentTeamMemberId
 }
 
-export interface AgentTeamAuthorizedCreateChannelRequest extends AgentTeamCreateChannelRequest {
+export interface AgentTeamAuthorizedCreateProjectRequest extends AgentTeamCreateProjectRequest {
   readonly actor: AgentTeamHumanActor
 }
 
@@ -202,11 +202,11 @@ export interface AgentTeamAuthorizedRecycleMemberSessionRequest {
   readonly inputFromSeq?: SessionLogOffset
 }
 
-export interface AgentTeamAuthorizedJoinChannelRequest extends AgentTeamJoinChannelRequest {
+export interface AgentTeamAuthorizedJoinProjectRequest extends AgentTeamJoinProjectRequest {
   readonly actor: AgentTeamHumanActor
 }
 
-export interface AgentTeamAuthorizedRemoveChannelMemberRequest extends AgentTeamRemoveChannelMemberRequest {
+export interface AgentTeamAuthorizedRemoveProjectMemberRequest extends AgentTeamRemoveProjectMemberRequest {
   readonly actor: AgentTeamHumanActor
 }
 
@@ -258,11 +258,11 @@ export interface AgentTeamAuthorizedArchiveMemberRequest extends AgentTeamArchiv
   readonly actor: AgentTeamHumanActor
 }
 
-export interface AgentTeamAuthorizedUpdateChannelRequest extends AgentTeamUpdateChannelRequest {
+export interface AgentTeamAuthorizedUpdateProjectRequest extends AgentTeamUpdateProjectRequest {
   readonly actor: AgentTeamHumanActor
 }
 
-export interface AgentTeamAuthorizedArchiveChannelRequest extends AgentTeamArchiveChannelRequest {
+export interface AgentTeamAuthorizedArchiveProjectRequest extends AgentTeamArchiveProjectRequest {
   readonly actor: AgentTeamHumanActor
 }
 
@@ -278,7 +278,7 @@ export interface AgentTeamAuthorizedDmRequest extends AgentTeamDmRequest {
 export interface AgentTeamLedgerOptions {
   readonly operationId?: () => AgentTeamOperationId
   readonly occurredAt?: () => string
-  readonly ref?: (kind: 'channel' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
+  readonly ref?: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
   /**
    * Whether one unread fact is already on the named Member's model-visible
    * surface, in full. The Host supplies it: it owns the live Agent sessions,
@@ -316,7 +316,7 @@ export type { AgentTeamDurableMemberResult }
 interface Confirmation {
   readonly actor: AgentTeamMemberId
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly taskRef?: AgentTeamTaskRef
   readonly threadRef?: AgentTeamThreadRef
   readonly body: string
@@ -358,11 +358,11 @@ interface Projection {
   readonly ordered: AgentTeamOperation[]
   /** Committing instant per ledger sequence, so a fact's instant is a lookup rather than an index into `ordered`. */
   readonly occurredAtBySequence: Map<number, string>
-  readonly channels: Map<AgentTeamChannelRef, AgentTeamChannel>
+  readonly projects: Map<AgentTeamProjectRef, AgentTeamProject>
   readonly members: Map<AgentTeamMemberId, AgentTeamAgentMember>
   /** Member ↔ Workspace participation relation: the Workspace authorization set, seeded by member-added with the Member's default Workspace. */
   readonly participations: Map<AgentTeamMemberId, Set<WorkspaceId>>
-  readonly memberships: Map<AgentTeamChannelRef, Set<AgentTeamMemberId>>
+  readonly memberships: Map<AgentTeamProjectRef, Set<AgentTeamMemberId>>
   readonly claims: Map<AgentTeamClaimRef, AgentTeamClaim>
   readonly tasks: Map<AgentTeamTaskRef, AgentTeamTask>
   readonly threads: Map<AgentTeamThreadRef, AgentTeamThread>
@@ -374,8 +374,8 @@ interface Projection {
   /** Claims per Task, in the order `claims` first took them: the bucket that keeps a per-Task read from walking every Claim. */
   readonly claimsByTask: Map<AgentTeamTaskRef, AgentTeamClaim[]>
   readonly factsByThread: Map<AgentTeamThreadRef, AgentTeamThreadFact[]>
-  /** Owning Channel of each Thread, established by the anchor Message and immutable afterwards. */
-  readonly channelRefByThread: Map<AgentTeamThreadRef, AgentTeamChannelRef>
+  /** Owning Project of each Thread, established by the anchor Message and immutable afterwards. */
+  readonly projectRefByThread: Map<AgentTeamThreadRef, AgentTeamProjectRef>
   /** Structured mention refs per Message, derived from the originating send operations. */
   readonly mentionsByMessage: Map<AgentTeamMessageRef, readonly AgentTeamMemberId[]>
   readonly messageCountByThread: Map<AgentTeamThreadRef, number>
@@ -385,9 +385,9 @@ interface Projection {
   readonly sessionTransitions: Map<AgentTeamMemberId, { readonly previousSessionId: SessionId; readonly inputFromSeq?: SessionLogOffset }>
   /** Top-level anchor Message per Thread; the first topLevel Message wins. */
   readonly anchorByThread: Map<AgentTeamThreadRef, AgentTeamMessage>
-  /** Display ordinal per Task, in per-Channel creation order; workspace filtering happens at read time. */
+  /** Display ordinal per Task, in per-Project creation order; workspace filtering happens at read time. */
   readonly taskNumberByTask: Map<AgentTeamTaskRef, number>
-  readonly taskCountByChannel: Map<AgentTeamChannelRef, number>
+  readonly taskCountByProject: Map<AgentTeamProjectRef, number>
   /** Threads each Member follows — the reverse of attentionByThread, for per-reader Inbox candidates. */
   readonly attentionThreadsByMember: Map<AgentTeamMemberId, Set<AgentTeamThreadRef>>
   /** Threads each Member has written a Message in; participation is what the recent slice admits. */
@@ -425,12 +425,12 @@ function isAuditOnlyOperation(operation: AgentTeamOperation): operation is Extra
 }
 
 function emptyProjection(): Projection {
-  return { byRequest: new Map(), byOperation: new Map(), ordered: [], occurredAtBySequence: new Map(), channels: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
+  return { byRequest: new Map(), byOperation: new Map(), ordered: [], occurredAtBySequence: new Map(), projects: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
     claims: new Map(), tasks: new Map(), threads: new Map(), attention: new Map(), directMarkers: new Map(), activityMarkers: new Map(),
-    orderedFacts: [], claimsByTask: new Map(), factsByThread: new Map(), channelRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
+    orderedFacts: [], claimsByTask: new Map(), factsByThread: new Map(), projectRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
     messagesByRef: new Map(),
     attentionByThread: new Map(), sessionTransitions: new Map(),
-    anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByChannel: new Map(), attentionThreadsByMember: new Map(),
+    anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
     directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map() }
 }
@@ -510,7 +510,7 @@ export class AgentTeamLedger {
   private readonly confirmations = new Map<AgentTeamConfirmationToken, Confirmation>()
   private readonly createOperationId: () => AgentTeamOperationId
   private readonly createOccurredAt: () => string
-  private readonly createRef: (kind: 'channel' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
+  private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
   /** Host-supplied surface visibility probe; absent means no write is ever exempt. */
   private readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
   private operationTail: Promise<void> = Promise.resolve()
@@ -598,53 +598,53 @@ export class AgentTeamLedger {
     })
   }
 
-  createChannel(request: AgentTeamAuthorizedCreateChannelRequest): Promise<AgentTeamLedgerResult<AgentTeamCreateChannelResult>> {
+  createProject(request: AgentTeamAuthorizedCreateProjectRequest): Promise<AgentTeamLedgerResult<AgentTeamCreateProjectResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
-        this.assertSameChannelCreation(existing, request, this.normalizeUnique(request.memberIds, 'initial Channel members'))
-        return this.resolved(this.channelResult(existing))
+        this.assertSameProjectCreation(existing, request, this.normalizeUnique(request.memberIds, 'initial Project members'))
+        return this.resolved(this.projectResult(existing))
       }
       this.assertHumanActor(request.actor)
       const name = request.name.trim()
       const description = request.description.trim()
-      if (name === '') throw new Error('channel name must not be empty')
-      const memberIds = this.normalizeUnique(request.memberIds, 'initial Channel members')
+      if (name === '') throw new Error('project name must not be empty')
+      const memberIds = this.normalizeUnique(request.memberIds, 'initial Project members')
       for (const memberId of memberIds) this.assertJoinableMember(request.workspaceId, memberId)
       const sequence = this.nextSequence()
-      const channel: AgentTeamChannel = Object.freeze({
-        channelRef: this.ref('channel'), workspaceId: request.workspaceId, name, description, createdAtSequence: sequence, state: 'active' as const,
+      const project: AgentTeamProject = Object.freeze({
+        projectRef: this.ref('project'), workspaceId: request.workspaceId, name, description, createdAtSequence: sequence, state: 'active' as const,
       })
-      const operation: AgentTeamChannelCreatedOperation = Object.freeze({
-        ...this.operationBase(request, sequence), kind: 'team/channel-created',
-        data: Object.freeze({ workspaceId: request.workspaceId, channel, memberIds }),
+      const operation: AgentTeamProjectCreatedOperation = Object.freeze({
+        ...this.operationBase(request, sequence), kind: 'team/project-created',
+        data: Object.freeze({ workspaceId: request.workspaceId, project, memberIds }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.channelResult(operation))
+      return this.committed(this.projectResult(operation))
     })
   }
 
-  /** Human rename of one Channel's display facts; identity refs are immutable. */
-  updateChannel(request: AgentTeamAuthorizedUpdateChannelRequest): Promise<AgentTeamLedgerResult<AgentTeamUpdateChannelResult>> {
+  /** Human rename of one Project's display facts; identity refs are immutable. */
+  updateProject(request: AgentTeamAuthorizedUpdateProjectRequest): Promise<AgentTeamLedgerResult<AgentTeamUpdateProjectResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
-        this.assertSameChannelUpdate(existing, request)
-        return this.resolved(this.channelUpdateResult(existing))
+        this.assertSameProjectUpdate(existing, request)
+        return this.resolved(this.projectUpdateResult(existing))
       }
       this.assertHumanActor(request.actor)
       const name = request.name.trim()
       const description = request.description.trim()
-      if (name === '') throw new Error('channel name must not be empty')
-      const channel = Object.freeze({ ...this.requireActiveChannel(request.workspaceId, request.channelRef), name, description })
-      const operation: AgentTeamChannelUpdatedOperation = Object.freeze({
-        ...this.operationBase(request, this.nextSequence()), kind: 'team/channel-updated',
-        data: Object.freeze({ workspaceId: request.workspaceId, channel }),
+      if (name === '') throw new Error('project name must not be empty')
+      const project = Object.freeze({ ...this.requireActiveProject(request.workspaceId, request.projectRef), name, description })
+      const operation: AgentTeamProjectUpdatedOperation = Object.freeze({
+        ...this.operationBase(request, this.nextSequence()), kind: 'team/project-updated',
+        data: Object.freeze({ workspaceId: request.workspaceId, project }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.channelUpdateResult(operation))
+      return this.committed(this.projectUpdateResult(operation))
     })
   }
 
@@ -661,10 +661,10 @@ export class AgentTeamLedger {
       const presetId = request.presetId.trim()
       if (handle === '') throw new Error('member handle must not be empty')
       if (presetId === '') throw new Error('member preset must not be empty')
-      // Description and initial Channels are optional: a Member with neither is
-      // still drivable through its DM view, and joins Channels later.
-      const channelRefs = this.normalizeUnique(request.channelRefs, 'initial Member Channels')
-      for (const channelRef of channelRefs) this.requireActiveChannel(request.workspaceId, channelRef)
+      // Description and initial Projects are optional: a Member with neither is
+      // still drivable through its DM view, and joins Projects later.
+      const projectRefs = this.normalizeUnique(request.projectRefs, 'initial Member Projects')
+      for (const projectRef of projectRefs) this.requireActiveProject(request.workspaceId, projectRef)
       this.assertHandleAvailable(request.workspaceId, handle)
       this.assertModelSelection(request.member.model)
       this.assertCapabilities(request.member.capabilities)
@@ -675,7 +675,7 @@ export class AgentTeamLedger {
       })
       const operation: AgentTeamMemberAddedOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/member-added',
-        data: Object.freeze({ member, channelRefs }),
+        data: Object.freeze({ member, projectRefs }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
@@ -825,7 +825,7 @@ export class AgentTeamLedger {
    * default Workspace cannot be left — ending it is the archive path. Every
    * active Claim the Member holds on the Workspace's Threads releases with
    * public Activities, its Attention and markers on those Threads clear, and
-   * its Channel memberships there end; identity, Session, and remaining
+   * its Project memberships there end; identity, Session, and remaining
    * participations are untouched.
    */
   leaveWorkspace(request: AgentTeamAuthorizedLeaveWorkspaceRequest): Promise<AgentTeamLedgerResult<AgentTeamLeaveWorkspaceResult>> {
@@ -864,24 +864,24 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Archive one Channel: hidden from every surface, facts kept recoverable.
-   * Every active Claim on the Channel's Threads releases with one public
+   * Archive one Project: hidden from every surface, facts kept recoverable.
+   * Every active Claim on the Project's Threads releases with one public
    * Activity per (owner, Thread), and every Member's Attention and markers
-   * for those Threads clear — a hidden Channel must not leave Tasks stuck in
+   * for those Threads clear — a hidden Project must not leave Tasks stuck in
    * progress behind it or phantom unread counts.
    */
-  archiveChannel(request: AgentTeamAuthorizedArchiveChannelRequest): Promise<AgentTeamLedgerResult<AgentTeamArchiveChannelResult>> {
+  archiveProject(request: AgentTeamAuthorizedArchiveProjectRequest): Promise<AgentTeamLedgerResult<AgentTeamArchiveProjectResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
-        this.assertSameChannelArchival(existing, request)
-        return this.resolved(this.channelArchivalResult(existing))
+        this.assertSameProjectArchival(existing, request)
+        return this.resolved(this.projectArchivalResult(existing))
       }
       this.assertHumanActor(request.actor)
-      const channel = this.requireChannel(request.workspaceId, request.channelRef)
-      if (channel.state === 'archived') throw new Error(`Channel '${channel.channelRef}' is already archived`)
-      const nextChannel = Object.freeze({ ...channel, state: 'archived' as const })
-      const threadRefs = this.channelThreadRefs(channel.channelRef)
+      const project = this.requireProject(request.workspaceId, request.projectRef)
+      if (project.state === 'archived') throw new Error(`Project '${project.projectRef}' is already archived`)
+      const nextProject = Object.freeze({ ...project, state: 'archived' as const })
+      const threadRefs = this.projectThreadRefs(project.projectRef)
       const releasedClaims = [...this.state.claims.values()]
         .filter(claim => claim.state === 'active' && threadRefs.has(claim.threadRef))
         .map(claim => Object.freeze({ ...claim, state: 'released' as const }))
@@ -892,32 +892,32 @@ export class AgentTeamLedger {
       const activities = Object.freeze(owners.flatMap(owner => this.releaseSummaries(releasedClaims.filter(claim => claim.owner === owner), owner, sequence)))
       const threads = this.threadsForActivities(activities)
       const tasks = this.tasksForClaims(releasedClaims, nextClaims)
-      const inbox = this.channelArchivalInbox(threadRefs)
-      const operation: AgentTeamChannelArchivedOperation = Object.freeze({
-        ...this.operationBase(request, sequence), kind: 'team/channel-archived',
-        data: Object.freeze({ workspaceId: request.workspaceId, channel: nextChannel,
+      const inbox = this.projectArchivalInbox(threadRefs)
+      const operation: AgentTeamProjectArchivedOperation = Object.freeze({
+        ...this.operationBase(request, sequence), kind: 'team/project-archived',
+        data: Object.freeze({ workspaceId: request.workspaceId, project: nextProject,
           claims: Object.freeze(releasedClaims), activities, tasks, threads, inbox }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.channelArchivalResult(operation))
+      return this.committed(this.projectArchivalResult(operation))
     })
   }
 
   sendMessage(request: AgentTeamAuthorizedSendMessageRequest): Promise<AgentTeamLedgerResult<AgentTeamSendMessageResult>> {
     return this.enqueue(async () => {
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
-      const channel = this.requireActiveChannel(request.workspaceId, request.channelRef)
-      if (actor.kind === 'member') this.requireMemberChannel(this.requireMember(actor.memberId), channel.channelRef)
+      const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+      if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), project.projectRef)
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
-      const recipients = this.mergeBodyMentions(actor.memberId, channel.channelRef, body, this.normalizeRecipients(request.actor, request.recipients))
+      const recipients = this.mergeBodyMentions(actor.memberId, project.projectRef, body, this.normalizeRecipients(request.actor, request.recipients))
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameMessage(existing, request, recipients)
         return this.resolved(this.messageResult(existing))
       }
-      this.assertMentionTargets(channel, recipients)
+      this.assertMentionTargets(project, recipients)
       // Top-level Task creation is open to every actor: mentioned Members join
       // the new Thread as followers. Only existing-Thread invitations stay
       // Human-gated (reply path).
@@ -927,10 +927,10 @@ export class AgentTeamLedger {
       const threadRef = this.ref('thread')
       const taskRef = asTask ? this.ref('task') : undefined
       const task = taskRef === undefined ? undefined
-        : Object.freeze({ taskRef, channelRef: channel.channelRef, threadRef, status: 'todo' as const, resolution: 'open' as const })
+        : Object.freeze({ taskRef, projectRef: project.projectRef, threadRef, status: 'todo' as const, resolution: 'open' as const })
       const thread: AgentTeamThread = Object.freeze({ threadRef, ...(taskRef === undefined ? {} : { taskRef }), revision: sequence })
       const message: AgentTeamMessage = Object.freeze({
-        messageRef: this.ref('message'), channelRef: channel.channelRef, threadRef, ...(taskRef === undefined ? {} : { taskRef }),
+        messageRef: this.ref('message'), projectRef: project.projectRef, threadRef, ...(taskRef === undefined ? {} : { taskRef }),
         sender: request.actor.memberId, body,
         ...(request.resolvedAttachments === undefined ? {} : { attachments: request.resolvedAttachments }),
         topLevel: true, sequence, occurredAt: base.occurredAt,
@@ -953,10 +953,10 @@ export class AgentTeamLedger {
   reply(request: AgentTeamAuthorizedReplyRequest): Promise<AgentTeamLedgerResult<AgentTeamReplyResult>> {
     return this.enqueue(async () => {
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
-      const { task, thread, channelRef } = this.threadContextForActor(actor, request.workspaceId, request)
+      const { task, thread, projectRef } = this.threadContextForActor(actor, request.workspaceId, request)
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
-      const channel = this.requireChannel(request.workspaceId, channelRef)
+      const project = this.requireProject(request.workspaceId, projectRef)
       const parent = this.requireReplyParent(request, thread.threadRef)
       const explicit = this.normalizeRecipients(actor, request.recipients)
       // Answering a Member delivers to them the way a mention does: a reply the
@@ -966,13 +966,13 @@ export class AgentTeamLedger {
       const answered = parent === undefined || parent.sender === actor.memberId || parent.sender === AGENT_TEAM_HUMAN_MEMBER_ID
         ? explicit
         : [...new Set([...explicit, parent.sender])].sort()
-      const recipients = this.mergeBodyMentions(actor.memberId, channelRef, body, answered)
+      const recipients = this.mergeBodyMentions(actor.memberId, projectRef, body, answered)
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameReply(existing, request, recipients)
         return this.resolved(this.replyResult(existing, this.undeliverableRecipients(actor, thread.threadRef, recipients)))
       }
-      this.assertMentionTargets(channel, recipients)
+      this.assertMentionTargets(project, recipients)
       const deferred = this.deferredThreadWrite(actor.memberId, task, thread, request.baseRevision)
       if (deferred !== undefined) return this.resolved(deferred)
       if (task?.resolution === 'closed') throw new Error(`Task '${task.taskRef}' is closed; reopen it before replying`)
@@ -986,16 +986,16 @@ export class AgentTeamLedger {
       // A Member that once took part in this Thread is delivered to directly:
       // re-joining a Thread it already belongs to is not an invitation.
       if (unfollowedAgents.length > 0 && actor.kind === 'human' && request.confirmationToken === undefined) {
-        return this.resolved(this.issueConfirmation(request.actor, request.workspaceId, channelRef, body, delivered, task, thread))
+        return this.resolved(this.issueConfirmation(request.actor, request.workspaceId, projectRef, body, delivered, task, thread))
       }
       if (request.confirmationToken !== undefined) {
-        this.consumeConfirmation(request.confirmationToken, request.actor, request.workspaceId, channelRef,
+        this.consumeConfirmation(request.confirmationToken, request.actor, request.workspaceId, projectRef,
           task, thread, body, delivered)
       }
       const sequence = this.nextSequence()
       const base = this.operationBase(request, sequence)
       const message: AgentTeamMessage = Object.freeze({
-        messageRef: this.ref('message'), channelRef, threadRef: thread.threadRef,
+        messageRef: this.ref('message'), projectRef, threadRef: thread.threadRef,
         ...(task === undefined ? {} : { taskRef: task.taskRef }), sender: request.actor.memberId, body,
         ...(request.resolvedAttachments === undefined ? {} : { attachments: request.resolvedAttachments }),
         ...(parent === undefined ? {} : { replyToMessageRef: parent.messageRef }),
@@ -1023,14 +1023,14 @@ export class AgentTeamLedger {
         return this.resolved(this.promotionResult(existing))
       }
       this.assertHumanActor(request.actor)
-      const { task: existingTask, thread, channelRef } = this.threadContextForActor(request.actor, request.workspaceId, request)
+      const { task: existingTask, thread, projectRef } = this.threadContextForActor(request.actor, request.workspaceId, request)
       if (existingTask !== undefined) throw new Error(`Thread '${thread.threadRef}' already has Task '${existingTask.taskRef}'`)
       const deferred = this.deferredThreadWrite(request.actor.memberId, undefined, thread, request.baseRevision)
       if (deferred !== undefined) return this.resolved(deferred)
       const sequence = this.nextSequence()
       const base = this.operationBase(request, sequence)
       const taskRef = this.ref('task')
-      const task: AgentTeamTask = Object.freeze({ taskRef, channelRef, threadRef: thread.threadRef, status: 'todo', resolution: 'open' })
+      const task: AgentTeamTask = Object.freeze({ taskRef, projectRef, threadRef: thread.threadRef, status: 'todo', resolution: 'open' })
       const nextThread: AgentTeamThread = Object.freeze({ threadRef: thread.threadRef, taskRef, revision: sequence })
       const activity: AgentTeamTaskActivity = Object.freeze({ activityRef: this.ref('activity'), kind: 'promote',
         taskRef, threadRef: thread.threadRef, actor: request.actor.memberId, sequence })
@@ -1292,7 +1292,7 @@ export class AgentTeamLedger {
 
   /**
    * Append one Member-to-Member direct message as an audit-only operation.
-   * A DM is pure delivery: no Channel, Thread, revision, attention, or
+   * A DM is pure delivery: no Project, Thread, revision, attention, or
    * markers change, so apply() is a marker and no projection state moves.
    */
   sendDm(request: AgentTeamAuthorizedDmRequest): Promise<AgentTeamLedgerResult<AgentTeamDmResult>> {
@@ -1379,7 +1379,7 @@ export class AgentTeamLedger {
     // Candidates carry only what ranking and the totals need; a row's preview
     // text, actor and live Claim owners are materialized only for the rows
     // this response returns.
-    type Candidate = { readonly workspaceId: WorkspaceId; readonly channelRef: AgentTeamChannelRef; readonly channelName: string
+    type Candidate = { readonly workspaceId: WorkspaceId; readonly projectRef: AgentTeamProjectRef; readonly projectName: string
       readonly task?: AgentTeamTask; readonly taskNumber?: number; readonly thread: AgentTeamThread
       readonly unreadCount: number; readonly directCount: number; readonly newest: AgentTeamThreadFact
       readonly attention?: AgentTeamThreadAttention }
@@ -1387,13 +1387,13 @@ export class AgentTeamLedger {
     for (const threadRef of this.inboxCandidateThreads(authorized.memberId)) {
       const thread = this.state.threads.get(threadRef)
       if (thread === undefined) continue
-      const channelRef = this.channelRefForThread(thread.threadRef)
-      if (channelRef === undefined) continue
-      const channel = this.state.channels.get(channelRef)
-      if (channel === undefined || !workspaceIds.includes(channel.workspaceId)) continue
-      if (this.visibleChannel(channel) === undefined) continue
-      const workspaceId = channel.workspaceId
-      if (authorized.kind === 'member' && !this.isChannelMember(channelRef, authorized.memberId)) continue
+      const projectRef = this.projectRefForThread(thread.threadRef)
+      if (projectRef === undefined) continue
+      const project = this.state.projects.get(projectRef)
+      if (project === undefined || !workspaceIds.includes(project.workspaceId)) continue
+      if (this.visibleProject(project) === undefined) continue
+      const workspaceId = project.workspaceId
+      if (authorized.kind === 'member' && !this.isProjectMember(projectRef, authorized.memberId)) continue
       const unread = this.unreadFor(authorized.memberId, thread.threadRef)
       if (unread.length === 0) continue
       unreadThreads.add(thread.threadRef)
@@ -1405,13 +1405,13 @@ export class AgentTeamLedger {
       // observe a different commit between the two reads.
       const newest = unread.at(-1)!.fact
       const taskNumber = task === undefined ? undefined : taskNumbers.get(task.taskRef)
-      candidates.push({ workspaceId, channelRef, channelName: channel.name,
+      candidates.push({ workspaceId, projectRef, projectName: project.name,
         ...(task === undefined ? {} : { task }), ...(taskNumber === undefined ? {} : { taskNumber }), thread,
         unreadCount: unread.length, directCount, newest, ...(attention === undefined ? {} : { attention }) })
     }
     candidates.sort((left, right) => right.directCount - left.directCount || right.newest.sequence - left.newest.sequence || left.thread.threadRef.localeCompare(right.thread.threadRef))
-    const selected = candidates.slice(0, limit).map(candidate => Object.freeze({ workspaceId: candidate.workspaceId, channelRef: candidate.channelRef,
-      channelName: candidate.channelName, ...(candidate.task === undefined ? {} : { task: candidate.task }),
+    const selected = candidates.slice(0, limit).map(candidate => Object.freeze({ workspaceId: candidate.workspaceId, projectRef: candidate.projectRef,
+      projectName: candidate.projectName, ...(candidate.task === undefined ? {} : { task: candidate.task }),
       ...(candidate.taskNumber === undefined ? {} : { taskNumber: candidate.taskNumber }), thread: candidate.thread,
       unreadCount: candidate.unreadCount, directCount: candidate.directCount,
       previewText: boundedOpeningLine(this.threadAnchor(candidate.thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
@@ -1447,7 +1447,7 @@ export class AgentTeamLedger {
    * The people a Task still has on it, resolved the way a row draws them: owners
    * of its live Claims, in claim order, deduped. A released Claim is not work,
    * and a done or closed Task keeps its Claims as history rather than as
-   * presence — deliberately the same rule the Channel feed applies to the same
+   * presence — deliberately the same rule the Project feed applies to the same
    * Task, so 「谁在这个 Task 上」 never acquires a second definition.
    */
   private liveClaimOwners(task: AgentTeamTask | undefined): readonly AgentTeamInboxActor[] {
@@ -1479,18 +1479,18 @@ export class AgentTeamLedger {
       if (unreadThreads.has(threadRef)) continue
       const thread = this.state.threads.get(threadRef)
       if (thread === undefined) continue
-      const channelRef = this.channelRefForThread(thread.threadRef)
-      if (channelRef === undefined) continue
-      const channel = this.state.channels.get(channelRef)
-      if (channel === undefined || channel.workspaceId !== workspaceId) continue
-      if (this.visibleChannel(channel) === undefined) continue
+      const projectRef = this.projectRefForThread(thread.threadRef)
+      if (projectRef === undefined) continue
+      const project = this.state.projects.get(projectRef)
+      if (project === undefined || project.workspaceId !== workspaceId) continue
+      if (this.visibleProject(project) === undefined) continue
       const facts = this.state.factsByThread.get(thread.threadRef) ?? []
       const newest = facts.at(-1)
       if (newest === undefined) continue
       const task = thread.taskRef === undefined ? undefined : this.state.tasks.get(thread.taskRef)
       const taskNumber = task === undefined ? undefined : taskNumbers.get(task.taskRef)
-      recent.push(Object.freeze({ workspaceId, channelRef,
-        channelName: this.state.channels.get(channelRef)?.name ?? '',
+      recent.push(Object.freeze({ workspaceId, projectRef,
+        projectName: this.state.projects.get(projectRef)?.name ?? '',
         ...(task === undefined ? {} : { task }), ...(taskNumber === undefined ? {} : { taskNumber }), thread,
         unreadCount: 0, directCount: 0,
         previewText: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
@@ -1626,13 +1626,13 @@ export class AgentTeamLedger {
     for (const threadRef of threadRefs) {
       const key = this.uniqueRefKey(this.state.threads, threadRef, 'thread')
       const thread = key === undefined ? undefined : this.state.threads.get(key)
-      const channelRef = thread === undefined ? undefined : this.channelRefForThread(thread.threadRef)
-      const channel = channelRef === undefined ? undefined : this.state.channels.get(channelRef)
-      if (thread === undefined || channelRef === undefined || channel?.workspaceId !== workspaceId || this.visibleChannel(channel) === undefined) continue
+      const projectRef = thread === undefined ? undefined : this.projectRefForThread(thread.threadRef)
+      const project = projectRef === undefined ? undefined : this.state.projects.get(projectRef)
+      if (thread === undefined || projectRef === undefined || project?.workspaceId !== workspaceId || this.visibleProject(project) === undefined) continue
       const task = thread.taskRef === undefined ? undefined : this.state.tasks.get(thread.taskRef)
       resolved.push(Object.freeze({
         threadRef: thread.threadRef,
-        channelRef,
+        projectRef,
         ...(task === undefined ? {} : { taskRef: task.taskRef, taskNumber: numbers.get(task.taskRef) ?? 0 }),
         title: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, THREAD_CHIP_TITLE_MAX_CHARACTERS),
       }))
@@ -1654,8 +1654,8 @@ export class AgentTeamLedger {
     for (const messageRef of messageRefs) {
       const message = this.state.messagesByRef.get(messageRef)
       if (message === undefined) continue
-      const channel = this.state.channels.get(message.channelRef)
-      if (this.visibleChannel(channel)?.workspaceId !== workspaceId) continue
+      const project = this.state.projects.get(message.projectRef)
+      if (this.visibleProject(project)?.workspaceId !== workspaceId) continue
       resolved.push(Object.freeze({
         messageRef: message.messageRef,
         threadRef: message.threadRef,
@@ -1670,7 +1670,7 @@ export class AgentTeamLedger {
    * Read one Message back verbatim, inside the Thread that carries it.
    *
    * Authorization comes first and comes from the Thread: a reader must be able
-   * to address the Thread at all, which is where membership and Channel
+   * to address the Thread at all, which is where membership and Project
    * archival are decided, so this opens no path that reading the Thread did
    * not already open. The Message is then looked up by identity in the index —
    * never by position — so a ref resolves the same Message whatever else has
@@ -1690,7 +1690,7 @@ export class AgentTeamLedger {
     return Object.freeze({
       messageRef: message.messageRef,
       threadRef: message.threadRef,
-      channelRef: context.channelRef,
+      projectRef: context.projectRef,
       sender: message.sender,
       sequence: message.sequence,
       ...(message.occurredAt === undefined ? {} : { occurredAt: message.occurredAt }),
@@ -1705,9 +1705,9 @@ export class AgentTeamLedger {
     for (const taskRef of taskRefs) {
       const key = this.uniqueRefKey(this.state.tasks, taskRef, 'task')
       const task = key === undefined ? undefined : this.state.tasks.get(key)
-      const channel = task === undefined ? undefined : this.state.channels.get(task.channelRef)
-      if (task === undefined || this.visibleChannel(channel)?.workspaceId !== workspaceId) continue
-      resolved.push(Object.freeze({ taskRef: task.taskRef, channelRef: task.channelRef, threadRef: task.threadRef, taskNumber: numbers.get(task.taskRef) ?? 0 }))
+      const project = task === undefined ? undefined : this.state.projects.get(task.projectRef)
+      if (task === undefined || this.visibleProject(project)?.workspaceId !== workspaceId) continue
+      resolved.push(Object.freeze({ taskRef: task.taskRef, projectRef: task.projectRef, threadRef: task.threadRef, taskNumber: numbers.get(task.taskRef) ?? 0 }))
     }
     return resolved
   }
@@ -1723,33 +1723,33 @@ export class AgentTeamLedger {
       const member = this.requireMember(memberId)
       if (!this.participatesIn(member.memberId, request.workspaceId)) throw new Error('Member cannot view another Workspace')
     }
-    const channelRefFilter = request.channelRef === undefined
+    const projectRefFilter = request.projectRef === undefined
       ? undefined
-      : this.requireActiveChannel(request.workspaceId, request.channelRef).channelRef
-    if (channelRefFilter !== undefined) {
-      if (memberId !== undefined && !this.isChannelMember(channelRefFilter, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Channel '${request.channelRef}'`)
+      : this.requireActiveProject(request.workspaceId, request.projectRef).projectRef
+    if (projectRefFilter !== undefined) {
+      if (memberId !== undefined && !this.isProjectMember(projectRefFilter, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
     }
     let threadRefFilter: AgentTeamThreadRef | undefined
     if (request.threadRef !== undefined) {
       const thread = this.requireThread(request.threadRef)
       threadRefFilter = thread.threadRef
-      const channelRef = this.channelRefForThread(thread.threadRef)
-      if (channelRef === undefined) throw new Error(`unknown Thread ref '${request.threadRef}'`)
-      if (this.state.channels.get(channelRef)?.workspaceId !== request.workspaceId) throw new Error(`Thread '${request.threadRef}' does not belong to Workspace '${request.workspaceId}'`)
-      this.assertThreadChannelActive(channelRef)
-      if (channelRefFilter !== undefined && channelRef !== channelRefFilter) throw new Error(`Thread '${request.threadRef}' does not belong to Channel '${request.channelRef}'`)
-      if (memberId !== undefined && !this.isChannelMember(channelRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Channel '${channelRef}'`)
+      const projectRef = this.projectRefForThread(thread.threadRef)
+      if (projectRef === undefined) throw new Error(`unknown Thread ref '${request.threadRef}'`)
+      if (this.state.projects.get(projectRef)?.workspaceId !== request.workspaceId) throw new Error(`Thread '${request.threadRef}' does not belong to Workspace '${request.workspaceId}'`)
+      this.assertThreadProjectActive(projectRef)
+      if (projectRefFilter !== undefined && projectRef !== projectRefFilter) throw new Error(`Thread '${request.threadRef}' does not belong to Project '${request.projectRef}'`)
+      if (memberId !== undefined && !this.isProjectMember(projectRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${projectRef}'`)
     }
-    const channels = [...this.state.channels.values()].filter(channel => channel.workspaceId === request.workspaceId
-      && this.visibleChannel(channel) !== undefined
-      && (memberId === undefined || this.isChannelMember(channel.channelRef, memberId)))
-    const channelRefs = new Set(channels.map(channel => channel.channelRef))
+    const projects = [...this.state.projects.values()].filter(project => project.workspaceId === request.workspaceId
+      && this.visibleProject(project) !== undefined
+      && (memberId === undefined || this.isProjectMember(project.projectRef, memberId)))
+    const projectRefs = new Set(projects.map(project => project.projectRef))
     const before = request.cursor ?? this.state.ordered.length + 1
     const matches = (fact: AgentTeamThreadFact): boolean => {
       const threadRef = fact.kind === 'message' ? fact.message.threadRef : fact.activity.threadRef
-      const channelRef = this.channelRefForThread(threadRef)
-      if (channelRef === undefined || !channelRefs.has(channelRef)) return false
-      if (channelRefFilter !== undefined && channelRef !== channelRefFilter) return false
+      const projectRef = this.projectRefForThread(threadRef)
+      if (projectRef === undefined || !projectRefs.has(projectRef)) return false
+      if (projectRefFilter !== undefined && projectRef !== projectRefFilter) return false
       if (threadRefFilter !== undefined && threadRef !== threadRefFilter) return false
       if (request.topLevelOnly && (fact.kind !== 'message' || !fact.message.topLevel)) return false
       if (request.includeActivities === false && fact.kind === 'activity') return false
@@ -1788,9 +1788,9 @@ export class AgentTeamLedger {
     const inScope = (threadRef: AgentTeamThreadRef): boolean => {
       const cached = scopeCache.get(threadRef)
       if (cached !== undefined) return cached
-      const channelRef = this.channelRefForThread(threadRef)
-      const scoped = channelRef !== undefined && channelRefs.has(channelRef)
-        && (channelRefFilter === undefined || channelRef === channelRefFilter)
+      const projectRef = this.projectRefForThread(threadRef)
+      const scoped = projectRef !== undefined && projectRefs.has(projectRef)
+        && (projectRefFilter === undefined || projectRef === projectRefFilter)
         && (threadRefFilter === undefined || threadRef === threadRefFilter)
       scopeCache.set(threadRef, scoped)
       return scoped
@@ -1819,18 +1819,18 @@ export class AgentTeamLedger {
       humanMemberId: initialization.data.humanMemberId,
       workspaces: Object.freeze(memberId === undefined ? [] : this.workspacesOfFrom(this.state, memberId)
         .map(workspaceId => Object.freeze({ workspaceId, default: workspaceId === this.state.members.get(memberId)?.workspaceId }))),
-      channels: Object.freeze(channels),
-      // Channel participation is derived, so this roster is too: every Member
-      // that takes part in a visible Channel, by explicit enrolment a ledger
+      projects: Object.freeze(projects),
+      // Project participation is derived, so this roster is too: every Member
+      // that takes part in a visible Project, by explicit enrolment a ledger
       // still carries or by having taken part in one of its Threads. Reading
       // the membership table directly would hide Members that mention rules
       // let you address.
-      members: Object.freeze([...channelRefs].flatMap(channelRef => [...this.state.members.keys()]
+      members: Object.freeze([...projectRefs].flatMap(projectRef => [...this.state.members.keys()]
         .filter(memberId => {
           const state = this.state.members.get(memberId)?.state
           return state !== undefined && state !== 'inactive' && state !== 'archived'
-            && this.isChannelMemberFrom(this.state, channelRef, memberId)
-        }).sort().map(memberId => Object.freeze({ channelRef, memberId })))),
+            && this.isProjectMemberFrom(this.state, projectRef, memberId)
+        }).sort().map(memberId => Object.freeze({ projectRef, memberId })))),
       tasks: Object.freeze(catalogTasks),
       threads: Object.freeze(catalogThreads),
       taskNumbers: Object.freeze(catalogTasks.map(task => Object.freeze({ taskRef: task.taskRef, taskNumber: taskNumbers.get(task.taskRef) ?? 0 }))),
@@ -1846,7 +1846,7 @@ export class AgentTeamLedger {
   status(): AgentTeamStatus {
     const initialization = this.initialization()
     return Object.freeze({ initialized: true, sequence: this.state.ordered.length, operationCount: this.state.ordered.length,
-      channelCount: this.state.channels.size, agentMemberCount: this.state.members.size, humanMemberId: initialization.data.humanMemberId })
+      projectCount: this.state.projects.size, agentMemberCount: this.state.members.size, humanMemberId: initialization.data.humanMemberId })
   }
 
   validate(): void {
@@ -1878,12 +1878,12 @@ export class AgentTeamLedger {
     tasks: readonly AgentTeamTask[],
     activities: readonly AgentTeamClaimsReleasedActivity[],
   ): AgentTeamChangeScope[] {
-    const channelByTask = new Map(tasks.map(task => [task.taskRef, task.channelRef]))
+    const projectByTask = new Map(tasks.map(task => [task.taskRef, task.projectRef]))
     for (const activity of activities) {
       scopes.push({ kind: 'thread', threadRef: activity.threadRef })
-      const channelRef = channelByTask.get(activity.taskRef)
-      if (channelRef !== undefined && !scopes.some(scope => scope.kind === 'channel' && scope.channelRef === channelRef)) {
-        scopes.push({ kind: 'channel', channelRef })
+      const projectRef = projectByTask.get(activity.taskRef)
+      if (projectRef !== undefined && !scopes.some(scope => scope.kind === 'project' && scope.projectRef === projectRef)) {
+        scopes.push({ kind: 'project', projectRef })
       }
     }
     return scopes
@@ -1909,11 +1909,11 @@ export class AgentTeamLedger {
     switch (operation.kind) {
       case 'team/initialized':
         return undefined
-      case 'team/channel-created':
+      case 'team/project-created':
         return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }]
-      case 'team/channel-updated':
-        // The rename is visible in the sidebar list and any open Channel/Thread header.
-        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'channel', channelRef: operation.data.channel.channelRef }]
+      case 'team/project-updated':
+        // The rename is visible in the sidebar list and any open Project/Thread header.
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.project.projectRef }]
       case 'team/member-added':
       case 'team/member-suspended':
       case 'team/member-resumed':
@@ -1939,35 +1939,35 @@ export class AgentTeamLedger {
           operation.data.tasks,
           operation.data.activities,
         )
-      case 'team/channel-member-added':
-        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'channel', channelRef: operation.data.channelRef }]
-      case 'team/channel-member-removed':
+      case 'team/project-member-added':
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
+      case 'team/project-member-removed':
         return this.withReleasedActivityScopes(
           [
             { kind: 'workspace', workspaceId: operation.data.workspaceId },
-            { kind: 'channel', channelRef: operation.data.channelRef },
+            { kind: 'project', projectRef: operation.data.projectRef },
           ],
           operation.data.tasks,
           operation.data.activities,
         )
-      case 'team/channel-archived': {
+      case 'team/project-archived': {
         const scopes: AgentTeamChangeScope[] = [
           { kind: 'workspace', workspaceId: operation.data.workspaceId },
-          { kind: 'channel', channelRef: operation.data.channel.channelRef },
+          { kind: 'project', projectRef: operation.data.project.projectRef },
         ]
         for (const activity of operation.data.activities) scopes.push({ kind: 'thread', threadRef: activity.threadRef })
         return scopes
       }
       case 'team/message-sent':
       case 'team/thread-replied':
-        return [{ kind: 'channel', channelRef: operation.data.message.channelRef }, { kind: 'thread', threadRef: operation.data.message.threadRef }]
+        return [{ kind: 'project', projectRef: operation.data.message.projectRef }, { kind: 'thread', threadRef: operation.data.message.threadRef }]
       case 'team/thread-promoted':
-        return [{ kind: 'channel', channelRef: operation.data.task.channelRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
+        return [{ kind: 'project', projectRef: operation.data.task.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
       case 'team/claim-created':
       case 'team/claim-done':
       case 'team/claim-released':
       case 'team/task-changed':
-        return [{ kind: 'channel', channelRef: operation.data.task.channelRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
+        return [{ kind: 'project', projectRef: operation.data.task.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
       case 'team/thread-attention-changed':
         return [{ kind: 'thread', threadRef: operation.data.thread.threadRef }]
       case 'team/thread-read':
@@ -2016,15 +2016,15 @@ export class AgentTeamLedger {
       case 'team/task-changed':
       case 'team/thread-attention-changed':
         return [operation.data.thread.threadRef]
-      case 'team/channel-member-removed':
-      case 'team/channel-archived':
+      case 'team/project-member-removed':
+      case 'team/project-archived':
       case 'team/member-removed':
       case 'team/member-archived':
       case 'team/member-workspace-left':
         return operation.data.activities.map(activity => activity.threadRef)
       case 'team/initialized':
-      case 'team/channel-created':
-      case 'team/channel-updated':
+      case 'team/project-created':
+      case 'team/project-updated':
       case 'team/member-added':
       case 'team/member-workspace-joined':
       case 'team/member-suspended':
@@ -2035,7 +2035,7 @@ export class AgentTeamLedger {
       case 'team/member-session-rolled-over':
       case 'team/member-session-recycled':
       case 'team/member-updated':
-      case 'team/channel-member-added':
+      case 'team/project-member-added':
       case 'team/thread-read':
       case 'team/dm-sent':
         return []
@@ -2097,27 +2097,27 @@ export class AgentTeamLedger {
       return member
     }
     if (operation.kind === 'team/initialized') throw new Error('agent-team initialization must be first')
-    if (operation.kind === 'team/channel-created') {
+    if (operation.kind === 'team/project-created') {
       assertHuman()
-      const { channel, memberIds } = operation.data
-      if (projection.channels.has(channel.channelRef) || channel.createdAtSequence !== operation.sequence || channel.workspaceId !== operation.data.workspaceId) throw new Error('invalid Channel creation')
-      this.addRef(refs, channel.channelRef)
+      const { project, memberIds } = operation.data
+      if (projection.projects.has(project.projectRef) || project.createdAtSequence !== operation.sequence || project.workspaceId !== operation.data.workspaceId) throw new Error('invalid Project creation')
+      this.addRef(refs, project.projectRef)
       const unique = new Set(memberIds)
-      if (unique.size !== memberIds.length) throw new Error('invalid initial Channel members')
+      if (unique.size !== memberIds.length) throw new Error('invalid initial Project members')
       for (const memberId of memberIds) {
         const member = projection.members.get(memberId)
-        if (member === undefined || !this.participatesInFrom(projection, member.memberId, channel.workspaceId) || member.state !== 'enabled') throw new Error('invalid initial Channel Member')
+        if (member === undefined || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || member.state !== 'enabled') throw new Error('invalid initial Project Member')
       }
       return
     }
     if (operation.kind === 'team/member-added') {
       assertHuman()
-      const { member, channelRefs } = operation.data
-      if (projection.members.has(member.memberId) || new Set(channelRefs).size !== channelRefs.length) throw new Error('invalid Member creation')
+      const { member, projectRefs } = operation.data
+      if (projection.members.has(member.memberId) || new Set(projectRefs).size !== projectRefs.length) throw new Error('invalid Member creation')
       this.addRef(refs, member.memberId)
-      for (const channelRef of channelRefs) {
-        const channel = projection.channels.get(channelRef)
-        if (channel === undefined || channel.workspaceId !== member.workspaceId) throw new Error('invalid initial Member Channel')
+      for (const projectRef of projectRefs) {
+        const project = projection.projects.get(projectRef)
+        if (project === undefined || project.workspaceId !== member.workspaceId) throw new Error('invalid initial Member Project')
       }
       return
     }
@@ -2182,13 +2182,13 @@ export class AgentTeamLedger {
       if ((operation.data.checkpointRef !== undefined) !== (operation.data.sourceSessionId !== undefined)) throw new Error('rolled-over checkpoint fields must appear together')
       return
     }
-    if (operation.kind === 'team/channel-updated') {
+    if (operation.kind === 'team/project-updated') {
       assertHuman()
-      const prior = projection.channels.get(operation.data.channel.channelRef)
+      const prior = projection.projects.get(operation.data.project.projectRef)
       if (prior === undefined || prior.workspaceId !== operation.data.workspaceId
-        || operation.data.channel.workspaceId !== prior.workspaceId || operation.data.channel.createdAtSequence !== prior.createdAtSequence
-        || operation.data.channel.state !== prior.state) {
-        throw new Error('invalid Channel update')
+        || operation.data.project.workspaceId !== prior.workspaceId || operation.data.project.createdAtSequence !== prior.createdAtSequence
+        || operation.data.project.state !== prior.state) {
+        throw new Error('invalid Project update')
       }
       return
     }
@@ -2208,20 +2208,20 @@ export class AgentTeamLedger {
       if (normalized === this.humanHandle.normalize('NFKC').trim().toLowerCase()) throw new Error('invalid Member update handle')
       return
     }
-    if (operation.kind === 'team/channel-member-added') {
+    if (operation.kind === 'team/project-member-added') {
       assertHuman()
-      const channel = projection.channels.get(operation.data.channelRef)
+      const project = projection.projects.get(operation.data.projectRef)
       const member = projection.members.get(operation.data.memberId)
-      if (channel === undefined || member === undefined || !this.participatesInFrom(projection, member.memberId, channel.workspaceId) || operation.data.workspaceId !== channel.workspaceId || projection.memberships.get(channel.channelRef)?.has(member.memberId)) throw new Error('invalid Channel membership')
+      if (project === undefined || member === undefined || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || operation.data.workspaceId !== project.workspaceId || projection.memberships.get(project.projectRef)?.has(member.memberId)) throw new Error('invalid Project membership')
       return
     }
-    if (operation.kind === 'team/channel-member-removed') {
+    if (operation.kind === 'team/project-member-removed') {
       assertHuman()
-      const channel = projection.channels.get(operation.data.channelRef)
+      const project = projection.projects.get(operation.data.projectRef)
       const member = projection.members.get(operation.data.memberId)
-      if (channel === undefined || member === undefined || operation.data.workspaceId !== channel.workspaceId
-        || !this.participatesInFrom(projection, member.memberId, channel.workspaceId) || !projection.memberships.get(channel.channelRef)?.has(member.memberId)) throw new Error('invalid Channel membership removal')
-      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.channelRefForThreadFrom(projection, threadRef) === channel.channelRef))
+      if (project === undefined || member === undefined || operation.data.workspaceId !== project.workspaceId
+        || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || !projection.memberships.get(project.projectRef)?.has(member.memberId)) throw new Error('invalid Project membership removal')
+      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === project.projectRef))
       this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs)
       return
     }
@@ -2243,14 +2243,14 @@ export class AgentTeamLedger {
       this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs)
       return
     }
-    if (operation.kind === 'team/channel-archived') {
+    if (operation.kind === 'team/project-archived') {
       assertHuman()
-      const prior = projection.channels.get(operation.data.channel.channelRef)
-      if (prior === undefined || prior.state !== 'active' || operation.data.channel.state !== 'archived'
-        || operation.data.channel.workspaceId !== prior.workspaceId || operation.data.workspaceId !== prior.workspaceId
-        || operation.data.channel.name !== prior.name || operation.data.channel.description !== prior.description
-        || operation.data.channel.createdAtSequence !== prior.createdAtSequence) throw new Error('invalid Channel archival')
-      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.channelRefForThreadFrom(projection, threadRef) === prior.channelRef))
+      const prior = projection.projects.get(operation.data.project.projectRef)
+      if (prior === undefined || prior.state !== 'active' || operation.data.project.state !== 'archived'
+        || operation.data.project.workspaceId !== prior.workspaceId || operation.data.workspaceId !== prior.workspaceId
+        || operation.data.project.name !== prior.name || operation.data.project.description !== prior.description
+        || operation.data.project.createdAtSequence !== prior.createdAtSequence) throw new Error('invalid Project archival')
+      const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === prior.projectRef))
       this.validateReleaseCleanup(operation.data, projection, undefined, threadRefs, operation.sequence, refs)
       return
     }
@@ -2276,10 +2276,10 @@ export class AgentTeamLedger {
       const thread = projection.threads.get(operation.data.thread.threadRef)
       const task = operation.data.task
       const currentTask = thread?.taskRef === undefined ? undefined : projection.tasks.get(thread.taskRef)
-      const channelRef = thread === undefined ? undefined : this.channelRefForThreadFrom(projection, thread.threadRef)
-      if (thread === undefined || channelRef === undefined || !this.sameThread(thread, operation.data.thread)
+      const projectRef = thread === undefined ? undefined : this.projectRefForThreadFrom(projection, thread.threadRef)
+      if (thread === undefined || projectRef === undefined || !this.sameThread(thread, operation.data.thread)
         || (task === undefined ? currentTask !== undefined : currentTask === undefined || !this.sameTask(currentTask, task) || thread.taskRef !== task.taskRef)
-        || (actor !== undefined && !this.participatesInChannelWorkspaceFrom(projection, channelRef, actor.memberId))) throw new Error('invalid Attention operation')
+        || (actor !== undefined && !this.participatesInProjectWorkspaceFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Attention operation')
       const current = this.attentionForFrom(projection, operation.data.memberId, thread.threadRef)
       if ((operation.data.action === 'follow' && (task?.resolution === 'closed' || current !== undefined))
         || (operation.data.action === 'unfollow' && (current === undefined || (task !== undefined && this.hasActiveClaimFrom(projection, operation.data.memberId, task.taskRef))))) {
@@ -2306,10 +2306,10 @@ export class AgentTeamLedger {
       assertHuman()
       const { activity, task, thread } = operation.data
       const priorThread = projection.threads.get(thread.threadRef)
-      const channelRef = priorThread === undefined ? undefined : this.channelRefForThreadFrom(projection, thread.threadRef)
+      const projectRef = priorThread === undefined ? undefined : this.projectRefForThreadFrom(projection, thread.threadRef)
       if (priorThread === undefined || priorThread.taskRef !== undefined || projection.tasks.has(task.taskRef)
-        || channelRef === undefined || task.channelRef !== channelRef
-        || projection.channels.get(channelRef)?.workspaceId !== operation.data.workspaceId
+        || projectRef === undefined || task.projectRef !== projectRef
+        || projection.projects.get(projectRef)?.workspaceId !== operation.data.workspaceId
         || operation.data.baseRevision !== priorThread.revision
         || task.status !== 'todo' || task.resolution !== 'open'
         || thread.revision !== operation.sequence || task.threadRef !== thread.threadRef || thread.taskRef !== task.taskRef
@@ -2326,13 +2326,13 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') {
       const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
       const { message, task, thread } = operation.data
-      const channel = projection.channels.get(message.channelRef)
-      if (channel === undefined || channel.workspaceId !== operation.data.workspaceId || message.sender !== actorMemberId()
+      const project = projection.projects.get(message.projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.workspaceId || message.sender !== actorMemberId()
         || message.sequence !== operation.sequence || thread.revision !== operation.sequence
         || message.threadRef !== thread.threadRef
         || (task === undefined ? message.taskRef !== undefined || thread.taskRef !== undefined
-          : message.taskRef !== task.taskRef || thread.taskRef !== task.taskRef || task.threadRef !== thread.threadRef || task.channelRef !== channel.channelRef)
-        || (actor !== undefined && !this.participatesInChannelWorkspaceFrom(projection, channel.channelRef, actor.memberId))) throw new Error('invalid Message operation')
+          : message.taskRef !== task.taskRef || thread.taskRef !== task.taskRef || task.threadRef !== thread.threadRef || task.projectRef !== project.projectRef)
+        || (actor !== undefined && !this.participatesInProjectWorkspaceFrom(projection, project.projectRef, actor.memberId))) throw new Error('invalid Message operation')
       if (operation.kind === 'team/message-sent') {
         if (!message.topLevel || projection.threads.has(thread.threadRef) || (task !== undefined && projection.tasks.has(task.taskRef))) {
           throw new Error('invalid top-level Message operation')
@@ -2363,7 +2363,7 @@ export class AgentTeamLedger {
         || !this.sameTaskIdentity(priorTask, task) || task.threadRef !== thread.threadRef || task.taskRef !== thread.taskRef
         || thread.revision !== operation.sequence || activity.sequence !== operation.sequence || activity.actor !== actorMemberId()
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef || activity.claimRef !== claim.claimRef
-        || (actor !== undefined && !this.participatesInChannelWorkspaceFrom(projection, task.channelRef, actor.memberId))) throw new Error('invalid Claim operation')
+        || (actor !== undefined && !this.participatesInProjectWorkspaceFrom(projection, task.projectRef, actor.memberId))) throw new Error('invalid Claim operation')
       const creates = operation.kind === 'team/claim-created'
       const expectedKind = creates ? 'claim' : operation.kind === 'team/claim-done' ? 'done' : 'release'
       if (activity.kind !== expectedKind || claim.taskRef !== task.taskRef || claim.threadRef !== thread.threadRef) throw new Error('invalid Claim activity')
@@ -2501,7 +2501,7 @@ export class AgentTeamLedger {
       markerKeys.add(key)
       const message = projection.messagesByRef.get(marker.messageRef) ?? additionalMessages.find(candidate => candidate.messageRef === marker.messageRef)
       if (message === undefined || message.threadRef !== marker.threadRef || message.sequence !== marker.sequence
-        || !this.validMentionTarget(projection, message.channelRef, marker.memberId)) throw new Error('invalid direct marker addition')
+        || !this.validMentionTarget(projection, message.projectRef, marker.memberId)) throw new Error('invalid direct marker addition')
     }
     for (const marker of delta.directMarkers.removed) {
       const key = this.directMarkerKey(marker)
@@ -2510,7 +2510,7 @@ export class AgentTeamLedger {
       const current = projection.directMarkers.get(key)!
       const message = projection.messagesByRef.get(marker.messageRef) ?? additionalMessages.find(candidate => candidate.messageRef === marker.messageRef)
       if (!isDeepStrictEqual(current, marker) || message === undefined || message.threadRef !== marker.threadRef
-        || message.sequence !== marker.sequence || !this.validMentionTarget(projection, message.channelRef, marker.memberId)) {
+        || message.sequence !== marker.sequence || !this.validMentionTarget(projection, message.projectRef, marker.memberId)) {
         throw new Error('invalid direct marker removal')
       }
     }
@@ -2539,20 +2539,20 @@ export class AgentTeamLedger {
    * Replay validation of one departure's release snapshot against the
    * projection it was derived from. `memberId` scopes everything to a single
    * departing Member; `undefined` validates every owner, which is what
-   * archiving a whole Channel releases. The two scopes differ in exactly four
+   * archiving a whole Project releases. The two scopes differ in exactly four
    * ways, all of them visible here rather than spread over two copies:
    *
-   * 1. released Claims are owner-filtered for a Member, unfiltered for a Channel;
+   * 1. released Claims are owner-filtered for a Member, unfiltered for a Project;
    * 2. Activities group per (owner, Thread) with owners sorted, which for a
    *    single departing Member collapses to one Activity per Thread — the shape
    *    the commit path writes;
    * 3. the inbox cleanup covers the departing Member's Attention and markers, or
-   *    every Member's on the archived Channel's Threads;
+   *    every Member's on the archived Project's Threads;
    * 4. the failure message names which of the two paths lost its cleanup.
    */
   private validateReleaseCleanup(
-    data: AgentTeamChannelMemberRemovedOperation['data'] | AgentTeamMemberRemovedOperation['data']
-      | AgentTeamMemberArchivedOperation['data'] | AgentTeamChannelArchivedOperation['data']
+    data: AgentTeamProjectMemberRemovedOperation['data'] | AgentTeamMemberRemovedOperation['data']
+      | AgentTeamMemberArchivedOperation['data'] | AgentTeamProjectArchivedOperation['data']
       | AgentTeamMemberWorkspaceLeftOperation['data'],
     projection: Projection,
     memberId: AgentTeamMemberId | undefined,
@@ -2615,7 +2615,7 @@ export class AgentTeamLedger {
       .filter(marker => (memberId === undefined || marker.memberId === memberId) && threadRefs.has(marker.threadRef))
     const expectedInbox = this.inboxDelta([], expectedAttention, [], expectedMarkers, [], expectedActivityMarkers)
     if (!isDeepStrictEqual(data.inbox, expectedInbox)) {
-      throw new Error(memberId === undefined ? 'invalid Channel archival inbox cleanup' : 'invalid Member inbox cleanup')
+      throw new Error(memberId === undefined ? 'invalid Project archival inbox cleanup' : 'invalid Member inbox cleanup')
     }
     this.validateInboxDelta(data.inbox, projection, refs)
   }
@@ -2646,15 +2646,15 @@ export class AgentTeamLedger {
     projection: Projection,
   ): void {
     if (mentions.includes(message.sender) || !this.sameList(mentions, [...new Set(mentions)].sort())) throw new Error('invalid Message mentions')
-    for (const memberId of mentions) if (!this.validMentionTarget(projection, message.channelRef, memberId)) throw new Error('invalid Message mention target')
+    for (const memberId of mentions) if (!this.validMentionTarget(projection, message.projectRef, memberId)) throw new Error('invalid Message mention target')
   }
 
-  private validMentionTarget(projection: Projection, channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
+  private validMentionTarget(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
     if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return true
     const member = projection.members.get(memberId)
-    const channelWorkspaceId = projection.channels.get(channelRef)?.workspaceId
+    const projectWorkspaceId = projection.projects.get(projectRef)?.workspaceId
     return member !== undefined && member.state !== 'inactive' && member.state !== 'archived'
-      && channelWorkspaceId !== undefined && this.participatesInFrom(projection, memberId, channelWorkspaceId)
+      && projectWorkspaceId !== undefined && this.participatesInFrom(projection, memberId, projectWorkspaceId)
   }
 
   /**
@@ -2678,9 +2678,9 @@ export class AgentTeamLedger {
     target.byOperation.set(operation.operationId, operation)
     if (operation.kind === 'team/initialized') return
     if (isAuditOnlyOperation(operation)) return
-    if (operation.kind === 'team/channel-created') {
-      target.channels.set(operation.data.channel.channelRef, operation.data.channel)
-      target.memberships.set(operation.data.channel.channelRef, new Set(operation.data.memberIds))
+    if (operation.kind === 'team/project-created') {
+      target.projects.set(operation.data.project.projectRef, operation.data.project)
+      target.memberships.set(operation.data.project.projectRef, new Set(operation.data.memberIds))
       return
     }
     if (operation.kind === 'team/member-added') {
@@ -2688,7 +2688,7 @@ export class AgentTeamLedger {
       // Creation seeds the first Workspace participation; member.workspaceId
       // stays the default Workspace the Session roots in, immutable after add.
       target.participations.set(operation.data.member.memberId, new Set([operation.data.member.workspaceId]))
-      for (const channelRef of operation.data.channelRefs) this.addMembership(target, channelRef, operation.data.member.memberId)
+      for (const projectRef of operation.data.projectRefs) this.addMembership(target, projectRef, operation.data.member.memberId)
       return
     }
     if (operation.kind === 'team/member-suspended' || operation.kind === 'team/member-resumed') {
@@ -2713,20 +2713,20 @@ export class AgentTeamLedger {
       target.sessionTransitions.set(operation.data.member.memberId, { previousSessionId: operation.data.previousSessionId })
       return
     }
-    if (operation.kind === 'team/channel-updated') {
-      target.channels.set(operation.data.channel.channelRef, operation.data.channel)
+    if (operation.kind === 'team/project-updated') {
+      target.projects.set(operation.data.project.projectRef, operation.data.project)
       return
     }
     if (operation.kind === 'team/member-updated') {
       target.members.set(operation.data.member.memberId, operation.data.member)
       return
     }
-    if (operation.kind === 'team/channel-member-added') {
-      this.addMembership(target, operation.data.channelRef, operation.data.memberId)
+    if (operation.kind === 'team/project-member-added') {
+      this.addMembership(target, operation.data.projectRef, operation.data.memberId)
       return
     }
-    if (operation.kind === 'team/channel-member-removed') {
-      target.memberships.get(operation.data.channelRef)?.delete(operation.data.memberId)
+    if (operation.kind === 'team/project-member-removed') {
+      target.memberships.get(operation.data.projectRef)?.delete(operation.data.memberId)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
@@ -2738,19 +2738,19 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/member-workspace-left') {
       target.participations.get(operation.data.memberId)?.delete(operation.data.workspaceId)
-      // Departure ends Channel memberships inside the left Workspace — unlike
+      // Departure ends Project memberships inside the left Workspace — unlike
       // archival, which keeps them hidden for a possible restore.
-      for (const channel of target.channels.values()) {
-        if (channel.workspaceId === operation.data.workspaceId) target.memberships.get(channel.channelRef)?.delete(operation.data.memberId)
+      for (const project of target.projects.values()) {
+        if (project.workspaceId === operation.data.workspaceId) target.memberships.get(project.projectRef)?.delete(operation.data.memberId)
       }
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
-    if (operation.kind === 'team/channel-archived') {
+    if (operation.kind === 'team/project-archived') {
       // Archival keeps Memberships: hidden state, not departure — a future
-      // restore returns every Member to the Channel. Visibility filters by
-      // channel state instead.
-      target.channels.set(operation.data.channel.channelRef, operation.data.channel)
+      // restore returns every Member to the Project. Visibility filters by
+      // project state instead.
+      target.projects.set(operation.data.project.projectRef, operation.data.project)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
@@ -2762,7 +2762,7 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/member-archived') {
       // Archival keeps Memberships: hidden state, not departure — a future
-      // restore returns the Member to its Channels. Visibility filters by
+      // restore returns the Member to its Projects. Visibility filters by
       // member state instead.
       target.members.set(operation.data.member.memberId, operation.data.member)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
@@ -2784,7 +2784,7 @@ export class AgentTeamLedger {
       if (operation.data.task !== undefined) target.tasks.set(operation.data.task.taskRef, operation.data.task)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
       if (message.topLevel) {
-        target.channelRefByThread.set(message.threadRef, message.channelRef)
+        target.projectRefByThread.set(message.threadRef, message.projectRef)
         // The anchor is the Thread's first topLevel Message; a later topLevel
         // Message must not displace it.
         if (!target.anchorByThread.has(message.threadRef)) target.anchorByThread.set(message.threadRef, message)
@@ -2826,7 +2826,7 @@ export class AgentTeamLedger {
    * Replay the departure snapshot a releasing operation carries. The listed
    * order is replay semantics: an Activity references a Claim, and the inbox
    * delta reads the Tasks and Threads. Each caller still applies its own
-   * identifying writes (member, membership, channel) around this call.
+   * identifying writes (member, membership, project) around this call.
    */
   private applyReleaseSnapshot(
     target: Projection,
@@ -2889,10 +2889,10 @@ export class AgentTeamLedger {
     target.factsByThread.set(activity.threadRef, facts)
   }
 
-  /** Display ordinals are a per-Channel creation counter; the workspace filter happens at read time. */
+  /** Display ordinals are a per-Project creation counter; the workspace filter happens at read time. */
   private recordTaskNumber(target: Projection, task: AgentTeamTask): void {
-    const ordinal = (target.taskCountByChannel.get(task.channelRef) ?? 0) + 1
-    target.taskCountByChannel.set(task.channelRef, ordinal)
+    const ordinal = (target.taskCountByProject.get(task.projectRef) ?? 0) + 1
+    target.taskCountByProject.set(task.projectRef, ordinal)
     target.taskNumberByTask.set(task.taskRef, ordinal)
   }
 
@@ -3055,11 +3055,11 @@ export class AgentTeamLedger {
    * never drift.
    */
   private prepareReadReceiptFrom(projection: Projection, memberId: AgentTeamMemberId, workspaceId: WorkspaceId, request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined }): PreparedReadReceipt {
-    const { task, thread, channelRef } = this.threadContextFrom(projection, workspaceId, request)
+    const { task, thread, projectRef } = this.threadContextFrom(projection, workspaceId, request)
     if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID) {
       const member = projection.members.get(memberId)
-      if (member === undefined || !this.participatesInChannelWorkspaceFrom(projection, channelRef, member.memberId)) {
-        throw new Error(`Agent Member '${memberId}' is not authorized for Channel '${channelRef}'`)
+      if (member === undefined || !this.participatesInProjectWorkspaceFrom(projection, projectRef, member.memberId)) {
+        throw new Error(`Agent Member '${memberId}' is not authorized for Project '${projectRef}'`)
       }
     }
     const attention = this.attentionForFrom(projection, memberId, thread.threadRef)
@@ -3338,11 +3338,11 @@ export class AgentTeamLedger {
   }
 
   /** Attention and marker cleanup for EVERY Member on the given Threads. */
-  private channelArchivalInbox(threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
-    return this.channelArchivalInboxFrom(this.state, threadRefs)
+  private projectArchivalInbox(threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
+    return this.projectArchivalInboxFrom(this.state, threadRefs)
   }
 
-  private channelArchivalInboxFrom(projection: Projection, threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
+  private projectArchivalInboxFrom(projection: Projection, threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
     const removed = [...projection.attention.values()].filter(attention => threadRefs.has(attention.threadRef))
       .map(attention => Object.freeze({ memberId: attention.memberId, threadRef: attention.threadRef }))
     const markers = [...projection.directMarkers.values()].filter(marker => threadRefs.has(marker.threadRef))
@@ -3416,7 +3416,7 @@ export class AgentTeamLedger {
   private issueConfirmation(
     actor: AgentTeamHumanActor | AgentTeamMemberActor,
     workspaceId: WorkspaceId,
-    channelRef: AgentTeamChannelRef,
+    projectRef: AgentTeamProjectRef,
     body: string,
     recipients: readonly AgentTeamMemberId[],
     task?: AgentTeamTask,
@@ -3425,11 +3425,11 @@ export class AgentTeamLedger {
     if (actor.kind !== 'human') throw new Error('only Human may invite an unfollowed Agent')
     for (const [token, confirmation] of this.confirmations) if (confirmation.actor === actor.memberId) this.confirmations.delete(token)
     const confirmationToken = `confirmation:${randomUUID()}` as AgentTeamConfirmationToken
-    this.confirmations.set(confirmationToken, Object.freeze({ actor: actor.memberId, workspaceId, channelRef,
+    this.confirmations.set(confirmationToken, Object.freeze({ actor: actor.memberId, workspaceId, projectRef,
       ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(thread === undefined ? {} : { threadRef: thread.threadRef }),
       body, recipients, attention: recipients.map(memberId => thread !== undefined && this.isFollowing(thread.threadRef, memberId)),
       memberStates: recipients.map(memberId => this.state.members.get(memberId)?.state ?? 'enabled') }))
-    return Object.freeze({ kind: 'confirmation_required', confirmationToken, workspaceId, channelRef,
+    return Object.freeze({ kind: 'confirmation_required', confirmationToken, workspaceId, projectRef,
       recipients: Object.freeze(recipients.filter(memberId => this.state.members.has(memberId) && (thread === undefined || !this.isFollowing(thread.threadRef, memberId)))),
       ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(thread === undefined ? {} : { threadRef: thread.threadRef, revision: thread.revision }) })
   }
@@ -3438,7 +3438,7 @@ export class AgentTeamLedger {
     token: AgentTeamConfirmationToken,
     actor: AgentTeamHumanActor | AgentTeamMemberActor,
     workspaceId: WorkspaceId,
-    channelRef: AgentTeamChannelRef,
+    projectRef: AgentTeamProjectRef,
     task: AgentTeamTask | undefined,
     thread: AgentTeamThread | undefined,
     body: string,
@@ -3449,19 +3449,19 @@ export class AgentTeamLedger {
     const attention = recipients.map(memberId => thread !== undefined && this.isFollowing(thread.threadRef, memberId))
     const states = recipients.map(memberId => this.state.members.get(memberId)?.state ?? 'enabled')
     if (confirmation === undefined || confirmation.actor !== actor.memberId || confirmation.workspaceId !== workspaceId
-      || confirmation.channelRef !== channelRef || confirmation.taskRef !== task?.taskRef || confirmation.threadRef !== thread?.threadRef
+      || confirmation.projectRef !== projectRef || confirmation.taskRef !== task?.taskRef || confirmation.threadRef !== thread?.threadRef
       || confirmation.body !== body || !this.sameList(confirmation.recipients, recipients)
       || !this.sameList(confirmation.attention, attention) || !this.sameList(confirmation.memberStates, states)) {
       throw new Error('confirmation token is invalid or expired')
     }
   }
 
-  private assertMentionTargets(channel: AgentTeamChannel, recipients: readonly AgentTeamMemberId[]): void {
+  private assertMentionTargets(project: AgentTeamProject, recipients: readonly AgentTeamMemberId[]): void {
     for (const memberId of recipients) {
       if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) continue
       const member = this.requireMember(memberId)
-      if (member.state === 'inactive' || member.state === 'archived' || !this.participatesIn(member.memberId, channel.workspaceId)) {
-        throw new Error(`Agent Member '${memberId}' is not authorized for Channel '${channel.channelRef}'`)
+      if (member.state === 'inactive' || member.state === 'archived' || !this.participatesIn(member.memberId, project.workspaceId)) {
+        throw new Error(`Agent Member '${memberId}' is not authorized for Project '${project.projectRef}'`)
       }
     }
   }
@@ -3556,11 +3556,11 @@ export class AgentTeamLedger {
    * The team_view「活跃 task thread」radar for a Workspace: every visible Task
    * still in flight — in_progress or in_review, the two states a live Claim
    * keeps a Task in — newest activity first. Unlike `recentInboxItems`, this is
-   * not a participation slice: admission is the Task being active in a Channel
+   * not a participation slice: admission is the Task being active in a Project
    * the reader can see, whether or not the reader wrote in it, and a Thread
    * still holding the reader's unread is not excluded. Rows carry the same
-   * `liveClaimOwners`口径 the Inbox and Channel feed already use, so 「谁在这个
-   * Task 上」 never gains a second definition. Archived Channels are already
+   * `liveClaimOwners`口径 the Inbox and Project feed already use, so 「谁在这个
+   * Task 上」 never gains a second definition. Archived Projects are already
    * absent from `visibleTasks`, so their Tasks never reach here.
    */
   private activeTaskThreads(visibleTasks: readonly AgentTeamTask[],
@@ -3574,7 +3574,7 @@ export class AgentTeamLedger {
       if (newest === undefined) continue
       const taskNumber = taskNumbers.get(task.taskRef)
       rows.push({
-        row: Object.freeze({ taskRef: task.taskRef, threadRef: thread.threadRef, channelRef: task.channelRef,
+        row: Object.freeze({ taskRef: task.taskRef, threadRef: thread.threadRef, projectRef: task.projectRef,
           ...(taskNumber === undefined ? {} : { taskNumber }), status: task.status,
           subject: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
           members: this.liveClaimOwners(task), lastActivityAt: newest.occurredAt }),
@@ -3592,12 +3592,12 @@ export class AgentTeamLedger {
     }))
   }
 
-  /** Resolve one Task's Thread for a workspace-authorized actor; Member actors must belong to the Task's Channel. */
+  /** Resolve one Task's Thread for a workspace-authorized actor; Member actors must belong to the Task's Project. */
   private threadForActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, workspaceId: WorkspaceId, taskRef: AgentTeamTaskRef): { readonly task: AgentTeamTask; readonly thread: AgentTeamThread } {
     const task = this.requireTask(workspaceId, taskRef)
     const thread = this.requireThread(task.threadRef)
-    this.assertThreadChannelActive(task.channelRef)
-    if (actor.kind === 'member') this.requireMemberChannel(this.requireMember(actor.memberId), task.channelRef)
+    this.assertThreadProjectActive(task.projectRef)
+    if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), task.projectRef)
     return { task, thread }
   }
 
@@ -3654,10 +3654,10 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Display numbers for Tasks: one counter per home Channel, in creation
-   * order. This is the single numbering authority — Channel cards, Thread
-   * headings, cross-channel ref resolution, and inbox renders all show the
-   * ordinal the Task holds inside its own Channel. The ordinals are derived
+   * Display numbers for Tasks: one counter per home Project, in creation
+   * order. This is the single numbering authority — Project cards, Thread
+   * headings, cross-project ref resolution, and inbox renders all show the
+   * ordinal the Task holds inside its own Project. The ordinals are derived
    * at replay time (`taskNumberByTask`); this read only filters them to one
    * Workspace.
    */
@@ -3665,7 +3665,7 @@ export class AgentTeamLedger {
     const numbers = new Map<AgentTeamTaskRef, number>()
     for (const [taskRef, taskNumber] of this.state.taskNumberByTask) {
       const task = this.state.tasks.get(taskRef)
-      if (task === undefined || this.state.channels.get(task.channelRef)?.workspaceId !== workspaceId) continue
+      if (task === undefined || this.state.projects.get(task.projectRef)?.workspaceId !== workspaceId) continue
       numbers.set(taskRef, taskNumber)
     }
     return numbers
@@ -3788,7 +3788,7 @@ export class AgentTeamLedger {
   private requireTask(workspaceId: WorkspaceId, taskRef: AgentTeamTaskRef): AgentTeamTask {
     const task = this.state.tasks.get(this.requireRefKey(this.state.tasks, taskRef, 'task', 'Task'))
     if (task === undefined) throw new Error(`unknown Task ref '${taskRef}'${this.unknownRefHint(taskRef, 'task', 'Task')}`)
-    if (this.state.channels.get(task.channelRef)?.workspaceId !== workspaceId) throw new Error(`Task '${taskRef}' does not belong to Workspace '${workspaceId}'`)
+    if (this.state.projects.get(task.projectRef)?.workspaceId !== workspaceId) throw new Error(`Task '${taskRef}' does not belong to Workspace '${workspaceId}'`)
     return task
   }
 
@@ -3798,34 +3798,34 @@ export class AgentTeamLedger {
     return thread
   }
 
-  private channelRefForThread(threadRef: AgentTeamThreadRef): AgentTeamChannelRef | undefined {
-    return this.channelRefForThreadFrom(this.state, threadRef)
+  private projectRefForThread(threadRef: AgentTeamThreadRef): AgentTeamProjectRef | undefined {
+    return this.projectRefForThreadFrom(this.state, threadRef)
   }
 
   /**
-   * The Channel one read resolves against, or undefined when it is not on Team
+   * The Project one read resolves against, or undefined when it is not on Team
    * read surfaces at all.
    *
-   * Archival removes a Channel and everything it owns from every read: its
+   * Archival removes a Project and everything it owns from every read: its
    * Threads, Tasks, Claims, and Messages stop resolving, and participation ends
    * with it. This is the single definition of that rule for reads; writes use
-   * `requireActiveChannel`, and Thread-scoped writes `assertThreadChannelActive`.
+   * `requireActiveProject`, and Thread-scoped writes `assertThreadProjectActive`.
    */
-  private visibleChannel(channel: AgentTeamChannel | undefined): AgentTeamChannel | undefined {
-    return channel?.state === 'archived' ? undefined : channel
+  private visibleProject(project: AgentTeamProject | undefined): AgentTeamProject | undefined {
+    return project?.state === 'archived' ? undefined : project
   }
 
-  private channelRefForThreadFrom(projection: Projection, threadRef: AgentTeamThreadRef): AgentTeamChannelRef | undefined {
-    return projection.channelRefByThread.get(threadRef)
+  private projectRefForThreadFrom(projection: Projection, threadRef: AgentTeamThreadRef): AgentTeamProjectRef | undefined {
+    return projection.projectRefByThread.get(threadRef)
   }
 
   private threadContextForActor(
     actor: AgentTeamHumanActor | AgentTeamMemberActor,
     workspaceId: WorkspaceId,
     request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined },
-  ): { readonly task?: AgentTeamTask; readonly thread: AgentTeamThread; readonly channelRef: AgentTeamChannelRef } {
+  ): { readonly task?: AgentTeamTask; readonly thread: AgentTeamThread; readonly projectRef: AgentTeamProjectRef } {
     const resolved = this.threadContextFrom(this.state, workspaceId, request)
-    if (actor.kind === 'member') this.requireMemberChannel(this.requireMember(actor.memberId), resolved.channelRef)
+    if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), resolved.projectRef)
     return resolved
   }
 
@@ -3833,7 +3833,7 @@ export class AgentTeamLedger {
     projection: Projection,
     workspaceId: WorkspaceId,
     request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined },
-  ): { readonly task?: AgentTeamTask; readonly thread: AgentTeamThread; readonly channelRef: AgentTeamChannelRef } {
+  ): { readonly task?: AgentTeamTask; readonly thread: AgentTeamThread; readonly projectRef: AgentTeamProjectRef } {
     if (request.threadRef === undefined && request.taskRef === undefined) throw new Error('Thread addressing requires threadRef or taskRef')
     let thread: AgentTeamThread | undefined
     let task: AgentTeamTask | undefined
@@ -3854,36 +3854,36 @@ export class AgentTeamLedger {
       if (thread === undefined) throw new Error(`unknown Thread ref '${byTask.threadRef}'`)
     }
     if (thread === undefined) throw new Error('unknown Thread')
-    const channelRef = this.channelRefForThreadFrom(projection, thread.threadRef)
-    if (channelRef === undefined) throw new Error(`Thread '${thread.threadRef}' has no Channel`)
-    if (projection.channels.get(channelRef)?.workspaceId !== workspaceId) throw new Error(`Thread '${thread.threadRef}' does not belong to Workspace '${workspaceId}'`)
+    const projectRef = this.projectRefForThreadFrom(projection, thread.threadRef)
+    if (projectRef === undefined) throw new Error(`Thread '${thread.threadRef}' has no Project`)
+    if (projection.projects.get(projectRef)?.workspaceId !== workspaceId) throw new Error(`Thread '${thread.threadRef}' does not belong to Workspace '${workspaceId}'`)
     // Replay stays honest: operations predating the archival resolve against
-    // the then-active Channel because replay applies in sequence.
-    if (projection.channels.get(channelRef)?.state === 'archived') {
-      throw new Error(`Channel '${channelRef}' is archived and no longer accepts Team work`)
+    // the then-active Project because replay applies in sequence.
+    if (projection.projects.get(projectRef)?.state === 'archived') {
+      throw new Error(`Project '${projectRef}' is archived and no longer accepts Team work`)
     }
-    if (task !== undefined && task.channelRef !== channelRef) throw new Error(`Task '${task.taskRef}' does not belong to Thread '${thread.threadRef}'`)
-    return { ...(task === undefined ? {} : { task }), thread, channelRef }
+    if (task !== undefined && task.projectRef !== projectRef) throw new Error(`Task '${task.taskRef}' does not belong to Thread '${thread.threadRef}'`)
+    return { ...(task === undefined ? {} : { task }), thread, projectRef }
   }
 
-  private requireChannel(workspaceId: WorkspaceId, channelRef: AgentTeamChannelRef): AgentTeamChannel {
-    const channel = this.state.channels.get(this.requireRefKey(this.state.channels, channelRef, 'channel', 'Channel'))
-    if (channel === undefined) throw new Error(`unknown Channel ref '${channelRef}'${this.unknownRefHint(channelRef, 'channel', 'Channel')}`)
-    if (channel.workspaceId !== workspaceId) throw new Error(`Channel '${channelRef}' does not belong to Workspace '${workspaceId}'`)
-    return channel
+  private requireProject(workspaceId: WorkspaceId, projectRef: AgentTeamProjectRef): AgentTeamProject {
+    const project = this.state.projects.get(this.requireRefKey(this.state.projects, projectRef, 'project', 'Project'))
+    if (project === undefined) throw new Error(`unknown Project ref '${projectRef}'${this.unknownRefHint(projectRef, 'project', 'Project')}`)
+    if (project.workspaceId !== workspaceId) throw new Error(`Project '${projectRef}' does not belong to Workspace '${workspaceId}'`)
+    return project
   }
 
-  /** Guard for every mutating or Channel-scoped surface flow: archived Channels reject. */
-  private requireActiveChannel(workspaceId: WorkspaceId, channelRef: AgentTeamChannelRef): AgentTeamChannel {
-    const channel = this.requireChannel(workspaceId, channelRef)
-    if (channel.state === 'archived') throw new Error(`Channel '${channelRef}' is archived and no longer accepts Team work`)
-    return channel
+  /** Guard for every mutating or Project-scoped surface flow: archived Projects reject. */
+  private requireActiveProject(workspaceId: WorkspaceId, projectRef: AgentTeamProjectRef): AgentTeamProject {
+    const project = this.requireProject(workspaceId, projectRef)
+    if (project.state === 'archived') throw new Error(`Project '${projectRef}' is archived and no longer accepts Team work`)
+    return project
   }
 
-  /** Thread-mutation guard: the Channel owning the Thread must still be active. */
-  private assertThreadChannelActive(channelRef: AgentTeamChannelRef): void {
-    if (this.state.channels.get(channelRef)?.state === 'archived') {
-      throw new Error(`Channel '${channelRef}' is archived and no longer accepts Team work`)
+  /** Thread-mutation guard: the Project owning the Thread must still be active. */
+  private assertThreadProjectActive(projectRef: AgentTeamProjectRef): void {
+    if (this.state.projects.get(projectRef)?.state === 'archived') {
+      throw new Error(`Project '${projectRef}' is archived and no longer accepts Team work`)
     }
   }
 
@@ -3894,64 +3894,64 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Live-side write gate for a Member acting in a Channel: participation in the
-   * Workspace that owns the Channel. Joining the Channel is not a prerequisite —
+   * Live-side write gate for a Member acting in a Project: participation in the
+   * Workspace that owns the Project. Joining the Project is not a prerequisite —
    * a Member who works in this Workspace can reply, claim, follow and read here.
    */
-  private requireMemberChannel(member: AgentTeamAgentMember, channelRef: AgentTeamChannelRef): void {
-    const channel = this.state.channels.get(channelRef)
-    if (channel === undefined || !this.participatesIn(member.memberId, channel.workspaceId)) {
-      throw new Error(`Agent Member '${member.memberId}' is not authorized for Channel '${channelRef}'`)
+  private requireMemberProject(member: AgentTeamAgentMember, projectRef: AgentTeamProjectRef): void {
+    const project = this.state.projects.get(projectRef)
+    if (project === undefined || !this.participatesIn(member.memberId, project.workspaceId)) {
+      throw new Error(`Agent Member '${member.memberId}' is not authorized for Project '${projectRef}'`)
     }
   }
 
   /**
-   * Replay-side write authorization for one Channel's operations:
-   * participation in the Workspace that owns the Channel. Channel membership
+   * Replay-side write authorization for one Project's operations:
+   * participation in the Workspace that owns the Project. Project membership
    * is a Human-side organisation and is not a write gate, but historical
    * operations were checked against it; every actor that passed the
    * membership form also participates, so this form never rejects a record
    * the membership form accepted.
    */
-  private participatesInChannelWorkspaceFrom(projection: Projection, channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
-    const workspaceId = projection.channels.get(channelRef)?.workspaceId
+  private participatesInProjectWorkspaceFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    const workspaceId = projection.projects.get(projectRef)?.workspaceId
     return workspaceId !== undefined && this.participatesInFrom(projection, memberId, workspaceId)
   }
 
   /**
-   * Whether a Member takes part in a Channel (the visibility question),
-   * derived from taking part in any Thread of the Channel, or from an
+   * Whether a Member takes part in a Project (the visibility question),
+   * derived from taking part in any Thread of the Project, or from an
    * explicit membership a historical ledger still carries. The explicit half
-   * keeps old ledgers reproducible (a Member added by `channel-member-joined`
-   * who never wrote a word must still see the Channel); nothing new is
+   * keeps old ledgers reproducible (a Member added by `project-member-joined`
+   * who never wrote a word must still see the Project); nothing new is
    * enrolled. Deriving from Threads is what makes a Member mentioned into a
-   * Thread see the Channel that Thread belongs to.
+   * Thread see the Project that Thread belongs to.
    */
-  private isChannelMember(channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
-    return this.isChannelMemberFrom(this.state, channelRef, memberId)
+  private isProjectMember(projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    return this.isProjectMemberFrom(this.state, projectRef, memberId)
   }
 
-  private isChannelMemberFrom(projection: Projection, channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
-    if (projection.memberships.get(channelRef)?.has(memberId) === true) return true
+  private isProjectMemberFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    if (projection.memberships.get(projectRef)?.has(memberId) === true) return true
     // Deriving stays inside the Workspace boundary: a Member who has left the
-    // Workspace stops seeing its Channels even though the Threads it wrote
+    // Workspace stops seeing its Projects even though the Threads it wrote
     // there are still on the record.
     if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return false
-    const channel = projection.channels.get(channelRef)
-    if (channel === undefined || !this.participatesInFrom(projection, memberId, channel.workspaceId)) return false
-    for (const threadRef of this.channelThreadRefsFrom(projection, channelRef)) {
+    const project = projection.projects.get(projectRef)
+    if (project === undefined || !this.participatesInFrom(projection, memberId, project.workspaceId)) return false
+    for (const threadRef of this.projectThreadRefsFrom(projection, projectRef)) {
       if (this.everParticipatedFrom(projection, threadRef, memberId)) return true
     }
     return false
   }
 
-  /** Every Thread of the Channel, taskful or taskless — the scope both cleanup validators replay against. */
-  private channelThreadRefs(channelRef: AgentTeamChannelRef): Set<AgentTeamThreadRef> {
-    return this.channelThreadRefsFrom(this.state, channelRef)
+  /** Every Thread of the Project, taskful or taskless — the scope both cleanup validators replay against. */
+  private projectThreadRefs(projectRef: AgentTeamProjectRef): Set<AgentTeamThreadRef> {
+    return this.projectThreadRefsFrom(this.state, projectRef)
   }
 
-  private channelThreadRefsFrom(projection: Projection, channelRef: AgentTeamChannelRef): Set<AgentTeamThreadRef> {
-    return new Set([...projection.threads.keys()].filter(threadRef => this.channelRefForThreadFrom(projection, threadRef) === channelRef))
+  private projectThreadRefsFrom(projection: Projection, projectRef: AgentTeamProjectRef): Set<AgentTeamThreadRef> {
+    return new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === projectRef))
   }
 
   /** The Workspace authorization question: does this Member participate in this Workspace. */
@@ -3992,15 +3992,15 @@ export class AgentTeamLedger {
 
   private workspaceThreadRefsFrom(projection: Projection, workspaceId: WorkspaceId): Set<AgentTeamThreadRef> {
     return new Set([...projection.threads.keys()].filter(threadRef => {
-      const channelRef = this.channelRefForThreadFrom(projection, threadRef)
-      return channelRef !== undefined && projection.channels.get(channelRef)?.workspaceId === workspaceId
+      const projectRef = this.projectRefForThreadFrom(projection, threadRef)
+      return projectRef !== undefined && projection.projects.get(projectRef)?.workspaceId === workspaceId
     }))
   }
 
   private assertJoinableMember(workspaceId: WorkspaceId, memberId: AgentTeamMemberId): void {
     const member = this.requireMember(memberId)
     if (!this.participatesIn(memberId, workspaceId)) throw new Error(`Agent Member '${memberId}' does not participate in Workspace '${workspaceId}'`)
-    if (member.state !== 'enabled') throw new Error(`Agent Member '${memberId}' is ${member.state}; only enabled Members can join a Channel`)
+    if (member.state !== 'enabled') throw new Error(`Agent Member '${memberId}' is ${member.state}; only enabled Members can join a Project`)
   }
 
   private normalizeRecipients(actor: AgentTeamHumanActor | AgentTeamMemberActor, recipients: readonly AgentTeamMemberId[] | undefined): readonly AgentTeamMemberId[] {
@@ -4016,15 +4016,15 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Names a Message body may address in one Channel: every live Member who
-   * participates in the Channel's Workspace plus the Human. A name outside this
+   * Names a Message body may address in one Project: every live Member who
+   * participates in the Project's Workspace plus the Human. A name outside this
    * set stays prose, which is what keeps an incidental name-drop from reaching
    * someone the Workspace cannot deliver to.
    *
-   * Participation, not Channel membership, is the boundary: Channel membership
+   * Participation, not Project membership, is the boundary: Project membership
    * is a Human-side organisation of the Workspace, so a Member who works in
    * this Workspace is addressable here without first being enrolled in the
-   * Channel. `@all` is narrower than this set — see `allRecipientsFor`.
+   * Project. `@all` is narrower than this set — see `allRecipientsFor`.
    *
    * The Human is reachable under two names: the current display handle and the
    * permanent `human` alias, so a rename never silently orphans `@human`
@@ -4033,8 +4033,8 @@ export class AgentTeamLedger {
    * written name never notifies two different Members; enrollment reserves the
    * literal, so that yield only ever covers data predating the reservation.
    */
-  private mentionCandidatesFor(channelRef: AgentTeamChannelRef): readonly AgentTeamBodyMentionCandidate[] {
-    const workspaceId = this.state.channels.get(channelRef)?.workspaceId
+  private mentionCandidatesFor(projectRef: AgentTeamProjectRef): readonly AgentTeamBodyMentionCandidate[] {
+    const workspaceId = this.state.projects.get(projectRef)?.workspaceId
     const candidates: AgentTeamBodyMentionCandidate[] = [{ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: this.humanHandle }]
     for (const member of this.state.members.values()) {
       if (member.state === 'inactive' || member.state === 'archived') continue
@@ -4045,16 +4045,16 @@ export class AgentTeamLedger {
   }
 
   /**
-   * The Member set `@all` stands for in one Channel: the Members who take part
-   * in that Channel plus the Human. Deliberately narrower than the names a body
+   * The Member set `@all` stands for in one Project: the Members who take part
+   * in that Project plus the Human. Deliberately narrower than the names a body
    * may address — a Member can be named by hand from anywhere in the Workspace,
    * while `@all` only reaches the people already in this conversation.
    */
-  private allRecipientsFor(channelRef: AgentTeamChannelRef): readonly AgentTeamMemberId[] {
+  private allRecipientsFor(projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
     const memberIds: AgentTeamMemberId[] = [AGENT_TEAM_HUMAN_MEMBER_ID]
     for (const member of this.state.members.values()) {
       if (member.state === 'inactive' || member.state === 'archived') continue
-      if (!this.isChannelMember(channelRef, member.memberId)) continue
+      if (!this.isProjectMember(projectRef, member.memberId)) continue
       memberIds.push(member.memberId)
     }
     return Object.freeze(memberIds.sort())
@@ -4093,17 +4093,17 @@ export class AgentTeamLedger {
    */
   private mergeBodyMentions(
     sender: AgentTeamMemberId,
-    channelRef: AgentTeamChannelRef,
+    projectRef: AgentTeamProjectRef,
     body: string,
     explicit: readonly AgentTeamMemberId[],
   ): readonly AgentTeamMemberId[] {
-    const candidates = this.mentionCandidatesFor(channelRef)
+    const candidates = this.mentionCandidatesFor(projectRef)
     const resolution = resolveBodyMentions(body, candidates, sender)
     // `@all` stands for its expansion as of this write: the Member set is
     // snapshotted into the recipient list, so a later roster change cannot
     // retroactively alter what this operation delivered. It expands to the
-    // Channel's own participants, not to every name the body could address.
-    const authored = resolution.all ? this.allRecipientsFor(channelRef) : resolution.memberIds
+    // Project's own participants, not to every name the body could address.
+    const authored = resolution.all ? this.allRecipientsFor(projectRef) : resolution.memberIds
     const merged = new Set([...explicit, ...authored])
     merged.delete(sender)
     return Object.freeze([...merged].sort())
@@ -4208,10 +4208,10 @@ export class AgentTeamLedger {
     if (operation.kind !== 'team/initialized' || !this.sameActor(operation.actor, request.actor) || operation.data.humanMemberId !== request.humanMemberId) this.throwRequestCollision(request.requestId)
   }
 
-  private assertSameChannelCreation(operation: AgentTeamOperation, request: AgentTeamAuthorizedCreateChannelRequest, memberIds: readonly AgentTeamMemberId[]): asserts operation is AgentTeamChannelCreatedOperation {
-    if (operation.kind !== 'team/channel-created' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.workspaceId !== request.workspaceId || operation.data.channel.name !== request.name.trim()
-      || operation.data.channel.description !== request.description.trim() || !this.sameList(operation.data.memberIds, memberIds)) this.throwRequestCollision(request.requestId)
+  private assertSameProjectCreation(operation: AgentTeamOperation, request: AgentTeamAuthorizedCreateProjectRequest, memberIds: readonly AgentTeamMemberId[]): asserts operation is AgentTeamProjectCreatedOperation {
+    if (operation.kind !== 'team/project-created' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.project.name !== request.name.trim()
+      || operation.data.project.description !== request.description.trim() || !this.sameList(operation.data.memberIds, memberIds)) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameMemberAdd(operation: AgentTeamOperation, request: AgentTeamAuthorizedAddMemberRequest): asserts operation is AgentTeamMemberAddedOperation {
@@ -4220,7 +4220,7 @@ export class AgentTeamLedger {
       || operation.data.member.description !== request.description.trim() || operation.data.member.presetId !== request.presetId.trim()
       || !isDeepStrictEqual(operation.data.member.model ?? undefined, request.member.model ?? undefined)
       || !isDeepStrictEqual(operation.data.member.capabilities ?? undefined, request.member.capabilities ?? undefined)
-      || !this.sameList(operation.data.channelRefs, this.normalizeUnique(request.channelRefs, 'initial Member Channels'))) this.throwRequestCollision(request.requestId)
+      || !this.sameList(operation.data.projectRefs, this.normalizeUnique(request.projectRefs, 'initial Member Projects'))) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameMemberState(operation: AgentTeamOperation, request: AgentTeamAuthorizedSetMemberStateRequest, state: 'enabled' | 'suspended'): asserts operation is AgentTeamMemberSuspendedOperation | AgentTeamMemberResumedOperation {
@@ -4235,10 +4235,10 @@ export class AgentTeamLedger {
       || operation.data.inputFromSeq !== request.inputFromSeq) this.throwRequestCollision(request.requestId)
   }
 
-  private assertSameChannelUpdate(operation: AgentTeamOperation, request: AgentTeamAuthorizedUpdateChannelRequest): asserts operation is AgentTeamChannelUpdatedOperation {
-    if (operation.kind !== 'team/channel-updated' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.workspaceId !== request.workspaceId || operation.data.channel.channelRef !== request.channelRef
-      || operation.data.channel.name !== request.name.trim() || operation.data.channel.description !== request.description.trim()) this.throwRequestCollision(request.requestId)
+  private assertSameProjectUpdate(operation: AgentTeamOperation, request: AgentTeamAuthorizedUpdateProjectRequest): asserts operation is AgentTeamProjectUpdatedOperation {
+    if (operation.kind !== 'team/project-updated' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.project.projectRef !== request.projectRef
+      || operation.data.project.name !== request.name.trim() || operation.data.project.description !== request.description.trim()) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameMemberUpdate(operation: AgentTeamOperation, request: AgentTeamAuthorizedUpdateMemberRequest): asserts operation is AgentTeamMemberUpdatedOperation {
@@ -4252,14 +4252,14 @@ export class AgentTeamLedger {
       || (request.capabilities !== undefined && !isDeepStrictEqual(operation.data.member.capabilities ?? undefined, request.capabilities ?? undefined))) this.throwRequestCollision(request.requestId)
   }
 
-  private assertSameChannelJoin(operation: AgentTeamOperation, request: AgentTeamAuthorizedJoinChannelRequest): asserts operation is AgentTeamChannelMemberAddedOperation {
-    if (operation.kind !== 'team/channel-member-added' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.workspaceId !== request.workspaceId || operation.data.channelRef !== request.channelRef || operation.data.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
+  private assertSameProjectJoin(operation: AgentTeamOperation, request: AgentTeamAuthorizedJoinProjectRequest): asserts operation is AgentTeamProjectMemberAddedOperation {
+    if (operation.kind !== 'team/project-member-added' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.projectRef !== request.projectRef || operation.data.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
   }
 
-  private assertSameChannelMemberRemoval(operation: AgentTeamOperation, request: AgentTeamAuthorizedRemoveChannelMemberRequest): asserts operation is AgentTeamChannelMemberRemovedOperation {
-    if (operation.kind !== 'team/channel-member-removed' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.workspaceId !== request.workspaceId || operation.data.channelRef !== request.channelRef || operation.data.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
+  private assertSameProjectMemberRemoval(operation: AgentTeamOperation, request: AgentTeamAuthorizedRemoveProjectMemberRequest): asserts operation is AgentTeamProjectMemberRemovedOperation {
+    if (operation.kind !== 'team/project-member-removed' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.projectRef !== request.projectRef || operation.data.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameWorkspaceJoin(operation: AgentTeamOperation, request: AgentTeamAuthorizedJoinWorkspaceRequest): asserts operation is AgentTeamMemberWorkspaceJoinedOperation {
@@ -4272,9 +4272,9 @@ export class AgentTeamLedger {
       || operation.data.workspaceId !== request.workspaceId || operation.data.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
   }
 
-  private assertSameChannelArchival(operation: AgentTeamOperation, request: AgentTeamAuthorizedArchiveChannelRequest): asserts operation is AgentTeamChannelArchivedOperation {
-    if (operation.kind !== 'team/channel-archived' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.workspaceId !== request.workspaceId || operation.data.channel.channelRef !== request.channelRef) this.throwRequestCollision(request.requestId)
+  private assertSameProjectArchival(operation: AgentTeamOperation, request: AgentTeamAuthorizedArchiveProjectRequest): asserts operation is AgentTeamProjectArchivedOperation {
+    if (operation.kind !== 'team/project-archived' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.project.projectRef !== request.projectRef) this.throwRequestCollision(request.requestId)
   }
 
   private assertSameDm(operation: AgentTeamOperation, request: AgentTeamAuthorizedDmRequest): asserts operation is AgentTeamDmSentOperation {
@@ -4291,7 +4291,7 @@ export class AgentTeamLedger {
 
   private assertSameMessage(operation: AgentTeamOperation, request: AgentTeamAuthorizedSendMessageRequest, recipients: readonly AgentTeamMemberId[]): asserts operation is AgentTeamMessageSentOperation {
     if (operation.kind !== 'team/message-sent' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.workspaceId !== request.workspaceId || operation.data.message.channelRef !== request.channelRef
+      || operation.data.workspaceId !== request.workspaceId || operation.data.message.projectRef !== request.projectRef
       || operation.data.message.body !== request.body.trim() || !this.sameList(operation.data.mentions, recipients)
       || !this.sameList(operation.data.message.attachments?.map(attachment => attachment.attachmentId) ?? [],
         request.resolvedAttachments?.map(attachment => attachment.attachmentId) ?? [])
@@ -4365,7 +4365,7 @@ export class AgentTeamLedger {
   }
 
   private sameTaskIdentity(left: AgentTeamTask, right: AgentTeamTask): boolean {
-    return left.taskRef === right.taskRef && left.channelRef === right.channelRef && left.threadRef === right.threadRef
+    return left.taskRef === right.taskRef && left.projectRef === right.projectRef && left.threadRef === right.threadRef
   }
 
   private sameClaim(left: AgentTeamClaim, right: AgentTeamClaim): boolean {
@@ -4414,10 +4414,10 @@ export class AgentTeamLedger {
     return `${marker.memberId}\u0000${marker.threadRef}\u0000${marker.activityRef}`
   }
 
-  private addMembership(target: Pick<Projection, 'memberships'>, channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): void {
-    const members = target.memberships.get(channelRef) ?? new Set<AgentTeamMemberId>()
+  private addMembership(target: Pick<Projection, 'memberships'>, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): void {
+    const members = target.memberships.get(projectRef) ?? new Set<AgentTeamMemberId>()
     members.add(memberId)
-    target.memberships.set(channelRef, members)
+    target.memberships.set(projectRef, members)
   }
 
   private addRef(refs: Set<string>, ref: string): void {
@@ -4429,24 +4429,24 @@ export class AgentTeamLedger {
     throw new Error(`agent-team request id '${requestId}' was reused with a different operation or payload`)
   }
 
-  private channelResult(operation: AgentTeamChannelCreatedOperation): AgentTeamCreateChannelResult {
-    return Object.freeze({ receipt: this.receipt(operation), channel: operation.data.channel, memberIds: operation.data.memberIds })
+  private projectResult(operation: AgentTeamProjectCreatedOperation): AgentTeamCreateProjectResult {
+    return Object.freeze({ receipt: this.receipt(operation), project: operation.data.project, memberIds: operation.data.memberIds })
   }
 
-  private channelUpdateResult(operation: AgentTeamChannelUpdatedOperation): AgentTeamUpdateChannelResult {
-    return Object.freeze({ receipt: this.receipt(operation), channel: operation.data.channel })
+  private projectUpdateResult(operation: AgentTeamProjectUpdatedOperation): AgentTeamUpdateProjectResult {
+    return Object.freeze({ receipt: this.receipt(operation), project: operation.data.project })
   }
 
   private memberResult(operation: AgentTeamMemberAddedOperation | AgentTeamMemberSuspendedOperation | AgentTeamMemberResumedOperation | AgentTeamMemberSessionRecycledOperation | AgentTeamMemberUpdatedOperation): AgentTeamDurableMemberResult {
     return Object.freeze({ receipt: this.receipt(operation), member: operation.data.member })
   }
 
-  private joinResult(operation: AgentTeamChannelMemberAddedOperation): AgentTeamJoinChannelResult {
-    return Object.freeze({ receipt: this.receipt(operation), channelRef: operation.data.channelRef, memberId: operation.data.memberId })
+  private joinResult(operation: AgentTeamProjectMemberAddedOperation): AgentTeamJoinProjectResult {
+    return Object.freeze({ receipt: this.receipt(operation), projectRef: operation.data.projectRef, memberId: operation.data.memberId })
   }
 
-  private channelMemberRemovalResult(operation: AgentTeamChannelMemberRemovedOperation): AgentTeamRemoveChannelMemberResult {
-    return Object.freeze({ receipt: this.receipt(operation), channelRef: operation.data.channelRef, memberId: operation.data.memberId,
+  private projectMemberRemovalResult(operation: AgentTeamProjectMemberRemovedOperation): AgentTeamRemoveProjectMemberResult {
+    return Object.freeze({ receipt: this.receipt(operation), projectRef: operation.data.projectRef, memberId: operation.data.memberId,
       releasedClaims: operation.data.claims, removedAttention: operation.data.inbox.attention.removed })
   }
 
@@ -4459,8 +4459,8 @@ export class AgentTeamLedger {
       releasedClaims: operation.data.claims, removedAttention: operation.data.inbox.attention.removed })
   }
 
-  private channelArchivalResult(operation: AgentTeamChannelArchivedOperation): AgentTeamArchiveChannelResult {
-    return Object.freeze({ receipt: this.receipt(operation), channel: operation.data.channel,
+  private projectArchivalResult(operation: AgentTeamProjectArchivedOperation): AgentTeamArchiveProjectResult {
+    return Object.freeze({ receipt: this.receipt(operation), project: operation.data.project,
       releasedClaims: operation.data.claims })
   }
 
@@ -4533,13 +4533,13 @@ export class AgentTeamLedger {
     return this.state.ordered.length + 1
   }
 
-  private ref(kind: 'channel'): AgentTeamChannelRef
+  private ref(kind: 'project'): AgentTeamProjectRef
   private ref(kind: 'message'): AgentTeamMessageRef
   private ref(kind: 'task'): AgentTeamTaskRef
   private ref(kind: 'thread'): AgentTeamThreadRef
   private ref(kind: 'claim'): AgentTeamClaimRef
   private ref(kind: 'activity'): AgentTeamActivityRef
-  private ref(kind: 'channel' | 'message' | 'task' | 'thread' | 'claim' | 'activity') {
+  private ref(kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') {
     return this.createRef(kind)
   }
 
@@ -4560,35 +4560,35 @@ export class AgentTeamLedger {
     // cleanup repair sees the same state its validator will.
     const projection = emptyProjection()
     return records.map(([id, operation]) => {
-      const normalized = this.repairLegacyChannelCleanup(this.normalizeOperation(operation, occurrences, instants), projection)
+      const normalized = this.repairLegacyProjectCleanup(this.normalizeOperation(operation, occurrences, instants), projection)
       this.applyTo(projection, normalized)
       return [id, normalized]
     })
   }
 
   /**
-   * Records written by releases that scoped Channel archival and Channel
+   * Records written by releases that scoped Project archival and Project
    * member-removal inbox cleanup to taskful Threads only (the collector read
-   * the Task projection) carry an incomplete inbox when the Channel holds a
+   * the Task projection) carry an incomplete inbox when the Project holds a
    * taskless Thread with Attention or markers. They are repaired in memory
    * the same way pre-envelope Thread reads are; any other inbox still fails
    * validation, so a forgery is not silently accepted.
    */
-  private repairLegacyChannelCleanup(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
-    if (operation.kind === 'team/channel-archived') {
-      const channelRef = operation.data.channel.channelRef
-      const expected = this.channelArchivalInboxFrom(projection, this.channelThreadRefsFrom(projection, channelRef))
+  private repairLegacyProjectCleanup(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+    if (operation.kind === 'team/project-archived') {
+      const projectRef = operation.data.project.projectRef
+      const expected = this.projectArchivalInboxFrom(projection, this.projectThreadRefsFrom(projection, projectRef))
       if (!isDeepStrictEqual(operation.data.inbox, expected)
-        && isDeepStrictEqual(operation.data.inbox, this.channelArchivalInboxFrom(projection, this.legacyChannelThreadRefs(projection, channelRef)))) {
+        && isDeepStrictEqual(operation.data.inbox, this.projectArchivalInboxFrom(projection, this.legacyProjectThreadRefs(projection, projectRef)))) {
         return { ...operation, data: { ...operation.data, inbox: expected } }
       }
       return operation
     }
-    if (operation.kind === 'team/channel-member-removed') {
-      const { channelRef, memberId } = operation.data
-      const expected = this.removeMemberThreadInboxFrom(projection, memberId, this.channelThreadRefsFrom(projection, channelRef))
+    if (operation.kind === 'team/project-member-removed') {
+      const { projectRef, memberId } = operation.data
+      const expected = this.removeMemberThreadInboxFrom(projection, memberId, this.projectThreadRefsFrom(projection, projectRef))
       if (!isDeepStrictEqual(operation.data.inbox, expected)
-        && isDeepStrictEqual(operation.data.inbox, this.removeMemberThreadInboxFrom(projection, memberId, this.legacyChannelThreadRefs(projection, channelRef)))) {
+        && isDeepStrictEqual(operation.data.inbox, this.removeMemberThreadInboxFrom(projection, memberId, this.legacyProjectThreadRefs(projection, projectRef)))) {
         return { ...operation, data: { ...operation.data, inbox: expected } }
       }
       return operation
@@ -4596,9 +4596,9 @@ export class AgentTeamLedger {
     return operation
   }
 
-  /** The legacy Channel Thread scope: only Threads carrying a Task. */
-  private legacyChannelThreadRefs(projection: Projection, channelRef: AgentTeamChannelRef): Set<AgentTeamThreadRef> {
-    return new Set([...projection.tasks.values()].filter(task => task.channelRef === channelRef).map(task => task.threadRef))
+  /** The legacy Project Thread scope: only Threads carrying a Task. */
+  private legacyProjectThreadRefs(projection: Projection, projectRef: AgentTeamProjectRef): Set<AgentTeamThreadRef> {
+    return new Set([...projection.tasks.values()].filter(task => task.projectRef === projectRef).map(task => task.threadRef))
   }
 
   /**

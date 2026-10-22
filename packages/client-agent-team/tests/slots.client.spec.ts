@@ -252,7 +252,7 @@ describe('Team Client slot takeover', () => {
     ctx.teamNavigation.actions().enterMemberSession('session:builder' as never, 'session:return' as never)
     expect(slots.entries('main')).toHaveLength(2)
 
-    ctx.teamNavigation.actions().selectChannel('channel:engineering' as never)
+    ctx.teamNavigation.actions().selectProject('project:engineering' as never)
     expect(ctx.teamNavigation.getSnapshot().memberSessionId).toBeUndefined()
     expect(slots.entries('main')).toHaveLength(3)
 

@@ -16,10 +16,10 @@ interface MentionMatch {
   readonly query: string
 }
 
-/** How directly a mention reaches a Member: thread follower (delivers at once), Channel peer, or the rest of the workspace. Ranking and row styling both read it. */
-export type MentionTier = 'thread-follower' | 'channel-peer' | 'workspace'
+/** How directly a mention reaches a Member: thread follower (delivers at once), Project peer, or the rest of the workspace. Ranking and row styling both read it. */
+export type MentionTier = 'thread-follower' | 'project-peer' | 'workspace'
 
-const MENTION_TIER_RANK = { 'thread-follower': 0, 'channel-peer': 1, workspace: 2 } as const satisfies Record<MentionTier, number>
+const MENTION_TIER_RANK = { 'thread-follower': 0, 'project-peer': 1, workspace: 2 } as const satisfies Record<MentionTier, number>
 
 type MentionOption = { readonly kind: 'all' } | { readonly kind: 'member'; readonly status: AgentTeamClientMemberStatus; readonly tier: MentionTier }
 
@@ -44,16 +44,16 @@ function mentionCandidates(members: readonly AgentTeamClientMemberStatus[], quer
 
 /** A hint for the picker only: every tier stays eligible, but a lower tier means the Host may ask the Human to confirm before pulling the Member in. */
 function mentionTier(status: AgentTeamClientMemberStatus, followers: ReadonlySet<AgentTeamMemberId> | undefined,
-  channelPeers: ReadonlySet<AgentTeamMemberId> | undefined): MentionTier {
+  projectPeers: ReadonlySet<AgentTeamMemberId> | undefined): MentionTier {
   if (followers?.has(status.member.memberId) === true) return 'thread-follower'
-  if (channelPeers?.has(status.member.memberId) === true) return 'channel-peer'
+  if (projectPeers?.has(status.member.memberId) === true) return 'project-peer'
   return 'workspace'
 }
 
 function rankMentionCandidates(candidates: readonly AgentTeamClientMemberStatus[], followers: ReadonlySet<AgentTeamMemberId> | undefined,
-  channelPeers: ReadonlySet<AgentTeamMemberId> | undefined): readonly AgentTeamClientMemberStatus[] {
-  if ((followers === undefined || followers.size === 0) && (channelPeers === undefined || channelPeers.size === 0)) return candidates
-  return [...candidates].sort((left, right) => MENTION_TIER_RANK[mentionTier(left, followers, channelPeers)] - MENTION_TIER_RANK[mentionTier(right, followers, channelPeers)])
+  projectPeers: ReadonlySet<AgentTeamMemberId> | undefined): readonly AgentTeamClientMemberStatus[] {
+  if ((followers === undefined || followers.size === 0) && (projectPeers === undefined || projectPeers.size === 0)) return candidates
+  return [...candidates].sort((left, right) => MENTION_TIER_RANK[mentionTier(left, followers, projectPeers)] - MENTION_TIER_RANK[mentionTier(right, followers, projectPeers)])
 }
 
 /** The Human is excluded from delivery, so a quote naming them joins no notify row. */
@@ -96,12 +96,12 @@ function deliverableRecipients(
   ])].sort()
 }
 
-export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, asTask, onAsTaskChange, t }: {
+export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, asTask, onAsTaskChange, t }: {
   readonly members: readonly AgentTeamClientMemberStatus[]
   /** Current Thread followers; the Thread surface passes them so they rank above other candidates. */
   readonly followerMemberIds?: ReadonlySet<AgentTeamMemberId>
-  /** Members taking part in the Channel but not following this Thread; they rank above the rest of the Workspace. */
-  readonly channelPeerMemberIds?: ReadonlySet<AgentTeamMemberId>
+  /** Members taking part in the Project but not following this Thread; they rank above the rest of the Workspace. */
+  readonly projectPeerMemberIds?: ReadonlySet<AgentTeamMemberId>
   /** Subscribing here, not in the hosting page, keeps a keystroke from re-rendering the timeline. */
   readonly drafts: TeamDraftStore
   readonly draftKey: TeamDraftKey
@@ -117,7 +117,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   readonly onFilesChange?: (files: readonly File[]) => void
   readonly replyTo?: ReplyTarget | undefined
   readonly onCancelReply?: (() => void) | undefined
-  /** Channel-only: create a real Task with the top-level Message. Default off. */
+  /** Project-only: create a real Task with the top-level Message. Default off. */
   readonly asTask?: boolean
   readonly onAsTaskChange?: (asTask: boolean) => void
   readonly t: TeamConversationProps['t']
@@ -132,16 +132,16 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   const { draft, recipients } = useSyncExternalStore(drafts.subscribe, () => drafts.getSnapshot(draftKey))
   const [mention, setMention] = useState<MentionMatch>()
   const [highlight, setHighlight] = useState(0)
-  const memberCandidates = mention === undefined ? [] : rankMentionCandidates(mentionCandidates(members, mention.query), followerMemberIds, channelPeerMemberIds)
+  const memberCandidates = mention === undefined ? [] : rankMentionCandidates(mentionCandidates(members, mention.query), followerMemberIds, projectPeerMemberIds)
   const options: readonly MentionOption[] = mention !== undefined && 'all'.startsWith(mention.query.toLocaleLowerCase())
-    ? [{ kind: 'all' }, ...memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, channelPeerMemberIds) }))]
-    : memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, channelPeerMemberIds) }))
+    ? [{ kind: 'all' }, ...memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))]
+    : memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))
   const menuOpen = mention !== undefined && options.length > 0
   const activeOption = options[highlight]
   const activeOptionKey = activeOption === undefined ? undefined : activeOption.kind === 'all' ? 'all' : activeOption.status.member.memberId
-  // `@all` stands for the Channel's own participants, not every name the body
+  // `@all` stands for the Project's own participants, not every name the body
   // could address — the same split the Host's allRecipientsFor makes.
-  const allMembers = channelPeerMemberIds === undefined ? members : members.filter(status => channelPeerMemberIds.has(status.member.memberId))
+  const allMembers = projectPeerMemberIds === undefined ? members : members.filter(status => projectPeerMemberIds.has(status.member.memberId))
   const allCount = allMentionMembers(allMembers).length
   const mentionSurface = mentionSurfaceOf(draftKey)
   const listId = 'team-mention-suggestions'

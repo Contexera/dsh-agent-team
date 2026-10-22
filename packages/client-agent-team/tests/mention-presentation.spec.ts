@@ -4,21 +4,21 @@ import { mentionSurfaceOf, mentionTierIsParticipant } from '../src/client/mentio
 describe('mention row weight', () => {
   it('reads the surface from the draft key the composer already writes to', () => {
     expect(mentionSurfaceOf('thread:thread:one' as never)).toBe('thread')
-    expect(mentionSurfaceOf('channel:channel:one' as never)).toBe('channel')
+    expect(mentionSurfaceOf('project:project:one' as never)).toBe('project')
   })
 
   it('puts a Thread\'s followers inside it and every other tier outside', () => {
     expect(mentionTierIsParticipant('thread-follower', 'thread')).toBe(true)
-    // A Channel peer takes part in the Channel, yet not in this Thread.
-    expect(mentionTierIsParticipant('channel-peer', 'thread')).toBe(false)
+    // A Project peer takes part in the Project, yet not in this Thread.
+    expect(mentionTierIsParticipant('project-peer', 'thread')).toBe(false)
     expect(mentionTierIsParticipant('workspace', 'thread')).toBe(false)
   })
 
-  it('puts a Channel peer inside the Channel, because the Channel is the conversation', () => {
-    // A Channel row never carries the follower tier — the Channel surface is
+  it('puts a Project peer inside the Project, because the Project is the conversation', () => {
+    // A Project row never carries the follower tier — the Project surface is
     // handed no follower set — so membership is what separates its two
     // reachable tiers.
-    expect(mentionTierIsParticipant('channel-peer', 'channel')).toBe(true)
-    expect(mentionTierIsParticipant('workspace', 'channel')).toBe(false)
+    expect(mentionTierIsParticipant('project-peer', 'project')).toBe(true)
+    expect(mentionTierIsParticipant('workspace', 'project')).toBe(false)
   })
 })

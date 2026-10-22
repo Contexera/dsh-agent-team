@@ -2,7 +2,7 @@ import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { MarkdownText, Modal, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamProjectRef, AgentTeamMemberId, AgentTeamMessageAttachment, AgentTeamMessageRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
@@ -62,8 +62,8 @@ export interface TeamMessageProps {
   readonly onResolveTaskRefs?: ((taskRefs: readonly AgentTeamTaskRef[]) => Promise<readonly ResolvedTaskRef[]>) | undefined
   /** Host lookup turning thread refs into titled chips; absent keeps raw refs. */
   readonly onResolveThreadRefs?: ((threadRefs: readonly AgentTeamThreadRef[]) => Promise<readonly ResolvedThreadRef[]>) | undefined
-  /** Roster name for one authored channel ref; absent or unknown keeps plain text. */
-  readonly channelNameOf?: ((ref: AgentTeamChannelRef) => string | undefined) | undefined
+  /** Roster name for one authored project ref; absent or unknown keeps plain text. */
+  readonly projectNameOf?: ((ref: AgentTeamProjectRef) => string | undefined) | undefined
   /** Roster facts for one authored member ref; absent or unknown keeps plain text. */
   readonly memberOf?: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined
   /** Agent-card session jump for member chips; absent renders them as plain text. */
@@ -75,7 +75,7 @@ export interface TeamMessageProps {
  * One chat message row. Memoized: the Task-ref subscription lives inside this component, so a skipped render never
  * detaches it. Callers must keep per-render props (mention names, ref callbacks) identity-stable.
  */
-export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
+export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
   const identityImage = useAvatarImage(human ? avatarUrl : undefined)
   // The stored body carries machine-facing `[attachment] <path>` prompt lines; the attachment strip renders from message metadata instead.
@@ -94,7 +94,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
     onOpenMemberSession,
     onResolveTaskRefs,
     onResolveThreadRefs,
-    channelNameOf,
+    projectNameOf,
     memberOf,
     t,
   })
@@ -202,14 +202,14 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
 })
 
 /** Kept inside the component so the Task-ref subscription of a memoized row never detaches. */
-function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSession, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, t }: {
+function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSession, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, t }: {
   readonly plan: PlannedMessageBody
   readonly mentionNames?: readonly MentionHandle[] | undefined
   readonly onOpenRef: ((ref: string) => void) | undefined
   readonly onOpenMemberSession: ((sessionId: SessionId) => void) | undefined
   readonly onResolveTaskRefs: ((taskRefs: readonly AgentTeamTaskRef[]) => Promise<readonly ResolvedTaskRef[]>) | undefined
   readonly onResolveThreadRefs: ((threadRefs: readonly AgentTeamThreadRef[]) => Promise<readonly ResolvedThreadRef[]>) | undefined
-  readonly channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined
+  readonly projectNameOf: ((ref: AgentTeamProjectRef) => string | undefined) | undefined
   readonly memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined
   readonly t: TeamConversationProps['t'] | undefined
 }): {
@@ -236,7 +236,7 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
     return title === '' ? base : `${base} · ${title}`
   }, [t])
   // Member chips use a handle, deliberately distinct from `@mention` chips, which notify.
-  const channelChipLabel = useCallback((name: string): string => t?.('channelLabel', { name }) ?? `Channel · ${name}`, [t])
+  const projectChipLabel = useCallback((name: string): string => t?.('projectLabel', { name }) ?? `Project · ${name}`, [t])
   const memberChipLabel = useCallback((name: string): string => t?.('memberLabel', { name }) ?? `Member · @${name}`, [t])
   // Stable per locale revision: a fresh object per render would rebuild the component table every chunk.
   const markdownLabels = useMemo<MarkdownLabels>(() => ({
@@ -259,8 +259,8 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
         .map(segment => segment.ref as AgentTeamThreadRef)))]
     if (onResolveTaskRefs !== undefined && taskRefs.length > 0) void resolveUnknownTaskRefs(taskRefs, onResolveTaskRefs)
     if (onResolveThreadRefs !== undefined && threadRefs.length > 0) void resolveUnknownThreadRefs(threadRefs, onResolveThreadRefs)
-    for (const code of styledRefCodes) renderResolvedMarkdownCodeRef(code, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)
-    for (const node of textNodes) renderResolvedMarkdownText(node, mentionNames ?? [], taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf)
+    for (const code of styledRefCodes) renderResolvedMarkdownCodeRef(code, taskLabel, threadChipLabel, projectChipLabel, memberChipLabel, projectNameOf, memberOf)
+    for (const node of textNodes) renderResolvedMarkdownText(node, mentionNames ?? [], taskLabel, threadChipLabel, projectChipLabel, memberChipLabel, projectNameOf, memberOf)
     for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-task-ref]')) {
       const taskRef = button.dataset.taskRef as AgentTeamTaskRef | undefined
       const hit = taskRef === undefined ? undefined : cachedResolvedTaskRef(taskRef)
@@ -271,7 +271,7 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
       const hit = threadRef === undefined ? undefined : cachedResolvedThreadRef(threadRef)
       if (threadRef !== undefined && hit !== undefined) button.textContent = threadChipLabel(hit.title)
     }
-  }, [richAgentBody, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, taskRefVersion, threadRefVersion, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf, mentionNames])
+  }, [richAgentBody, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, taskRefVersion, threadRefVersion, taskLabel, threadChipLabel, projectChipLabel, memberChipLabel, projectNameOf, memberOf, mentionNames])
   useEffect(() => {
     const root = markdownRef.current
     if (!richAgentBody || root === null || onOpenRef === undefined) return
@@ -294,8 +294,8 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
     return () => { root.removeEventListener('click', openTask) }
   }, [richAgentBody, onOpenRef, onOpenMemberSession])
   const renderRefs = useCallback((text: string): ReactNode =>
-    renderRefsFromText(text, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf),
-  [onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, channelChipLabel, memberChipLabel, channelNameOf, memberOf])
+    renderRefsFromText(text, onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, projectChipLabel, memberChipLabel, projectNameOf, memberOf),
+  [onOpenRef, onOpenMemberSession, taskLabel, threadChipLabel, projectChipLabel, memberChipLabel, projectNameOf, memberOf])
   return { markdownRef, markdownLabels, taskLabel, renderRefs }
 }
 
@@ -344,12 +344,12 @@ function resolvedThreadRefButton(threadRef: AgentTeamThreadRef, label: string): 
   return button
 }
 
-function resolvedChannelRefButton(channelRef: AgentTeamChannelRef, label: string): HTMLButtonElement {
+function resolvedProjectRefButton(projectRef: AgentTeamProjectRef, label: string): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
   if (css.refLink !== undefined) button.className = css.refLink
-  button.dataset.ref = channelRef
-  button.title = channelRef
+  button.dataset.ref = projectRef
+  button.title = projectRef
   button.textContent = label
   return button
 }
@@ -371,12 +371,12 @@ function resolvedMemberRefChip(memberRef: AgentTeamMemberId, label: string, sess
   return button
 }
 
-function renderResolvedMarkdownCodeRef(code: HTMLElement, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, channelChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): void {
+function renderResolvedMarkdownCodeRef(code: HTMLElement, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, projectChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, projectNameOf: ((ref: AgentTeamProjectRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): void {
   const segments = splitBrandedRefs((code.textContent ?? '').trim())
   const segment = segments.length === 1 ? segments[0]! : undefined
   const ref = segment?.ref
   if (ref === undefined) return
-  // Task and Thread refs need Host resolution; Channel and Member refs resolve against loaded rosters; unknown refs stay plain text.
+  // Task and Thread refs need Host resolution; Project and Member refs resolve against loaded rosters; unknown refs stay plain text.
   if (ref.startsWith('task:')) {
     const resolved = cachedResolvedTaskRef(ref as AgentTeamTaskRef)
     if (resolved === undefined) return
@@ -389,10 +389,10 @@ function renderResolvedMarkdownCodeRef(code: HTMLElement, taskLabel: (taskNumber
     code.replaceWith(resolvedThreadRefButton(ref as AgentTeamThreadRef, threadChipLabel(resolved.title)))
     return
   }
-  if (ref.startsWith('channel:')) {
-    const name = channelNameOf?.(ref as AgentTeamChannelRef)
+  if (ref.startsWith('project:')) {
+    const name = projectNameOf?.(ref as AgentTeamProjectRef)
     if (name === undefined) return
-    code.replaceWith(resolvedChannelRefButton(ref as AgentTeamChannelRef, channelChipLabel(name)))
+    code.replaceWith(resolvedProjectRefButton(ref as AgentTeamProjectRef, projectChipLabel(name)))
     return
   }
   if (ref.startsWith('member:')) {
@@ -402,8 +402,8 @@ function renderResolvedMarkdownCodeRef(code: HTMLElement, taskLabel: (taskNumber
   }
 }
 
-/** Replace resolved Task/Thread/Channel/Member refs and structured mention handles in one prose text node without changing Markdown structure. */
-function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHandle[], taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, channelChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): void {
+/** Replace resolved Task/Thread/Project/Member refs and structured mention handles in one prose text node without changing Markdown structure. */
+function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHandle[], taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, projectChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, projectNameOf: ((ref: AgentTeamProjectRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): void {
   let changed = false
   const fragment = document.createDocumentFragment()
   for (const refSegment of splitBrandedRefs(node.data)) {
@@ -437,14 +437,14 @@ function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHa
       }
       changed = true
       fragment.append(resolvedThreadRefButton(refSegment.ref as AgentTeamThreadRef, threadChipLabel(resolved.title)))
-    } else if (refSegment.ref.startsWith('channel:')) {
-      const name = channelNameOf?.(refSegment.ref as AgentTeamChannelRef)
+    } else if (refSegment.ref.startsWith('project:')) {
+      const name = projectNameOf?.(refSegment.ref as AgentTeamProjectRef)
       if (name === undefined) {
         fragment.append(refSegment.text)
         continue
       }
       changed = true
-      fragment.append(resolvedChannelRefButton(refSegment.ref as AgentTeamChannelRef, channelChipLabel(name)))
+      fragment.append(resolvedProjectRefButton(refSegment.ref as AgentTeamProjectRef, projectChipLabel(name)))
     } else if (refSegment.ref.startsWith('member:')) {
       const resolved = memberOf?.(refSegment.ref as AgentTeamMemberId)
       if (resolved === undefined) {
@@ -460,7 +460,7 @@ function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHa
   if (changed) node.replaceWith(fragment)
 }
 
-function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | undefined, onOpenMemberSession: ((sessionId: SessionId) => void) | undefined, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, channelChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): ReactNode {
+function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | undefined, onOpenMemberSession: ((sessionId: SessionId) => void) | undefined, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, projectChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, projectNameOf: ((ref: AgentTeamProjectRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): ReactNode {
   if (onOpenRef === undefined) return text
   return splitBrandedRefs(text).map((segment, index) => {
     if (segment.ref === undefined) return <Fragment key={index}>{segment.text}</Fragment>
@@ -474,10 +474,10 @@ function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | u
       if (resolved === undefined) return <Fragment key={index}>{segment.text}</Fragment>
       return <button key={index} type="button" className={css.refLink} title={segment.ref} onClick={() => { onOpenRef(segment.ref!) }}>{threadChipLabel(resolved.title)}</button>
     }
-    if (segment.ref.startsWith('channel:')) {
-      const name = channelNameOf?.(segment.ref as AgentTeamChannelRef)
+    if (segment.ref.startsWith('project:')) {
+      const name = projectNameOf?.(segment.ref as AgentTeamProjectRef)
       if (name === undefined) return <Fragment key={index}>{segment.text}</Fragment>
-      return <button key={index} type="button" className={css.refLink} title={segment.ref} onClick={() => { onOpenRef(segment.ref!) }}>{channelChipLabel(name)}</button>
+      return <button key={index} type="button" className={css.refLink} title={segment.ref} onClick={() => { onOpenRef(segment.ref!) }}>{projectChipLabel(name)}</button>
     }
     if (segment.ref.startsWith('member:')) {
       const resolved = memberOf?.(segment.ref as AgentTeamMemberId)

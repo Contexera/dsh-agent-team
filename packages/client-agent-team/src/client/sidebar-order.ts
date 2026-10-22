@@ -1,11 +1,11 @@
 /**
- * Human presentation preference for the Team sidebar row order of Channels and Agents. The order lives in this browser
+ * Human presentation preference for the Team sidebar row order of Projects and Agents. The order lives in this browser
  * only; it is never a shared Team fact. Reconcile drops removed refs, keeps the user's relative order, and appends newcomers.
  */
 import { useCallback, useSyncExternalStore } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
-export type TeamSidebarListKind = 'channels' | 'agents'
+export type TeamSidebarListKind = 'projects' | 'agents'
 
 export type SidebarDropMarker = 'before' | 'after'
 
@@ -45,7 +45,9 @@ function storedOrders(): StoredOrders {
     const clean: Record<string, readonly string[]> = {}
     for (const [key, value] of Object.entries(parsed)) {
       if (!Array.isArray(value) || !value.every(entry => typeof entry === 'string')) continue
-      clean[key] = value
+      // Projects were called Channels; an order saved before the rename keeps applying.
+      if (key.endsWith('|channels')) clean[key.replace(/\|channels$/, '|projects')] ??= value.map(ref => ref.replace(/^channel:/, 'project:'))
+      else clean[key] = value
     }
     cachedRaw = raw
     cachedOrders = clean

@@ -193,7 +193,7 @@ describe('attachment cache', () => {
 describe('Agent Team attachment remotes', () => {
   it('uploads, reads back, and rejects oversized or empty payloads', async () => {
     const { ctx } = await harness()
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const uploaded = await ctx.agentTeam.putAttachment({
       requestId: requestId('put-upload'), workspaceId: alpha,
       name: 'design.png', mediaType: 'image/png', bytesBase64: Buffer.from('png-bytes').toString('base64'),
@@ -226,18 +226,18 @@ describe('Agent Team attachment remotes', () => {
       JSON.stringify({ name: 'half.png', mediaType: 'image/png', uploadedAt: new Date().toISOString() }), 'utf8')
     await expect(ctx.agentTeam.getAttachment({ attachmentId: invalid }))
       .rejects.toMatchObject({ name: 'RemoteError', code: 'team/attachment-not-found', details: { attachmentId: invalid } })
-    void channel
+    void project
   })
 
   it('stores message attachment metadata, appends prompt lines, and replays old ledgers unchanged', async () => {
     const { ctx, facility } = await harness()
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const uploaded = await ctx.agentTeam.putAttachment({
       requestId: requestId('put-message'), workspaceId: alpha,
       name: 'design.png', mediaType: 'image/png', bytesBase64: Buffer.from('png').toString('base64'),
     })
     const sent = await ctx.agentTeam.sendMessage({ asTask: true,
-      requestId: requestId('send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      requestId: requestId('send'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: '请看这张图', attachments: [uploaded.attachmentId],
     })
     expect(sent.kind).toBe('committed')
@@ -250,7 +250,7 @@ describe('Agent Team attachment remotes', () => {
     // Idempotent resend with the same request resolves to the same message.
     const beforeResend = await cacheEntries()
     const resent = await ctx.agentTeam.sendMessage({ asTask: true,
-      requestId: requestId('send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      requestId: requestId('send'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: '请看这张图', attachments: [uploaded.attachmentId],
     })
     expect(resent.kind).toBe('committed')
@@ -258,7 +258,7 @@ describe('Agent Team attachment remotes', () => {
 
     // An unknown attachment id is rejected before the ledger append.
     await expect(ctx.agentTeam.sendMessage({ asTask: true,
-      requestId: requestId('send-unknown'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      requestId: requestId('send-unknown'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'missing', attachments: [newAttachmentId()],
     })).rejects.toThrow(/not in the upload cache/)
 
@@ -277,9 +277,9 @@ describe('Agent Team attachment remotes', () => {
     cleanups.push(async () => { await rm(sourceRoot, { recursive: true, force: true }) })
     const source = join(sourceRoot, 'report.txt')
     await writeFile(source, 'path payload')
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('path-retry-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('path-retry-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const request = { asTask: false, requestId: requestId('path-retry'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'same request', attachmentPaths: [source] } as const
+      projectRef: project.project.projectRef, body: 'same request', attachmentPaths: [source] } as const
 
     const first = await ctx.agentTeam.sendMessage(request)
     expect(first.kind).toBe('committed')
@@ -348,9 +348,9 @@ describe('Agent Team attachment remotes', () => {
 
   it('resolves Human reply attachments from the upload cache and replays them', async () => {
     const { ctx, facility } = await harness()
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const started = await ctx.agentTeam.sendMessage({ asTask: true,
-      requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: '开个任务',
+      requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: '开个任务',
     })
     if (started.kind !== 'committed') throw new Error('expected committed')
     const uploaded = await ctx.agentTeam.putAttachment({
@@ -406,7 +406,7 @@ describe('agent-supplied attachment paths', () => {
 
   it('copies validated paths into the cache for sends and replies, and rejects atomically', async () => {
     const { ctx, facility } = await harness()
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const sourceDir = await mkdtemp(join(tmpdir(), 'dsh-attach-src-'))
     cleanups.push(async () => { await rm(sourceDir, { recursive: true, force: true }) })
     const screenshot = join(sourceDir, '验收截图.png')
@@ -417,7 +417,7 @@ describe('agent-supplied attachment paths', () => {
       throw error
     })
     const sent = await ctx.agentTeam.sendMessage({ asTask: true,
-      requestId: requestId('send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      requestId: requestId('send'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: '截图在下面', attachmentPaths: [screenshot],
     })
     expect(sent.kind).toBe('committed')
@@ -449,7 +449,7 @@ describe('agent-supplied attachment paths', () => {
     // One bad path rejects the whole send: no message, no cache writes.
     const entriesBefore = await readdir(attachmentsRoot())
     await expect(ctx.agentTeam.sendMessage({ asTask: true,
-      requestId: requestId('send-bad'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      requestId: requestId('send-bad'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: '不应提交', attachmentPaths: [join(sourceDir, 'missing.png')],
     })).rejects.toThrow(/does not exist/)
     const coldAfterFailure = ledgerAtBoot(facility)
@@ -463,9 +463,9 @@ describe('agent-supplied attachment paths', () => {
     cleanups.push(async () => { await rm(sourceRoot, { recursive: true, force: true }) })
     const source = join(sourceRoot, 'note.txt')
     await writeFile(source, 'reply payload')
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('reply-path-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('reply-path-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('reply-path-start'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: '开个任务' })
+      projectRef: project.project.projectRef, body: '开个任务' })
     if (started.kind !== 'committed') throw new Error('expected committed')
     const request = { requestId: requestId('reply-path-retry'), workspaceId: alpha, taskRef: started.task!.taskRef,
       body: '带一个附件', baseRevision: started.thread.revision, attachmentPaths: [source] } as const
@@ -493,19 +493,19 @@ describe('agent-supplied attachment paths', () => {
     cleanups.push(async () => { await rm(sourceDir, { recursive: true, force: true }) })
     const screenshot = join(sourceDir, 'evidence.png')
     await writeFile(screenshot, Buffer.from('png-bytes'))
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('cleanup-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('cleanup-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const before = await cacheEntries()
 
     // A referenced upload that is not in the cache fails after the path copy:
     // the entry this attempt prepared is unreferenced, so it is removed again.
     await expect(ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('fail-cleanup'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: '不应提交', attachmentPaths: [screenshot], attachments: [newAttachmentId()] }))
+      projectRef: project.project.projectRef, body: '不应提交', attachmentPaths: [screenshot], attachments: [newAttachmentId()] }))
       .rejects.toThrow(/not in the upload cache/)
     expect(await cacheEntries()).toEqual(before)
     expect(() => ledgerAtBoot(facility).validate()).not.toThrow()
 
     const request = { asTask: false, requestId: requestId('collision-keep'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'first body', attachmentPaths: [screenshot] } as const
+      projectRef: project.project.projectRef, body: 'first body', attachmentPaths: [screenshot] } as const
     const sent = await ctx.agentTeam.sendMessage(request)
     expect(sent.kind).toBe('committed')
     const committed = await cacheEntries()

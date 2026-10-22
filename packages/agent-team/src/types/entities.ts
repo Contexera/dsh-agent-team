@@ -15,8 +15,8 @@ export type AgentTeamAttachmentId = Branded<'AgentTeamAttachmentId'>
 /** Stable identifier of one Team member. */
 export type AgentTeamMemberId = Branded<'AgentTeamMemberId'>
 
-/** Stable identifier of one Workspace-scoped Channel. */
-export type AgentTeamChannelRef = Branded<'AgentTeamChannelRef'>
+/** Stable identifier of one Workspace-scoped Project. */
+export type AgentTeamProjectRef = Branded<'AgentTeamProjectRef'>
 
 /** Stable identifier of one immutable Message. */
 export type AgentTeamMessageRef = Branded<'AgentTeamMessageRef'>
@@ -162,7 +162,7 @@ export interface AgentTeamResolveTaskRefsRequest {
 /** One resolved Task; refs that do not exist in the workspace are omitted. */
 export interface AgentTeamResolvedTaskRef {
   readonly taskRef: AgentTeamTaskRef
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly threadRef: AgentTeamThreadRef
   readonly taskNumber: number
 }
@@ -180,7 +180,7 @@ export interface AgentTeamResolveThreadRefsRequest {
 /** One resolved Thread; refs that do not exist in the workspace are omitted. */
 export interface AgentTeamResolvedThreadRef {
   readonly threadRef: AgentTeamThreadRef
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly taskRef?: AgentTeamTaskRef
   readonly taskNumber?: number
   /** Opening-line gist distinguishing one Thread chip from another: first line, trimmed, capped at 40 characters. */
@@ -210,7 +210,7 @@ export interface AgentTeamReadMessageRequest {
 export interface AgentTeamReadMessageResult {
   readonly messageRef: AgentTeamMessageRef
   readonly threadRef: AgentTeamThreadRef
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly sender: AgentTeamMemberId
   readonly sequence: number
   readonly occurredAt?: string | undefined
@@ -245,20 +245,20 @@ export interface AgentTeamOperationBase {
   readonly previousOperationId: AgentTeamOperationId | null
 }
 
-/** One Workspace-scoped collaboration Channel. */
-export interface AgentTeamChannel {
-  readonly channelRef: AgentTeamChannelRef
+/** One Workspace-scoped collaboration Project. */
+export interface AgentTeamProject {
+  readonly projectRef: AgentTeamProjectRef
   readonly workspaceId: WorkspaceId
   readonly name: string
   readonly description: string
   readonly createdAtSequence: number
-  /** Durable lifecycle state. `archived` hides the Channel and its Threads everywhere while keeping all facts recoverable (no restore entry point yet). Older records omit the field; the schema normalizes it to `active` on load. */
+  /** Durable lifecycle state. `archived` hides the Project and its Threads everywhere while keeping all facts recoverable (no restore entry point yet). Older records omit the field; the schema normalizes it to `active` on load. */
   readonly state: 'active' | 'archived'
 }
 
-/** One durable Channel membership fact derived from the operation ledger. */
-export interface AgentTeamChannelMembership {
-  readonly channelRef: AgentTeamChannelRef
+/** One durable Project membership fact derived from the operation ledger. */
+export interface AgentTeamProjectMembership {
+  readonly projectRef: AgentTeamProjectRef
   readonly memberId: AgentTeamMemberId
 }
 
@@ -272,7 +272,7 @@ export interface AgentTeamMessageAttachment {
 
 export interface AgentTeamMessage {
   readonly messageRef: AgentTeamMessageRef
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly threadRef: AgentTeamThreadRef
   /** Absent on Messages committed while the Thread had no Task; promotion does not rewrite prior Messages. */
   readonly taskRef?: AgentTeamTaskRef
@@ -290,7 +290,7 @@ export interface AgentTeamMessage {
 /** Task overlay created by an atomic start or Human promotion. */
 export interface AgentTeamTask {
   readonly taskRef: AgentTeamTaskRef
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly threadRef: AgentTeamThreadRef
   readonly status: AgentTeamTaskStatus
   readonly resolution: 'open' | 'accepted' | 'closed'

@@ -102,7 +102,7 @@ Any bundle, Client module, Remote activation, slot, or DSH Client package change
 npm run test:browser
 ```
 
-Run it against the candidate Harness checkout and verify ordinary DSH → Team mode → ordinary DSH restoration. Cover Remote mounting, Team entry/reload/exit, existing Channel/Thread/Member flows, 390×844 layout, keyboard focus/dialogs, and absence of Team tools, guidance, and UI in ordinary Sessions. Handle browser output as described in `development/generated-and-seams.md`; do not commit routine screenshots or temporary Harness tests.
+Run it against the candidate Harness checkout and verify ordinary DSH → Team mode → ordinary DSH restoration. Cover Remote mounting, Team entry/reload/exit, existing Project/Thread/Member flows, 390×844 layout, keyboard focus/dialogs, and absence of Team tools, guidance, and UI in ordinary Sessions. Handle browser output as described in `development/generated-and-seams.md`; do not commit routine screenshots or temporary Harness tests.
 
 ### 3.5 Dependency graph installation
 

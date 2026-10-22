@@ -1,14 +1,14 @@
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
   AgentTeamAddMemberRequest,
-  AgentTeamArchiveChannelRequest,
-  AgentTeamArchiveChannelResult,
+  AgentTeamArchiveProjectRequest,
+  AgentTeamArchiveProjectResult,
   AgentTeamArchiveMemberRequest,
   AgentTeamArchiveMemberResult,
-  AgentTeamChannelRef,
+  AgentTeamProjectRef,
   AgentTeamClientMemberStatus,
-  AgentTeamCreateChannelRequest,
-  AgentTeamCreateChannelResult,
+  AgentTeamCreateProjectRequest,
+  AgentTeamCreateProjectResult,
   AgentTeamInbox,
   AgentTeamInboxRequest,
   AgentTeamJoinWorkspaceRequest,
@@ -45,8 +45,8 @@ import type {
   AgentTeamTaskResult,
   AgentTeamSendMessageRequest,
   AgentTeamSendMessageResult,
-  AgentTeamUpdateChannelRequest,
-  AgentTeamUpdateChannelResult,
+  AgentTeamUpdateProjectRequest,
+  AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
   AgentTeamView,
   AgentTeamViewRequest,
@@ -103,10 +103,10 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     subscribeReads: (listener: () => void) => () => void
     subscribeChanges: SubscribeTeamChanges
     addMember: (request: AgentTeamAddMemberRequest) => Promise<RemoteResult<AgentTeamAddMemberResult>>
-    loadChannels: (request: AgentTeamViewRequest) => Promise<RemoteResult<AgentTeamView>>
-    createChannel: (request: AgentTeamCreateChannelRequest) => Promise<RemoteResult<AgentTeamCreateChannelResult>>
-    updateChannel: (request: AgentTeamUpdateChannelRequest) => Promise<RemoteResult<AgentTeamUpdateChannelResult>>
-    archiveChannel: (request: AgentTeamArchiveChannelRequest) => Promise<RemoteResult<AgentTeamArchiveChannelResult>>
+    loadProjects: (request: AgentTeamViewRequest) => Promise<RemoteResult<AgentTeamView>>
+    createProject: (request: AgentTeamCreateProjectRequest) => Promise<RemoteResult<AgentTeamCreateProjectResult>>
+    updateProject: (request: AgentTeamUpdateProjectRequest) => Promise<RemoteResult<AgentTeamUpdateProjectResult>>
+    archiveProject: (request: AgentTeamArchiveProjectRequest) => Promise<RemoteResult<AgentTeamArchiveProjectResult>>
     updateMember: (request: AgentTeamUpdateMemberRequest) => Promise<RemoteResult<AgentTeamMemberResult>>
     recoverMember: (request: AgentTeamRecoverMemberRequest) => Promise<RemoteResult<AgentTeamRecoverMemberResult>>
     archiveMember: (request: AgentTeamArchiveMemberRequest) => Promise<RemoteResult<AgentTeamArchiveMemberResult>>
@@ -115,7 +115,7 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     /** Session-independent Host model catalog (`llm.models`); needs no live Member. */
     loadModels: () => Promise<RemoteResult<TeamModelCatalog>>
     openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => void
-    selectedChannelRef?: AgentTeamChannelRef
+    selectedProjectRef?: AgentTeamProjectRef
   }
 
 export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> & TeamNavigationActions & {
@@ -123,7 +123,7 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   drafts: TeamDraftStore
   /** The Human's own identity: the display name and avatar every seat that names or draws them reads. */
   humanIdentity: TeamHumanIdentitySource
-  loadChannels: (request: AgentTeamViewRequest) => Promise<RemoteResult<AgentTeamView>>
+  loadProjects: (request: AgentTeamViewRequest) => Promise<RemoteResult<AgentTeamView>>
   readThread: (request: AgentTeamThreadReadRequest) => Promise<RemoteResult<AgentTeamThreadReadResult>>
   loadThreadHistory: (request: AgentTeamThreadHistoryRequest) => Promise<RemoteResult<AgentTeamThreadHistory>>
   subscribeChanges: SubscribeTeamChanges

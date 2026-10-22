@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import type {
-  AgentTeamChannel,
-  AgentTeamChannelRef,
+  AgentTeamProject,
+  AgentTeamProjectRef,
   AgentTeamClientMemberStatus,
   AgentTeamMemberId,
 } from '@contexera/dsh-agent-team/types'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { rosterChannelName, rosterMember } from '../src/client/refs.ts'
+import { rosterProjectName, rosterMember } from '../src/client/refs.ts'
 
 const workspaceId = 'workspace:00000000-0000-4000-8000-000000000000' as WorkspaceId
 
-function channel(channelRef: string, name: string, state: AgentTeamChannel['state'] = 'active'): AgentTeamChannel {
+function project(projectRef: string, name: string, state: AgentTeamProject['state'] = 'active'): AgentTeamProject {
   return {
-    channelRef: channelRef as AgentTeamChannelRef,
+    projectRef: projectRef as AgentTeamProjectRef,
     workspaceId,
     name,
     description: `${name} work`,
@@ -40,17 +40,17 @@ function status(memberId: string, handle: string, availability: AgentTeamClientM
   }
 }
 
-describe('rosterChannelName', () => {
-  const channels = [channel('channel:11111111-2222-4333-8333-111111111111', '工程'), channel('channel:11112222-2222-4333-8333-222222222222', '发布')]
+describe('rosterProjectName', () => {
+  const projects = [project('project:11111111-2222-4333-8333-111111111111', '工程'), project('project:11112222-2222-4333-8333-222222222222', '发布')]
   it('names full and unambiguous abbreviated refs', () => {
-    expect(rosterChannelName(channels, 'channel:11111111-2222-4333-8333-111111111111' as AgentTeamChannelRef)).toBe('工程')
-    expect(rosterChannelName(channels, 'channel:111122' as AgentTeamChannelRef)).toBe('发布')
+    expect(rosterProjectName(projects, 'project:11111111-2222-4333-8333-111111111111' as AgentTeamProjectRef)).toBe('工程')
+    expect(rosterProjectName(projects, 'project:111122' as AgentTeamProjectRef)).toBe('发布')
   })
-  it('leaves unknown, ambiguous, and archived channels unresolved', () => {
-    expect(rosterChannelName(channels, 'channel:99999999-2222-4333-8333-999999999999' as AgentTeamChannelRef)).toBeUndefined()
-    expect(rosterChannelName(channels, 'channel:1111' as AgentTeamChannelRef)).toBeUndefined()
-    const archived = [channel('channel:33333333-2222-4333-8333-333333333333', '旧频道', 'archived')]
-    expect(rosterChannelName(archived, 'channel:33333333-2222-4333-8333-333333333333' as AgentTeamChannelRef)).toBeUndefined()
+  it('leaves unknown, ambiguous, and archived projects unresolved', () => {
+    expect(rosterProjectName(projects, 'project:99999999-2222-4333-8333-999999999999' as AgentTeamProjectRef)).toBeUndefined()
+    expect(rosterProjectName(projects, 'project:1111' as AgentTeamProjectRef)).toBeUndefined()
+    const archived = [project('project:33333333-2222-4333-8333-333333333333', '旧项目', 'archived')]
+    expect(rosterProjectName(archived, 'project:33333333-2222-4333-8333-333333333333' as AgentTeamProjectRef)).toBeUndefined()
   })
 })
 

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   AgentTeamClientMemberStatus,
-  AgentTeamChannelRef,
+  AgentTeamProjectRef,
   AgentTeamConfirmationToken,
   AgentTeamMemberId,
   AgentTeamMessageRef,
@@ -28,7 +28,7 @@ import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRe
 import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames, type ThreadFactKey } from './thread-facts.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
-import { rosterChannelName, rosterMember } from './refs.ts'
+import { rosterProjectName, rosterMember } from './refs.ts'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
 
@@ -36,12 +36,12 @@ interface TeamThreadPageProps {
   readonly workspaceId: WorkspaceId
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
-  readonly channelRef?: AgentTeamChannelRef
+  readonly projectRef?: AgentTeamProjectRef
   readonly taskRef?: AgentTeamTaskRef
   readonly threadRef: AgentTeamThreadRef
   readonly taskNumber?: number
   readonly backToWorkspace: TeamConversationProps['backToWorkspace']
-  readonly loadChannels: TeamConversationProps['loadChannels']
+  readonly loadProjects: TeamConversationProps['loadProjects']
   readonly readThread: TeamConversationProps['readThread']
   readonly loadThreadHistory: TeamConversationProps['loadThreadHistory']
   readonly threadObservations: TeamConversationProps['threadObservations']
@@ -53,7 +53,7 @@ interface TeamThreadPageProps {
   readonly changeTask: TeamConversationProps['changeTask']
   readonly promoteThread: TeamConversationProps['promoteThread']
   readonly putAttachment: TeamConversationProps['putAttachment']
-  readonly selectChannel: TeamConversationProps['selectChannel']
+  readonly selectProject: TeamConversationProps['selectProject']
   readonly selectThread: TeamConversationProps['selectThread']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
@@ -83,13 +83,13 @@ function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], humanName
 
 export function TeamThreadPage(props: TeamThreadPageProps) {
   const {
-    workspaceId, humanName, humanAvatarUrl, channelRef, taskRef, threadRef, taskNumber, backToWorkspace, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
-    loadChannels, readThread, loadThreadHistory, threadObservations,
+    workspaceId, humanName, humanAvatarUrl, projectRef, taskRef, threadRef, taskNumber, backToWorkspace, selectProject, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
+    loadProjects, readThread, loadThreadHistory, threadObservations,
     subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, resolveMessageRefs, t,
   } = props
   const threadRequest = { threadRef, ...(taskRef === undefined ? {} : { taskRef }) }
   const [projection, setProjection] = useState<ReadProjection>()
-  const [channelView, setChannelView] = useState<AgentTeamView>()
+  const [projectView, setProjectView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   // Current Thread followers; the composer ranks them first because a mention
   // to a follower delivers directly instead of entering the invite detour.
@@ -193,11 +193,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     try {
       const [loadedMembers, loadedView] = await Promise.all([
         loadMembers({ workspaceId }),
-        loadChannels({ workspaceId, ...(channelRef === undefined ? {} : { channelRef }), threadRef, includeActivities: false, limit: 1 }),
+        loadProjects({ workspaceId, ...(projectRef === undefined ? {} : { projectRef }), threadRef, includeActivities: false, limit: 1 }),
       ])
       if (!mountedRef.current) return false
       if (loadedMembers.ok) setMembers(loadedMembers.value)
-      if (loadedView.ok) setChannelView(loadedView.value)
+      if (loadedView.ok) setProjectView(loadedView.value)
       const failure = [loadedMembers, loadedView].find(result => !result.ok)
       if (failure !== undefined && !failure.ok) setError(failure.error.message)
       return true
@@ -285,7 +285,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     supplementalPendingRef.current = false
     projectionRef.current = undefined
     setProjection(undefined)
-    setChannelView(undefined)
+    setProjectView(undefined)
     setMembers([])
     setFollowerIds(new Set())
     setCurrentFacts([])
@@ -351,7 +351,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         if (update.type === 'failed') { setError(update.message); return }
         void refreshSupplemental()
       }),
-      // Presence commits nothing: refresh the roster alone; the channel view is reserved for workspace membership changes.
+      // Presence commits nothing: refresh the roster alone; the project view is reserved for workspace membership changes.
       subscribeChanges({ kind: 'presence', workspaceId }, update => {
         if (!mountedRef.current) return
         if (update.type === 'failed') { setError(update.message); return }
@@ -399,12 +399,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const activeProjection = projection
   const task = activeProjection?.task
   const thread = activeProjection?.thread
-  const resolvedTaskNumber = taskNumber ?? channelView?.taskNumbers.find(entry => entry.taskRef === task?.taskRef)?.taskNumber
+  const resolvedTaskNumber = taskNumber ?? projectView?.taskNumbers.find(entry => entry.taskRef === task?.taskRef)?.taskNumber
   const taskTitle = activeProjection === undefined ? undefined : formatTaskTitle(activeProjection.anchor.body)
   const taskClaims = activeProjection?.claims ?? []
-  const effectiveChannelRef = task?.channelRef ?? channelRef
-  const channelMemberIds = useMemo(() => new Set(channelView?.members.filter(item => item.channelRef === effectiveChannelRef).map(item => item.memberId) ?? []), [channelView, effectiveChannelRef])
-  const channelMembers = members.filter(status => channelMemberIds.size === 0 || channelMemberIds.has(status.member.memberId))
+  const effectiveProjectRef = task?.projectRef ?? projectRef
+  const projectMemberIds = useMemo(() => new Set(projectView?.members.filter(item => item.projectRef === effectiveProjectRef).map(item => item.memberId) ?? []), [projectView, effectiveProjectRef])
+  const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
   const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
   const metadata = useMemo(() => readMeta(readFacts), [readFacts])
   const unreadIndex = useMemo(() => {
@@ -417,7 +417,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   }, [activeProjection?.anchor, readFacts, currentFacts, metadata])
 
   const memberName = (memberId: AgentTeamMemberId): string => {
-    if (memberId === channelView?.humanMemberId) return humanName
+    if (memberId === projectView?.humanMemberId) return humanName
     const status = members.find(candidate => candidate.member.memberId === memberId)
     return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
   }
@@ -430,8 +430,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here. Identity-stable: a fresh
   // closure per render would defeat TeamMessage's memo.
   const openRef = useCallback((ref: string): void => {
-    if (ref.startsWith('channel:') && ref !== channelRef) {
-      selectChannel(ref as AgentTeamChannelRef)
+    if (ref.startsWith('project:') && ref !== projectRef) {
+      selectProject(ref as AgentTeamProjectRef)
       return
     }
     if (ref.startsWith('thread:') && ref !== threadRef) {
@@ -441,7 +441,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     if (ref.startsWith('task:') && ref !== taskRef) {
       jumpToTaskThread(resolveTaskRefs, workspaceId, ref as AgentTeamTaskRef, selectThread)
     }
-  }, [channelRef, threadRef, taskRef, workspaceId, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs])
+  }, [projectRef, threadRef, taskRef, workspaceId, selectProject, selectThread, resolveTaskRefs, resolveThreadRefs])
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
@@ -488,16 +488,16 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const handleOpenReplyTo = useCallback((messageRef: AgentTeamMessageRef): void => { jumpToMessage(messageRef) }, [jumpToMessage])
   // Keyed on roster content, not array identity, so memoized rows survive change bursts that leave the roster untouched.
   const rosterKey = useMemo(() => [
-    (channelView?.channels ?? []).map(channel => `${channel.channelRef}=${channel.name}=${channel.state}`).join(','),
+    (projectView?.projects ?? []).map(project => `${project.projectRef}=${project.name}=${project.state}`).join(','),
     members.map(status => `${status.member.memberId}=${status.member.handle}=${status.member.sessionId}=${status.availability}`).join(','),
-    channelView?.humanMemberId ?? '',
-  ].join(';'), [channelView, members])
-  const channelNameOf = useMemo(() => {
-    const channels = channelView?.channels ?? []
-    return (ref: AgentTeamChannelRef): string | undefined => rosterChannelName(channels, ref)
+    projectView?.humanMemberId ?? '',
+  ].join(';'), [projectView, members])
+  const projectNameOf = useMemo(() => {
+    const projects = projectView?.projects ?? []
+    return (ref: AgentTeamProjectRef): string | undefined => rosterProjectName(projects, ref)
   }, [rosterKey])
   const memberOf = useMemo(() => {
-    const humanMemberId = channelView?.humanMemberId
+    const humanMemberId = projectView?.humanMemberId
     return (ref: AgentTeamMemberId) => rosterMember(members, humanMemberId, humanName, ref)
   }, [rosterKey, humanName])
 
@@ -505,7 +505,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const replyContexts = useMemo(() => {
     const contexts = new Map<AgentTeamMessageRef, { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef }>()
     const nameOf = (memberId: AgentTeamMemberId): string => {
-      if (memberId === channelView?.humanMemberId) return humanName
+      if (memberId === projectView?.humanMemberId) return humanName
       const status = members.find(candidate => candidate.member.memberId === memberId)
       return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
     }
@@ -519,13 +519,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         : { senderName: nameOf(parent.sender), excerpt: parent.excerpt, messageRef: parent.messageRef })
     }
     return contexts
-  }, [currentFacts, messageRefVersion, members, channelView, humanName, t])
+  }, [currentFacts, messageRefVersion, members, projectView, humanName, t])
 
   const renderFact = (fact: AgentTeamThreadFact, grouped = false) => {
     if (fact.kind === 'message') {
       const sender = memberName(fact.message.sender)
       const senderStatus = members.find(candidate => candidate.member.memberId === fact.message.sender)
-      const human = fact.message.sender === channelView?.humanMemberId
+      const human = fact.message.sender === projectView?.humanMemberId
       return <TeamMessage
         key={factKey(fact)}
         senderName={sender}
@@ -542,7 +542,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         onOpenRef={openRef}
         onResolveTaskRefs={lookupTaskRefs}
         onResolveThreadRefs={lookupThreadRefs}
-        channelNameOf={channelNameOf}
+        projectNameOf={projectNameOf}
         memberOf={memberOf}
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
@@ -719,7 +719,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       if (result.value.kind === 'committed') {
         const committed = result.value as Extract<typeof result.value, { kind: 'committed' }>
         // A hand-typed `@Handle` delivers like a picked recipient; committed facts replace this row on arrival.
-        const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, channelMembers)])].sort()
+        const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, projectMembers)])].sort()
         setCurrentFacts(current => {
           const merged = mergeFacts(current, [{ kind: 'message', sequence: committed.message.sequence, message: committed.message, mentions: optimisticMentions, occurredAt: committed.receipt.occurredAt }])
           currentFactsRef.current = merged
@@ -774,9 +774,9 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       full: detail === '' ? t('statusError') : detail,
     }]
   })
-  // Threads are always entered through a Channel page, so a Channel origin
+  // Threads are always entered through a Project page, so a Project origin
   // returns to its timeline; a Thread restored without one returns further.
-  const backLabel = channelRef === undefined ? t('backToWorkspace') : t('backToChannel')
+  const backLabel = projectRef === undefined ? t('backToWorkspace') : t('backToProject')
 
   return <main className={css.surface} data-team-thread={threadRef}>
     <div className={css.surfaceHeader}>
@@ -870,7 +870,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       key={draftKey}
       members={members}
       followerMemberIds={followerIds}
-      channelPeerMemberIds={channelMemberIds}
+      projectPeerMemberIds={projectMemberIds}
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}

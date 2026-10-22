@@ -3,7 +3,7 @@
 English | [中文](refresh-copy-accessibility.zh.md)
 
 ## Data refresh semantics
-Channel refreshes deduplicate by `messageRef`, merge new and loaded history through `mergeChannelView`, retain the older cursor, and combine `hasMore`. The fresh window is authoritative for every Message it covers — a change wake must move that row's live Task state, newest instant, and unread along with the new facts — while older Messages loaded earlier are kept instead of discarded. A refresh also reads the Workspace Inbox slice and rebuilds the Thread→unread map from it; a failed read clears that map.
+Project refreshes deduplicate by `messageRef`, merge new and loaded history through `mergeProjectView`, retain the older cursor, and combine `hasMore`. The fresh window is authoritative for every Message it covers — a change wake must move that row's live Task state, newest instant, and unread along with the new facts — while older Messages loaded earlier are kept instead of discarded. A refresh also reads the Workspace Inbox slice and rebuilds the Thread→unread map from it; a failed read clears that map.
 
 Thread passive changes merge into current facts; the durable read pointer advances automatically on open and on every arrival (a bounded read's remainder drains through the serial continuation loop), and `newFactsCount` only drives the pure jump hint. `loadOlder` has concurrency protection.
 
@@ -13,7 +13,7 @@ All visible copy comes from structurally matching zh/en locale keys, whose types
 > TODO: decide whether a raw transport message should be replaced by localized copy or stay exactly as the Host worded it; today the surfaces show it verbatim.
 
 ## Accessibility baseline
-Section headers, expand/collapse buttons, menus, listbox/options, the 「作为任务」 control, and the Channel page's `频道 | 看板` tab strip use native keyboard behavior and complete ARIA state. The tab strip is one tab stop for the group with Left/Right/Home/End moving selection and focus together, each tab naming its panel through `aria-controls`/`aria-labelledby`.
+Section headers, expand/collapse buttons, menus, listbox/options, the 「作为任务」 control, and the Project page's `项目 | 看板` tab strip use native keyboard behavior and complete ARIA state. The tab strip is one tab stop for the group with Left/Right/Home/End moving selection and focus together, each tab naming its panel through `aria-controls`/`aria-labelledby`.
 
 Every icon button has an accessible label; decoration is hidden. A Thread entry's door is one native button whose label carries both the Thread and its unread count; the capsule drawn beside it is `aria-hidden`, and the owner stack is a single labeled `role="img"` that stays outside the button so its name survives. Timeline uses a dedicated message-timeline label.
 

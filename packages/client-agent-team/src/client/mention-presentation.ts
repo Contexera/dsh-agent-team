@@ -9,7 +9,7 @@ export function mentionSurfaceOf(draftKey: TeamDraftKey): MentionSurface {
   return draftKindOf(draftKey)
 }
 
-/** A Thread's own followers are in it; a Channel send counts every Member taking part in that Channel through any Thread. */
+/** A Thread's own followers are in it; a Project send counts every Member taking part in that Project through any Thread. */
 export function mentionTierIsParticipant(tier: MentionTier, surface: MentionSurface): boolean {
   return surface === 'thread' ? tier === 'thread-follower' : tier !== 'workspace'
 }

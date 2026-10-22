@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import AgentTeam, { AgentTeamDmDeliveryError, markAgentTeamPreset } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
-import { service, workspaceOf, workspaceParam } from './host-access.ts'
+import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 import type {
   AgentTeamClaimRef,
@@ -218,7 +218,7 @@ const teamInbox = defineTool({
       totalUnreadCount: { type: 'number', required: true }, totalDirectCount: { type: 'number', required: true },
       hasMore: { type: 'boolean', required: true },
       items: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
-        workspaceId: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, channelRef: { type: 'string', required: true },
+        workspaceId: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
         taskRef: { type: 'string' }, status: { type: 'string' }, revision: { type: 'number', required: true }, unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true },
         taskNumber: { type: 'number' }, newestOccurredAt: { type: 'string' },
       } } },
@@ -235,7 +235,7 @@ const teamInbox = defineTool({
         : '.'
       return [{ type: 'text', text: [
         `Inbox — ${value.totalUnreadCount} unread update(s) total, ${value.totalDirectCount} direct, across ${value.items.length} Thread(s) shown${more}`,
-        ...value.items.map(item => `${item.workspaceId} · ${item.threadRef}${item.channelRef === undefined ? '' : ` · ${item.channelRef}`}${item.taskRef === undefined ? '' : ` · ${taskStanding(item)}`} · ${item.unreadCount} unread, ${item.directCount} direct${item.newestOccurredAt === undefined ? '' : ` · newest ${formatTeamTimestamp(item.newestOccurredAt)}`}`),
+        ...value.items.map(item => `${item.workspaceId} · ${item.threadRef}${item.projectRef === undefined ? '' : ` · ${item.projectRef}`}${item.taskRef === undefined ? '' : ` · ${taskStanding(item)}`} · ${item.unreadCount} unread, ${item.directCount} direct${item.newestOccurredAt === undefined ? '' : ` · newest ${formatTeamTimestamp(item.newestOccurredAt)}`}`),
         'Read a selected Thread with team_thread read. Listing changes no read state and supplies no write token.',
       ].join('\n') }]
     },
@@ -249,7 +249,7 @@ const teamInbox = defineTool({
       totalUnreadCount: inbox.totalUnreadCount, totalDirectCount: inbox.totalDirectCount, hasMore: inbox.hasMore,
       items: inbox.items.map(item => {
         const taskNumber = item.taskNumber
-        return { workspaceId: item.workspaceId, threadRef: item.thread.threadRef, channelRef: item.channelRef,
+        return { workspaceId: item.workspaceId, threadRef: item.thread.threadRef, projectRef: item.projectRef,
           ...(item.task === undefined ? {} : { taskRef: item.task.taskRef, status: item.task.status }),
           revision: item.thread.revision, unreadCount: item.unreadCount, directCount: item.directCount, newestOccurredAt: item.newestOccurredAt,
           ...(taskNumber === undefined ? {} : { taskNumber }) }
@@ -270,15 +270,15 @@ const teamAttention = defineTool({
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
-      workspaceId: { type: 'string', required: true }, channelRef: { type: 'string', required: true },
+      workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
       kind: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, taskRef: { type: 'string' },
       revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
       following: { type: 'boolean', required: true },
     } },
-        // Renders are the only channel a tool result reaches the model through. One outcome line plus the Attention state; a yes/no on one Thread needs no orientation, facts, or write token (a status read authorizes no mutation).
+        // Renders are the only project a tool result reaches the model through. One outcome line plus the Attention state; a yes/no on one Thread needs no orientation, facts, or write token (a status read authorizes no mutation).
     render: (args, value) => {
       const standing = taskStanding(value)
-      const source = `Workspace: ${value.workspaceId} · Channel: ${value.channelRef}`
+      const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef}`
       if (value.kind === 'follow' || value.kind === 'unfollow') {
         return [{ type: 'text', text: `${source}\nAttention changed — ${value.following ? 'now following' : 'no longer following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
       }
@@ -314,9 +314,9 @@ function attentionResult(
   snapshot: ReturnType<AgentTeam['threadHistoryForAgent']>,
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
   task: { taskNumber?: number },
-): { workspaceId: string; channelRef: string; kind: string; threadRef: string; revision: number; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number } {
+): { workspaceId: string; projectRef: string; kind: string; threadRef: string; revision: number; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number } {
   return {
-    workspaceId, channelRef: snapshot.anchor.channelRef,
+    workspaceId, projectRef: snapshot.anchor.projectRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
     ...(snapshot.task === undefined ? {} : { taskRef: snapshot.task.taskRef, status: snapshot.task.status, resolution: snapshot.task.resolution }),
     ...(task.taskNumber === undefined ? {} : { taskNumber: task.taskNumber }),
@@ -336,7 +336,7 @@ const teamThread = defineTool({
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
-      workspaceId: { type: 'string', required: true }, channelRef: { type: 'string', required: true },
+      workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
       kind: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, taskRef: { type: 'string' },
       message: { type: 'object', additionalProperties: false, properties: {
         messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' }, body: { type: 'string', required: true },
@@ -353,10 +353,10 @@ const teamThread = defineTool({
       } } },
       facts: { type: 'array', required: true, items: FACT_SCHEMA },
     } },
-        // Renders are the only channel a tool result reaches the model through. read renders outcome → context → orientation → active collision surface → facts → watermark, handing off the next-write token only when no unread remains. history renders deep orientation and never the collision surface or a write token.
+        // Renders are the only project a tool result reaches the model through. read renders outcome → context → orientation → active collision surface → facts → watermark, handing off the next-write token only when no unread remains. history renders deep orientation and never the collision surface or a write token.
     render: (args, value) => {
       const standing = taskStanding(value)
-      const source = `Workspace: ${value.workspaceId} · Channel: ${value.channelRef}`
+      const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef}`
       if (value.kind === 'message') {
                 // Verbatim, and the only action that is: the reader asked for this Message to answer it.
         const message = value.message!
@@ -505,9 +505,9 @@ function threadResult(
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
   facts: FactView[],
   extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; taskNumber?: number; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string } } = {},
-): { workspaceId: string; channelRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; claims: ClaimView[]; facts: FactView[] } {
+): { workspaceId: string; projectRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; claims: ClaimView[]; facts: FactView[] } {
   return {
-    workspaceId, channelRef: snapshot.anchor.channelRef,
+    workspaceId, projectRef: snapshot.anchor.projectRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
     ...(snapshot.task === undefined ? {} : { taskRef: snapshot.task.taskRef, status: snapshot.task.status, resolution: snapshot.task.resolution }),
     ...(extra.taskNumber === undefined ? {} : { taskNumber: extra.taskNumber }),
@@ -535,7 +535,7 @@ const teamDm = defineTool({
       recipientMemberId: { type: 'string', required: true }, recipientHandle: { type: 'string', required: true },
       delivered: { type: 'boolean', required: true }, deliveryNote: { type: 'string' }, occurredAt: { type: 'string' },
     } },
-        // Renders are the only channel a tool result reaches the model through. A DM is recorded either way, so the first line says whether it was delivered or recorded without a live session to wake.
+        // Renders are the only project a tool result reaches the model through. A DM is recorded either way, so the first line says whether it was delivered or recorded without a live session to wake.
     render: (_args, value) => {
       if (value.delivered === false) return [{ type: 'text', text: [
         `Recorded, not delivered — DM to @${value.recipientHandle} (${value.recipientMemberId}).`,
@@ -567,15 +567,15 @@ const teamDm = defineTool({
 
 const teamMessage = markAgentTeamPreset(defineTool({
   name: 'team_message',
-  description: 'Start a top-level Thread, or reply to an existing one. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message and restores Attention, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start defaults to a taskless Thread; pass asTask true to create a Task in the same send. A top-level start may mention related Agents directly; in replies, only a Human can invite a Member the Thread has never carried. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` reaches every Member of the Channel. Naming a Member this Thread has never carried still commits, delivers nothing to that Member, and reports them under undeliveredMentions: ask the Human to invite them, or reach them with a team_dm. This tool writes Threads only: a private note to one Member is team_dm, not a reply.',
+  description: 'Start a top-level Thread, or reply to an existing one. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message and restores Attention, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start defaults to a taskless Thread; pass asTask true to create a Task in the same send. A top-level start may mention related Agents directly; in replies, only a Human can invite a Member the Thread has never carried. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` reaches every Member of the Project. Naming a Member this Thread has never carried still commits, delivers nothing to that Member, and reports them under undeliveredMentions: ask the Human to invite them, or reach them with a team_dm. This tool writes Threads only: a private note to one Member is team_dm, not a reply.',
   parameters: {
     action: { type: 'string', required: true, enum: ['start', 'reply'] },
-    channelRef: { type: 'string', description: "Full branded Channel ref exactly as returned by Team tools, including the 'channel:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for reply on a Taskful Thread. Prefer threadRef; an unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     replyToMessageRef: { type: 'string', description: "Optional: the full branded Message ref you are answering (as rendered by team_thread or an inbox notice). Reply on the Thread you are already replying to; the Message must be one this Thread recorded. The Host links the reply to it, and its author is then delivered to like a mention, so answering a peer reaches them without typing their handle. Use it when the link is the point — the reader needs to know which Message you are answering. A Message that only continues the Thread's conversation needs neither this nor a mention: the Thread already delivers to the Members on it, so the link would announce a delivery that was going to happen anyway." },
     asTask: { type: 'boolean', description: 'When true, start creates a Task with the Thread. Default false creates a taskless Thread.' },
-    body: { type: 'string', required: true, description: "Markdown body. Lead with the conclusion or state. Mention the Human only when they must know or decide; when a decision is owed, say plainly what needs deciding and what happens by default if nobody answers — no fixed template. Keep it the shortest useful message for the recipients; mechanical detail follows below. Cite Team refs exactly as returned, as bare text with one colon (e.g. task:0f0a…) — never a double colon, never inside backticks or quotes. Unambiguous UUID abbreviations (first 6+ hex chars) also resolve. Mention a Member by writing `@Handle` (`@` required, case-insensitive) in the prose: that is what delivers the Message to them and renders the mention chip, and `@all` reaches the whole Channel." }, baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Thread." },
+    body: { type: 'string', required: true, description: "Markdown body. Lead with the conclusion or state. Mention the Human only when they must know or decide; when a decision is owed, say plainly what needs deciding and what happens by default if nobody answers — no fixed template. Keep it the shortest useful message for the recipients; mechanical detail follows below. Cite Team refs exactly as returned, as bare text with one colon (e.g. task:0f0a…) — never a double colon, never inside backticks or quotes. Unambiguous UUID abbreviations (first 6+ hex chars) also resolve. Mention a Member by writing `@Handle` (`@` required, case-insensitive) in the prose: that is what delivers the Message to them and renders the mention chip, and `@all` reaches the whole Project." }, baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Thread." },
     attachments: { type: 'array', items: { type: 'string' }, description: 'Absolute file paths to share, e.g. screenshots or generated artifacts; images render as thumbnails for recipients. The Host validates each path and copies the file into the attachment cache, and members also receive one cached path per attachment; if any path fails validation the whole send is rejected.' },
     workspace: workspaceParam,
   },
@@ -613,13 +613,13 @@ const teamMessage = markAgentTeamPreset(defineTool({
     const attachmentPaths = Array.isArray(rawPaths) ? rawPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '') : undefined
     const paths = attachmentPaths !== undefined && attachmentPaths.length > 0 ? { attachmentPaths } : {}
     if (args.action === 'start') {
-      if (args.channelRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined) throw new Error(`start requires channelRef and does not accept threadRef, taskRef, or baseRevision — ${recoveryFor('start_requires_channel').sentence({})}`)
+      if (args.projectRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined) throw new Error(`start requires projectRef and does not accept threadRef, taskRef, or baseRevision — ${recoveryFor('start_requires_project').sentence({})}`)
       const result = await host.sendMessageForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
-        channelRef: args.channelRef as never, body: args.body, asTask: args.asTask === true, ...paths })
+        projectRef: projectRefOf(args.projectRef) as never, body: args.body, asTask: args.asTask === true, ...paths })
       return messageOutcome(result, 'start')
     }
     const baseRevision = args.baseRevision
-    if ((args.threadRef === undefined && args.taskRef === undefined) || args.channelRef !== undefined || args.asTask !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
+    if ((args.threadRef === undefined && args.taskRef === undefined) || args.projectRef !== undefined || args.asTask !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
       throw new Error(`reply requires threadRef and a positive baseRevision — ${recoveryFor('missing_write_token').sentence({})}`)
     }
     const result = await host.replyForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
@@ -729,29 +729,29 @@ const teamClaim = defineTool({
 
 const teamView = defineTool({
   name: 'team_view',
-  description: 'Discover your authorized Team addresses: current Channels, a newest-first page of top-level Threads (each with its bounded anchor subject; Task standing inline on taskful rows), current Members, and an「active task threads」section listing the work in flight right now — every in_progress / in_review Task Thread in your Channels, with its subject and the Members already on it. This is an address book, not a work queue: unread work lives in team_inbox, and a Thread is read with team_thread read. Consult the active-task-threads section when a Workspace change surprises you, or before you claim or commit, to tell in-flight work from a real conflict and avoid riding onto someone else\'s unpushed work — it is independent of your own unread. The cursor pages Thread rows only.',
+  description: 'Discover your authorized Team addresses: current Projects, a newest-first page of top-level Threads (each with its bounded anchor subject; Task standing inline on taskful rows), current Members, and an「active task threads」section listing the work in flight right now — every in_progress / in_review Task Thread in your Projects, with its subject and the Members already on it. This is an address book, not a work queue: unread work lives in team_inbox, and a Thread is read with team_thread read. Consult the active-task-threads section when a Workspace change surprises you, or before you claim or commit, to tell in-flight work from a real conflict and avoid riding onto someone else\'s unpushed work — it is independent of your own unread. The cursor pages Thread rows only.',
   parameters: {
-    channelRef: { type: 'string', description: "Full branded Channel ref exactly as returned by Team tools, including the 'channel:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     limit: { type: 'number' }, cursor: { type: 'number' }, workspace: workspaceParam,
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
-      channels: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { channelRef: { type: 'string', required: true }, name: { type: 'string', required: true } } } },
+      projects: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { projectRef: { type: 'string', required: true }, name: { type: 'string', required: true } } } },
       workspaceId: { type: 'string', required: true },
       workspaces: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { workspaceId: { type: 'string', required: true }, title: { type: 'string' }, default: { type: 'boolean', required: true } } } },
       members: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         memberId: { type: 'string', required: true }, kind: { type: 'string', required: true }, handle: { type: 'string', required: true }, description: { type: 'string', required: true }, presence: { type: 'string', required: true },
       } } },
       threads: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
-        threadRef: { type: 'string', required: true }, channelRef: { type: 'string', required: true }, revision: { type: 'number', required: true }, messageCount: { type: 'number', required: true }, subject: { type: 'string', required: true },
+        threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, revision: { type: 'number', required: true }, messageCount: { type: 'number', required: true }, subject: { type: 'string', required: true },
         taskRef: { type: 'string' }, status: { type: 'string' }, taskNumber: { type: 'number' }, lastActivityAt: { type: 'string' },
       } } },
       activeTaskThreads: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
-        taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, channelRef: { type: 'string', required: true }, status: { type: 'string', required: true }, subject: { type: 'string', required: true },
+        taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, status: { type: 'string', required: true }, subject: { type: 'string', required: true },
         taskNumber: { type: 'number' }, lastActivityAt: { type: 'string', required: true },
         members: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { memberId: { type: 'string', required: true }, name: { type: 'string', required: true } } } },
       } } },
-      tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, channelRef: { type: 'string', required: true }, status: { type: 'string', required: true }, revision: { type: 'number' } } } },
+      tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, status: { type: 'string', required: true }, revision: { type: 'number' } } } },
       cursor: { type: 'number', required: true }, hasMore: { type: 'boolean', required: true }, page: { type: 'string' },
     } },
         // Address book, newest Thread first: labelled sections, one bounded subject per Thread row, Task standing inline (no second Task index), and a footer naming the value a Thread cursor. Continuation pages repeat only Threads. No message count or revision label: neither changes the next legal action, which is reading, never writing from a directory snapshot.
@@ -759,14 +759,14 @@ const teamView = defineTool({
       const continuation = value.page === 'threads'
       const lines: string[] = [`Workspace: ${value.workspaceId}`]
       if (!continuation) {
-        lines.push('Team directory', '', 'Channels — current')
-        if (value.channels.length === 0) lines.push('No authorized Channels.')
-        else lines.push(...value.channels.map(channel => `${channel.channelRef} · ${channel.name}`))
+        lines.push('Team directory', '', 'Projects — current')
+        if (value.projects.length === 0) lines.push('No authorized Projects.')
+        else lines.push(...value.projects.map(project => `${project.projectRef} · ${project.name}`))
         lines.push('')
       }
       lines.push('Threads')
-      if (value.threads.length === 0) lines.push(`No top-level Threads${!continuation && value.channels.length === 1 ? ` in ${value.channels[0]!.channelRef}` : ''} at this cursor.`)
-      else lines.push(...value.threads.map(thread => `${thread.threadRef} · ${thread.channelRef}${thread.taskRef === undefined ? ' · taskless' : ` · ${taskStanding(thread)}`} — ${thread.subject}${thread.lastActivityAt === undefined ? '' : ` · last activity ${formatTeamTimestamp(thread.lastActivityAt)}`}`))
+      if (value.threads.length === 0) lines.push(`No top-level Threads${!continuation && value.projects.length === 1 ? ` in ${value.projects[0]!.projectRef}` : ''} at this cursor.`)
+      else lines.push(...value.threads.map(thread => `${thread.threadRef} · ${thread.projectRef}${thread.taskRef === undefined ? ' · taskless' : ` · ${taskStanding(thread)}`} — ${thread.subject}${thread.lastActivityAt === undefined ? '' : ` · last activity ${formatTeamTimestamp(thread.lastActivityAt)}`}`))
       lines.push(`Thread cursor ${value.cursor}; hasMore=${value.hasMore ? 'true' : 'false'}${value.hasMore ? ' — older Thread anchors exist; page again with this cursor.' : ' — no older Threads remain.'}`)
       if (!continuation && value.workspaces.length > 1) {
         lines.push('', 'Workspaces — you participate in')
@@ -778,7 +778,7 @@ const teamView = defineTool({
         else lines.push(...value.members.map(m => `${m.memberId} · @${m.handle} (${m.kind}, ${m.presence})${m.description === '' ? '' : ` — ${m.description}`}`))
         lines.push('', 'Active task threads — work in flight right now')
         if (value.activeTaskThreads.length === 0) lines.push('No task thread is in flight in this Workspace.')
-        else lines.push(...value.activeTaskThreads.map(t => `${t.threadRef} · ${t.channelRef} · ${t.status}${t.taskNumber === undefined ? '' : ` · #${t.taskNumber}`}${t.members.length === 0 ? '' : ` · ${t.members.map(m => `@${m.name}`).join(', ')}`} — ${t.subject} · last activity ${formatTeamTimestamp(t.lastActivityAt)}`))
+        else lines.push(...value.activeTaskThreads.map(t => `${t.threadRef} · ${t.projectRef} · ${t.status}${t.taskNumber === undefined ? '' : ` · #${t.taskNumber}`}${t.members.length === 0 ? '' : ` · ${t.members.map(m => `@${m.name}`).join(', ')}`} — ${t.subject} · last activity ${formatTeamTimestamp(t.lastActivityAt)}`))
         lines.push('Use this when a Workspace change surprises you, or before you claim or commit — to see who is already on a Task rather than riding onto their in-flight work. It is not the unread queue; unread work still lives in team_inbox.')
       }
       return [{ type: 'text', text: lines.join('\n') }]
@@ -790,13 +790,13 @@ const teamView = defineTool({
     const host = service(agent)
     const workspaceId = workspaceOf(args, agent)
         // `includeCatalog` makes this the address book: the radar and Task/Thread catalog of the whole Workspace scope, not just this page's Threads. Other `view` callers keep the bounded page projection.
-    const view = host.viewForAgent(agent, { workspaceId, ...(args.channelRef === undefined ? {} : { channelRef: args.channelRef as never }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.cursor === undefined ? {} : { cursor: args.cursor }), topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true })
+    const view = host.viewForAgent(agent, { workspaceId, ...(args.projectRef === undefined ? {} : { projectRef: projectRefOf(args.projectRef) as never }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.cursor === undefined ? {} : { cursor: args.cursor }), topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true })
     const visibleMemberIds = new Set(view.members.map(membership => membership.memberId))
     return {
       workspaceId,
       workspaces: view.workspaces.map(participation => ({ workspaceId: participation.workspaceId,
         ...(participation.title === undefined ? {} : { title: participation.title }), default: participation.default })),
-      channels: view.channels.map(channel => ({ channelRef: channel.channelRef, name: channel.name })),
+      projects: view.projects.map(project => ({ projectRef: project.projectRef, name: project.name })),
       members: [
         { memberId: view.humanMemberId, kind: 'human', handle: host.humanHandle(), description: 'Human Team Member', presence: 'available' },
         ...host.members().filter(status => visibleMemberIds.has(status.member.memberId)).map(status => ({ memberId: status.member.memberId,
@@ -805,17 +805,17 @@ const teamView = defineTool({
       threads: view.items.map(item => {
         const thread = item.thread
         const task = item.task
-        return { threadRef: thread.threadRef, channelRef: item.message.channelRef, revision: thread.revision, messageCount: item.messageCount,
+        return { threadRef: thread.threadRef, projectRef: item.message.projectRef, revision: thread.revision, messageCount: item.messageCount,
           subject: boundedSubject(item.message.body), lastActivityAt: item.lastActivityAt,
           ...(task === undefined ? {} : { taskRef: task.taskRef, status: task.status, ...(item.taskNumber === undefined ? {} : { taskNumber: item.taskNumber }) }) }
       }),
             // A Task's revision is its Thread's; omitted rather than reported as `0` when the Thread is outside this page's scope, since `0` would read as "never written".
       tasks: view.tasks.map(task => {
         const revision = view.threads.find(thread => thread.threadRef === task.threadRef)?.revision
-        return { taskRef: task.taskRef, threadRef: task.threadRef, channelRef: task.channelRef, status: task.status,
+        return { taskRef: task.taskRef, threadRef: task.threadRef, projectRef: task.projectRef, status: task.status,
           ...(revision === undefined ? {} : { revision }) }
       }),
-      activeTaskThreads: view.activeTaskThreads.map(t => ({ taskRef: t.taskRef, threadRef: t.threadRef, channelRef: t.channelRef,
+      activeTaskThreads: view.activeTaskThreads.map(t => ({ taskRef: t.taskRef, threadRef: t.threadRef, projectRef: t.projectRef,
         status: t.status, subject: t.subject, lastActivityAt: t.lastActivityAt,
         ...(t.taskNumber === undefined ? {} : { taskNumber: t.taskNumber }),
         members: t.members.map(m => ({ memberId: m.memberId, name: m.name })) })),

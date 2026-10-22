@@ -9,9 +9,9 @@ usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
-/** One seeded taskless discussion on the bench, with the Channel page open. */
+/** One seeded taskless discussion on the bench, with the Project page open. */
 async function seedPanel() {
-  const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seedTaskless: true, seededMessages: [
+  const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seededMessages: [
     { body: '帮我看看这个方案', occurredAt: '2026-10-14T09:00:00.000Z' },
   ] })
   fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -19,7 +19,7 @@ async function seedPanel() {
   return b
 }
 
-describe('Team Channel discussion panel', () => {
+describe('Team Project discussion panel', () => {
   it('opens a taskless Thread in the side panel instead of the Thread page', async () => {
     const b = await seedPanel()
     fireEvent.click(await b.view.findByRole('button', { name: '打开讨论' }))
@@ -31,19 +31,19 @@ describe('Team Channel discussion panel', () => {
     // The anchor Message and the reply composer are the body and the foot.
     expect(within(panel).getByText('帮我看看这个方案')).toBeTruthy()
     expect(within(panel).getByRole('textbox', { name: '消息内容' })).toBeTruthy()
-    // The feed never left: the channel page and the discussion's door stand.
-    expect(b.view.container.querySelector('[data-team-channel]')).toBeTruthy()
+    // The feed never left: the project page and the discussion's door stand.
+    expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy()
     expect(b.view.getByRole('button', { name: '打开讨论' })).toBeTruthy()
     await waitFor(() => expect(b.readThread).toHaveBeenCalledWith(expect.objectContaining({ threadRef: 'thread:1' })))
     await b.runtime.dispose()
   })
 
   it('clears the feed row unread badge as the panel reads', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seedTaskless: true, seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seededMessages: [
       { body: '帮我看看这个方案', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
     b.seedInbox([{
-      workspaceId: 'w1', channelRef: 'channel:engineering',
+      workspaceId: 'w1', projectRef: 'project:engineering',
       thread: { threadRef: 'thread:1', revision: 2 },
       unreadCount: 3, directCount: 0,
       previewText: '帮我看看这个方案', newestSequence: 1, newestOccurredAt: '2026-10-14T09:00:00.000Z',
@@ -109,7 +109,7 @@ describe('Team Channel discussion panel', () => {
     // page opens, and the feed's door is a Task's when the reader returns.
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
     expect(b.view.queryByRole('complementary', { name: '讨论' })).toBeNull()
-    fireEvent.click(b.view.getByRole('button', { name: '返回频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '返回项目' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     expect(await b.view.findByRole('button', { name: '打开 Task #1' })).toBeTruthy()
     await b.runtime.dispose()
@@ -122,7 +122,7 @@ describe('Team Channel discussion panel', () => {
     // The board takes the whole seat; the panel's state stays for the feed.
     fireEvent.click(b.view.getByRole('tab', { name: '看板' }))
     expect(b.view.queryByRole('complementary', { name: '讨论' })).toBeNull()
-    fireEvent.click(b.view.getByRole('tab', { name: '频道' }))
+    fireEvent.click(b.view.getByRole('tab', { name: '项目' }))
     const panel = await b.view.findByRole('complementary', { name: '讨论' })
     fireEvent.click(within(panel).getByRole('button', { name: '关闭讨论' }))
     expect(b.view.queryByRole('complementary', { name: '讨论' })).toBeNull()

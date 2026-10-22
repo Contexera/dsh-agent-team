@@ -16,7 +16,7 @@ const ACCEPT_FACT = {
 describe('team_thread renders the model-facing decision surface', () => {
   it('an accept activity renders actor, Task ref, and the Claims it concluded — not a bare kind', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
+      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
       kind: 'read', threadRef: 'thread:cb7e5eca-9a73-4fa6-9fdf-260996597e7d',
       taskRef: 'task:205a8ba6-f3c6-4fbc-95b7-c3448191f730',
       revision: 8190, status: 'done', resolution: 'accepted', following: true,
@@ -41,7 +41,7 @@ describe('team_thread renders the model-facing decision surface', () => {
 
   it('a read states its facts and never recommends a context action', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
+      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
       kind: 'read', threadRef: 'thread:x', revision: 100, following: false,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
       claims: [],
@@ -56,7 +56,7 @@ describe('team_thread renders the model-facing decision surface', () => {
     expect(text).not.toContain('usageTokens')
     // The empty-facts status path keeps the same identifying header.
     const statusText = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
+      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
       kind: 'status', threadRef: 'thread:x', revision: 100, following: false,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
       claims: [],
@@ -67,7 +67,7 @@ describe('team_thread renders the model-facing decision surface', () => {
     expect(statusText.split('\n')[1]).toContain('thread:x')
     // Advice never appears for a non-accept activity even when unread.
     const activityText = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
+      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
       kind: 'read', threadRef: 'thread:x', revision: 100, following: false,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
       claims: [],
@@ -91,7 +91,7 @@ describe('team_thread renders the model-facing decision surface', () => {
 
   it('a read that left facts behind states how many, so a returning reader sees the span it is not looking at', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
+      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
       kind: 'read', threadRef: 'thread:x', revision: 400, following: true,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
       claims: [],
@@ -135,7 +135,7 @@ describe('team_thread renders the model-facing decision surface', () => {
  */
 describe('team_thread shows what a reply answers', () => {
   const READ_BASE = {
-    workspaceId: 'workspace:alpha', channelRef: 'channel:046dd831-c679-4279-b6aa-7813476cf12e',
+    workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
     kind: 'read', threadRef: 'thread:cb7e5eca-9a73-4fa6-9fdf-260996597e7d',
     revision: 9, following: true,
     anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor body', sequence: 1 },
