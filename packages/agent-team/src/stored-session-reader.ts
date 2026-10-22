@@ -1,22 +1,7 @@
 /**
- * The Team's single seam for reading stored Sessions.
+ * The Team's single seam for reading stored Sessions: one `open → read → close` cycle that always closes the handle and normalizes failures into five categories. Callers never touch a `SessionHandle`, artifact path, format generation, or Harness error text. Reading and classification only; no Member lifecycle, Agent create/resume, UI, or ledger.
  *
- * Every per-Session read the Host performs goes through here: one
- * `open → read → close` cycle whose handle lifecycle is guaranteed closed,
- * and whose failures are normalized into the five categories consumers choose
- * policy by. Callers never touch a `SessionHandle`, an artifact path, a
- * format generation, or Harness error message text.
- *
- * The reader owns reading and classification only — not Member lifecycle,
- * Agent create/resume, UI, or ledger.
- *
- * Classification notes: the shipped JSONL backend throws its
- * `corrupt session log` family as plain `Error`s, so corruption is detected by
- * that stable message prefix (an upstream gap; if the text ever changes the
- * failure degrades to `unknown`, which consumers treat conservatively —
- * blocking rather than silently skipping). Typed refusals are also matched
- * through `error.cause` chains because the Harness agent layer wraps
- * persistence failures during resume.
+ * The JSONL backend throws its `corrupt session log` family as plain `Error`s, so corruption is detected by that message prefix; if the text changes, failures degrade to `unknown`, which consumers treat conservatively. Typed refusals are also matched through `error.cause` chains because the Harness agent layer wraps persistence failures during resume.
  * @module @contexera/dsh-agent-team/stored-session-reader
  */
 
@@ -59,10 +44,7 @@ export type StoredSessionReadResult =
   | { readonly ok: true; readonly inspection: StoredSessionInspection }
   | { readonly ok: false; readonly failure: StoredSessionFailure }
 
-/**
- * A call site's session-read failure, carrying the typed classification so
- * activation can route the diagnostic without re-matching error text.
- */
+/** A call site's session-read failure, carrying the typed classification so activation can route the diagnostic without re-matching error text. */
 export class StoredSessionReadError extends Error {
   constructor(message: string, readonly failure: StoredSessionFailure) {
     super(message)
@@ -85,14 +67,7 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/**
- * The deterministic session-shaped classification of one error value:
- * typed Harness failures plus the corruption message family. A system error
- * code is deliberately NOT matched here — outside the reader an fs error may
- * come from unrelated work (private memory, attachment cache), so only the
- * reader itself, where the failed operation is known to be a session read,
- * may classify an fs error as `io`.
- */
+/** Session-shaped classification of one error: typed Harness failures plus the corruption message family. System error codes are not matched here, since outside the reader an fs error may come from unrelated work (private memory, attachment cache). */
 function sessionClassOf(error: unknown): Classified | undefined {
   if (error instanceof SessionPersistenceNotFoundError) return { kind: 'missing' }
   if (error instanceof SessionFormatUnsupportedError) {
@@ -114,11 +89,7 @@ function sessionClassInChain(error: unknown): { readonly classified: Classified;
   return undefined
 }
 
-/**
- * Classify any failure as a stored-Session read failure. Total: unmatched
- * errors become `unknown`, and a direct system error code becomes `io` —
- * call this only where the failed operation is known to be a session read.
- */
+/** Classifies any failure as a stored-Session read failure; total: unmatched errors become `unknown`, a direct system error code becomes `io`. Call only where the failed operation is known to be a session read. */
 export function classifyStoredSessionFailure(error: unknown, sessionId: SessionId): StoredSessionFailure {
   const inChain = sessionClassInChain(error)
   if (inChain !== undefined) {
@@ -130,14 +101,7 @@ export function classifyStoredSessionFailure(error: unknown, sessionId: SessionI
   return { kind: 'unknown', sessionId, detail: messageOf(error) }
 }
 
-/**
- * The session-shaped failure carried by an arbitrary error, when it carries
- * one at all: deterministic markers (typed classes, the corruption message
- * family) are matched through the cause chain; transient fs errors are not —
- * outside the reader they are not provably session-related. Activation uses
- * this to route diagnostics; `undefined` means the failure is not
- * session-shaped.
- */
+/** The session-shaped failure carried by an error, if any: deterministic markers are matched through the cause chain, transient fs errors are not (unprovable outside the reader). `undefined` means not session-shaped. */
 export function sessionFailureOf(error: unknown, sessionId: SessionId): StoredSessionFailure | undefined {
   const inChain = sessionClassInChain(error)
   if (inChain === undefined) return undefined
@@ -148,11 +112,7 @@ export function sessionFailureOf(error: unknown, sessionId: SessionId): StoredSe
 export class StoredSessionReader {
   constructor(private readonly ctx: Context) {}
 
-  /**
-   * Read one stored Session completely. The handle is closed on every path;
-   * any failure of open, read, or close is returned as its normalized
-   * category, never thrown.
-   */
+  /** Reads one stored Session completely; the handle is closed on every path and failures are returned as a category, never thrown. */
   async read(sessionId: SessionId): Promise<StoredSessionReadResult> {
     try {
       const handle = await this.ctx.sessionPersistence.open(sessionId, 'read')

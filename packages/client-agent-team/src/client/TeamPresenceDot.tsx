@@ -12,7 +12,6 @@ export function presenceLabel(status: AgentTeamClientMemberStatus, t: TeamSideba
   return status.diagnostic === undefined ? label : `${label}: ${diagnosticText(status)}`
 }
 
-/** One line of human-readable diagnostic text: the reason, plus the refused artifact path when one was reported. */
 export function diagnosticText(status: Pick<AgentTeamClientMemberStatus, 'diagnostic'>): string {
   const diagnostic = status.diagnostic
   if (diagnostic === undefined) return ''
@@ -23,7 +22,6 @@ export function restartOffered(status: AgentTeamClientMemberStatus): boolean {
   return status.diagnostic?.class !== 'rollover'
 }
 
-/** Shared presence → indicator mapping for dots and avatar badges. */
 export function presenceDotState(presence: AgentTeamClientMemberStatus['presence']): TeamStateDotState {
   return presence === 'available' ? 'done' : presence === 'working' ? 'ongoing' : presence === 'error' ? 'error' : 'quiet'
 }

@@ -2,21 +2,16 @@ import { useSyncExternalStore } from 'react'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamEnvironmentResult } from '@contexera/dsh-agent-team/types'
 
-/** One read of the environment check, replaced wholesale on every change. */
 export interface TeamEnvironmentSnapshot {
-  /** `loading` until the first read settles, `ready` once it has. */
   readonly status: 'loading' | 'ready'
-  /** The report to render; undefined until the first read settles. */
   readonly report?: AgentTeamEnvironmentResult | undefined
 }
 
-/** Read-side face the settings page binds. */
 export interface TeamEnvironmentSource {
   getSnapshot(): TeamEnvironmentSnapshot
   subscribe(listener: () => void): () => void
 }
 
-/** Host call the store reads through; one loader per Client context. */
 export interface TeamEnvironmentLoader {
   loadEnvironment: () => Promise<RemoteResult<AgentTeamEnvironmentResult>>
 }
@@ -35,23 +30,13 @@ export class TeamEnvironmentCheck implements TeamEnvironmentSource {
 
   readonly getSnapshot = (): TeamEnvironmentSnapshot => this.snapshot
 
-  /**
-   * Observe the check, starting the first read when nobody has read yet.
-   * @param listener - invoked after every snapshot replacement.
-   * @returns the disposer removing this listener.
-   */
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     if (this.snapshot.status === 'loading' && this.reading === undefined) void this.refresh()
     return () => { this.listeners.delete(listener) }
   }
 
-  /**
-   * Read the Host projection. Concurrent callers share one round trip, and a
-   * failed read keeps the last accepted report — the block never blanks out
-   * over a background read.
-   * @returns settlement of this read (or of the read already in flight).
-   */
+  /** Concurrent callers share one round trip; a failed read keeps the last accepted report. */
   refresh(): Promise<void> {
     if (this.reading !== undefined) return this.reading
     const reading = this.read().finally(() => {
@@ -83,11 +68,7 @@ export class TeamEnvironmentCheck implements TeamEnvironmentSource {
     this.commit({ status: 'ready', report })
   }
 
-  /**
-   * Settle a read that produced no report, so a reader stops waiting on a
-   * `loading` that will never finish. A report that already stands is left
-   * untouched: a failed background read never blanks the block.
-   */
+  /** Settle a read that produced no report so a reader stops waiting on a `loading` that never finishes; a standing report is untouched. */
   private fail(): void {
     if (this.snapshot.report === undefined) this.commit({ status: 'ready' })
   }
@@ -98,7 +79,6 @@ export class TeamEnvironmentCheck implements TeamEnvironmentSource {
   }
 }
 
-/** Subscribe one rendered block to the environment check. */
 export function useEnvironmentCheck(environment: TeamEnvironmentSource): TeamEnvironmentSnapshot {
   return useSyncExternalStore(environment.subscribe, environment.getSnapshot, environment.getSnapshot)
 }

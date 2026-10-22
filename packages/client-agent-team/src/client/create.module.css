@@ -3,13 +3,8 @@
   gap: 16px;
 }
 
-/* The add-Agent dialog stacks the mode switch above the mode's own content,
-   and the Modal body declares no gap of its own: without this seat the
-   switch's edge is the form's first field edge (measured 0px). The step is
-   the dialog body's own block rhythm, not the Modal's 20px header step, so
-   one body does not speak two rhythms. It has to sit on the switch rather
-   than on `.form`, because the Channel create/edit forms share `.form` and
-   must keep their own first-child seat. */
+/* The Modal body declares no gap, so this seat separates the switch from the first field. It sits on the switch rather than
+   on `.form`, which the Channel create/edit forms share and keep their own first-child seat. */
 .modeSwitch {
   margin-bottom: 16px;
 }
@@ -22,9 +17,7 @@
   line-height: 18px;
 }
 
-/* border-box keeps the wrap's own padding+border inside width:100% — without
-   it every Input overflows the dialog body's right padding (the lopsided
-   gutter this form was showing). */
+/* border-box keeps padding+border inside width:100%, or every Input overflows the dialog body's right padding. */
 .input {
   box-sizing: border-box;
   width: 100%;
@@ -36,8 +29,6 @@
   max-height: min(320px, 56vh);
 }
 
-/* Model picker trigger styled to the Input atom chrome; the option list is
-   the shared ui-primitives Menu (grouped rows + selection check). */
 .selectTrigger {
   align-items: center;
   background: var(--dsw-alias-bg-layer-1);
@@ -143,11 +134,7 @@
   margin: 0;
 }
 
-/* Import view. Its caption and its loading/empty lines take the dialog's own
-   caption scale instead of the UA `<p>` default: the body's inherited 16px
-   made the notice as large as the dialog title. Secondary explains the mode,
-   tertiary states what the list is doing — the same split as the roster
-   surfaces (`members.module.css` `.state`/`.error`). */
+/* Caption and loading/empty lines take the dialog's caption scale instead of the UA `<p>` default (16px matched the dialog title). */
 .notice {
   color: var(--dsw-alias-label-secondary);
   font-size: 12px;
@@ -162,21 +149,13 @@
   margin: 0;
 }
 
-/* The importable Members are a roster, and they keep the shared roster
-   density (2px between rows, `members.module.css` `.group`) rather than the
-   dialog's 16px stack rhythm: the same person has to read as the same list
-   on every surface that draws them. */
+/* The importable Members keep the shared roster density (2px between rows) so the same person reads as the same list on every surface. */
 .roster {
   display: grid;
   gap: 2px;
 }
 
-/* A failed read or join states the message and then offers its retry under
-   it, 8px apart — the shipped message-then-action gap (Modal footer, the
-   sidebar's own `.retryError`). Laid out as a plain block, the button's edge
-   rode the message's last line box with no space between them. Both stay in
-   one alert region, and the button keeps its own shape rather than stretching
-   to the column. */
+/* The retry sits 8px under the message (the shipped message-then-action gap) in one alert region; the button keeps its own shape. */
 .failure {
   display: grid;
   gap: 8px;
