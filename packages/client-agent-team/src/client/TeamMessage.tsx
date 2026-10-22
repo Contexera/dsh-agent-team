@@ -24,53 +24,34 @@ export interface TeamMessageProps {
   readonly senderTitle?: string
   /** Continuation of one same-sender run: suppress repeated identity chrome. */
   readonly grouped?: boolean
-  /** This Message carries a structured mention of the Human reader. The hover
-      card states it on a line of its own: the fact belongs to the Message, not
-      to the reader's read state, so it survives being read. It never moves the
-      row — an Agent's mention of the reader is still the Agent's Message, and a
-      reader who saw it on their own side would think they wrote it. */
-  /** The reader's own display name, so the trailing fallback row never repeats
-      the reader back to themselves: the badge already states the mention when it
-      needs attention, and their name in the body is chipped in place. */
+  /** The reader's own name, so the trailing fallback row never repeats it; the body chips it in place. */
   readonly readerName?: string
-  /**
-   * Resolved context of the Message this one quotes; absent when it quotes
-   * nothing. The author and the excerpt come from the Host, never from the body,
-   * so a quote cannot drift from the Message it points at.
-   */
+  /** Resolved quote context from the Host, never the body, so a quote cannot drift from the Message it points at. */
   readonly replyTo?: { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef } | undefined
-  /** Opens the named Message as the composer's quote target; absent surfaces offer no quote action.
-      The Message's own ref travels as the argument so the hosting page can pass one
-      identity-stable callback for every row instead of a fresh closure per row —
-      a new function per render would defeat this component's memo. */
+  /**
+   * Opens the Message as the composer's quote target; the ref travels as the argument so one identity-stable
+   * callback serves every row and the memo holds. Absent surfaces offer no quote action.
+   */
   readonly onReply?: ((messageRef: AgentTeamMessageRef) => void) | undefined
   /** Jumps to the Message this one quotes, which travels as the argument; absent keeps the quote inert. */
   readonly onOpenReplyTo?: ((messageRef: AgentTeamMessageRef) => void) | undefined
   /** Stable identity of this Message: the anchor a quote line jumps to. */
   readonly messageRef?: AgentTeamMessageRef
-  /** This row is the composer's current quote target. */
   readonly replyTarget?: boolean
-  /** This row is the one a reader just jumped to. */
   readonly replyFlash?: boolean
-  /** A continuation row carries its own time in the empty avatar seat; only the
-   * Thread asks for it, where the reading language lives. */
+  /** Continuation rows show their time in the empty avatar seat; only the Thread asks for it. */
   readonly showGroupedTime?: boolean
-  /** This row's actions are open on a surface without hover; the hosting page
-   * owns the flag so only one row can hold it. */
+  /** Actions open on a surface without hover; the hosting page owns the flag so only one row holds it. */
   readonly cardOpen?: boolean
   /** Opens or closes this row's actions; absent surfaces offer none. */
   readonly onToggleCard?: ((messageRef: AgentTeamMessageRef) => void) | undefined
   /**
-   * Whether this surface offers the row's actions at all — copy, and the
-   * reader's own mention notice. `inherit` (the default) offers them exactly
-   * when the surface also offers a quote; `always` offers them without one,
-   * because withholding quotes is a policy about one action and it must not
-   * take the others with it; `never` withholds them.
+   * Whether the surface offers row actions (copy, the reader's mention notice). `inherit` offers them when a quote is
+   * offered; `always` offers them without one; `never` withholds them.
    */
   readonly rowActions?: 'inherit' | 'always' | 'never'
   readonly attachments?: readonly AgentTeamMessageAttachment[] | undefined
-  /** The Human's uploaded avatar; only the Human's own row draws it, and absent
-   * or undecodable bytes draw the initial on the business-tinted chip. */
+  /** The Human's uploaded avatar; absent or undecodable bytes draw the initial on the tinted chip. */
   readonly avatarUrl?: string | undefined
   /** Cache readback for thumbnails; absent on surfaces without the remotes. */
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
@@ -91,29 +72,18 @@ export interface TeamMessageProps {
 }
 
 /**
- * One chat message row with identity chrome and sender-appropriate rendering.
- *
- * Memoized because a timeline row is rendered by the page that owns the whole
- * Thread: the Task-ref subscription below lives inside this component, so
- * skipping a render here never detaches it. Callers must therefore keep the
- * props they derive per render (mention names, ref callbacks) identity-stable.
+ * One chat message row. Memoized: the Task-ref subscription lives inside this component, so a skipped render never
+ * detaches it. Callers must keep per-render props (mention names, ref callbacks) identity-stable.
  */
 export const TeamMessage = memo(function TeamMessage({ senderName, memberId, human, avatarUrl, body, occurredAt, mentionNames, senderTitle, grouped, readerName, replyTo, onReply, onOpenReplyTo, rowActions, messageRef, replyTarget, replyFlash, showGroupedTime, cardOpen, onToggleCard, attachments, loadAttachment, t, onOpenRef, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, onOpenMemberSession, children }: TeamMessageProps) {
   const avatarStyle = human ? undefined : { '--team-avatar-hue': memberHue(memberId) } as CSSProperties
   const identityImage = useAvatarImage(human ? avatarUrl : undefined)
-  // Literal bodies carry mention chips inline — Human input always, and
-  // plain-prose Agent bodies where literal rendering loses nothing. Rich
-  // Markdown keeps unmatched structured mentions in the trailing row.
-  // The stored body carries machine-facing `[attachment] <path>` prompt lines;
-  // humans see the attachment strip rendered from the message metadata instead.
-  // One pure plan resolves the stored body into the rendering branch, the
-  // trailing fallback rows, and the literal Task/Thread refs that resolve in place.
+  // The stored body carries machine-facing `[attachment] <path>` prompt lines; the attachment strip renders from message metadata instead.
+  // Literal bodies chip mentions inline; rich Markdown keeps unmatched structured mentions in the trailing row.
   const plan = planMessageBody(body, { human, ...(mentionNames === undefined ? {} : { mentionNames }), canOpenRefs: onOpenRef !== undefined })
-  // The chip names what the body names, not what the Host delivered to: a
-  // Thread reaches its Human in every row, and only the words can mention them.
+  // The chip names what the body names, not what the Host delivered to: a Thread reaches its Human in every row.
   const mentionedInBody = bodyMentionsHuman(body, readerName)
-  // The fallback row lists mentions the body text does not carry, minus the
-  // reader's own name and the author the quote line already names.
+  // The fallback row omits the reader's own name and the author the quote line already names.
   const quoteAuthor = replyTo === undefined ? undefined : replyTo.senderName.replace(/^@/, '')
   const fallbackNames = unshownMentionNames(plan.fallbackNames, readerName, quoteAuthor)
   const displayBody = plan.displayBody
@@ -128,28 +98,18 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
     memberOf,
     t,
   })
-  // Long bodies start clamped behind the expand control. The default derives
-  // from the body alone; the toggle itself is per-mount view state nothing
-  // persists.
   const [expanded, setExpanded] = useState(false)
-  // Copy feedback is per row and self-clearing: the label states success for a
-  // moment, then goes back to naming the action.
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
     const timer = setTimeout(() => { setCopied(false) }, 1200)
     return () => { clearTimeout(timer) }
   }, [copied])
-  // The body travels as the stored Markdown, never as the rendered text: a
-  // reader pasting an Agent's answer somewhere else wants the source it was
-  // written in, not the styling this page gave it.
+  // Copy the stored Markdown, not the rendered text.
   const copyMessage = useCallback((): void => {
     void writeClipboard(body).then(accepted => { if (accepted) setCopied(true) })
   }, [body])
-  // A touch surface has no hover to reveal the actions, so a tap on the row
-  // opens its card; hover-capable surfaces ignore the flag (see the CSS), and a
-  // press on the card itself never toggles it. The page owns the flag because
-  // only one row may hold it at a time.
+  // A touch surface has no hover, so a tap opens the card; a press on the card itself never toggles it.
   const toggleCard = useCallback((event: MouseEvent<HTMLElement>): void => {
     if (onToggleCard === undefined || messageRef === undefined) return
     const target = event.target
@@ -172,13 +132,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
       {identityImage.image.kind === 'initial'
         ? <div className={css.messageIdentity} data-avatar="initial" style={avatarStyle} aria-hidden="true">{senderName.replace('@', '').slice(0, 1).toUpperCase()}</div>
         : <img className={css.messageIdentityImage} data-avatar="image" src={identityImage.image.src} alt="" aria-hidden="true" onError={identityImage.failed} />}
-      {/* A continuation row has no identity line for its own time, so the time
-          sits in the avatar seat under where the face would be — out of the
-          reading path, and off the row's right edge where the words live. The
-          seat is 34px and does not clip, so it states the time of day only: the
-          date belongs to the identity line that opened this run and to the day
-          separator above it, and the exact instant stays one hover away on the
-          row's own title. */}
+      {/* A continuation row shows time of day only in the avatar seat (34px, no clip); the date lives on the run's identity line and the day separator. */}
       {grouped === true && showGroupedTime === true && occurredAt !== undefined && <span className={css.gutterTime} data-gutter-time="" aria-hidden="true" title={formatAbsoluteTime(occurredAt)}>{formatClockTime(occurredAt)}</span>}
       <div className={css.messageBody}>
         {!grouped && (
@@ -187,10 +141,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
             {occurredAt !== undefined && <span className={css.messageTime}>{formatMessageTime(occurredAt)}</span>}
           </div>
         )}
-        {/* What this Message quotes leads it, in the Markdown reference form the
-            reader already knows: one muted line behind a rule, the whole of it a
-            jump to the original, so a long parent is never pasted a second time
-            and the quote can never disagree with the Message it points at. */}
+        {/* The quote is one muted line that jumps to the original, so a long parent is never pasted twice. */}
         {replyTo !== undefined && (onOpenReplyTo === undefined
           ? <span className={css.quoteLine} data-quote-line="">
               <span className={css.quoteLineBar} aria-hidden="true" />
@@ -207,12 +158,8 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
                 <span className={css.quoteLineText}>{replyTo.excerpt}</span>
               </span>
             </button>)}
-        {/* The wrapper stays mounted for every clampable body and only swaps
-            its class: appearing/disappearing around bodyNode would remount the
-            Markdown subtree and wipe the post-render ref/mention chips that the
-            layout effects painted into it. It also carries data-document —
-            the same >600-character rule that folds the body marks it for the
-            document reading rhythm (conversation.module.css). */}
+        {/* The wrapper stays mounted for every clampable body and only swaps its class: remounting the Markdown subtree would wipe
+            the post-render ref/mention chips. It also carries data-document, the same >600-character rule that folds the body. */}
         {clampable ? <div data-document="" className={clamped ? css.messageClamp : undefined}>{bodyNode}</div> : bodyNode}
         {clampable && (
           <button type="button" className={css.messageExpand} data-message-expand="true" aria-expanded={expanded} onClick={() => { setExpanded(value => !value) }}>
@@ -234,16 +181,10 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
           {...(loadAttachment === undefined ? {} : { loadAttachment })}
           {...(t === undefined ? {} : { t })}
         />}
-        {/* The entry line a feed passes in is the row's own chrome, not its
-            words: it opens the entry (state, door) and stays on the row's own
-            reading path rather than inside any per-message surface. */}
+        {/* A feed's entry line is the row's own chrome, outside any per-message surface. */}
         {children}
       </div>
-      {/* The actions float beside the Message instead of living on it: they are
-          about the row, not part of it, and the reader asks for them only when
-          the row is under the pointer or the caret. The card is the only raised
-          surface in a Message row — the row itself stays flat, so one hovered
-          Message gains a layer instead of the whole timeline gaining texture. */}
+      {/* The actions float beside the Message, shown only under the pointer or caret; the card is the only raised surface in a row. */}
       {(rowActions !== 'never' && (rowActions === 'always' || onReply !== undefined)) && <div className={css.messageCard} data-message-card="">
         {mentionedInBody && <span className={css.cardMention} data-mentions-you="">{t?.('mentionsMe') ?? 'Mentioned you'}</span>}
         <button type="button" className={css.cardAction} data-copy-message="" onClick={copyMessage}
@@ -260,11 +201,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   )
 })
 
-/**
- * The Message's own ref/mention resolution, kept inside the component so the
- * Task-ref subscription a memoized row holds never detaches when its caller
- * skips a render.
- */
+/** Kept inside the component so the Task-ref subscription of a memoized row never detaches. */
 function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSession, onResolveTaskRefs, onResolveThreadRefs, channelNameOf, memberOf, t }: {
   readonly plan: PlannedMessageBody
   readonly mentionNames?: readonly MentionHandle[] | undefined
@@ -276,15 +213,12 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
   readonly memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined
   readonly t: TeamConversationProps['t'] | undefined
 }): {
-  /** Attach to the Markdown wrapper; the post-render chip pass walks this root. */
   readonly markdownRef: RefObject<HTMLDivElement>
   readonly markdownLabels: MarkdownLabels
   readonly taskLabel: (taskNumber: number) => string
   readonly renderRefs: (text: string) => ReactNode
 } {
   const { richAgentBody } = plan
-  // Resolved refs re-label once the Host lookup lands; the version tokens
-  // refresh literal links and rendered Markdown prose.
   const taskRefVersion = useResolvedTaskRefVersion()
   const threadRefVersion = useResolvedThreadRefVersion()
   const bodyTaskRefs = plan.taskRefs
@@ -296,20 +230,15 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
     if (onResolveThreadRefs !== undefined && bodyThreadRefKey !== '') void resolveUnknownThreadRefs(bodyThreadRefs, onResolveThreadRefs)
   }, [onResolveTaskRefs, onResolveThreadRefs, bodyTaskRefKey, bodyThreadRefKey, taskRefVersion, threadRefVersion])
   const taskLabel = useCallback((taskNumber: number): string => t?.('taskLabel', { number: taskNumber }) ?? `Task #${taskNumber}`, [t])
-  // Thread chips carry the cited Thread's opening-line gist, so one taskless
-  // Thread no longer reads exactly like the next. Unresolvable refs never
-  // reach this label — they stay plain text (see renderRefs).
+  // Unresolvable refs never reach this label; they stay plain text (see renderRefs).
   const threadChipLabel = useCallback((title: string): string => {
     const base = t?.('threadLabel') ?? 'Thread'
     return title === '' ? base : `${base} · ${title}`
   }, [t])
-  // Channel chips name the cited Channel; member chips name the cited Member
-  // with a handle — deliberately distinct from `@mention` chips, which notify.
+  // Member chips use a handle, deliberately distinct from `@mention` chips, which notify.
   const channelChipLabel = useCallback((name: string): string => t?.('channelLabel', { name }) ?? `Channel · ${name}`, [t])
   const memberChipLabel = useCallback((name: string): string => t?.('memberLabel', { name }) ?? `Member · @${name}`, [t])
-  // Markdown chrome (code-copy buttons, footnotes heading) is locale copy the
-  // cordis-free primitive receives via props. Stable per locale revision — a
-  // fresh object per render would rebuild the component table every chunk.
+  // Stable per locale revision: a fresh object per render would rebuild the component table every chunk.
   const markdownLabels = useMemo<MarkdownLabels>(() => ({
     code: { copyLabel: t?.('copyCode') ?? 'Copy', copiedLabel: t?.('copiedCode') ?? 'Copied' },
     footnotes: t?.('markdownFootnotes') ?? 'Footnotes',
@@ -370,7 +299,6 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
   return { markdownRef, markdownLabels, taskLabel, renderRefs }
 }
 
-/** Text nodes that Markdown rendered as prose rather than code or a link. */
 function markdownProseTextNodes(root: HTMLElement): Text[] {
   const nodes: Text[] = []
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
@@ -378,8 +306,7 @@ function markdownProseTextNodes(root: HTMLElement): Text[] {
     const parent = node.parentElement
     if (parent === null) continue
     if (parent.closest('code, pre, a, button') !== null) continue
-    // Mention chips from an earlier pass stay untouched, or each effect rerun
-    // would wrap another chip around the last one.
+    // Skip text already chipped by an earlier pass, or each rerun wraps another chip around the last.
     if (css.mention !== undefined && parent.closest(`[class~="${css.mention}"]`) !== null) continue
     nodes.push(node as Text)
   }
@@ -397,7 +324,6 @@ function markdownStyledRefCodeElements(root: HTMLElement): HTMLElement[] {
   return elements
 }
 
-/** One resolved Task-ref chip built outside React, matching the styled ref link. */
 function resolvedTaskRefButton(taskRef: AgentTeamTaskRef, label: string): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
@@ -408,7 +334,6 @@ function resolvedTaskRefButton(taskRef: AgentTeamTaskRef, label: string): HTMLBu
   return button
 }
 
-/** One resolved Thread-ref chip built outside React, matching the styled ref link. */
 function resolvedThreadRefButton(threadRef: AgentTeamThreadRef, label: string): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
@@ -419,7 +344,6 @@ function resolvedThreadRefButton(threadRef: AgentTeamThreadRef, label: string): 
   return button
 }
 
-/** One roster-resolved Channel chip built outside React, matching the styled ref link. */
 function resolvedChannelRefButton(channelRef: AgentTeamChannelRef, label: string): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
@@ -430,11 +354,7 @@ function resolvedChannelRefButton(channelRef: AgentTeamChannelRef, label: string
   return button
 }
 
-/**
- * One roster-resolved Member chip built outside React. Openable Members jump
- * to their session through the delegated click listener; everyone else gets
- * a labelled but inert span, never a link-shaped misfire.
- */
+/** Openable Members jump to their session through the delegated click listener; others get an inert span. */
 function resolvedMemberRefChip(memberRef: AgentTeamMemberId, label: string, sessionId?: SessionId): HTMLElement {
   if (sessionId === undefined) {
     const span = document.createElement('span')
@@ -451,15 +371,12 @@ function resolvedMemberRefChip(memberRef: AgentTeamMemberId, label: string, sess
   return button
 }
 
-/** Replace a whole-ref code span with its resolved chip once known. */
 function renderResolvedMarkdownCodeRef(code: HTMLElement, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, channelChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): void {
   const segments = splitBrandedRefs((code.textContent ?? '').trim())
   const segment = segments.length === 1 ? segments[0]! : undefined
   const ref = segment?.ref
   if (ref === undefined) return
-  // Task and Thread refs need Host resolution before becoming human-readable
-  // links; Channel and Member refs resolve against the loaded rosters, and
-  // anything the roster does not know stays untouched plain text.
+  // Task and Thread refs need Host resolution; Channel and Member refs resolve against loaded rosters; unknown refs stay plain text.
   if (ref.startsWith('task:')) {
     const resolved = cachedResolvedTaskRef(ref as AgentTeamTaskRef)
     if (resolved === undefined) return
@@ -504,9 +421,6 @@ function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHa
       }
       continue
     }
-    // Task and Thread refs need Host resolution before becoming human-readable
-    // links; Channel and Member refs resolve against the loaded rosters.
-    // Unresolvable refs stay plain text so prose never misfires as a link.
     if (refSegment.ref.startsWith('task:')) {
       const resolved = cachedResolvedTaskRef(refSegment.ref as AgentTeamTaskRef)
       if (resolved === undefined) {
@@ -546,14 +460,10 @@ function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHa
   if (changed) node.replaceWith(fragment)
 }
 
-/** Render one literal text run, linkifying branded refs when navigation is available. */
 function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | undefined, onOpenMemberSession: ((sessionId: SessionId) => void) | undefined, taskLabel: (taskNumber: number) => string, threadChipLabel: (title: string) => string, channelChipLabel: (name: string) => string, memberChipLabel: (name: string) => string, channelNameOf: ((ref: AgentTeamChannelRef) => string | undefined) | undefined, memberOf: ((ref: AgentTeamMemberId) => ResolvedMemberRef | undefined) | undefined): ReactNode {
   if (onOpenRef === undefined) return text
   return splitBrandedRefs(text).map((segment, index) => {
     if (segment.ref === undefined) return <Fragment key={index}>{segment.text}</Fragment>
-    // Task and Thread refs link only once the Host confirms them; Channel and
-    // Member refs link once the loaded roster knows them. Anything unknown
-    // stays plain text so prose never misfires as a link.
     if (segment.ref.startsWith('task:')) {
       const resolved = cachedResolvedTaskRef(segment.ref as AgentTeamTaskRef)
       if (resolved === undefined) return <Fragment key={index}>{segment.text}</Fragment>
@@ -572,8 +482,7 @@ function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | u
     if (segment.ref.startsWith('member:')) {
       const resolved = memberOf?.(segment.ref as AgentTeamMemberId)
       if (resolved === undefined) return <Fragment key={index}>{segment.text}</Fragment>
-      // Known but not openable (suspended Members, the Human): a labelled
-      // span, informative without promising a jump that cannot happen.
+      // Known but not openable (suspended Members, the Human): a labelled span that promises no jump.
       if (!resolved.openable || resolved.sessionId === undefined || onOpenMemberSession === undefined) {
         return <span key={index} title={segment.ref}>{memberChipLabel(resolved.handle)}</span>
       }
@@ -584,7 +493,6 @@ function renderRefsFromText(text: string, onOpenRef: ((ref: string) => void) | u
   })
 }
 
-/** One message's attachment strip: image thumbnails with a large view, or name chips when bytes are gone. */
 function TeamAttachmentStrip({ attachments, loadAttachment, t }: {
   readonly attachments: readonly AgentTeamMessageAttachment[]
   readonly loadAttachment?: TeamConversationProps['getAttachment'] | undefined
