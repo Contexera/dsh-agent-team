@@ -5,11 +5,7 @@ import { PANEL_MAX, PANEL_MIN, clampPanelWidth, readPanelWidthPreference, writeP
 const STEP = 24
 const COARSE_STEP = 96
 
-/**
- * The seam that re-seats the discussion panel through one CSS variable on the
- * surface, so a drag never re-renders either side. The keyboard path is not
- * optional: without it those readers keep a seat they cannot change.
- */
+/** Re-seats the discussion panel through one CSS variable on the surface, so a drag never re-renders either side. The keyboard path is required: without it keyboard readers cannot change the seat. */
 export function TeamPanelHandle({ surface, label }: {
   readonly surface: HTMLElement | null
   readonly label: string
@@ -27,7 +23,6 @@ export function TeamPanelHandle({ surface, label }: {
     return width
   }, [surface])
 
-  // The seat a drag or nudge starts from.
   const current = useCallback((): number => {
     if (surface === null) return PANEL_MIN
     const declared = Number.parseFloat(getComputedStyle(surface).getPropertyValue('--team-panel-width'))

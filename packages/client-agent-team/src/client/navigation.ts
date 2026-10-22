@@ -5,11 +5,7 @@ import type { AgentTeamChannelRef, AgentTeamTaskRef, AgentTeamThreadRef } from '
 
 export type TeamMode = 'conversation' | 'team'
 
-/**
- * The global panel the Team is entered as, addressed by the sidebar's panel
- * rail. Team mode and this panel selection are one fact: the rail's row selects
- * it and the mode follows (see the panel-ownership effect in `index.ts`).
- */
+/** The rail row selects this panel and Team mode follows (see the panel-ownership effect in `index.ts`). */
 export const TEAM_PANEL_ID = 'agent-team' as MainPanelId
 
 export interface TeamNavigationSnapshot {
@@ -19,11 +15,7 @@ export interface TeamNavigationSnapshot {
   taskRef?: AgentTeamTaskRef
   threadRef?: AgentTeamThreadRef
   taskNumber?: number
-  /**
-   * Durable position of the Human mention-Inbox page (a navigation fact, not
-   * an unread fact): selecting Inbox clears the Channel/Thread faces, and a
-   * reload reopens the page. Read markers only move through Thread reads.
-   */
+  /** A navigation fact, not an unread fact: selecting Inbox clears the Channel/Thread faces, and a reload reopens the page. */
   inbox?: boolean
   /** Runtime-only Member Session embedded in the conversation seat; never persisted. */
   memberSessionId?: SessionId
@@ -81,37 +73,24 @@ export interface TeamNavigationActions {
   /** Flip the mode only; a caller that also owns the column releases it through {@link leaveTeamForConversation}. */
   leaveTeam: () => void
   /**
-   * Leave Team mode for the conversation and hand the column back in one move.
-   * The panel release runs before the mode flips: the mode's own ownership
-   * effect reads the flip, and a still-selected Team panel at that instant would
-   * put the mode straight back.
+   * Leave Team mode and hand the column back in one move. The panel release runs before the mode flips, or a
+   * still-selected Team panel would put the mode straight back.
    */
   leaveTeamForConversation: (releasePanel: () => void) => void
   selectWorkspace: (workspaceId: WorkspaceId) => void
   selectChannel: (channelRef: AgentTeamChannelRef) => void
   selectThread: (threadRef: AgentTeamThreadRef, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void
-  /** Open the Human mention-Inbox page; clears the Channel/Thread faces. */
   selectInbox: () => void
   backToWorkspace: () => void
-  /**
-   * Swap the conversation seat to a Member Session while Team chrome stays
-   * mounted. `returnToSessionId` is captured once — switching between Member
-   * Sessions keeps the original target.
-   */
+  /** Swap the conversation seat to a Member Session. `returnToSessionId` is captured once, so switching Member Sessions keeps the original target. */
   enterMemberSession: (sessionId: SessionId, returnToSessionId?: SessionId) => void
-  /** Close the embedded Member Session view and return to the Team views. */
   exitMemberSession: () => void
 }
 
-/**
- * Whether one `enterMemberSession` call restates the state already standing:
- * the same Member Session selected while Team mode is already entered.
- */
 function isReselectingActiveMember(snapshot: TeamNavigationSnapshot, sessionId: SessionId): boolean {
   return snapshot.memberSessionId === sessionId && snapshot.mode === 'team'
 }
 
-/** Root-scoped Team mode state. Slot lifetimes subscribe to this source. */
 export class TeamNavigation {
   private snapshot = readSnapshot()
   private readonly listeners = new Set<() => void>()

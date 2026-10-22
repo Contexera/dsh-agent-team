@@ -1,22 +1,16 @@
-// Single source of truth for which sibling deepseek-harness checkout this
-// repository's scripts, tests, and generated facades resolve against.
+// Single source of truth for which sibling deepseek-harness checkout this repository's scripts, tests,
+// and generated facades resolve against.
 //
 // Resolution order:
-//   1. DSH_HARNESS_DIR — certification runs point this at an isolated
-//      checkout at the candidate tag (see docs/dsh-release-compatibility.md).
-//   2. `.generated-harness` marker — scripts/sync-paths.mjs writes the
-//      checkout it generated the tsconfig facades against. Following it keeps
-//      the vitest harness project on the SAME checkout as the facades, so a
-//      forgotten env var after `DSH_HARNESS_DIR=<tag> node scripts/sync-paths.mjs`
-//      cannot silently split them (the 0.1.7 acceptance divergence mode).
-//   3. Default: `deepseek-harness`, the daily sibling checkout that tracks the
-//      latest certified release. The name is the contract: scripts, generated
-//      tsconfig facades, and the documented sandbox setup all rely on it.
+//   1. DSH_HARNESS_DIR: certification runs point this at an isolated checkout at the candidate tag
+//      (see docs/dsh-release-compatibility.md).
+//   2. `.generated-harness` marker: scripts/sync-paths.mjs writes the checkout it generated the tsconfig
+//      facades against, so the vitest harness project cannot silently split from the facades.
+//   3. Default `deepseek-harness`, the daily sibling checkout tracking the latest certified release. The
+//      name is the contract: scripts, generated facades, and the documented sandbox setup rely on it.
 //
-// A resolved directory that does not exist fails fast with the sibling
-// checkouts that ARE present, instead of surfacing later as a far-away
-// runtime symptom (the PR #3 sandbox failure mode: a stale cordis bundle
-// missing FiberState, or a misleading "Cannot find module 'zod'").
+// A resolved directory that does not exist fails fast, listing the sibling checkouts that ARE present,
+// instead of surfacing later as a misleading runtime error (a stale cordis bundle, "Cannot find module 'zod'").
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'

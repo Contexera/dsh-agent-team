@@ -1,10 +1,6 @@
 /**
- * Native whole-row drag for the Team sidebar lists. Unlike the Harness
- * workspace list there is no document-level acceptance here: hovering another
- * row shows the before/after insertion marker and releasing on a row commits
- * exactly once per gesture, while a release outside any row — including over
- * the other sidebar list, whose panel never responds — just cancels without
- * committing.
+ * Native whole-row drag for the Team sidebar lists. Releasing on a row commits exactly once per gesture; a release outside
+ * any row, including over the other sidebar list, cancels.
  */
 import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
@@ -22,13 +18,8 @@ export interface SidebarRowDragHandlers<K extends string> {
   }
 }
 
-/**
- * One drag gesture per panel instance. `onCommit` receives the moved ref,
- * the drop target and the insertion side exactly once per completed gesture;
- * releases outside the list never reach it.
- */
+/** One drag gesture per panel instance; `onCommit` fires exactly once per completed gesture. */
 export function useSidebarRowDrag<K extends string>({ refs, onCommit }: {
-  /** Effective current order of the owning list, used for hit validation. */
   readonly refs: readonly K[]
   readonly onCommit: (movedRef: K, targetRef: K, marker: SidebarDropMarker) => void
 }): SidebarRowDragHandlers<K> {
@@ -73,11 +64,7 @@ export function useSidebarRowDrag<K extends string>({ refs, onCommit }: {
   }
 }
 
-/**
- * Transparent wrapper that owns the drop-marker styling for one draggable
- * sidebar row. It adds no layout of its own; the styled row stays inside so
- * hover/focus descendant selectors keep working.
- */
+/** Owns the drop-marker styling for one row without adding layout; the styled row stays inside so descendant selectors keep working. */
 export function SortableRow<K extends string>({ drag, orderKey, children }: {
   readonly drag: SidebarRowDragHandlers<K>
   readonly orderKey: K
