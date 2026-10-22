@@ -6,20 +6,10 @@ import { recoveryFor } from './recovery-hints.ts'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type { AgentTeamAttachmentId } from './types.ts'
 
-/**
- * Composer attachments are a cache, not an archive: bytes live only so Member
- * agents can read them within the consumption window, while the ledger keeps
- * the metadata forever. Everything here derives from the on-disk layout
- * `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/` holding the payload
- * file (original sanitized name) plus a `meta.json` sidecar.
- */
+/** Composer attachment cache: `$DSH_HOME/agent-team/attachments/v1/<attachmentId>/` holds the payload (sanitized name) plus a `meta.json` sidecar. Bytes are temporary; the ledger keeps the metadata. */
 export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024
 
-/**
- * The sidecar every cache entry writes beside its payload. A client-supplied
- * name that would collide with it is escaped by `sanitizeFileName`, so the
- * sidecar is always ours; both spellings come from this one constant.
- */
+/** Sidecar name; `sanitizeFileName` escapes client names that collide with it. */
 const ATTACHMENT_SIDECAR_NAME = 'meta.json'
 /** Referenced uploads survive this long after upload for member consumption. */
 export const ATTACHMENT_REFERENCED_TTL_MS = 72 * 60 * 60 * 1000
@@ -39,12 +29,7 @@ export function newAttachmentId(): AgentTeamAttachmentId {
   return randomUUID() as AgentTeamAttachmentId
 }
 
-/**
- * Request-stable cache identity for one upload of an idempotent request: see
- * [`stableRequestUuid`](./request-scoped-id.ts) for why the id is derived
- * rather than fresh. `scope` separates several attachments prepared by one
- * request (path copies) from the request's upload itself.
- */
+/** Request-stable cache id (see `stableRequestUuid`); `scope` separates path copies from the request's own upload. */
 export function requestScopedAttachmentId(requestId: string, scope?: string): AgentTeamAttachmentId {
   return stableRequestUuid('attachment-request', requestId, scope) as AgentTeamAttachmentId
 }
@@ -91,19 +76,12 @@ export function mediaTypeForPath(raw: string): string {
   return PATH_MEDIA_TYPES[extname(raw).toLowerCase()] ?? 'application/octet-stream'
 }
 
-/**
- * Refuse one attachment, naming the subject the fault is about so the model can
- * hand the same value back: every rejection states why it failed and the way
- * out in one sentence.
- */
+/** Refuse with the subject named and the way out in one sentence, so the model can resend the same value. */
 function refuseAttachment(subject: string, fault: string): never {
   throw new Error(`attachment ${subject} ${fault} — ${recoveryFor('attachment_path_rejected').sentence({ refused: subject })}`)
 }
 
-/**
- * Validate one agent-supplied attachment path before any cache write happens,
- * so a rejection anywhere leaves the upload cache untouched.
- */
+/** Validate an agent-supplied path before any cache write, so a rejection leaves the cache untouched. */
 export async function validatePathAttachment(raw: string): Promise<void> {
   if (!isAbsolute(raw)) refuseAttachment(`path '${raw}'`, 'must be absolute')
   const info = await stat(raw).catch(() => undefined)
@@ -113,12 +91,7 @@ export async function validatePathAttachment(raw: string): Promise<void> {
   if (info.size > ATTACHMENT_MAX_BYTES) refuseAttachment(`'${basename(raw)}'`, `exceeds the ${ATTACHMENT_MAX_BYTES} byte limit`)
 }
 
-/**
- * Copy one validated file into the cache under the caller's request-stable id.
- * A committed Message may already reference that id, so an existing entry is
- * never overwritten: identical name and bytes replay it, and anything else is
- * refused as the same request-id collision the ledger reports.
- */
+/** Copy a validated file under the request-stable id. A committed Message may reference that id, so an existing entry is never overwritten: identical content replays, anything else is refused as a request-id collision. */
 export async function copyPathAttachment(root: string, raw: string, attachmentId: AgentTeamAttachmentId, requestId: string): Promise<{ attachmentId: AgentTeamAttachmentId; name: string; byteSize: number; mediaType: string }> {
   const bytes = await readFile(raw)
   const name = sanitizeFileName(basename(raw))
@@ -132,12 +105,7 @@ export async function copyPathAttachment(root: string, raw: string, attachmentId
   return { attachmentId: stored.attachmentId, name: stored.name, byteSize: stored.byteSize, mediaType: stored.mediaType }
 }
 
-/**
- * Store one upload under the id its `requestId` derives. The first attempt
- * writes the entry; a later attempt with the same request replays it, and a
- * different payload for that same request is refused instead of silently
- * becoming a second upload of the same idempotency key.
- */
+/** Store an upload under its request-derived id: identical payload replays, a different payload for the same request is refused. */
 export async function writeRequestScopedAttachment(root: string, requestId: string, rawName: string, mediaType: string, bytes: Buffer): Promise<{ attachmentId: AgentTeamAttachmentId; path: string; name: string; byteSize: number; mediaType: string }> {
   const attachmentId = requestScopedAttachmentId(requestId)
   const existing = await readAttachment(root, attachmentId)
@@ -241,11 +209,7 @@ export async function removeAttachment(root: string, attachmentId: AgentTeamAtta
 /** Ids of uploads a Message still references — everything else is an orphan. */
 export type ReferencedAttachments = ReadonlySet<AgentTeamAttachmentId>
 
-/**
- * One GC pass: drop uploads older than the orphan TTL, and referenced ones
- * older than the consumption-window TTL. Returns the ids removed so the
- * service can log them.
- */
+/** One GC pass: drops orphans past the orphan TTL and referenced uploads past the consumption TTL; returns removed ids. */
 export async function sweepAttachmentCache(root: string, referenced: ReferencedAttachments, now: number): Promise<readonly AgentTeamAttachmentId[]> {
   const removed: AgentTeamAttachmentId[] = []
   for (const entry of await scanAttachmentCache(root)) {

@@ -2,27 +2,17 @@ import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from './te
 import type { TeamChangeStream } from './team-changes.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
-/**
- * One data query's identity. `key` names the query in diagnostics and is what
- * concurrent consumers must agree on to share an in-flight read; `covers` says
- * which change scopes can change this query's data, so an unrelated wake never
- * invalidates it.
- */
+/** `key` is what concurrent consumers agree on to share an in-flight read; `covers` lists the change scopes that can change its data. */
 export interface TeamQueryIdentity {
   readonly key: string
   readonly covers: (scope: TeamChangeScope) => boolean
 }
 
-/** The Workspace-scoped change kinds a query may declare it covers. */
 export type WorkspaceScopeKind = 'workspace' | 'presence'
 
 /**
- * Whether one change scope can carry new data for a Workspace-scoped query: it
- * names one of the query's own scope kinds in that query's Workspace. The
- * scope-less stream is deliberately excluded — it is a superset of projection
- * wakes, so every scope-less delivery that touches such a query's data has
- * already woken the Workspace scope, and admitting it would only add unrelated
- * invalidations that cost a redundant read.
+ * Whether a change scope names one of the query's scope kinds in its Workspace. The scope-less stream is excluded:
+ * every delivery touching such data has already woken the Workspace scope, so admitting it only adds redundant reads.
  */
 export function coversWorkspaceScope(scope: TeamChangeScope, workspaceId: WorkspaceId | undefined, kind: WorkspaceScopeKind): boolean {
   return scope !== undefined && scope.kind === kind && scope.workspaceId === workspaceId
@@ -30,7 +20,6 @@ export function coversWorkspaceScope(scope: TeamChangeScope, workspaceId: Worksp
 
 /** Per-query read counters. Diagnostics record identity and counts only — never response bodies. */
 export interface TeamQueryCounters {
-  /** Underlying reads started for this query. */
   readonly issued: number
   /** Requests that joined a read instead of starting their own. */
   readonly shared: number
@@ -40,21 +29,13 @@ export interface TeamQueryCounters {
   readonly droppedStale: number
   /** Responses dropped because an invalidation superseded the read before it landed. */
   readonly droppedSuperseded: number
-  /**
-   * Reads that failed to answer with a result — rejected, returned an error, or
-   * answered with an error payload. Counting the payload case too is this
-   * counter's contract: `failed` observes the read, whatever shape the failure
-   * arrived in, while delivery stays unchanged and the consumer renders the
-   * error from its own `result.ok` face.
-   */
+  /** Reads that failed in any shape (rejected, error result, error payload); delivery is unchanged and the consumer renders its own `result.ok` face. */
   readonly failed: number
 }
 
 /**
- * The Host keeps two version domains: presence scopes carry the process-local
- * presence epoch, every other scope carries the ledger's projection position.
- * Watermarks are tracked per domain because the two counters are unrelated —
- * comparing them across domains would both miss and invent invalidations.
+ * Presence scopes carry the process-local presence epoch; every other scope carries the ledger's projection position.
+ * Watermarks are per domain: comparing the unrelated counters would miss and invent invalidations.
  */
 type VersionDomain = 'presence' | 'projection'
 
@@ -63,7 +44,6 @@ interface QueryState {
   readonly counters: Mutable<TeamQueryCounters>
   /** Last invalidating version seen per domain; the same version carries no new data. */
   readonly invalidated: Partial<Record<VersionDomain, number>>
-  /** Issuance of the response that last landed for this query. */
   applied: number
   /** The response that last landed; a stale drop hands waiters this instead of its own payload. */
   stored: { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: unknown } | undefined
@@ -78,10 +58,6 @@ interface Waiter {
 
 type Outcome = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: unknown }
 
-/**
- * Whether a Remote answer reports failure inside its payload rather than as a
- * result error — the second shape the `failed` counter observes.
- */
 const answeredFailure = (outcome: Outcome): boolean =>
   outcome.ok && typeof outcome.value === 'object' && outcome.value !== null && (outcome.value as { readonly ok?: unknown }).ok === false
 
@@ -89,7 +65,6 @@ interface InFlight {
   readonly key: string
   readonly issuance: number
   readonly state: QueryState
-  /** Kept so an invalidation with no replacement read can re-issue the same request. */
   readonly load: () => Promise<unknown>
   superseded: boolean
   /** Set once the response landed: the entry still shares this response through the microtask drain. */
@@ -98,26 +73,14 @@ interface InFlight {
 }
 
 /**
- * The Client's one owner for Team data reads. Consumers ask by query identity;
- * the owner decides whether a request can share a read, drops responses a newer
- * response has superseded, and keeps per-query counters so duplicate reads and
- * stale drops are observable without logging any response body.
+ * The Client's one owner for Team data reads, with per-query counters so duplicate reads and stale drops are observable.
  *
- * Joining rules, in order:
- * - A request joins the read for its key unless that read has been invalidated
- *   (a wake the read predates) — the same invalidation's N consumers therefore
- *   share one underlying read. A landed response stays joinable through the
- *   rest of the microtask drain, so a consumer reacting one microtask after
- *   the dispatch shares it too; the next task reads Host state fresh.
- * - Every change dispatch invalidates once per (scope, version); the same
- *   version means no new data, and a stream-opening baseline always
- *   invalidates regardless of version (it is the reconnect's fresh start).
- * - A superseded response never applies: its waiters join the read that
- *   replaced it, or the owner issues that replacement itself when the wake
- *   left none — so an invalidation always ends in fresh data, not a failure.
- * - The response lands on the microtask that resolves it: no timer sits
- *   between Host answer and consumer, and the issuance guard drops any older
- *   response that arrives afterwards.
+ * - A request joins the read for its key unless a wake it predates has invalidated it. A landed response stays joinable
+ *   through the rest of the microtask drain; the next task reads Host state fresh.
+ * - Each change dispatch invalidates once per (scope, version); a stream-opening baseline always invalidates.
+ * - A superseded response never applies: waiters join its replacement, or the owner issues one, so an invalidation
+ *   always ends in fresh data.
+ * - The response lands on the microtask that resolves it; the issuance guard drops any older response arriving later.
  */
 export class TeamQueries {
   private readonly states = new Map<string, QueryState>()
@@ -129,7 +92,6 @@ export class TeamQueries {
 
   constructor(private readonly changes: Pick<TeamChangeStream, 'subscribe'>) {}
 
-  /** Read one query, sharing the current read when it is still joinable. */
   read<T>(identity: TeamQueryIdentity, load: () => Promise<T>): Promise<T> {
     const existing = this.inFlight.get(identity.key)
     if (existing !== undefined && !existing.superseded) {
@@ -169,10 +131,8 @@ export class TeamQueries {
   }
 
   /**
-   * Subscribe to a change scope, folding each dispatch into query
-   * invalidations before the consumer's own listener runs — that order is
-   * what makes the first requesting consumer issue the shared read and the
-   * rest join it.
+   * Folds each dispatch into invalidations before the consumer's own listener runs, so the first requesting consumer
+   * issues the shared read and the rest join it.
    */
   subscribeChanges(scope: TeamChangeScope, listener: TeamChangeListener): () => void {
     return this.changes.subscribe(scope, update => {
@@ -182,10 +142,8 @@ export class TeamQueries {
   }
 
   /**
-   * A new connection generation restarts the presence epoch and supersedes
-   * every read — pending or landed: without this, a restarted Host's low
-   * presence version would collide with the old watermark, and a pre-reset
-   * response could still be handed to a post-reset reader.
+   * A new generation restarts the presence epoch and supersedes every read, pending or landed; otherwise a low presence
+   * version would collide with the old watermark and a pre-reset response could reach a post-reset reader.
    */
   newGeneration(): void {
     for (const state of this.states.values()) {
@@ -198,7 +156,6 @@ export class TeamQueries {
     }
   }
 
-  /** Per-query read counters for diagnostics. */
   diagnostics(): Record<string, Readonly<TeamQueryCounters>> {
     const snapshot: Record<string, Readonly<TeamQueryCounters>> = {}
     for (const [key, state] of this.states) snapshot[key] = { ...state.counters }
@@ -269,9 +226,6 @@ export class TeamQueries {
       return
     }
     if (current) {
-      // The landed response stays shareable through the rest of this microtask
-      // drain — a consumer reacting to the same change a microtask later still
-      // joins it instead of paying a second read. The next task reads fresh.
       queueMicrotask(() => {
         if (this.inFlight.get(entry.key) === entry) this.inFlight.delete(entry.key)
       })
@@ -279,11 +233,7 @@ export class TeamQueries {
     this.deliver(entry, outcome)
   }
 
-  /**
-   * A newer response for this query already landed. The stale payload is
-   * dropped whole — and so is its failure: the newest known result is the one
-   * waiters receive, so an old error never masks newer data either.
-   */
+  /** The stale payload is dropped whole, failure included, so an old error never masks newer data. */
   private dropStale(entry: InFlight, current: boolean): void {
     entry.state.counters.droppedStale += 1
     this.logDrop(entry, 'stale')
@@ -292,13 +242,8 @@ export class TeamQueries {
   }
 
   /**
-   * An invalidation — a wake, or a new connection generation — superseded this
-   * read before anything newer landed. Its payload must never become the
-   * query's state: that is exactly how a pre-reset response would be handed to
-   * a post-reset reader. Waiters move to the read that took its place; when the
-   * wake left none — its own listener may sit on a narrower scope, or the
-   * surface may already be gone — the layer issues that replacement itself, so
-   * the invalidation still ends in fresh data rather than a failure.
+   * An invalidation superseded this read: its payload must never become the query's state. Waiters move to the
+   * replacement read; when the wake left none, issue it here so the invalidation still ends in fresh data.
    */
   private deliverSuperseded(entry: InFlight, current: boolean): void {
     entry.state.counters.droppedSuperseded += 1
@@ -318,7 +263,6 @@ export class TeamQueries {
     this.deliver(entry, entry.state.stored)
   }
 
-  /** Counters and identity only; response bodies never reach the log. */
   private logDrop(entry: InFlight, reason: 'stale' | 'superseded'): void {
     console.info('[agent-team] stale read response dropped', { query: entry.key, issuance: entry.issuance, landed: entry.state.applied, reason })
   }
