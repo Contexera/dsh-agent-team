@@ -8,9 +8,8 @@ const PACKAGE_NAME = '@contexera/dsh-agent-team'
 export const name = 'agent-team-invariant'
 /**
  * Services required before the companion can validate Team state. The check
- * is self-hosted in this plugin's own fiber — companions used to register
- * into `@deepseek-ai/dsh-invariants`, which the Harness line after `rc.2`
- * removes wholesale.
+ * is self-hosted in this plugin's own fiber rather than registered into
+ * `@deepseek-ai/dsh-invariants`.
  */
 export const inject = ['agentTeam']
 
