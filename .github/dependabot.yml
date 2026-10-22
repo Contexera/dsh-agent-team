@@ -15,6 +15,17 @@ updates:
     open-pull-requests-limit: 3
     ignore:
       - dependency-name: "@deepseek-ai/*"
+      # The client bundle renders inside the Harness's own React (every
+      # Harness package pins react ^18.2.0), so React majors follow the
+      # certified Harness, never an automated bump.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
 
   # Workflows pin third-party actions to commit SHAs, so a new version only
   # arrives as an explicit dependency bump here.
