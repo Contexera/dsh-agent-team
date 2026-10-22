@@ -4,9 +4,8 @@ const decoratorSyntax = /^\s*@[A-Za-z_$][\w$]*/m
 
 /**
  * Transform standard (TC39) TypeScript decorators before Vite's default parser
- * sees source files - esbuild only understands experimentalDecorators. Trimmed
- * copy of deepseek-harness vitest.shared.ts (v8-ignore comments dropped: this
- * repo runs no coverage lane).
+ * sees source files - esbuild only understands experimentalDecorators. Copy of
+ * deepseek-harness vitest.shared.ts without its v8-ignore comments.
  * @returns a pre-transform Vite plugin.
  */
 export function standardDecoratorPlugin() {

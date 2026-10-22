@@ -1,13 +1,5 @@
 /**
- * What a Member is told after a read acknowledges the acceptance of a Task it
- * contributed to.
- *
- * Acceptance is the one moment where the Team knows a Member's context has
- * turned a page: the work it was holding is finished, and anything worth
- * keeping has to move into its own memory first. Below the budget the Member is
- * only asked to write that down; at or above it the Host also compacts the
- * generation once the Agent settles, because a finished Task is not a reason to
- * keep carrying its transcript.
+ * Reminder a Member receives after a read acknowledges acceptance of a Task it contributed to.
  * @module @contexera/dsh-agent-team/acceptance-context
  */
 
@@ -32,16 +24,7 @@ export interface AcceptanceContextFacts {
   readonly canCompact: boolean
 }
 
-/**
- * Decide what an acknowledged acceptance does to the reader's context.
- *
- * Both halves are required for `compact`: an unmeasurable context only reminds,
- * because a meter failure is not evidence that the generation is large, and a
- * preset with no engine only reminds, because the reminder must never promise a
- * compaction that cannot happen.
- * @param facts - the measurement and whether compaction is available.
- * @returns the action and the measurement behind it.
- */
+/** Plans `compact` only when usage is measurable, at or above the budget, and an engine exists; otherwise `remind`. */
 export function planAcceptanceContext(facts: AcceptanceContextFacts): AcceptanceContextPlan {
   const { usageTokens } = facts
   if (usageTokens === undefined) return { action: 'remind' }
@@ -51,13 +34,7 @@ export function planAcceptanceContext(facts: AcceptanceContextFacts): Acceptance
   }
 }
 
-/**
- * The reminder body. The compaction clause is stated only when it is true: a
- * Member that is told its context will be replaced plans around that, and one
- * that is told so falsely loses work it thought it had written down.
- * @param action - whether the Host will compact after this turn.
- * @returns the model-facing text, framed as the Harness frames injected context.
- */
+/** Reminder text; the compaction clause appears only when compaction will happen. */
 export function acceptanceReminderText(action: AcceptanceContextAction): string {
   const lines = [
     '<system-reminder>',

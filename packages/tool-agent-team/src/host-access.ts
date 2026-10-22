@@ -38,10 +38,7 @@ export function workspaceOf(args: { workspace?: string | undefined }, agent: Tea
   const requested = args.workspace
   const exact = workspaces.find(workspace => workspace.workspaceId === requested)
   if (exact !== undefined) return exact.workspaceId
-  // Only a well-formed, long-enough hex tail may abbreviate; anything else is
-  // an unknown id, never a silently shortened match. The brand prefix is not
-  // part of the tail, so `workspace:1a2b3c4d` abbreviates the same UUID the
-  // branded refs do.
+    // Only a well-formed hex tail of at least 6 characters may abbreviate, never a silently shortened match; the brand prefix is not part of the tail.
   const tail = requested.slice(requested.indexOf(':') + 1).replaceAll('-', '').toLowerCase()
   const isAbbreviation = tail.length >= MIN_WORKSPACE_PREFIX && /^[0-9a-f]+$/.test(tail)
   if (isAbbreviation) {
