@@ -9,12 +9,7 @@ export interface TimelineScroll {
   scrollToBottom: () => void
 }
 
-/**
- * Chat-timeline scroll policy shared by the Channel and Thread pages: follow
- * new facts only while the reader stays pinned to the bottom, and keep
- * prepended history visually stable. The content key must change whenever
- * rendered facts change.
- */
+/** Shared by Channel and Thread: follow new facts only while pinned to the bottom, and keep prepended history stable. The content key must change whenever rendered facts change. */
 export function useTimelineScroll(contentKey: string): TimelineScroll {
   const ref = useRef<HTMLElement>(null)
   const pinnedRef = useRef(true)

@@ -27,7 +27,6 @@ interface TeamChannelsPanelProps {
   readonly workspaceId: WorkspaceId
   readonly loadMembers: TeamSidebarProps['loadMembers']
   readonly loadChannels: TeamSidebarProps['loadChannels']
-  /** Membership and channel facts change outside this panel; the workspace scope keeps the list fresh. */
   readonly subscribeChanges: TeamSidebarProps['subscribeChanges']
   readonly createChannel: TeamSidebarProps['createChannel']
   readonly updateChannel: TeamSidebarProps['updateChannel']
@@ -52,8 +51,6 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
   const [pendingCreate, setPendingCreate] = useState<AgentTeamCreateChannelRequest>()
   const previousCreatingKey = useRef(creatingAgents.map(request => request.requestId).join(','))
   const triggerRef = useRef<HTMLButtonElement>(null)
-  // Row order is this browser's presentation preference; the drag commits
-  // through the single shared mutation below.
   const channelRefs = useMemo(() => view?.channels.map(channel => channel.channelRef) ?? [], [view])
   const orderedChannelRefs = useSidebarOrder(workspaceId, 'channels', channelRefs)
   const orderedChannels = useMemo(() => {
@@ -66,13 +63,9 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
   const drag = useSidebarRowDrag({ refs: orderedChannelRefs, onCommit: applyMove })
   const sectionOpen = useSidebarSectionOpen(workspaceId, 'channels')
 
-  // Only the first refresh owns the loading surface; later wakes (workspace
-  // catalog changes, member creation) refresh the rendered rows in place.
   const loadedRef = useRef(false)
   const mountedRef = useRef(false)
-  // The three wake sources below can overlap; only the newest issuance may
-  // apply, so a late answer from a superseded refresh is dropped instead of
-  // painting stale rows over a landed result.
+  // Three wake sources can overlap; only the newest issuance applies.
   const refreshSequenceRef = useRef(0)
   const refresh = useCallback(async () => {
     const sequence = refreshSequenceRef.current + 1
@@ -82,12 +75,9 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
       loadChannels({ workspaceId, limit: 1 }),
       loadMembers({ workspaceId }),
     ])
-    // A response for a panel the user has already left changes nothing: the
-    // key-remounted successor owns the roster and selection state now.
+    // A panel the user already left changes nothing; the key-remounted successor owns the state.
     if (!mountedRef.current || sequence !== refreshSequenceRef.current) return
-    // The two legs carry independent freshness (the roster rides the shared
-    // read layer, the catalog is still a direct read), so each applies on its
-    // own; one leg's failure must not freeze the other leg's landed value.
+    // The roster and catalog legs have independent freshness; one leg's failure must not freeze the other's landed value.
     if (channelResult.ok) {
       setView(channelResult.value)
       loadedRef.current = true
@@ -226,9 +216,7 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
         )}
       >
         {loading && view === undefined && <p className={css.emptyState}>{t('loadingChannels')}</p>}
-        {/* An empty claim needs a loaded projection, and a standing error
-            overrides it: a failed load reports through the error line instead
-            of additionally reading as "no channels yet". */}
+        {/* A standing error overrides the empty claim, so a failed load does not also read as "no channels yet". */}
         {!loading && error === undefined && view !== undefined && view.channels.length === 0 && <p className={css.emptyState}>{t('emptyChannels')}</p>}
         <div className={css.channelList}>
           {orderedChannels.map(channel => {
@@ -256,10 +244,6 @@ export function TeamChannelsPanel(props: TeamChannelsPanelProps) {
   )
 }
 
-/**
- * One sidebar Channel row: the select button keeps the `#` identity while the
- * row menu carries the entry point; editing covers display facts and membership.
- */
 function ChannelRow({ channel, members, joinedIds, selected, updateChannel, archiveChannel, onCommitted, selectChannel, t }: {
   readonly channel: AgentTeamChannel
   readonly members: readonly AgentTeamClientMemberStatus[]
@@ -342,10 +326,7 @@ function ChannelRow({ channel, members, joinedIds, selected, updateChannel, arch
   )
 }
 
-/**
- * Channel editor: name and description commit through one durable update;
- * Channel membership below keeps its own immediate add/remove flow.
- */
+/** Name and description commit through one durable update; membership keeps its own immediate add/remove flow. */
 function ChannelEditorDialog({ channel, updateChannel, onCommitted, onClose, t }: {
   readonly channel: AgentTeamChannel
   readonly members: readonly AgentTeamClientMemberStatus[]

@@ -112,11 +112,9 @@ const outputs = [
   ['../tsconfig.build-deps.json', facade('// Build facade: own cross-surface imports resolve to emitted declarations.\n', { ...buildOwn, ...harnessTypes })],
 ]
 
-// A subpath added to the maps above (or a Harness mapping that moved) must land
-// with its regenerated facades; hand-edited or stale facades otherwise resolve
-// imports that no source declares. Check mode never writes, so a fresh clone
-// whose facades still point at their generation-time paths fails loudly here
-// instead of having the mismatch papered over.
+// A subpath added to the maps above (or a Harness mapping that moved) must land with its regenerated
+// facades. Check mode never writes, so a fresh clone whose facades still point at their generation-time
+// paths fails loudly instead of having the mismatch papered over.
 if (process.argv.includes('--check')) {
   const drifted = outputs
     .filter(([path, text]) => readFileSync(new URL(path, import.meta.url), 'utf8') !== text)

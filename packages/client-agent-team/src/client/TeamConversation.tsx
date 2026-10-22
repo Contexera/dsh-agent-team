@@ -13,11 +13,7 @@ export function TeamConversation({ t, useWorkspaces, navigation, drafts, humanId
   const workspaces = useWorkspaces(state => state.items)
   const current = workspaces.find(workspace => workspace.workspaceId === navigationState.workspaceId)
   if (navigationState.inbox === true) {
-    // The Inbox page is global: it merges every visible Workspace and needs no
-    // selected Workspace. Selecting Inbox clears the Channel/Thread faces, so
-    // this face owns the seat while the flag stands. The Human identity rides
-    // along for the same reason it rides on the other two faces: a row that
-    // names or draws the reader must draw the one identity every seat draws.
+    // The Inbox page is global; selecting it clears the Channel/Thread faces, so this face owns the seat while the flag stands.
     return <TeamInboxPage key="inbox" useWorkspaces={useWorkspaces} loadInbox={loadInbox} subscribeChanges={subscribeChanges} selectWorkspace={selectWorkspace} selectThread={selectThread} humanName={humanName} {...(identity.avatarUrl === undefined ? {} : { humanAvatarUrl: identity.avatarUrl })} t={t} />
   }
   if (current !== undefined && navigationState.threadRef !== undefined) {

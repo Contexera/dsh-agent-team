@@ -3,40 +3,22 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { AgentTeamHumanProfileResult } from '@contexera/dsh-agent-team/types'
 
 /**
- * The Client's one projection of the Human identity.
+ * The Client's one projection of the Human identity, so every seat that names or draws the Human shows one rename and one face.
+ * Durable facts live in the Host (name and avatar reference in the Team Host row's Config, bytes in the avatar store);
+ * writes go through the Host's `setHumanProfile` Remote.
  *
- * The durable facts live in the Host: the display name and the avatar
- * reference in the Team Host row's own Config, the avatar bytes in the
- * persistent avatar store. This store is the only place the Team Client reads
- * them, so every seat that names or draws the Human — message rows, member
- * refs, mention chips, the settings page — shows one rename and one face, and a
- * single refresh after a write moves all of them together. Writes go back
- * through the Host's `setHumanProfile` Remote, which owns the profile entry the
- * Client would otherwise have to name.
- *
- * Seats render before the first read settles; `name` stays undefined until then
- * and every caller falls back to its own localized name for the Human. Reads
- * are demand-driven: the first subscriber starts the read, so a Client that
- * never opens Team mode or the profile page never calls the Remote.
+ * `name` stays undefined until the first read settles, and callers fall back to their own localized name. Reads are
+ * demand-driven: the first subscriber starts the read.
  */
 
-/** One read of the Human identity, replaced wholesale on every change. */
 export interface TeamHumanIdentitySnapshot {
-  /**
-   * `loading` until the first read settles, `ready` while an accepted value
-   * stands (also when a later refresh failed), `unavailable` when no value was
-   * ever accepted — the one state that hands the page a retry.
-   */
+  /** `unavailable` only when no value was ever accepted; it is the one state that offers a retry. */
   readonly status: 'loading' | 'ready' | 'unavailable'
-  /** Host-resolved display name; undefined before the first accepted read. */
   readonly name?: string | undefined
   /** Configured avatar reference; undefined means the identity fallback is the avatar. */
   readonly avatarRef?: string | undefined
-  /** Avatar bytes as a data URL for `<img>`; undefined renders the fallback. */
   readonly avatarUrl?: string | undefined
-  /** Bundle version for the settings footnote. */
   readonly version?: string | undefined
-  /** Repository home the footnote links to. */
   readonly repoUrl?: string | undefined
   /** A newer published release, when one is known; the footnote stays version + link until then. */
   readonly latestVersion?: string | undefined
@@ -44,7 +26,6 @@ export interface TeamHumanIdentitySnapshot {
   readonly error?: string | undefined
 }
 
-/** Read-side face every consumer binds: the seats' hook and the settings page alike. */
 export interface TeamHumanIdentitySource {
   getSnapshot(): TeamHumanIdentitySnapshot
   subscribe(listener: () => void): () => void
@@ -55,7 +36,6 @@ export interface TeamHumanIdentityFace extends TeamHumanIdentitySource {
   refresh(): Promise<void>
 }
 
-/** Host calls the store reads through; one loader per Client context. */
 export interface TeamHumanIdentityLoader {
   loadProfile: () => Promise<RemoteResult<AgentTeamHumanProfileResult>>
   /** Resolve one avatar reference to a displayable URL; null falls back to the initial. */
@@ -76,23 +56,13 @@ export class TeamHumanIdentity implements TeamHumanIdentityFace {
 
   readonly getSnapshot = (): TeamHumanIdentitySnapshot => this.snapshot
 
-  /**
-   * Observe the identity, starting the first read when nobody has read yet.
-   * @param listener - invoked after every snapshot replacement.
-   * @returns the disposer removing this listener.
-   */
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
     if (this.snapshot.status === 'loading' && this.reading === undefined) void this.refresh()
     return () => { this.listeners.delete(listener) }
   }
 
-  /**
-   * Re-read the Host projection. Concurrent callers share one round trip, and a
-   * failed refresh keeps the last accepted value beside the reported error —
-   * the seats never blank out because a background read failed.
-   * @returns settlement of this read (or of the read already in flight).
-   */
+  /** Concurrent callers share one round trip; a failed refresh keeps the last accepted value beside the error. */
   refresh(): Promise<void> {
     if (this.reading !== undefined) return this.reading
     const reading = this.read().finally(() => {
@@ -133,22 +103,14 @@ export class TeamHumanIdentity implements TeamHumanIdentityFace {
     })
   }
 
-  /**
-   * Bytes to draw for one avatar reference. Bytes are immutable per reference,
-   * so one fetch serves every later refresh that still carries the same avatar;
-   * nothing to resolve leaves the seat's fallback.
-   */
+  /** Bytes are immutable per reference, so one fetch serves every later refresh with the same avatar. */
   private async avatarUrlFor(avatarRef: string | undefined): Promise<string | undefined> {
     if (avatarRef === undefined) return undefined
     if (avatarRef === this.snapshot.avatarRef && this.snapshot.avatarUrl !== undefined) return this.snapshot.avatarUrl
     return (await this.loader.loadAvatarUrl(avatarRef)) ?? undefined
   }
 
-  /**
-   * Record one read failure. A value that was already accepted stays on screen
-   * (the seats never blank out over a background read), and only an identity
-   * that never loaded becomes `unavailable` — the state that offers a retry.
-   */
+  /** A previously accepted value stays on screen; only an identity that never loaded becomes `unavailable`. */
   private recordReadFailure(message: string): void {
     const held = this.snapshot
     this.commit(held.name === undefined
@@ -162,7 +124,6 @@ export class TeamHumanIdentity implements TeamHumanIdentityFace {
   }
 }
 
-/** Subscribe one rendered seat to the identity. */
 export function useHumanIdentity(identity: TeamHumanIdentitySource): TeamHumanIdentitySnapshot {
   return useSyncExternalStore(identity.subscribe, identity.getSnapshot, identity.getSnapshot)
 }

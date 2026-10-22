@@ -1,25 +1,19 @@
 /**
- * Desktop-strip boot verification for GitHub issue #28.
+ * Desktop-strip boot verification (GitHub issue #28).
  *
- * Simulates what a DSH Desktop generation installer does to this bundle —
- * delete every `@deepseek-ai/*` copy from the plugin generation, leaving host
- * packages to resolve from the host closure (which ships no
- * `dsh-storage-sqlite`) — then performs a real Loader boot of the storage
- * stack against that stripped layout and round-trips a record through the
- * `agent_team` sqlite route.
+ * Simulates a DSH Desktop generation installer stripping this bundle: every `@deepseek-ai/*` copy is
+ * deleted from the plugin generation and host packages resolve from the host closure, which ships no
+ * `dsh-storage-sqlite`. Then boots the storage stack through the real Loader and round-trips a record
+ * through the `agent_team` sqlite route.
  *
- * Layout under a temp dir (never the live profile or Host):
- *   gen/cordis.yml                                  rows under test
- *   gen/node_modules/@contexera/dsh-agent-team/      REAL COPY of our packed
- *     package.json + packages/agent-team/lib        files (a symlink would
- *                                                   resolve back into this
- *                                                   repo and defeat the strip)
- *   gen/node_modules/@deepseek-ai/<pkg>             symlinks standing in for
- *                                                   the host closure
+ * Temp layout (never the live profile or Host):
+ *   gen/cordis.yml                              rows under test
+ *   gen/node_modules/@contexera/dsh-agent-team/ REAL COPY of the packed package.json + packages/agent-team/lib
+ *                                               (a symlink would resolve back into this repo and defeat the strip)
+ *   gen/node_modules/@deepseek-ai/<pkg>         symlinks standing in for the host closure
  *
- * Run: `npm run build && node scripts/verify-desktop-strip-boot.mjs`
- * (`--keep` leaves the sandbox for inspection.) Exits nonzero on failure;
- * every step logs, so the output is the acceptance evidence.
+ * Run: `npm run build && node scripts/verify-desktop-strip-boot.mjs` (`--keep` leaves the sandbox).
+ * Exits nonzero on failure; every step logs, so the output is the acceptance evidence.
  */
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -35,10 +29,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(join(root, 'package.json'))
 const keep = process.argv.includes('--keep')
 
-// Host-closure stand-ins: everything the booted rows may reach, resolved to
-// the same bits the host ships. Deliberately absent:
-// `@deepseek-ai/dsh-storage-sqlite` — the host closure has no such package,
-// which is the whole of issue #28.
+// Host-closure stand-ins: everything the booted rows may reach. `@deepseek-ai/dsh-storage-sqlite` is
+// deliberately absent, as in the host closure (issue #28).
 const HOST_PACKAGES = [
   '@deepseek-ai/cordis',
   '@deepseek-ai/cordis-plugin-loader',
@@ -62,7 +54,6 @@ try {
     throw new Error(`missing built output at ${builtBackend} — run \`npm run build\` first`)
   }
 
-  // 1. Our own files enter the generation as a real copy.
   const ownTarget = join(genModules, '@contexera/dsh-agent-team')
   await mkdir(ownTarget, { recursive: true })
   await cp(join(root, 'package.json'), join(ownTarget, 'package.json'))
@@ -70,7 +61,7 @@ try {
   await cp(join(root, 'packages/agent-team/lib'), join(ownTarget, 'packages/agent-team/lib'), { recursive: true })
   step(`1. copied our package files into stripped generation (${sandbox})`)
 
-  // 2. Host closure stand-ins; the sqlite package must NOT be among them.
+  // Host closure stand-ins; the sqlite package must NOT be among them.
   for (const name of HOST_PACKAGES) {
     const target = require.resolve(`${name}/package.json`)
     const link = join(genModules, ...name.split('/'))
@@ -79,7 +70,7 @@ try {
   }
   step(`2. planted ${HOST_PACKAGES.length} host-closure stand-ins, no dsh-storage-sqlite`)
 
-  // 3. Negative control: the missing package really is missing from here.
+  // Negative control: the missing package really is missing from here.
   let absent = false
   try {
     require.resolve('@deepseek-ai/dsh-storage-sqlite', { paths: [gen] })
@@ -89,7 +80,6 @@ try {
   if (!absent) throw new Error('negative control failed: dsh-storage-sqlite resolves from the sandbox')
   step('3. negative control holds: @deepseek-ai/dsh-storage-sqlite is unresolvable from the sandbox')
 
-  // 4. Real Loader boot of the storage stack from the stripped baseUrl.
   const storages = join(sandbox, 'storages')
   await mkdir(storages, { recursive: true })
   const configPath = join(gen, 'cordis.yml')
@@ -129,7 +119,6 @@ try {
     if (unloaded.length > 0) throw new Error(`rows failed to load: ${unloaded.join(', ')}`)
     step('4. real Loader boot green: storage, storage-json, storage-sqlite, storage-domain all loaded')
 
-    // 5. The routed backend is live: open agent_team on sqlite and round-trip.
     const backend = ctx.get(storageBackendServiceKey('sqlite'))
     if (backend === undefined) throw new Error('sqlite backend did not register on the storage hub')
     const unit = await backend.kv.open({ name: 'agent_team', version: 1, tables: ['operations'], hasGlobal: false })
