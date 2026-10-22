@@ -63,12 +63,7 @@ export interface AgentTeamMemberResumedOperation extends AgentTeamOperationBase 
   readonly data: { readonly member: AgentTeamAgentMember }
 }
 
-/**
- * The departure facts every releasing operation persists: the Claims it
- * released, the public release Activities, the Tasks and Threads those touched,
- * and the Inbox delta the release consumed. Replay recomputes the projection
- * from these alone, without runtime state.
- */
+/** Departure facts every releasing operation persists: released Claims, public release Activities, touched Tasks and Threads, and the consumed Inbox delta. Replay recomputes the projection from these alone. */
 export interface AgentTeamReleaseSnapshot {
   /** Claims released by this operation. */
   readonly claims: readonly AgentTeamClaim[]
@@ -85,36 +80,19 @@ export interface AgentTeamMemberArchivedOperation extends AgentTeamOperationBase
   readonly data: { readonly member: AgentTeamAgentMember } & AgentTeamReleaseSnapshot
 }
 
-/**
- * Audit record of one in-place Member session restart. The restart changes no
- * projection state — the Member keeps identity, transcript, and memory — so
- * apply() treats this operation as a marker only.
- */
+/** Audit record of one in-place Member session restart; no projection change (the Member keeps identity, transcript, and memory), so apply() treats it as a marker. */
 export interface AgentTeamMemberSessionRestartedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-session-restarted'
   readonly data: { readonly member: AgentTeamAgentMember }
 }
 
-/**
- * Legacy audit record of one in-place Member context clear (superseded by
- * `team/member-session-renewed`). The Host discarded the Member's persisted
- * Session log and recreated the live Session under the same sessionId.
- * Projection state is unchanged, so apply() treats this operation as a marker
- * only. Never written again; the schema and replay validation stay so
- * ledgers recorded before the renewal redesign keep replaying.
- */
+/** Legacy audit record of an in-place Member context clear (current flow: `team/member-session-renewed`). Never written; kept so existing ledgers replay. Projection state is unchanged, so apply() treats it as a marker. */
 export interface AgentTeamMemberContextClearedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-context-cleared'
   readonly data: { readonly member: AgentTeamAgentMember }
 }
 
-/**
- * Durable transition of one Member onto a fresh Session: the Member keeps its
- * identity, memory, and binding while its sessionId moves to a newly created
- * Session whose first turn starts from an empty context. The previous Session
- * log stays on disk (archived from every grouping surface), and the new
- * Session header records the previous id as fork lineage.
- */
+/** Durable transition of one Member onto a fresh Session: identity, memory, and binding are kept while sessionId moves to a new Session starting from an empty context. The previous log stays on disk (archived from grouping surfaces) and the new header records it as fork lineage. */
 export interface AgentTeamMemberSessionRenewedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-session-renewed'
   readonly data: {
@@ -124,14 +102,7 @@ export interface AgentTeamMemberSessionRenewedOperation extends AgentTeamOperati
   }
 }
 
-/**
- * Durable model-initiated rollover of one Member onto its next context
- * generation. The actor is the calling Member itself: the Host is the
- * executor, never a synthetic Human/system actor. The data records only the
- * verifiable envelope — session anchors, the successful handoff tool-result
- * sequence, and the trigger — because the private handoff prose stays in the
- * Member's own Session log, never in the Team ledger.
- */
+/** Durable model-initiated rollover of one Member onto its next context generation. The actor is the calling Member; the Host executes. The data records only the verifiable envelope (session anchors, handoff tool-result sequence, trigger); the handoff prose stays in the Member's Session log. */
 export interface AgentTeamMemberSessionRolledOverOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-session-rolled-over'
   readonly data: {
@@ -140,11 +111,7 @@ export interface AgentTeamMemberSessionRolledOverOperation extends AgentTeamOper
     readonly previousSessionId: SessionId
     /** The fresh or seeded Session the Member transitions onto. */
     readonly newSessionId: SessionId
-    /**
-     * The Session a checkpoint return was seeded from. Absent on a fresh
-     * rollover, where the new Session inherits no prefix and its lineage
-     * parent is the previous active Session.
-     */
+    /** The Session a checkpoint return was seeded from; absent on a fresh rollover, where the new Session inherits no prefix and its lineage parent is the previous active Session. */
     readonly sourceSessionId?: SessionId
     readonly sourceThroughSeq?: SessionLogOffset
     readonly handoffEventSeq: SessionSeq
@@ -153,12 +120,7 @@ export interface AgentTeamMemberSessionRolledOverOperation extends AgentTeamOper
   }
 }
 
-/**
- * Durable Host-initiated recycling of one Member's Session: the Host judged a
- * live generation cold enough to replace before delivering the message that
- * woke it. A live transition records the old log offset from which unanswered
- * input must be replayed; no handoff prose or checkpoint lineage is copied.
- */
+/** Durable Host-initiated recycling of one Member's Session: the Host judged a live generation cold enough to replace before delivering the waking message. Records the old log offset from which unanswered input is replayed; no handoff prose or checkpoint lineage is copied. */
 export interface AgentTeamMemberSessionRecycledOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-session-recycled'
   readonly actor: AgentTeamHostActor
@@ -205,13 +167,7 @@ export interface AgentTeamChannelMemberRemovedOperation extends AgentTeamOperati
   } & AgentTeamReleaseSnapshot
 }
 
-/**
- * Durable addition of one Workspace to an Agent Member's participation set.
- * Participation is a pure relation: it carries no Session and no execution
- * semantics — the Member's Session stays rooted in its default Workspace
- * (`member.workspaceId`, fixed at creation) and collaboration in the joined
- * Workspace is ledger work addressed by the workspaceId.
- */
+/** Durable addition of one Workspace to a Member's participation set. Participation is a pure relation with no Session or execution semantics: the Member's Session stays rooted in its default Workspace (`member.workspaceId`, fixed at creation) and joined-Workspace collaboration is ledger work addressed by workspaceId. */
 export interface AgentTeamMemberWorkspaceJoinedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-workspace-joined'
   readonly data: {
@@ -220,14 +176,7 @@ export interface AgentTeamMemberWorkspaceJoinedOperation extends AgentTeamOperat
   }
 }
 
-/**
- * Durable withdrawal of one non-default Workspace participation: the Member
- * loses Workspace authority while its identity, Session, and remaining
- * participations survive untouched. Every active Claim the Member holds on
- * the Workspace's Threads releases with public Activities, and its Attention
- * and markers for those Threads clear — a Member that no longer participates
- * must not leave Tasks stuck in progress or phantom unread counts behind it.
- */
+/** Durable withdrawal of one non-default Workspace participation. Identity, Session, and other participations survive. Active Claims on the Workspace's Threads release with public Activities and the Member's Attention and markers for them clear, so no Task stays stuck in progress and no phantom unread remains. */
 export interface AgentTeamMemberWorkspaceLeftOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-workspace-left'
   readonly data: {
@@ -236,13 +185,7 @@ export interface AgentTeamMemberWorkspaceLeftOperation extends AgentTeamOperatio
   } & AgentTeamReleaseSnapshot
 }
 
-/**
- * Durable archival of one Channel: the Channel and its Threads leave every
- * surface while all facts stay recoverable. Every active Claim on the
- * Channel's Threads releases (any owner), and every affected Member's
- * Attention and markers for those Threads clear — a hidden Channel must not
- * leave Tasks stuck in progress or phantom unread counts.
- */
+/** Durable archival of one Channel: it and its Threads leave every surface while facts stay recoverable. Every active Claim on its Threads releases (any owner) and affected Members' Attention and markers clear, so no Task stays stuck in progress and no phantom unread remains. */
 export interface AgentTeamChannelArchivedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/channel-archived'
   readonly data: {
@@ -348,12 +291,7 @@ export interface AgentTeamThreadAttentionChangedOperation extends AgentTeamOpera
   }
 }
 
-/**
- * Durable content of one Thread read: the watermark it advanced to and the
- * Inbox delta it consumed. Everything else the read answered with — the Thread,
- * its facts, the anchor, the reader's Attention, the unread count it left — is
- * derived from the projection at read time and re-derived on every replay.
- */
+/** Durable content of one Thread read: the watermark advanced to and the Inbox delta consumed. Everything else the read answered with is derived from the projection at read time and on replay. */
 export interface AgentTeamThreadReadReceipt {
   readonly workspaceId: WorkspaceId
   readonly memberId: AgentTeamMemberId
@@ -394,12 +332,7 @@ export interface AgentTeamMemberRemovedOperation extends AgentTeamOperationBase 
   readonly data: { readonly member: AgentTeamAgentMember } & AgentTeamReleaseSnapshot
 }
 
-/**
- * Durable audit record of one Member-to-Member direct message. A DM is pure
- * delivery: it creates no Channel/Thread/revision, no Inbox attention, and no
- * markers. The ledger records it for audit, idempotent retries, and post-
- * compaction traceability; the wake itself is a transient runtime effect.
- */
+/** Durable audit record of one Member-to-Member direct message. A DM is pure delivery: no Channel/Thread/revision, Inbox attention, or markers. The ledger keeps it for audit, idempotent retries, and post-compaction traceability; the wake is a transient runtime effect. */
 export interface AgentTeamDmSentOperation extends AgentTeamOperationBase {
   readonly kind: 'team/dm-sent'
   readonly data: {

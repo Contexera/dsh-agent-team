@@ -1,15 +1,5 @@
 /**
- * The one agent-facing Team timestamp formatter.
- *
- * Ledger storage keeps UTC ISO instants (`occurredAt` on every operation);
- * rendering converts them into the fixed Team coordination zone UTC+8 with
- * an explicit offset (`2026-09-08T17:00:00+08:00`). The conversion is a
- * fixed offset with no daylight-saving component, so the same stored instant
- * renders byte-identically on every reread path — the context-cache
- * invariant. The Web Client keeps its own browser-local rendering and never
- * passes through this module; a future configuration layer may make the
- * zone configurable, but the render must stay a single deterministic
- * formatter per stored instant.
+ * The agent-facing Team timestamp formatter. Ledger storage keeps UTC ISO instants; rendering converts them to the fixed Team zone UTC+8 with an explicit offset (`2026-09-08T17:00:00+08:00`). A fixed offset has no daylight-saving component, so a stored instant renders byte-identically on every reread (context-cache invariant). The Web Client renders browser-local time and never uses this module.
  * @module @contexera/dsh-agent-team/time-format
  */
 
@@ -19,12 +9,7 @@ const TEAM_ZONE_OFFSET_MINUTES = 8 * 60
 /** Rendered offset text, e.g. `+08:00`. */
 const OFFSET_TEXT = '+08:00'
 
-/**
- * Format one stored UTC ISO instant as the agent-facing Team timestamp.
- * @param occurredAt - stored UTC ISO 8601 instant (ledger `occurredAt`).
- * @returns the fixed-offset UTC+8 rendering, or the input unchanged when it
- * cannot be parsed (never a fabricated time).
- */
+/** Formats a stored UTC ISO instant as UTC+8 with explicit offset; returns the input unchanged when unparsable, never a fabricated time. */
 export function formatTeamTimestamp(occurredAt: string): string {
   const instant = Date.parse(occurredAt)
   if (!Number.isFinite(instant)) return occurredAt
@@ -34,11 +19,7 @@ export function formatTeamTimestamp(occurredAt: string): string {
     + `T${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}:${pad(shifted.getUTCSeconds())}${OFFSET_TEXT}`
 }
 
-/**
- * Format a non-negative elapsed millisecond count as compact whole-second
- * units (`2d 3h 12m 8s`), mirroring the shipped harness time-context
- * vocabulary so both clock families read the same way.
- */
+/** Formats a non-negative elapsed millisecond count as whole-second units (`2d 3h 12m 8s`), matching the harness time-context vocabulary. */
 export function formatTeamDuration(elapsedMs: number): string {
   let seconds = Math.floor(Math.max(0, elapsedMs) / 1000)
   const days = Math.floor(seconds / 86_400)
