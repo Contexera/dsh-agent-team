@@ -9,44 +9,26 @@ const MAX_VISIBLE = 3
 
 export interface TeamAvatarOwner {
   readonly memberId: AgentTeamMemberId
-  /** Public handle, or the raw Member id when the roster no longer names them. */
   readonly name: string
 }
 
-/**
- * The reader's own identity, as the Client's one Human projection holds it.
- *
- * The stack draws every owner from the shared Member language — hue plus
- * initial — which is the whole identity an Agent has. The Human is the one
- * Member with a picture, so that one chip draws the picture and falls back to
- * this name's initial, exactly as the timeline already does.
- */
+/** The Human is the one Member with a picture; that chip draws it and falls back to this name's initial. */
 export interface TeamAvatarHuman {
   readonly memberId: AgentTeamMemberId
   readonly name: string
   readonly avatarUrl?: string | undefined
 }
 
-/**
- * Owners as a seat names them: the Client's Human identity outranks the name
- * the Host projected for that actor, so a rename moves label and initial
- * together in every seat that draws the stack.
- */
+/** The Client's Human identity outranks the Host-projected name, so a rename moves label and initial together. */
 export function namedAvatarOwners(owners: readonly TeamAvatarOwner[], human: TeamAvatarHuman | undefined): readonly TeamAvatarOwner[] {
   if (human === undefined) return owners
   return owners.map(owner => owner.memberId === human.memberId ? { memberId: owner.memberId, name: human.name } : owner)
 }
 
-/**
- * The compact "who is on this work" stack: overlapping 18px Member circles in
- * the shared identity language, capped at three plus a `+N` chip. The circles
- * are presentational, so the stack is one `role="img"` whose label carries the
- * whole roster — three anonymous initials would read as noise.
- */
+/** The circles are presentational, so the stack is one `role="img"` whose label carries the whole roster. */
 export function TeamAvatarStack({ owners, label, human }: {
   readonly owners: readonly TeamAvatarOwner[]
   readonly label: string
-  /** The reader's own identity; one owner matching it draws the Human's picture. */
   readonly human?: TeamAvatarHuman | undefined
 }) {
   if (owners.length === 0) return null
@@ -58,11 +40,7 @@ export function TeamAvatarStack({ owners, label, human }: {
   </span>
 }
 
-/**
- * One circle. Only an owner the seat identifies as the Human consults an image
- * at all, and those bytes keep the initial whenever they do not decode — the
- * same promise, and the same hook, the timeline avatar makes.
- */
+/** Only an owner the seat identifies as the Human consults an image; undecodable bytes keep the initial. */
 function OwnerAvatar({ owner, human }: {
   readonly owner: TeamAvatarOwner
   readonly human: TeamAvatarHuman | undefined
@@ -73,7 +51,6 @@ function OwnerAvatar({ owner, human }: {
   return <img className={css.avatarImage} style={hue} src={image.image.src} alt="" aria-hidden="true" onError={image.failed} />
 }
 
-/** First visible character of a handle — and of a raw Member id when that is all there is. */
 function initial(name: string): string {
   return name.replace(/^@/, '').replace(/^member:/, '').slice(0, 1).toUpperCase()
 }

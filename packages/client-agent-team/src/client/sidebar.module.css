@@ -1,20 +1,13 @@
-/* Team mode stands the shell's global chrome down: the New Session button and
-   the global panel rail both address the profile rather than the Team, so both
-   hide while the mode stands. The rail's own Team row goes with it — the reader
-   is already there, and the mode's exit is the foot row, not a rail row — so the
-   rail is what an ordinary conversation offers, and it comes back the moment the
-   mode is left. Both sides key off the html attribute the Team client owns,
-   never off a localized label. */
+/* Team mode hides the shell's New Session button and global panel rail, which address the profile rather than the Team; the
+   rail's own Team row goes with it (the exit is the foot row). Both key off the html attribute the Team client owns, never a
+   localized label. */
 :global(html[data-agent-team-mode='team']) button[class*='newSession'],
 :global(html[data-agent-team-mode='team']) nav[class*='panelList'] {
   display: none;
 }
 
-/* The browsing region is the shipped browser's own seat, so this column keeps
-   that seat's inline box: the shell's sidebar padding on the right and nothing
-   on the left, because the shell already indents the region itself. Reading the
-   shipped variable rather than restating its 12px keeps the two columns one
-   fact — a reader switching modes must not see the whole column shift. */
+/* The browsing region is the shipped browser's seat: the shell's sidebar padding on the right and nothing on the left (the
+   shell already indents the region). Reading the shipped variable keeps both modes one column, so switching shifts nothing. */
 .workspaceBrowser {
   display: flex;
   flex-direction: column;
@@ -44,13 +37,9 @@
   outline-offset: 1px;
 }
 
-/* The Workspace selector is a field, not a list row: it carries the bordered
-   trigger shape the creation forms already use for a single choice, so the one
-   line that states where the reader is does not read as the first entry of the
-   list below it. Its folder icon keeps the selected tint the list rows used to
-   carry, because the trigger is always showing a selection. It leads the sections
-   it scopes rather than the whole browser: the Inbox entry above it crosses
-   Workspaces, so that entry stays outside this selector's reach. */
+/* A field, not a list row: the bordered trigger shape the creation forms use for a single choice, so it does not read as the
+   first list entry. The folder icon keeps the selected tint, since the trigger always shows a selection. It scopes the
+   sections below it; the Inbox entry above crosses Workspaces and stays outside. */
 .workspaceTrigger {
   align-items: center;
   background: var(--dsw-alias-bg-layer-1);
@@ -69,9 +58,7 @@
   text-align: left;
   width: 100%;
 }
-/* Location reads like the harness session tree: the leaf that is the current
-   page carries the fill. The field already sits on its own layer, so the shared
-   hover fill is what says its overview is the page on screen. */
+/* The field sits on its own layer, so the shared hover fill is what marks its overview as the page on screen. */
 .workspaceTrigger:hover,
 .workspaceTrigger[aria-current='page'] {
   background: var(--dsw-alias-interactive-bg-hover);
@@ -117,32 +104,14 @@
   margin: 8px;
 }
 
-/* The mode's exit, first in the browsing region and directly under the shell's
-   brand row — the closest a Team seat can legally stand to it, since that row is
-   either a New Session button or a macOS window-drag surface and its mark is
-   aria-hidden. It is the one row in this column that leaves rather than
-   navigates, so it never carries `aria-current`.
+/* The mode's exit, first in the browsing region under the shell's brand row (a New Session button or a macOS window-drag
+   surface). It leaves rather than navigates, so it never carries `aria-current`. It takes the shipped New Session bar's slot
+   and slab (38px elevated fill, 2px inset, so its box matches the shipped bar: 252px wide, 14px from the sidebar edge); the
+   separator is 1px because shipped's 0.5px declaration renders as 1px.
 
-   It takes over the shipped New Session bar's slot and slab: the mode hides that
-   bar, so this row is what the column shows between the brand row and the
-   browsing list, in the same 38px elevated fill, and the label is what changes.
-   The separator is written 1px because that is what shipped's 0.5px declaration
-   renders as.
-
-   The slot is vertical, and horizontally the row keeps the shipped bar's own
-   2px inset inside the column. The column is the shipped browser's seat, so
-   this row's box is then the shipped bar's box exactly — 14px from the sidebar
-   edge, 252px wide — which is what makes the two modes one column rather than
-   two columns that resemble each other.
-
-   What centres on the slab is the label, not the group it lays out with the
-   chevron. Centring the group depends on the air inside each glyph's box, and
-   that air differs between CJK and Latin glyphs and across platform font
-   stacks — a compensation measured against one stack overcorrects on another
-   and visibly walks the ink off the middle. A CJK glyph's ink sits symmetric
-   inside its advance, so a centred label box is centred ink; the chevron
-   hangs off the label's leading edge out of flow, where the air inside its
-   own box can no longer move the text. */
+   The label is what centres, not the label+chevron group: glyph air differs between CJK and Latin and across font stacks,
+   so a compensation measured on one stack walks the ink off the middle on another. The chevron hangs off the label's
+   leading edge, out of flow. */
 .leaveCard {
   align-items: center;
   background: var(--dsw-alias-button-elevated-fill);
@@ -158,11 +127,7 @@
   height: 38px;
   justify-content: center;
   line-height: 22px;
-  /* The shipped bar's own inset inside the column, so the row lands on the box
-     the reader met in the other mode rather than beside it. No width: the
-     shipped bar is a stretched flex item too, so the 2px margins are what make
-     it 252px inside this 256px column — stating a width as well would add the
-     margins on top and push the row past the column's edge. */
+  /* The shipped bar's own inset. No width: the 2px margins make it 252px inside the 256px column, and a width would add them on top. */
   margin: 0 2px 12px;
   padding: 8px 12px;
 }
@@ -174,9 +139,7 @@
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
 }
-/* macOS: the themed elevated fill reads as a foreign slab on the vibrancy
-   sidebar, so the bar we take over washes white in the glass instead — the same
-   substitution the shipped bar makes in the same slot. */
+/* macOS: the themed elevated fill reads as a foreign slab on the vibrancy sidebar, so this washes white in the glass, as the shipped bar does. */
 :global([data-platform='darwin']) .leaveCard {
   background: rgb(255 255 255 / 0.55);
 }
@@ -191,9 +154,7 @@
 :global([data-platform='darwin']) :global([data-ds-dark-theme]) .leaveCard:focus-visible {
   background: rgb(255 255 255 / 0.2);
 }
-/* The centred flex item: shrink-wraps the label so the chevron can anchor to
-   the label's leading edge rather than to the slab, and `min-width: 0` keeps
-   the label's ellipsis working inside the centred row. */
+/* Shrink-wraps the label so the chevron anchors to its leading edge; `min-width: 0` keeps the label's ellipsis working. */
 .leaveCardGroup {
   display: inline-flex;
   min-width: 0;
@@ -207,9 +168,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* A leading affordance, not a centring participant: out of flow and anchored
-   to the label's leading edge, so the air inside the glyph's own box never
-   moves the centred text. The 6px is the gap the group used to state. */
+/* Out of flow, anchored to the label's leading edge, so glyph air never moves the centred text. */
 .leaveCardGlyph {
   position: absolute;
   right: calc(100% + 6px);
@@ -242,7 +201,6 @@
 .inboxCard:hover,
 .inboxCard:focus-visible,
 .inboxCard[aria-current='page'] {
-  /* The mark on the card cuts itself out of the card, not out of the page. */
   --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
   background: var(--dsw-alias-interactive-bg-hover);
 }
@@ -262,23 +220,14 @@
   white-space: nowrap;
 }
 
-/* The mark is anchored to the glyph rather than to the control, so the wide card
-   and the 36px rail button put the same dot on the same corner of the same icon.
-   Zero renders no mark at all, which is the absence of unread rather than an
-   empty dot. */
+/* Anchored to the glyph rather than the control, so the wide card and the 36px rail button put the same dot on the same corner. Zero renders no mark. */
 .inboxMark {
   display: inline-flex;
   flex: 0 0 16px;
   position: relative;
 }
-/* Everything the sidebar still says about unread: the solid ink the queue uses
-   for a Thread that named the reader, at the size of a mark instead of a count.
-   The ring is the surface's own background — the sidebar fill, as the Agent
-   badge's ring is — so the dot reads as a mark laid over the icon's strokes
-   rather than one blending into them. A hovered or current-page card adds a
-   translucent wash on top of that fill, so the ring paints both in order: the wash
-   alone would darken the already-washed card a second time and ring the dot with a
-   halo the reader would read as a smudge. */
+/* The solid ink the queue uses for a Thread that named the reader, at mark size. The ring paints the sidebar fill, then the
+   card's translucent hover/current wash, in order: the wash alone would darken the already-washed card twice and halo the dot. */
 .inboxDot {
   background: var(--dsw-alias-state-business-primary);
   border-radius: 50%;
@@ -306,30 +255,20 @@
   position: relative;
   width: 36px;
 }
-/* The rail's own current-page marker: the icon-only rail reads the same
-   `aria-current="page"` the wide card does, and while the Inbox is the page on
-   screen its icon wears the card's own fill — which is also the surface its
-   unread dot has to cut itself out of. The rail carries no label, so this fill
-   is the only thing that says where the reader is. */
+/* The icon-only rail reads the same `aria-current="page"` as the wide card. This fill is the only thing saying where the
+   reader is, and the surface the unread dot cuts itself out of. */
 .railButton[aria-current='page'] {
   --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-label-primary);
 }
 
-/* One scroll container carries both sections; headers stay in flow.
-   Only the vertical axis scrolls: the section headers reach 4px past this box
-   by their own margin (the shipped header's box equation, whose contents still
-   end inside the rows' edge), and that overhang is a box, not content — left
-   scrollable it becomes a horizontal gutter that shifts the whole column.
-   The bar's space is reserved rather than conditional, as the shipped list
-   reserves it, so a growing list does not move the rows sideways when the bar
-   appears. Reserving it narrows the content box, so this element widens its own
-   box past the column by the same amount — the 4px the shipped list overhangs
-   on the left, and the bar plus its air on the right — which is what keeps the
-   rows on the shipped 256px edge instead of 5px inside it. The two lengths are
-   restated here because the shipped variables that carry them are declared on
-   the shipped browser's own root and never reach this seat. */
+/* One scroll container carries both sections; headers stay in flow. Only the vertical axis scrolls: the section headers
+   overhang this box by 4px by their own margin, and left scrollable that overhang becomes a horizontal gutter. The bar's
+   space is reserved, as in the shipped list, so a growing list does not shift the rows. Reserving it narrows the content box,
+   so this element widens its own box by the same amount (4px on the left, bar plus air on the right) to keep the rows on the
+   shipped 256px edge. The lengths are restated because the shipped variables are declared on the shipped browser's root and
+   never reach this seat. */
 .workspaceSection {
   --team-list-bar: 5px;
   --team-list-air: 5px;

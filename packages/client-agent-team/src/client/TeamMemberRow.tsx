@@ -11,20 +11,12 @@ export interface TeamMemberAction {
 }
 
 /**
- * The one place a Member's identity is drawn: the presence-bearing avatar plus
- * the handle over its description. The rosters with a membership action and the
- * sidebar Agent list both render this, so identity, tone and truncation cannot
- * drift between surfaces that show the same person.
- *
- * A fragment, not a row: each surface owns its own row element, hit target and
- * grid, and places this identity in that grid's first two tracks. The handle
- * spelling is the surface's call — rosters address Members the way the
- * composer does (`@handle`), the sidebar names them as the directory does.
+ * The one place a Member's identity is drawn, so identity, tone and truncation cannot drift between surfaces. A fragment, not a
+ * row: each surface owns its row element and grid and places this in the first two tracks. The handle spelling is the surface's call.
  */
 export function TeamMemberIdentity({ status, name, className, t }: {
   readonly status: AgentTeamClientMemberStatus
   readonly name?: string | undefined
-  /** Surface-local copy hook (sidebar line heights, dialog density). */
   readonly className?: string | undefined
   readonly t: TeamSidebarProps['t']
 }) {
@@ -37,18 +29,11 @@ export function TeamMemberIdentity({ status, name, className, t }: {
   </>
 }
 
-/**
- * The one roster row: identity, an optional membership action, and the row's
- * own failure line. The action is the row's only chrome, so the eye lands on
- * the handle first and on the action second. A row without an action omits it
- * and the trailing track collapses, handing its width back to the description.
- */
+/** The action is the row's only chrome; a row without one collapses the trailing track, handing its width to the description. */
 export function TeamMemberRow({ status, action, error, className, t }: {
   readonly status: AgentTeamClientMemberStatus
   readonly action?: TeamMemberAction | undefined
-  /** Transport failure for this row's last mutation, announced in place. */
   readonly error?: string | undefined
-  /** Surface-local hook (dialog, sidebar, footer) for its own row rules. */
   readonly className?: string | undefined
   readonly t: TeamSidebarProps['t']
 }) {
