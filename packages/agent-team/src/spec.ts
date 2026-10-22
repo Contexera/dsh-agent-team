@@ -571,8 +571,7 @@ export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = storedAge
  * format and older local media reject at open. The number moves only when a
  * stored record would mean something different: this layout has no migration,
  * so a bump breaks every existing ledger. Adding an operation kind is not that
- * — an older build's records keep parsing — which is why every additive kind
- * since the public format landed at v1.
+ * — an older build's records keep parsing — so additive kinds stay at v1.
  */
 export const agentTeamDomainSpec = defineDomain({
   name: 'agent_team',
