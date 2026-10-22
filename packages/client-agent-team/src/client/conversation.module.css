@@ -1,15 +1,8 @@
 .surface {
-  /* The face's own box, and the one place its size is stated: the seat the
-     initial or uploaded avatar occupies, the width the continuation row's time
-     centres in, and the indent the run hairlines hug. 34px is the shipped
-     composer's own primary round action (`InputBar .primary`, 34×34), and sits
-     between the 32px this row carried before and Raft's larger `h-9` face: the
-     same gesture as Raft's, held at the size our own round controls use. It is
-     chrome rather than content: the content axis moves the words beside the
-     face, never the face.
-     It sits on the surface root because the Thread, Channel and Inbox pages all
-     render Message faces under it — a declaration scoped to `[data-team-thread]`
-     left the Channel feed reading the `var()` fallback instead. */
+  /* The face's box and the one place its size is stated: the seat for the initial or uploaded avatar, the width the continuation
+     row's time centres in, and the indent the run hairlines hug. 34px is the shipped composer's primary round action. Chrome,
+     not content: the content axis moves the words beside the face, never the face. Declared on the surface root because
+     Thread, Channel and Inbox all render Message faces under it. */
   --team-identity-seat: 34px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -17,27 +10,21 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  /* The discussion panel's containing box: the panel is the one child that
-     spans the band and the feed as a single column. */
+  /* The panel is the one child that spans the band and the feed as a single column. */
   position: relative;
 }
 
-/* Header chrome is flush with the pane, not with the reading column: the
-   shipped session header leaks left to a 20px inset while the transcript stays a
-   centred column, so the two deliberately do not share an edge. The 28px right
-   inset is the shipped figure, and it keeps the trailing actions off the pane's
-   edge where a scrollbar already stands. */
+/* Header chrome is flush with the pane, not the reading column: the shipped session header leaks left to a 20px inset. The
+   28px right inset is the shipped figure and keeps actions off a scrollbar. */
 .surfaceHeader {
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   min-width: 0;
   padding: 14px 28px 12px;
 }
 
-/* An open panel owns the right edge, so the band gives up its width: a long
-   description would otherwise run under the seam. Below the breakpoint the
-   panel covers the feed instead of sitting beside it, so the band takes its
-   width back — this override lives here, after the rule it replaces, because a
-   same-specificity copy in another module loses to bundle order. */
+/* An open panel owns the right edge, so the band gives up width or a long description would run under the seam. Below the
+   breakpoint the panel covers the feed and the band takes its width back; this override lives here, after the rule it
+   replaces, because a same-specificity copy in another module loses to bundle order. */
 .surface:has(> [data-team-panel]) .surfaceHeader {
   padding-right: calc(var(--team-panel-width, 460px) + 12px);
 }
@@ -73,11 +60,8 @@
   gap: 6px;
 }
 
-/* The Channel band is one identity row and the tab strip under it, at the
-   shipped session header's own rhythm: 10px top inset, a 30px identity row, the
-   strip's 10px margin, a 16px tab line, and a 9px bottom inset. The band's own
-   12px bottom padding stands down because the strip's inset already places the
-   tabs on the closing rule. */
+/* The shipped session header's rhythm: 10px top inset, 30px identity row, the strip's 10px margin, 16px tab line, 9px bottom
+   inset. The band's 12px bottom padding stands down because the strip's inset already places the tabs on the closing rule. */
 .surfaceHeaderWithTabs {
   padding-top: 10px;
   padding-bottom: 0;
@@ -109,7 +93,6 @@
   min-height: 100%;
   min-width: 0;
 }
-/* Empty and loading states ride the free timeline space instead of the top edge. */
 .emptySurface {
   margin: auto;
   padding: 32px 0;
@@ -124,42 +107,29 @@
   padding: 2px 0 8px;
 }
 
-/* One Message is one row on the reading path — one column for everyone, no
-   per-message surface, no per-message width. The row's own layer appears only
-   while the reader is on it, and only in a Thread's reading seat: the page and
-   the panel read one Thread, so both speak it, and the Channel feed keeps the
-   language its own entry rows own. */
+/* One column for everyone, no per-message surface or width. The row's layer appears only under the reader, and only in a
+   Thread's reading seat (page and panel); the Channel feed keeps the language its entry rows own. */
 .messageRow { align-items: flex-start; display: flex; gap: 10px; padding: 10px 0; position: relative; }
 .messageRow[data-grouped] { padding-top: 2px; }
 .messageRow[data-grouped] .messageIdentity,
 .messageRow[data-grouped] .messageIdentityImage { visibility: hidden; }
-/* The row under the pointer (or holding the caret) gains one flat layer — the
-   shipped interactive fill, the material a hovered list row already uses, at the
-   radius a hovered full-width row already carries (`--dsw-radius-md`, the
-   shipped settings-row selector) — and nothing else: no shadow, no border.
-   The layer answers the pointer, never a click: `:focus-within` would keep a row
-   lit after its own actions were pressed (the button holds focus), so a clicked
-   row would stay shaded until the reader clicked elsewhere. Keyboard readers get
-   the layer from `:has(:focus-visible)` instead — same statement, and it ends
-   when the caret leaves. */
+/* The row under the pointer or caret gains one flat layer (the shipped interactive fill at `--dsw-radius-md`), nothing else.
+   It answers the pointer, never a click: `:focus-within` would keep a row lit after its action button took focus. Keyboard
+   readers get it from `:has(:focus-visible)`, which ends when the caret leaves. */
 [data-team-thread] .messageRow[data-reply-flash] { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
-/* The Message the composer is answering holds that same layer, so the choice
-   stays visible after the pointer leaves and until it is sent or cancelled —
-   the banner names the parent, and this says which row on screen it is. */
+/* The Message the composer is answering holds the same layer until sent or cancelled, showing which row the banner's parent is. */
 [data-team-thread] .messageRow[data-replying-to] { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
 @media (hover: hover) {
   [data-team-thread] .messageRow:hover,
   [data-team-thread] .messageRow:has(:focus-visible) { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
 }
-/* The Message a reader just jumped to: one short pulse of that same layer, which
-   says "here" and then gets out of the way. */
+/* One short pulse of the same layer marks the Message a reader jumped to. */
 @keyframes rowFlash {
   0%, 100% { background-color: transparent; }
   20%, 70% { border-radius: var(--dsw-radius-md); background-color: var(--dsw-alias-interactive-bg-hover); }
 }
 [data-team-thread] .messageRow[data-reply-flash] { animation: rowFlash 1.2s ease-in-out; }
 @media (prefers-reduced-motion: reduce) {
-  /* The pulse is decoration; the layer still lands so the target is marked. */
   [data-team-thread] .messageRow[data-reply-flash] { animation: none; background: var(--dsw-alias-interactive-bg-hover); }
 }
 .messageIdentity {
@@ -178,8 +148,6 @@
 .messageRow[data-human] .messageIdentity {
   background: var(--dsw-alias-state-business-primary);
 }
-/* The Human's uploaded avatar takes the same identity seat as the initial it
-   replaces, cropped to the circle. */
 .messageIdentityImage {
   border-radius: 50%;
   corner-shape: round;
@@ -187,20 +155,11 @@
   height: var(--team-identity-seat, 34px);
   object-fit: cover;
 }
-/* The face rides level with the capitals of the name beside it: its top edge
-   meets the author line's cap height, the way Raft's own avatar meets the
-   `text-sm` line it labels. That height is what fixes this number, and it is a
-   property of our font stack rather than of the row — an inline box carries
-   half-leading above its glyphs, so the author line's capitals begin 5.5px
-   below the box top at the default 13px/20px: 2.5px of half-leading, then the
-   3px between the font's 12px ascent and the 9px cap height. Pinning the face to
-   the box top would float it 5.5px above the name it belongs to. One fixed
-   offset cannot track cap height exactly across the content axis — that height
-   reads 5.5px at 13px/20px, 6.5px at 20px/27px, and 5px at 9px/16px — so this
-   value is set for the default size and the published axis stays within 1.5px
-   of level, exact at 10px. Raft's `mt-0.5` is not the constant to copy: its
-   author line is `leading-none` at 14px/14px, whose capitals already begin 2px
-   down, which is all that 2px ever meant. Keep this paired with the type. */
+/* The face's top edge meets the author line's cap height. That is a property of our font stack, not the row: at the default
+   13px/20px the capitals begin 5.5px below the box top (2.5px half-leading + 3px between the 12px ascent and 9px cap height),
+   so pinning to the box top would float the face above the name. One fixed offset cannot track cap height across the content
+   axis (5.5px at 13/20, 6.5px at 20/27, 5px at 9/16), so this is set for the default size and stays within 1.5px of level.
+   Keep it paired with the type. */
 .messageIdentity,
 .messageIdentityImage {
   margin-top: 5px;

@@ -1,28 +1,5 @@
 /**
- * Every model-facing recovery line the Team renders, from one registry.
- *
- * A rejection that names only the fault leaves the model to guess the next
- * move, and the guess is what turns one friction into a loop. This module owns
- * the words for every way out: one entry per situation, built from the values
- * the rejection actually holds, so the line can name the refused value instead
- * of describing it.
- *
- * It lives beside the Host, not beside the tools, because the faults that
- * reach a model come from both layers: the tools refuse a parameter shape they
- * can see, and the ledger refuses a state transition it owns. One registry in
- * the Host is the only way a sentence stays reachable from every site — the
- * package boundary runs one way (tools import the Host, never the reverse), so
- * the registry cannot sit in the tool package and serve the ledger.
- *
- * Two properties make it more than a constant file:
- *
- * 1. **Reachability is asserted.** `assertRecoveryCoverage` refuses a registry
- *    entry no produced situation reaches — dead coverage is worse than none,
- *    because it reads as protection.
- * 2. **Hand-written lines are refused.** `forbidHandWrittenRecovery` scans the
- *    sources that reach a model for a sentence that spells a route outside the
- *    registry, so the next rejection added cannot quietly write its own way out
- *    and drift from the rest of the set.
+ * Registry of every model-facing recovery line the Team renders: one entry per situation, built from the values the rejection holds so the line names the refused value. It lives in the Host because both tools and the ledger reject, and tools import the Host, never the reverse. `assertRecoveryCoverage` refuses entries no situation reaches; `forbidHandWrittenRecovery` scans model-facing sources for route sentences outside the registry.
  */
 
 /** What a rejection hands the registry: the values the sentence should name. */
@@ -49,11 +26,7 @@ export interface RecoveryEntry {
   readonly sentence: (context: RecoveryContext) => string
 }
 
-/**
- * The registry: one entry per model-facing fault, each naming the next action
- * and the value that action takes. Lookup is by exact kind, never by substring,
- * so a new kind cannot inherit a neighbouring entry's sentence by accident.
- */
+/** One entry per model-facing fault, naming the next action and its value. Lookup is by exact kind so a new kind cannot inherit a neighbour's sentence. */
 export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   {
     kind: 'unread_required',
@@ -72,13 +45,7 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
     sentence: () => 'Read the Thread, reconsider the new facts, then retry with the token that read returns.',
   },
   {
-    // Not a new fault kind — the ledger still answers `stale_revision`. This is
-    // the same refusal with a different cause: the token was never a revision
-    // this Thread reached, so it was copied from another Thread or invented.
-    // The ordinary race sentence sends a model hunting for an insertion that
-    // never happened, so this one names the actual mistake and where a real
-    // token comes from. A distinct kind keeps the lookup by exact kind honest:
-    // two entries sharing one kind would make the second unreachable.
+    // Same refusal as `stale_revision` with a different cause: the token was never a revision this Thread reached. The race sentence would send the model hunting for a nonexistent insertion. A distinct kind keeps exact-kind lookup reachable.
     kind: 'stale_revision_token_unrecognized',
     sentence: ({ threadRef }: RecoveryContext) => [
       'That write token is not a revision this Thread reached — nobody inserted anything, so there is nothing to go and re-read.',
@@ -103,9 +70,7 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'action_only_arguments',
-    // The same fault class as `history_only_arguments`, named by the parameter
-    // rather than hard-coded: `messageRef` belongs to `message` alone, and a
-    // read that carried it would otherwise drop it in silence.
+    // Named by parameter: `messageRef` belongs to `message` alone and would otherwise be dropped silently.
     sentence: ({ action, parameter, owner }: RecoveryContext) => `${action ?? 'read'} does not accept ${parameter ?? 'that parameter'} — drop it, or call action: ${owner ?? 'message'} where it belongs.`,
   },
   {
@@ -178,11 +143,7 @@ export function recoveryFor(kind: string): RecoveryEntry {
   return entry
 }
 
-/**
- * Refuse a registry entry no produced situation reaches, and a produced
- * situation with no entry: both directions are coverage holes, and the second
- * one is the failure this registry exists to prevent.
- */
+/** Refuses a registry entry no produced situation reaches, and a produced situation with no entry. */
 export function assertRecoveryCoverage(producedKinds: readonly string[]): void {
   const produced = new Set(producedKinds)
   for (const entry of RECOVERY_REGISTRY) {
@@ -195,20 +156,11 @@ export function assertRecoveryCoverage(producedKinds: readonly string[]): void {
   }
 }
 
-/**
- * Refuse a hand-written recovery sentence in model-facing source.
- *
- * The registry is only a registry while every line comes from it. A comment
- * describing a route is prose, not a route, so comments are stripped before the
- * scan; what remains is what a model would read, and a route sentence there
- * that is not the registry's is drift.
- */
+/** Refuses a hand-written recovery sentence in model-facing source. Comments are stripped before the scan, so only what a model would read is checked. */
 export function forbidHandWrittenRecovery(source: string, fileName: string): void {
   if (fileName.endsWith('recovery-hints.ts')) return
   const withoutComments = stripComments(source)
-  // Imperative route shapes only: a bare `retry` also names a variable, a
-  // policy, and an engine's own decision, and matching it would refuse ordinary
-  // code for a word rather than for a sentence.
+  // Imperative route shapes only: a bare `retry` also names variables and policies.
   const routePatterns = [
     /\b(then )?retry (this|it|the|with|again|without|after|a)\b/i,
     /\bcopy (a|an|the) [a-zA-Z]+ (from|rendered by|you were shown)/i,

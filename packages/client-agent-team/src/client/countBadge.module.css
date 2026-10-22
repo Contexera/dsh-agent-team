@@ -1,15 +1,6 @@
-/* The one count capsule, worn by the Human Inbox entry, the Channel feed's
-   Thread entry, and the Inbox queue row. border-box keeps one digit an 18px
-   circle instead of padding it out to an oval (the platform has no global
-   border-box reset), 999px pairs with the platform's corner-shape opt-out the
-   way every shipped capsule does, and tabular figures keep a two-digit count
-   from moving the ink inside it.
-
-   Every declaration here is load-bearing on at least one surface: the line box
-   is the capsule's own height rather than whatever line-height happens to be
-   inherited (the feed's Thread row inherits `normal`, the sidebar card does
-   not), and `flex: none` keeps a squeezed Inbox row from shrinking the circle
-   the way a default `flex: 0 1 auto` would. */
+/* The one count capsule. border-box keeps one digit an 18px circle (no global border-box reset); 999px pairs with the
+   platform's corner-shape opt-out; tabular figures keep a two-digit count steady. The line box is the capsule's own height
+   (inherited line-height differs by surface), and `flex: none` keeps a squeezed row from shrinking the circle. */
 .badge {
   align-items: center;
   background: var(--dsw-alias-state-business-primary);
@@ -29,12 +20,8 @@
   padding: 0 5px;
 }
 
-/* The same geometry in the other ink: unread that merely arrived. The border is
-   paid for out of the padding — 1px + 4px is the solid tone's 5px — so both
-   tones keep one border box. Keeping the padding at 5px instead lets the 1px
-   border push the box past the 18px floor: a one-digit hairline reads 18.125px
-   wide rather than 18, and a two-digit one ends up 2px wider than the solid
-   capsule beside it. */
+/* The border is paid for out of the padding (1px + 4px = the solid tone's 5px) so both tones keep one border box;
+   5px padding would push a hairline past the 18px floor. */
 .hairline {
   background: transparent;
   border: 1px solid var(--dsw-alias-border-l2);

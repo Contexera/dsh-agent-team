@@ -16,18 +16,11 @@ interface MentionMatch {
   readonly query: string
 }
 
-/**
- * How directly a mention reaches a Member: `thread-follower` follows this
- * Thread (a pick delivers at once), `channel-peer` takes part in the Channel
- * but not this Thread, `workspace` is the rest. Ranking and row styling both
- * read this, so the two can never disagree about which tier a Member is in.
- */
+/** How directly a mention reaches a Member: thread follower (delivers at once), Channel peer, or the rest of the workspace. Ranking and row styling both read it. */
 export type MentionTier = 'thread-follower' | 'channel-peer' | 'workspace'
 
-/** Sort precedence of one mention tier: lower sorts first. */
 const MENTION_TIER_RANK = { 'thread-follower': 0, 'channel-peer': 1, workspace: 2 } as const satisfies Record<MentionTier, number>
 
-/** One pickable row: the fixed @all expansion or one concrete member. */
 type MentionOption = { readonly kind: 'all' } | { readonly kind: 'member'; readonly status: AgentTeamClientMemberStatus; readonly tier: MentionTier }
 
 function findMention(draft: string, caret: number): MentionMatch | undefined {
@@ -49,14 +42,7 @@ function mentionCandidates(members: readonly AgentTeamClientMemberStatus[], quer
     && status.member.handle.toLocaleLowerCase().startsWith(normalized))
 }
 
-/**
- * Ranks mention candidates by how directly a pick reaches them: this Thread's
- * followers first (a mention delivers there at once), then Members taking part
- * in the Channel through another Thread, then the rest of the Workspace. The
- * order is a hint for the picker only — every tier stays eligible, because the
- * ledger accepts all of them; a lower tier only means the Host may ask the
- * Human to confirm before the Member is pulled in.
- */
+/** A hint for the picker only: every tier stays eligible, but a lower tier means the Host may ask the Human to confirm before pulling the Member in. */
 function mentionTier(status: AgentTeamClientMemberStatus, followers: ReadonlySet<AgentTeamMemberId> | undefined,
   channelPeers: ReadonlySet<AgentTeamMemberId> | undefined): MentionTier {
   if (followers?.has(status.member.memberId) === true) return 'thread-follower'
@@ -70,10 +56,7 @@ function rankMentionCandidates(candidates: readonly AgentTeamClientMemberStatus[
   return [...candidates].sort((left, right) => MENTION_TIER_RANK[mentionTier(left, followers, channelPeers)] - MENTION_TIER_RANK[mentionTier(right, followers, channelPeers)])
 }
 
-/**
- * The Message this send answers, with the author named when the parent resolved.
- * The Human is excluded from delivery, so a quote naming them joins no notify row.
- */
+/** The Human is excluded from delivery, so a quote naming them joins no notify row. */
 export interface ReplyTarget {
   /** Absent when the parent did not resolve and cannot name an author. */
   readonly memberId?: AgentTeamMemberId
@@ -99,12 +82,7 @@ function revokeDraftPreviewUrl(file: File): void {
   if (url !== undefined) URL.revokeObjectURL(url)
 }
 
-/**
- * Member ids one draft would notify: the picked recipients, the handles the body
- * itself names, and the quoted author. The Human is the one author the Host
- * never delivers to — they read the Thread directly and hold no session — so a
- * quote of them (including the reader quoting themselves) joins no row.
- */
+/** The Human is never delivered to (they read the Thread directly), so quoting them, even oneself, joins no row. */
 function deliverableRecipients(
   recipients: ReadonlySet<AgentTeamMemberId>,
   draft: string,
@@ -124,11 +102,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   readonly followerMemberIds?: ReadonlySet<AgentTeamMemberId>
   /** Members taking part in the Channel but not following this Thread; they rank above the rest of the Workspace. */
   readonly channelPeerMemberIds?: ReadonlySet<AgentTeamMemberId>
-  /**
-   * The draft cache this composer subscribes to: owning the subscription here
-   * instead of in the hosting page keeps a keystroke from re-rendering the
-   * timeline around it.
-   */
+  /** Subscribing here, not in the hosting page, keeps a keystroke from re-rendering the timeline. */
   readonly drafts: TeamDraftStore
   readonly draftKey: TeamDraftKey
   readonly pending: boolean
@@ -137,15 +111,10 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   /** The Human edited the draft: the hosting page drops its one-shot send state. */
   readonly onEdit?: () => void
   readonly onSubmit: () => void
-  /** Conversation-specific prompt; the shared default fits Channel surfaces. */
   readonly placeholder?: string
   /** Upload-capable surfaces pass this to enable the "+" file picker; the reply path omits it. */
   readonly pendingFiles?: readonly File[]
   readonly onFilesChange?: (files: readonly File[]) => void
-  /**
-   * The Message this send answers, with the author named when the parent
-   * resolved. The Human is the one author the Host never delivers to.
-   */
   readonly replyTo?: ReplyTarget | undefined
   readonly onCancelReply?: (() => void) | undefined
   /** Channel-only: create a real Task with the top-level Message. Default off. */
@@ -159,14 +128,10 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   const menuRef = useRef<HTMLDivElement>(null)
   const activeOptionRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
-  // The draft lives in the injected cache so a view switch or refresh does not
-  // cost the half-written message. Subscribing here — not in the page that
-  // hosts this composer — is what keeps a keystroke off the timeline.
+  // Subscribing here, not in the hosting page, keeps a keystroke off the timeline.
   const { draft, recipients } = useSyncExternalStore(drafts.subscribe, () => drafts.getSnapshot(draftKey))
   const [mention, setMention] = useState<MentionMatch>()
   const [highlight, setHighlight] = useState(0)
-  // @all is a composer-layer expansion of the same eligibility filter a
-  // handle pick uses; the fixed row stays on top of the matching members.
   const memberCandidates = mention === undefined ? [] : rankMentionCandidates(mentionCandidates(members, mention.query), followerMemberIds, channelPeerMemberIds)
   const options: readonly MentionOption[] = mention !== undefined && 'all'.startsWith(mention.query.toLocaleLowerCase())
     ? [{ kind: 'all' }, ...memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, channelPeerMemberIds) }))]
@@ -178,8 +143,6 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
   // could address — the same split the Host's allRecipientsFor makes.
   const allMembers = channelPeerMemberIds === undefined ? members : members.filter(status => channelPeerMemberIds.has(status.member.memberId))
   const allCount = allMentionMembers(allMembers).length
-  // The surface comes from the draft key this composer already writes to, so
-  // the weight cannot disagree with the conversation the draft belongs to.
   const mentionSurface = mentionSurfaceOf(draftKey)
   const listId = 'team-mention-suggestions'
   const menuMaxHeight = useAnchoredMaxHeight(menuRef, 320, menuOpen ? draft : null)
@@ -201,32 +164,26 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
     setHighlight(current => Math.min(current, options.length - 1))
   }, [mention, options.length])
 
-  // The anchored height cap keeps long rosters scrollable; without this the
-  // keyboard-highlighted row can stay hidden below the fold.
+  // Keeps the keyboard-highlighted row from hiding below the anchored height cap.
   useLayoutEffect(() => {
     if (!menuOpen) return
     // Optional call: jsdom renders the menu without a layout engine.
     activeOptionRef.current?.scrollIntoView?.({ block: 'nearest' })
   }, [menuOpen, highlight, activeOptionKey])
 
-  // Match the resident DSH composer without stealing a later user choice: Team
-  // data can load after navigation, so a dialog or another control may already
-  // own focus by the time this composer appears.
+  // Team data can load after navigation, so another control may already own focus; do not steal it.
   useEffect(() => {
     const active = document.activeElement
     if (active !== document.body && active?.closest('[aria-current="page"]') === null) return
     inputRef.current?.focus({ preventScroll: true })
   }, [])
 
-  // Confirmation settles after a read-only submission span. Restore focus in
-  // case the browser moved it so the second Enter can confirm immediately.
+  // Confirmation settles after a read-only submission span; restore focus so the second Enter confirms immediately.
   useEffect(() => {
     if (confirmation === undefined || pending) return
     inputRef.current?.focus({ preventScroll: true })
   }, [confirmation, pending])
 
-  // Handle lookup for both directions of the same judgement: whether a picked
-  // recipient is still spelled in the text, and which Members the text names.
   const memberHandles = new Map(members.map(status => [status.member.memberId, status.member.handle]))
 
   const pruneRecipients = (nextDraft: string): void => {
@@ -240,9 +197,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
     if (next.size !== recipients.size) drafts.writeRecipients(draftKey, next)
   }
 
-  // Restored drafts may carry recipients that no longer match the text (or
-  // unknown Members); converge on mount and on every state change so the
-  // cached entry never stays stale — the same rule user edits already apply.
+  // Restored drafts may carry recipients that no longer match the text; converge so the cache never stays stale.
   // An unloaded roster must never judge recipients unknown.
   useEffect(() => {
     if (members.length === 0) return
@@ -265,8 +220,6 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
     updateMention(nextDraft, event.target.selectionStart ?? nextDraft.length)
   }
 
-  // Both pick kinds share the same commit path: swap the text in, add the
-  // recipients, close the menu, and restore the caret after focus.
   const commitMention = (nextDraft: string, nextCaret: number, nextRecipients: ReadonlySet<AgentTeamMemberId>): void => {
     drafts.writeDraft(draftKey, nextDraft)
     drafts.writeRecipients(draftKey, nextRecipients)
@@ -300,9 +253,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
     commitMention(nextDraft, nextCaret, new Set(recipients).add(member.member.memberId))
   }
 
-  // Pasted files (screenshots, copies) join the same chips the "+" picker
-  // fills; only a paste that carries files is intercepted, so plain text
-  // keeps the browser's native insertion.
+  // Only a paste that carries files is intercepted, so plain text keeps native insertion.
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
     if (pending || onFilesChange === undefined || pendingFiles === undefined) return
     const files = Array.from(event.clipboardData.items)
@@ -331,7 +282,6 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
       setMention(undefined)
       return
     }
-    // Tab accepts the highlighted candidate; Shift+Tab keeps default focus reversal.
     if (menuOpen && event.key === 'Tab' && !event.shiftKey) {
       event.preventDefault()
       if (activeOption !== undefined) selectOption(activeOption)
@@ -392,11 +342,7 @@ export function TeamComposer({ members, followerMemberIds, channelPeerMemberIds,
                   ref={selected ? activeOptionRef : undefined}
                   onMouseDown={event => { event.preventDefault() }}
                   onClick={() => { selectOption(option) }}
-                  // How directly a pick reaches this Member; the row's styling
-                  // and the sort order read the same tier.
                   data-mention-tier={MENTION_TIER_RANK[option.tier]}
-                  // Whether the pick lands inside the conversation being
-                  // written into; the name drops a weight when it does not.
                   data-mention-inside={String(mentionTierIsParticipant(option.tier, mentionSurface))}
                 >
                   <TeamPresenceDot status={option.status} t={t} />
