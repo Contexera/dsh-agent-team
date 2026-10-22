@@ -106,6 +106,22 @@
   padding-top: 16px;
 }
 
+/* The Host row's configuration group. It opens on the same hairline the
+ * identity rows close on, and its heading is the shipped settings card's group
+ * heading — the plugin page's own section label, one step under the page h2. */
+.context {
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  padding-top: 16px;
+}
+
+.groupHeading {
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin: 0;
+}
+
 .footnote {
   align-items: center;
   color: var(--dsw-alias-label-tertiary);

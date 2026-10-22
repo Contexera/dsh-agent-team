@@ -1,3 +1,5 @@
+import type { SettingsFormLabels } from '@deepseek-ai/dsh-client-ui-primitives'
+
 export const zh = {
   team: '团队',
   backToConversations: '对话',
@@ -142,6 +144,20 @@ export const zh = {
   humanSettingsUnavailable: '资料读不出来：{message}',
   humanSettingsVersion: '版本 {version}',
   humanSettingsUpdateAvailable: '有新版本 {version}，去查看发布说明',
+  // The shared settings form's chrome and the one Host-row group this page
+  // edits. The generic labels match the shipped plugin settings pages word for
+  // word, so the Team page reads as one more page in the same panel.
+  overridden: '已覆盖',
+  reset: '恢复默认',
+  readOnly: '本部署的设置为只读。',
+  unavailable: '该插件当前未加载，暂时无法配置。',
+  save: '保存',
+  saving: '保存中…',
+  saveFailed: '本部署没有接受这些值，已保留供你修改。',
+  memberCompactionTitle: '上下文',
+  memberCompactionTokens: '默认压缩阈值',
+  memberCompactionTokenHint: '留空即使用默认的 256K；可写 256K、1M 这样的容量，也可写纯数字。',
+  memberCompactionTokenInvalid: '请填一个大于 0 的整数，例如 256K 或 1M。',
   // The support line is stated in words, never as a bare semver range.
   environmentOkTitle: '在支持范围内',
   environmentOkDetail: '正在运行的 DSH {version} 在我们声明的支持范围内。',
@@ -376,6 +392,17 @@ export const en = {
   humanSettingsUnavailable: 'The profile could not be read: {message}',
   humanSettingsVersion: 'Version {version}',
   humanSettingsUpdateAvailable: 'New version {version} available — see the release notes',
+  overridden: 'Overridden',
+  reset: 'Reset to default',
+  readOnly: 'This deployment stores settings read-only.',
+  unavailable: 'This plugin is not loaded, so it cannot be configured right now.',
+  save: 'Save',
+  saving: 'Saving…',
+  saveFailed: 'The deployment did not accept these values; they were left for you to correct.',
+  memberCompactionTitle: 'Context',
+  memberCompactionTokens: 'Default compaction threshold',
+  memberCompactionTokenHint: 'Leave empty to use the default 256K; accepts sizes such as 256K or 1M, or a plain number.',
+  memberCompactionTokenInvalid: 'Enter a whole number greater than 0, such as 256K or 1M.',
   environmentOkTitle: 'Within the supported range',
   environmentOkDetail: 'The running DSH {version} is within the range we declare support for.',
   environmentOutOfRangeTitle: 'Outside the supported range',
@@ -465,3 +492,12 @@ export const en = {
 } as const
 
 export type TeamKey = keyof typeof zh
+
+/**
+ * The shared settings form's chrome, read from this page's dictionary.
+ * @param t - the page's locale reader.
+ * @returns the labels the shared settings form renders.
+ */
+export function formLabels(t: (key: TeamKey) => string): SettingsFormLabels {
+  return { unavailable: t('unavailable'), readOnly: t('readOnly'), saveFailed: t('saveFailed'), save: t('save'), saving: t('saving') }
+}

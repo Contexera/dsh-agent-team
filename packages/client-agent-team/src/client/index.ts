@@ -29,6 +29,7 @@ import type {
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
 import agentTeamRemote from '@contexera/dsh-agent-team/remote'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '@contexera/dsh-agent-team/human-settings'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -40,6 +41,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { TeamSettingsSection } from './TeamSettingsSection.tsx'
+import { TeamConfigController, teamConfigScope } from './team-config.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
 import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
@@ -60,6 +62,7 @@ const NS = 'team'
 
 export const inject = [
   'slots', 'workspaces', 'layout', 'locale', 'remote', 'remote.session', 'sessions', 'connection', 'conversation', 'uiWorkspace',
+  'configForms',
 ]
 
 /** The rendered session is the one holding its `mainView` reference, so the selection is read through retention. */
@@ -306,11 +309,19 @@ function applyUi(ctx: ClientContext): void {
   const environment = new TeamEnvironmentCheck({
     loadEnvironment: () => ctx.remote.agentTeam.environment({}),
   })
+  // The Host row's compaction threshold. The shared settings form addresses
+  // top-level section fields only, so `teamConfigScope` flattens the one group
+  // this page edits and maps its writes back onto that group's child paths —
+  // saving a threshold never restates the sibling fields beside it.
+  const teamConfig = ctx.configForms === undefined
+    ? undefined
+    : new TeamConfigController(teamConfigScope(ctx.configForms.get(HUMAN_PROFILE_SETTINGS_NAMESPACE)))
   ctx.effect(() => () => {
     navigation.dispose()
     drafts.dispose()
     humanIdentity.dispose()
     environment.dispose()
+    teamConfig?.dispose()
     void disposeNavigation()
     void disposeDrafts()
   }, 'agent-team: navigation service')
@@ -403,6 +414,7 @@ function applyUi(ctx: ClientContext): void {
     inject: () => ({
       identity: humanIdentity,
       environment,
+      teamConfig,
       saveName: async (name: string) => {
         const saved = await ctx.remote.agentTeam.setHumanProfile({ name })
         if (!saved.ok) return saved.error.message

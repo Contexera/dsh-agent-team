@@ -3178,6 +3178,54 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef !== undefined).toBe(true)
   await page.screenshot({ path: join(UI09_SHOTS, 'team-page.png'), fullPage: true })
 
+  // The Host row's compaction threshold: the page's one settings-document
+  // field. A save stages a child path of `memberCompaction`, so the sibling
+  // `enabled` switch the page never shows has to survive it — the Host's own
+  // descriptor is what proves the write, not the field it just rendered.
+  const context = panel.getByRole('region', { name: '上下文' })
+  const threshold = context.getByLabel('默认压缩阈值')
+  await threshold.waitFor()
+  expect(await threshold.inputValue()).toBe('256K')
+  // Keyboard, no pointer: the staged edit makes the field dirty, Tab hands
+  // focus from the input to the form's own save (the staged edit also puts the
+  // reset control earlier in the document, so this proves the tab order skips
+  // nothing it should not), and Enter writes it.
+  await threshold.fill('512K')
+  await threshold.press('Tab')
+  const thresholdSave = context.getByRole('button', { name: '保存', exact: true })
+  const thresholdRing = await thresholdSave.evaluate((target) => {
+    const style = getComputedStyle(target)
+    return {
+      focusVisible: target.matches(':focus-visible'),
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+    }
+  })
+  expect(thresholdRing.focusVisible).toBe(true)
+  expect(thresholdRing.outlineStyle).not.toBe('none')
+  await page.keyboard.press('Enter')
+  await expect.poll(() => {
+    const value = scaffold!.ctx.settings.describe().find(row => row.ns === 'wowyuarm-agent-team-host')?.value as
+      | { memberCompaction?: { enabled?: boolean; tokens?: number } }
+      | undefined
+    return value?.memberCompaction
+  }).toEqual({ enabled: true, tokens: 512_000 })
+  await expect.poll(async () => await context.getByText('已覆盖').count()).toBe(1)
+
+  // An unreadable draft never becomes a value: the field keeps the text, the
+  // group says what it accepts, and the save stays out of reach.
+  await threshold.fill('2GB')
+  await context.getByText('请填一个大于 0 的整数，例如 256K 或 1M。').waitFor()
+  await expect.poll(async () => await context.getByRole('button', { name: '保存', exact: true }).isDisabled()).toBe(true)
+  expect(await threshold.inputValue()).toBe('2GB')
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-compaction-invalid.png'), fullPage: true })
+  await threshold.fill('512K')
+  await expect.poll(async () => await context.getByRole('button', { name: '保存', exact: true }).isDisabled()).toBe(true)
+  await page.screenshot({ path: join(UI09_SHOTS, 'team-page-compaction.png'), fullPage: true })
+
+  // A refused name is refused before the round trip: the field keeps what the
+  // reader typed and the notice states the rule.
+
   // A refused name is refused before the round trip: the field keeps the typed
   // text and the notice states the rule.
   await nameField.fill('   ')
@@ -3198,6 +3246,14 @@ it('configures the Team page identity from Settings in real Web', async () => {
   }))
   expect(narrow.scrollWidth).toBeLessThanOrEqual(narrow.clientWidth)
   expect((await panel.boundingBox())!.width).toBeLessThanOrEqual(390)
+  // The configuration group is a shipped field inside the same squeezed
+  // column: its own box must fit the column rather than painting past it, and
+  // the group adds no width the panel did not already have.
+  const narrowContext = await panel.getByRole('region', { name: '上下文' }).evaluate(element => ({
+    scrollWidth: element.scrollWidth,
+    clientWidth: element.clientWidth,
+  }))
+  expect(narrowContext.scrollWidth).toBeLessThanOrEqual(narrowContext.clientWidth)
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 

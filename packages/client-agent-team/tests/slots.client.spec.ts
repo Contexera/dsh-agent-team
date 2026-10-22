@@ -2,6 +2,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
+import { stubConfigForm } from '@deepseek-ai/dsh-client-test-runtime'
 import { apply, inject } from '../src/client/index.ts'
 
 function workspaceFeed() {
@@ -50,6 +51,21 @@ async function bench(persisted: string | null = null) {
     list: workspaceFeed(),
     pickDirectory: vi.fn(async () => null),
     create: vi.fn(),
+  } as never)
+  // The Team settings page reads the Host row's configuration form through the
+  // shared registry; the bench keeps one stub per entry id, as the shipped
+  // service does, so a page that asks twice sees one document.
+  const configForms = new Map<string, ReturnType<typeof stubConfigForm>>()
+  ctx.provide('configForms', {
+    developerTools: { enabled: { getSnapshot: () => true, subscribe: () => () => {} }, setEnabled: async () => {} },
+    get: (entryId: string) => {
+      let form = configForms.get(entryId)
+      if (form === undefined) {
+        form = stubConfigForm()
+        configForms.set(entryId, form)
+      }
+      return form.scope
+    },
   } as never)
   const slots = ctx.get('slots') as SlotRegistry
   const root = () => null

@@ -14,6 +14,8 @@ A Member's context has exactly two mechanisms, and neither is the model's to inv
 
 The input trigger is `floor(min(B, W × 0.8, W − 16384))`, where `B` is `memberCompaction.tokens` (default 256000) and `W` is the routed window. Without a declared window the absolute budget still applies. A 1M or 2M model triggers at 256000; a 272000 model triggers at 217600. Model maximum output is not subtracted from this trigger. Pending messages, assembled tools, and system-prompt growth are counted before admission.
 
+`memberCompaction` is a volatile Host-row group (`enabled`, `tokens`). The Team settings page edits `tokens` alone under 「上下文」, through the shared configuration form: the field accepts a capacity (`256K`, `1M`) and a blank field clears the override so the group re-inherits the composition layer and its 256000 default. The write names the `memberCompaction.tokens` child path, so the sibling `enabled` switch is untouched.
+
 When input reaches the trigger, Team first prunes tool results, then requests one upstream forced reduction if needed. This path uses a zero retained-tail budget rather than retaining 0.16 of a large window; upstream may still preserve a recent balanced block. The summary output cap is independently set to 16384. A failed or insufficient reduction ends the turn explicitly; unadmitted input stays queued without an automatic retry.
 
 Each request's output allowance is capped at `W − estimated input − 4096`, never raised above its original allowance. The actual value is logged in the request header; a temporary reduction is removed before the next allowance is resolved, and a resumed loop starts from its declared options. Input pricing is heuristic, so provider overflow recovery remains necessary.

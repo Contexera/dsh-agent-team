@@ -138,14 +138,34 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   })
   runtime.ctx.provide('uiWorkspace', { startSession: vi.fn(), connectWorkspace: vi.fn(async () => 'ordinary-session'), openSession })
   // The shipped conversation reads the developer-tools switch and per-domain
-  // config scopes through the config-form registry.
+  // config scopes through the config-form registry. The Team settings page also
+  // reads the Host row's own form there, so the registry answers per entry id
+  // and the Host row's page is seeded as a served document.
   const developerTools = createSnapshotStore(true)
+  const configForms = new Map<string, ReturnType<typeof stubConfigForm>>()
+  const configFormFor = (entryId: string): ReturnType<typeof stubConfigForm> => {
+    let form = configForms.get(entryId)
+    if (form === undefined) {
+      form = stubConfigForm()
+      configForms.set(entryId, form)
+    }
+    return form
+  }
+  const teamConfigForm = configFormFor('wowyuarm-agent-team-host')
+  teamConfigForm.publish({
+    status: 'ready',
+    writable: true,
+    revision: 1,
+    value: { memberCompaction: { enabled: true, tokens: 256_000 } },
+    base: { memberCompaction: { tokens: 256_000 } },
+    user: {},
+  })
   runtime.ctx.provide('configForms', {
     developerTools: {
       enabled: developerTools,
       setEnabled: async (enabled: boolean) => { developerTools.set(enabled) },
     },
-    get: () => stubConfigForm().scope,
+    get: (entryId: string) => configFormFor(entryId).scope,
   } as never)
   // The shipped Conversation core reads its whole outward face here, and two of
   // those reads are not calls: the composer bar injects `fileUploads` as a live
@@ -677,5 +697,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
-  return { runtime, team, view, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
+  return { runtime, team, view, panelInfo: runtime.panelInfo, teamConfigForm, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
 }

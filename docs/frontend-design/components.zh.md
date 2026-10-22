@@ -49,9 +49,12 @@
 
 ## 团队设置页（团队）
 - 设置面板里 Team 只有这一面：`settings.section` 的 `team-settings` 条目（「团队」），只在普通模式提供。Team 模式接管侧栏后，设置面板不可达。导航轨与内容列由 shell 画，所以本段自己画 18px/600 标题。其余行沿用 shipped 设置语言：16px/0 内边距配 border-l2 发丝线、14px/22px 标题叠 12px/18px tertiary 说明、控件间距 12px。按钮与输入框直接用 shipped `Button` 与 `Input`，不另起一份声明。因为导航轨把这个条目与 Harness 自己的页面排在一起，标题下方加一行 13px tertiary 引言，写明这一页属于谁、改动作用在哪里。这行页头在**每个状态**都渲染。读取失败时也在。页面不会把「这是谁的 Team」晾着不答。脚注写出版本号并链接仓库。升级提示行只在 Host 报告有时才出现。
-- 这一页只写一样东西：身份走 Team Remote 读写。页面不渲染 Team Host 行的任何 settings 节，所以一个扁平字段名不会被寻址到错误的路径。
+- 这一页写两样东西。身份——显示名与头像——走 Team Remote，由它拥有 Client 本来叫不出名字的 profile 条目。压缩阈值则是 Team Host 行自己的配置组，经共享的配置表单（`configForms.get(<行 id>)`）读写，所以这一页只点名 `memberCompaction.tokens` 这一条子路径，而不是整组重述一遍。
+- 这一组落在身份行与环境检查之间，自带 13px/600 分组标题（shipped 设置卡片的分组标签），以页面的发丝线开场。它的字段与保存都是 shipped 的 `SettingsForm` 与 `SettingsValueField`。阈值按容量书写（`256K`、`1M` 或纯数字）。字段读不懂的草稿（`2GB`）保留原文并阻塞保存。留空则暂存一次 `unset`，让这一组回落到组合层与其 256000 默认值。只写这一条子路径，所以页面从不显示的兄弟 `enabled` 开关在每次保存后都还在。
+- `human-identity.ts` 是这份资料的唯一读取方。`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取。引用未变时复用已经解码好的头像。后续读取失败时保留上一次已接受的值。只有从未加载成功才是 unavailable。这时整面 `role="alert"` 并自带重试。它还在每次写入被接受后刷新。写入走 Team Remote 自己的 `setHumanProfile` 与头像调用，由它们拥有 profile 条目：Client 从不替身份字段写 settings 文档，所以也不必给那些字段起名。
+- `team-config.ts` 是阈值的唯一读写方。共享设置表单只寻址命名空间的顶层字段，而阈值住在这一行的 `memberCompaction` 组里，所以一层小小的 `SettingsFormScope` 适配器把该组摊平给表单，再把表单的编辑映射回子路径。`TeamConfigController` 把这层适配器包进 `SettingsFormModel`，对外发布页面渲染的那一份快照。Client 注入 `configForms`——每个设置消费方都在用的 shipped 服务——并在每个 Client 上构造一次控制器；服务缺席时整组不渲染，控制器随其余 navigation 服务一起销毁。
+- 写入被拒绝时绝不把「正在保存…」晾着。身份行在原位置显示 Host 的 message；配置组就是 shipped 表单，部署拒绝的保存会保留草稿，并在保存按钮旁给出共享的「本部署没有接受这些值」一行。
 - 名字行是一个 form：36×200px 输入框，主色「保存」按钮持有 submit。脏字段里按 Enter 即保存，Tab 的下一站就是「保存」按钮。头像行画 40px 身份圆（`border-radius: 50%` 配 `corner-shape: round`）呈现图片或首字母。一个「更换头像」按钮驱动视觉隐藏的 `input[type="file"] accept="image/*"`，上限 10MB。只有在存有 `avatarRef` 时才多出「移除头像」。两处头像座位只在**这些字节真的能解码**时才画图。Host 按声明的 media type 收头像，不解码内容。手机拍的 HEIC 或传入途中损坏的字节会被存下来，再以画不出任何东西的 data URL 交回。`useAvatarImage` 按 URL 记住字节能否解码。画不出就与「已移除」一样显示首字母；而新上传的字节是另一个 URL，会自动重试。
-- `human-identity.ts` 是这份资料的唯一读取方。`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取。引用未变时复用已经解码好的头像。后续读取失败时保留上一次已接受的值。只有从未加载成功才是 unavailable。这时整面 `role="alert"` 并自带重试。它还在每次写入被接受后刷新。写入走 settings 命名空间。经由一个可选的 `ctx.inject(['remote.settings'])` 绑定取得的有两样：`remote.settings.update(namespace, patch, expectedRevision)` 与 `mutate(…, [{ op: 'unset', path: ['avatarRef'] }])`。未声明就读 `ctx.remote.settings` 会抛错。硬性激活依赖会在 settings 服务缺席时把整个 Client 拖下水，服务缺席只报不可用。写入被拒绝时在原位置显示 Host 的 message，而不是让「正在保存…」一直挂着。Client 侧的 namespace 常量由测试钉在 Host 自己的常量上，两半不会静默漂移。
 - 390×844 下 shipped 面板保留 188px 的导航轨，没有 media query。内容列只剩约 106px。所以本段自带 `@container (max-width: 420px)`。每行文案叠在控件上方，去掉宽版为控件预留的 48px 右内边距，输入框与按钮占满整列。浏览器验收在窄宽度断言无横向溢出。
 
 ## 环境检查（environment check）

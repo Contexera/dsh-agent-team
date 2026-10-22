@@ -66,7 +66,11 @@ Membership law follows the Host: joining needs `availability === 'active'` (the 
 ## Team settings page
 Settings carries the Team's one surface: the `settings.section` entry `team-settings` (「团队」), offered in ordinary mode only, because Team mode's sidebar takeover puts the settings panel out of reach. The shell draws the nav rail and the content column, so the section draws its own 18px/600 heading and then rows in the shipped settings language — 16px/0 padding over a hairline separator, a 14px/22px title above a 12px/18px tertiary description, 12px between controls. It reuses the shipped `Button` and `Input` rather than restating them.
 
-The page writes one thing: identity, read and written through the Team Remote. It renders no group of the Team Host row's settings section, so a flat field name can never be addressed at the wrong path.
+The page writes two things. Identity — the display name and the avatar — goes through the Team Remote, which owns the profile entry the Client would otherwise have to name. The compaction threshold is the Team Host row's own settings group, read and written through the shared configuration form (`configForms.get(<row id>)`), so the page names one `memberCompaction.tokens` child path rather than restating the whole group.
+
+The group sits between the identity rows and the environment check, under its own 13px/600 heading — the shipped settings card's group label — opening on the page's hairline. Its field and its save are the shipped `SettingsForm` and `SettingsValueField`: the threshold is typed as a capacity (`256K`, `1M`, or a plain count), and a draft the field cannot read (`2GB`) keeps its text and blocks the save.
+
+A blank field stages an `unset` so the group re-inherits the composition layer and its 256000 default. Only that one child path is written, so the sibling `enabled` switch the page never shows survives every save.
 
 Because the nav lists that entry among the Harness's own pages, a 13px tertiary intro under the heading names what owns the page and where a change applies. That header renders in every state — including a failed read — so the page never leaves "whose Team is this?" open. The name row is a form: a 36×200px field whose primary Save button owns the submit, so Enter saves a dirty field and Tab reaches that button as the next stop.
 
@@ -76,9 +80,15 @@ Both avatar seats draw the picture only while those bytes decode. The Host accep
 
 `human-identity.ts` is the one reader of that profile. `TeamHumanIdentity` shares a single in-flight read between subscribers, reuses the avatar it already decoded while the reference is unchanged, keeps the last accepted value when a later read fails, and refreshes after every accepted write. Only a never-loaded profile becomes unavailable, rendering as `role="alert"` with its own retry.
 
-Writes reach the settings namespace through `remote.settings.update(namespace, patch, expectedRevision)` and `mutate(…, [{ op: 'unset', path: ['avatarRef'] }])`, resolved through an optional `ctx.inject(['remote.settings'])` binding: reading `ctx.remote.settings` without declaring it throws, and a hard activation dependency would take the whole Client down whenever the settings service is missing, so an absent service is reported as unavailable instead.
+Its writes go through the Team Remote's own `setHumanProfile` and avatar calls, which own the profile entry: the Client never writes the settings document for the identity fields, so it never has to name them.
 
-The section reports a rejected write's Host message in place rather than leaving a 「正在保存…」 label standing.
+`team-config.ts` is the one reader and writer of the threshold. The shared settings form addresses a namespace's top-level fields only, while the threshold lives inside the row's `memberCompaction` group, so a small `SettingsFormScope` adapter flattens that group for the form and maps its edits back onto child paths.
+
+`TeamConfigController` wraps that adapter in a `SettingsFormModel` and publishes the one snapshot the page renders.
+
+The Client injects `configForms` — a shipped service every settings consumer uses — and constructs the controller once per Client. If the service is absent the group is not rendered at all, and the controller is disposed with the rest of the navigation services.
+
+A rejected write never leaves a 「正在保存…」 label standing. The identity rows report the Host's message in place under their own controls; the configuration group is the shipped form, so a save the deployment refused leaves its draft staged and states the shared "the deployment did not accept these values" line beside the save.
 
 The Client's namespace constant is pinned by a test against the Host's own, so the two halves cannot drift silently.
 

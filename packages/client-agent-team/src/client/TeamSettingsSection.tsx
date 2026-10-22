@@ -1,14 +1,16 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, Input, SettingsForm, SettingsValueField } from '@deepseek-ai/dsh-client-ui-primitives'
 import { HUMAN_AVATAR_MAX_BYTES } from '@contexera/dsh-agent-team/human-settings'
 import { useHumanIdentity, type TeamHumanIdentityFace } from './human-identity.ts'
 import { EnvironmentCheck } from './EnvironmentCheck.tsx'
 import type { TeamEnvironmentSource } from './environment-check.ts'
+import { formLabels } from './locales.ts'
+import { useTeamConfig, type TeamConfigFace } from './team-config.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import css from './team-settings.module.css'
 
-/** The Team's settings page. It owns no durable fact: identity arrives from the shared projection and writes through the Team Remote; a failed write keeps the typed value and reports the Host's reason. */
+/** The Team's settings page: identity, the Host row's compaction threshold, the local environment check, and the version footnote. It owns no durable fact and no copy of one — identity writes through the Team Remote, the threshold through the shared configuration form — and a failed write keeps the typed value and reports the Host's reason. */
 
 export interface TeamSettingsInjected {
   /** The shared Human identity projection: profile facts plus post-write refresh. */
@@ -19,6 +21,8 @@ export interface TeamSettingsInjected {
   uploadAvatar: (file: File) => Promise<string | undefined>
   removeAvatar: () => Promise<string | undefined>
   environment: TeamEnvironmentSource
+  /** The Host row's compaction threshold; absent when the settings service is. */
+  teamConfig?: TeamConfigFace | undefined
 }
 
 export type TeamSettingsProps =
@@ -44,6 +48,41 @@ function avatarInitial(name: string | undefined): string {
 type NameDraft =
   | { readonly kind: 'follow' }
   | { readonly kind: 'editing'; readonly text: string }
+
+/**
+ * The Host row's compaction group, staged by the shared settings form.
+ *
+ * It is a group of its own rather than a row in the identity list: its save is
+ * a settings-document write with its own revision fence, while the rows above
+ * write through the Team Remote. Two saves in one form would make one button
+ * two different transactions.
+ * @param props - the page's locale reader and the configuration group's face.
+ * @returns the group's heading, its one field, and its save.
+ */
+function ContextSettings(props: { t: TeamSettingsProps['t']; face: TeamConfigFace }) {
+  const { t, face } = props
+  const state = useTeamConfig(face)
+  const headingId = useId()
+  return <section className={css.context} aria-labelledby={headingId}>
+    <h3 className={css.groupHeading} id={headingId}>{t('memberCompactionTitle')}</h3>
+    <SettingsForm labels={formLabels(t)} state={state} onSave={face.save} onDiscard={face.discard}>
+      <SettingsValueField
+        id="plugin-config-team-member-compaction-tokens"
+        label={t('memberCompactionTokens')}
+        hint={t('memberCompactionTokenHint')}
+        placeholder="256K"
+        overriddenLabel={t('overridden')}
+        resetLabel={t('reset')}
+        invalidLabel={t('memberCompactionTokenInvalid')}
+        numeric
+        disabled={!state.writable || state.saving}
+        {...state.tokens}
+        onEdit={(text) => { face.edit('tokens', text) }}
+        onReset={() => { face.resetField('tokens') }}
+      />
+    </SettingsForm>
+  </section>
+}
 
 export function TeamSettingsSection(props: TeamSettingsProps) {
   const { t, identity } = props
@@ -179,6 +218,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
         </div>
       </div>
     </div>
+    {props.teamConfig === undefined ? null : <ContextSettings t={t} face={props.teamConfig} />}
     <div className={css.environment}>
       <EnvironmentCheck t={t} environment={props.environment} />
     </div>
