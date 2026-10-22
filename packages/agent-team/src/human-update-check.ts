@@ -1,15 +1,5 @@
 /**
- * Best-effort Host-side check for a newer published bundle release.
- *
- * The settings footnote needs `latestVersion`, but the profile read path must
- * never wait on the network: the checker serves a cached snapshot
- * synchronously and refreshes it in the background. Every failure mode —
- * disabled by the operator, no fetch implementation, timeout, non-OK status,
- * malformed payload, unparsable version — settles as "no update known", so
- * the footnote degrades to version + link exactly as before.
- *
- * No durable state: the cache lives only in memory. A Host restart simply
- * starts unknown again, which is the safe default for an informational tip.
+ * Best-effort check for a newer published bundle release. The profile read path never waits on the network: it serves a cached in-memory snapshot and refreshes in the background. Every failure settles as "no update known". Nothing is persisted across Host restarts.
  */
 
 /** Public npm metadata document for the bundle's `latest` dist-tag. */
@@ -39,11 +29,7 @@ export function isUpdateCheckEnabled(env: { readonly [key: string]: string | und
   return raw !== '0' && raw !== 'false' && raw !== 'off'
 }
 
-/**
- * Numeric core of a `major.minor.patch…` version. Pre-release/build suffixes
- * are ignored for ordering; anything else unparsable resolves absent so the
- * caller treats it as "no update known" instead of guessing.
- */
+/** Numeric core of a `major.minor.patch…` version; suffixes are ignored and unparsable values resolve absent. */
 export function parseVersionCore(value: string): readonly number[] | undefined {
   const core = value.split('+', 1)[0]?.split('-', 1)[0]
   if (core === undefined || core === '') return undefined
@@ -70,10 +56,7 @@ export function isNewerVersion(current: string, latest: string): boolean {
   return false
 }
 
-/**
- * One registry round trip resolving the published `latest` version string.
- * Never throws: anything unexpected resolves absent.
- */
+/** One registry round trip for the published `latest` version; never throws. */
 export async function fetchLatestVersion(
   fetchImpl: UpdateCheckFetcher,
   url: string = HUMAN_UPDATE_CHECK_REGISTRY_URL,
@@ -103,14 +86,7 @@ export interface HumanUpdateSnapshot {
   readonly latestVersion?: string | undefined
 }
 
-/**
- * Synchronous snapshot over a background-refreshed latest-version cache.
- * `snapshot()` never blocks: a stale or empty cache serves the last known
- * value (initially "no update") and kicks off at most one shared refresh.
- * Concurrent and repeated calls while a refresh is in flight share it, and a
- * refresh that settles only stamps the cache — failures simply leave the
- * previous value standing.
- */
+/** Synchronous snapshot over a background-refreshed cache. `snapshot()` never blocks: a stale or empty cache serves the last known value and starts at most one shared refresh; failures leave the previous value standing. */
 export function createHumanUpdateChecker(options: HumanUpdateCheckerOptions): {
   readonly snapshot: () => HumanUpdateSnapshot
 } {
