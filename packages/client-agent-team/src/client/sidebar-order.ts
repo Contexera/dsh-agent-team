@@ -1,20 +1,12 @@
 /**
- * Human presentation preference for the Team sidebar: the row order of the
- * Channels and Agents lists. The order lives in this browser only — it is UI
- * taste, never a shared Team fact, so nothing here touches the ledger.
- *
- * One deep module owns the whole concern: storage, reconcile against the
- * current Remote order (drop removed refs, keep the user's relative order,
- * append newcomers in default order), the single `moveSidebarItem` mutation
- * behind whole-row drag, and a small subscription hook with snapshot-stable
- * results for `useSyncExternalStore`.
+ * Human presentation preference for the Team sidebar row order of Channels and Agents. The order lives in this browser
+ * only; it is never a shared Team fact. Reconcile drops removed refs, keeps the user's relative order, and appends newcomers.
  */
 import { useCallback, useSyncExternalStore } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
 export type TeamSidebarListKind = 'channels' | 'agents'
 
-/** Insert side of a drop relative to the row under the pointer. */
 export type SidebarDropMarker = 'before' | 'after'
 
 const STORAGE_KEY = 'dsh.agent-team.sidebar-order'
@@ -32,11 +24,7 @@ const MEMORY_ONLY = Symbol('sidebar-order.memory')
 let cachedRaw: string | null | typeof MEMORY_ONLY | undefined
 let cachedOrders: StoredOrders = {}
 
-/**
- * Parse persisted orders defensively: private mode, quota errors, and stale
- * or corrupted payloads all degrade to "no preference" instead of breaking
- * the sidebar.
- */
+/** Private mode, quota errors, and stale or corrupted payloads degrade to "no preference". */
 function storedOrders(): StoredOrders {
   let raw: string | null = null
   try {
@@ -78,18 +66,12 @@ function saveOrder(key: string, refs: readonly string[]): void {
       return
     }
   } catch {
-    // Private mode and quota failures do not block reordering; the session
-    // keeps serving the in-memory order below.
+    // Private mode and quota failures do not block reordering; the in-memory order keeps serving.
   }
   cachedRaw = MEMORY_ONLY
 }
 
-/**
- * Merge the saved personal order into the current Remote order: kept refs
- * stay in the user's relative order with duplicates collapsed, removed refs
- * disappear, and new refs join in their Remote default positions after the
- * known ones.
- */
+/** Removed refs disappear; new refs join in their Remote default positions after the known ones. */
 export function reconcileSidebarOrder<R extends string>(saved: readonly string[], current: readonly R[]): readonly R[] {
   const present = new Set(current)
   const seen = new Set<string>()
@@ -141,11 +123,7 @@ function orderedSnapshot<R extends string>(workspaceId: WorkspaceId | undefined,
   return result as readonly R[]
 }
 
-/**
- * Effective row order for one sidebar list: the user's saved order folded
- * into the given Remote default order. Identity-stable across renders while
- * neither the data nor this browser's preference changes.
- */
+/** Identity-stable across renders while neither the data nor this browser's preference changes. */
 export function useSidebarOrder<R extends string>(workspaceId: WorkspaceId | undefined, kind: TeamSidebarListKind, refs: readonly R[]): readonly R[] {
   const subscribe = useCallback((listener: () => void) => {
     listeners.add(listener)
@@ -157,11 +135,8 @@ export function useSidebarOrder<R extends string>(workspaceId: WorkspaceId | und
 }
 
 /**
- * The only mutation path: move `movedRef` to the given side of `targetRef`
- * inside the list's current effective order. Returns the new order, or
- * `undefined` when the request cannot change anything (unknown refs, dropping
- * a row onto itself, or an adjacent marker that would put it right back).
- * Persistence and subscriber notification happen here.
+ * The only mutation path. Returns the new order, or `undefined` when nothing would change (unknown refs, dropping a row
+ * onto itself, or an adjacent marker). Persistence and subscriber notification happen here.
  */
 export function moveSidebarItem<R extends string>(
   workspaceId: WorkspaceId | undefined,
