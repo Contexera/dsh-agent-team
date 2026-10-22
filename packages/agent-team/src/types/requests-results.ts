@@ -97,23 +97,14 @@ export interface AgentTeamArchiveChannelRequest {
   readonly channelRef: AgentTeamChannelRef
 }
 
-/**
- * Result of Channel archival: the Channel is hidden with every fact
- * recoverable. Active Claims on the Channel's Threads were released.
- */
+/** Result of Channel archival: hidden with every fact recoverable; active Claims on its Threads were released. */
 export interface AgentTeamArchiveChannelResult {
   readonly receipt: AgentTeamOperationReceipt
   readonly channel: AgentTeamChannel
   readonly releasedClaims: readonly AgentTeamClaim[]
 }
 
-/**
- * Human intent to edit one Member's mutable facts. This is a partial update:
- * an absent optional field keeps the value the Member already has, and an
- * explicit `null` clears that override (inheriting the Host default model /
- * the full standard capability surface). Callers only state what they mean to
- * change, so they never have to echo stored values back.
- */
+/** Human intent to edit one Member's mutable facts, as a partial update: an absent optional field keeps the current value and an explicit `null` clears the override (Host default model / full standard capability surface). */
 export interface AgentTeamUpdateMemberRequest {
   readonly requestId: AgentTeamRequestId
   readonly memberId: AgentTeamMemberId
@@ -138,11 +129,7 @@ export interface AgentTeamArchiveMemberRequest {
   readonly memberId: AgentTeamMemberId
 }
 
-/**
- * Result of archival: the Member is hidden with its data recoverable. Active
- * Claims the Member held were released, so those Tasks are no longer stuck
- * in progress behind a hidden Member.
- */
+/** Result of archival: the Member is hidden with data recoverable; its active Claims were released so no Task stays in progress behind it. */
 export interface AgentTeamArchiveMemberResult {
   readonly receipt: AgentTeamOperationReceipt
   readonly member: AgentTeamAgentMember
@@ -156,11 +143,7 @@ export interface AgentTeamMemberResult {
   readonly status: AgentTeamAgentMemberStatus
 }
 
-/**
- * How a configuration edit's committed runtime effects landed: installed now,
- * already in force, or saved but deferred to the next activation (with the
- * reason). A failed apply never appears here — it stays a rejection.
- */
+/** How a configuration edit's runtime effects landed: installed now, already in force, or saved but deferred to the next activation (with the reason). A failed apply is a rejection, never listed here. */
 export type AgentTeamMemberEffect =
   | 'applied'
   | 'already-applied'
@@ -219,11 +202,7 @@ export interface AgentTeamJoinWorkspaceResult {
   readonly workspaceId: WorkspaceId
 }
 
-/**
- * Human intent to withdraw one Agent Member from one of its non-default
- * Workspaces: participation ends, Workspace-scoped Claims release, and the
- * Member's Attention/markers on that Workspace's Threads clear.
- */
+/** Human intent to withdraw one Agent Member from a non-default Workspace: participation ends, Workspace-scoped Claims release, and Attention/markers on its Threads clear. */
 export interface AgentTeamLeaveWorkspaceRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
@@ -261,10 +240,7 @@ export interface AgentTeamSendMessageRequest {
   readonly recipients?: readonly AgentTeamMemberId[]
   /** Uploaded attachments to reference; the Host resolves and verifies each id. */
   readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
-  /**
-   * Agent-supplied absolute file paths; the Host validates each one, copies the
-   * bytes into the attachment cache, and turns them into the same metadata.
-   */
+  /** Agent-supplied absolute file paths; the Host validates each, copies the bytes into the attachment cache, and produces the same metadata. */
   readonly attachmentPaths?: readonly string[] | undefined
   readonly confirmationToken?: AgentTeamConfirmationToken
   readonly asTask?: boolean
@@ -311,12 +287,7 @@ export interface AgentTeamHumanProfileResult {
   readonly version: string
   /** Repository home the footnote links to. */
   readonly repoUrl: string
-  /**
-   * A newer published release, when one is known. Best-effort and cached
-   * Host-side (npm `latest`, 12 h TTL, silent on any failure), so this stays
-   * absent until a background refresh actually observes one; the footnote
-   * shows only the version + link until then.
-   */
+  /** A newer published release, when known. Best-effort and cached Host-side (npm `latest`, 12 h TTL, silent on failure); absent until a background refresh observes one. */
   readonly latestVersion?: string | undefined
 }
 
@@ -324,12 +295,7 @@ export interface AgentTeamHumanProfileResult {
 export interface AgentTeamEnvironmentRequest {
 }
 
-/**
- * The one of three shapes the page renders. `undetermined` is the answer for
- * every fact this Host cannot establish — an unreadable runtime version, a
- * support range the manifest does not state — and never a guessed verdict; its
- * two causes are not distinguished to the reader, only recorded in `reason`.
- */
+/** `undetermined` answers every fact this Host cannot establish (unreadable runtime version, unstated support range) and is never a guessed verdict; the two causes are indistinguishable to the reader and recorded only in `reason`. */
 export type AgentTeamEnvironmentVerdict = 'ok' | 'out-of-range' | 'undetermined'
 
 /** Declared DSH support line, stated in words by the page rather than as a range string. */
@@ -345,21 +311,14 @@ export interface AgentTeamEnvironmentResult {
   /** Host-side diagnostic behind an `undetermined` verdict; not rendered as user copy. */
   readonly reason?: string | undefined
   readonly bundleVersion?: string | undefined
-  /**
-   * The running DSH version, which is what the page states it is running.
-   * Distinct from `certifiedDshVersion`: one is the environment, the other is
-   * the line this bundle declares support for.
-   */
+  /** The running DSH version the page states it is running; distinct from `certifiedDshVersion`, the line this bundle declares. */
   readonly dshVersion?: string | undefined
   /** Lower bound of the declared range: the certified, actually-tested DSH line. */
   readonly certifiedDshVersion?: string | undefined
   readonly supportRange?: AgentTeamEnvironmentSupportRange | undefined
 }
 
-/**
- * Human profile write: the fields the Client supplies, each one optional and
- * independent of the others.
- */
+/** Human profile write: each Client-supplied field is optional and independent. */
 export interface AgentTeamSetHumanProfileRequest {
   /** New display name; omitted keeps the current one. */
   readonly name?: string | undefined
@@ -418,11 +377,7 @@ export interface AgentTeamReplyRequest {
   readonly body: string
   readonly baseRevision: number
   readonly recipients?: readonly AgentTeamMemberId[]
-  /**
-   * The Message this reply answers. The Host resolves it against the ledger and
-   * refuses a ref that is unknown or belongs to another Thread; the parent's
-   * author then joins the recipients, so answering a Member reaches them.
-   */
+  /** The Message this reply answers. The Host refuses an unknown ref or one from another Thread; the parent's author joins the recipients, so answering a Member reaches them. */
   readonly replyToMessageRef?: AgentTeamMessageRef
   /** Agent-supplied absolute file paths, resolved like sendMessage's. */
   readonly attachmentPaths?: readonly string[] | undefined
@@ -461,20 +416,9 @@ export interface AgentTeamStaleRevision {
   readonly threadRef: AgentTeamThreadRef
   readonly expectedRevision: number
   readonly revision: number
-  /**
-   * How the token the writer used relates to this Thread's revisions, absent
-   * when it was one this Thread really reached — a plain race. `unknown` is a
-   * token from before the Thread's first fact, which may simply have been read
-   * a moment too early; `unrecognized` is a token this Thread's revisions
-   * skipped over, so the writer copied it from another Thread or invented it.
-   */
+  /** How the writer's token relates to this Thread's revisions; absent for a token the Thread really reached (a plain race). `unknown` is a token from before the Thread's first fact (possibly read too early); `unrecognized` is one the Thread's revisions skipped, copied from another Thread or invented. */
   readonly staleTokenKind?: 'unknown' | 'unrecognized'
-  /**
-   * The facts committed inside `(expectedRevision, revision]` — what changed
-   * between the token the writer used and the current one. Same shape as a
-   * Thread read's facts. Absent when the increment carries nothing renderable
-   * or the ledger predates the field.
-   */
+  /** The facts committed inside `(expectedRevision, revision]`, in the shape of a Thread read's facts; absent when the increment carries nothing renderable. */
   readonly facts?: readonly AgentTeamThreadReadFact[]
 }
 
@@ -588,11 +532,7 @@ export interface AgentTeamThreadAttentionRequest {
   readonly action: 'follow' | 'unfollow'
 }
 
-/**
- * Agent-only direct message to one enabled Agent Member in the same
- * Workspace. Delivery is pure injection: the ledger records the send, and the
- * recipient's live session receives the body as a relay-form user message.
- */
+/** Agent-only direct message to one enabled Agent Member in the same Workspace. Pure injection: the ledger records the send and the recipient's live session receives the body as a relay-form user message. */
 export interface AgentTeamDmRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
@@ -658,11 +598,7 @@ export interface AgentTeamInboxRequest {
   readonly limit?: number
 }
 
-/**
- * One person as an Inbox row draws them: the Member id carries the shared
- * identity hue, the handle the initial. A row names who moved a Thread without
- * a per-row Member view, the same way it already carries its Channel's name.
- */
+/** One person as an Inbox row draws them: the Member id carries the identity hue, the handle the initial; a row names who moved a Thread without a per-row Member view. */
 export interface AgentTeamInboxActor {
   readonly memberId: AgentTeamMemberId
   /** Public handle, or the raw Member id when the roster no longer names them. */
@@ -696,12 +632,7 @@ export interface AgentTeamInbox {
   readonly humanMemberId: AgentTeamMemberId
   readonly items: readonly AgentTeamInboxItem[]
   readonly hasMore: boolean
-  /**
-   * Human readers only: the 「最近活跃」 slice — Threads this reader took part in,
-   * newest activity first, at most ten, excluding every Thread the queue above
-   * already carries. Agent readers always receive an empty slice, so the
-   * model-facing Inbox stays exactly the unread queue.
-   */
+  /** Human readers only: the 「最近活跃」 slice, Threads this reader took part in, newest activity first, at most ten, excluding Threads the unread queue carries. Agent readers get an empty slice, so the model-facing Inbox stays exactly the unread queue. */
   readonly recent: readonly AgentTeamInboxItem[]
   readonly totalUnreadCount: number
   readonly totalDirectCount: number
@@ -716,11 +647,7 @@ export interface AgentTeamThreadReadRequest {
 }
 
 export interface AgentTeamThreadReadResult {
-  /**
-   * Receipt of the durable read this response committed; absent when the read
-   * made no progress — an already-read Thread whose watermark did not move —
-   * so no operation was appended and there is nothing to point at.
-   */
+  /** Receipt of the durable read this response committed; absent when the read made no progress (watermark did not move), since no operation was appended. */
   readonly receipt?: AgentTeamOperationReceipt
   readonly task?: AgentTeamTask
   readonly thread: AgentTeamThread
@@ -792,29 +719,14 @@ export interface AgentTeamViewItem {
   readonly task?: AgentTeamTask
   readonly thread: AgentTeamThread
   readonly taskNumber?: number
-  /**
-   * The people still on this item's Task: owners of its live Claims, in claim
-   * order, deduped — the same rule, and the same words, the Inbox row already
-   * uses for the same Task, resolved here because a feed entry draws handles
-   * and has no Member view of its own. Empty on a taskless item, and on a done
-   * or closed one, whose Claims are history that the state word already tells.
-   */
+  /** Owners of this item's Task's live Claims, in claim order, deduped (the Inbox row's rule), resolved here because a feed entry draws handles and has no Member view. Empty on a taskless, done, or closed item. */
   readonly liveClaimOwners: readonly AgentTeamInboxActor[]
   readonly messageCount: number
   /** Instant of the latest fact on this Thread (message or activity), projected from its committing operation. */
   readonly lastActivityAt: string
 }
 
-/**
- * One in-flight Task Thread for the team_view「活跃 task thread」radar: work a
- * reader can see is already claimed and moving, so an unexpected Workspace edit
- * or a Task they were about to pick up resolves to "someone is on this" instead
- * of a mystery. Unlike the Human Inbox's 「最近活跃」 slice, admission is not
- * participation — every active Task Thread in the reader's authorized Channels
- * appears, whether or not they took part — and a Thread still holding unread is
- * not excluded, because this radar answers "who is on what" independently of
- * the reader's own unread queue.
- */
+/** One in-flight Task Thread for the team_view「活跃 task thread」radar: claimed, moving work, so an unexpected edit or a Task a reader was about to pick up resolves to "someone is on this". Unlike the Inbox's 「最近活跃」 slice, admission is not participation: every active Task Thread in the reader's authorized Channels appears, including Threads still holding unread. */
 export interface AgentTeamActiveTaskThread {
   readonly taskRef: AgentTeamTaskRef
   readonly threadRef: AgentTeamThreadRef
@@ -851,25 +763,12 @@ export interface AgentTeamView {
   readonly workspaces: readonly AgentTeamWorkspaceParticipation[]
   readonly channels: readonly AgentTeamChannel[]
   readonly members: readonly AgentTeamChannelMembership[]
-  /**
-   * Catalog of the response's scope: every visible Task, its Thread, its display
-   * ordinal, the live-Claim radar rows and the Claims themselves. With
-   * `includeCatalog` this is the whole request scope; without it, only the Tasks
-   * and Threads this fact page and the named Thread carry.
-   */
+  /** Catalog of the response's scope: visible Tasks, their Threads, ordinals, radar rows, and Claims. With `includeCatalog` this is the whole request scope; otherwise only the Tasks and Threads the fact page and named Thread carry. */
   readonly tasks: readonly AgentTeamTask[]
   readonly threads: readonly AgentTeamThread[]
   readonly taskNumbers: readonly { readonly taskRef: AgentTeamTaskRef; readonly taskNumber: number }[]
   readonly items: readonly AgentTeamViewItem[]
-  /**
-   * The「活跃 task thread」radar: the in_progress / in_review Task Threads of the
-   * response's scope, newest activity first. With `includeCatalog` that is every
-   * such Task Thread in the reader's authorized Channels of this Workspace;
-   * without it, only those the catalog above carries.
-   * Independent of the reader's participation and unread state — its job is to
-   * surface who is already on what, so re-entry and pre-claim/pre-commit checks
-   * do not mistake in-flight work for a conflict.
-   */
+  /** The「活跃 task thread」radar: in_progress / in_review Task Threads of the response's scope, newest activity first. With `includeCatalog` that is every such Thread in the reader's authorized Channels of this Workspace; otherwise only those the catalog carries. Independent of participation and unread state, so re-entry and pre-claim checks do not mistake in-flight work for a conflict. */
   readonly activeTaskThreads: readonly AgentTeamActiveTaskThread[]
   readonly claims: readonly AgentTeamClaim[]
   readonly activities: readonly AgentTeamActivity[]
@@ -890,12 +789,7 @@ export type AgentTeamChangeScope =
   | { readonly kind: 'workspace'; readonly workspaceId: WorkspaceId }
   | { readonly kind: 'channel'; readonly channelRef: AgentTeamChannelRef }
   | { readonly kind: 'thread'; readonly threadRef: AgentTeamThreadRef }
-  /**
-   * Presence-only lifecycle wake (Agent running/idle/failure) with no ledger
-   * commit behind it: members/presence subscribers refresh their rows, while
-   * workspace catalog and scope-less Inbox subscribers stay parked because no
-   * durable projection changed.
-   */
+  /** Presence-only lifecycle wake (Agent running/idle/failure) with no ledger commit: members/presence subscribers refresh, while workspace catalog and scope-less Inbox subscribers stay parked. */
   | { readonly kind: 'presence'; readonly workspaceId: WorkspaceId }
 
 /** Subscribe to lightweight invalidations; each connection starts with a current baseline. */
