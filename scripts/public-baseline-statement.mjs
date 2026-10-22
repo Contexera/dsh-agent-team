@@ -1,12 +1,7 @@
-// The certified-baseline token one public surface states, read as the first
-// inline-code span of the marker's own clause, on the marker's own line.
-//
-// This is the anchor rule the baseline gates apply to the same README sentences,
-// stated once here: the marker is the WHOLE phrase that qualifies the baseline,
-// so prose after it is free while wording inserted inside the marker phrase
-// stops the match. Anchoring on the declaration — rather than searching the line
-// for anything version-shaped — is what keeps a sentence that also names retired
-// baselines ("On DSH `0.1.7-rc.2`, stay on ...") from reporting one of them.
+// The certified-baseline token one public surface states: the first inline-code span of the marker's
+// own clause, on the marker's own line. The marker is the whole phrase that qualifies the baseline, so
+// prose after it is free while words inserted inside it stop the match; anchoring on the declaration
+// keeps a sentence that also names retired baselines from reporting one of them.
 
 /**
  * The baseline stated after `marker` on the marker's own line, or `undefined`

@@ -1,13 +1,5 @@
 /**
- * Whether an idle Member generation is swapped before anything is delivered
- * into it.
- *
- * Ported from raft's `decideWakeRecycle`. Past the provider's prompt-cache TTL
- * a resumed context is rewritten at cache-write prices, so a large enough
- * generation is cheaper to replace than to resume. Every uncertain fact
- * resolves to `resume`: a swap that should not have happened costs a Member
- * its working trail, while a resume that should have swapped costs only
- * tokens.
+ * Whether an idle Member generation is swapped before anything is delivered into it. Past the provider's prompt-cache TTL a resumed context is rewritten at cache-write prices, so a large generation is cheaper to replace than resume. Every uncertain fact resolves to `resume`: a wrongful swap costs the Member its working trail, a wrongful resume only tokens.
  * @module @contexera/dsh-agent-team/wake-recycle
  */
 
@@ -68,7 +60,7 @@ export interface WakeRecycleInput {
   readonly nowMs: number
 }
 
-/** Pure gate ladder, in raft's order; the first failure is the reason. */
+/** Pure gate ladder; the first failing gate is the reason. */
 export function decideWakeRecycle(input: WakeRecycleInput): WakeRecyclePlan {
   const { config, facts } = input
   if (!config.enabled) return { action: 'resume', reason: 'disabled' }
@@ -92,11 +84,7 @@ export interface TransitionIdentity {
   readonly requestId: AgentTeamRequestId
 }
 
-/**
- * Durable identity of one wake swap. Derived from the retired Session alone:
- * the Host may crash between the commit and the activation, and the recovery
- * must converge on the same successor instead of minting a second one.
- */
+/** Durable identity of one wake swap, derived from the retired Session alone so recovery after a crash between commit and activation converges on the same successor. */
 export function wakeRecycleIdentity(previousSessionId: SessionId): TransitionIdentity {
   const digest = createHash('sha256').update(JSON.stringify(['wake-recycle', previousSessionId])).digest('hex')
   return { newSessionId: SessionIdBrand(`agent-team-recycle-${digest}`), requestId: `agent-team:recycle:${digest}` as AgentTeamRequestId }
