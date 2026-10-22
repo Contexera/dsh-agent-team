@@ -1,4 +1,3 @@
-/** One rendered timeline block: a same-sender run or an injected day marker. */
 export type TimelineBlock<T> =
   | { readonly kind: 'run'; readonly items: readonly T[] }
   | { readonly kind: 'day'; readonly label: string }
@@ -6,11 +5,7 @@ export type TimelineBlock<T> =
 /** Same-sender messages at least this many minutes apart count as separate turns. */
 export const RUN_GAP_MINUTES = 5
 
-/**
- * Whether two adjacent same-sender run items are separated by a real waiting
- * gap: only such gaps earn an explicit time divider, while rapid bursts stay
- * merged into one seamless run.
- */
+/** Only a real waiting gap earns a time divider; rapid bursts stay one run. */
 export function isRunGap(previousOccurredAt: string | undefined, occurredAt: string | undefined): boolean {
   if (previousOccurredAt === undefined || occurredAt === undefined) return false
   const previous = Date.parse(previousOccurredAt)
@@ -25,21 +20,13 @@ export function localDateKey(occurredAt: string): string {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
 }
 
-/**
- * Numeric day label matching the message-time convention: MM-DD within the
- * current year, full YYYY-MM-DD across years.
- */
+/** MM-DD within the current year, YYYY-MM-DD across years. */
 export function daySeparatorLabel(occurredAt: string, now = new Date()): string {
   const key = localDateKey(occurredAt)
   return key.startsWith(String(now.getFullYear())) ? key.slice(5) : key
 }
 
-/**
- * Chunk one ordered timeline into same-sender runs, breaking a run at every
- * calendar-day change so identity chrome restarts across days. Items without a
- * wall-clock instant (activities) inherit the preceding message's day and never
- * trigger a boundary; callers interleave activity rows between returned blocks.
- */
+/** Breaks a run at every calendar-day change. Items without a wall-clock instant (activities) inherit the preceding message's day and never trigger a boundary. */
 export function chunkRunsWithDays<T>(items: readonly T[], senderOf: (item: T) => string | undefined, occurredAtOf: (item: T) => string | undefined): readonly TimelineBlock<T>[] {
   const blocks: TimelineBlock<T>[] = []
   let lastDate: string | undefined

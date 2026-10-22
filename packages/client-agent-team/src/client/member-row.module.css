@@ -1,21 +1,12 @@
-/* The shared roster row: one Member's identity, presence and Channel
-   membership. Every surface that draws a person renders this geometry, so the
-   import roster, the Channel editor and the sidebar read as the same list at
-   the same density.
-
-   Its 12px radius is the row tier this app shares with the shipped rail
-   (`.panelRow`, `.newSession`): a row that carries a person or an entity is a
-   list row, whichever surface it lands on. The dense two-line queue rows on the
-   Inbox page are the other dimension and keep 8px. */
+/* The shared roster row: every surface that draws a person renders this geometry. The 12px radius is the row tier shared
+   with the shipped rail (`.panelRow`, `.newSession`); the dense two-line Inbox queue rows keep 8px. */
 
 .row {
   align-items: center;
   border-radius: var(--dsw-radius-md, 12px);
   display: grid;
   gap: 0 10px;
-  /* The action track is declared only when one is rendered, so a row without
-     an action gives its width back to the description instead of reserving a
-     hole. */
+  /* The action track is declared only when rendered, so an actionless row gives its width to the description. */
   grid-template-columns: 34px minmax(0, 1fr);
   min-height: 50px;
   padding: 8px 10px;
@@ -25,7 +16,6 @@
   grid-template-columns: 34px minmax(0, 1fr) auto;
 }
 
-/* The row is a hit target for its action, so it answers the pointer. */
 .row:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
@@ -45,8 +35,6 @@
   white-space: nowrap;
 }
 
-/* The description annotates the handle, never competes with it: one step down
-   in both size and tone. */
 .copy small {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
@@ -56,15 +44,13 @@
   white-space: nowrap;
 }
 
-/* Membership is the row's only control, and it keeps one width in both
-   directions: the label changes between add and remove, the shape does not. */
+/* One width in both directions: the label changes between add and remove, the shape does not. */
 .action {
   justify-self: end;
   min-width: 64px;
 }
 
-/* A failed mutation is announced inside the row it belongs to, under the copy
-   column, so the message never reads as another Member's. */
+/* Announced inside its own row, under the copy column, so it never reads as another Member's. */
 .error {
   color: var(--dsw-alias-state-error-primary);
   font-size: 11px;
@@ -73,8 +59,7 @@
   margin: 2px 0 0;
 }
 
-/* Narrow dialogs cannot afford a third column: the action drops under the
-   identity and aligns with the copy, so the description keeps its width. */
+/* Narrow dialogs drop the action under the identity, aligned with the copy, so the description keeps its width. */
 @media (max-width: 600px) {
   .row,
   .row:has(button) {
