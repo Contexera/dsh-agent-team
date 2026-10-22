@@ -1,11 +1,11 @@
 # CI gate: typecheck + full tests on clean Linux and Windows runners.
 #
 # The environment contract lives in
-# docs/development/environments-and-install.md § "Sandbox and CI environments" — the same six-step contract as the hoplite sandbox setup in
-# .hoplite/settings.json. When the certified harness tag advances, update the
-# DSH_HARNESS_TAG env below, docs/development/environments-and-install.md, and
-# .hoplite/settings.json
-# together; keep the three in sync by hand, there is no generator on purpose.
+# docs/development/environments-and-install.md § "Sandbox and CI environments" — the same contract as
+# scripts/hoplite-setup.sh. When the certified harness tag advances, update the
+# DSH_HARNESS_TAG env below together with the DSH peer ranges and
+# docs/development/environments-and-install.md; `npm run check:versions` gates the
+# match. The Hoplite setup derives its tag from the peer lower bound.
 #
 # Scope guard: one workflow, two jobs (linux + windows). No coverage matrix,
 # no release automation, no test:browser (that stays a local acceptance step).
