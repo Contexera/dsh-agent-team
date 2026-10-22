@@ -9,17 +9,11 @@ import { useEditDialogSave } from './team-dialog-save.ts'
 import createCss from './create.module.css'
 import css from './sidebar.module.css'
 
-/** Model option key inside one editor; opaque and resolved against the loaded groups. */
 function modelKey(provider: string, model: string): string {
   return `${provider}\u0000${model}`
 }
 
-/**
- * Shared Host catalog across the pickers: one in-flight read while pending,
- * last good value afterwards. Revalidation re-reads (a slow Host still
- * refreshes behind already-rendered rows), and a loader that starts throwing
- * keeps serving its last good value rather than blanking every picker.
- */
+/** Shared Host catalog: one in-flight read while pending, last good value afterwards; a loader that starts throwing keeps serving that value. */
 interface ModelCatalogCache {
   inflight?: Promise<RemoteResult<TeamModelCatalog>>
   value?: TeamModelCatalog
@@ -51,11 +45,7 @@ function sharedCatalog(loadModels: TeamSidebarProps['loadModels']): Promise<Remo
   return next
 }
 
-/**
- * Best-effort warm of the shared catalog (the agents panel calls this while
- * the roster loads, so the pickers open with rows instead of paying the
- * first read on open). Failures belong to the picker's own error surface.
- */
+/** Best-effort warm so pickers open with rows; failures belong to the picker's own error surface. */
 export function warmModelCatalog(loadModels: TeamSidebarProps['loadModels']): void {
   try {
     void sharedCatalog(loadModels).catch(() => {
@@ -67,14 +57,8 @@ export function warmModelCatalog(loadModels: TeamSidebarProps['loadModels']): vo
 }
 
 /**
- * Shared provider/model dropdown for the create and edit forms. The option
- * list rides the shared Menu primitive (one leading "follow Host default"
- * row, then non-selectable provider headings) with a capped, internally
- * scrolling card so growing model catalogs cannot stretch the dialog. Mounts
- * open with the warmed value when one exists and revalidate behind it, so a
- * slow Host read delays a refresh — never the picker itself; a refused or
- * failed read with no warmed value renders a retryable error instead of
- * stranding the field on "loading".
+ * Shared provider/model dropdown for the create and edit forms. Mounts open with the warmed value and revalidate behind it;
+ * a refused or failed read with no warmed value renders a retryable error rather than stranding the field on "loading".
  */
 export function ModelPickerField({ model, onModelChange, loadModels, disabled, t }: {
   readonly model: AgentTeamModelSelection | undefined
@@ -94,10 +78,7 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
     try {
       pending = sharedCatalog(loadModels)
     } catch (error) {
-      // A synchronously refused read (an undeclared remote, a dead scope)
-      // used to strand the field on "loading" forever with no diagnostic;
-      // surface it as the same retryable failure an answered refusal gets.
-      // Last good rows stay rendered underneath, matching a refused answer.
+      // A synchronously refused read (an undeclared remote, a dead scope) surfaces as the same retryable failure; last good rows stay rendered.
       setModelsError(error instanceof Error ? error.message : String(error))
       return
     }
@@ -112,9 +93,7 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
         }
       },
       (error: unknown) => {
-        // A rejected read (a transport that died mid-call) previously fell
-        // through as an unhandled rejection behind the same endless loading
-        // line; it retries like any other failure.
+        // A rejected read (a transport that died mid-call) retries like any other failure.
         if (!mounted) return
         setModelsError(error instanceof Error ? error.message : String(error))
       },
@@ -252,10 +231,8 @@ export function AgentEditorDialog({ status, updateMember, loadModels, onCommitte
       memberId,
       handle: normalizedHandle,
       description: normalizedDescription,
-      // Only the model is stated: an absent model would keep the stored
-      // override, so following the Host default has to say `null` explicitly.
-      // Capabilities stay out of the payload — the editor owns no UI for them,
-      // and an absent field now leaves any Remote-written override alone.
+      // An absent model would keep the stored override, so following the Host default must say `null` explicitly.
+      // Capabilities stay out of the payload so a Remote-written override is left alone.
       model: model ?? null,
     }
     await save(previous => previous !== undefined && previous.memberId === payload.memberId

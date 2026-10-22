@@ -33,9 +33,7 @@ interface TeamChannelPanelProps {
   readonly workspaceId: WorkspaceId
   readonly channelRef: AgentTeamChannelRef
   readonly threadRef: AgentTeamThreadRef
-  /** The home Channel's display name, for the head's 讨论 · #name title. */
   readonly channelName: string
-  /** The Human's own display name and avatar, from the shared identity projection. */
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
   readonly humanMemberId?: AgentTeamMemberId | undefined
@@ -76,11 +74,7 @@ type ReadProjection = Awaited<ReturnType<TeamChannelPanelProps['readThread']>> e
   ? Result extends { ok: true; value: infer Value } ? Value : never
   : never
 
-/**
- * A taskless Thread's whole face beside its feed: read, answer, quote, and — when
- * the discussion turns into work — promote. Claims and acceptance stay on the
- * Thread page, which a promoted Thread walks into anyway.
- */
+/** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
 export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
@@ -184,8 +178,6 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
         return next
       })
       if (additions.length === 0) return
-      // Every arrival while the panel is open is acknowledged durably: the
-      // timeline renders it either way.
       await readCurrent(true)
     } catch {
     }
@@ -241,8 +233,6 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
         setHistoryCursor(history.value.cursor)
         setHistoryHasMore(history.value.hasMore)
       } else {
-        // A refused read keeps the way back open: the affordance stands and
-        // pages under its own error surface.
         setHistoryHasMore(true)
       }
       if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
@@ -296,8 +286,6 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
     return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
   }
 
-  // A cited Thread or Task resolves through the Host and jumps to its home
-  // Channel, where it reads whole; a cited Channel hops directly.
   const openRef = useCallback((ref: string): void => {
     if (ref.startsWith('channel:')) {
       if (ref !== channelRef) selectChannel(ref as AgentTeamChannelRef)
@@ -431,7 +419,6 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
     }
   }
 
-  // Editing the draft invalidates one-shot send state.
   const clearSendState = useCallback((): void => {
     setConfirmation(current => current === undefined ? current : undefined)
     setReplyRequestId(current => current === undefined ? current : undefined)
@@ -439,8 +426,7 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
   }, [])
 
   const sendReply = async (): Promise<void> => {
-    // The composer owns the draft subscription, so a captured render value
-    // would be stale after its own edits.
+    // The composer owns the draft subscription; a captured render value would be stale.
     const { draft, recipients } = drafts.getSnapshot(draftKey)
     if (pending || thread === undefined || draft.trim() === '') return
     const id = replyRequestId ?? mintRequestId()
