@@ -1,12 +1,7 @@
 /**
- * Team's own Session projection: the durable ref naming and the fold every Host
- * registers.
+ * Team's Session projection: durable ref naming and the fold every Host registers.
  *
- * Every tool name here is a log decoder, never a tool alias: `context_rollover`, its predecessor
- * `new_context`, and `context_checkpoint` no longer exist as tools, but a
- * Member's Session log written under them still folds — a pending intent parked
- * by an earlier build has to keep decoding so a live generation can finish or
- * discard its swap.
+ * `context_rollover`, `new_context`, and `context_checkpoint` are log decoders only, not tools: existing Session logs still fold so a parked intent can finish or discard its swap.
  * @module @contexera/dsh-agent-team/context-projection
  */
 
@@ -20,16 +15,12 @@ import type { AgentTeamContextCheckpointRef } from './types/entities.ts'
 
 export const CONTEXT_CONTINUITY_PROJECTION_KEY = 'contextContinuity'
 
-/** Decoder name of the retired rollover tool. */
 const CONTEXT_ROLLOVER_TOOL_NAME = 'context_rollover'
 
-/** Decoder name of the retired checkpoint tool. */
 const CONTEXT_CHECKPOINT_TOOL_NAME = 'context_checkpoint'
 
-/** Legacy decoder name of the rollover tool, before it was renamed. */
 const NEW_CONTEXT_TOOL_NAME = 'new_context'
 
-/** Every recorded name a retired rollover call may carry. */
 const TEAM_ROLLOVER_TOOL_NAMES: readonly string[] = [CONTEXT_ROLLOVER_TOOL_NAME, NEW_CONTEXT_TOOL_NAME]
 
 export const TEAM_INBOX_NOTICE_SUMMARY = 'Team Inbox has unread work.'
