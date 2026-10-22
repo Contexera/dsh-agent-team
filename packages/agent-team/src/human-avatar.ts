@@ -5,12 +5,7 @@ import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import { sanitizeFileName, sanitizeMediaType } from './attachments.ts'
 import { HUMAN_AVATAR_MAX_BYTES } from './human-settings.ts'
 
-/**
- * Persistent human avatar store. Layout mirrors the composer attachment
- * cache (`<avatarRef>/` payload plus `meta.json`) but lives under its own
- * root with no TTL sweep: avatar bytes must survive longer than the 72h
- * referenced / 24h orphan windows that bound message attachments.
- */
+/** Persistent human avatar store: `<avatarRef>/` payload plus `meta.json`, with no TTL sweep since avatars outlive message attachments. */
 
 export function humanAvatarsRoot(): string {
   return dshHomePath('agent-team', 'human', 'v1')

@@ -1,29 +1,9 @@
 /**
- * Team Member turn-level clock context.
+ * Team Member turn-level clock context. The first model step of every eligible turn appends a durable, source-attributed snapshot: the current instant in the fixed Team zone (UTC+8), the time elapsed since the preceding model-visible event, and the ordering authority note. Later steps stay quiet unless the turn outlasts the refresh interval, then one snapshot lands per elapsed interval. The snapshot is an observation, never ledger authority: sequence and revision order Team facts.
  *
- * The first model step of every eligible Team Member turn appends one
- * durable, source-attributed clock snapshot: the current instant in the
- * fixed Team coordination zone (UTC+8), the elapsed time since the
- * preceding model-visible event, and the ordering authority note. Later
- * steps of the same turn stay quiet unless the turn runs longer than the
- * refresh interval, in which case one snapshot lands per elapsed interval —
- * a tool-dense turn of quick steps produces exactly one line, while a turn
- * that outlives the interval still shows its real span. The snapshot is an
- * observation, never ledger authority: sequence and revision, not
- * wall-clock time, order Team facts.
+ * The shipped `@deepseek-ai/dsh-time-context` is not mounted: its browser-zone policy asks the model to confirm dates with the user when no unique browser zone exists, which is the normal case for background Member wakes.
  *
- * This plugin deliberately does not mount the shipped
- * `@deepseek-ai/dsh-time-context`: its browser-zone policy asks the model to
- * confirm dates with the user whenever a request carries no unique browser
- * zone, which is the normal case for background Member wakes (Inbox, DM,
- * recovery, continuation). The Team coordination zone is fixed instead. If
- * the harness grows a public non-browser/canonical-zone policy, retire this
- * row in favor of configuring that plugin.
- *
- * State is folded from the Member Session's own events — the same
- * manual-fold pattern the Host's context projection uses — so restart,
- * request reconstruction, and compaction all derive identical baselines
- * without a second durable store.
+ * State is folded from the Member Session's own events, so restart, request reconstruction, and compaction derive identical baselines without a second store.
  * @module @contexera/dsh-agent-team/member-time-context
  */
 
@@ -37,10 +17,7 @@ import { advanceOwnedSessionEventCursor, type OwnedSessionEventCursor, type Sess
 
 export const name = 'wowyuarm-agent-team-member-time-context'
 
-/** This producer's own attribution. `kind` must be producer-owned (Session format
- * V4); the second member is the read-time conversion's rename of this
- * producer's released V3 history (`plugin:` + id, `plugin` key dropped) —
- * read-side only. */
+/** This producer's attribution; `kind` must be producer-owned (Session format V4). The second member is the read-side rename of its released V3 history. */
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'wowyuarm-agent-team-member-time-context': { kind: 'wowyuarm-agent-team-member-time-context' } & ContextFormed
@@ -73,11 +50,7 @@ function emptyBaseline(): ClockBaseline {
   return { lastMessageTime: null, lastInjectionTime: null, lastTurnInjectionTime: null, openTurn: -1 }
 }
 
-/**
- * Fold one session event into the clock baseline. Uninterested events return
- * the same state reference.
- * @internal exported for tests.
- */
+/** Folds one session event into the clock baseline; uninterested events return the same state reference. @internal exported for tests. */
 export function applyClockEvent(state: ClockBaseline, event: { readonly type: string; readonly time: number; readonly data?: unknown }): ClockBaseline {
   switch (event.type) {
     case 'turn/start':
@@ -107,14 +80,7 @@ export function foldClockBaseline(events: readonly { readonly type: string; read
   return state
 }
 
-/**
- * Whether this step should append a clock snapshot: the first step of a turn
- * always does (every wake starts with a fresh instant), and a later step
- * does only when the turn has run longer than the refresh interval since
- * the last landed snapshot. Skipped steps produce nothing and never
- * backfill — their span folds into the next snapshot's elapsed.
- * @internal exported for tests.
- */
+/** Whether this step appends a snapshot: the first step of a turn always does; later steps only when the turn has outlasted the refresh interval since the last snapshot. Skipped steps never backfill; their span folds into the next elapsed. @internal exported for tests. */
 export function shouldSampleClock(step: number, now: number, baseline: ClockBaseline, refreshIntervalMs: number): boolean {
   if (step === 1) return true
   return baseline.lastTurnInjectionTime === null || now - baseline.lastTurnInjectionTime >= refreshIntervalMs
@@ -134,12 +100,7 @@ export function renderClockSnapshot(input: { readonly now: number; readonly turn
     + 'Team collaboration timestamps use UTC+8. Sequence and revision, not wall-clock time, determine ordering and concurrency.'
 }
 
-/**
- * The clock baseline folded incrementally over one Session's own events. A
- * rollover starts a fresh Session log, and the cache below is keyed by Session
- * id, so the fold never guesses elapsed across generations: a missing prior
- * event renders `unavailable`, not a fabricated baseline.
- */
+/** The clock baseline folded incrementally over one Session's own events. The cache is keyed by Session id, so a missing prior event renders `unavailable` rather than a baseline guessed across generations. */
 const CLOCK_FOLD: SessionEventFold<ClockBaseline, SessionEvent> = {
   start: emptyBaseline(),
   step: (state, event) => applyClockEvent(state, event),
@@ -147,16 +108,12 @@ const CLOCK_FOLD: SessionEventFold<ClockBaseline, SessionEvent> = {
 
 export function apply(ctx: Context, config: Config = {}): void {
   const refreshIntervalMs = config.refreshIntervalMs ?? CLOCK_REFRESH_INTERVAL_MS
-  // Per-step fold state, reused for this plugin lifecycle: one entry per
-  // Member, replaced when that Member's Session changes, so a rollover neither
-  // resumes across generations nor retains every generation it leaves behind.
+  // One entry per Member, replaced when its Session changes, so a rollover neither resumes across generations nor retains old ones.
   const cursors = new Map<string, OwnedSessionEventCursor<ClockBaseline>>()
   ctx.on('agent/pre-step', async ({ agent, turn, step, signal }, next): Promise<PreStepDecision> => {
     const decision = await next()
     if (decision.kind === 'reject' || signal.aborted) return decision
-    // The Host service is resolved at step time, never through plugin inject
-    // (same reason as member-context: the row mounts while the Host itself
-    // is still restoring Members).
+    // Resolved at step time, never through plugin inject (see member-context).
     const host = ctx.get('agentTeam')
     if (host === undefined) return decision
     const member = (host as { memberForAgent(subject: unknown): { readonly memberId: string } | undefined }).memberForAgent(agent)
