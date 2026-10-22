@@ -49,8 +49,6 @@ export function firstSentence(detail: string): string {
   const trimmed = detail.trim()
   const end = trimmed.search(/[.。;；]/)
   if (end === -1) return trimmed
-  // A terminator that already ends a sentence stays; a separator the Host used
-  // mid-sentence becomes a full stop.
   return trimmed[end] === '.' || trimmed[end] === '。' ? trimmed.slice(0, end + 1) : `${trimmed.slice(0, end)}.`}
 
 /**
@@ -63,23 +61,19 @@ export function taskStatusDot(status: AgentTeamTask['status']): TeamStateDotStat
   return ({ todo: 'todo', in_progress: 'ongoing', in_review: 'warning', done: 'done', closed: 'quiet' } as const)[status]
 }
 
-/** One-line title snippet derived from the Task's root Message body. */
 export function formatTaskTitle(body: string): string {
   const firstLine = body.split('\n', 1)[0]?.trim() ?? ''
   return firstLine.length > 120 ? `${firstLine.slice(0, 119)}…` : firstLine
 }
 
-/** Deterministic avatar hue for one Member identity; stable across sessions and themes. */
 export function memberHue(memberId: string): number {
   let hash = 0
   for (let index = 0; index < memberId.length; index += 1) hash = (hash * 31 + memberId.charCodeAt(index)) % 360
   return hash
 }
 
-/** One branded-ref occurrence inside a literal body segment. */
 export interface RefSegment {
   readonly text: string
-  /** The full `task:`/`channel:`/`thread:`/`member:` ref when this segment is a link. */
   readonly ref?: string
 }
 
@@ -98,14 +92,7 @@ function canonicalBrandedRef(match: string): string {
   return match.replace('::', ':').toLowerCase()
 }
 
-/**
- * Split a literal text run into plain and branded-ref segments. The pattern
- * anchors on the fixed ref prefixes plus a UUID shape (full or abbreviated),
- * so ordinary prose containing a colon never linkifies; a doubled colon from
- * model output is tolerated. Segment refs are always canonical, so resolution
- * and navigation work regardless of how the ref was spelled; text without any
- * ref comes back as one untouched segment.
- */
+/** Splits a literal run into plain and canonical branded-ref segments; prose colons never linkify. */
 export function splitBrandedRefs(text: string): readonly RefSegment[] {
   const segments: RefSegment[] = []
   let cursor = 0
@@ -134,7 +121,6 @@ export function isSingleBrandedRef(text: string): boolean {
 export interface MentionSegment {
   readonly text: string
   readonly mention: boolean
-  /** Canonical handle of the mentioned Member; present only on mention segments. */
   readonly name?: string
 }
 
@@ -147,15 +133,9 @@ export interface MentionSegment {
  */
 export const HUMAN_MEMBER_ID = 'member:human' as AgentTeamMemberId
 
-/** The Human's handle before they could rename themselves; the Host keeps it as an alias. */
 export const HUMAN_HISTORIC_HANDLE = 'human'
 
-/**
- * Every handle that still addresses the Human reader: the name their profile
- * answers to today, plus the historic handle their older mentions were written
- * with. One spelling for the reader's own identity, so the mention scan and the
- * mention chips cannot disagree about who the reader is.
- */
+/** Every handle that addresses the Human reader, so the mention scan and chips agree on who the reader is. */
 export function humanMentionHandle(humanName: string): MentionHandle {
   return humanName.toLowerCase() === HUMAN_HISTORIC_HANDLE ? humanName : { name: humanName, also: [HUMAN_HISTORIC_HANDLE] }
 }
@@ -186,12 +166,10 @@ export function bodyMentionsHuman(body: string, humanName: string | undefined): 
  */
 export type MentionHandle = string | { readonly name: string; readonly also: readonly string[] }
 
-/** Normalize one mention entry into its printed name and every handle that matches it. */
 function mentionHandlesOf(mention: MentionHandle): { name: string; handles: readonly string[] } {
   return typeof mention === 'string' ? { name: mention, handles: [mention] } : { name: mention.name, handles: [mention.name, ...mention.also] }
 }
 
-/** The printed name of one mention entry; its aliases follow that name, never the body. */
 export function mentionNameOf(mention: MentionHandle): string {
   return typeof mention === 'string' ? mention : mention.name
 }
