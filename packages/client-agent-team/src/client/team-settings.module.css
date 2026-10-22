@@ -1,8 +1,5 @@
-/* The Team settings page: two identity rows, the environment check and the
- * version footnote in one column. Geometry follows the shipped settings page
- * (760px column, 18px heading) and the shipped preference row (16px/0 padding,
- * border-l2 separator, 12px control gap); the controls themselves are the
- * shipped Button/Input atoms, so only their seats are styled here. */
+/* Geometry follows the shipped settings page (760px column, 18px heading) and preference row (16px/0 padding, border-l2
+   separator, 12px control gap); the controls are the shipped Button/Input atoms, so only their seats are styled here. */
 
 .section {
   container-type: inline-size;
@@ -19,9 +16,8 @@
   font-weight: 600;
 }
 
-/* The page names what owns it: the settings nav lists it among the Harness's
- * own pages, where a bare 「团队」 leaves the reader guessing what a change here
- * would move. Shipped rate for a page intro. */
+/* The settings nav lists this page among the Harness's own pages, where a bare 「团队」 leaves the reader guessing what a change
+   would move. Shipped rate for a page intro. */
 .intro {
   margin: 0;
   font-size: 13px;
@@ -73,17 +69,14 @@
   gap: 12px;
 }
 
-/* One line with the 36px Button beside it: the 32px Input atom would sit 4px
- * short of the button it saves. */
+/* One line with the 36px Button beside it: the 32px Input atom would sit 4px short of the button it saves. */
 .nameInput {
   height: 36px;
   width: 200px;
 }
 
-/* The Human's own face, drawn at the identity language's 40px seat: the
- * uploaded bytes when there are any, the business-tinted initial otherwise.
- * The static white is the platform's own white (`--dsw-static-*`), the same
- * pairing every avatar circle uses. */
+/* The Human's face at the identity language's 40px seat. The static white is the platform's own white (`--dsw-static-*`),
+   the pairing every avatar circle uses. */
 .identity {
   border-radius: 50%;
   corner-shape: round;
@@ -158,12 +151,8 @@
   gap: 12px;
 }
 
-/* The settings shell keeps its 188px nav rail at every viewport (shipped
- * `.panel` is `max-width: calc(100vw - 48px)` with a `flex: none` rail), so on a
- * phone the content column is ~100px wide. Rather than let a field and its
- * seats squeeze out of the column, the row stacks and the controls wrap. The
- * section is its own container, so this answers the width it actually gets, not
- * the viewport. */
+/* The settings shell keeps its 188px nav rail at every viewport, so on a phone the content column is ~100px wide; the row
+   stacks and the controls wrap. The section is its own container, so this answers the width it gets, not the viewport's. */
 @container (max-width: 420px) {
   .row {
     align-items: stretch;

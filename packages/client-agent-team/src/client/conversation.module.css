@@ -1,15 +1,8 @@
 .surface {
-  /* The face's own box, and the one place its size is stated: the seat the
-     initial or uploaded avatar occupies, the width the continuation row's time
-     centres in, and the indent the run hairlines hug. 34px is the shipped
-     composer's own primary round action (`InputBar .primary`, 34×34), and sits
-     between the 32px this row carried before and Raft's larger `h-9` face: the
-     same gesture as Raft's, held at the size our own round controls use. It is
-     chrome rather than content: the content axis moves the words beside the
-     face, never the face.
-     It sits on the surface root because the Thread, Channel and Inbox pages all
-     render Message faces under it — a declaration scoped to `[data-team-thread]`
-     left the Channel feed reading the `var()` fallback instead. */
+  /* The face's box and the one place its size is stated: the seat for the initial or uploaded avatar, the width the continuation
+     row's time centres in, and the indent the run hairlines hug. 34px is the shipped composer's primary round action. Chrome,
+     not content: the content axis moves the words beside the face, never the face. Declared on the surface root because
+     Thread, Channel and Inbox all render Message faces under it. */
   --team-identity-seat: 34px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
@@ -17,27 +10,21 @@
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  /* The discussion panel's containing box: the panel is the one child that
-     spans the band and the feed as a single column. */
+  /* The panel is the one child that spans the band and the feed as a single column. */
   position: relative;
 }
 
-/* Header chrome is flush with the pane, not with the reading column: the
-   shipped session header leaks left to a 20px inset while the transcript stays a
-   centred column, so the two deliberately do not share an edge. The 28px right
-   inset is the shipped figure, and it keeps the trailing actions off the pane's
-   edge where a scrollbar already stands. */
+/* Header chrome is flush with the pane, not the reading column: the shipped session header leaks left to a 20px inset. The
+   28px right inset is the shipped figure and keeps actions off a scrollbar. */
 .surfaceHeader {
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   min-width: 0;
   padding: 14px 28px 12px;
 }
 
-/* An open panel owns the right edge, so the band gives up its width: a long
-   description would otherwise run under the seam. Below the breakpoint the
-   panel covers the feed instead of sitting beside it, so the band takes its
-   width back — this override lives here, after the rule it replaces, because a
-   same-specificity copy in another module loses to bundle order. */
+/* An open panel owns the right edge, so the band gives up width or a long description would run under the seam. Below the
+   breakpoint the panel covers the feed and the band takes its width back; this override lives here, after the rule it
+   replaces, because a same-specificity copy in another module loses to bundle order. */
 .surface:has(> [data-team-panel]) .surfaceHeader {
   padding-right: calc(var(--team-panel-width, 460px) + 12px);
 }
@@ -73,11 +60,8 @@
   gap: 6px;
 }
 
-/* The Channel band is one identity row and the tab strip under it, at the
-   shipped session header's own rhythm: 10px top inset, a 30px identity row, the
-   strip's 10px margin, a 16px tab line, and a 9px bottom inset. The band's own
-   12px bottom padding stands down because the strip's inset already places the
-   tabs on the closing rule. */
+/* The shipped session header's rhythm: 10px top inset, 30px identity row, the strip's 10px margin, 16px tab line, 9px bottom
+   inset. The band's 12px bottom padding stands down because the strip's inset already places the tabs on the closing rule. */
 .surfaceHeaderWithTabs {
   padding-top: 10px;
   padding-bottom: 0;
@@ -109,7 +93,6 @@
   min-height: 100%;
   min-width: 0;
 }
-/* Empty and loading states ride the free timeline space instead of the top edge. */
 .emptySurface {
   margin: auto;
   padding: 32px 0;
@@ -124,42 +107,29 @@
   padding: 2px 0 8px;
 }
 
-/* One Message is one row on the reading path — one column for everyone, no
-   per-message surface, no per-message width. The row's own layer appears only
-   while the reader is on it, and only in a Thread's reading seat: the page and
-   the panel read one Thread, so both speak it, and the Channel feed keeps the
-   language its own entry rows own. */
+/* One column for everyone, no per-message surface or width. The row's layer appears only under the reader, and only in a
+   Thread's reading seat (page and panel); the Channel feed keeps the language its entry rows own. */
 .messageRow { align-items: flex-start; display: flex; gap: 10px; padding: 10px 0; position: relative; }
 .messageRow[data-grouped] { padding-top: 2px; }
 .messageRow[data-grouped] .messageIdentity,
 .messageRow[data-grouped] .messageIdentityImage { visibility: hidden; }
-/* The row under the pointer (or holding the caret) gains one flat layer — the
-   shipped interactive fill, the material a hovered list row already uses, at the
-   radius a hovered full-width row already carries (`--dsw-radius-md`, the
-   shipped settings-row selector) — and nothing else: no shadow, no border.
-   The layer answers the pointer, never a click: `:focus-within` would keep a row
-   lit after its own actions were pressed (the button holds focus), so a clicked
-   row would stay shaded until the reader clicked elsewhere. Keyboard readers get
-   the layer from `:has(:focus-visible)` instead — same statement, and it ends
-   when the caret leaves. */
+/* The row under the pointer or caret gains one flat layer (the shipped interactive fill at `--dsw-radius-md`), nothing else.
+   It answers the pointer, never a click: `:focus-within` would keep a row lit after its action button took focus. Keyboard
+   readers get it from `:has(:focus-visible)`, which ends when the caret leaves. */
 [data-team-thread] .messageRow[data-reply-flash] { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
-/* The Message the composer is answering holds that same layer, so the choice
-   stays visible after the pointer leaves and until it is sent or cancelled —
-   the banner names the parent, and this says which row on screen it is. */
+/* The Message the composer is answering holds the same layer until sent or cancelled, showing which row the banner's parent is. */
 [data-team-thread] .messageRow[data-replying-to] { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
 @media (hover: hover) {
   [data-team-thread] .messageRow:hover,
   [data-team-thread] .messageRow:has(:focus-visible) { border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); }
 }
-/* The Message a reader just jumped to: one short pulse of that same layer, which
-   says "here" and then gets out of the way. */
+/* One short pulse of the same layer marks the Message a reader jumped to. */
 @keyframes rowFlash {
   0%, 100% { background-color: transparent; }
   20%, 70% { border-radius: var(--dsw-radius-md); background-color: var(--dsw-alias-interactive-bg-hover); }
 }
 [data-team-thread] .messageRow[data-reply-flash] { animation: rowFlash 1.2s ease-in-out; }
 @media (prefers-reduced-motion: reduce) {
-  /* The pulse is decoration; the layer still lands so the target is marked. */
   [data-team-thread] .messageRow[data-reply-flash] { animation: none; background: var(--dsw-alias-interactive-bg-hover); }
 }
 .messageIdentity {
@@ -178,8 +148,6 @@
 .messageRow[data-human] .messageIdentity {
   background: var(--dsw-alias-state-business-primary);
 }
-/* The Human's uploaded avatar takes the same identity seat as the initial it
-   replaces, cropped to the circle. */
 .messageIdentityImage {
   border-radius: 50%;
   corner-shape: round;
@@ -187,40 +155,21 @@
   height: var(--team-identity-seat, 34px);
   object-fit: cover;
 }
-/* The face rides level with the capitals of the name beside it: its top edge
-   meets the author line's cap height, the way Raft's own avatar meets the
-   `text-sm` line it labels. That height is what fixes this number, and it is a
-   property of our font stack rather than of the row — an inline box carries
-   half-leading above its glyphs, so the author line's capitals begin 5.5px
-   below the box top at the default 13px/20px: 2.5px of half-leading, then the
-   3px between the font's 12px ascent and the 9px cap height. Pinning the face to
-   the box top would float it 5.5px above the name it belongs to. One fixed
-   offset cannot track cap height exactly across the content axis — that height
-   reads 5.5px at 13px/20px, 6.5px at 20px/27px, and 5px at 9px/16px — so this
-   value is set for the default size and the published axis stays within 1.5px
-   of level, exact at 10px. Raft's `mt-0.5` is not the constant to copy: its
-   author line is `leading-none` at 14px/14px, whose capitals already begin 2px
-   down, which is all that 2px ever meant. Keep this paired with the type. */
+/* The face's top edge meets the author line's cap height. That is a property of our font stack, not the row: at the default
+   13px/20px the capitals begin 5.5px below the box top (2.5px half-leading + 3px between the 12px ascent and 9px cap height),
+   so pinning to the box top would float the face above the name. One fixed offset cannot track cap height across the content
+   axis (5.5px at 13/20, 6.5px at 20/27, 5px at 9/16), so this is set for the default size and stays within 1.5px of level.
+   Keep it paired with the type. */
 .messageIdentity,
 .messageIdentityImage {
   margin-top: 5px;
 }
-/* The text column claims the whole track beside the avatar seat, so a long
-   Message may use the full reading width, while `align-items` lets a short one
-   shrink back onto its own content — a four-word reply must not paint a
-   full-width bar. `min-width: 0` keeps an unbroken token from forcing the flex
-   track wider than the column.
-   Shrink-to-fit has a price the caps below pay: a child sized to its own
-   content can be WIDER than this column, and the width it takes then paints
-   past the column's right edge onto the page. A wide Markdown table is exactly
-   that child — the primitive holds a ≥4-column table at its natural width and
-   scrolls it inside `.tableScroll`, whose own `max-width: 100%` resolves
-   against a parent that has already grown to the table, so it caps nothing.
-   Capping the child at the column is what puts the table back inside its own
-   box and lets that box's horizontal bar do the scrolling instead. The shipped
-   chat transcript lifts this exact cap on purpose, by a rule of its own, for
-   its full-width table breakout; this column has no such rule, so the
-   primitive's base containment is the behavior it wants. */
+/* The text column claims the whole track beside the avatar seat; `align-items` lets a short Message shrink back onto its content,
+   and `min-width: 0` keeps an unbroken token from widening the flex track.
+   Shrink-to-fit lets a child be wider than the column and paint past its right edge: a wide Markdown table is held at natural
+   width and its `.tableScroll` `max-width: 100%` resolves against an already-grown parent. Capping the child at the column puts
+   the table back inside its box, whose horizontal bar then scrolls. The shipped transcript lifts this cap for its full-width
+   table breakout; this column has no such rule. */
 .messageBody {
   align-items: flex-start;
   display: flex;
@@ -228,22 +177,14 @@
   flex-direction: column;
   min-width: 0;
 }
-/* The caps this column's children carry are stated at each level of the body
-   chain, because the chain has two shapes: a short body puts `.messageMarkdown`
-   directly under this column, while one long enough to fold gains a
-   `[data-document]` wrapper BETWEEN them (TeamMessage.tsx). A `max-width` is
-   resolved against the box that contains it, so a cap on the Markdown box
-   cannot reach a wrapper that has already been sized — and a cap on the wrapper
-   cannot reach the unwrapped path. Dropping either rule leaves one of the two
-   body shapes painting past the column. */
+/* The caps are stated at each level of the body chain, which has two shapes: a short body puts `.messageMarkdown` directly
+   under the column, a foldable one gains a `[data-document]` wrapper between them (TeamMessage.tsx). A `max-width` resolves
+   against the containing box, so dropping either rule leaves one shape painting past the column. */
 .messageBody > [data-document] {
   max-width: 100%;
 }
-/* Who wrote this Message, and when. It leads the body's own reading path, so
-   the author sits at the same x as the words it introduces, and the name and
-   its instant share one baseline — the `items-baseline` row Raft builds. The
-   face is levelled with this line by its own 5px drop, not by this row growing
-   to the face's height, so the name-to-body rhythm rides the text alone. */
+/* Author and instant share one baseline. The face is levelled with this line by its own drop, not by this row growing, so the
+   name-to-body rhythm rides the text alone. */
 .nameRow {
   align-items: baseline;
   display: flex;
@@ -251,16 +192,10 @@
   gap: 8px;
 }
 
-/* ---- The row's own time ------------------------------------------------ */
-/* A continuation row has no identity line, so its time goes in the avatar seat,
-   on the face's own first line: the time is placed absolutely inside the seat,
-   so revealing a time can never push the text column — the one thing a reader
-   would notice while reading. Because the box neither clips (`overflow` would
-   cut a label rather than move it) nor grows, its label states the time of day
-   alone: an `HH:mm` measures 27.5px of ink in the shipped stack and centres
-   inside the seat, while the dated forms run to 57px within the year and 87px
-   across it and spill evenly to either side rather than being cut. The date is
-   the identity line's and the day separator's; the instant rides this `title`. */
+/* A continuation row has no identity line, so its time goes in the avatar seat, positioned absolutely so revealing it never
+   pushes the text column. The box neither clips nor grows, so the label states time of day only: `HH:mm` measures 27.5px of
+   ink and centres in the seat, while dated forms (57px / 87px) spill evenly to either side. The date belongs to the identity
+   line and day separator; the instant rides this `title`. */
 .gutterTime {
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
@@ -278,34 +213,20 @@
   [data-team-thread] .messageRow:hover .gutterTime,
   [data-team-thread] .messageRow:has(:focus-visible) .gutterTime { opacity: 1; }
 }
-/* Where no pointer can hover, a permanent time on every row would undo the quiet
-   default: the tap that opens the row's actions opens its time with them. */
+/* Where no pointer can hover, the tap that opens the row's actions opens its time too; a permanent time on every row would
+   undo the quiet default. */
 @media (hover: none) {
   [data-team-thread] .messageRow[data-card-open] .gutterTime { opacity: 1; }
 }
 
-/* ---- The row's actions ------------------------------------------------- */
-/* The actions float beside the Message rather than living on it: they are about
-   the row, not part of it, and the reader asks for them only while the row is
-   under the pointer or holds the caret. The card is the only raised surface in a
-   Message row — the row itself stays flat, so one hovered Message gains a layer
-   instead of the whole timeline gaining texture.
-   Its geometry is the shipped small control's own — the same 28px height and
-   `--dsw-radius-sm` the header's 验收 Button renders at (`size="sm"`), which is
-   the control a reader compares it with — and its shadow is the shipped
-   floating-card tier: a Message row never invents a radius, a stroke, or a
-   shadow. It rises clear of the row's own first line (`--team-card-rise`): only
-   the card's lower edge can touch a Message, and never the words. */
-/* How far the actions card rises above its row. The rule is one equation, not a
-   nudge: the card is 28px tall, so the rise is what puts its LOWER edge exactly
-   2px above the row's own content edge — the card then covers no word of the
-   Message it acts on, whatever that Message's first line is. A turn opens with
-   its identity line 10px down, and a continuation row carries no identity line
-   at all, so its content starts 8px higher: the card rises those 8px with it
-   instead of sinking into the words. (Reading the rise as a fixed number is what
-   let the card graze a continuation row's first line.)
-   The first row has no predecessor to give it that room, so its scroll box does:
-   a box padded shorter than the rise clips the card it opens on. */
+/* The actions float beside the Message: they are about the row, not part of it, and appear only under the pointer or caret.
+   The card is the only raised surface in a row. Its geometry is the shipped small control's (28px height, `--dsw-radius-sm`,
+   as the header's 验收 Button at `size="sm"`) with the shipped floating-card shadow tier. It rises clear of the first line
+   (`--team-card-rise`): only its lower edge may touch a Message, never the words. */
+/* The rise is one equation: the card is 28px tall, so the rise puts its lower edge exactly 2px above the row's content edge.
+   A turn opens with its identity line 10px down; a continuation row has none, so its content starts 8px higher and the card
+   rises with it. The first row has no predecessor to give it that room, so its scroll box does: a box padded shorter than the
+   rise clips the card. */
 [data-team-thread] { --team-card-rise: 20px; }
 [data-team-thread] .messageRow[data-grouped] { --team-card-rise: 28px; }
 [data-team-thread] .timeline { padding-top: max(12px, var(--team-card-rise)); }
@@ -387,13 +308,8 @@
   [data-team-thread] .messageRow:has(:focus-visible) .messageCard { opacity: 1; pointer-events: auto; }
 }
 
-/* ---- The quote line ---------------------------------------------------- */
-/* What this Message quotes, in the one reference form the reader already knows
-   from Markdown: a muted rule and the original's own words, leading the Message
-   it belongs to. No panel, no fill, no label — a quote is a pointer at an
-   original, and dressing it as a card would make it compete with the words it
-   introduces. The whole line is the jump target, so a long original is never
-   pasted a second time and the quote can never disagree with its source. */
+/* A quote is a pointer at the original: a muted rule plus the original's words, with no panel, fill or label, since a card
+   would compete with the words it introduces. The whole line is the jump target, so a long original is never pasted twice. */
 .quoteLine {
   align-items: baseline;
   background: none;
@@ -439,20 +355,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The line is a control, so it answers the pointer and the caret the way one
-   does — the rule brightens and the words step up one grade, nothing moves. */
+/* The line is a control: the rule brightens and the words step up one grade, nothing moves. */
 .quoteLine:hover .quoteLineBar { background: var(--dsw-alias-label-secondary); opacity: .8; }
 .quoteLine:hover .quoteLineText { color: var(--dsw-alias-label-secondary); }
 .quoteLine:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 2px;
 }
-/* The sender is the secondary grade of the content axis — one step under the
- * body, 13px/20px at the default content size — so a raised Settings size
- * grows the author with the message instead of leaving the seat header behind.
- * Shipped keeps a label that sits next to content on this same grade
- * (`.hint`, `openError`, a compaction title) and pins only its smallest time
- * grade at a fixed size, which is why the 11px time below stays put. */
+/* The sender is one grade under the body on the content axis, so a raised Settings size grows the author with the message.
+   Shipped pins only its smallest time grade at a fixed size, which is why the 11px time below stays put. */
 .nameRow strong {
   color: var(--dsw-alias-label-primary);
   font-size: var(--dsh-content-font-size-secondary, 13px);
@@ -464,13 +375,8 @@
   font-size: 11px;
   line-height: 20px;
 }
-/* One entry's state, leading the entry row: who is on this work and where it
-   stands. It sits on the reading path the body and the door already share, and
-   at the same x on every entry, instead of trailing the identity line where the
-   reader would have to cross the column for it — and where a continuation row,
-   which carries no identity of its own, would leave it floating alone. Shipped
-   rows lead with their state the same way (a SkillRow's collapsed leading slot,
-   a JobListAction trigger's dot before its count). */
+/* One entry's state leads the entry row at the same x on every entry, rather than trailing the identity line where a
+   continuation row (no identity of its own) would leave it floating. Shipped rows lead with state the same way. */
 .stateCluster {
   align-items: center;
   display: inline-flex;
@@ -482,11 +388,8 @@
   font-size: 11px;
   line-height: 18px;
 }
-/* The entry's one line: state first, then the door. The state sits outside the
-   button, because a labeled button prunes its descendants from the accessibility
-   tree — the owner stack would lose the roster it names — and because the
-   control's name should say exactly what clicking it does. A 390 column can wrap
-   the door under the state rather than push the line past the reading column. */
+/* State first, then the door. The state sits outside the button, because a labeled button prunes its descendants from the
+   accessibility tree and the owner stack would lose the roster it names. A 390 column can wrap the door under the state. */
 .entryLine {
   align-items: center;
   display: flex;
@@ -495,10 +398,8 @@
   margin: 4px 0 0;
   max-width: 100%;
 }
-/* The line sits outside the body column, and a short Message hugs its own
-   content (`align-items`), so the line takes the whole column back: the state has
-   to open the entry at the column's left edge on either side, or the reader
-   loses the one column they scan down the feed. */
+/* The line sits outside the body column and a short Message hugs its content, so the line takes the whole column back: the
+   state must open the entry at the column's left edge. */
 .messageRow .entryLine {
   align-self: stretch;
 }
@@ -527,10 +428,8 @@
 }
 .entryRow:hover .entryArrow,
 .entryRow:focus-visible .entryArrow { transform: translateX(2px); }
-/* Literal human text: the shared MessageText primitive, or segmented mention
-   spans — both need the same pre-wrap metrics from this container. The vertical
-   rhythm comes from the row's padding and this column's gaps, so the block
-   margins collapse to the first/last-child edges only. */
+/* Literal human text: the shared MessageText primitive or segmented mention spans need the same pre-wrap metrics. Vertical
+   rhythm comes from row padding and column gaps, so block margins collapse to first/last-child edges only. */
 .messageText {
   font-size: var(--dsh-content-font-size, 14px);
   line-height: calc(22px + var(--dsh-content-font-delta, 0px));
@@ -538,19 +437,14 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-/* Clamped preview of an over-long body: fixed height with an alpha fade so
-   the cutoff reads as "there is more", not a rendering fault. The mask fades
-   transparency instead of painting a surface color, staying theme-agnostic. */
+/* Clamped preview of an over-long body: fixed height with an alpha mask fade so the cutoff reads as "there is more"; the mask is theme-agnostic. */
 .messageClamp {
   -webkit-mask-image: linear-gradient(#000 72%, transparent 100%);
   mask-image: linear-gradient(#000 72%, transparent 100%);
   max-height: calc(176px + 8 * var(--dsh-content-font-delta, 0px));
   overflow: hidden;
 }
-/* The clamp's expand/collapse toggle: quiet text link under the preview.
-   Block-level and shrink-wrapped so the control owns its line instead of
-   flowing beside a trailing entry row; feedback stays text-scoped — color
-   and underline only, no background box past the characters. */
+/* Block-level and shrink-wrapped so the control owns its line instead of flowing beside a trailing entry row; feedback is colour and underline only. */
 .messageExpand {
   background: transparent;
   border: 0;
@@ -570,22 +464,15 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-/* Compact timeline typography over the shared Markdown primitive; the root
-   font shorthand is reset so Agent and Human bodies share one text grid.
-   Heading sizes are chat-tuned: the page h1 stays the loudest element.
-   Sizes ride the Settings content-font axis the way shipped chat bodies do:
+/* Compact timeline typography over the shared Markdown primitive; the root font shorthand is reset so Agent and Human bodies
+   share one text grid. Heading sizes are chat-tuned so the page h1 stays loudest. Sizes ride the Settings content-font axis:
    the default size and the px delta add back into every number below. */
-/* The second half of the cap stated at `.messageBody`: this one constrains the
-   unwrapped body, where no `[data-document]` wrapper sits between the column and
-   this box. Stated as a descendant so it reaches both chain shapes. */
+/* The second half of the cap stated at `.messageBody`: this constrains the unwrapped body. Stated as a descendant so it reaches both chain shapes. */
 .messageBody .messageMarkdown { font-size: var(--dsh-content-font-size, 14px); line-height: calc(22px + var(--dsh-content-font-delta, 0px)); max-width: 100%; }
-/* Descendant (not child) on .messageBody: the clamp wrapper may sit between
-   them, and a broken reset would let the primitive's own root font shorthand
+/* Descendant on .messageBody: the clamp wrapper may sit between, and a broken reset would let the primitive's root font shorthand
    render the clamped preview larger than the expanded body. */
 .messageBody .messageMarkdown > div:first-child { color: var(--dsw-alias-label-primary); font: inherit; }
-/* The block grid opens and closes flush with this column's edges: a leading
-   `6px` on the first paragraph would read as a gap nobody asked for, and the
-   same at the tail. */
+/* The block grid opens and closes flush with the column's edges; a leading 6px on the first paragraph would read as an unrequested gap. */
 .messageBody .messageMarkdown > div:first-child > :first-child { margin-top: 0; }
 .messageBody .messageMarkdown > div:first-child > :last-child { margin-bottom: 0; }
 .messageBody .messageMarkdown p { margin: 6px 0; }
@@ -596,20 +483,14 @@
 .messageBody .messageMarkdown :where(h1) { font-size: calc(17px + var(--dsh-content-font-delta, 0px)); line-height: calc(26px + var(--dsh-content-font-delta, 0px)); }
 .messageBody .messageMarkdown :where(h2) { font-size: calc(16px + var(--dsh-content-font-delta, 0px)); line-height: calc(24px + var(--dsh-content-font-delta, 0px)); }
 .messageBody .messageMarkdown :where(h3, h4, h5, h6) { font-size: calc(15px + var(--dsh-content-font-delta, 0px)); line-height: calc(22px + var(--dsh-content-font-delta, 0px)); }
-/* A fence rides the Settings code-size axis, not the 13px chat grade alone:
-   the primitive states the block at `--dsw-font-markdown-code-block`, which
-   0.2.1-rc.2 rewrote onto `--dsh-code-font-delta`, so a literal size here would
-   hold the words still while the leading around them grew. The delta is what
-   the axis publishes (setting − 11px), so default 11px still renders 13px. */
+/* A fence rides the Settings code-size axis: the primitive states the block at `--dsw-font-markdown-code-block` (built on
+   `--dsh-code-font-delta`, setting − 11px), so a literal size would hold the words still while leading grew. Default 11px still renders 13px. */
 .messageBody .messageMarkdown pre { margin: 8px 0; padding: 10px 12px; font-size: calc(13px + var(--dsh-code-font-delta, 0px)); }
 .messageBody .messageMarkdown blockquote { margin: 6px 0; }
 .messageBody .messageMarkdown :where(th, td) { padding-block: 5px; }
-/* Past the fold threshold the body is a document, not a chat line: the
-   wrapper carries `data-document` and this rhythm replaces the chat-tuned
-   one above — the shipped markdown block grid (16px blocks, 6px list items,
-   24px lines) with section headings held one notch tighter than the document
-   sheet. The same deterministic >600-character rule drives the fold, so every
-   surface calls the same body a document without new state. */
+/* Past the fold threshold the body is a document: the wrapper carries `data-document` and this rhythm (the shipped markdown
+   block grid: 16px blocks, 6px list items, 24px lines, headings one notch tighter) replaces the chat-tuned one. The same
+   >600-character rule drives the fold. */
 .messageBody [data-document] .messageMarkdown { line-height: calc(24px + var(--dsh-content-font-delta, 0px)); }
 .messageBody [data-document] .messageMarkdown p { margin: 16px 0; }
 .messageBody [data-document] .messageMarkdown :where(ul, ol) { margin: 16px 0; }
@@ -649,8 +530,6 @@
   width: 8px;
 }
 
-/* An inline failure line stays in the content column, under the rows it
-   belongs to. */
 .error {
   color: var(--dsw-alias-state-error-primary);
   font-size: 12px;
@@ -659,9 +538,7 @@
   max-width: 880px;
   padding-top: 6px;
 }
-/* A failure that replaces the whole surface rides the same free space as the
-   loading and empty surfaces it stands in for, instead of hugging the top
-   edge: `margin: auto` also takes the box off stretch and centers it. */
+/* A failure that replaces the whole surface rides the same free space as the loading and empty surfaces; `margin: auto` also takes the box off stretch and centres it. */
 .errorState {
   align-items: center;
   color: var(--dsw-alias-state-error-primary);
@@ -726,24 +603,17 @@
   .entryRow:focus-visible .entryArrow { transform: none; }
 }
 
-/* One run = one same-sender reply turn (message + its Thread gate). It is a
-   pure grouping block: no hover border or fill — block boundaries are carried
-   by the turn divider, day anchors, and the unread line instead. The 2px
-   vertical gap keeps adjacent runs visually separate. */
+/* One run is one same-sender reply turn: a pure grouping block with no hover border or fill (boundaries come from the turn
+   divider, day anchors and unread line). The 2px gap keeps adjacent runs separate. */
 .messageRun {
   margin: 2px 0;
   padding: 3px 0;
 }
 
-/* Inside one run, consecutive messages that carry their own Thread entry get a
-   hairline separator; plain same-sender continuations stay seamless. The entry
-   line is identified by its own data attribute rather than by any button in the
-   body, so neither the expand/collapse control nor a Task ref link rendered
-   inside a body can read as an entry boundary.
-   The line hugs the text column — inset past the hidden avatar (the identity
-   seat + 10px gap, level with the run divider label) and flush with the body's
-   right edge — because it separates entries inside a run; structural boundaries
-   (turn divider, day anchor, unread line) stay full-width. */
+/* Consecutive messages in a run that carry their own Thread entry get a hairline; plain continuations stay seamless. The entry
+   is identified by its own data attribute, not a button, so neither the expand control nor a Task ref link in a body reads as
+   an entry boundary. The line hugs the text column (identity seat + 10px gap, past the hidden avatar) because it separates
+   entries inside a run; structural boundaries stay full-width. */
 .messageRow[data-grouped]:has([data-thread-entry]) {
   margin-top: 3px;
   padding-top: 7px;
@@ -758,22 +628,14 @@
   position: absolute;
 }
 
-/* Turn divider inside one run: same-sender messages separated by a real
-   waiting gap (isRunGap) are separate turns — the hairline restores their
-   block boundary and the label below it shows the later message's instant,
-   which the suppressed identity chrome would have carried. The line hugs the
-   text column (identity seat + the row's 10px gap — derived, so a face resize
-   moves it), the same geometry as the task-chip hairline: run-level boundaries
-   inset, structural ones (day anchor, unread line) full-width with centered
-   labels. The divider replaces the following row's own chip hairline so the
-   lines never stack. The line stays on border-l2 — the standard structural
-   hairline level; l3 is the focus/attention tier and an always-on divider must
-   not outrank page chrome. */
+/* Turn divider: same-sender messages separated by a real waiting gap (isRunGap) are separate turns, so the hairline restores
+   their block boundary and the label shows the later message's instant. The line hugs the text column (identity seat + 10px
+   gap, derived so a face resize moves it), as the task-chip hairline does; structural boundaries (day anchor, unread line) are
+   full-width. It replaces the following row's chip hairline so lines never stack. It stays on border-l2: l3 is the focus tier
+   and an always-on divider must not outrank page chrome. */
 .runDivider {
   border-top: 1px solid var(--dsw-alias-border-l2);
-  /* The hairline hugs the text column (identity seat + gap 10px) and states no
-     instant of its own: the row it separates states its time under the
-     pointer, so one line is a line and never a second time. */
+  /* Hugs the text column and states no instant of its own: the row it separates states its time under the pointer. */
   margin: 2px 0 0 calc(var(--team-identity-seat, 34px) + 10px);
 }
 .runDivider + .messageRow[data-grouped]:has([data-thread-entry]) {
@@ -784,8 +646,7 @@
   content: none;
 }
 
-/* Mention chip for @Member references in Human literal messages, and for the
-   structured mention fallback row present on every message kind. */
+/* Mention chip for @Member references in Human literal messages and the structured mention fallback row. */
 .mention {
   background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
   border-radius: var(--dsw-radius-sm, 6px);
@@ -794,17 +655,14 @@
   font-weight: 500;
   padding: 0 4px;
 }
-/* The reader's own handle is the one chip they need to find without reading:
-   every other chip stays business, so a second family is what separates "this
-   one is you" from "someone was named". Success carries "for you" without the
-   alarm of the error and warn families, which mean a failure and a caution. */
+/* The reader's own handle is the one chip to find without reading, so it takes a second family (success: "for you" without
+   the alarm of the error and warn families). */
 .mention[data-mention-human] {
   background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
   color: var(--dsw-alias-state-success-primary);
 }
 
-/* Trailing row for structured mentions that the body text does not carry:
-   names omitted by the sender and all chips of Markdown agent bodies. */
+/* Structured mentions the body text does not carry: names the sender omitted and all chips of Markdown agent bodies. */
 .mentionsRow {
   display: flex;
   font-size: 0.85em;
@@ -813,8 +671,7 @@
   width: fit-content;
 }
 
-/* Attachment strip under one message body: thumbnails open the large view,
-   chips carry name + size, and GC'd bytes degrade to a name-only chip. */
+/* Thumbnails open the large view; chips carry name + size; GC'd bytes degrade to a name-only chip. */
 .attachmentStrip {
   display: flex;
   flex-wrap: wrap;
@@ -873,8 +730,7 @@
   outline-offset: 1px;
 }
 
-/* The shared dialog card is form-sized (380px); the image preview needs a
-   wide card so the zoomed screenshot stays readable. */
+/* The shared dialog card is form-sized (380px); the image preview needs a wide card. */
 .attachmentModal {
   width: min(1100px, 92vw);
 }

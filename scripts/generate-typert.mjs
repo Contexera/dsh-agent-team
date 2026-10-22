@@ -25,32 +25,14 @@ try {
     },
   }))
   await mkdir(join(tempPackage, 'node_modules'), { recursive: true })
-  // Resolve zod once through the real node_modules chain and LINK it into the
-  // temp analysis package: a symlink on POSIX, a directory junction on Windows,
-  // where a real symlink needs a privilege the runner may not have
-  // (link-harness-packages.mjs uses junctions for the same reason). Either form
-  // leaves zod's real path in this repository's install, OUTSIDE the analysed
-  // package, which is what the analyzer's reachable-files walk assumes.
-  //
-  // A copy is not equivalent, however tempting: zod's declarations then sit
-  // under the analysed root, and resolving `index.d.cts`'s own
-  // `./v4/classic/external.cjs` inside that copy reaches a declaration file the
-  // program never loaded, which the walk queues as undefined and dies on —
-  // a TypeError instead of a diagnosable error.
-  //
-  // The chain is this repository's own root install: the analysis package sits
-  // inside the harness checkout, where nothing provides zod, and `zod` is a
-  // dependency of the single root manifest. A per-package
-  // `packages/agent-team/node_modules` is NOT a resolution path any more — the
-  // workspace has one root package, so a clean install never creates it and the
-  // stale directory on a long-lived checkout must not be the only reason the
-  // build works.
-  // LINK one root-install dependency into the temp analysis package: a
-  // symlink on POSIX, a directory junction on Windows, where a real symlink
-  // needs a privilege the runner may not have (link-harness-packages.mjs uses
-  // junctions for the same reason). Either form leaves the package's real path
-  // in this repository's install, OUTSIDE the analysed package, which is what
-  // the analyzer's reachable-files walk assumes.
+  // LINK root-install dependencies into the temp analysis package (symlink on POSIX, directory junction on
+  // Windows, where a real symlink needs a privilege the runner may not have; link-harness-packages.mjs does
+  // the same). The real path must stay in this repository's install, OUTSIDE the analysed package, as the
+  // analyzer's reachable-files walk assumes: a copy puts zod's declarations under the analysed root, where
+  // resolving `index.d.cts`'s `./v4/classic/external.cjs` reaches a declaration file the program never
+  // loaded and the walk dies with a TypeError.
+  // The source is the root install because the analysis package sits inside the harness checkout, where
+  // nothing provides zod; there is no per-package `packages/agent-team/node_modules` resolution path.
   const linkRootDependency = async (name) => {
     const source = join(projectRoot, 'node_modules', name)
     if (!existsSync(source)) {
@@ -67,8 +49,7 @@ try {
     }
   }
   await linkRootDependency('zod')
-  // The Host face's second root-install dependency: the legacy settings
-  // document parse rides the same chain, for the same reasons as zod above.
+  // The legacy settings document parse resolves `yaml` through the same chain as zod.
   await linkRootDependency('yaml')
   await writeFile(join(tempPackage, 'tsconfig.json'), JSON.stringify({
     extends: '../../tsconfig.base.json',

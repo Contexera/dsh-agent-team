@@ -16,9 +16,7 @@ const test = join(harness, 'apps/web/tests/__external-agent-team.e2e.ts')
 const quote = value => value.replaceAll('\\', '\\\\').replaceAll("'", "\\'")
 
 const run = (command, args, cwd) => new Promise((resolveRun, reject) => {
-  // On Windows, bare-name spawns of pnpm shims (.cmd) fail with ENOENT and
-  // Node 22+ also refuses shell-less .cmd spawns (EINVAL) — route through
-  // cmd.exe with the full argument string quoted.
+  // Windows: bare-name pnpm shim spawns fail (.cmd ENOENT, and Node 22+ refuses shell-less .cmd spawns), so go through cmd.exe with the argument string quoted.
   const child = process.platform === 'win32'
     ? spawn(`${command} ${args.join(' ')}`, { cwd, stdio: 'inherit', env: process.env, shell: true })
     : spawn(command, args, { cwd, stdio: 'inherit', env: process.env })

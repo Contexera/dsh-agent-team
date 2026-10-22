@@ -1,33 +1,11 @@
-// Mechanical gate for the certified-version consistency rule.
-//
-// The certified DSH baseline is written in many places: the CI tag, the setup
-// script tag, the development guide, the READMEs, the architecture doc, the
-// compatibility doc, and the bug-report placeholder — each in both languages
-// where a pair exists. Humans advance those spots one by one and forget one
-// silently; this script reads them all back and refuses a split baseline.
-//
-// It asserts two lane-agnostic facts, never a hardcoded version, so both the
-// blocking lane and the alpha lane pass unchanged:
-// (a) every named spot states the same certified version (the `dsh-v` prefix
-//     the machine files carry is normalized away), and
-// (b) that version is the lower bound of every `@deepseek-ai/dsh-*`
-//     peer range in the root manifest — the line we certify is the
-//     line users can install.
-// The bug-report placeholder also names our own plugin version, which must
-// equal the root manifest version. Both READMEs must name the released plugin
-// version in the install command (c), and both languages of the compatibility
-// doc must restate the declared peer line as the manifest declares it (d) — a
-// sentence that drifted silently until it was gated.
-//
-// Deliberately excluded: CHANGELOG (history), `.scratch/` (work history), the
-// history paragraphs inside the compatibility doc (only its baseline sentence
-// is read), and the vendored sqlite fork pin (intentionally off-baseline).
-//
-// It deliberately runs standalone — no Harness checkout, no Vitest config — so
-// a version-touching change can be checked in a second:
-// `npm run check:versions`, which is also part of `npm test`.
-// `--root <dir>` points the same checks at another tree (used to run the gate
-// against the extracted alpha lane without switching branches).
+// Mechanical gate for the certified-version consistency rule: every place that states the certified DSH baseline must agree.
+// It asserts these facts without a hardcoded version, so the blocking and alpha lanes both pass:
+// (a) every named spot states the same version (the `dsh-v` prefix of the machine files is normalized away);
+// (b) that version is the lower bound of every `@deepseek-ai/dsh-*` peer range in the root manifest;
+// (c) both READMEs name the released plugin version in the install command, and the bug-report placeholder's plugin version equals the root manifest version;
+// (d) both languages of the compatibility doc restate the declared peer line.
+// Excluded: CHANGELOG, `.scratch/`, the compatibility doc's history paragraphs (only its baseline sentence is read), and the vendored sqlite fork pin (intentionally off-baseline).
+// Runs standalone: `npm run check:versions` (also part of `npm test`); `--root <dir>` checks another tree.
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,18 +33,11 @@ const failures = []
 // The tag spots carry the `dsh-v` prefix the prose spots omit.
 const normalize = (version) => version.replace(/^dsh-v/u, '')
 
-// (a) Every named spot states the same certified version. Each pattern anchors
-// on the sentence that declares the current baseline — a marker word, then the
-// backticked token, tolerating prose between them on the same line but never
-// across another inline-code span, and never requiring prose after the token.
-// The marker is the WHOLE phrase or clause that qualifies the baseline: a token
-// carrying its own `dsh-v` needs no `DSH` after the marker, and
-// `minimum compatible DSH version is` is marker from `minimum` to `is`. Only
-// prose after the marker is free; words inserted inside it stop the match,
-// which is the accepted cost of anchoring on the declaration. An adjacency-only
-// pattern reads a sentence rewrite as a version change (the 2026-10-06 Chinese
-// rewrite did exactly that), while dropping the marker would let history
-// paragraphs that mention older versions participate.
+// (a) Each pattern anchors on the sentence that declares the current baseline: a marker phrase, then the
+// backticked token, tolerating prose between them on the same line but never across another inline-code span.
+// The marker is the whole qualifying phrase (`minimum compatible DSH version is`); words inserted inside it
+// stop the match. An adjacency-only pattern reads a sentence rewrite as a version change, while dropping
+// the marker would let history paragraphs that mention older versions participate.
 const spots = [
   { file: '.github/workflows/ci.yml', pattern: /DSH_HARNESS_TAG:\s*dsh-v(\S+)/u },
   { file: '.hoplite/settings.json', pattern: /HARNESS_TAG=\\"dsh-v([^\\]+)\\"/u },
