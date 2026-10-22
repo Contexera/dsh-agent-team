@@ -8,13 +8,7 @@ import { TeamAgentsPanel } from './TeamAgentsPanel.tsx'
 import { TeamChannelsPanel } from './TeamChannelsPanel.tsx'
 import css from './sidebar.module.css'
 
-/**
- * Inbox totals per Workspace, carrying the last good value across failed
- * refreshes: a read that did not land must never fold into zero and read as
- * "no unread". Recovery overwrites the kept value — a failure freezes nothing —
- * and the read layer's per-key failed counter is where the failure stays
- * inspectable; the badge gains no new visual state for it.
- */
+/** A failed read keeps the last good total: it must never fold into zero and read as "no unread". Recovery overwrites the kept value. */
 function mergeInboxTotals(
   results: readonly { readonly workspaceId: string; readonly result: RemoteResult<AgentTeamInbox> }[],
   previous: ReadonlyMap<string, number>,
@@ -29,12 +23,8 @@ function mergeInboxTotals(
 type SidebarSection = 'channels' | 'agents'
 
 /**
- * The Inbox entry's icon with its unread mark. The quantity left this surface
- * and lives in the control's accessible name: the sidebar answers whether
- * anything is waiting at a glance, and the number — which moves on every fact —
- * is what a reader asks for on purpose. The mark hangs off the icon rather than
- * off the control, so the wide card and the 36px rail button put the same dot
- * on the same corner of the same glyph.
+ * The quantity lives in the control's accessible name. The mark hangs off the icon so the wide card and the 36px rail
+ * button put the same dot on the same corner.
  */
 function InboxMark({ unread }: { readonly unread: number }) {
   return <span className={css.inboxMark}>
@@ -49,14 +39,9 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   const selected = navigationState.workspaceId
   const selectedExists = selected !== undefined && workspaces.some(workspace => workspace.workspaceId === selected)
   const selectedId = selectedExists ? selected : workspaces[0]?.workspaceId
-  // Exactly one sidebar row carries aria-current='page': the open Channel while
-  // one is set, the selected Agent card while a Member Session view is open,
-  // otherwise the browsed Workspace's overview. The selected row keeps its
-  // quiet folder tint (data-selected) in every case. The mention-Inbox card
-  // takes the marker while the Inbox page stands, and stands down while the
-  // embedded Member Session covers that page: the Inbox stays the remembered
-  // face underneath — closing the overlay returns to it, marker included —
-  // but the card is not a second current page while an Agent holds the seat.
+  // Exactly one sidebar row carries aria-current='page': the open Channel, else the selected Agent card while a Member Session
+  // view is open, else the Workspace overview. The Inbox card takes the marker while the Inbox page stands, but not while an
+  // embedded Member Session covers it (the Inbox stays the remembered face underneath).
   const overviewIsCurrent = navigationState.channelRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true
   const inboxIsCurrent = navigationState.inbox === true && navigationState.memberSessionId === undefined
   const [creatingAgents, setCreatingAgents] = useState<readonly AgentTeamAddMemberRequest[]>([])
@@ -64,18 +49,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   const [pendingSection, setPendingSection] = useState<SidebarSection>()
   const channelsRef = useRef<HTMLDivElement>(null)
   const agentsRef = useRef<HTMLDivElement>(null)
-  // The cross-Workspace Inbox badge: one scope-less subscription while the
-  // Team sidebar stands; every wake re-pulls each Workspace's unread total
-  // (limit 1 — totals cover every row, never the list). Same-burst wakes
-  // coalesce behind a short debounce; the number is whatever the Host's whole
-  // unread slice returns, mentions included rather than alone.
+  // One scope-less subscription re-pulls each Workspace's unread total (limit 1) on every wake; same-burst wakes coalesce behind a short debounce.
   const [inboxTotal, setInboxTotal] = useState(0)
-  // The last successful total per Workspace, kept across failed refreshes so
-  // the badge never folds an unread read into zero.
+  // Kept across failed refreshes so the badge never folds an unread read into zero.
   const keptTotalsRef = useRef(new Map<string, number>())
-  // One name for both entries: what the control is, and how much waits behind
-  // it. The rail repeats it as its hover hint, which is the only place a reader
-  // still meets the quantity without opening the page.
+  // The rail repeats it as the hover hint, the only place a reader meets the quantity without opening the page.
   const inboxLabel = inboxTotal > 0 ? t('inboxTitleWithCount', { count: inboxTotal }) : t('inboxTitle')
   useEffect(() => {
     let disposed = false
@@ -98,9 +76,7 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
     const unsubscribe = subscribeChanges(undefined, update => {
       if (update.type === 'changed') schedule()
     })
-    // A durable Thread read consumes this reader's mention markers without a
-    // changes wake (reads change no shared projection), so the badge also
-    // refreshes from every completed read.
+    // Reads change no shared projection, so no changes wake fires; refresh the badge from every completed read.
     const unsubscribeReads = subscribeReads(schedule)
     return () => {
       disposed = true
@@ -152,22 +128,14 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   }
 
   return <section className={css.workspaceBrowser} aria-label={t('workspaces')}>
-    {/* The way back to the conversation takes over the New Session bar's slot:
-        the mode hides that bar, so this row stands where the reader met it —
-        directly under the shell's brand row — in the same 38px slab, with its
-        label centred and the chevron hanging off the label's leading edge.
-        The seat is the closest a Team control can legally stand to the
-        brand row, which is itself either that bar's button or a window-drag
-        surface with an aria-hidden mark. */}
+    {/* Takes the New Session bar's slot, which the mode hides: directly under the shell's brand row in the same 38px slab. */}
     <button type="button" className={css.leaveCard} aria-label={t('backToConversations')} data-team-action="leave" onClick={leaveTeam}>
       <span className={css.leaveCardGroup}>
         <IconChevronLeftOutlineMedium size={14} className={css.leaveCardGlyph} />
         <span className={css.leaveCardLabel}>{t('backToConversations')}</span>
       </span>
     </button>
-    {/* The Inbox is the one destination that crosses Workspaces — its total sums
-        every one of them — so it stands above the selector rather than inside
-        the scope that selector names. */}
+    {/* The Inbox crosses Workspaces, so it stands above the selector rather than inside its scope. */}
     <button type="button" className={css.inboxCard} aria-label={inboxLabel} aria-current={inboxIsCurrent ? 'page' : undefined} onClick={selectInbox}>
       <InboxMark unread={inboxTotal} />
       <span className={css.inboxCardLabel}>{t('inboxTitle')}</span>
