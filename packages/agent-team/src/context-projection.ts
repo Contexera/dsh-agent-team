@@ -26,7 +26,7 @@ const CONTEXT_ROLLOVER_TOOL_NAME = 'context_rollover'
 /** Decoder name of the retired checkpoint tool. */
 const CONTEXT_CHECKPOINT_TOOL_NAME = 'context_checkpoint'
 
-/** Legacy decoder name of the rollover tool, before it was renamed. */
+/** Alternate decoder name of the retired rollover tool. */
 const NEW_CONTEXT_TOOL_NAME = 'new_context'
 
 /** Every recorded name a retired rollover call may carry. */
