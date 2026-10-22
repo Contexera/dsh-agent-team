@@ -152,6 +152,16 @@ function textResponse(text: string): StreamChunk[] {
   ]
 }
 
+/**
+ * The swap commits its new binding before it archives the retired Session, so
+ * `members()` reports the new binding while the archive is still in flight.
+ */
+function waitForArchive(ctx: Context, sessionId: SessionId): Promise<void> {
+  return vi.waitFor(() => {
+    if (!ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)) throw new Error(`Session '${sessionId}' is not archived yet`)
+  }, { timeout: 20_000 })
+}
+
 function waitForIdle(ctx: Context, agent: NonNullable<ReturnType<Context['agents']['get']>>): Promise<void> {
   if (agent.status === 'idle') return Promise.resolve()
   return new Promise(resolve => {
@@ -3081,7 +3091,7 @@ describe('Agent Team wake-slot generation swap (ticket 05)', () => {
         return current.member.sessionId
       }, { timeout: 20_000 })
       // The retired log is archived, never deleted, and the binding moved.
-      expect(ctx.workspaceRegistry.archivedSessionIds).toContain(sessionId)
+      await waitForArchive(ctx, sessionId)
       // Availability flips to active only once the successor's Agent is live;
       // reading it immediately after the binding moved sees the window in
       // between, so wait for the settled value instead of a one-shot read.
@@ -3203,7 +3213,7 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState, presets, archived } = await realHarness(adapter)
+      const { ctx, workspaceId, pressureState, presets } = await realHarness(adapter)
       const channel = await ctx.agentTeam.createChannel({ requestId: requestId('post-commit-channel'), workspaceId, name: 'engineering', description: 'Engineering work' })
       const added = await ctx.agentTeam.addMember({ requestId: requestId('post-commit-builder'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
       const memberId = added.status.member.memberId
@@ -3229,7 +3239,7 @@ describe('Agent Team wake-slot swap safety (ticket 05)', () => {
         return current
       }, { timeout: 20_000 })
       const successor = stranded.member.sessionId
-      expect(archived).toContain(sessionId)
+      await waitForArchive(ctx, sessionId)
       expect(ctx.agents.get(sessionId)).toBeUndefined()
 
       // The next thing that needs this Member finishes the recorded transition
@@ -3529,7 +3539,7 @@ describe('Agent Team wake-slot swap input across the commit (ticket 05)', () => 
         return current
       }, { timeout: 20_000 })
       const successor = stranded.member.sessionId
-      expect(archived).toContain(sessionId)
+      await waitForArchive(ctx, sessionId)
       expect(ctx.agents.get(sessionId)).toBeUndefined()
       expect(ctx.agents.get(successor)).toBeUndefined()
       expect(adapter.requests.filter(request => request.sessionId === successor)).toHaveLength(0)
@@ -3700,7 +3710,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
       const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId, pressureState, archived } = await realHarness(adapter)
+      const { ctx, workspaceId, pressureState } = await realHarness(adapter)
       const added = await ctx.agentTeam.addMember({ requestId: requestId('resume-wake-add'), workspaceId, handle: 'builder', description: 'Builds changes', presetId: 'team-member', channelRefs: [] })
       const memberId = added.status.member.memberId
       const sessionId = added.status.member.sessionId
@@ -3725,7 +3735,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       }, { timeout: 20_000 })
       expect(String(successor)).toMatch(/^agent-team-recycle-[0-9a-f]{64}$/)
       expect(ctx.agents.get(successor)).toBeDefined()
-      expect(archived).toContain(sessionId)
+      await waitForArchive(ctx, sessionId)
       expect(resumed.status.member.sessionId).toBe(sessionId)
     } finally {
       vi.useRealTimers()
