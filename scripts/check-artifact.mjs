@@ -1,27 +1,12 @@
-// Mechanical gate for the publish artifact: what `npm pack` would ship, checked
-// before anything is published.
-//
-// The repository works locally because every file is present, but the tarball
-// only carries what `package.json`'s `files` allowlist (plus npm's always-
-// included set) selects. A runtime file outside that set, or a stray `.ts`, is
-// invisible to every local check and breaks installed users only. This script
-// reads back the real pack list and asserts three things no other check sees:
-//
+// Gate for the publish artifact: what `npm pack` would ship. The tarball only carries
+// what `package.json`'s `files` allowlist (plus npm's always-included set) selects, so a
+// runtime file outside it, or a stray `.ts`, breaks installed users only. Asserts:
 //   1. no stray `.ts`/`.tsx` sources (published `.d.ts` declarations are fine);
-//   2. the mandatory manifests (`package.json` and, for this Cordis bundle,
-//      `cordis.patch.yml`) are present;
-//   3. every runtime relative import resolves to a file that is actually in the
-//      tarball — the failure a `files` allowlist produces when it stops covering
-//      a module the entry points load.
+//   2. the mandatory manifests (`package.json`, `cordis.patch.yml`) are present;
+//   3. every runtime relative import resolves to a file in the tarball.
 //
-// Run it AFTER `npm run build`: it packs with `--ignore-scripts`, so it
-// validates the `lib/` that is on disk, which is what a real publish would ship.
-//
-// The idea is adapted from the artifact-validation step of
-// `oh-my-dsh/dsh-plugin-upgrade-skill` (MIT, `skills/plugin-release`); this
-// implementation is ours and is verified against this repository, including
-// negative controls (dropping `cordis.patch.yml` from `files`, adding a stray
-// `.ts`, and narrowing the `lib/**` glob each turn it red).
+// Run AFTER `npm run build`: it packs with `--ignore-scripts`, so it validates the `lib/`
+// on disk.
 //
 // Usage:  npm run check:artifact      (or: node scripts/check-artifact.mjs [repoRoot])
 // Exit:   0 = the artifact is complete and clean, 1 = it would ship broken.
@@ -32,7 +17,6 @@ import { dirname, join, normalize } from 'node:path'
 const repoRoot = process.argv.slice(2).find(arg => !arg.startsWith('--')) ?? process.cwd()
 const failures = []
 
-// ---- 1. Capture what npm would actually pack --------------------------------
 // npm prints the notice block to STDERR, so the two streams must be merged —
 // piping stdout alone yields just the tarball filename. `--loglevel=notice` is
 // forced because npm exports its own loglevel to child processes: invoked from a
@@ -72,7 +56,6 @@ if (shipped.size === 0) {
   process.exit(1)
 }
 
-// ---- 2. No stray TypeScript sources ----------------------------------------
 // `.d.ts` / `.d.ts.map` are legitimate published declarations; a bare `.ts` or
 // `.tsx` is a build leftover that should never reach consumers.
 const strayTs = [...shipped].filter(path => (path.endsWith('.ts') || path.endsWith('.tsx')) && !path.endsWith('.d.ts'))
@@ -82,7 +65,6 @@ if (strayTs.length > 0) {
   console.log('ok   no stray .ts/.tsx sources')
 }
 
-// ---- 3. Mandatory manifest files -------------------------------------------
 // `cordis.patch.yml` is this bundle's patch entry point; a plain library
 // package would ship none, so the requirement keys off its presence.
 const isBundle = existsSync(join(repoRoot, 'cordis.patch.yml'))
@@ -94,7 +76,6 @@ if (required.every(file => shipped.has(file))) {
   console.log(`ok   mandatory manifests present (${required.join(', ')})`)
 }
 
-// ---- 4. Every runtime relative import must resolve to a SHIPPED file -------
 // The scan set is the shipped `.js` files themselves, so it assumes nothing
 // about the directory layout. `types/` output is excluded: its imports of
 // client `.module.css` files are not runtime loads of the plugin entry points.
@@ -122,7 +103,6 @@ if (missing.length > 0) {
   console.log(`ok   all ${checked} runtime relative imports resolve to shipped files`)
 }
 
-// ---- 5. Verdict -------------------------------------------------------------
 if (failures.length > 0) {
   console.error(`\nARTIFACT WOULD SHIP BROKEN (${failures.length} problem(s)):`)
   for (const failure of failures) console.error(`  x ${failure}`)

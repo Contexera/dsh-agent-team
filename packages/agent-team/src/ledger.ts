@@ -284,9 +284,8 @@ export interface AgentTeamLedgerOptions {
    * surface, in full. The Host supplies it: it owns the live Agent sessions,
    * the ledger owns durable state and must never reach into a runtime.
    *
-   * Returning false keeps today's behaviour exactly — refuse the write. A
-   * true answer exempts this one write only: nothing is persisted, no
-   * watermark advances, no marker is consumed.
+   * Returning false refuses the write. A true answer exempts this one write
+   * only: nothing is persisted, no watermark advances, no marker is consumed.
    */
   readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
 }
@@ -384,7 +383,7 @@ interface Projection {
   readonly messagesByRef: Map<AgentTeamMessageRef, AgentTeamMessage>
   readonly attentionByThread: Map<AgentTeamThreadRef, Set<AgentTeamMemberId>>
   readonly sessionTransitions: Map<AgentTeamMemberId, { readonly previousSessionId: SessionId; readonly inputFromSeq?: SessionLogOffset }>
-  /** Top-level anchor Message per Thread; the first topLevel Message wins, like the linear scan it replaces. */
+  /** Top-level anchor Message per Thread; the first topLevel Message wins. */
   readonly anchorByThread: Map<AgentTeamThreadRef, AgentTeamMessage>
   /** Display ordinal per Task, in per-Channel creation order; workspace filtering happens at read time. */
   readonly taskNumberByTask: Map<AgentTeamTaskRef, number>
@@ -1145,12 +1144,10 @@ export class AgentTeamLedger {
             : claim)
       const releasedClaims = claims.filter(claim => claim.state === 'released' && this.state.claims.get(claim.claimRef)?.state === 'active')
       const completedClaims = claims.filter(claim => claim.state === 'done' && this.state.claims.get(claim.claimRef)?.state === 'active')
-      // Every done Claim at commit time — pre-finished and atomically
-      // completed alike — is the acceptance discriminator: the one list
-      // accept markers deliver from, so a normal accept no longer stays
-      // silent about the Members whose work it accepted. Sorted lexically
-      // so replay validation compares stably regardless of claim-ref
-      // generation order.
+      // Every done Claim at commit time, pre-finished and atomically
+      // completed alike, is the acceptance discriminator and the list accept
+      // markers deliver from. Sorted lexically so replay validation compares
+      // stably regardless of claim-ref generation order.
       const acceptedClaims = request.action === 'accept'
         ? claims.filter(claim => claim.state === 'done').sort((left, right) => left.claimRef.localeCompare(right.claimRef))
         : []
@@ -1379,10 +1376,9 @@ export class AgentTeamLedger {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('inbox limit must be an integer between 1 and 100')
     const taskNumbers = new Map(workspaceIds.flatMap(workspaceId => [...this.taskNumbers(workspaceId)]))
     const unreadThreads = new Set<AgentTeamThreadRef>()
-    // Candidates carry only what ranking and the totals need. A row's preview
-    // text, actor and live Claim owners are materialized for the rows this
-    // response actually returns, so an Inbox badge of one item no longer builds
-    // a preview and a Claim-owner lookup per unread Thread it is about to drop.
+    // Candidates carry only what ranking and the totals need; a row's preview
+    // text, actor and live Claim owners are materialized only for the rows
+    // this response returns.
     type Candidate = { readonly workspaceId: WorkspaceId; readonly channelRef: AgentTeamChannelRef; readonly channelName: string
       readonly task?: AgentTeamTask; readonly taskNumber?: number; readonly thread: AgentTeamThread
       readonly unreadCount: number; readonly directCount: number; readonly newest: AgentTeamThreadFact
@@ -1465,20 +1461,16 @@ export class AgentTeamLedger {
   }
 
   /**
-   * The Human Inbox's 「最近活跃」 slice: the Threads this reader has written in
-   * — the durable way back into work instead of a mention-only queue.
-   * Participation is the whole admission rule: a reader who replied to somebody
-   * else's Thread is here whether or not they follow it, and so is one who
-   * started a Thread nobody has answered yet, because starting one is writing
-   * its anchor. Attention deliberately plays no part — it decides what notifies
-   * a reader (a reply does not implicitly follow a Thread), and reading it here
-   * as well is what once hid every Thread a reader had replied to without
-   * following. A Thread the reader later unfollowed stays: they did take part
-   * in it, and unfollowing stops the notifications, not the record. Every
-   * Thread still holding unread is excluded because the queue above already
-   * carries it, and the slice is newest-activity first, bounded by
-   * `RECENT_INBOX_LIMIT`. Rows are the same shape as unread rows with every
-   * count at zero — they are the same row to render.
+   * The Human Inbox's 「最近活跃」 slice: the Threads this reader has written in, a
+   * durable way back into work. Participation is the whole admission rule,
+   * whether or not the reader follows the Thread; starting a Thread counts
+   * because it writes its anchor. Attention plays no part: it decides what
+   * notifies a reader, and a reply does not implicitly follow a Thread. A
+   * Thread the reader later unfollowed stays, since unfollowing stops
+   * notifications, not the record. Threads still holding unread are excluded
+   * because the unread queue already carries them. Newest activity first,
+   * bounded by `RECENT_INBOX_LIMIT`. Rows have the same shape as unread rows
+   * with every count at zero.
    */
   private recentInboxItems(memberId: AgentTeamMemberId, workspaceId: WorkspaceId,
     unreadThreads: ReadonlySet<AgentTeamThreadRef>, taskNumbers: ReadonlyMap<AgentTeamTaskRef, number>): readonly AgentTeamInboxItem[] {
@@ -1781,12 +1773,10 @@ export class AgentTeamLedger {
       }
     }
     // What this response's catalog describes. A caller that asked for the
-    // catalog wants the whole request scope — the address-book radar. Every
-    // other read describes its own facts: the Threads this page's facts belong
-    // to plus the Thread it names, so a sidebar asking for one item no longer
-    // carries every Task, Thread and Claim the Workspace ever had. Resolving
-    // those Threads by ref also replaces a per-Thread directory walk with the
-    // page's own lookups.
+    // catalog wants the whole request scope (the address-book radar). Every
+    // other read describes its own facts: the Threads this page's facts
+    // belong to plus the Thread it names, resolved by ref through the page's
+    // own lookups.
     const catalogThreadRefs = new Set<AgentTeamThreadRef>()
     if (request.includeCatalog === true) {
       for (const thread of this.state.threads.values()) catalogThreadRefs.add(thread.threadRef)
@@ -1830,11 +1820,11 @@ export class AgentTeamLedger {
       workspaces: Object.freeze(memberId === undefined ? [] : this.workspacesOfFrom(this.state, memberId)
         .map(workspaceId => Object.freeze({ workspaceId, default: workspaceId === this.state.members.get(memberId)?.workspaceId }))),
       channels: Object.freeze(channels),
-      // Channel participation is derived, so this roster is derived the same
-      // way: every Member that takes part in a visible Channel, whether by an
-      // enrolment a historical ledger still carries or by having taken part in
-      // one of its Threads. Reading the membership table directly would hide
-      // exactly the Members the widened mention rules let you address.
+      // Channel participation is derived, so this roster is too: every Member
+      // that takes part in a visible Channel, by explicit enrolment a ledger
+      // still carries or by having taken part in one of its Threads. Reading
+      // the membership table directly would hide Members that mention rules
+      // let you address.
       members: Object.freeze([...channelRefs].flatMap(channelRef => [...this.state.members.keys()]
         .filter(memberId => {
           const state = this.state.members.get(memberId)?.state
@@ -2410,9 +2400,8 @@ export class AgentTeamLedger {
         .filter(claim => projection.claims.get(claim.claimRef)?.state === 'active' && claim.state === 'done')
         .map(claim => claim.claimRef)
       // New-shape accepts carry the acceptance discriminator: every done
-      // Claim at commit time, sorted. Legacy accepts predate it; the
-      // recorded wake semantics for them stay completed-only (the old rule)
-      // so every existing ledger replays unchanged.
+      // Claim at commit time, sorted. Legacy accepts without it keep
+      // completed-only wake semantics as recorded.
       const expectedAcceptedClaimRefs = operation.data.claims
         .filter(claim => claim.state === 'done')
         .map(claim => claim.claimRef)
@@ -2797,11 +2786,11 @@ export class AgentTeamLedger {
       if (message.topLevel) {
         target.channelRefByThread.set(message.threadRef, message.channelRef)
         // The anchor is the Thread's first topLevel Message; a later topLevel
-        // Message (none today) must not displace it, matching the linear scan.
+        // Message must not displace it.
         if (!target.anchorByThread.has(message.threadRef)) target.anchorByThread.set(message.threadRef, message)
       }
       // Only message-sent mints a Task ordinal; thread-replied may echo the
-      // Task without renumbering it, like the operation scan it replaces.
+      // Task without renumbering it.
       if (operation.kind === 'team/message-sent' && operation.data.task !== undefined) this.recordTaskNumber(target, operation.data.task)
       this.recordAttentionObservations(target, operation, operation.data.inbox)
       this.applyInboxDelta(target, operation.data.inbox)
@@ -3292,11 +3281,11 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Acceptance notifies every done Claim owner — pre-finished (the normal
-   * flow) and atomically completed (early acceptance) alike — through
-   * activity markers regardless of whether they still follow the Thread.
-   * The actor never notifies itself. Legacy records without the acceptance
-   * discriminator keep the old completed-only wake semantics on replay.
+   * Acceptance notifies every done Claim owner, pre-finished (the normal
+   * flow) and atomically completed (early acceptance) alike, through activity
+   * markers regardless of whether they still follow the Thread. The actor
+   * never notifies itself. Legacy records without the acceptance
+   * discriminator keep completed-only wake semantics on replay.
    */
   private acceptThreadInbox(activity: AgentTeamTaskActivity, threadRef: AgentTeamThreadRef, acceptedOwners: readonly AgentTeamMemberId[]): AgentTeamInboxDelta {
     if (acceptedOwners.length === 0) return this.inboxDelta()
@@ -3917,12 +3906,12 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Replay-side write authorization for one Channel's operations: participation
-   * in the Workspace that owns the Channel. Channel membership is a Human-side
-   * organisation and is not a write gate — but it used to be, so this is the
-   * widened form every historical operation is re-checked against. Every actor
-   * that passed the membership form also participates, so the widening can
-   * never reject a record the old rule accepted.
+   * Replay-side write authorization for one Channel's operations:
+   * participation in the Workspace that owns the Channel. Channel membership
+   * is a Human-side organisation and is not a write gate, but historical
+   * operations were checked against it; every actor that passed the
+   * membership form also participates, so this form never rejects a record
+   * the membership form accepted.
    */
   private participatesInChannelWorkspaceFrom(projection: Projection, channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
     const workspaceId = projection.channels.get(channelRef)?.workspaceId
@@ -3930,14 +3919,13 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Whether a Member takes part in a Channel — the visibility question, now
-   * derived rather than enrolled: taking part in any Thread of the Channel, or
-   * an explicit membership a historical ledger still carries.
-   *
-   * The explicit half is kept only to keep old ledgers reproducible (a Member
-   * added by `channel-member-joined` who never wrote a word must still see the
-   * Channel); nothing new is ever enrolled. Deriving from Threads is what makes
-   * a Member mentioned into a Thread see the Channel that Thread belongs to.
+   * Whether a Member takes part in a Channel (the visibility question),
+   * derived from taking part in any Thread of the Channel, or from an
+   * explicit membership a historical ledger still carries. The explicit half
+   * keeps old ledgers reproducible (a Member added by `channel-member-joined`
+   * who never wrote a word must still see the Channel); nothing new is
+   * enrolled. Deriving from Threads is what makes a Member mentioned into a
+   * Thread see the Channel that Thread belongs to.
    */
   private isChannelMember(channelRef: AgentTeamChannelRef, memberId: AgentTeamMemberId): boolean {
     return this.isChannelMemberFrom(this.state, channelRef, memberId)
@@ -4097,11 +4085,11 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Merge the `@Handle` mentions authored in `body` into an explicit recipient
-   * set. Body mentions are the primary channel now: an Agent has no recipient
-   * parameter to forget, and the same scan serves Human input typed by hand.
-   * The result stays a plain recipient set, so every downstream projection —
-   * delivery markers, chip rendering, confirmation — is unchanged.
+   * Merge the `@Handle` mentions authored in `body` into an explicit
+   * recipient set. An Agent has no recipient parameter to forget, and the
+   * same scan serves Human input typed by hand. The result stays a plain
+   * recipient set, so every downstream projection (delivery markers, chip
+   * rendering, confirmation) is unaffected.
    */
   private mergeBodyMentions(
     sender: AgentTeamMemberId,
@@ -4579,13 +4567,11 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Releases up to 0.1.9 scoped Channel archival and Channel member-removal
-   * inbox cleanup to taskful Threads only (the collector read the Task
-   * projection), so archiving or member removal in a Channel holding a
-   * taskless Thread with Attention or markers wrote an incomplete inbox and
-   * every later load rejected the record, leaving the profile unable to boot.
-   * Records carrying exactly that legacy cleanup are repaired in memory the
-   * same way pre-envelope Thread reads are; any other inbox still fails
+   * Records written by releases that scoped Channel archival and Channel
+   * member-removal inbox cleanup to taskful Threads only (the collector read
+   * the Task projection) carry an incomplete inbox when the Channel holds a
+   * taskless Thread with Attention or markers. They are repaired in memory
+   * the same way pre-envelope Thread reads are; any other inbox still fails
    * validation, so a forgery is not silently accepted.
    */
   private repairLegacyChannelCleanup(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
@@ -4610,7 +4596,7 @@ export class AgentTeamLedger {
     return operation
   }
 
-  /** The pre-fix Channel Thread scope: only Threads carrying a Task. */
+  /** The legacy Channel Thread scope: only Threads carrying a Task. */
   private legacyChannelThreadRefs(projection: Projection, channelRef: AgentTeamChannelRef): Set<AgentTeamThreadRef> {
     return new Set([...projection.tasks.values()].filter(task => task.channelRef === channelRef).map(task => task.threadRef))
   }
