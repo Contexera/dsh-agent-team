@@ -38,7 +38,11 @@
 
 **CI lanes。 ** [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) 在干净的 `ubuntu-latest` 与 `windows-latest` runner 上运行 typecheck 加完整测试套件。pull request、push 到 `master`、手动 `workflow_dispatch` 都会触发。 两条 lane 执行上面相同的六步环境契约。Windows lane 的每一步经 git bash（`shell: bash`）运行，因为默认 pwsh 会破坏反斜杠续行。harness 包经目录 junction 链接，无需 symlink 权限。 范围护栏：无 coverage matrix、无发布自动化、无 `test:browser`——浏览器验收始终是本地步骤。 Windows lane 是文件系统标识符类 bug（issue #7/#8）的回归防线。 唯一可调变量是 `DSH_HARNESS_TAG`。认证推进该 tag 时，workflow 的 env、本文档与 [`.hoplite/settings.json`](../../.hoplite/settings.json) 三处同步更新。三处靠手工保持一致。
 
-若该次 tag 推进同时移动了 DSH peers，必须在同一改动里提交 `pnpm-lock.yaml`。CI 以 `frozen-lockfile` 安装。本地装一次就会就地重写 lockfile，把这个不一致一直掩盖到 CI 上才暴露。 开发脚本（`build-client`、`run-browser-test`、`run-preview`、`run-ui-preview`）已做 Windows 硬化，在该平台经 git bash 运行。本地 Windows 开发遵循同一环境契约。
+若该次 tag 推进同时移动了 DSH peers，必须在同一改动里提交 `pnpm-lock.yaml`。CI 以 `frozen-lockfile` 安装。本地装一次就会就地重写 lockfile，把这个不一致一直掩盖到 CI 上才暴露。
+
+**提交 lockfile 前先确认两组原生绑定还在。** `@rolldown/binding-*` 与 `jscpd-*` 只从 lockfile 进入依赖树，丢失后安装仍然成功，问题只在跑测时暴露：Vitest 5 启动即加载 rolldown，每个测试都以 `Cannot find native binding` 中止；`npm run duplication` 会报 jscpd 平台包未安装。manifest 没变时 pnpm 会沿用 lockfile 里记录的解析，因此重解析（无论加不加 `--force`）都不会补回丢掉的那组。提交前 grep 一下 lockfile，确认两组都还在。
+
+开发脚本（`build-client`、`run-browser-test`、`run-preview`、`run-ui-preview`）已做 Windows 硬化，在该平台经 git bash 运行。本地 Windows 开发遵循同一环境契约。
 
 ## 外部安装验证
 发布形态是根 bundle：

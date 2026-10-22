@@ -46,7 +46,11 @@ A resolved checkout that does not exist aborts immediately with the sibling Harn
 
 Scope guard: no coverage matrix, no release automation, and no `test:browser` — browser acceptance stays a local step. The Windows lane is the regression fence for filesystem-identifier bugs (issues #7/#8). The only adjustable variable is `DSH_HARNESS_TAG`; when certification advances the tag, update the workflow env, this document, and [`.hoplite/settings.json`](../../.hoplite/settings.json) together — the three stay in sync by hand.
 
-A tag advance that also moves the DSH peers must commit `pnpm-lock.yaml` in the same change: CI installs with `frozen-lockfile`, while a local install rewrites the lockfile in place and hides the mismatch until CI runs. The dev scripts (`build-client`, `run-browser-test`, `run-preview`, `run-ui-preview`) are Windows-hardened and run under git bash there, so local Windows development follows the same environment contract.
+A tag advance that also moves the DSH peers must commit `pnpm-lock.yaml` in the same change: CI installs with `frozen-lockfile`, while a local install rewrites the lockfile in place and hides the mismatch until CI runs.
+
+**Check the lockfile still lists both native-binding families before committing it.** `@rolldown/binding-*` and `jscpd-*` reach the tree only from the lockfile, and a lockfile that lost them still installs cleanly, so nothing fails until tests run: Vitest 5 loads rolldown at startup and every test aborts with `Cannot find native binding`, while `npm run duplication` reports the jscpd platform package as missing. An unchanged manifest makes pnpm reuse what the lockfile records, so re-resolving — with or without `--force` — leaves the gap in place. Grep the lockfile for both families.
+
+The dev scripts (`build-client`, `run-browser-test`, `run-preview`, `run-ui-preview`) are Windows-hardened and run under git bash there, so local Windows development follows the same environment contract.
 
 ## External installation verification
 The published layout is the root bundle:
