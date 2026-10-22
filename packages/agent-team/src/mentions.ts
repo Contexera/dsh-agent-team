@@ -1,10 +1,6 @@
 import type { AgentTeamMemberId } from './types/entities.ts'
 
-/**
- * One addressable name in a Message body: the Member's stable id plus the
- * handle authors are expected to write. The Human is included through the
- * same shape so a body-level mention needs no special case at the call site.
- */
+/** One addressable name in a Message body: the Member's stable id plus the handle authors write. The Human uses the same shape. */
 export interface AgentTeamBodyMentionCandidate {
   readonly memberId: AgentTeamMemberId
   readonly handle: string
@@ -48,14 +44,7 @@ export function hasAllMarker(body: string): boolean {
   return marker !== null && !excluded.some(([start, end]) => marker.index >= start && marker.index < end)
 }
 
-/**
- * Every `@Handle` occurrence in one body that names one of `handles`:
- * case-insensitive, on Unicode word boundaries, longest handle first, outside
- * code. Writing `@` is required: bare handles are ordinary words. This is the
- * single definition of an authored mention — the Host delivery resolution and
- * the Client's chip rendering and draft preview all read through it, so a name
- * that renders as a chip is the same name that delivers a notification.
- */
+/** Every `@Handle` occurrence naming one of `handles`: case-insensitive, on Unicode word boundaries, longest first, outside code. The `@` is required. This is the single definition of an authored mention, shared by Host delivery and Client chip rendering. */
 export function scanBodyHandles(body: string, handles: readonly string[]): readonly AgentTeamBodyHandleMatch[] {
   const seen = new Set<string>()
   const usable: string[] = []
@@ -84,16 +73,7 @@ export function scanBodyHandles(body: string, handles: readonly string[]): reado
   return Object.freeze(matches)
 }
 
-/**
- * Resolve the `@Handle` mentions authored in one Message body.
- *
- * Callers pass the candidates reachable in the Message's Channel, so a name
- * that resolves here is already an addressable target; handles the Channel
- * cannot reach simply stay prose.
- *
- * `sender` is excluded because a Message never mentions its own author, which
- * also keeps the result usable as a recipient set without further filtering.
- */
+/** Resolves `@Handle` mentions authored in a Message body. Callers pass the candidates reachable in the Channel; other handles stay prose. `sender` is excluded, so the result works as a recipient set. */
 export function resolveBodyMentions(
   body: string,
   candidates: readonly AgentTeamBodyMentionCandidate[],
