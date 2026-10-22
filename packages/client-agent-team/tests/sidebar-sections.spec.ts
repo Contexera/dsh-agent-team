@@ -43,6 +43,11 @@ describe('sidebar section collapse persistence', () => {
     expect(hook.result.current).toBe(false)
   })
 
+  it('keeps a Projects section collapsed before Projects were renamed from Channels', () => {
+    localStorage.setItem('dsh.agent-team.sidebar-sections', JSON.stringify({ collapsed: ['w1|channels'] }))
+    expect(renderHook(() => useSidebarSectionOpen('w1' as never, 'projects')).result.current).toBe(false)
+  })
+
   it('falls back to expanded when storage is corrupted or unavailable', () => {
     localStorage.setItem('dsh.agent-team.sidebar-sections', '{oops')
     expect(renderHook(() => useSidebarSectionOpen('w1' as never, 'projects')).result.current).toBe(true)

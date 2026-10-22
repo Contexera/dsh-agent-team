@@ -41,7 +41,8 @@ function storedCollapsed(): ReadonlySet<string> {
     const keys = (parsed as Record<string, unknown>).collapsed
     if (!Array.isArray(keys) || !keys.every(key => typeof key === 'string')) throw new Error('bad shape')
     cachedRaw = raw
-    cachedCollapsed = new Set(keys)
+    // Projects were called Channels; a section collapsed before the rename stays collapsed.
+    cachedCollapsed = new Set(keys.map(key => key.replace(/\|channels$/, '|projects')))
     return cachedCollapsed
   } catch {
     return new Set()
