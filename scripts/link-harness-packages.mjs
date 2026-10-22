@@ -44,10 +44,8 @@ const linkPackage = (name, packageDir) => {
   // node_modules/<scope>/<name> -> ../../../deepseek-harness/<packageDir>
   const relativeTarget = relative(scopeRoot, packageDir)
   if (process.platform === 'win32') {
-    // Windows needs symlink privilege (admin or developer mode) for real
-    // symlinks; directory junctions need none and behave the same for this
-    // purpose. CI windows runners are admin, but junction keeps local
-    // non-admin setups working too.
+    // Real symlinks need symlink privilege on Windows; directory junctions need none and behave
+    // the same here.
     symlinkSync(relativeTarget, target, 'junction')
   } else {
     symlinkSync(relativeTarget, target, 'dir')
