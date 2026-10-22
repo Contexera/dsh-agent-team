@@ -8,14 +8,7 @@ import type { TeamEnvironmentSource } from './environment-check.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import css from './team-settings.module.css'
 
-/**
- * The Team's settings page: the Human's display name and avatar, the local
- * environment check, and the version footnote.
- *
- * The page owns no durable fact and no copy of one: identity arrives from the
- * shared identity projection and writes through the Team Remote, and a failed
- * write keeps the typed value and reports the reason the Host refused it.
- */
+/** The Team's settings page. It owns no durable fact: identity arrives from the shared projection and writes through the Team Remote; a failed write keeps the typed value and reports the Host's reason. */
 
 export interface TeamSettingsInjected {
   /** The shared Human identity projection: profile facts plus post-write refresh. */
@@ -24,9 +17,7 @@ export interface TeamSettingsInjected {
   saveName: (name: string) => Promise<string | undefined>
   /** Upload one image file, persist its reference; the failure message when it does not stick. */
   uploadAvatar: (file: File) => Promise<string | undefined>
-  /** Clear the avatar; the identity falls back to the initial. */
   removeAvatar: () => Promise<string | undefined>
-  /** The local environment check, a read-only projection of the installation. */
   environment: TeamEnvironmentSource
 }
 
@@ -35,12 +26,7 @@ export type TeamSettingsProps =
   & PropsLocale<'team'>
   & TeamSettingsInjected
 
-/**
- * Run one durable write and reduce every failure to the message the page
- * reports. A rejected Remote call (a dropped carrier, a refused write) is a
- * failure like any other: without this the field would sit on "saving" forever
- * and report nothing.
- */
+/** A rejected Remote call (a dropped carrier) is a failure like any other; otherwise the field would sit on "saving" forever. */
 async function failureOf(action: () => Promise<string | undefined>): Promise<string | undefined> {
   try {
     return await action()
@@ -49,17 +35,12 @@ async function failureOf(action: () => Promise<string | undefined>): Promise<str
   }
 }
 
-/** First visible character of a display name, or the neutral `H` before one is known. */
 function avatarInitial(name: string | undefined): string {
   const trimmed = (name ?? '').replace(/^@/, '').trim()
   return trimmed === '' ? 'H' : trimmed.slice(0, 1).toUpperCase()
 }
 
-/**
- * The name field's own state: follow the Host value, or a text the reader is
- * editing. `follow` lets the field re-sync whenever the profile changes
- * underneath, without a background read clobbering an in-progress edit.
- */
+/** `follow` re-syncs the field when the profile changes underneath, without clobbering an in-progress edit. */
 type NameDraft =
   | { readonly kind: 'follow' }
   | { readonly kind: 'editing'; readonly text: string }
@@ -115,10 +96,7 @@ export function TeamSettingsSection(props: TeamSettingsProps) {
     if (failure !== undefined) setNotice(t('humanSettingsAvatarFailed', { message: failure }))
   }
 
-  // The page says what it is before it says what happened: the settings nav
-  // lists it beside the Harness's own pages, so the title alone leaves "whose
-  // Team is this, and where does a change apply?" unanswered — and every state,
-  // including a failed read, has to answer it.
+  // Every state, including a failed read, must say whose Team this is and where a change applies.
   const pageHeader = <>
     <h2 className={css.heading}>{t('teamSettingsTitle')}</h2>
     <p className={css.intro}>{t('teamSettingsIntro')}</p>

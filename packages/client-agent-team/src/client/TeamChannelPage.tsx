@@ -29,7 +29,6 @@ import threadCss from './thread.module.css'
 interface TeamChannelPageProps {
   readonly workspaceId: WorkspaceId
   readonly channelRef: AgentTeamChannelRef
-  /** The Human's own display name and avatar, from the shared identity projection. */
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
   readonly loadChannels: TeamConversationProps['loadChannels']
@@ -55,12 +54,7 @@ interface TeamChannelPageProps {
   readonly t: TeamConversationProps['t']
 }
 
-/**
- * Merge the freshest top-level window over what the reader already has. The
- * fresh window is authoritative for every Message it covers — a change wake
- * must move that row's live Task state, newest instant, and unread with it —
- * while older Messages loaded earlier are retained instead of discarded.
- */
+/** Fresh window is authoritative for every Message it covers; older loaded Messages are retained. */
 function mergeChannelView(current: AgentTeamView, fresh: AgentTeamView): AgentTeamView {
   const freshRefs = new Set(fresh.items.map(item => item.message.messageRef))
   const items = [...current.items.filter(item => !freshRefs.has(item.message.messageRef)), ...fresh.items]
@@ -73,37 +67,23 @@ function mergeChannelView(current: AgentTeamView, fresh: AgentTeamView): AgentTe
   }
 }
 
-/** Whether the retained items reach older than the fresh window's own start. */
 function hasOlderBeyondFreshWindow(current: AgentTeamView, fresh: AgentTeamView): boolean {
   return current.cursor < fresh.cursor
 }
 
-/**
- * The newest fact instant, or nothing when the entry's own Message is still the
- * newest fact on its Thread. That difference is exactly what "has follow-up
- * activity" means, and the Host projects both instants from the ledger.
- */
+/** Latest fact instant, or nothing when the entry's own Message is the newest on its Thread. */
 function newerActivityAt(item: AgentTeamViewItem): string | undefined {
   const lastActivityAt: string | undefined = item.lastActivityAt
   return lastActivityAt === undefined || lastActivityAt === item.message.occurredAt ? undefined : lastActivityAt
 }
 
-/**
- * What the door prints about follow-up activity, or nothing. Unfinished work
- * reports the recency that is the whole of its state line; a resolved Task
- * prints the day it landed instead (see `ThreadEntryRow`), because the recency
- * there would only repeat the moment it resolved on every finished row.
- */
+/** Resolved Tasks print their resolution day instead (see `ThreadEntryRow`), so recency is omitted for them. */
 function unresolvedFollowUpAt(item: AgentTeamViewItem): string | undefined {
   const status = item.task?.status
   return status === 'done' || status === 'closed' ? undefined : newerActivityAt(item)
 }
 
-/**
- * Host unread per Thread, keyed for the feed's rows: zero unread is the absence
- * of a badge, not a row. A failed read keeps the previous counts: a read failure
- * must not render as "everything was consumed".
- */
+/** Zero unread is the absence of a badge. A failed read keeps the previous counts rather than rendering as "everything was consumed". */
 function applyInboxRead(
   previous: ReadonlyMap<AgentTeamThreadRef, number>,
   result: RemoteResult<AgentTeamInbox>,
@@ -125,33 +105,21 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   const [pending, setPending] = useState(false)
   const [asTask, setAsTask] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  // The feed and the board are two readings of one window; the tab only chooses
-  // which of them fills the content seat.
   const [tab, setTab] = useState<'feed' | 'board'>('feed')
-  // The taskless Thread open in the feed's side panel. A Task's entry still
-  // walks into the Thread page; only a discussion stays here.
   const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
-  // The surface the panel is seated in, which owns the panel-width variable: the
-  // drag handle writes it there, so a drag never re-renders this page.
+  // The surface owns the panel-width variable; a drag writes it there so this page never re-renders.
   const [panelSurface, setPanelSurface] = useState<HTMLElement | null>(null)
-  // The composer draft lives in the keyed draft cache: view switches unmount
-  // this page, and a refresh must not cost the half-written message either.
-  // The composer owns the subscription — this page only reads a snapshot when
-  // it sends, so typing never re-renders the timeline.
+  // The draft cache outlives this page across view switches; the composer owns the subscription so typing never re-renders the timeline.
   const draftKey: TeamDraftKey = `channel:${channelRef}`
   const mountedRef = useRef(false)
-  // Flips after the first successful timeline load; later change wakes
-  // refresh in place instead of showing the loading surface again.
+  // True after the first load; later refreshes keep the rendered timeline.
   const loadedRef = useRef(false)
   const refreshSequenceRef = useRef(0)
   const channelLastItem = view?.items[view.items.length - 1]
-  // Derived ids, so a second Channel page cannot collide with this one.
   const tabIdPrefix = useId()
   const feedTabRef = useRef<HTMLButtonElement>(null)
   const boardTabRef = useRef<HTMLButtonElement>(null)
-  // The shipped tab strip's contract: arrows cycle, Home/End jump, and
-  // selection follows focus. Enter and Space need no branch — the button's own
-  // activation runs the click handler on release.
+  // Enter and Space need no branch: the button's own activation fires click.
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     const order: readonly { readonly value: 'feed' | 'board'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
       { value: 'feed', ref: feedTabRef },
@@ -172,11 +140,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     setTab(target.value)
     target.ref.current?.focus()
   }
-  // Branded-ref navigation for message bodies: channel refs hop directly,
-  // task and thread refs resolve against this Channel's loaded timeline and
-  // fall back to the Host resolver, which also accepts abbreviated spellings.
-  // Unresolvable refs never become links (see TeamMessage), so this path only
-  // fires for refs the Host already confirmed.
+  // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here.
   const openRef = (ref: string): void => {
     if (ref.startsWith('channel:')) {
       if (ref !== channelRef) selectChannel(ref as AgentTeamChannelRef)
@@ -185,14 +149,10 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     if (ref.startsWith('thread:')) {
       const match = view?.items.find(item => item.thread.threadRef === ref)
       if (match !== undefined) {
-        // A taskless discussion opens in the feed's own panel; a Task keeps
-        // walking into the Thread page.
         if (match.task === undefined) { setPanelThreadRef(match.thread.threadRef); return }
         selectThread(match.thread.threadRef, channelRef, match.task.taskRef, match.taskNumber)
         return
       }
-      // Not in the loaded timeline (or cited by abbreviation): resolve through
-      // the Host and jump to the Thread's home Channel.
       jumpToThread(resolveThreadRefs, workspaceId, ref as AgentTeamThreadRef, selectThread)
       return
     }
@@ -202,20 +162,13 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
         selectThread(match.thread.threadRef, channelRef, match.task?.taskRef, match.taskNumber)
         return
       }
-      // Not in the loaded timeline: resolve through the Host and jump to the
-      // Task's home Channel.
       jumpToTaskThread(resolveTaskRefs, workspaceId, ref as AgentTeamTaskRef, selectThread)
     }
   }
 
   const lookupTaskRefs = hostTaskRefLookup(resolveTaskRefs, workspaceId)
   const lookupThreadRefs = hostThreadRefLookup(resolveThreadRefs, workspaceId)
-  // Roster chips resolve synchronously from loaded data: channel names from
-  // the loaded feed windows, member facts from the member list. Anything
-  // outside stays plain text — the same rule unresolvable refs follow. The
-  // lookups key on roster content, not array identity: every refresh hands
-  // over fresh arrays, and the memoized rows must survive change bursts that
-  // leave the roster itself untouched.
+  // Keyed on roster content, not array identity, so memoized rows survive change bursts that leave the roster untouched.
   const rosterKey = useMemo(() => [
     (view?.channels ?? []).map(channel => `${channel.channelRef}=${channel.name}=${channel.state}`).join(','),
     members.map(status => `${status.member.memberId}=${status.member.handle}=${status.member.sessionId}=${status.availability}`).join(','),
@@ -233,7 +186,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     const numbers = view?.taskNumbers ?? []
     return (taskRef: AgentTeamTaskRef): number | undefined => numbers.find(entry => entry.taskRef === taskRef)?.taskNumber
   }, [view])
-  // Zero unread is the absence of a map entry, so clearing deletes the key.
   const handlePanelRead = useCallback((read: AgentTeamThreadRef): void => {
     setUnreadByThread(current => {
       if (!current.has(read)) return current
@@ -247,18 +199,12 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     setPanelThreadRef(undefined)
   }, [panelThreadRef, channelRef, selectThread, taskNumberOf])
   const handlePanelClose = useCallback((): void => { setPanelThreadRef(undefined) }, [])
-  // The Thread entry row's owner stack speaks the same grammar as the Inbox
-  // row's, Human included: the Host names which actor is the reader, the
-  // Client's identity projection says what that actor looks like.
   const humanMemberId = view?.humanMemberId
   const humanIdentity: TeamAvatarHuman | undefined = humanMemberId === undefined
     ? undefined
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
 
-  // Every taskful entry in the loaded window, newest Task number first inside
-  // its column. The window is the feed's: walking the Channel's remaining
-  // history would merge every top-level Message into the timeline to fill four
-  // columns, defeating the feed's own pagination.
+  // The window is the feed's: walking the Channel's remaining history would defeat the feed's pagination.
   const boardColumns = useMemo(() => {
     const taskful = (view?.items ?? []).filter((item): item is AgentTeamViewItem & { readonly task: AgentTeamTask } => item.task !== undefined)
     const byNumber = (left: AgentTeamViewItem, right: AgentTeamViewItem): number => (right.taskNumber ?? 0) - (left.taskNumber ?? 0)
@@ -267,10 +213,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
 
   const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${channelLastItem?.message.messageRef ?? ''}`)
 
-  // Seat the panel from its surface: the saved choice, else this surface's
-  // default share. The surface is laid out after this effect first runs, so the
-  // seat follows its box — a one-shot pass would seat from a pre-layout width
-  // and leave it there. A dragged choice is re-clamped, never re-derived.
+  // The surface is laid out after this effect first runs, so the seat follows its box; a dragged choice is re-clamped, never re-derived.
   useEffect(() => {
     if (panelSurface === null) return
     const seat = () => {
@@ -292,8 +235,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     if (!mountedRef.current) return false
     const sequence = refreshSequenceRef.current + 1
     refreshSequenceRef.current = sequence
-    // Only the first refresh owns the loading surface; change wakes refresh
-    // the rendered timeline in place instead of flashing it back to skeleton.
     if (!loadedRef.current) setLoading(true)
     if (clearError) {
       setLoadError(undefined)
@@ -303,17 +244,12 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
       const [loaded, loadedMembers, loadedInbox] = await Promise.all([
         loadChannels({ workspaceId, channelRef, direction: 'before', topLevelOnly: true, includeActivities: false, limit: 20 }),
         loadMembers({ workspaceId }),
-        // The non-direct slice of the Host's own Inbox is the authority for
-        // "what needs me on this Thread" — following activity, mentions, and my
-        // Task/Claim changes alike. Nothing here re-derives unread from message
-        // mentions.
+        // The Host Inbox is the authority for unread; never re-derive it from message mentions.
         loadInbox({ workspaceId, limit: 100 }),
       ])
       if (!mountedRef.current || sequence !== refreshSequenceRef.current) return false
       if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeChannelView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
       if (loadedMembers.ok) setMembers(loadedMembers.value); else setLoadError(loadedMembers.error.message)
-      // A failed inbox read keeps the last successful counts while the failure
-      // itself surfaces through the error face below.
       if (!loadedInbox.ok) setLoadError(loadedInbox.error.message)
       setUnreadByThread(current => applyInboxRead(current, loadedInbox))
       if (loaded.ok && loadedMembers.ok && loadedInbox.ok) setLoadError(undefined)
@@ -326,8 +262,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     }
   }
 
-  // Presence and membership live in the workspace projection; they never need
-  // the Channel timeline refetch that a full refresh performs.
   const refreshMembers = async () => {
     if (!mountedRef.current) return
     try {
@@ -359,8 +293,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
         if (update.type === 'failed') { setLoadError(update.message); return }
         void refreshMembers()
       }),
-      // Presence transitions commit nothing: only the member rows move, so
-      // the header presence counts refresh without a timeline refetch.
       subscribeChanges({ kind: 'presence', workspaceId }, update => {
         if (!mountedRef.current) return
         if (update.type === 'failed') { setLoadError(update.message); return }
@@ -389,20 +321,16 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     }
   }
 
-  // Retained across transport failures so a replayed send dedupes on the Host;
-  // definitive outcomes (committed or rejected) start the next send fresh.
+  // Retained across transport failures so a replayed send dedupes on the Host.
   const pendingSendId = useRef<AgentTeamSendMessageRequest['requestId']>()
 
-  // Editing the draft invalidates the one-shot status line. The setter returns
-  // the same state when there is nothing to clear, so a keystroke does not
-  // re-render the timeline now that the composer owns the draft.
+  // The setter returns the same state when nothing is set, so keystrokes do not re-render the timeline.
   const clearSendState = useCallback((): void => {
     setStatusMessage(current => current === undefined ? current : undefined)
   }, [])
 
   const send = async () => {
-    // Read the draft at send time: this page no longer subscribes to it, so a
-    // captured render value would be stale after the composer's own edits.
+    // Read at send time: this page does not subscribe to the draft.
     const { draft, recipients } = drafts.getSnapshot(draftKey)
     if (pending || draft.trim() === '') return
     const recipientIds = [...recipients].sort()
@@ -410,8 +338,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
     pendingSendId.current = requestId
     setPending(true); setError(undefined); setStatusMessage(undefined)
     try {
-      // Upload chosen files first; any failure aborts the send with the
-      // existing error surface and keeps the chips for a retry.
       const upload = await uploadComposerFiles(putAttachment, workspaceId, pendingFiles)
       if (!upload.ok) {
         pendingSendId.current = undefined
@@ -503,14 +429,9 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
             const human = item.message.sender === view!.humanMemberId
             const sender = human ? humanName : senderStatus?.member.handle ?? item.message.sender
             const turnGap = isRunGap(index > 0 ? block.items[index - 1]!.message.occurredAt : undefined, item.message.occurredAt)
-            // The entry's own line is the gate under the body, and its state
-            // leads that line: ownership, status, and unread answer the reader
-            // where they are already reading. A reply inside a Thread has none
-            // of it — the Thread page owns that surface.
+            // A reply inside a Thread carries no entry state; the Thread page owns that.
             const unread = unreadByThread.get(item.thread.threadRef) ?? 0
-            // A turn boundary on this level keeps its hairline — the feed states
-            // blocks, where the Thread reads as one flow — but never the instant:
-            // every row states its own time under the pointer.
+            // A turn boundary keeps its hairline but never the instant: every row states its own time.
             return <Fragment key={item.message.messageRef}>
               {turnGap && <TeamRunDivider />}
               <TeamMessage
@@ -542,8 +463,6 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
                   human={humanIdentity}
                   t={t}
                   onOpen={() => {
-                    // A taskless discussion opens in the feed's own panel; a
-                    // Task keeps walking into the Thread page.
                     if (item.task === undefined) setPanelThreadRef(item.thread.threadRef)
                     else selectThread(item.thread.threadRef, channelRef, item.task.taskRef, item.taskNumber)
                   }}
@@ -611,15 +530,7 @@ export function TeamChannelPage({ workspaceId, channelRef, humanName, humanAvata
   </main>
 }
 
-/**
- * One entry's state: who is on the work, where it stands, and how much of it
- * needs the reader. It leads the entry's own line rather than trailing the
- * identity line, so a reader meets it where they are already reading instead of
- * crossing the column for it — and the same placement holds whether this
- * Message opened its run or continued one, where an identity line would have
- * carried nothing else. The unread capsule is the only member a taskless
- * discussion can carry: it needs no Task.
- */
+/** State leads the entry's line. The unread capsule is the only part a taskless discussion can carry. */
 function ThreadStateCluster({ task, owners, unread, human, t }: {
   readonly task: AgentTeamTask | undefined
   readonly owners: readonly TeamAvatarOwner[]
@@ -641,14 +552,8 @@ function ThreadStateCluster({ task, owners, unread, human, t }: {
 }
 
 /**
- * The gate under one top-level Message: the single row that opens its Thread,
- * and the one line that says what stands there. State leads it, then what the
- * entry is: a Task entry keeps its number so the status word never floats free
- * of the Task it describes, follow-up activity adds when the work last moved —
- * while the work is still unfinished — and an unanswered Thread says only 回复.
- * The instant uses the Inbox's own 今天/昨天 form with the precise local time on
- * the control's title, and an unread Thread says so in the control's label
- * rather than only in pixels.
+ * The single row that opens an entry's Thread. A Task entry keeps its number so the status word stays attached;
+ * the instant uses the Inbox's 今天/昨天 form, with the precise local time in the title.
  */
 function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   readonly item: AgentTeamViewItem
@@ -661,10 +566,7 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   const taskNumber = item.taskNumber
   const followUp = newerActivityAt(item)
   const printedActivity = unresolvedFollowUpAt(item)
-  // A resolved Task's gate slims to a footnote — no owner stack, no status
-  // dot: the word and the day it landed say what is left to say, and the
-  // board owns scanning resolved work now. Unread still counts beside it:
-  // a resolved Thread can be answered.
+  // A resolved Task slims to a footnote; unread still counts because a resolved Thread can be answered.
   const resolved = item.task?.status === 'done' || item.task?.status === 'closed'
   const label = taskNumber !== undefined
     ? t('taskLabel', { number: taskNumber })
@@ -675,10 +577,7 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   const openLabel = taskNumber === undefined
     ? unread > 0 ? t('openThreadUnread', { count: unread }) : t('openThread')
     : unread > 0 ? t('openTaskUnread', { number: taskNumber, count: unread }) : t('openTask', { number: taskNumber })
-  // The state is a label, not a control: it stays outside the button so the
-  // owner stack keeps its own accessible name — a labeled button prunes its
-  // descendants from the accessibility tree — and so the control's name says
-  // exactly what clicking it does.
+  // Outside the button so the owner stack keeps its accessible name: a labeled button prunes its descendants from the accessibility tree.
   return <span className={css.entryLine} data-thread-entry="" data-thread-entry-door={taskNumber ?? 'thread'}>
     {resolved ? <TeamCountBadge count={unread} /> : <ThreadStateCluster task={item.task} owners={owners} unread={unread} human={human} t={t} />}
     <button
@@ -694,7 +593,6 @@ function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
   </span>
 }
 
-/** The board's columns: the three moving states first, then everything resolved. */
 const BOARD_COLUMNS = [
   { labelKey: 'taskStatusTodo', match: (status: AgentTeamTask['status']): boolean => status === 'todo' },
   { labelKey: 'taskStatusInProgress', match: (status: AgentTeamTask['status']): boolean => status === 'in_progress' },
@@ -702,13 +600,7 @@ const BOARD_COLUMNS = [
   { labelKey: 'taskStatusDone', match: (status: AgentTeamTask['status']): boolean => status === 'done' || status === 'closed' },
 ] as const
 
-/**
- * One Task on the board: the same facts the feed's entry row prints, re-dealt
- * for scanning by state — the status dot and number lead, the title is the
- * opener's first line, and the foot names who is on it (or that nobody is)
- * beside when it last moved. Resolved work dims rather than dressing up: the
- * board's job is to keep the moving work loudest.
- */
+/** One Task on the board; resolved work dims so moving work stays loudest. */
 function BoardCard({ item, unread, human, t, onOpen }: {
   readonly item: AgentTeamViewItem & { readonly task: AgentTeamTask }
   readonly unread: number
@@ -719,8 +611,7 @@ function BoardCard({ item, unread, human, t, onOpen }: {
   const task = item.task
   const taskNumber = item.taskNumber ?? 0
   const resolved = task.status === 'done' || task.status === 'closed'
-  // For resolved work the newest fact is the resolution itself — the date the
-  // card prints is when it landed; for moving work it is when it last moved.
+  // For resolved work the newest fact is the resolution itself.
   const activityAt = item.lastActivityAt
   const namedOwners = namedAvatarOwners(item.liveClaimOwners, human)
   return <button

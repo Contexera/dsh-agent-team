@@ -38,26 +38,15 @@ interface TeamAgentsPanelProps {  readonly workspaceId: WorkspaceId
 
 type MemberSessionId = AgentTeamClientMemberStatus['member']['sessionId']
 
-/**
- * How the panel is following one Member's Session binding while it stays
- * mounted.
- */
 type RolloverFollow =
   | { readonly kind: 'idle' }
   | { readonly kind: 'pending'; readonly previousSessionId: MemberSessionId; readonly nextSessionId: MemberSessionId }
   | { readonly kind: 'followed'; readonly nextSessionId: MemberSessionId }
 
 /**
- * Follow a Host-initiated Session swap exactly once.
- *
- * A swap moves a Member's Session binding with no Client action. When the
- * conversation seat is showing that Member's previous live Session, the panel
- * follows to the new one — but only once the refreshed status is active, so the
- * commit window (binding moved, new Session not yet live) never redirects to a
- * Session that does not exist. The seat must still show the previous Session at
- * completion as well: a swap observed while unavailable stays pending, and
- * navigating away before it completes cancels the follow instead of pulling the
- * pane back.
+ * Follow a Host-initiated Session swap exactly once. The panel follows only once the refreshed status is active, so the
+ * commit window never redirects to a Session that does not exist. The seat must still show the previous Session at
+ * completion; navigating away first cancels the follow.
  */
 function useMemberSessionFollow(
   seatSessionId: MemberSessionId | undefined,
@@ -65,10 +54,7 @@ function useMemberSessionFollow(
 ): (statuses: readonly AgentTeamClientMemberStatus[]) => void {
   const observed = useRef(new Map<string, MemberSessionId>())
   const follows = useRef(new Map<string, RolloverFollow>())
-  // The seat's embedded Session id and the opener ride refs: the change
-  // subscription may deliver an invalidation through a refresh closure captured
-  // before the seat rebinds, and the follow decision must always read the live
-  // value.
+  // Refs, so the follow decision reads the live value even through a refresh closure captured before the seat rebinds.
   const seatRef = useRef(seatSessionId)
   seatRef.current = seatSessionId
   const openRef = useRef(openMemberSession)
@@ -84,10 +70,7 @@ function useMemberSessionFollow(
       }
       if (previous !== current) {
         observed.current.set(memberId, current)
-        // Only the exact previous live page arms a follow; browsing an older
-        // archive or another Member stays untouched. A binding change seen
-        // before any page is embedded is still recorded so the baseline stays
-        // current.
+        // Only the exact previous live page arms a follow. A binding change seen before any page is embedded is still recorded as the baseline.
         const seat = seatRef.current
         follows.current.set(memberId, seat !== undefined && previous === seat
           ? { kind: 'pending', previousSessionId: previous, nextSessionId: current }
@@ -115,8 +98,6 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   const [creating, setCreating] = useState(false)
   const [retryRequest, setRetryRequest] = useState<AgentTeamAddMemberRequest>()
   const triggerRef = useRef<HTMLButtonElement>(null)
-  // Same presentation-preference ordering as the Channels list; the drag
-  // commits through one shared mutation.
   const agentRefs = useMemo(() => members.map(status => status.member.memberId), [members])
   const orderedAgentRefs = useSidebarOrder(workspaceId, 'agents', agentRefs)
   const orderedMembers = useMemo(() => {
@@ -130,20 +111,14 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   const sectionOpen = useSidebarSectionOpen(workspaceId, 'agents')
   const followRollover = useMemberSessionFollow(memberSessionId, openMemberSession)
 
-  // Only the first refresh owns the loading surface; presence wakes (Agent
-  // running/idle) ride the dedicated scope and refresh rows in place.
   const loadedRef = useRef(false)
   const mountedRef = useRef(false)
   const refresh = useCallback(async () => {
     if (!loadedRef.current) setLoading(true)
     const result = await loadMembers({ workspaceId })
-    // A response for a panel the user has already left changes nothing: the
-    // key-remounted successor owns the roster state — and the seat-follow
-    // side effects — now.
+    // A panel the user already left changes nothing; the key-remounted successor owns the roster state now.
     if (!mountedRef.current) return
     if (result.ok) {
-      // Archived Members are hidden from every surface; the row disappears
-      // the moment the workspace-scope wake delivers the archived state.
       const next = result.value.filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
       setMembers(next)
       followRollover(next)
@@ -160,21 +135,16 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
     return () => { mountedRef.current = false }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
-  // Warm the Host model catalog while the roster loads, so the create and
-  // edit pickers open with rows instead of paying the first read on open.
-  // Mount-scoped (not per refresh): presence wakes must not refetch it.
+  // Mount-scoped, not per refresh: presence wakes must not refetch the catalog.
   useEffect(() => { warmModelCatalog(loadModels) }, [loadModels])
   useEffect(() => subscribeChanges({ kind: 'workspace', workspaceId }, update => {
     if (update.type === 'failed') {
       setError(update.message)
       return
     }
-    // The section stays mounted across Channel creation, so the Member roster
-    // rides every workspace invalidation.
     void refresh()
   }), [subscribeChanges, refresh, workspaceId])
-  // Presence transitions commit nothing: the Host wakes only this scope, so
-  // the green dots stay live without any catalog refetch.
+  // Presence commits nothing and wakes only this scope, so dots stay live without a catalog refetch.
   useEffect(() => subscribeChanges({ kind: 'presence', workspaceId }, update => {
     if (update.type === 'failed') {
       setError(update.message)
@@ -239,8 +209,7 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
       handle: normalizedHandle,
       description: normalizedDescription,
       presetId: 'team-member',
-      // No initial Channels at creation: the Member joins Channels later from
-      // the Channel side and stays reachable through its DM view meanwhile.
+      // No initial Channels: the Member joins later from the Channel side, reachable through its DM view meanwhile.
       channelRefs: [],
       ...(model === undefined ? {} : { model }),
     })
@@ -306,11 +275,6 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
   )
 }
 
-/**
- * One sidebar Agent row: the select button opens the Member's own Session
- * conversation page, the avatar carries identity plus the presence badge, and
- * the row menu opens the editor.
- */
 function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, recoverMember, archiveMember, loadModels, openMemberSession, onUpdated, t }: {
   readonly workspaceId: WorkspaceId
   readonly leaveWorkspace: TeamSidebarProps['leaveWorkspace']
@@ -332,8 +296,7 @@ function AgentRow({ workspaceId, leaveWorkspace, status, current, updateMember, 
   const [archivePending, setArchivePending] = useState(false)
   const archiveRequest = useRef<ReturnType<typeof mintRequestId>>()
   const withdrawing = workspaceId !== status.member.workspaceId
-  // Both row actions ride the same runtime remote: the Host steers a live
-  // session, rebuilds an orphaned composition, or re-runs a failed activation.
+  // The Host steers a live session, rebuilds an orphaned composition, or re-runs a failed activation.
   const recover = async (): Promise<void> => {
     try {
       const result = await recoverMember({

@@ -3,22 +3,15 @@ import { useEnvironmentCheck, type TeamEnvironmentSource } from './environment-c
 import css from './environment-check.module.css'
 
 /**
- * The local environment check: which DSH line this installation runs against,
- * and whether that line is inside the range the bundle declares.
- *
- * Three verdicts, never a fourth, and never a guess: a fact the Host could not
- * establish is `undetermined`, not a mismatch. Every verdict is stated as text
- * plus an icon, so the state survives a reader who cannot tell the colors
- * apart. The support line is written in words rather than as a bare semver
- * range, and the tested combination is printed only when the Host could derive
- * both of its versions — the page never supplies a version of its own.
+ * The local environment check: which DSH line this installation runs against and whether it is inside the declared range.
+ * Three verdicts only; a fact the Host could not establish is `undetermined`, not a mismatch. Every verdict is text plus an
+ * icon so it survives color blindness. The tested combination prints only when the Host derived both versions.
  */
 
 export type EnvironmentCheckProps =
   & PropsLocale<'team'>
   & { readonly environment: TeamEnvironmentSource }
 
-/** The three glyphs, drawn at the 16px seat the settings page uses for state marks. */
 const ICONS = {
   ok: <path d="M3 8.5 6.5 12 13 4.5" />,
   warn: <><path d="M8 2.5 14.6 13.6H1.4z" /><path d="M8 6.6v3.2" /><path d="M8 11.9h.01" /></>,
@@ -38,25 +31,19 @@ function EnvironmentIcon({ glyph }: { readonly glyph: keyof typeof ICONS }) {
   >{ICONS[glyph]}</svg>
 }
 
-/** The release notes this bundle's own repository keeps, one click from the version footnote. */
 const RELEASE_NOTES_URL = 'https://github.com/Contexera/dsh-agent-team/releases'
 
 export function EnvironmentCheck({ t, environment }: EnvironmentCheckProps) {
   const { report } = useEnvironmentCheck(environment)
-  // Nothing to state before the first read settles, and nothing to state if it
-  // never lands: the block is informational and its absence is not an error.
+  // Informational: absence before or without a read is not an error.
   if (report === undefined) return null
 
   const range = report.supportRange
   const running = report.dshVersion
-  // The tested combination appears only when both of its versions were derived:
-  // the installed manifest's own version, and the range's lower bound, which is
-  // the certified line. A missing one withholds the line rather than inviting a
-  // hand-written version onto the page.
+  // Withhold the tested line unless both versions were derived (installed manifest version and the range's lower bound).
   const certified = report.certifiedDshVersion
   const bundleVersion = report.bundleVersion
-  // Both sides of the line have to be derived: `'unknown'` is the data layer's
-  // word for a version that could not be read, and it never reaches the page.
+  // `'unknown'` is the data layer's word for an unreadable version and never reaches the page.
   const tested = certified !== undefined && bundleVersion !== undefined && bundleVersion !== 'unknown'
 
   const title = report.verdict === 'ok'
@@ -78,9 +65,7 @@ export function EnvironmentCheck({ t, environment }: EnvironmentCheckProps) {
     lines.push(t('environmentUndeterminedDetail'))
   }
 
-  // `data-environment` carries the verdict the way the rest of the Client marks
-  // a state for assertions; the block also renders nothing at all before a read
-  // lands, so a journey can wait on this attribute rather than on prose.
+  // Marks the verdict for assertions; nothing renders before a read lands, so a journey can wait on this attribute.
   return <div className={css.block} data-environment={report.verdict}>
     <EnvironmentIcon glyph={report.verdict === 'ok' ? 'ok' : report.verdict === 'out-of-range' ? 'warn' : 'unknown'} />
     <div className={css.body}>
