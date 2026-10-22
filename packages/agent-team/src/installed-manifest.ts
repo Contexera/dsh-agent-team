@@ -1,26 +1,15 @@
-/**
- * The installed bundle's own manifest, read once for both facts taken from it.
- */
+/** The installed bundle's own manifest, read once. */
 
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-/**
- * Root of the installed bundle. `packages/agent-team/{src,lib}` sits three
- * levels down in both a `link:` checkout and a registry tarball, so a
- * development install and a published one each resolve their own root.
- */
+/** Root of the installed bundle: three levels above `packages/agent-team/{src,lib}` in both `link:` and registry installs. */
 function installedPackageRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 }
 
-/**
- * Parsed manifest of the installed bundle, or `undefined` when it cannot be
- * read. An unreadable or malformed manifest is a broken install, not a failure
- * of whatever asked: every caller degrades to `'unknown'` or withholds the line
- * it would have stated, so reading this can never fail the Host boot.
- */
+/** Parsed manifest of the installed bundle, or `undefined` when unreadable; callers degrade to `'unknown'` so Host boot never fails. */
 export function readInstalledManifest(): Record<string, unknown> | undefined {
   try {
     const parsed: unknown = JSON.parse(readFileSync(resolve(installedPackageRoot(), 'package.json'), 'utf8'))
