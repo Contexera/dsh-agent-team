@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** pending
+**Status:** ready
 
 - [ ] 新增 `team/rules-version-adopted`（Host actor，`{ version }`）；无标记的 ledger 段为版本 1
 - [ ] 标记单调递增、每个版本至多一条；重复、倒退或晚于该版本段内其他写入时加载失败
