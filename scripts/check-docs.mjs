@@ -1,37 +1,8 @@
-// Mechanical gate for the maintained documentation set.
-//
-// docs/AGENTS.md states the rules this file decides: maintained documents ship
-// as bilingual pairs with a working switcher, every relative link resolves, and
-// the index in docs/README.md and docs/README.zh.md names exactly the documents
-// that exist. Humans forget those rules silently; this script is the part that
-// cannot be forgotten.
-//
-// It covers every bilingual page that ships: the maintained documents under
-// docs/, the four README pairs (repository root and one per package), and the
-// root contributing pair. The set comparison stays docs-only, because those two
-// READMEs are the only indexes.
-//
-// Two judgments go past "the target exists": a `#fragment` must name a real
-// heading of its target document, and no rendered block of a maintained
-// document may outgrow the ceiling recorded for it below. A link whose fragment
-// survived a rename while its path did not is the failure mode that motivates
-// the first; a paragraph that keeps absorbing facts is the one behind the
-// second.
-//
-// A third judgment compares the two halves of a pair to each other: they carry
-// the same outline — the same headings at the same levels, in the same order —
-// because a translation rewords a heading but never adds, drops, or re-levels
-// one. Lists and tables are deliberately out of scope: the two languages
-// legitimately render one rule set as bullets in one half and as a table or
-// prose in the other, so gating presentation would fail correct documents and
-// train everyone to work around the gate. What it catches is the drifted
-// outline a translation quietly leaves behind.
-//
-// It deliberately runs standalone — no Harness checkout, no Vitest config — so a
-// documentation edit can be checked in a second: `npm run check:docs`, which is
-// also part of `npm test`. `--root <dir>` points the same checks at another tree
-// (used to exercise the failure paths against throwaway copies), and
-// `--budgets` prints the per-file longest-block table instead of deciding.
+// Mechanical gate for the maintained documentation set (rules in docs/AGENTS.md): bilingual pairs with a
+// switcher, resolving relative links and `#fragment`s, matching indexes, equal heading outlines per pair,
+// and per-document longest-block ceilings. The index comparison is docs-only; the two docs READMEs are the only indexes.
+// Runs standalone (no Harness checkout): `npm run check:docs`, also part of `npm test`.
+// `--root <dir>` checks another tree; `--budgets` prints the longest-block table instead of deciding.
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -75,22 +46,11 @@ const PAGE_SETS = [
   { directory: 'packages/client-agent-team', pages: ['README.md'], switcher: DOCS_SWITCHER },
 ]
 
-// The longest rendered block each maintained document may contain, measured in
-// characters on the block's own source text: the longest paragraph, single list
-// item, single table cell, single heading, or single line of a fenced code
-// sample. A whole paragraph is one block even when it is soft-wrapped over
-// several source lines, and one list item or one table cell is a block of its
-// own — a blank-line-delimited "block" would call a list or a table one wall.
-//
-// The English and Chinese halves of a pair each get their own number: the same
-// content costs Chinese roughly half the characters, so one shared ceiling
-// would either never fire on the Chinese side or fire on every English edit.
-//
-// A ceiling is the value measured when it was recorded. It ratchets down as a
-// document is condensed and is raised only deliberately, in a commit that says
-// why — the same discipline as the persona budget in the shipping contract.
-// Every maintained document needs a row, so a new document declares its own
-// ceiling instead of inheriting an unbounded default.
+// The longest rendered block (paragraph, list item, table cell, heading, or fenced-code line, measured in
+// characters of source text) each maintained document may contain. A soft-wrapped paragraph is one block.
+// Each half of a pair has its own number: Chinese needs roughly half the characters.
+// A ceiling ratchets down as a document is condensed and is raised only deliberately, with the reason in the commit.
+// Every maintained document needs a row.
 const BLOCK_CHARACTER_CEILINGS = {
   'architecture/README.md': [342, 174],
   'architecture/client-and-remote.md': [499, 586],
@@ -228,10 +188,9 @@ function documentAnchors(text) {
   return anchors
 }
 
-// The outline a document declares: each heading's level and rendered text, in
-// source order. Fenced code is skipped for the same reason as above — a
-// `# comment` inside a shell sample is not a heading — so a shell block that
-// gains a comment cannot tip a pair out of alignment.
+// The outline a document declares: each heading's level and rendered text, in source order.
+// Fenced code is skipped (a `# comment` in a shell sample is not a heading).
+// Lists and tables are out of scope: the two languages legitimately render one rule set as bullets in one half and a table in the other.
 function documentHeadings(text) {
   const headings = []
   let fence = null
@@ -248,12 +207,9 @@ function documentHeadings(text) {
   return headings
 }
 
-// The rendered blocks of a document, in source order. Soft-wrapped lines join
-// the paragraph they belong to; one list item, one table cell, one heading, and
-// one line of a fenced code sample are each a block of their own. Blank lines
-// end a paragraph. A code line counts even though it is not prose: a code line
-// cannot wrap, and leaving fences out would make "wrap it in a fence" the
-// cheapest way past the ceiling.
+// The rendered blocks of a document: soft-wrapped lines join their paragraph; a list item, table cell,
+// heading, and fenced-code line are each a block. Code lines count because leaving fences out would make
+// fencing the cheapest way past the ceiling.
 function renderedBlocks(text) {
   const blocks = []
   const lines = text.replaceAll('\r\n', '\n').split('\n')
@@ -354,7 +310,6 @@ if (!existsSync(docsDirectory) || !statSync(docsDirectory).isDirectory()) {
   process.exit(1)
 }
 
-// 1. Bilingual pairing and switcher integrity, in every page set.
 const linkFiles = new Set()
 let pagePairs = 0
 let pairOutlines = 0
@@ -419,7 +374,6 @@ for (const set of PAGE_SETS) {
   }
 }
 
-// 2. Relative links resolve inside the working tree.
 let linkCount = 0
 for (const file of [...linkFiles].sort()) {
   for (const target of relativeTargets(readFileSync(file, 'utf8'))) {
@@ -435,9 +389,7 @@ for (const file of [...linkFiles].sort()) {
   }
 }
 
-// 2b. Every `#fragment` names a real anchor of the document it points into; a
-// same-file anchor names one of its own. Fragments onto a non-Markdown target
-// (an image, a generated JSON) are not heading lookups and are left alone.
+// Fragments onto non-Markdown targets (an image, generated JSON) are not heading lookups and are left alone.
 let anchorCount = 0
 const anchorSets = new Map()
 function anchorsOf(file) {
@@ -469,7 +421,6 @@ for (const file of [...linkFiles].sort()) {
   }
 }
 
-// 3. Both indexes name the same maintained documents, and exactly the ones that exist.
 const actual = new Set()
 for (const file of markdownFiles(docsDirectory)) {
   const name = relative(docsDirectory, file).replaceAll('\\', '/')
@@ -507,9 +458,7 @@ if (englishRows !== undefined && chineseRows !== undefined) {
   }
 }
 
-// 4. Every maintained document stays inside its recorded longest-block ceiling,
-// in both languages. A document without a row fails: an unbudgeted document is
-// how a wall gets in, and declaring the ceiling is a one-line decision.
+// A document without a row fails: an unbudgeted document is how a wall gets in.
 const budgetRows = []
 for (const document of actual) {
   if (!(document in BLOCK_CHARACTER_CEILINGS)) {
