@@ -1,12 +1,5 @@
-/* The environment check: one line while the installation is inside the declared
- * support range, a warning surface when it is not, and a neutral line when the
- * fact could not be established. Only the out-of-range verdict takes a surface
- * — it is the one state a reader is expected to act on. Every verdict states
- * itself in text and an icon, never by color alone.
- *
- * Radius follows the tier for a row-sized surface (12px, the same tier the
- * settings rows and sidebar rows use); the colors are the shipped warn/success
- * aliases, never literal values. */
+/* Only the out-of-range verdict takes a surface, being the one state a reader is expected to act on. Radius follows the row
+   tier (12px); colors are the shipped warn/success aliases, never literals. */
 
 .block {
   align-items: flex-start;

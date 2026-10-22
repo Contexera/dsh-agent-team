@@ -61,12 +61,9 @@ beforeAll(async () => {
   const team = scaffold.ctx.agentTeam
   const humanMemberId = team.status().humanMemberId
 
-  // Members are provisioned through the Client's own dialog, because a direct
-  // `agentTeam.addMember` call resolves this lane's shipped presets only: the
-  // Member would exist with no live Agent answering for it, and the whole left
-  // side of the conversation — plus every mention of the reader — would be
-  // missing from the preview. The dialog provisions them the way an operator
-  // does, and the headless page is closed again before the preview is served.
+  // Members are provisioned through the Client's own dialog: a direct `agentTeam.addMember` call
+  // resolves this lane's shipped presets only, leaving Members with no live Agent answering for them
+  // and the conversation missing their side. The headless page is closed before the preview is served.
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
   try {
@@ -191,10 +188,8 @@ beforeAll(async () => {
   await claim('aster', 'ui-preview-claim-1', taskRef, '实现 hover 阅读语言')
   await claim('vera', 'ui-preview-claim-2', taskRef, '独立验收引用与跳转')
 
-  // Answering a Member delivers to them — the feature's own rule — so every
-  // quote in this fixture wakes the parent's author, and in a lane with no model
-  // that turn faults. The product's own remedy clears it: the preview is meant
-  // to show the surfaces, not a fault banner the lane cannot avoid.
+  // Answering a Member delivers to them, so every quote wakes the parent's author, and this lane has no
+  // model, so that turn faults. The product's own remedy clears it.
   for (const agent of AGENTS) {
     await team.recoverMember({
       requestId: `ui-preview-recover-${agent.handle}` as never,

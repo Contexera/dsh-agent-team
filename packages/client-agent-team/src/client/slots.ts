@@ -65,13 +65,11 @@ export interface TeamNavigationSource {
 /** Subscribe to one projection scope's invalidation stream; disposal aborts the shared poll. */
 export type SubscribeTeamChanges = (scope: TeamChangeScope, listener: TeamChangeListener) => () => void
 
-/** One adapter-owned selectable reasoning effort of one model route. */
 export interface TeamModelEffortOption {
   readonly id: string
   readonly name: string
 }
 
-/** One selectable model row inside one provider group of the Host catalog. */
 export interface TeamModelOption {
   readonly id: string
   readonly name: string
@@ -81,7 +79,6 @@ export interface TeamModelOption {
   }
 }
 
-/** Provider-grouped slice of the Host model catalog the editors render. */
 export interface TeamModelProviderGroup {
   readonly id: string
   readonly name: string
@@ -117,14 +114,12 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     leaveWorkspace: (request: AgentTeamLeaveWorkspaceRequest) => Promise<RemoteResult<AgentTeamLeaveWorkspaceResult>>
     /** Session-independent Host model catalog (`llm.models`); needs no live Member. */
     loadModels: () => Promise<RemoteResult<TeamModelCatalog>>
-    /** Embed the Member's Session conversation in the Team conversation seat. */
     openMemberSession: (sessionId: AgentTeamClientMemberStatus['member']['sessionId'], reportFailure?: (message: string) => void) => void
     selectedChannelRef?: AgentTeamChannelRef
   }
 
 export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> & TeamNavigationActions & {
   navigation: TeamNavigationSource
-  /** Keyed composer draft cache; one store per Client context. */
   drafts: TeamDraftStore
   /** The Human's own identity: the display name and avatar every seat that names or draws them reads. */
   humanIdentity: TeamHumanIdentitySource

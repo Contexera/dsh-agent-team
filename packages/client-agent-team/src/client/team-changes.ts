@@ -54,12 +54,7 @@ export class TeamChangeStream {
     }
   }
 
-  /**
-   * Reopen every scope whose stream already ended for good. The Harness resumes a
-   * live generation across reconnects, but a terminated one is gone for good: a new
-   * Host generation is the moment the scope was waiting for can come back, and the
-   * listeners keep their seats, so only the stream is replaced.
-   */
+  /** Reopen every scope whose stream ended for good. The Harness resumes a live generation across reconnects, but a terminated one is gone; listeners keep their seats, so only the stream is replaced. */
   recover(): void {
     // Replacing an existing key's value is safe during Map iteration: the entry keeps
     // its place, and a scope that never failed is left untouched.
@@ -105,12 +100,8 @@ export class TeamChangeStream {
 
   private async run(key: string, subscription: ScopeSubscription): Promise<void> {
     try {
-      // One update object per dispatch: every co-subscriber of this scope
-      // receives the identical value, which is what lets the read layer fold
-      // one dispatch into one invalidation. A baseline marks the stream's
-      // opening — its start, or its first item after a carrier outage the
-      // Harness retried inside this same loop — so readers can tell a fresh
-      // stream position from a version that merely repeats.
+      // One update object per dispatch, so every co-subscriber receives the identical value and the read layer folds it into one invalidation.
+      // A baseline marks the stream's opening, including its first item after a carrier outage retried inside this loop.
       let opening = true
       for await (const item of subscription.stream) {
         if (this.subscriptions.get(key) !== subscription) return
@@ -129,11 +120,8 @@ export class TeamChangeStream {
 }
 
 /**
- * The Host's `changes` stream never wakes on a Thread read — a read advances
- * only the reader's private watermark, so no shared projection changes. A
- * durable read does consume the reader's own mention markers, so the Human's
- * badge and Inbox page refresh from the completed read itself instead of
- * waiting for the next unrelated commit.
+ * The Host's `changes` stream never wakes on a Thread read (it moves only the reader's private watermark), but a durable
+ * read consumes the reader's mention markers, so the badge and Inbox refresh from the completed read itself.
  */
 export class TeamReadStream {
   private version = 0

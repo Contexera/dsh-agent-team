@@ -52,11 +52,7 @@ export class TeamContextManagement {
     return this.members.has(memberId)
   }
 
-  /**
-   * Resolve once no swap is in flight for this Member — immediately when none
-   * is. A caller holding a message for the generation being replaced awaits
-   * this instead of delivering into a Session about to be disposed.
-   */
+/** Resolves once no swap is in flight for this Member (immediately if none), so callers don't deliver into a Session about to be disposed. */
   whenSettled(memberId: AgentTeamMemberId): Promise<void> {
     if (!this.members.has(memberId)) return Promise.resolve()
     return new Promise<void>(resolve => {

@@ -18,8 +18,7 @@ try {
   const rendered = (await readFile(join(root, 'scripts/team-ui.ui-preview.ts'), 'utf8'))
     .replace('__TEAM_ROOT__', quote(root)).replace('__HOME__', quote(home))
   await writeFile(test, rendered)
-  // Windows: bare-name corepack spawns hit .cmd ENOENT/EINVAL — go through
-  // the shell like the preview runner does.
+  // Windows: bare-name corepack spawns hit .cmd ENOENT/EINVAL, so go through the shell.
   const child = process.platform === 'win32'
     ? spawn(`corepack pnpm exec vitest run --config vitest.web.config.ts apps/web/tests/__external-agent-team-ui-preview.e2e.ts --reporter=verbose`, {
         cwd: harness, stdio: 'inherit', env: { ...process.env, DSH_SNAPSHOT: 'replay' }, shell: true,
