@@ -1,19 +1,14 @@
-/* The Human Inbox page: the shared conversation seat carries the header band,
- * column, gutters, and scrollbar; this sheet styles only the queue rows. Every
- * color rides the shipped DSW aliases so the page follows the active theme. */
+/* This sheet styles only the queue rows; the shared conversation seat carries the header band, column, gutters and scrollbar.
+   Colors ride the shipped DSW aliases so the page follows the active theme. */
 .list {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-/* The queue's totals are segments rather than the sentence they replaced: the
-   reader scans two or three numbers instead of parsing a clause, and the number
-   the page is about carries the ink. Spacing alone separates them — a generated
-   separator would open a line with a lone dot the moment a squeezed seat
-   wrapped this line, and each segment already names its own unit. The segments
-   inherit the band's own 13/20 from `.headerCopy p`, so this line keeps the
-   rhythm of every other surface. */
+/* The totals are segments the reader scans rather than a clause to parse, and the number the page is about carries the ink.
+   Spacing alone separates them: a generated separator would open a squeezed, wrapped line with a lone dot. The segments
+   inherit the band's own 13/20 from `.headerCopy p`. */
 .headerMeta {
   align-items: baseline;
   display: flex;
@@ -27,19 +22,11 @@
   font-weight: 600;
 }
 
-/* A queue row is the shipped two-line result row (`.searchResultRow`): one
-   marker leads in a gutter of its own and everything the row says starts on one
-   column. The grid is what holds that column across both sections — the same
-   Thread moves between them and must not slide sideways on the way.
-   The first line's items centre on each other rather than sharing a baseline,
-   which is what the shipped row does with its own marker
-   (`.searchResultHeading`), because the marker is not always text: a face drawn
-   as a picture has no baseline, so a browser reads a replaced box as sitting on
-   its bottom edge. Baseline alignment therefore dropped the identity line 4px
-   and made the row 4px taller wherever the leading chip was the Human's
-   picture — the same row led by an initial stayed put. Both are 18px in a 20px
-   line, so centring puts every chip on the line it leads whatever it is drawn
-   from. */
+/* A queue row is the shipped two-line result row (`.searchResultRow`): one marker leads in its own gutter and everything
+   else starts on one column. The grid holds that column across both sections, so a Thread moving between them does not slide
+   sideways. The first line's items centre on each other rather than share a baseline (as `.searchResultHeading` does): a
+   face drawn as a picture is a replaced box that sits on its bottom edge, so baseline alignment dropped the identity line
+   4px wherever the leading chip was the Human's picture. Both chips are 18px in a 20px line, so centring is stable. */
 .row {
   align-items: center;
   background: transparent;
@@ -50,18 +37,10 @@
   cursor: pointer;
   display: grid;
   font: inherit;
-  /* The leading cluster takes the width it actually draws — one 18px face on
-     most rows — and the line's own 8px gap follows it, so a row pays only for
-     the faces it has. Reserving the widest stack on every row instead buys a
-     still content edge with 36px of empty space in front of the identity on
-     every Thread that carries one owner, which is most of them; a row that does
-     carry a stack opens its text a face further right and nothing else moves.
-     The section heading is inset to the one-face column (34px), which is the
-     same column every single-face row opens on, so heading, identity, and gist
-     still read down one column wherever the stack is not. 8px is also the
-     shipped sidebar-row inset; it nearly cancels the reserved scrollbar gutter
-     that shifts this column half a scrollbar left of the header band, leaving
-     the row text within a few pixels of the header's. */
+  /* The leading cluster takes the width it draws (one 18px face on most rows) and the line's own 8px gap follows. Reserving the
+     widest stack on every row would put 36px of empty space before most identities. The section heading is inset to the
+     one-face column (34px), so heading, identity and gist read down one column. 8px is also the shipped sidebar-row inset;
+     it nearly cancels the scrollbar gutter that shifts this column left of the header band. */
   grid-template-columns: max-content minmax(0, 1fr);
   padding: 8px;
   row-gap: 1px;
@@ -70,8 +49,7 @@
 }
 .row:hover,
 .row:focus-visible {
-  /* On this state the row is no longer the page background, so the marks it
-     carries must cut themselves out of the surface they are actually on. */
+  /* The row is no longer the page background here, so its marks must cut themselves out of the surface they are on. */
   --team-mark-ring: var(--dsw-alias-interactive-bg-hover);
   background: var(--dsw-alias-interactive-bg-hover);
 }
@@ -80,28 +58,18 @@
   outline-offset: -2px;
 }
 
-/* The leading slot, first line: who is on this Thread — the Task's live owners
-   where it has any, the person its newest fact came from otherwise. Every row
-   fills the slot, which is the point — a slot reserved for a count sits empty on
-   every Thread with nothing waiting, and the row then opens on blank space
-   instead of on the one thing it always knows. It is the same Member identity
-   language the Channel feed's Thread entry row leads with, and it takes only the
-   width it draws, so the row's content edge follows the cluster rather than
-   reserving room for the widest one it could ever hold. */
+/* Leading slot: who is on this Thread (the Task's live owners, else the person its newest fact came from). Every row fills
+   it, since a slot reserved for a count would sit empty on most Threads. It takes only the width it draws, so the content
+   edge follows the cluster. */
 .rowActor {
   display: flex;
   grid-column: 1;
   grid-row: 1;
 }
 
-/* The row's first line: the identity, then the count and the instant closing it
-   at the right edge. It does not wrap — a squeezed seat shortens the identity
-   with an ellipsis instead of folding one row into three lines, and the count
-   and the time keep the columns the reader scans down. The line is its own size
-   container so the instant can answer the width the line actually gets rather
-   than the viewport's; the container stays anonymous because CSS modules hash
-   container names per sheet, exactly as the composer's row and the settings
-   section leave theirs. */
+/* The first line: identity, then the count and the instant at the right edge. It does not wrap: a squeezed seat shortens the
+   identity with an ellipsis. The line is its own size container so the instant answers the width the line gets, not the
+   viewport's; anonymous because CSS modules hash container names per sheet. */
 .rowLine {
   align-items: baseline;
   container-type: inline-size;
@@ -112,12 +80,9 @@
   min-width: 0;
 }
 
-/* Provenance is the row's identity, so it carries the row's ink: the Channel is
-   what varies from row to row and what the reader scans for, and it leads in
-   primary 600 while the Workspace stays a quiet prefix. Styled runs are safe
-   here because the separator is a text node of its own — the control's
-   accessible name keeps its spaces. The one-line clamp is what stops a squeezed
-   seat from crushing the run into a column of two characters. */
+/* Provenance is the row's identity: the Channel varies from row to row, so it leads in primary 600 while the Workspace stays
+   a quiet prefix. Styled runs are safe because the separator is a text node of its own, so the control's accessible name
+   keeps its spaces. The one-line clamp stops a squeezed seat from crushing the run to two characters. */
 .rowCrumb {
   flex: 1 1 auto;
   font-size: 13px;
@@ -127,10 +92,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The Workspace is drawn only while the rows on screen span more than one: a
-   name repeated down every row spends the row's best position on a constant.
-   It returns by itself as soon as a second Workspace reaches the list, because
-   two rows must still be tellable apart. */
+/* Drawn only while the rows on screen span more than one Workspace; it returns as soon as a second one reaches the list. */
 .rowWorkspace {
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
@@ -139,11 +101,8 @@
   color: var(--dsw-alias-label-primary);
   font-weight: 600;
 }
-/* The Task marker rides the provenance line as a hairline chip — the same one
-   the neutral count uses, so the row carries exactly one kind of quiet chip.
-   The space in front of it is in the markup, where it is both drawn and read,
-   and it is what lets the chip wrap to its own line in a squeezed seat; the 3px
-   is the rest of the 6px that set the chip off before the count led the row. */
+/* The Task marker is a hairline chip, the same one the neutral count uses. The space in front of it is in the markup, where
+   it is drawn and read, and lets the chip wrap to its own line in a squeezed seat; the 3px is the rest of the 6px offset. */
 .rowTask {
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: var(--dsw-radius-sm, 6px);
@@ -156,17 +115,10 @@
   padding: 0 5px;
   white-space: nowrap;
 }
-/* Where the Task stands rides the same provenance run, right behind its number,
-   in the pair the Channel feed's Thread entry row and the Thread header already
-   speak: an 8px state dot then the status word. A reader scanning the queue is
-   choosing which Thread to pick back up, and that choice needs the standing, not
-   only the number — a Thread waiting for an acceptance and one already done read
-   the same otherwise. The pair is the shipped pill's own 4px pairing at this
-   row's 11px step, so the dot reads as part of its word rather than as a second
-   mark beside it. The whole pair is inline-level because the run it joins is a
-   line of text: a squeezed seat shortens the standing together with the Channel
-   name and the number instead of the standing cutting its own hole in the line,
-   and a Thread that is merely a discussion draws nothing at all. */
+/* The Task's standing rides the provenance run behind its number, as in the Channel feed's Thread entry row and the Thread
+   header: an 8px state dot then the status word, the shipped pill's 4px pairing at this row's 11px step. The pair is
+   inline-level, so a squeezed seat shortens it together with the Channel name instead of cutting its own hole in the line;
+   a discussion draws nothing. */
 .rowTaskState {
   align-items: center;
   color: var(--dsw-alias-label-secondary);
@@ -177,9 +129,7 @@
   margin-left: 3px;
   white-space: nowrap;
 }
-/* The instant closes the row's first line behind the count: the identity is what
-   takes the free space, so the two of them sit at the right edge rather than the
-   time alone, and the queue's own axis keeps one column the reader scans down. */
+/* The instant closes the first line behind the count; the identity takes the free space, so both sit at the right edge. */
 .rowTime {
   color: var(--dsw-alias-label-tertiary);
   flex: none;
@@ -188,23 +138,17 @@
   line-height: 18px;
   white-space: nowrap;
 }
-/* A line can come in narrower than the count and the instant together need: the
-   capsule's 18px floor, its 8px gap and the instant's 28px are 62px, and a
-   two-digit count makes it 70px. That seat exists in the product — a 390px phone
-   with the sidebar forced open leaves the page 110px, the row 86px and this line
-   44px — and there the instant used to hang 10px past the row's own right edge,
-   outside the surface it belongs to. The count is what the queue is for, so the
-   instant yields: the row keeps its two-line shape, nothing spills, and the
-   element still carries the exact time for the Thread that shows it. The cut
-   sits at the wider of the two counts, so no capsule the queue draws can spill
-   at a seat that has already yielded the instant. */
+/* A line can be narrower than the count and the instant need: the capsule's 18px floor, 8px gap and the instant's 28px are
+   62px, or 70px with a two-digit count. That seat exists (a 390px phone with the sidebar forced open leaves this line 44px),
+   and there the instant used to hang past the row's right edge. The count is what the queue is for, so the instant yields;
+   the element still carries the exact time. The cut sits at the wider count so no capsule spills at a seat that already
+   yielded the instant. */
 @container (max-width: 70px) {
   .rowTime {
     display: none;
   }
 }
-/* The gist is evidence for the identity above it, not the row's subject: it
-   starts on the identity's own column and speaks in secondary ink, one line. */
+/* The gist is evidence for the identity above it, not the row's subject: it starts on the identity's column in secondary ink. */
 .rowPreview {
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
@@ -217,10 +161,8 @@
   white-space: nowrap;
 }
 
-/* The page's two slices — 「需要我」 is the queue, 「最近活跃」 the way back into
-   work already read. The heading names the slice a reader is looking at, so it
-   speaks in the page's caption voice instead of competing with the queue:
-   tertiary ink, no rule of its own, and the same 8px inset the rows carry. */
+/* 「需要我」 is the queue, 「最近活跃」 the way back into work already read. The heading speaks in the page's caption voice (tertiary
+   ink, no rule, the rows' 8px inset) so it does not compete with the queue. */
 .section {
   display: flex;
   flex-direction: column;
@@ -234,24 +176,17 @@
   font-weight: 600;
   line-height: 18px;
   margin: 0 0 4px;
-  /* The heading opens on the column every single-face row opens on — the row's
-     8px inset, one 18px face, and the line's 8px gap — rather than beside the
-     gutter, so the section reads as one block and the count capsule keeps the
-     margin to itself. It is the column the reader scans down: only a row that
-     actually carries a stack opens further right than its own section's
-     heading. */
+  /* Opens on the column every single-face row opens on (8px inset, one 18px face, the line's 8px gap) so the section reads as
+     one block and the count capsule keeps the margin to itself. */
   padding: 0 8px 0 34px;
 }
-/* How much the section holds, so a reader never counts rows to find out — and
-   so the capped 「最近活跃」 tail says how much of it is on screen. */
+/* Lets a reader see how much the section holds, including how much of the capped 「最近活跃」 tail is on screen. */
 .sectionCount {
   font-variant-numeric: tabular-nums;
   margin-left: 6px;
 }
 
-/* The bounded-queue footnote: the page shows the newest unread Threads up to the
-   Host's cap, so this line is what keeps a full page from reading as the whole
-   queue. It sits with the list it qualifies, not in the header. */
+/* The page shows the newest unread Threads up to the Host's cap; this line keeps a full page from reading as the whole queue. */
 .queueMore {
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;

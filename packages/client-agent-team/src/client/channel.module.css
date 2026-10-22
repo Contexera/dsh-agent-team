@@ -1,8 +1,5 @@
-/* The Channel header band is one identity row and the tab strip under it. The
-   identity row leads with the title and carries the description beside it on the
-   title's baseline, the way the shipped session header puts its own metadata
-   after the session title: the description is a subtitle, not a second reading
-   line, so it never grows the band into a two-line block. */
+/* The header band is the identity row plus the tab strip. The description sits on the title's baseline as a subtitle (as in
+   the shipped session header), so it never grows the band into two lines. */
 .headerIdentity {
   align-items: baseline;
   display: flex;
@@ -10,8 +7,7 @@
   min-width: 0;
 }
 
-/* One line, always: the band's height must not depend on how much someone wrote
-   into the description, and the full text stays on the element's `title`. */
+/* One line always: the band's height must not depend on the description; the full text stays on the element's `title`. */
 .headerIdentity .headerDescription {
   min-width: 0;
   overflow: hidden;
@@ -23,8 +19,6 @@
 /* A `#` name is one unbreakable token, so the description gives up width first. */
 .headerIdentity h1 { flex: none; }
 
-/* The roster is a scrollable window of shared Member rows; the row owns its
-   own identity, action and failure line. */
 .memberList {
   display: grid;
   gap: 2px;
@@ -36,8 +30,7 @@
   overflow-y: auto;
 }
 
-/* The strip shares the header's flush-left edge — shipped's own strip sits on
-   the same x as the title above it, because the two are one band. */
+/* Shares the header's flush-left edge: the strip and title are one band. */
 .tabs {
   display: flex;
   gap: 36px;
@@ -83,11 +76,8 @@
   outline-offset: 2px;
 }
 
-/* The board is the same facts re-sorted by state, not a second surface: it
-   borrows the timeline's scroll seat, gutters, and scroll behaviour, and it is
-   the one place in the Client that may outgrow the 880px reading column — four
-   status columns side by side are a scanning surface, and narrowing them to the
-   reading measure would cost every column its card width. */
+/* The same facts re-sorted by state; it borrows the timeline's scroll seat and is the one place that may outgrow the 880px
+   reading column, since four status columns are a scanning surface. */
 .board {
   min-height: 0;
   overflow-x: hidden;
@@ -131,11 +121,8 @@
   margin-left: auto;
 }
 
-/* Until four columns each have a card's worth of width, the board scrolls
-   sideways instead of squeezing them: four 220px columns plus their gaps and
-   gutters need about 1120px, and a card narrower than 220px breaks its title to
-   one character per line, which is not a card any more. The columns keep their
-   equal share above that width. */
+/* Four 220px columns plus gaps and gutters need about 1120px; below that the board scrolls sideways, since a narrower card
+   breaks its title to one character per line. */
 @media (max-width: 1120px) {
   .boardColumns { overflow-x: auto; }
 
@@ -162,7 +149,6 @@
   outline-offset: 2px;
 }
 
-/* Resolved work stays findable without competing with what is still moving. */
 .boardCard[data-resolved] { opacity: 0.62; }
 
 .boardCardNum {
@@ -199,9 +185,7 @@
 
 .boardCardFoot time { margin-left: auto; }
 
-/* The feed's stage owns the timeline and the composer as one seat, and an open
-   panel reserves its width here rather than always: an always-on reservation
-   spends 360px of the reading surface on an empty band for the page's life. */
+/* The panel reserves its width here only while open; an always-on reservation would waste 360px on an empty band. */
 .feedStage {
   box-sizing: border-box;
   display: grid;
@@ -214,11 +198,8 @@
 
 .feedStage[data-panel="open"] { padding-right: var(--team-panel-width, 460px); }
 
-/* The panel is a discussion's whole face beside its feed: the head names it, the
-   body reads it, the foot answers it. As the surface's own child it spans the
-   band and the feed as one column, so its 10px inset puts the head on the band's
-   identity row. Its seat is one variable the handle writes, so a drag repaints
-   without re-rendering the feed. */
+/* As the surface's own child the panel spans the band and the feed as one column, so its 10px inset puts the head on the
+   band's identity row. Its seat is one variable the handle writes, so a drag never re-renders the feed. */
 .panel {
   background: var(--dsw-alias-bg-base);
   border-left: 1px solid var(--dsw-alias-border-l2);
@@ -231,9 +212,7 @@
   width: var(--team-panel-width, 460px);
 }
 
-/* The grab strip straddles the seam so a pointer aimed at it need not land on
-   the panel itself. Transparent at rest; hover and drag light the 2px rule where
-   the border already is. */
+/* The grab strip straddles the seam so a pointer need not land on the panel itself; hover and drag light the 2px rule. */
 .panelHandle {
   appearance: none;
   background: none;
@@ -275,10 +254,7 @@
   .panelHandle::after { transition: none; }
 }
 
-/* The band's identity row, continued on the panel's side of the seam: the
-   panel's 10px inset and this 30px row are the band's own numbers. No closing
-   rule — the band's rule already ends the row, so a second one only draws a
-   line the reader has to read past. */
+/* Continues the band's identity row; no closing rule, since the band's rule already ends the row. */
 .panelHead {
   align-items: center;
   display: flex;
@@ -307,13 +283,9 @@
   padding-top: max(12px, var(--team-card-rise, 20px));
 }
 
-/* Below the shared 600px breakpoint the panel covers the feed rather than
-   sitting beside it: a 360px column beside a feed leaves neither one readable.
-   Both take the surface's one column and the feed's own rows, so the panel
-   paints over the feed while the band above them — and the seam it shares —
-   stay visible. Placing one of them auto would open a second implicit column
-   and squeeze the feed instead of covering it. The band's width override lives
-   beside the rule it replaces, in the conversation module. */
+/* Below the shared 600px breakpoint the panel covers the feed: a 360px column beside it leaves neither readable. Both take
+   the one column so the band and seam stay visible; `auto` would open a second implicit column and squeeze the feed.
+   The band's width override lives beside the rule it replaces, in the conversation module. */
 @media (max-width: 600px) {
   .feedStage[data-panel="open"] { padding-right: 0; }
 
@@ -329,6 +301,5 @@
     width: auto;
   }
 
-  /* Covering the feed whole is not a seat one can drag wider. */
   .panelHandle { display: none; }
 }

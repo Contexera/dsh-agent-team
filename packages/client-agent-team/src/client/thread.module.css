@@ -1,4 +1,3 @@
-/* Task identity and its state pill share one baseline row. */
 .titleLine {
   align-items: center;
   display: flex;
@@ -20,8 +19,7 @@
   margin: 0 0 6px;
 }
 
-/* One risk is one line: the localized class label leads, and the Host's own
-   English diagnostic rides the row's title instead of the line box. */
+/* The localized class label leads; the Host's English diagnostic rides the row's title instead of the line box. */
 .riskRow {
   align-items: center;
   color: var(--dsw-alias-label-secondary);
@@ -75,10 +73,8 @@
   width: 5px;
 }
 
-/* A block of consecutive activities reads as one ledger: block members align
-   to the text column (the identity seat + the row's 10px gap, derived from the
-   same declaration the face reads, level with the run divider) instead of
-   stacking as centered floats; an isolated activity stays centered. */
+/* A block of consecutive activities reads as one ledger: members align to the text column (identity seat + the row's 10px
+   gap, derived from the same declaration the face reads) instead of stacking as centered floats; an isolated activity stays centered. */
 .activityRow:has(+ .activityRow),
 .activityRow + .activityRow {
   justify-content: flex-start;
@@ -125,7 +121,6 @@
 
 .unreadBoundary span { flex: none; }
 
-/* Calendar-day anchor between rendered facts; quieter than the unread line. */
 .daySeparator {
   align-items: center;
   color: var(--dsw-alias-label-tertiary);
@@ -166,7 +161,6 @@
   z-index: 2;
 }
 
-/* The hint carries no read semantics — it only scrolls to the tail. */
 .newUpdatesJump {
   background: none;
   border: 0;
@@ -183,10 +177,8 @@
   outline-offset: 2px;
 }
 
-/* The opener is one line in every Thread kind: a Task's title runs long and
-   embeds unbreakable refs, and a discussion repeats its anchor message in full
-   right below, so a second line here would only spend the band's height on text
-   the reader can already see. The full text rides the title attribute. */
+/* One line in every Thread kind: a Task's title runs long with unbreakable refs, and a discussion repeats its anchor message
+   right below. The full text rides the title attribute. */
 .taskTitle {
   color: var(--dsw-alias-label-secondary);
   display: -webkit-box;
@@ -200,8 +192,6 @@
   overflow-wrap: anywhere;
 }
 
-/* The closed-task bar replaces the composer slot; the notice explains why input
-   is unavailable and carries the one recovery action. */
 .closedBar {
   align-items: center;
   display: flex;

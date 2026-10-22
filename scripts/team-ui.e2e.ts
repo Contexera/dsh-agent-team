@@ -4,10 +4,9 @@ import { afterEach, expect, it } from 'vitest'
 import { chromium, type Browser, type Locator, type Page } from 'playwright'
 import { launchWebScaffold, acknowledgeReloadConnectionLoss, watchConsole, type WebScaffold } from './scaffold.ts'
 import { connectFreshWorkspaceZh } from './support.ts'
-// This file is rendered into the adjacent harness checkout and runs from there,
-// where bare workspace imports resolve to harness source by the lane's own
-// tsconfig paths facade — so the version the page must state is read through the
-// same call the running Host makes, not from a copy of its path.
+// Runs from the adjacent harness checkout, where bare workspace imports resolve
+// to harness source; the expected version is read through the same call the Host
+// makes.
 import { getDshRuntimeVersion } from '@deepseek-ai/dsh-app-boot'
 
 const TEAM_ROOT = '__TEAM_ROOT__'
@@ -33,11 +32,9 @@ afterEach(async () => {
 })
 
 /**
- * Wait until no finite animation is still running. The sidebar collapse and
- * its rail-in crossfade are 150ms each, and the AppFrame track slides between
- * 56px and 280px: a screenshot taken mid-flight captures the frozen expanded
- * column clipped to the rail instead of the settled rail itself. Infinite
- * animations (presence and loading pulses) are not waits.
+ * Wait until no finite animation is running: a screenshot taken mid-collapse
+ * captures the expanded column clipped to the rail. Infinite animations
+ * (presence and loading pulses) are not waited on.
  */
 async function settleAnimations(page: Page): Promise<void> {
   await page.waitForFunction(() => document.getAnimations().every(animation => {
@@ -58,9 +55,8 @@ async function openSettings(page: Page): Promise<void> {
 }
 
 /**
- * What a control's focus ring actually renders, plus whether the browser counts
- * the focus as keyboard-visible at all. A ring the reader never sees is not
- * evidence, so the assertion has to read `:focus-visible` too.
+ * The focus ring a control renders, plus whether the browser counts the focus
+ * as keyboard-visible (`:focus-visible`).
  */
 async function focusRing(page: Page, selector: string): Promise<{
   readonly focusVisible: boolean
@@ -82,10 +78,8 @@ async function focusRing(page: Page, selector: string): Promise<{
 }
 
 /**
- * Settle a viewport change all the way. The responsive sidebar starts its slide
- * on the frame *after* the resize, so a single animation check can pass before
- * the transition exists and the screenshot lands mid-flight — frozen expanded
- * column clipped to the rail. Two quiet frames later, re-check.
+ * Settle a viewport change: the responsive sidebar starts sliding a frame
+ * after the resize, so re-check animations after two quiet frames.
  */
 async function settleLayout(page: Page): Promise<void> {
   await settleAnimations(page)
@@ -96,11 +90,9 @@ async function settleLayout(page: Page): Promise<void> {
 }
 
 /**
- * One Task's Thread entry line in the Channel feed. The row carries
- * `data-thread-entry-door` as a stable marker — the Task number, or `thread`
- * for a taskless Thread — so a selector never has to parse the rendered
- * accessible name, whose wording is localized and whose unread form appends a
- * count inside a full-width bracket.
+ * One Task's Thread entry line in the Channel feed, matched by the stable
+ * `data-thread-entry-door` marker (the Task number, or `thread`) rather than
+ * the localized accessible name.
  */
 function taskEntryLineSelector(taskNumber: number): string {
   return `[data-team-channel] [data-thread-entry-door="${taskNumber}"]`
@@ -116,9 +108,8 @@ function taskEntryRow(page: Page, taskNumber: number) {
 }
 
 /**
- * The colour one `--dsw-*` alias really resolves to in the running theme. A row's
- * expectation is compared against this instead of a frozen literal, so the check
- * follows a palette swap and still fails if the rule stops naming the alias.
+ * The colour a `--dsw-*` alias resolves to in the running theme, so
+ * expectations follow palette changes.
  */
 async function resolveAliasColor(page: Page, alias: string): Promise<string> {
   return page.evaluate(name => {
@@ -132,12 +123,9 @@ async function resolveAliasColor(page: Page, alias: string): Promise<string> {
 }
 
 /**
- * Left edges of one entry's state cluster, the entry line it leads, and the
- * reading column holding both it and the body above it. All three meet when the
- * state opens the entry line — the path the reader's eye already follows — and
- * diverge when it is parked at a line's far end instead. The column is the
- * message body box itself rather than a positional child, because a grouped row
- * that carries no time of its own renders no identity line at all.
+ * Left edges of an entry's state cluster, its entry line, and the reading
+ * column (the message body box itself, since grouped rows render no identity
+ * line).
  */
 async function entryClusterEdges(page: Page, lineSelector: string): Promise<{ readonly cluster: number; readonly row: number; readonly column: number } | null> {
   return page.evaluate((selector) => {
@@ -154,28 +142,11 @@ async function entryClusterEdges(page: Page, lineSelector: string): Promise<{ re
 }
 
 /**
- * The horizontal centre of a control's *visible ink*, read off a screenshot of
- * the control itself rather than from its box. Box geometry cannot answer this
- * question: a flex row centres the boxes it lays out, and a glyph that draws its
- * mark off-centre inside a symmetric box carries the whole group with it. The
- * exit row is exactly that case — the chevron's 4px of ink sits 5px inside its
- * 14px box while the label fills its own box — so the assertion the reader cares
- * about ("does the group look centred?") has to be measured in pixels.
- */
-/**
- * How far the Team browsing column can be scrolled sideways, in whole pixels —
- * the largest distance any scroller inside it will actually travel when asked
- * to scroll right.
- *
- * A scrollport with `overflow-x: hidden` still reports a `scrollWidth` past its
- * `clientWidth` and can still be scrolled programmatically, so neither that pair
- * nor the computed `overflow-x` tells a clipped box from a reachable one — and
- * the Team column's own scroller is `hidden` on this axis, so a probe that
- * skipped those would measure nothing at all. Scrolling is the reader's own
- * gesture, so this asks every element that clips, hidden included, how far it
- * will actually go. The scope is the Team region rather than the page: the
- * shipped shell's own sidebar column clips 1px of its scrollbar gutter, which is
- * neither this change's business nor reachable as a visible sideways move.
+ * Furthest any scroller inside the region can travel when scrolled right.
+ * `overflow-x: hidden` boxes still scroll programmatically and report a
+ * `scrollWidth` past `clientWidth`, so every clipping element is asked.
+ * Scoped to the Team region because the shell's sidebar clips 1px of
+ * scrollbar gutter.
  */
 async function maxHorizontalScroll(page: Page, selector: string): Promise<number> {
   return page.evaluate(rootSelector => {
@@ -195,11 +166,7 @@ async function maxHorizontalScroll(page: Page, selector: string): Promise<number
   }, selector)
 }
 
-/**
- * The Channel feed's state column: the left edge of every entry line's state
- * cluster. A Taskful entry always carries one — a status dot and word at
- * minimum — so these x values are what a reader's eye scans down.
- */
+/** Left edge of every entry line's state cluster in the Channel feed. */
 async function taskEntryClusterLefts(page: Page): Promise<readonly number[]> {
   return page.evaluate(() => {
     const edges: number[] = []
@@ -212,23 +179,22 @@ async function taskEntryClusterLefts(page: Page): Promise<readonly number[]> {
 }
 
 /**
- * What decides where the digit sits and how wide the capsule runs. Three copies
- * of these declarations is how the count drifted between the sidebar's Inbox
- * entry, the Channel feed's Thread entry, and the Inbox queue's own rows; one
- * component means one answer, and this reads that answer off the assembled
- * bundle instead of trusting the source.
+ * The declarations that decide where the count digit sits and how wide the
+ * capsule runs, read from the assembled bundle.
  */
 function readCountCapsule(element: Element): {
   readonly text: string
   readonly hidden: string | null
   readonly background: string
-  /** The used box, computed style is not enough: `min-width` is a floor the
-   * content can still push past, so whether one digit really lands in a square
-   * is only answered here. */
+  /**
+   * The used box: `min-width` is only a floor, so squareness of one digit
+   * needs the measured size.
+   */
   readonly box: Record<string, number>
-  /** The inset that reaches the digit: what a tone spends before the count can
-   * start, padding plus its own border. The two tones declare different numbers
-   * on purpose, so this — not the declaration — is what has to agree. */
+  /**
+   * The inset reaching the digit (padding plus border). The tones declare
+   * different values on purpose, so this is what must agree.
+   */
   readonly inset: number
   readonly shape: Record<string, string>
 } {
@@ -241,8 +207,8 @@ function readCountCapsule(element: Element): {
     box: { width: rect.width, height: rect.height },
     inset: Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.borderLeftWidth),
     shape: {
-      // The longhands, because `font` is the empty string here and a shape that
-      // silently compares '' to '' would let a second font in unnoticed.
+      // Longhands: `font` computes to '' here, so comparing it would silently
+      // pass.
       fontFamily: style.fontFamily,
       fontSize: style.fontSize,
       fontWeight: style.fontWeight,
@@ -261,11 +227,8 @@ function readCountCapsule(element: Element): {
 }
 
 /**
- * The unread capsule an entry carries, found by the shared count badge's own
- * attribute: CSS-module class names are hashed by the build, and one component
- * now wears every count, so the attribute — not a class name and not a guessed
- * shape — is the contract. Computed style is the evidence that the single rule
- * actually reached the page.
+ * The unread capsule of an entry, found by the shared count badge's attribute
+ * because the build hashes CSS-module class names.
  */
 async function entryUnreadCapsule(page: Page, lineSelector: string): Promise<ReturnType<typeof readCountCapsule> | null> {
   const capsule = page.locator(`${lineSelector} [data-team-count-badge]`).first()
@@ -273,52 +236,41 @@ async function entryUnreadCapsule(page: Page, lineSelector: string): Promise<Ret
 }
 
 /**
- * Stage this bundle and its dependency closure the way `dsh plugin add`
- * installs it. Production mounts the package as a profile bundle and takes the
- * row set from the bundle's own patch; a command-line overlay declaring those
- * rows instead shadows the profile document, so the Host row's settings write
- * fails (rc.1 `ConfigEditor`: "overridden by a home patch or command-line
- * overlay"). Every lane therefore mounts the staged copy as a profile package.
- * Only the first case of a run clears the artifacts directory
- * (`clearArtifacts`); every later case appends to it, so one full run leaves
- * every case's screenshots to review instead of only the last case's.
+ * Stage this bundle and its dependency closure as `dsh plugin add` installs
+ * it. A command-line overlay would shadow the profile document and make the
+ * Host row's settings write fail, so every lane mounts the staged copy as a
+ * profile package. Only the first case of a run clears the artifacts
+ * directory (`clearArtifacts`).
  */
 async function installLocalBundle(clearArtifacts = true): Promise<void> {
   await rm(HOME, { recursive: true, force: true })
   if (clearArtifacts) await rm(BROWSER_ARTIFACTS, { recursive: true, force: true })
   const scope = `${HOME}/profiles/node_modules/@contexera`
   await mkdir(scope, { recursive: true })
-  // The filter must match on both separators: on Windows cp walks backslash
-  // paths, so forward-slash-only matching lets node_modules and src through.
+  // Match both separators: on Windows cp walks backslash paths.
   await cp(TEAM_ROOT, `${scope}/dsh-agent-team`, {
     recursive: true,
     filter: source => {
       const normalized = source.replaceAll('\\', '/')
-      // .hoplite is agent-workspace state (runtime FIFOs kill fs.cp), never
-      // part of the bundle layout being staged.
+      // .hoplite is agent-workspace state (runtime FIFOs kill fs.cp).
       return !normalized.includes('/node_modules') && !normalized.includes('/src') && !normalized.includes('/artifacts') && !normalized.includes('/.hoplite')
     },
   })
-  // Production installs the bundle's regular dependencies with it (pnpm,
-  // hoisted); this manual staging runs no installer, so stage the same
-  // closure or a boot-time bare import resolves nowhere — before this, zod
-  // passed only because the installation fallback heals its own copy. Stage
-  // them INSIDE the bundle dir: the shared profiles/node_modules root is
-  // dsh-managed healed state, and the healer rejects foreign real entries.
+  // Stage regular dependencies inside the bundle dir, as the production installer
+  // would; the shared profiles/node_modules root is dsh-managed and rejects
+  // foreign entries.
   const { dependencies } = JSON.parse(await readFile(join(TEAM_ROOT, 'package.json'), 'utf8')) as { dependencies: Record<string, string> }
   const bundleModules = join(scope, 'dsh-agent-team', 'node_modules')
   for (const name of Object.keys(dependencies)) {
-    // No filter: the source root itself lives under node_modules (the
-    // bundle filter above would reject it), and a store package never nests
-    // its own node_modules — pnpm keeps siblings beside it instead.
+    // No filter: the source root itself lives under node_modules, and store
+    // packages never nest their own node_modules.
     await cp(join(TEAM_ROOT, 'node_modules', name), join(bundleModules, ...name.split('/')), {
       recursive: true,
       dereference: true,
     })
   }
-  // The routed ledger backend travels inside the staged copy: it is vendored
-  // under this bundle's own package name (see cordis.patch.yml), so no host
-  // node_modules link is staged here.
+  // The routed ledger backend is vendored under this bundle's own package name
+  // (see cordis.patch.yml).
   await mkdir(UI01_SHOTS, { recursive: true })
   await mkdir(UI02_SHOTS, { recursive: true })
   await mkdir(UI03_SHOTS, { recursive: true })
@@ -336,26 +288,22 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
   const consoleWatch = watchConsole(page)
-  // rc.1: the web server gates the browser surface behind a process-token
-  // exchange; the scaffold's authenticatedUrl establishes the session cookie.
+  // The web server gates the browser surface behind a process-token exchange;
+  // authenticatedUrl sets the session cookie.
   await page.goto(scaffold.authenticatedUrl)
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
   const ordinaryComposer = page.locator('[data-composer-input][contenteditable="true"][data-placeholder="描述你想要构建的内容, / 调用指令, @ 文件或对话"]')
   await expect.poll(() => ordinaryComposer.count()).toBe(1)
-  // The Team browser's own marked row. The shell's rail marks the panel that
-  // owns the column one level above it, so the leaf's "exactly one" invariant is
-  // asserted in the browser's scope rather than across the whole sidebar.
+  // Scoped to the Team browser's marked row: the shell's rail marks the panel
+  // that owns the column above it.
   const teamCurrentPage = page.locator('[data-slot="sidebar.workspaces"] [aria-current="page"]')
 
   expect(scaffold.ctx.clientModules.graph().entries.some(entry => entry.id === '@contexera/dsh-agent-team')).toBe(true)
-  // The Team entry is the sidebar rail's own row: the same list as the shipped
-  // global panels, at the same height and on the list's own pitch.
   const panelRail = page.locator('nav[class*="panelList"]')
   const pluginsTrigger = panelRail.getByRole('button', { name: '插件' })
   const teamTrigger = panelRail.getByRole('button', { name: '团队', exact: true })
   const settingsTrigger = page.locator('[data-slot="sidebar.settings"] button').first()
-  // The bar the mode's exit takes over, measured while it is still on screen:
-  // in Team mode the stand-down rule hides it, so its box has to be read here.
+  // Measured while on screen: Team mode's stand-down rule hides this bar.
   const shippedBarBox = await page.locator('button[class*="newSession"]').boundingBox()
   expect(shippedBarBox).not.toBeNull()
   const [teamBox, pluginsBox, settingsBox] = await Promise.all([teamTrigger.boundingBox(), pluginsTrigger.boundingBox(), settingsTrigger.boundingBox()])
@@ -363,8 +311,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(pluginsBox).not.toBeNull()
   expect(settingsBox).not.toBeNull()
   expect(teamBox!.height).toBeCloseTo(pluginsBox!.height, 0)
-  // The Team row is the list's LAST row, on the list's one pitch: "on the grid"
-  // alone also passes when the row slid to a position that is not its own.
+  // The last row, on the list's one pitch: "on the grid" alone also passes at a
+  // wrong position.
   const railRows = await panelRail.evaluate(el => [...el.querySelectorAll('button')]
     .map(b => b.getBoundingClientRect().y))
   expect(railRows.length).toBeGreaterThan(1)
@@ -375,15 +323,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     expect(railRows[index]! - railRows[index - 1]!, `row ${index} leaves the list's pitch`).toBeCloseTo(pitch, 0)
   }
   await teamTrigger.click()
-  // The mode shadows the browser seat only. Its way back to the conversation
-  // takes over the shipped New Session bar's slot — the mode hides that bar, so
-  // one bar stands in that position in either mode and only its label changes.
-  // The seat is the closest a Team control can legally stand to the brand row:
-  // that row is either the shipped New Session button or a macOS window-drag
-  // surface, and its mark is aria-hidden. The shipped bar's own box is measured
-  // in the mode the reader meets it in, so "same slot" is an equation rather
-  // than a resemblance — and the shipped Settings row keeps the footer in both
-  // modes.
+  // The return control takes over the shipped New Session bar's slot (the mode
+  // hides that bar), so it is measured against the bar's box in ordinary mode.
+  // The footer's Settings row stays in both modes.
   const conversationTrigger = page.getByRole('button', { name: '对话' })
   const [conversationBox, brandRowBox, topInboxBox, teamSettingsBox] = await Promise.all([
     conversationTrigger.boundingBox(),
@@ -395,38 +337,23 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(brandRowBox).not.toBeNull()
   expect(topInboxBox).not.toBeNull()
   expect(teamSettingsBox).not.toBeNull()
-  // Below the brand row, above the Inbox card: the exit is the first control
-  // the browsing region offers.
   expect(conversationBox!.y).toBeGreaterThanOrEqual(brandRowBox!.y + brandRowBox!.height)
   expect(conversationBox!.y).toBeLessThan(topInboxBox!.y)
-  // The vertical claim is the shipped bar's slot — the mode hides that bar, so
-  // the column's first row must not jump when the reader switches modes — and it
-  // is an equation: same top, same height.
+  // Same top and height as the hidden shipped bar, so the first row does not jump
+  // between modes.
   expect(conversationBox!.y).toBeCloseTo(shippedBarBox!.y, 0)
   expect(conversationBox!.height).toBeCloseTo(shippedBarBox!.height, 0)
-  // Taking over the bar's slot means taking over its box, so this is the same
-  // equation as the vertical one: the mode hides the shipped bar, and the row
-  // that replaces it must land on the box the bar had — 14px to 266px in the
-  // 280px sidebar, the 2px inset being the shipped bar's own. A `width: 100%`
-  // here would add to that margin and push the slab 4px past the column, and an
-  // inset onto the browsing region's own 12px edge would pull it 2px in; both
-  // are kinks this pins shut.
+  // Same box as the hidden shipped bar: 14px to 266px in the 280px sidebar.
+  // `width: 100%` would add margin and overshoot by 4px; an inset onto the
+  // browsing region's 12px edge would pull it in 2px.
   expect(conversationBox!.x).toBeCloseTo(shippedBarBox!.x, 0)
   expect(conversationBox!.width).toBeCloseTo(shippedBarBox!.width, 0)
-  // The browsing column below it scrolls one way only: the section headers reach
-  // 4px past the scrollport by their own margin, and that overhang is a box
-  // rather than content, so nothing may scroll sideways. Measured by asking each
-  // scroller to scroll as far right as it can, which is the reader's own gesture.
+  // Nothing in the browsing column may scroll sideways, though section headers
+  // overhang the scrollport by their margin.
   expect(await maxHorizontalScroll(page, 'section[class*="workspaceBrowser"]')).toBe(0)
-  // Centring is a claim about the label's ink, not about the whole control's.
-  // The mode's exit centres its label and hangs the chevron off the label's
-  // leading edge, out of flow: centring the group instead makes the result
-  // depend on the air inside each glyph's box, which differs between CJK and
-  // Latin glyphs and across font stacks. Measuring the control's whole ink would
-  // therefore measure the chevron's offset and call the design wrong for doing
-  // what it documents; the label's own box is the thing that must be centred.
-  // Assembled-bundle only: jsdom loads no CSS and the optical margin is a CSS
-  // declaration.
+  // Centring is measured on the label's ink, not the whole control: the chevron
+  // hangs off the label's leading edge out of flow. Assembled-bundle only: jsdom
+  // loads no CSS.
   const labelCentreOffset = await page.evaluate(async () => {
     const label = document.querySelector('button[data-team-action="leave"] span[class*="leaveCardLabel"]')
     const control = label?.closest('button')
@@ -437,7 +364,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(labelCentreOffset).not.toBeNull()
   expect(Math.abs(labelCentreOffset!)).toBeLessThanOrEqual(1)
-  // The chevron leads the label rather than floating on the far side of the row.
   const glyphBeforeLabel = await page.evaluate(() => {
     const glyph = document.querySelector('button[data-team-action="leave"] svg')
     const label = document.querySelector('button[data-team-action="leave"] span[class*="leaveCardLabel"]')
@@ -445,11 +371,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     return glyph.getBoundingClientRect().right <= label.getBoundingClientRect().left
   })
   expect(glyphBeforeLabel).toBe(true)
-  // The shipped Settings row is not shadowed, so it keeps the y and the height
-  // it had before the mode was entered — the footer is the shell's again.
+  // The shipped Settings row is not shadowed and keeps its position.
   expect(teamSettingsBox!.y).toBeCloseTo(settingsBox!.y, 0)
   expect(teamSettingsBox!.height).toBeCloseTo(settingsBox!.height, 0)
-  // The roster entry is retired: no second row, and no members dialog trigger.
   await expect.poll(() => page.getByRole('button', { name: '成员', exact: true }).count()).toBe(0)
   const newSessionButtons = page.locator('button[aria-label="新建会话"]')
   const newSessionButton = page.locator('button[class*="newSession"][aria-label="新建会话"]')
@@ -458,11 +382,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => newSessionButton.count()).toBe(1)
   await expect.poll(() => newSessionButton.isVisible()).toBe(false)
   await expect.poll(() => brandButton.count()).toBe(1)
-  // Pinned as the defect it is, not as intent: the mode's stand-down rule hides
-  // the `.newSession` bar and the panel rail, but the wide brand row is a second
-  // New Session button on non-macOS and is still live here. The journey below
-  // uses it to stage the Human's own session, so the leak stays asserted until
-  // the mode is given that row's stand-down.
+  // Known defect: the mode's stand-down hides the `.newSession` bar and the panel
+  // rail but not the wide brand row, a second live New Session button on non-
+  // macOS. The journey uses it to stage the Human's own session.
   await expect.poll(() => brandButton.isVisible()).toBe(true)
   await page.getByRole('button', { name: '新建频道' }).click()
   const initialChannelDialog = page.getByRole('dialog', { name: '新建频道' })
@@ -474,28 +396,24 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     const dialog = page.getByRole('dialog', { name: '添加 Agent' })
     await dialog.getByLabel('名称').fill(name)
     await dialog.getByLabel('说明').fill(description)
-    // Creation has no Channel page anymore: membership is Channel-side.
     expect(await dialog.getByRole('button', { name: '初始频道' }).count()).toBe(0)
     if (name === 'builder') {
-      // The import entry shares the create dialog: toggling reveals the
-      // global Member roster — truthfully empty here, since no Member exists
-      // outside this Workspace yet — and toggling back restores the form
-      // with its input intact.
+      // The import entry shares the create dialog; toggling reveals the (empty)
+      // global Member roster, and toggling back restores the form with its input.
       await dialog.getByRole('button', { name: '从其他 Workspace 引入' }).click()
       await dialog.getByText('没有可引入的 Agent。').waitFor()
       await page.screenshot({ path: join(UI03_SHOTS, 'agent-import-empty.png'), fullPage: true })
       await dialog.getByRole('button', { name: '创建 Agent' }).click()
       await expect.poll(() => dialog.getByLabel('名称').inputValue()).toBe('builder')
       await page.screenshot({ path: join(UI03_SHOTS, 'agent-create-modal.png'), fullPage: true })
-      // The model picker caps its card and scrolls internally.
       await dialog.getByRole('button', { name: '模型' }).click()
       await page.getByRole('menuitem', { name: '跟随全局默认' }).waitFor()
       await page.screenshot({ path: join(UI03_SHOTS, 'agent-create-model-menu.png'), fullPage: true })
-      // Selecting the default row closes the menu and keeps the model unset
-      // (Escape would bubble to the Modal and close the whole dialog).
+      // Select the default row: Escape would bubble to the Modal and close the
+      // dialog.
       await page.getByRole('menuitem', { name: '跟随全局默认' }).click()
-      // The Input atoms sit evenly inside the dialog card (the lopsided
-      // right gutter regression this guard pins).
+      // The Input atoms sit evenly inside the dialog card (no lopsided right
+      // gutter).
       const inputBox = await dialog.getByLabel('名称').boundingBox()
       const cardBox = await dialog.boundingBox()
       expect(inputBox).not.toBeNull()
@@ -514,10 +432,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await joinEditor.waitFor()
   await expect.poll(async () => await joinEditor.locator('[data-team-member-row]').count()).toBe(0)
   await joinEditor.getByRole('button', { name: '关闭', exact: true }).click()
-  // Narrow-viewport create form with every field optional. The 390
-  // breakpoint collapses the frame to the rail and unmounts the sidebar
-  // panels (dialog state included), so the dialog opens from the
-  // narrow-expanded sidebar once the collapse has settled.
+  // The 390 breakpoint unmounts sidebar panels (dialog state included), so reopen
+  // the dialog from the narrow-expanded sidebar after the collapse settles.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
   await page.getByRole('button', { name: '打开侧边栏' }).click()
@@ -532,10 +448,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 1440, height: 960 })
   await expect.poll(() => page.getByLabel('可用').count(), { timeout: 20_000 }).toBeGreaterThanOrEqual(2)
-  // The Agent list seats the shared Member identity in the row's second track.
-  // A centred or over-wide identity walks the avatar right and pushes the row
-  // past the sidebar; both are invisible to a hover-only glance, so they are
-  // pinned here at the settled desktop width.
+  // A centred or over-wide identity pushes the avatar right and the row past the
+  // sidebar, which a hover-only glance misses.
   const agentRowBoxes = await page.locator('[data-agent-row]').evaluateAll(rows => rows.map(row => {
     const select = row.querySelector('button')
     const avatar = row.querySelector('[role="img"]')
@@ -560,16 +474,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const channelDialog = page.getByRole('dialog', { name: '新建频道' })
   await channelDialog.getByLabel('名称').fill('delivery')
   await channelDialog.getByLabel('说明').fill('M2 完整协作验收')
-  // Initial members ride the shared multi-select Menu now.
   await channelDialog.getByRole('button', { name: '初始成员' }).click()
   await page.getByRole('menuitem', { name: /builder/ }).click()
   await page.getByRole('menuitem', { name: /reviewer/ }).click()
   await expect.poll(async () => (await channelDialog.getByRole('button', { name: /初始成员/ }).textContent())?.trim() ?? '').toContain('已选 2 个成员')
   await page.screenshot({ path: join(UI03_SHOTS, 'channel-create-modal.png'), fullPage: true })
   await channelDialog.getByRole('button', { name: '创建频道' }).click()
-  // The same form at 390: the breakpoint unmounts sidebar panels (dialog
-  // state included), so the check re-opens it from the narrow-expanded
-  // sidebar after the collapse has settled.
+  // Reopen from the narrow-expanded sidebar after the collapse settles.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
   await page.getByRole('button', { name: '打开侧边栏' }).click()
@@ -589,9 +500,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByText('还没有消息', { exact: true }).waitFor()
   await page.screenshot({ path: join(UI02_SHOTS, 'sidebar-channels.png'), fullPage: true })
 
-  // Sidebar ordering: whole-row native drag reuses the Harness list model —
-  // a before/after insertion marker, one commit per gesture — and the personal
-  // order lives in this browser only, folded over the Remote default on load.
+  // Whole-row native drag: a before/after insertion marker and one commit per
+  // gesture; the personal order lives in this browser only.
   const channelOrder = (): Promise<string[]> => page.evaluate(() =>
     [...document.querySelectorAll('[class*="channelSelect"] strong')].map(node => node.textContent?.trim().replace(/^#\s*/, '') ?? ''))
   await expect.poll(channelOrder).toEqual(['engineering', 'delivery'])
@@ -603,8 +513,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     const draggingRow = page.getByRole('button', { name: '# engineering' })
     await draggingRow.dispatchEvent('dragstart', { dataTransfer })
     await locator.dispatchEvent('dragover', { dataTransfer, clientY: box.y + box.height * 0.75 })
-    // The insertion marker is part of the contract: the lower half of the
-    // target row must paint the drop-after line before anything commits.
+    // The lower half of the target row must paint the drop-after line before
+    // anything commits.
     const deliveryWrapper = locator.locator('xpath=ancestor::div[1]')
     await expect.poll(async () =>
       await deliveryWrapper.evaluate(element => element.className.includes('sidebarRowDropAfter'))).toBe(true)
@@ -614,11 +524,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   }
   await dropBelowTopHalfOf(deliveryRow)
   await expect.poll(channelOrder).toEqual(['delivery', 'engineering'])
-  // The committed order survives a full reload: boot restore folds the saved
-  // preference over the freshly loaded Remote default order.
+  // Boot restore folds the saved order over the freshly loaded Remote default.
   await page.reload()
-  // Boot restore lands on the persisted Channel route, and the sidebar lists
-  // the restored order beside it.
   await page.getByRole('heading', { name: '# delivery' }).waitFor({ timeout: 20_000 })
   await expect.poll(channelOrder, { timeout: 20_000 }).toEqual(['delivery', 'engineering'])
   // A brand-new channel appends after the user's saved entries.
@@ -648,16 +555,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     expect(row.tier).toBe('2')
     expect(row.inside).toBe('false')
   }
-  // Resolve the alias the rule names, so the expectation follows a theme swap
-  // instead of freezing one cut of the palette.
+  // Resolve the alias the rule names so the expectation follows a theme swap.
   const labelSecondary = await resolveAliasColor(page, '--dsw-alias-label-secondary')
   expect([...new Set(rampWide.map(row => row.nameColor))]).toEqual([labelSecondary])
   await page.screenshot({ path: join(UI04_SHOTS, 'mention-rows-outside.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
-  // The description is dropped at this width while the name keeps its weight.
-  // Measure the used values, because the element itself never answers a
-  // container query about its own visibility.
+  // Measure used values: the element never answers a container query about its
+  // own visibility.
   const rampNarrow = await rampMenu
     .evaluate((element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-tier]')]
       .map(row => ({
@@ -695,23 +600,17 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => channelRecheck.getByLabel('说明').inputValue()).toBe('Platform delivery work')
   await channelRecheck.getByRole('button', { name: '关闭', exact: true }).click()
   await expect.poll(() => page.getByRole('dialog', { name: '编辑频道' }).count()).toBe(0)
-  // Collapsed sections hide their rows until expanded again.
   const channelsToggle = page.getByRole('button', { name: '频道', exact: true })
   await channelsToggle.click()
   await expect.poll(() => page.getByRole('button', { name: '# engineering' }).count()).toBe(0)
-  // Collapse is a browser-local presentation preference, not a Team fact: it
-  // survives a full reload like the row order does, then still expands again.
-  // The section header itself stays reachable while collapsed, so no channel
-  // row is needed to prove the persisted state.
+  // Collapse is a browser-local preference that survives reload; the section
+  // header stays reachable while collapsed.
   await page.reload()
   await channelsToggle.waitFor({ timeout: 20_000 })
   await expect.poll(() => page.getByRole('button', { name: '# engineering' }).count()).toBe(0)
   await channelsToggle.click()
   await page.getByRole('button', { name: '# engineering' }).waitFor()
 
-  // The Workspace is one selector line, not a list: its own text names where
-  // the reader is, its accessible name states that same Workspace, and the
-  // other Workspaces exist only inside its menu.
   const workspaceTrigger = page.getByRole('button', { name: '工作区，team-workspace', exact: true })
   await expect.poll(async () => (await workspaceTrigger.textContent())?.trim() ?? '').toBe('team-workspace')
   await expect.poll(() => workspaceTrigger.getAttribute('aria-haspopup')).toBe('menu')
@@ -721,17 +620,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('menuitem', { name: 'team-workspace' }).waitFor()
   await page.keyboard.press('Escape')
   await expect.poll(() => workspaceTrigger.getAttribute('aria-expanded')).toBe('false')
-  // The menu is the only way to switch Workspaces, so its rows have to be
-  // reachable without a pointer: opening from the keyboard puts focus on the
-  // first row, and Escape hands focus back to the trigger.
+  // Opening from the keyboard focuses the first row; Escape returns focus to the
+  // trigger.
   await workspaceTrigger.focus()
   await page.keyboard.press('Enter')
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('role') ?? '')).toBe('menuitem')
   await page.keyboard.press('Escape')
   await expect.poll(() => page.evaluate(() => document.activeElement?.matches('[data-team-workspace-trigger]') ?? false)).toBe(true)
-  // The Inbox is the one entry that crosses Workspaces — its total sums every
-  // one of them — so it stands above the selector that scopes the sections
-  // below it rather than inside that scope.
+  // The Inbox crosses Workspaces (its total sums all of them), so it sits above
+  // the selector that scopes the sections.
   const [workspaceTriggerBox, inboxCardBox] = await Promise.all([
     workspaceTrigger.boundingBox(),
     page.locator('button[class*="inboxCard"]').boundingBox(),
@@ -746,14 +643,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('menuitem', { name: '编辑 Agent' }).click()
   const agentEditor = page.getByRole('dialog', { name: '编辑 Agent' })
   await agentEditor.waitFor()
-  // The Agent editor carries no Channel section anymore: handle,
-  // description, and model only (membership lives on the Channel side).
   await expect.poll(() => agentEditor.getByRole('button', { name: '移除' }).count()).toBe(0)
   await expect.poll(() => agentEditor.getByRole('button', { name: '添加' }).count()).toBe(0)
-  // The per-Member model picker rides the shared Menu primitive: the trigger
-  // echoes the current selection and opening lists the Host catalog grouped
-  // by provider without any live Session round-trip. Re-selecting the
-  // default row closes it without dirtying the form.
+  // The picker lists the Host catalog grouped by provider with no live Session
+  // round-trip.
   const modelTrigger = agentEditor.getByRole('button', { name: '模型', exact: true })
   await modelTrigger.waitFor()
   await expect.poll(() => modelTrigger.textContent()).toBe('跟随全局默认')
@@ -761,9 +654,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const modelMenu = page.locator('[role="menu"]').filter({ hasText: '跟随全局默认' })
   await modelMenu.waitFor()
   expect(await modelMenu.getByRole('menuitem').count()).toBeGreaterThanOrEqual(2)
-  // The radius the shared Menu primitive gives its own rows, measured live: the
-  // Team composer's mention popover is held to this same value below, so the two
-  // cannot drift into separate menu languages on any DSH line.
+  // The shared Menu's row radius, measured live; the mention popover below must
+  // match it.
   const shippedRowRadius = await modelMenu.getByRole('menuitem').first()
     .evaluate(row => getComputedStyle(row).borderTopLeftRadius)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-model-menu.png'), fullPage: true })
@@ -772,10 +664,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-edit-modal.png'), fullPage: true })
   await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()
 
-  // The manual clear-context entry is retired: the Host recycles a Member's
-  // generation at its wake boundary, so every row menu must omit the entry
-  // entirely and no confirm dialog exists. The swap itself is covered by the
-  // member-lifecycle integration tests and the Client component suite.
+  // Row menus omit any clear-context entry: the Host recycles a Member's
+  // generation at its wake boundary.
   await builderRow.hover()
   await builderRow.getByRole('button', { name: 'builder 的操作' }).click()
   await page.getByRole('menuitem', { name: '编辑 Agent' }).waitFor()
@@ -789,23 +679,18 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const builderMember = memberStatuses.find((status: { member: { handle: string } }) => status.member.handle === 'builder')!
   const builderAgent = scaffold.ctx.agents.get(builderMember.member.sessionId)!
 
-  // Clicking the Agent card keeps Team mode mounted and swaps only the right
-  // pane: the conversation shadow stands down so the shipped root renders the
-  // Member Session between the Team sidebars. A Member session has no human
-  // turns yet, so DSH renders its blank-session view — the hero composer
-  // carrying the Member's workspace + `team-member` preset chips.
-  // The Human's own session is staged first on purpose: the embedded view then
-  // carries a return target, so leaving Team later restores an ordinary
-  // conversation instead of stranding the Member Session.
+  // Opening an Agent card keeps Team mode mounted and swaps only the right pane:
+  // the shipped root renders the Member Session's blank-session hero composer
+  // with the workspace and `team-member` preset chips.
+  // The Human's own session is staged first so the embedded view has a return
+  // target.
   await brandButton.click()
-  // The two Member Sessions exist already; the brand click adds the Human's.
   await expect.poll(() => scaffold.ctx.sessions.list().length).toBeGreaterThanOrEqual(3)
   await builderRow.getByRole('button', { name: '打开 builder 的会话' }).click()
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.agentTeamMode ?? null)).toBe('team')
   await expect.poll(() => page.locator('[data-team-channel]').count()).toBe(0)
-  // rc.1: the shipped InputBar owns the composer entirely — the Team manages
-  // no member-session input surface, so the journey only asserts the shipped
-  // composer renders for the embedded Member Session.
+  // The Team manages no member-session input surface; only the shipped composer
+  // is asserted.
   const memberInput = page.locator('[data-composer-input][contenteditable="true"]')
   await expect.poll(() => memberInput.count()).toBe(1)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-composer.png'), fullPage: true })
@@ -816,17 +701,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })), { timeout: 10_000 }).toEqual({ channel: 0, mode: 'team' })
   await expect.poll(() => memberInput.isEnabled()).toBe(true)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-live.png'), fullPage: true })
-  // Host side: the Member is still bound to its original Session id; no
-  // archive happened and no rollover operation exists.
+  // Host side: the Member is still bound to its original Session id.
   const liveStatuses = scaffold.ctx.agentTeam.members({ workspaceId: memberWorkspace.id })
   const liveBuilder = liveStatuses.find((status: { member: { handle: string } }) => status.member.handle === 'builder')!
   expect(liveBuilder.member.sessionId).toBe(builderMember.member.sessionId)
   expect(scaffold.ctx.workspaceRegistry.archivedSessionIds).not.toContain(builderMember.member.sessionId)
 
-  // The embedded Member Session is directly usable through the shipped
-  // composer: a plain prompt lands on the Member's live Session (the Team
-  // manages no member-session input surface, so no structured mention flow
-  // remains).
+  // A plain prompt through the shipped composer lands on the Member's live
+  // Session.
   await memberInput.click()
   await page.keyboard.type('member session hello')
   await page.keyboard.press('Enter')
@@ -836,8 +718,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => builderAgent.session.snapshotEvents().some(isPlainMemberPrompt)).toBe(true)
   await builderAgent.whenIdle()
   await expect.poll(() => page.locator('[class*="agentRow"]').count()).toBeGreaterThan(0)
-  // The single positioning highlight sits on the selected Agent card; the
-  // workspace overview row stays quiet while the Member view is open.
+  // The single highlight sits on the selected Agent card, not on the workspace
+  // overview row.
   await expect.poll(() => teamCurrentPage.count()).toBe(1)
   await expect.poll(() => teamCurrentPage.getAttribute('aria-label')).toBe('打开 builder 的会话')
   await expect.poll(() => page.getByRole('button', { name: '# delivery' }).count()).toBe(1)
@@ -855,7 +737,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-session-dm-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
-  // Explicit Team navigation closes the embedded Member view again.
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   await expect.poll(() => page.locator('[data-team-channel]').count()).toBe(1)
@@ -875,14 +756,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     return `${style.borderColor} ${style.boxShadow}`
   })).toBe(idleComposerBorder)
   await channelComposer.fill('请协作完成验收 @')
-  // DSH 0.1.7's menu surface token is translucent, so the popup must frost what
-  // is behind it — the blur plus that translucent fill is what keeps the roster
-  // legible over the conversation, which is the state this pins. Its shape is
-  // the shipped menu's too: the surface rides the tier the shared radius scale
-  // names, and the rows land on the row radius measured off the Menu primitive
-  // above. rc.2 moved that scale onto `--dsw-radius-*` (lg surface, md rows)
-  // where rc.1 hard-coded the pixels, so both expectations are read from the
-  // running line instead of frozen to one cut of it.
+  // The menu surface token is translucent, so the popup must blur what is behind
+  // it to stay legible. Radii are read from the running `--dsw-radius-*` tiers
+  // (lg surface, md rows).
   const menuSurface = await page.getByRole('listbox', { name: '提及成员建议' }).evaluate(element => {
     const style = getComputedStyle(element)
     const firstRow = element.querySelector('[role="option"]')
@@ -898,10 +774,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(menuSurface.fill).toContain('rgba(')
   expect(menuSurface.radius).toBe(menuSurface.surfaceTier)
   expect(menuSurface.rowRadius).toBe(shippedRowRadius)
-  // Weight is the row's whole distinction: it separates a Member taking part in
-  // this Channel through another Thread — inside it, at full weight on this
-  // surface — from one the Channel never carried, and no row states anything in
-  // words on any tier of either surface.
+  // Weight is the row's only distinction between a Member already in this Channel
+  // and one the Channel never carried.
   const channelMentionRows = await page.getByRole('listbox', { name: '提及成员建议' })
     .evaluate((element: Element) => [...element.querySelectorAll('[role="option"][data-mention-tier]')].map(row => ({
       tier: row.getAttribute('data-mention-tier') ?? '',
@@ -909,14 +783,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       text: row.textContent ?? '',
     })))
   expect(channelMentionRows.length).toBeGreaterThan(1)
-  // Every candidate here takes part in this Channel already, so they are all
-  // inside it and none is dimmed. The tier-2 row needs a Workspace Member the
-  // Channel never carried, which the ramp case below and the component spec
-  // drive directly.
+  // Every candidate already takes part in this Channel, so none is dimmed; the
+  // outside tier is driven by the ramp case and the component spec.
   for (const row of channelMentionRows) {
     expect(row.inside).toBe(String(row.tier !== '2'))
-    // The row says nothing beyond the handle and its description: no tier of
-    // either surface carries a consequence in words.
     expect(row.text).not.toContain('需确认')
   }
   expect([...new Set(channelMentionRows.map(row => row.inside))]).toEqual(['true'])
@@ -932,9 +802,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await asTaskToggle.hover()
   expect(await asTaskToggle.evaluate(element => getComputedStyle(element).backgroundColor)).toBe(pressedFill)
   await page.screenshot({ path: join(UI04_SHOTS, 'as-task-pressed.png'), fullPage: true })
-  // The mode keeps its word at every width: the narrow branch narrows the
-  // toolbar's control gaps instead of dropping the label, so 390 asserts both
-  // halves. It runs in the settled collapsed layout, never mid-reflow.
+  // The label stays at every width; the narrow branch tightens the toolbar gaps.
+  // Runs in the settled collapsed layout.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
   await expect.poll(async () => (await page.locator('[data-team-channel]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
@@ -966,24 +835,22 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('消息内容')
   await page.getByRole('button', { name: '发送', exact: true }).waitFor()
 
-  // A handle typed by hand is delivered exactly like a pick from the menu, so
-  // the notify row must report it with no pick at all — and follow the text
-  // back out again when the name is deleted.
+  // A hand-typed handle is delivered like a menu pick, so the notify row reports
+  // it and follows the text when it is deleted.
   await channelComposer.fill('再确认一次 @reviewer')
   await expect.poll(() => page.getByText(/将通知/).textContent()).toContain('@reviewer')
   await page.screenshot({ path: join(UI04_SHOTS, 'mention-typed-notify.png'), fullPage: true })
   await channelComposer.fill('')
   await expect.poll(() => page.getByText(/将通知/).count()).toBe(0)
 
-  // @all expansion: typing a prefix of "all" surfaces the fixed row on top of
-  // the matching members; keyboard navigation highlights it and Tab accepts.
-  // The expansion snapshot covers every eligible delivery member (builder,
-  // reviewer) at pick time, and later text edits must not prune it away.
+  // @all: typing a prefix of "all" surfaces the fixed row on top; the keyboard
+  // highlights it and Tab accepts. The expansion snapshot covers every eligible
+  // delivery member at pick time and later edits must not prune it.
   await channelComposer.fill('全员同步 @a')
   const allOption = page.getByRole('option', { name: /@all/ })
   await allOption.waitFor()
-  // 'a' prefixes "all" but no handle in this channel, so the fixed row is
-  // the only candidate; it is highlighted by default.
+  // 'a' prefixes "all" but no handle here, so the fixed row is the only, default-
+  // highlighted candidate.
   expect(await page.getByRole('option').count()).toBe(1)
   await expect.poll(() => allOption.getAttribute('aria-selected')).toBe('true')
   await page.screenshot({ path: join(UI04_SHOTS, 'all-mention-menu.png'), fullPage: true })
@@ -998,11 +865,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const allMessage = page.locator('[data-team-channel] article').filter({ hasText: '全员同步' })
   await allMessage.waitFor()
   expect((await allMessage.textContent())?.includes('@all，今天截止')).toBe(true)
-  // The expansion delivered a direct mention to every eligible member: both
-  // agents read the taskless Thread so the later inbox assertions keep
-  // counting only the original @builder invitation flow. The @all message is
-  // the newest taskless Thread in the workspace; the Members are re-fetched
-  // through their current live bindings.
+  // Both agents read the taskless Thread so later inbox assertions count only the
+  // @builder flow. Members are re-fetched through their current live bindings.
   const allWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
   const allProjection = scaffold.ctx.agentTeam.view({ workspaceId: allWorkspace.id })
   const allThread = allProjection.threads
@@ -1016,10 +880,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     })
   }
 
-  // Branded-ref linkify: only refs the Host resolves become link controls.
-  // An unknown UUID-shaped task ref and non-UUID `channel:` prose both stay
-  // literal in the plain body; click-to-navigate is component-tested against
-  // the resolved selectThread call.
+  // Only refs the Host resolves become links; unknown UUID-shaped task refs and
+  // non-UUID `channel:` prose stay literal.
   await channelComposer.fill('请复核 task:c0ffee00-1234-4c05-8a9e-6f2b1c9d7e21 与 channel:engineering 的口径')
   await page.getByRole('button', { name: '发送' }).click()
   const refMessage = page.locator('[data-team-channel] article').filter({ hasText: '请复核' })
@@ -1029,9 +891,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await refMessage.textContent()).toContain('channel:engineering')
   await page.screenshot({ path: join(UI04_SHOTS, 'message-ref-linkify.png'), fullPage: true })
 
-  // Long-body clamp: a body past the deterministic character threshold starts
-  // clamped behind 展开全文 — the preview keeps the full text mounted under an
-  // alpha fade, expands in place, and collapses back through the same control.
+  // A body past the character threshold starts clamped behind 展开全文, expands in
+  // place under an alpha fade, and collapses via the same control.
   const longBody = '这是一条超长验收消息。'.repeat(60)
   await channelComposer.fill(longBody)
   await page.getByRole('button', { name: '发送' }).click()
@@ -1062,11 +923,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'message-clamp-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
 
-  // Attachment upload: the "+" picker takes real files, chips confirm the
-  // selection, and the committed message renders the image thumbnail from the
-  // Host cache — the full upload → ledger → display loop on the real app.
-  // Upload a real screenshot-sized PNG so thumbnails and the zoom preview
-  // demonstrate actual scaling, not a tiny fixture.
+  // The "+" picker takes real files, chips confirm the selection, and the sent
+  // message renders the thumbnail from the Host cache.
+  // A screenshot-sized PNG, so thumbnails and zoom show real scaling.
   const pngBytes = await readFile(join(UI02_SHOTS, 'sidebar-channels.png'))
   const uploadPath = join(BROWSER_ARTIFACTS, 'upload-fixture.png')
   await writeFile(uploadPath, pngBytes)
@@ -1079,10 +938,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await channelComposer.fill('这是带附件的验收消息')
   await page.screenshot({ path: join(UI04_SHOTS, 'composer-attachment-chip.png'), fullPage: true })
   await page.getByRole('button', { name: '发送' }).click()
-  // One column, and no reading language in the Channel: the feed's rows all
-  // start their words on the same x — the reader's own turns included — and a
-  // row under the pointer gains neither a layer nor a card, because that
-  // language belongs to the Thread and the feed's entry rows own their own.
+  // One text column and no hover layer in Channel feed rows; that language
+  // belongs to the Thread.
   const channelRows = page.locator('[data-team-channel] article')
   await expect.poll(() => channelRows.count()).toBeGreaterThanOrEqual(2)
   const channelColumns = await page.evaluate(() => {
@@ -1098,8 +955,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       seats: document.querySelectorAll('[data-team-channel] [data-card-time]').length,
     }
   })
-  // Every row shares one text column: the human's own Message reads on the same
-  // left edge as the Agents'.
   expect(channelColumns.columns.length).toBe(1)
   expect(channelColumns.sides).toBe(0)
   expect(channelColumns.cards).toBe(0)
@@ -1114,7 +969,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.locator('[data-team-channel] article img[src^="data:image/png"]').count()).toBeGreaterThanOrEqual(1)
   await expect.poll(() => page.getByText('验收截图.png', { exact: true }).count()).toBe(0)
   await page.screenshot({ path: join(UI04_SHOTS, 'message-attachment-thumbnail.png'), fullPage: true })
-  // Zoom: clicking the thumbnail opens a wide preview card over the mask.
   await page.locator('[data-team-channel] article img[src^="data:image/png"]').first().click()
   await page.getByRole('dialog').waitFor()
   await expect.poll(() => page.getByRole('dialog').locator('img').count()).toBe(1)
@@ -1122,9 +976,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.keyboard.press('Escape')
   await expect.poll(() => page.getByRole('dialog').count()).toBe(0)
 
-  // Paste intake: a real Chromium paste carrying an image file is intercepted
-  // before the textarea's native handling and joins the same chip flow, then
-  // uploads through the same ledger path as the "+" picker above.
+  // A real Chromium paste carrying an image file is intercepted before native
+  // handling and joins the chip flow.
   await channelComposer.focus()
   await channelComposer.evaluate((el, bytes) => {
     const file = new File([new Uint8Array(bytes)], 'image.png', { type: 'image/png' })
@@ -1139,8 +992,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await pastedMessage.waitFor()
   await expect.poll(() => pastedMessage.locator('img[src^="data:image/png"]').count()).toBeGreaterThanOrEqual(1)
 
-  // Narrow-viewport literal ref row: the unresolvable refs stay plain text
-  // and the row keeps its width without horizontal overflow.
+  // Unresolvable refs stay plain text without horizontal overflow at narrow
+  // width.
   await page.setViewportSize({ width: 390, height: 844 })
   expect(await refMessage.getByRole('button', { name: /task:c0ffee00|channel:engineering/ }).count()).toBe(0)
   expect((await refMessage.textContent())?.includes('task:c0ffee00-1234-4c05-8a9e-6f2b1c9d7e21')).toBe(true)
@@ -1150,10 +1003,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'message-attachment-thumbnail-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
-  // Three stacked bands, whichever reading is on screen: the header, the
-  // content that fills the free space, and the composer. The middle band is the
-  // feed stage — one child holding the timeline and the composer together — so
-  // this reads the stage's own box rather than its two occupants.
+  // Stacked bands: header, feed stage (one child holding timeline and composer),
+  // composer.
   const channelGeometry = await page.locator('[data-team-channel]').evaluate(element => {
     const children = [...element.children].map(child => child.getBoundingClientRect())
     return children.map(rect => ({ top: rect.top, bottom: rect.bottom, height: rect.height }))
@@ -1161,10 +1012,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(channelGeometry).toHaveLength(2)
   expect(channelGeometry[0]!.bottom).toBeLessThanOrEqual(channelGeometry[1]!.top + 1)
   expect(channelGeometry[1]!.height).toBeGreaterThan(200)
-  // The header is pane chrome and the feed is a centered column, so the two do
-  // NOT share an edge: the band sits near the pane's own left edge while the
-  // entry rows stay inside the reading column. The tab strip is part of the band
-  // and takes the band's edge, not the column's.
+  // The header band sits near the pane's left edge while entry rows stay in the
+  // centred reading column; the tab strip takes the band's edge.
   const channelColumnEdges = await page.evaluate(() => {
     const root = document.querySelector('[data-team-channel]')
     const round = (value: number) => Math.round(value)
@@ -1178,15 +1027,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(channelColumnEdges.header).not.toBeNull()
   expect(channelColumnEdges.tabs).toBe(channelColumnEdges.header)
-  // Flush with the pane, not centered on the reading column.
   expect(channelColumnEdges.header! - channelColumnEdges.pane!).toBeLessThanOrEqual(32)
   expect(channelColumnEdges.entry).toBeGreaterThan(channelColumnEdges.header!)
-  // The band is the shipped session header's shape: one identity row — the
-  // title with the description beside it — and the tab strip directly under,
-  // its 2px bar landing on the band's closing rule. The description sits on the
-  // title's line rather than under it, so the band's height is the same whatever
-  // the description says; the sidebar owns the way back, so the band carries no
-  // back row of its own.
+  // Shipped session header shape: one identity row (title with the description
+  // beside it) and the tab strip beneath, its 2px bar on the band's closing rule.
+  // The description shares the title's line so the band height does not depend on
+  // it.
   const channelBand = await page.evaluate(() => {
     const round = (value: number) => Math.round(value)
     const root = document.querySelector('[data-team-channel]')
@@ -1211,19 +1057,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     }
   })
   expect(channelBand).not.toBeNull()
-  // The bar covers the rule: their boxes end within a pixel of each other.
   expect(Math.abs(channelBand!.stripBottom - channelBand!.ruleBottom)).toBeLessThanOrEqual(1)
   expect(channelBand!.descriptionLines).toBe(1)
   expect(channelBand!.backRows).toBe(0)
-  // The description rides the title's own line, not a second one under it.
   expect(channelBand!.descriptionTop).toBeLessThan(channelBand!.titleBottom)
   expect(channelBand!.barColor).not.toBe('rgba(0, 0, 0, 0)')
-  // The band is one 76px figure at the top inset the shipped header uses.
+  // One 76px band at the shipped header's top inset.
   expect(channelBand!.bandHeight).toBeLessThanOrEqual(80)
-  // The seat is one declaration on the shared conversation surface, so the feed
-  // reads what a Thread's reading seat reads. Reading it off the Channel root is
-  // the question: a custom property is inherited, never re-resolved there. The
-  // face is measured too, since a fallback equal to the declaration satisfies it.
+  // The feed reads the shared conversation surface's seat declaration off the
+  // Channel root (custom properties inherit, never re-resolve there). The face is
+  // measured too, since a fallback equal to the declaration would satisfy it.
   const channelSeat = await page.evaluate(() => {
     const root = document.querySelector('[data-team-channel]')
     const face = document.querySelector('[data-team-channel] article [class*="messageIdentity"], [data-team-channel] article [class*="messageIdentityImage"]')
@@ -1235,8 +1078,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(channelSeat.declared).toBe('34px')
   expect(channelSeat.face).toBe(34)
   await page.screenshot({ path: join(UI01_SHOTS, 'desktop-channel.png'), fullPage: true })
-  // Channel membership is derived from participation now: the Channel page
-  // offers no management entry point and no membership dialog exists.
   await expect.poll(async () => await page.getByRole('button', { name: '管理成员' }).count()).toBe(0)
   await expect.poll(async () => await page.getByRole('dialog', { name: '频道成员' }).count()).toBe(0)
   await page.screenshot({ path: join(UI04_SHOTS, 'channel-members-retired.png'), fullPage: true })
@@ -1260,23 +1101,21 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => (await tasklessChannelFrame.locator(':scope > div').first().boundingBox())?.width ?? 999).toBeLessThanOrEqual(56)
   await expect.poll(async () => (await page.locator('[data-team-channel]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
   await tasklessMessage.getByRole('button', { name: '打开讨论' }).click()
-  // A taskless discussion opens beside its feed instead of replacing the page:
-  // the Channel page, its timeline, and the discussion's own door all stay.
+  // A taskless discussion opens beside its feed; the Channel page, timeline, and
+  // the discussion's door stay.
   const panel = page.locator('[data-team-panel]')
   await panel.waitFor()
   await expect.poll(async () => await page.getByRole('heading', { name: '# delivery' }).count()).toBe(1)
   await expect.poll(async () => await page.locator('[data-team-channel]').count()).toBe(1)
-  // The panel is a discussion's face, not a Task's: no acceptance control,
-  // because a taskless Thread has none. The feed beside it holds a Task's door.
+  // A discussion has no acceptance control; the feed beside it holds a Task's
+  // door.
   expect(await panel.getByRole('button', { name: '验收' }).count()).toBe(0)
   const promote = page.getByRole('button', { name: '转为 Task' })
   await promote.waitFor()
-  // The panel covers the feed at 390px rather than sitting beside one too narrow
-  // to read, and neither overflows the viewport. The band keeps its own width:
-  // the open panel must not also reserve a column up there, which would squeeze
-  // the identity row to nothing and leave the tabs one glyph per line — a
-  // clipped surface hides that from a page-level overflow check, so the band's
-  // own box is measured against the surface's.
+  // At 390px the panel covers the feed and neither overflows. The band keeps its
+  // own width (the panel must not reserve a column there); it is measured against
+  // the surface because a clipped surface hides this from page-level overflow
+  // checks.
   await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0))
     .toBeGreaterThanOrEqual(Math.round((await page.locator('[data-team-channel]').boundingBox())?.width ?? 0) - 2)
   const narrowBand = await page.evaluate(() => {
@@ -1292,9 +1131,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
-  // At desktop width the panel opens on the right of the feed, and the seat it
-  // takes is the seat the feed gives up: the two do not overlap, and the reading
-  // column keeps a readable measure instead of collapsing under the panel.
+  // At desktop width the panel opens right of the feed without overlap, leaving a
+  // readable reading column.
   const panelSplit = await page.evaluate(() => {
     const round = (value: number) => Math.round(value)
     const panelBox = document.querySelector('[data-team-panel]')?.getBoundingClientRect()
@@ -1307,11 +1145,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(panelSplit).not.toBeNull()
   expect(panelSplit!.timelineRight).toBeLessThanOrEqual(panelSplit!.panelLeft + 1)
   expect(panelSplit!.timelineWidth).toBeGreaterThanOrEqual(520)
-  // The panel is the surface the reader turned to, and it runs the surface whole:
-  // its head shares the band's identity row — same top, same height — rather than
-  // starting under the tab strip, and its foot shares the feed composer's line
-  // rather than floating above it. Each is an equation between two boxes measured
-  // in one render, so a change to either seat alone shows up here.
+  // The panel head shares the band's identity row (same top and height) and its
+  // foot the composer's line; each is an equation between boxes measured in one
+  // render.
   const bandEdges = await page.evaluate(() => {
     const box = (node: Element | null | undefined) => node?.getBoundingClientRect()
     const surface = box(document.querySelector('[data-team-channel]'))
@@ -1336,8 +1172,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(bandEdges!.panelHeadTop).toBe(bandEdges!.headerRowTop)
   expect(bandEdges!.panelHeadHeight).toBe(bandEdges!.headerRowHeight)
   expect(bandEdges!.panelFootBottom).toBe(bandEdges!.feedFootBottom)
-  // A discussion panel is resizable: the seam is a real separator control, and a
-  // drag re-seats the panel while the feed gives up exactly what the panel takes.
+  // The seam is a separator control; a drag re-seats the panel while the feed
+  // gives up exactly what it takes.
   const handle = page.locator('[data-team-panel-handle]')
   await handle.waitFor()
   expect(await handle.getAttribute('role')).toBe('separator')
@@ -1348,7 +1184,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     return { panel: Math.round(panel?.width ?? 0), feed: Math.round(feed?.width ?? 0) }
   })
   const before = await seam()
-  // Dragging the seam left hands the panel the width the feed gives up.
   const handleBox = await handle.boundingBox()
   expect(handleBox).not.toBeNull()
   await page.mouse.move(handleBox!.x + handleBox!.width / 2, handleBox!.y + 200)
@@ -1360,11 +1195,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const dragged = await seam()
   expect(Math.abs((before.panel + before.feed) - (dragged.panel + dragged.feed))).toBeLessThanOrEqual(2)
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-resized.png'), fullPage: true })
-  // The choice survives a reload and reopens at the same seat, and the keyboard
-  // path reaches a seat too: a pointer-only affordance would leave those readers
-  // stuck with whatever the drag left behind.
-  // The stored seat is the clamped integer; the painted box may differ by its
-  // own border, so the two are compared with that tolerance rather than as text.
+  // The seat survives reload and is reachable by keyboard. The stored seat is the
+  // clamped integer; the painted box may differ by its border, hence the
+  // tolerance.
   const storedWidth = await page.evaluate(() => Number(localStorage.getItem('dsh.agent-team.panel-width.v1')))
   expect(Math.abs(storedWidth - dragged.panel)).toBeLessThanOrEqual(1)
   await page.reload()
@@ -1401,7 +1234,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await replyBanner.textContent()).toContain('引用')
   await page.getByRole('button', { name: '取消引用' }).click()
   await expect.poll(async () => await replyBanner.count()).toBe(0)
-  // The reveal belongs to the pointer here too: off the row, the card is gone.
   await page.mouse.move(4, 4)
   await expect.poll(() => panelCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
   await settleAnimations(page)
@@ -1414,9 +1246,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
 
-  // The Channel's two readings. The switch is a composite control, so the whole
-  // strip is one tab stop and the arrow keys move selection with focus; both
-  // halves had no browser coverage at all before this journey.
+  // The Channel's two readings form one tab stop; arrow keys move selection with
+  // focus.
   const feedTab = page.getByRole('tab', { name: '频道' })
   const boardTab = page.getByRole('tab', { name: '看板' })
   await feedTab.waitFor()
@@ -1427,8 +1258,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await boardTab.getAttribute('aria-selected')).toBe('true')
   await expect.poll(() => page.evaluate(() => document.activeElement?.textContent ?? '')).toBe('看板')
   await settleLayout(page)
-  // The board is a full-content switch: four status columns, and the composer
-  // leaves with the feed because there is no send on a status view.
+  // The board is a full-content switch: four status columns, and no composer (a
+  // status view has no send).
   const boardPanel = page.locator('[role="tabpanel"]')
   const boardHeadings = await boardPanel.locator('[class*="boardColumnHead"]').allTextContents()
   expect(boardHeadings.map(text => text.replace(/\d+$/, ''))).toEqual(['待处理', '进行中', '待验收', '已完成'])
@@ -1448,21 +1279,19 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     }
   })
   expect(boardGeometry.count).toBe(4)
-  // One row of four equal columns: `flex: 1` with `min-width: 0` means a wider
-  // card in one column cannot buy that column more room than its neighbours.
+  // Four equal columns: `flex: 1` with `min-width: 0` stops a wide card taking
+  // room from its neighbours.
   expect(boardGeometry.tops).toHaveLength(1)
   expect(new Set(boardGeometry.widths).size).toBe(1)
   expect(boardGeometry.widths[0]).toBeGreaterThanOrEqual(150)
-  // The board is a scanning surface, so its columns span the content box rather
-  // than sitting huddled against one edge of it.
+  // Columns span the content box rather than huddling at one edge.
   expect(boardGeometry.lefts[0]! - boardGeometry.scrollport!.left).toBeLessThanOrEqual(boardGeometry.lefts[1]! - boardGeometry.lefts[0]!)
   await page.screenshot({ path: join(UI04_SHOTS, 'channel-board.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
-  // Four columns cannot fit a 390px column, so the board scrolls sideways and
-  // every card keeps a readable width. Squeezing them instead breaks a title to
-  // one character per line — a failure this asserts against rather than
-  // eyeballs, because it still renders and still passes an overflow check.
+  // Four columns cannot fit 390px, so the board scrolls sideways and keeps cards
+  // readable; squeezing would break titles to one character per line while still
+  // passing an overflow check.
   const narrowBoard = await page.evaluate(() => {
     const round = (value: number) => Math.round(value)
     const track = document.querySelector('[role="tabpanel"] > div')
@@ -1478,17 +1307,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(narrowBoard.cardWidths.length).toBeGreaterThanOrEqual(1)
   expect(Math.min(...narrowBoard.cardWidths)).toBeGreaterThanOrEqual(190)
-  // The overflow lives in the board track's own horizontal scroll, not on the
-  // page: the track scrolls its wider content, and the document still does not
-  // scroll sideways. A `hidden` overflow here would clip the last columns away
-  // with nothing to reach them, which is what this pins shut.
+  // The overflow lives in the track's own horizontal scroll, not the page;
+  // `hidden` would clip the last columns with nothing to reach them.
   expect(narrowBoard.track!.overflowX).toBe('auto')
   expect(narrowBoard.track!.scrollWidth).toBeGreaterThan(narrowBoard.track!.clientWidth)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.screenshot({ path: join(UI04_SHOTS, 'narrow-channel-board.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
-  // Back to the feed: the composer returns and the selection is remembered.
   await page.keyboard.press('ArrowLeft')
   await expect.poll(async () => await feedTab.getAttribute('aria-selected')).toBe('true')
   await expect.poll(async () => await page.getByRole('textbox', { name: '消息内容' }).count()).toBeGreaterThanOrEqual(1)
@@ -1515,16 +1341,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: /Task #1/ }).click()
   const invitationComposer = page.getByRole('textbox', { name: '消息内容' })
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('消息内容')
-  // Both calls are authored with '@': a bare name is prose the Host would not
-  // deliver to, so only the chipified handle threads the invitee in.
+  // Authored with '@': a bare name is prose the Host does not deliver to.
   await invitationComposer.fill('@')
-  // The one Thread face in this journey a non-follower appears on: reviewer does
-  // not follow Task #1's Thread, so its row is the outside one here. Weight is
-  // the whole of that distinction — no row states a consequence in words on any
-  // tier of either surface — so this measures the colour each name really
-  // resolves to and proves the two groups differ, at both widths. Read the
-  // unfiltered menu: a query narrows the roster to the rows it matches, and a
-  // single row can never show that two groups behave differently.
+  // reviewer does not follow Task #1's Thread, so its row is the outside one.
+  // Weight is the only distinction, so this measures each name's resolved colour
+  // at both widths. Read the unfiltered menu: a query would leave one row, which
+  // cannot show that two groups differ.
   const invitationMenu = page.getByRole('listbox', { name: '提及成员建议' })
   await invitationMenu.waitFor()
   const invitationRowState = (element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-tier]')]
@@ -1550,9 +1372,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     expect(row.text).not.toContain('需确认')
   }
   await page.screenshot({ path: join(UI04_SHOTS, 'thread-mention-weight.png'), fullPage: true })
-  // The description is what the narrow branch drops; the weight must not go with
-  // it, since it is the row's only remaining distinction. Measure used values,
-  // because the element never answers a container query about its own visibility.
+  // The narrow branch drops the description, not the weight. Measure used values:
+  // the element never answers a container query about its own visibility.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   const invitationNarrow = await invitationMenu.evaluate(invitationRowState)
@@ -1564,7 +1385,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   }
   await page.screenshot({ path: join(UI04_SHOTS, 'thread-mention-weight-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
-  // Narrow to the invitee to make the pick the journey needs.
   await invitationComposer.fill('请 @re')
   await invitationMenu.waitFor()
   await page.getByRole('option', { name: /@reviewer/ }).click()
@@ -1591,10 +1411,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(reviewerReply.kind).toBe('committed')
 
-  // Rich Agent Markdown keeps its structure while branded refs become inline
-  // Task links: the bold prose ref and the model-style backticked doubled
-  // colon both relabel to the human-facing number with the canonical full ref
-  // on hover, and no doubled colon survives into the rendered DOM.
+  // Branded refs in rich Markdown become inline Task links labelled with the
+  // human-facing number (canonical full ref on hover), and no doubled colon
+  // survives in the DOM.
   const agentRefLinks = page.locator('[data-team-thread] article').filter({ hasText: 'reviewer 已读取邀请' }).getByRole('button', { name: /Task #\d+/ })
   await agentRefLinks.first().waitFor()
   expect(await agentRefLinks.count()).toBe(2)
@@ -1628,28 +1447,21 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await longMarkdownRow.getByRole('button', { name: '展开全文' }).click()
   await expect.poll(async () => await longMarkdownRow.locator('[class*="messageClamp"]').count()).toBe(0)
   await expect.poll(markdownRootFont).toBe('14px')
-  // The doubled-colon ref inside the long body still resolves to its chip
-  // while the row is expanded — clamping must not break the post-render pass.
+  // The doubled-colon ref still resolves while the row is expanded: clamping must
+  // not break the post-render pass.
   await expect.poll(async () => await longMarkdownRow.getByRole('button', { name: /Task #\d+/ }).count()).toBeGreaterThanOrEqual(1)
   await page.screenshot({ path: join(UI04_SHOTS, 'message-clamp-markdown-expanded.png'), fullPage: true })
   await longMarkdownRow.getByRole('button', { name: '收起' }).click()
   await expect.poll(async () => await longMarkdownRow.locator('[class*="messageClamp"]').count()).toBe(1)
 
   // A wide Markdown table scrolls inside the reading column instead of painting
-  // past it. The column lays its children out shrink-to-fit, so a ≥4-column
-  // table — which the primitive holds at its natural width so its own wrapper
-  // can scroll it — sized that wrapper to the table itself and painted the
-  // overflow onto the page beside the column. The reader's assertion is an
-  // equation rather than prose: the wrapper renders exactly as wide as the body
-  // column, stops at that column's edge, and the table wider than it scrolls
-  // inside it. Both shapes of the body chain are walked, because the cap has to
-  // be stated at each level: a short body puts the Markdown box directly under
-  // the column, while one long enough to fold gains a `[data-document]` wrapper
-  // between them, and either level left uncapped reopens the overflow.
-  // The tool list in the last cell is what carries this table past the column:
-  // seven columns of minimum width fit inside 836px, so the measured overflow
-  // rides on the one column that grows. The assertion below only proves
-  // anything while `scrollWidth` really exceeds `clientWidth`.
+  // past it. The wrapper must be exactly as wide as the body column, stop at its
+  // edge, and the wider table must scroll within it. Both body chain shapes are
+  // walked: the Markdown box directly under the column, or under a `[data-
+  // document]` wrapper when the body folds; either level left uncapped reopens
+  // the overflow.
+  // The tool list in the last cell is what makes the table overflow; the
+  // assertion only means something while `scrollWidth` exceeds `clientWidth`.
   const wideTableHead = '| 序号 | 会话 | 耗时 | 工具 | 读取 | 写入 | 命中 |'
   const wideTableRule = '| --- | --- | --- | --- | --- | --- | --- |'
   const wideTableBody = '| 182 | pulse | 26.7 min | 83 | 0 | 0 | skill,bash,write,team_message,read,team_attention |'
@@ -1687,23 +1499,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
         scrollWidth: wrapper.scrollWidth,
       }
     })
-    // The wrapper renders as wide as the text column itself ...
     expect(Math.abs(tableFit.wrapperWidth - tableFit.bodyWidth)).toBeLessThanOrEqual(1)
-    // ... it stays inside that column's right edge ...
     expect(tableFit.wrapperPastBody).toBeLessThanOrEqual(1)
     expect(tableFit.wrapperPastColumn).toBeLessThanOrEqual(1)
-    // ... and the table that is wider than the wrapper travels inside it.
     expect(tableFit.scrollWidth).toBeGreaterThan(tableFit.clientWidth)
   }
 
-  // The sender line is the secondary grade of the content axis: 13px/20px at
-  // the default Settings size, and it grows with the body once that size is
-  // raised, while the 11px time stays the fixed small grade. The axis is the
-  // one variable the theme bootstrap publishes on body, so overriding it here
-  // walks the same path a raised Settings size takes. Both ends of the
-  // published range are walked: the shipped secondary tier is size − 1 up to
-  // 14px and size − 2 above it, so 22px reads 20px/27px and 10px reads
-  // 9px/16px — the default is asserted around them so the restore is covered.
+  // The sender line is the secondary grade: size − 1 up to 14px and size − 2
+  // above it, so 22px reads 20px/27px and 10px reads 9px/16px, while the 11px
+  // time stays fixed. Overriding the body variable the theme bootstrap publishes
+  // follows the same path as raising the Settings size.
   const senderName = page.locator('[data-team-thread] article [class*="nameRow"] strong').first()
   await senderName.waitFor()
   const senderMetrics = async (): Promise<string> => await senderName.evaluate(node => {
@@ -1715,18 +1520,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   }
   await expect.poll(senderMetrics).toBe('13px/20px')
 
-  // The face is chrome, not content: the three content sizes this block already
-  // visits move the words beside it and leave the face at its own 34px. It is
-  // dropped 5px from the name row's top edge, which is where the author line's
-  // capitals begin rather than where its box begins: an inline box carries font
-  // half-leading above its glyphs, so at 13px/20px the capitals start 5.5px down
-  // (2.5px half-leading, then the 3px between the font's 12px ascent and its 9px
-  // cap height). Raft levels its avatar with its own author line, but its
-  // `mt-0.5` only measures 2px because that line is `leading-none` at 14px/14px
-  // and its capitals already start 2px down. This drop is therefore a fact about
-  // our type, and the assertion pins it against all three tiers at once.
-  // All three numbers are read in one pass: the timeline scrolls and each row is
-  // its own offsetParent, so separate reads could fake a match.
+  // The face is chrome at a fixed 34px, dropped 5px from the name row's top,
+  // where the author line's capitals begin (at 13px/20px: 2.5px half-leading plus
+  // 3px between ascent and cap height). This is a fact about our type, pinned
+  // against all three tiers. All three numbers are read in one pass: the timeline
+  // scrolls and each row is its own offsetParent, so separate reads could fake a
+  // match.
   const faceGeometry = async (): Promise<[number, number, number]> => await page.evaluate(() => {
     const row = document.querySelector('[data-team-thread] article')
     const face = row?.querySelector('[class*="messageIdentity"], [class*="messageIdentityImage"]')
@@ -1766,9 +1565,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await codeRow.scrollIntoViewIfNeeded()
   const codeMetrics = async (): Promise<string> => await codeRow.locator('pre').first().evaluate(node => {
     const { fontSize, lineHeight, paddingTop, paddingBottom } = getComputedStyle(node)
-    // Content box of a one-line fence is exactly one line: reading the painted
-    // height this way keeps the assertion independent of the block's padding,
-    // while still failing on a block that never painted (height 0).
+    // The content box of a one-line fence is one line: independent of padding,
+    // and it still fails on a block that never painted (height 0).
     const content = Math.round(node.getBoundingClientRect().height - parseFloat(paddingTop) - parseFloat(paddingBottom))
     return `${fontSize}/${lineHeight}/${content}`
   })
@@ -1794,8 +1592,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'message-ref-inline-markdown-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
 
-  // Human reply with attachment inside the Task Thread: the reply composer
-  // offers the same "+" upload chain as the Channel composer.
+  // The Task Thread reply composer offers the same "+" upload chain as the
+  // Channel composer.
   const replyPicker = page.waitForEvent('filechooser', { timeout: 5000 })
   await page.getByRole('button', { name: '添加附件' }).click()
   await replyPicker
@@ -1814,15 +1612,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.reload()
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('button', { name: /Task #1/ }).click()
-  // The authored @human mention renders as the canonical chip at its prose
-  // position — the same occurrence the Host delivery scan resolves.
+  // The authored @human mention renders as the canonical chip at the position the
+  // Host delivery scan resolves.
   await page.getByText('reviewer 已读取邀请并回复 @human，关联', { exact: false }).waitFor()
 
-  // Open-onto-unread acceptance: while the Human is away from the Thread,
-  // agents publish a multi-batch backlog, then the Human reopens it. The
-  // Thread must land at the latest fact, drain every bounded batch
-  // automatically (no continue-reading control), keep the unread boundary
-  // rendered as information, and leave no unread remainder in the ledger.
+  // Open-onto-unread: after agents publish a multi-batch backlog while the Human
+  // is away, reopening lands at the latest fact, drains every batch
+  // automatically, keeps the unread boundary as information, and leaves no unread
+  // in the ledger.
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   const backlogBatch = async (label: string): Promise<void> => {
@@ -1841,10 +1638,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const preOpenInbox = scaffold.ctx.agentTeam.inbox({ workspaceId: workspace.id })
   const preOpenThread = preOpenInbox.items.find(item => item.task?.taskRef === task.taskRef)
   expect(preOpenThread?.unreadCount ?? 0).toBeGreaterThanOrEqual(3)
-  // The Channel feed says what the Host says. The entry row carries this
-  // reader's unread for its Thread, so the count lives in the row's accessible
-  // name rather than only in the capsule's pixels — and it arrives without a
-  // reload, because a Thread reply wakes the Channel scope.
+  // The row's accessible name carries the reader's unread count (not only the
+  // capsule's pixels) and updates without reload because a Thread reply wakes the
+  // Channel scope.
   const unreadLineSelector = taskEntryLineSelector(1)
   const unreadEntryRow = taskEntryRow(page, 1)
   const unreadTotal = preOpenThread!.unreadCount
@@ -1852,9 +1648,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     .toBe(`打开 Task #1（${unreadTotal} 条新动态）`)
   await expect.poll(async () => (await entryUnreadCapsule(page, unreadLineSelector))?.text ?? 'missing', { timeout: 10_000 })
     .toBe(unreadTotal > 99 ? '99+' : String(unreadTotal))
-  // The Task is still live, so its door keeps reporting when the work last
-  // moved — the one thing the feed's own order cannot say, since that order
-  // follows each anchor Message rather than the Thread.
+  // A live Task's door reports when work last moved, which the feed order (by
+  // anchor Message) cannot say.
   await expect.poll(async () => (await unreadEntryRow.textContent())?.trim() ?? '').toContain('最近活动')
   const unreadCapsule = await entryUnreadCapsule(page, unreadLineSelector)
   // The capsule is decoration inside a labeled control, and it is a capsule:
@@ -1863,9 +1658,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(unreadCapsule?.shape.height).toBe('18px')
   expect(unreadCapsule?.background).not.toBe('rgba(0, 0, 0, 0)')
   expect(Number.parseFloat(unreadCapsule?.shape.radius ?? '0')).toBeGreaterThanOrEqual(9)
-  // The state leads its entry row: it opens where the body and the door text
-  // open, on one x for every entry, instead of trailing a line the reader has
-  // to cross the column for.
+  // The state opens each entry row on one x, instead of trailing the line.
   const clusterEdges = await entryClusterEdges(page, unreadLineSelector)
   expect(clusterEdges).not.toBeNull()
   expect(clusterEdges!.cluster).toBe(clusterEdges!.row)
@@ -1885,10 +1678,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-entry-unread-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
-  // Keyboard: the entry is one control and the focus ring is the only chrome it
-  // grows. Tab first — a script `focus()` alone leaves the browser's own
-  // focus-visible heuristic cold, so the ring a keyboard reader sees would not
-  // be painted and the screenshot would prove nothing.
+  // The focus ring is the only chrome the entry grows. Tab first: a script
+  // `focus()` leaves the browser's focus-visible heuristic cold, so no ring would
+  // paint.
   await page.keyboard.press('Tab')
   await unreadEntryRow.focus()
   await unreadEntryRow.scrollIntoViewIfNeeded()
@@ -1901,8 +1693,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.keyboard.press('Enter')
   await page.getByRole('heading', { name: /Task #1/ }).waitFor()
   await page.getByText('离线期间的批量更新 三', { exact: true }).waitFor()
-  // The boundary stays as an informational separator even though reading is
-  // fully automatic now.
   await page.getByText('以下是本次打开收到的更新').waitFor()
   await expect.poll(() => page.getByRole('button', { name: '继续阅读' }).count()).toBe(0)
   await expect.poll(() => page.getByRole('button', { name: '标记为已读' }).count()).toBe(0)
@@ -1925,15 +1715,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(JSON.stringify(replayedThread)).toContain('请 @reviewer 加入这个已有 Thread 并回复 Human @reviewer')
   expect(JSON.stringify(replayedThread)).toContain('reviewer 已读取邀请并回复 @human')
 
-  // ---- The reading language: hover layer, seat time, action card, quote -----
-  // The row under the pointer gains one flat layer, its own time appears in the
-  // empty avatar seat when it is a continuation, and the actions float beside it.
-  // All three are hover-revealed, so what a reader sees at rest stays quiet.
+  // Hover reveals one flat layer on the row, its own time in the avatar seat for
+  // continuations, and the floating actions; at rest all stay quiet.
   const hoveredRow = page.locator('article').filter({ hasText: '离线期间的批量更新 二' })
   await hoveredRow.scrollIntoViewIfNeeded()
   const actionCard = hoveredRow.locator('[data-message-card]')
   await expect.poll(() => actionCard.count()).toBe(1)
-  // At rest: no layer on the row, no card, no time.
   expect(await hoveredRow.evaluate(element => getComputedStyle(element).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
   expect(await actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
   const seatTime = hoveredRow.locator('[data-gutter-time]')
@@ -1943,8 +1730,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
   await expect.poll(() => seatTime.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
-  // No line on this page states an instant: the boundary it does keep (the
-  // unread one) is information, and a waiting gap is stated by the row itself.
+  // The only instants on the page are the unread boundary (information) and
+  // waiting gaps stated by the row itself.
   expect(await page.locator('[role="separator"] time').count()).toBe(0)
   const hoverFacts = await hoveredRow.evaluate(element => {
     const row = getComputedStyle(element)
@@ -1958,9 +1745,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       cardTransition: `${card.transitionDuration} ${card.transitionTimingFunction}`,
       actionHeight: Math.round(Number.parseFloat(action.height)),
       seatWidth: Math.round(Number.parseFloat(getComputedStyle(cardElement.parentElement!.querySelector('[data-gutter-time]')!).width)),
-      // What the label actually paints, not what its box claims: the box is 28px
-      // by construction, so only a Range over the text sees an overflow the box
-      // does not clip.
+      // Painted width: the box is 28px by construction, so only a Range over the
+      // text sees overflow the box does not clip.
       seatInk: (() => {
         const label = element.querySelector('[data-gutter-time]')!
         const range = document.createRange()
@@ -1972,18 +1758,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       seatClientWidth: (element.querySelector('[data-gutter-time]') as HTMLElement).clientWidth,
     }
   })
-  // The row's layer is the shipped hovered-row fill: the shipped radius tier,
-  // no shadow, no border.
   expect(hoverFacts.rowFill).not.toBe('rgba(0, 0, 0, 0)')
   expect(hoverFacts.rowRadius).toBe('12px')
   expect(hoverFacts.rowShadow).toBe('none')
-  // The card is the one raised surface: the shipped floating-card shadow on an
-  // opaque surface (its radius is pinned against the live 验收 control below).
+  // The one raised surface: the shipped floating-card shadow on an opaque surface
+  // (radius pinned against the live 验收 control below).
   expect(hoverFacts.cardShadow).not.toBe('none')
   expect(hoverFacts.cardFill).not.toBe('rgba(0, 0, 0, 0)')
-  // The card is the header 验收 Button's own tier, measured against the live
-  // control in this same render: the reader compares the two, so they must
-  // agree — the same 28px height and the same corner radius.
+  // Same 28px height and corner radius as the header 验收 Button, measured against
+  // the live control in this render.
   const acceptButton = page.getByRole('button', { name: '验收' }).first()
   const acceptFacts = await acceptButton.evaluate(element => {
     const style = getComputedStyle(element)
@@ -1993,19 +1776,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(hoverFacts.cardRadius).toBe(acceptFacts.radius)
   expect(hoverFacts.actionHeight).toBe(28)
   expect(hoverFacts.cardTransition).toBe('0.16s ease-out')
-  // The seat keeps the face's own 34px: revealing a time never pushes the text
-  // column.
   expect(hoverFacts.seatWidth).toBe(34)
-  // ...and the time inside it stays inside it. A dated label is wider than the
-  // seat (57px within the year, 87px across it), and the box does not clip, so
-  // it would paint across the words beside it. The label states the time of day;
-  // the dated form belongs to the identity line that opened the run, and the
-  // precise instant rides the element's title.
+  // A dated label (57px within the year, 87px across it) would paint over the
+  // adjacent words since the box does not clip. The seat states the time of day;
+  // the date belongs to the identity line and the precise instant rides the
+  // title.
   expect(hoverFacts.seatText).toMatch(/^\d{2}:\d{2}$/)
   expect(hoverFacts.seatInk).toBeLessThanOrEqual(hoverFacts.seatWidth)
   expect(hoverFacts.seatScrollWidth).toBeLessThanOrEqual(hoverFacts.seatClientWidth)
-  // The card floats beside the reading path, level with the identity line, so it
-  // covers neither the author it names nor the words it acts on.
+  // The card floats level with the identity line, covering neither the author nor
+  // the words it acts on.
   const cardPlacement = await hoveredRow.evaluate(element => {
     const row = element.getBoundingClientRect()
     const card = element.querySelector('[data-message-card]')!.getBoundingClientRect()
@@ -2013,32 +1793,29 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     return {
       gapToBodyEdge: Math.round(body.right - card.right),
       topInRow: Math.round(card.top - row.top),
-      // Clearance between the card's lower edge and the row's own content edge:
-      // the one number that says "the card covers no word of this Message".
+      // Clearance between the card's lower edge and the row's content edge.
       clearanceToContent: Math.round(body.top - card.bottom),
     }
   })
   expect(Math.abs(cardPlacement.gapToBodyEdge)).toBeLessThanOrEqual(1)
-  // The card's lower edge stops above the row's content the rise is computed for.
-  // A continuation row carries no identity line, so its content starts 8px higher
-  // and the rise grows with it — this number is the invariant, not the rise.
+  // The card's lower edge stops above the row's content. A continuation row's
+  // content starts 8px higher, so this clearance is the invariant, not the rise.
   expect(cardPlacement.clearanceToContent).toBe(2)
-  // The hovered row continues an earlier one, so its content starts at the 2px
-  // grouped inset and the card rises the full 28px to clear it.
+  // A continuation row's content starts at the 2px grouped inset, so the card
+  // rises the full 28px.
   expect(cardPlacement.topInRow).toBe(-28)
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-row-hover.png') })
-  // The reveal belongs to the pointer and the focus ring, never to a sticky
-  // state: moving the pointer off the row puts the row back at rest...
+  // The reveal follows the pointer and focus ring, never sticky state: off the
+  // row it returns to rest...
   await page.mouse.move(4, 4)
   await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('0')
-  // ...and a keyboard reader gets the same card by focusing into the row, since
-  // the reveal is a :focus-visible rule and not a :focus-within one.
+  // ...and keyboard focus into the row reveals it (a :focus-visible rule, not
+  // :focus-within).
   await hoveredRow.locator('[data-quote-message]').focus()
   await expect.poll(() => actionCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
   await page.mouse.move(4, 4)
-  // Pressing an action is not a way to keep the row lit: the pressed button holds
-  // DOM focus, so a :focus-within layer would stay shaded until the reader
-  // clicked elsewhere. With the pointer off the row, the layer is gone.
+  // A pressed action button holds DOM focus, so a :focus-within layer would stay
+  // shaded; with the pointer off the row the layer must be gone.
   await hoveredRow.locator('[data-copy-message]').click()
   await page.mouse.move(4, 4)
   await settleAnimations(page)
@@ -2056,13 +1833,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 
-  // The seat's label must hold whatever the calendar says: a Thread read a day
-  // later — the ordinary case, and the one that first showed this — turns every
-  // Message on screen into a dated one. The page's own clock is the only lever
-  // that reaches the Client's `now`, so shift it a day on, read the same row
-  // again, and put it back. What the seat draws is measured, not assumed: a
-  // dated label is 57px against a 28px box that does not clip, so a regression
-  // that hands the seat a dated form paints across the words and fails here.
+  // The seat's label must hold across the calendar: a Thread read a day later
+  // dates every Message. The page clock is the only lever on the Client's `now`,
+  // so shift it a day, re-read, and restore it. A dated label (57px) in the 28px
+  // unclipped box would paint over the words.
   const pageNow = await page.evaluate(() => Date.now())
   await page.clock.setFixedTime(pageNow + 86_400_000)
   await page.getByRole('button', { name: '返回频道' }).click()
@@ -2085,14 +1859,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       width: Math.round(Number.parseFloat(style.width) * 100) / 100,
     }
   })
-  // The whole instant stays reachable, on the element the reader is pointing at.
   expect(agedSeat.title).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
-  // ...while the label itself states the time of day and fits the seat it sits in.
   expect(agedSeat.text).toMatch(/^\d{2}:\d{2}$/)
   expect(agedSeat.width).toBe(34)
   expect(agedSeat.ink).toBeLessThanOrEqual(agedSeat.width)
-  // And it never reaches the words: the seat's right edge is left of the body
-  // column's left edge, so the label ends before the text begins.
   const seatToBody = await agedRow.evaluate(element => {
     const seat = element.querySelector('[data-gutter-time]')!.getBoundingClientRect()
     const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
@@ -2105,7 +1875,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     return time === null ? null : time.textContent
   })
   expect(agedHead).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}$/)
-  // Put the world back the way the rest of this journey expects to find it.
   await page.clock.setFixedTime(pageNow)
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('button', { name: /Task #1/ }).waitFor()
@@ -2113,10 +1882,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByText('离线期间的批量更新 二', { exact: false }).first().waitFor()
 
   // Quote: the card's action puts the Message in the composer, the banner states
-  // who the quote reaches before send, and the sent Message leads with the quoted
-  // line — which jumps back to the original.
-  // First match on purpose: the Message this one quotes carries the same text
-  // inside its quote line, and the original always precedes its answers.
+  // who the quote reaches, and the sent Message leads with a quote line that
+  // jumps back to the original.
+  // First match: the quoting Message repeats the text inside its quote line, and
+  // the original always comes first.
   const quotedRow = page.locator('article').filter({ hasText: '离线期间的批量更新 一' }).first()
   await quotedRow.hover()
   await quotedRow.locator('[data-quote-message]').click()
@@ -2124,14 +1893,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => quoteBanner.count()).toBe(1)
   await expect.poll(async () => await quoteBanner.textContent() ?? '').toContain('引用')
   await expect.poll(async () => await quoteBanner.textContent() ?? '').toContain('离线期间的批量更新 一')
-  // The banner does not restate the delivery: the quoted author takes their
-  // place in the same 「将通知」 row as any other recipient, so one delivery is
-  // stated once, where the reader already looks for it.
+  // The quoted author appears in the same 「将通知」 row as any recipient, so the
+  // delivery is stated once.
   const quoteNotify = page.locator('[data-team-notify]')
   await expect.poll(async () => await quoteNotify.textContent() ?? '').toContain('@reviewer')
-  // The banner is a line, not a panel: no fill, no border, no radius, and no
-  // rule of its own — the card frames it, and the quote's own 2px bar belongs
-  // where it separates a Message from the body it answers.
+  // The banner is a line: no fill, border, radius, or rule of its own (the card
+  // frames it; the quote's 2px bar belongs inside a Message).
   const bannerFacts = await quoteBanner.evaluate(element => {
     const style = getComputedStyle(element)
     const author = element.querySelector('[class*="replyBannerAuthor"]')!.getBoundingClientRect()
@@ -2143,13 +1910,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     return {
       fill: style.backgroundColor, border: style.borderTopWidth, radius: style.borderTopLeftRadius,
       bar: element.querySelector('[class*="replyBannerBar"]') === null,
-      // The words sit in the composer's text column: the same left inset the
-      // draft is typed at and the same right inset the notify row keeps.
+      // The words sit in the composer's text column: the same left inset as the
+      // draft and the same right inset as the notify row.
       leftInset: Math.round(body.left - element.getBoundingClientRect().left),
       draftLeftInset: Math.round(Number.parseFloat(draftStyle.paddingLeft)),
       rightInset: Math.round(Number.parseFloat(style.paddingRight)),
       notifyRightInset: Math.round(Number.parseFloat(notify.paddingRight)),
-      // The cancel is a control on that line, so its centre is the line's centre.
       centerDelta: Math.abs((cancel.top + cancel.height / 2) - (author.top + author.height / 2)),
       cancelRight: Math.round(draft.right - cancel.right),
     }
@@ -2167,12 +1933,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'composer-quote-banner-crop.png'), clip: {
     x: Math.max(0, bannerBox.x - 8), y: Math.max(0, bannerBox.y - 8), width: bannerBox.width + 16, height: bannerBox.height + 16,
   } })
-  // The one author the Host never delivers to is the reader, so quoting their own
-  // Message promises nothing: the banner still names what is answered, and the
-  // notify row falls silent rather than naming the reader back at themselves.
-  // The banner is read first because it only carries the author and the gist once
-  // the Host has answered the lookup — asked earlier, "no notify row" would also
-  // be true of a composer that had not resolved anything yet.
+  // The reader is never delivered to, so quoting their own Message still names
+  // what is answered but leaves the notify row empty. Read the banner first: it
+  // resolves only after the Host lookup, so an absent notify row alone could mean
+  // nothing had resolved.
   const ownRow = page.locator('article').filter({ hasText: '这是带附件的 Thread 回复' }).first()
   await ownRow.scrollIntoViewIfNeeded()
   await ownRow.hover()
@@ -2180,7 +1944,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await quoteBanner.textContent() ?? '').toContain('这是带附件的 Thread 回复')
   expect(await quoteNotify.count()).toBe(0)
   await page.screenshot({ path: join(UI05_SHOTS, 'composer-quote-self.png') })
-  // Put the reviewer quote back: the send below asserts the line it produces.
+  // Restore the reviewer quote: the send below asserts its line.
   await quotedRow.hover()
   await quotedRow.locator('[data-quote-message]').click()
   await expect.poll(async () => await quoteNotify.textContent() ?? '').toContain('@reviewer')
@@ -2191,12 +1955,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const quoteLine = quotedMessage.locator('[data-quote-line]')
   await expect.poll(() => quoteLine.count()).toBe(1)
   await expect.poll(async () => await quoteLine.textContent() ?? '').toContain('离线期间的批量更新 一')
-  // It is the Message's first line under the identity line, in the reference form
-  // a reader already knows from Markdown.
   expect(await quotedMessage.evaluate(element =>
     [...element.querySelector('[class*="messageBody"]')!.children].indexOf(element.querySelector('[data-quote-line]')!))).toBe(1)
-  // ...and it is the same rule-and-line idea inside a Message: muted 2px bar,
-  // quiet words, no fill of its own.
   const quoteLineFacts = await quoteLine.evaluate(element => {
     const style = getComputedStyle(element)
     const bar = getComputedStyle(element.querySelector('[class*="quoteLineBar"]')!)
@@ -2210,8 +1970,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(quoteLineFacts.barWidth).toBe(2)
   expect(quoteLineFacts.barOpacity).toBeLessThan(1)
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-quote.png') })
-  // The quote survives the narrow column: still one line of text behind the same
-  // 2px rule, and it never widens the timeline it sits in.
+  // At narrow width the quote stays one line behind the 2px rule and never widens
+  // the timeline.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await quotedMessage.scrollIntoViewIfNeeded()
@@ -2221,13 +1981,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-quote-narrow.png') })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
-  // The quoted line is the jump back to what it points at.
   await quoteLine.click()
   await expect.poll(async () => await quotedRow.getAttribute('data-reply-flash')).toBe('true')
 
-  // Opening onto a mention: while the Human is away an agent names them, so the
-  // Thread opens centred on that Message with one pulse of the row layer — not on
-  // the latest fact, and never again once the mention has been read.
+  // Opening onto a mention: the Thread centres on that Message with one pulse of
+  // the row layer, not on the latest fact, and never again once the mention is
+  // read.
   await page.getByRole('button', { name: '返回频道' }).click()
   const mentionRead = await scaffold.ctx.agentTeam.readThreadForAgent(agent, {
     requestId: 'm2-06-mention-read' as never, workspaceId: workspace.id, taskRef: task.taskRef,
@@ -2237,10 +1996,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     body: '需要你拍板：@human 这条要你定方向', baseRevision: mentionRead.thread.revision,
   })
   if (mentionReply.kind !== 'committed') throw new Error(`mention reply rejected: ${mentionReply.kind}`)
-  // A run of Messages after it, naming nobody: the mention is still what the
-  // Thread opens on, and centring needs half a viewport of content below the
-  // target — a Message at the very end can only be clamped to the bottom, which
-  // is the browser's own limit rather than the jump's intent.
+  // Centring needs half a viewport of content below the target; at the very end
+  // the browser can only clamp to the bottom.
   for (const label of ['一', '二', '三', '四', '五', '六', '七', '八']) {
     const afterRead = await scaffold.ctx.agentTeam.readThreadForAgent(agent, {
       requestId: `m2-06-mention-after-read-${label}` as never, workspaceId: workspace.id, taskRef: task.taskRef,
@@ -2255,15 +2012,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const addressedRow = page.locator('article').filter({ hasText: '需要你拍板' })
   await addressedRow.waitFor()
   await expect.poll(async () => await addressedRow.getAttribute('data-reply-flash')).toBe('true')
-  // The mention is stated on the row's card, in its own words, and the card is
-  // where it lives — never on the reading path.
+  // The mention is stated on the row's card, never on the reading path.
   await addressedRow.hover()
   await settleAnimations(page)
   const mentionLine = addressedRow.locator('[data-mentions-you]')
   await expect.poll(() => mentionLine.count()).toBe(1)
   await expect.poll(async () => await mentionLine.textContent()).toBe('提到了你')
-  // The notice reads at the card's own type tier, never smaller than the actions
-  // it sits between; the card states its edge itself, in two declared layers.
+  // The notice uses the card's type tier, no smaller than the actions beside it;
+  // the card draws its edge in two declared layers.
   const noticeFacts = await addressedRow.evaluate(element => {
     const card = element.querySelector('[data-message-card]')!
     return {
@@ -2273,10 +2029,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     }
   })
   expect(noticeFacts.noticeSize).toBe(noticeFacts.actionSize)
-  // The elevation hairline is what keeps the chip legible on the white code
-  // block and the screenshots it floats across; underneath it the lightest
-  // shipped elevation (--dsw-elevation-panel), one step below the composer
-  // card's (--dsw-elevation-soft).
+  // The elevation hairline keeps the chip legible over white code blocks and
+  // screenshots; beneath it sits the lightest shipped elevation (--dsw-elevation-
+  // panel), one step below the composer card's (--dsw-elevation-soft).
   expect(noticeFacts.cardShadow).toContain('0px 0px 0px 0.5px')
   expect(noticeFacts.cardShadow).not.toContain('rgba(0, 0, 0, 0) 0px 0px 0px 0.5px')
   expect(noticeFacts.cardShadow).toContain('rgba(0, 0, 0, 0.03) 0px 3px 8px 0px')
@@ -2296,12 +2051,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 
-  // The badge answers for the reader alone, so a Message that named somebody
-  // else raises its card without one. This is the row the reader wrote
-  // themselves, calling on @reviewer: the badge once lit here for every reader,
-  // because the scan asked whether the Message named anybody at all. The card
-  // is what carries the badge, so it is proven up before its absence means
-  // anything.
+  // The badge answers for the reader alone: a row the reader wrote calling on
+  // @reviewer raises its card without one. Prove the card exists first so the
+  // badge's absence means something.
   const otherRow = page.locator('article').filter({ hasText: '请 @reviewer 加入这个已有 Thread' }).first()
   await otherRow.scrollIntoViewIfNeeded()
   await otherRow.hover()
@@ -2312,8 +2064,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
 
   await page.getByRole('button', { name: '返回频道' }).click()
   await page.getByRole('button', { name: '# delivery' }).click()
-  // The durable read cleared this reader's unread, so the entry row comes back
-  // to its bare label and drops the capsule.
+  // The durable read clears the unread: the entry row drops the capsule.
   await expect.poll(async () => await taskEntryRow(page, 1).getAttribute('aria-label'), { timeout: 10_000 }).toBe('打开 Task #1')
   await expect.poll(async () => await entryUnreadCapsule(page, unreadLineSelector), { timeout: 10_000 }).toBeNull()
   await taskEntryRow(page, 1).click()
@@ -2332,11 +2083,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'active-thread.png'), fullPage: true })
 
   const threadComposer = page.getByRole('textbox', { name: '消息内容' })
-  // Weight answers whether the Member is in the conversation being written into;
-  // on a Thread that boundary is following it, so a Member taking part in the
-  // Channel through another Thread is outside — not inside, which is where a
-  // Channel-shaped judgement would wrongly put them. It is the row's whole
-  // distinction: no tier states a consequence in words.
+  // On a Thread, weight tracks following: a Member taking part in the Channel
+  // through another Thread is outside. It is the row's only distinction.
   await threadComposer.fill('@')
   const mentionMenu = page.getByRole('listbox', { name: '提及成员建议' })
   await mentionMenu.waitFor()
@@ -2355,16 +2103,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     expect(row.inside).toBe(String(row.tier === '0'))
     expect(row.text).not.toContain('需确认')
   }
-  // Both Members take part in this Thread, so every row here is a follower and
-  // none is dimmed — the state a Thread reply reaches most of the time. The
-  // outside case needs a Member the Thread does not carry, which the invitation
-  // step above and the component spec drive directly.
+  // Both Members follow this Thread, so none is dimmed; the outside case needs a
+  // Member the Thread does not carry (invitation step above, component spec).
   expect([...new Set(threadRows.map(row => row.tier))]).toEqual(['0'])
   expect(new Set(threadRows.map(row => row.inside))).toEqual(new Set(['true']))
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-mention-rows.png'), fullPage: true })
-  // Below 600px the description is dropped to keep the row readable, and the
-  // weight is what must survive: it is the row's only remaining distinction,
-  // covered with both groups present at the invitation step above.
+  // Below 600px the description drops but the weight must survive; both groups
+  // were covered at the invitation step.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
   const narrowRows = await mentionMenu.evaluate(rowState)
@@ -2387,8 +2132,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await scaffold.ctx.agentTeam.readThread({
     requestId: 'm2-06-human-review-read' as never, workspaceId: workspace.id, taskRef: task.taskRef,
   })
-  // One self-healing loop: press the live 验收 control whenever the Task is
-  // still open, then wait for the ledger to show the committed acceptance.
+  // Press the live 验收 control while the Task is open, then wait for the ledger to
+  // show the acceptance.
   const acceptButtonsState = (): Promise<readonly { readonly text: string | null; readonly disabled: boolean }[]> =>
     page.evaluate(() => [...document.querySelectorAll('button')]
       .map(button => ({ text: button.textContent?.trim(), disabled: button.disabled }))
@@ -2412,11 +2157,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByText('验收后继续讨论', { exact: true }).waitFor()
   await page.screenshot({ path: join(UI01_SHOTS, 'desktop-thread.png'), fullPage: true })
   await page.screenshot({ path: join(UI05_SHOTS, 'accepted-thread.png'), fullPage: true })
-  // Early acceptance drill: reopen puts the Task back to in_progress; a fresh
-  // Agent Claim re-creates the exact precondition for accepting over open work.
+  // Early acceptance drill: reopen sets in_progress, and a fresh Agent Claim
+  // recreates the precondition for accepting over open work.
   await page.getByRole('button', { name: '重新打开' }).click()
-  // Direct Host calls below must observe the committed open state, not the
-  // optimistic-free UI in flight.
+  // Direct Host calls must observe the committed open state.
   await expect.poll(async () =>
     JSON.stringify(scaffold!.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
     .toContain('"resolution":"open"')
@@ -2437,7 +2181,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Snapshot before any interaction; compared after the Escape cancels below.
   const tasksBeforeCancel = JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef))
 
-  // Same confirm beat at phone size for the narrow layout.
   const escapeDialog = async (): Promise<void> => {
     await page.keyboard.press('Escape')
     await expect.poll(() => page.getByRole('dialog', { name: '提前验收任务' }).count()).toBe(0)
@@ -2451,7 +2194,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await page.setViewportSize({ width: 1440, height: 960 })
 
-  // The ledger stayed untouched through both Escape cancels.
   expect(JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef))).toBe(tasksBeforeCancel)
 
   // Confirm completes the open Claim inside the same accept operation.
@@ -2465,15 +2207,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
     .toContain('"resolution":"accepted"')
   await page.screenshot({ path: join(UI05_SHOTS, 'early-accepted-thread.png'), fullPage: true })
-  // Restore the pre-drill state so the following closed-thread beats run as before.
   await page.getByRole('button', { name: '重新打开' }).waitFor()
 
-  // The header offers exactly one of 打开/关闭 actions per resolution, so the
-  // restored open state comes from this reopen before the close beat.
+  // The header offers only one of 打开/关闭 per resolution, so this reopen restores
+  // the open state before the close beat.
   await page.getByRole('button', { name: '重新打开' }).click()
   await page.getByRole('button', { name: '关闭任务' }).waitFor()
   await page.getByRole('button', { name: '关闭任务' }).click()
-  // The closed Thread swaps the composer for the explanatory notice with its reopen action.
   await page.getByText('任务已关闭，重新打开后可继续讨论').waitFor()
   await expect.poll(() => page.getByRole('textbox', { name: '消息内容' }).count()).toBe(0)
   await page.screenshot({ path: join(UI05_SHOTS, 'closed-thread.png'), fullPage: true })
@@ -2492,24 +2232,18 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   await expect.poll(() => page.getByText('Human 已检查 Thread', { exact: true }).count()).toBe(0)
   await expect.poll(() => page.getByText('验收后继续讨论', { exact: true }).count()).toBe(0)
-  // A resolved Task's door stops printing when the work last moved: a done or
-  // closed status word says nothing is moving, and the instant would only repeat
-  // the moment it resolved on every finished row. The Thread has follow-up facts
-  // either way, so the precise instant stays on the control's title, one hover
-  // away.
   const closedEntry = taskEntryRow(page, 1)
-  // A resolved Task's door slims to a footnote: the number, the status word, and
-  // the day it landed — no owner stack and no recency clause, which on every
-  // finished row would only repeat the moment it resolved. The precise instant
-  // stays on the control's title, one hover away.
+  // A resolved Task's door slims to the number, status word, and day: no owner
+  // stack or recency clause, which would only repeat the resolution moment. The
+  // precise instant stays on the control's title.
   await expect.poll(async () => (await closedEntry.textContent())?.trim() ?? '').toMatch(/^Task #1 · 已(完成|关闭) · \d{2}-\d{2}$/)
   await expect.poll(async () => (await closedEntry.textContent())?.trim() ?? '').not.toContain('最近活动')
   await expect.poll(async () => await closedEntry.getAttribute('title') ?? '').toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   await closedEntry.scrollIntoViewIfNeeded()
   await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'resolved-task-entry.png'), fullPage: true })
-  // The door got shorter, so the narrow column has strictly less to wrap: the
-  // same row must still fit without a horizontal scrollbar.
+  // The shorter door leaves the narrow column less to wrap: it must still fit
+  // without a horizontal scrollbar.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await closedEntry.scrollIntoViewIfNeeded()
@@ -2517,10 +2251,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'narrow-resolved-task-entry.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
-  // The mode's exit at the top of the browsing region, directly under the brand
-  // row: the seat this change moved it to. The shot covers the sidebar column,
-  // so the row can be reviewed against the brand row above and the Inbox card
-  // below it rather than in isolation. The column wrapper is a real element —
+  // The shot covers the sidebar column so the exit row can be reviewed against
+  // the brand row above and the Inbox card below. The wrapper is a real element;
   // the slot anchor is `display: contents` and cannot be screenshotted.
   const sidebarColumn = page.locator('[class*="sidebarCol"]').first()
   await sidebarColumn.screenshot({ path: join(UI01_SHOTS, 'sidebar-exit-row.png') })
@@ -2528,8 +2260,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.reload()
   await page.getByRole('button', { name: '# delivery' }).waitFor({ timeout: 20_000 })
   await expect.poll(() => page.evaluate(() => localStorage.getItem('dsh.agent-team.navigation'))).toContain('"mode":"team"')
-  // Browser restoration returns to the last selected Channel instead of the
-  // empty Team welcome surface.
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   await expect.poll(() => page.getByText('Human 已检查 Thread', { exact: true }).count()).toBe(0)
   await expect.poll(() => page.getByText('验收后继续讨论', { exact: true }).count()).toBe(0)
@@ -2537,28 +2267,25 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '对话' }).click()
   await expect.poll(() => newSessionButton.isVisible()).toBe(true)
   await expect.poll(() => brandButton.isVisible()).toBe(true)
-  // Leaving Team closes any embedded Member Session view and restores the
-  // session the Human came from, so the ordinary shell shows an ordinary
-  // conversation composer rather than a stranded Member Session.
+  // Leaving Team closes any embedded Member view and restores the Human's
+  // ordinary session.
   const restoredComposer = page.locator('[data-composer-input][contenteditable="true"]').first()
   await restoredComposer.waitFor({ timeout: 20_000 })
   await expect.poll(() => page.locator('[data-team-channel]').count()).toBe(0)
-  // Team's globally registered sources return no ordinary candidates; shipped
-  // command/skill discovery takes the restored ordinary Session back over.
+  // Team's sources return no ordinary candidates, so shipped command/skill
+  // discovery takes the restored Session back.
   await restoredComposer.fill('/')
   await expect.poll(() => page.getByRole('option').count()).toBeGreaterThan(0)
   expect(await page.getByRole('option', { name: '@reviewer' }).count()).toBe(0)
   await restoredComposer.fill('')
   await page.screenshot({ path: join(UI01_SHOTS, 'restored-conversations.png'), fullPage: true })
 
-  // Archival beats: both danger entries hide their entity behind a
-  // destructive confirm that states the no-restore contract. The archived
-  // Channel leaves the sidebar; the archived Member leaves the agents panel,
-  // and the Host side disposes its session and archives it from grouping
-  // surfaces while the private memory stays on disk.
+  // Archive confirms state the no-restore contract. The archived Channel leaves
+  // the sidebar; the archived Member leaves the agents panel, its Host session is
+  // disposed and archived, and its private memory stays on disk.
   await page.getByRole('button', { name: '团队' }).click()
-  // Restoration returns to the last open surface; the sidebar row is the
-  // stable entry back onto the Channel page regardless of the restored route.
+  // Restoration returns to the last open surface; the sidebar row stays the entry
+  // back onto the Channel.
   await page.getByRole('button', { name: '# delivery' }).waitFor({ timeout: 20_000 })
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor({ timeout: 20_000 })
@@ -2592,53 +2319,45 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(archivedBuilder.member.state).toBe('archived')
   // The Session archival settles behind the Client wake; poll the registry.
   await expect.poll(() => scaffold.ctx.workspaceRegistry.archivedSessionIds.includes(archivedBuilder.member.sessionId)).toBe(true)
-  // The archived Member's row menu and mention candidates are gone. The
-  // read-only roster that used to restate it is retired with the members entry
-  // (asserted above), so the Agent panel's own row — the surface that still
-  // lists Members — carries the absence alone.
+  // The archived Member's row menu and mention candidates are gone; the Agent
+  // panel, the one surface still listing Members, carries the absence.
   await page.getByRole('button', { name: '对话' }).click()
   await expect.poll(() => page.locator('[data-team-channel]').count()).toBe(0)
 
-  // The shipped global panel rail holds the Team row beside the Plugins one while
-  // it is up: it addresses the profile, and Team mode stands it down with the
-  // rest of the shell chrome — the reader is already on the Team page, and the
-  // mode's own foot row is the way out. It is present in the DOM on both sides,
-  // visible only on one.
+  // The shipped panel rail holds the Team row beside Plugins; Team mode stands
+  // the rail down (present in the DOM on both sides, visible on one).
   const globalPanelsNav = page.locator('nav[class*="panelList"]')
   await expect.poll(() => globalPanelsNav.count()).toBe(1)
   await expect.poll(() => globalPanelsNav.isVisible()).toBe(true)
   // Selecting that panel keys the shell's single main cell to it. Team mode owns
-  // that cell, so a Team destination opening behind the foreign page would move
-  // the sidebar alone — the reported failure. Enter Team mode from here, and the
-  // assertions below prove the column came back rather than merely covering it.
+  // that cell, so opening a Team destination behind the foreign page would move
+  // only the sidebar. Enter Team mode from here and assert the column came back.
   const pluginsEntry = globalPanelsNav.getByRole('button', { name: '插件' })
   await pluginsEntry.click()
   await expect.poll(() => pluginsEntry.getAttribute('aria-current')).toBe('page')
   const pluginPanel = page.locator('[data-plugin-panel]')
   await pluginPanel.waitFor()
-  // The page renders this bundle's own artwork, read from the manifest's `icon`
-  // field: the artifact the plugin list shows instead of the default mark.
+  // The page renders the manifest's `icon` artwork instead of the default mark.
   await page.screenshot({ path: join(UI01_SHOTS, 'plugin-list-artwork.png'), fullPage: true })
 
-  // The plugin page lists this very bundle under a matching name ("智能体团队"),
-  // so the Team row is addressed exactly while that page is on screen.
+  // The plugin page lists this bundle by name ("智能体团队"), so the Team row is
+  // addressed exactly.
   const enterTeamKeyboard = globalPanelsNav.getByRole('button', { name: '团队', exact: true })
   await enterTeamKeyboard.focus()
   await expect.poll(() => enterTeamKeyboard.evaluate(element => element === document.activeElement)).toBe(true)
   await enterTeamKeyboard.press('Enter')
   await expect.poll(() => page.getByRole('button', { name: '对话', exact: true }).count()).toBe(1)
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
-  // The selected plugin page is unmounted rather than sitting behind the Team
-  // seat, the rail stands down with the mode (its own Team row included), and the
-  // browser seat's top row is what carries the leave action.
+  // The plugin page is unmounted rather than hidden behind the Team seat, the
+  // rail stands down, and the browser seat's top row carries the leave action.
   await expect.poll(() => page.getByRole('button', { name: '对话', exact: true }).getAttribute('data-team-action')).toBe('leave')
   await expect.poll(() => pluginPanel.count()).toBe(0)
   await expect.poll(() => globalPanelsNav.count()).toBe(1)
   await expect.poll(() => globalPanelsNav.isVisible()).toBe(false)
 
-  // The exit is keyboard-reachable at its new seat: focus it, activate with
-  // Space, and the mode stands down to an ordinary conversation. Team mode is
-  // then re-entered through the rail row for the segments below.
+  // The exit is keyboard-reachable: focus it, press Space, and the mode stands
+  // down to an ordinary conversation. Team mode is re-entered through the rail
+  // row for the segments below.
   const leaveKeyboard = page.getByRole('button', { name: '对话', exact: true })
   await leaveKeyboard.focus()
   await expect.poll(() => leaveKeyboard.evaluate(element => element === document.activeElement)).toBe(true)
@@ -2649,18 +2368,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.getByRole('button', { name: '对话', exact: true }).count()).toBe(1)
   await page.setViewportSize({ width: 1440, height: 960 })
 
-  // ── Human Inbox (收件箱) ─────────────────────────────────────────────────
-  // mention Human → badge; an Agent's ordinary reply on a followed Thread →
-  // badge too; open Inbox → row; open Thread → badge/row clear. Deltas ride a
-  // fresh taskless Thread so the assertions stay independent of earlier
-  // segments.
+  // Human Inbox: a mention, or an Agent's ordinary reply on a followed Thread,
+  // raises the badge and an Inbox row; opening the Thread clears both. Deltas
+  // ride a fresh taskless Thread to stay independent of earlier segments.
   const inboxWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
   const inboxCard = page.locator('button[class*="inboxCard"]')
   const railInboxButton = page.locator('nav[class*="railWorkspace"] button[aria-label*="收件箱"]')
-  // The sidebar states unread as a mark rather than a number, so the entry's own
-  // accessible name is the only place the quantity is written down — which is how
-  // a screen reader reaches it, and why this reads the name instead of a visible
-  // digit. `null` is the zero case: no count in the name at all.
+  // The sidebar states unread as a mark, so the entry's accessible name is the
+  // only place the quantity is written (what a screen reader reads). `null` means
+  // no count in the name.
   const sidebarUnread = async (): Promise<string | null> => {
     const scope = await inboxCard.count() > 0 ? inboxCard : railInboxButton
     const match = /(\d+)/.exec((await scope.getAttribute('aria-label')) ?? '')
@@ -2691,8 +2407,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const inboxView = scaffold.ctx.agentTeam.view({ workspaceId: inboxWorkspace.id, channelRef: deliveryChannel.channelRef, topLevelOnly: true, includeActivities: false, direction: 'before', limit: 50 })
   const inboxThreadItem = inboxView.items.find((item: { message: { body: string } }) => item.message.body === '请 Human 决策的讨论')!
   const inboxThreadRef = (inboxThreadItem.thread as { threadRef: string }).threadRef
-  // builder is archived earlier in the journey; reviewer stays an active
-  // delivery Member and drives the mention on the Human's behalf.
+  // builder is archived earlier; reviewer stays an active delivery Member and
+  // mentions the Human.
   const inboxReviewer = scaffold.ctx.agentTeam.members({ workspaceId: inboxWorkspace.id }).find((entry: { member: { handle: string } }) => entry.member.handle === 'reviewer')!
   const inboxAgent = scaffold.ctx.agents.get(inboxReviewer.member.sessionId)!
   const inboxRead = await scaffold.ctx.agentTeam.readThreadForAgent(inboxAgent, {
@@ -2709,7 +2425,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(inboxMention.kind).toBe('committed')
   const mentionedInbox = scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id })
   expect(mentionedInbox.totalUnreadCount).toBe(baseUnread + 1)
-  // The row preview is the Thread anchor's first line — the Human's own opener.
   expect(mentionedInbox.items.find((item: { thread: { threadRef: string } }) => item.thread.threadRef === inboxThreadRef)).toMatchObject({
     channelName: 'delivery', previewText: '请 Human 决策的讨论',
   })
@@ -2717,8 +2432,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expectSidebarUnread(String(baseUnread + 1))
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-dot-desktop.png'), fullPage: true })
 
-  // An ordinary Agent reply needs no mention: the Human follows their own
-  // Thread, so it lands in the queue and moves the badge by its own fact.
+  // An ordinary Agent reply needs no mention: the Human follows their own Thread,
+  // so it moves the badge by its own fact.
   const inboxOrdinary = await scaffold.ctx.agentTeam.replyForAgent(inboxAgent, {
     requestId: 'm2-09-builder-ordinary' as never,
     workspaceId: inboxWorkspace.id,
@@ -2730,10 +2445,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id }).totalUnreadCount).toBe(baseUnread + 2)
   await expectSidebarUnread(String(baseUnread + 2))
 
-  // A second Thread the Human opens and follows whose only unread fact is an
-  // Agent reply that names nobody. The queue now mixes the two kinds of unread
-  // the surface has to keep apart: one row that named the reader, one that
-  // merely moved, both waiting.
+  // A second Thread the Human follows whose only unread fact is an Agent reply
+  // naming nobody: the queue mixes a row that named the reader with one that
+  // merely moved.
   await inboxComposer.fill('工程侧同步，无需决策')
   await page.getByRole('button', { name: '发送' }).click()
   await page.locator('[data-team-channel] article').filter({ hasText: '工程侧同步，无需决策' }).waitFor()
@@ -2753,27 +2467,25 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id }).totalUnreadCount).toBe(baseUnread + 3)
   await expectSidebarUnread(String(baseUnread + 3))
 
-  // Narrow rail: 对话 → 收件箱 → Channels → Agents, unread marked on the Inbox
-  // icon, and that icon is a destination that opens the Inbox page and expands
-  // the sidebar. The exit leads the rail, exactly as it leads the wide column.
+  // Narrow rail: 对话 → 收件箱 → Channels → Agents. The Inbox icon marks unread and is
+  // a destination that opens the Inbox and expands the sidebar. The exit leads
+  // the rail as it leads the wide column.
   await page.setViewportSize({ width: 390, height: 844 })
   const inboxRail = page.locator('nav[class*="railWorkspace"]')
   await inboxRail.waitFor()
   const railLabels = await inboxRail.locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
   expect(railLabels).toEqual(['对话', `收件箱，${baseUnread + 3} 条未读`, '频道', 'Agents'])
   await expectSidebarUnread(String(baseUnread + 3))
-  // The dot replaced the number on the surface, so the rail's hover hint is where
-  // a reader still meets the quantity without opening the page: the same name the
-  // control carries, shown on demand. Hovering also proves the hint is not the
-  // only place it lives — the assertion above reads it with nothing hovered.
+  // The dot replaced the number, so the rail's hover hint is where the quantity
+  // shows (the same name the control carries); the assertion above reads it
+  // unhovered.
   await railInboxButton.hover()
   const railHint = page.locator('[role="tooltip"]')
   await expect.poll(async () => await railHint.count()).toBe(1)
   expect(await railHint.textContent()).toBe(`收件箱，${baseUnread + 3} 条未读`)
-  // Back off the control so the settled screenshot shows the rail, not the bubble.
   await page.mouse.move(300, 600)
   await expect.poll(async () => await railHint.count()).toBe(0)
-  // The rail settles after the collapse crossfade; screenshot the settled rail.
+  // Screenshot the settled rail after the collapse crossfade.
   await settleAnimations(page)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-narrow-rail.png'), fullPage: true })
   await railInboxButton.click()
@@ -2783,20 +2495,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await inboxRow.textContent()).toContain('#delivery')
   const plainRow = page.locator('[data-team-inbox] button').filter({ hasText: '工程侧同步，无需决策' })
   await expect.poll(async () => await plainRow.count()).toBe(1)
-  // The queue carries the shared header band plus its own count line, and that
-  // line is now segments the reader scans rather than a clause: the Thread
-  // count, the Host's whole unread slice, and — only while the queue holds one
-  // — the mentions inside it.
+  // The queue carries the shared header band plus a count line of segments: the
+  // Thread count, the Host's whole unread slice, and, only while the queue holds
+  // one, the mentions.
   const inboxPage = page.locator('[data-team-inbox]')
   await expect.poll(async () => await inboxPage.getByRole('heading', { name: '收件箱' }).count()).toBe(1)
-  // The page holds two slices, so each one is counted on its own: the queue
-  // shows every Thread the Host admits with unread, and the 「最近活跃」 tail
-  // shows what the Client caps it at. One whole-page row count would have to
-  // move every time an unrelated Thread joins the tail — which is exactly what
-  // a slice the reader's own writing admits does. Each slice is found by its own
-  // heading text: `filter({ has <locator> })` matches nothing in this page —
-  // even `has: locator('h2')` resolves to zero sections — while the text form
-  // this file already uses does.
+  // Each slice is counted separately: the queue shows every Thread the Host
+  // admits with unread, the 「最近活跃」 tail what the Client caps it at. One page-wide
+  // count would move whenever an unrelated Thread joins the tail. Slices are
+  // found by heading text: `filter({ has })` matches nothing on this page, even
+  // `has: locator('h2')`.
   const queueSection = inboxPage.locator('section').filter({ hasText: '需要我' })
   const recentSection = inboxPage.locator('section').filter({ hasText: '最近活跃' })
   const queue = scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id })
@@ -2807,17 +2515,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await inboxPage.getByText(`${queue.items.length} 个 Thread`, { exact: true }).count()).toBe(1)
   await expect.poll(async () => await inboxPage.getByText(`${queueUnread} 条未读`, { exact: true }).count()).toBe(1)
   await expect.poll(async () => await inboxPage.getByText(`${queueMentions} 条提及`, { exact: true }).count()).toBe(1)
-  // The row time is the newest unread fact's instant (the Human follows their
-  // own opener, so the ordinary inter-chat reply advances it past the mention).
+  // The row time is the newest unread fact's instant: the ordinary reply advances
+  // it past the mention.
   await expect.poll(async () => await inboxRow.locator('time').count()).toBe(1)
-  // A mention raised today is a bare clock time — no day word to print down
-  // every row — and the precise instant stays on the element behind that label.
+  // A mention raised today is a bare clock time; the precise instant stays on the
+  // element behind the label.
   const inboxRowTime = inboxRow.locator('time').first()
   await expect.poll(async () => await inboxRowTime.textContent()).toMatch(/^\d{2}:\d{2}$/)
   expect(await inboxRowTime.getAttribute('title')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
-  // The count closes the row's identity line, and it is where the split between
-  // a named Thread and one that merely moved reaches assistive tech: the row's
-  // visible text stays the Thread itself, never a second count.
+  // The count closes the identity line and carries the named-versus-moved split
+  // to assistive tech; the row's visible text stays the Thread itself.
   const namedCapsule = inboxRow.locator('[data-team-count-badge]')
   const plainCapsule = plainRow.locator('[data-team-count-badge]')
   await expect.poll(async () => await namedCapsule.getAttribute('aria-label')).toBe('2 条未读，其中 1 条提及')
@@ -2825,13 +2532,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(await namedCapsule.getAttribute('title')).toBe('2 条未读，其中 1 条提及')
   expect(await namedCapsule.textContent()).toBe('2')
   expect(await plainCapsule.textContent()).toBe('1')
-  // A squeezed seat: the provenance shortens with an ellipsis instead of folding
-  // one row into three lines, nothing spills out of a row, and the page still
-  // does not scroll sideways. The clock keeps the identity's own line wherever
-  // the line has the room to draw it: a line too narrow for the count and the
-  // clock together yields the clock entirely (inbox.module.css), and that face
-  // of the row is asserted where the seat has the room again — the collapsed
-  // rail below.
+  // A squeezed seat: provenance ellipsizes instead of folding to three lines,
+  // nothing spills out of a row, and the page does not scroll sideways. A line
+  // too narrow for count and clock yields the clock (inbox.module.css), so that
+  // face is asserted on the collapsed rail below.
   const narrowFit = await inboxPage.evaluate(root => {
     const rows = [...root.querySelectorAll('button[class*="row"]')] as HTMLElement[]
     const crumbs = rows.map(row => row.querySelector('[class*="rowCrumb"]') as HTMLElement)
@@ -2843,8 +2547,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       crumbNowrap: crumbStyle.whiteSpace,
       crumbEllipsis: crumbStyle.textOverflow,
       clockOnIdentityLine: rows.every((_, index) => {
-        // A yielded clock draws no box at all, which is this row's own answer to
-        // a line that cannot hold it; a drawn one shares the identity's line.
+        // A yielded clock draws no box; a drawn one shares the identity's line.
         if (times[index]!.getBoundingClientRect().width === 0) return true
         return Math.abs(crumbs[index]!.getBoundingClientRect().top - times[index]!.getBoundingClientRect().top) < 4
       }),
@@ -2856,17 +2559,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(narrowFit.crumbNowrap).toBe('nowrap')
   expect(narrowFit.crumbEllipsis).toBe('ellipsis')
   expect(narrowFit.clockOnIdentityLine).toBe(true)
-  // A wrapped provenance costs this seat three lines' worth of row; two lines
-  // with a clipped one is the shape the row keeps now.
+  // The row keeps two lines with a clipped provenance, not the three a wrapped
+  // one would cost.
   expect(narrowFit.rowHeight).toBeLessThanOrEqual(60)
   await settleAnimations(page)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-page-narrow.png'), fullPage: true })
-  // The expanded seat above is the side effect of the rail icon being a
-  // destination; on a phone the ordinary reading state is the collapsed rail,
-  // so the queue gets that face too — and there the row keeps its compact shape
-  // rather than the folded one the crushed seat forces. The card's current-page
-  // fill is read while it is still on screen, because the icon that replaces it
-  // has to wear exactly that.
+  // On a phone the reading state is the collapsed rail, so the queue gets that
+  // face too, with the compact row shape. The card's current-page fill is read
+  // while it is on screen because the replacing icon must wear exactly that.
   const currentCardFill = await inboxCard.evaluate(card => ({
     label: card.getAttribute('aria-current'),
     background: getComputedStyle(card).backgroundColor,
@@ -2882,9 +2582,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(collapsedRow.height).toBeLessThanOrEqual(62)
   expect(collapsedRow.sameLine).toBe(true)
-  // The rail has no label to say where the reader is, so the current page is the
-  // fill on the icon — the same `aria-current="page"` the wide card reads, and
-  // the same fill the card wears. One seat, one marker, at both widths.
+  // The rail has no label, so the current page is the fill on the icon: the same
+  // `aria-current="page"` fill the wide card wears.
   const railCurrent = await railInboxButton.evaluate(button => ({
     label: button.getAttribute('aria-current'),
     background: getComputedStyle(button).backgroundColor,
@@ -2897,8 +2596,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.locator('[data-sidebar-collapsed]').waitFor({ state: 'detached' })
   await settleLayout(page)
   await page.setViewportSize({ width: 1440, height: 960 })
-  // The queue's settled desktop face, before a row is opened: the two rows the
-  // queue now mixes, in the two inks, at the width most reading happens at.
   await settleLayout(page)
   const ink = async (locator: Locator) => await locator.evaluate(element => {
     const style = getComputedStyle(element)
@@ -2914,11 +2611,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // and the row that merely moved wears the same capsule as a hairline.
   expect(plainInk.background).not.toBe(namedInk.background)
   expect(plainInk.border).not.toBe('rgba(0, 0, 0, 0)')
-  // The sidebar states that same fact as a mark instead of a number: the count
-  // left the surface for the entry's accessible name, and what is left on screen
-  // is the ink the row that named the reader wears. It is a mark rather than a
-  // shrunken capsule, so it is measured as one — a count that comes back here
-  // would fail the first assertion.
+  // The sidebar shows the fact as a mark, not a number (the count moved to the
+  // accessible name), so it is measured as a mark; a returning count fails the
+  // first assertion.
   expect(await page.locator('button[class*="inboxCard"] [data-team-count-badge]').count()).toBe(0)
   const inboxDot = page.locator('button[class*="inboxCard"] [data-team-inbox-dot]')
   await expect.poll(async () => await inboxDot.count()).toBe(1)
@@ -2926,16 +2621,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(dotInk.background).toBe(namedInk.background)
   expect(dotInk.width).toBe(8)
   expect(dotInk.height).toBe(8)
-  // Identical geometry either way: a Thread does not shift its row when it is
-  // named again, and the counts open one column down the page.
+  // Identical geometry either way: naming a Thread again does not shift its row,
+  // and the counts open one column down.
   expect(namedInk.height).toBe(plainInk.height)
   expect(namedInk.width).toBe(plainInk.width)
   expect(namedInk.left).toBe(plainInk.left)
-  // One capsule, two surfaces: the Channel feed's Thread entry and both Inbox
-  // queue rows are the same component, so the shape that decides where the digit
-  // sits cannot drift between them — which is exactly how the feed's copy ended
-  // up on a different line box from the other two. The sidebar left this set: it
-  // draws the mark asserted above rather than a count.
+  // The Channel feed's Thread entry and both Inbox queue rows share one capsule
+  // component, so its shape cannot drift between them. The sidebar draws a mark
+  // and is excluded.
   const namedCapsuleRead = await namedCapsule.evaluate(readCountCapsule)
   const plainCapsuleRead = await plainCapsule.evaluate(readCountCapsule)
   const capsuleReads = [namedCapsuleRead, plainCapsuleRead, unreadCapsule]
@@ -2943,33 +2636,23 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     if (read === null) continue
     expect(read.shape).toEqual(namedCapsuleRead.shape)
   }
-  // The two tones spend their inset differently on purpose — the hairline draws
-  // a 1px border where the fill has none, and pays for it out of the padding — so
-  // what has to agree is the inset that reaches the digit, not the declaration:
-  // 4px of padding behind a 1px border is the solid tone's 5px. Reading only the
-  // declaration would let the hairline capsule run a pixel wider than the fill
-  // beside it and still pass.
+  // The tones spend their inset differently (the hairline's 1px border is paid
+  // out of the padding: 4px + 1px = the solid tone's 5px), so compare the inset
+  // that reaches the digit, not the declaration.
   expect(capsuleReads.map(read => read?.inset))
     .toEqual([namedCapsuleRead.inset, namedCapsuleRead.inset, namedCapsuleRead.inset])
   for (const read of capsuleReads) {
-    // One character keeps the box square: the shared rule's 18px floor, not the
-    // digit's own advance, decides the width — which is what seats one digit in
-    // a circle instead of an oval. A wider count is allowed to widen the pill
-    // (`99+` is the widest), so the square is claimed only where the content is
-    // one character. This is read as a box rather than as a declaration because
-    // `min-width` is a floor the content can still push past.
+    // One character keeps the box square (the 18px floor decides the width);
+    // wider counts may widen the pill (`99+`). Read as a box because `min-width`
+    // is only a floor.
     if (read === null || read.text.length !== 1) continue
     expect(read.box.height).toBe(read.box.width)
   }
   const edgeLeft = async (locator: Locator): Promise<number> => Math.round(await locator.evaluate(element => element.getBoundingClientRect().x))
   const edgeRight = async (locator: Locator): Promise<number> => Math.round(await locator.evaluate(element => element.getBoundingClientRect().right))
-  // One content column, measured rather than assumed: a Member circle hangs in
-  // the row's gutter on every row — counted or not — and everything the row says
-  // opens on the column after it, in both sections; the section heading opens on
-  // that same column. The whole promise of this layout is that heading, identity,
-  // and gist read down one inset instead of three, so a row that drifts sideways
-  // fails here. The count then closes the identity line one line-gap left of the
-  // instant, which is where a reader scans for what is still waiting.
+  // One content column: a Member circle hangs in the gutter of every row, and
+  // everything else, including the section heading, opens on the column after it.
+  // The count closes the identity line one line-gap left of the instant.
   const column = await inboxPage.evaluate(root => [...root.querySelectorAll('section')].map(section => {
     const heading = section.querySelector('h2') as HTMLElement
     const range = document.createRange()
@@ -2989,18 +2672,17 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
           crumb: left('[class*="rowCrumb"]', row),
           preview: left('[class*="rowPreview"]', row),
           text: (row.querySelector('[class*="rowPreview"]') as HTMLElement).textContent,
-          // One Workspace on screen, so no row prints the name that never varies.
+          // One Workspace on screen: no row prints the constant name.
           workspace: row.querySelector('[class*="rowWorkspace"]') === null ? null : 1,
         }
       }),
     }
   }))
   expect(column.length).toBeGreaterThan(0)
-  // The leading cluster is the Host's own roster, drawn: one 18px face per owner,
-  // —6px of overlap per neighbour, and the same again for a `+N` chip. The two
-  // names below are the Channel feed's own words, so 「谁在这个 Task 上」 reads the
-  // same on both surfaces; a Thread with no live owner falls back to whoever its
-  // newest fact came from, which is what the taskless rows above exercise.
+  // The leading cluster is the Host's roster: one 18px face per owner,
+  // overlapping by 6px (the same again for a `+N` chip), under the Channel feed's
+  // own words. A Thread with no live owner falls back to its newest fact's
+  // author, as the taskless rows above do.
   const inboxNow = scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id })
   const hostRows = [...inboxNow.items, ...inboxNow.recent]
   const clusterWidth = (owners: number): number => owners === 0 ? 18 : 18 + 12 * (Math.min(owners, 3) - 1) + (owners > 3 ? 12 : 0)
@@ -3012,16 +2694,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
         ? `最新来自 @${item!.newestActor.name}`
         : `由 ${item!.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
       expect(row.actorWidth).toBe(clusterWidth(item!.liveClaimOwners.length))
-      // The text column follows the cluster that is really drawn: a row pays one
-      // face's width per face it has and nothing for the stack it could have had.
-      // Reserving the widest stack is what used to put 36px of empty space in
-      // front of the identity on every single-face row.
+      // The text column follows the cluster actually drawn: one face's width per
+      // face, never a reserved widest stack.
       expect(row.crumb).toBe(row.actor + row.actorWidth + 8)
       expect(row.preview).toBe(row.crumb)
-      // The section heading is pinned to the one-face column — the row's own 8px
-      // inset plus one 18px face plus the line's 8px gap — which is the column
-      // every row without a stack opens on, so the section still reads as one
-      // block wherever a row is not actually carrying a stack.
+      // The section heading is pinned to the one-face column (8px inset + 18px
+      // face + 8px gap), where every stackless row opens.
       expect(section.heading).toBe(row.actor + 26)
       if (row.badgeToTime !== null) expect(row.badgeToTime).toBe(8)
       expect(row.workspace).toBeNull()
@@ -3030,9 +2708,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // The two times close one column on the right.
   expect(await edgeRight(inboxRow.locator('time'))).toBe(await edgeRight(plainRow.locator('time')))
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-page-desktop.png'), fullPage: true })
-  // Keyboard: a row is one control, and the ring is the only chrome it grows —
-  // around both of its lines, not around the count. Tab first, because a script
-  // `focus()` alone leaves the browser's focus-visible heuristic cold.
+  // A row is one control and its ring wraps both lines, not the count. Tab first:
+  // a script `focus()` leaves focus-visible cold.
   await page.keyboard.press('Tab')
   await inboxRow.focus()
   await inboxRow.scrollIntoViewIfNeeded()
@@ -3043,12 +2720,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-row-focus.png'), fullPage: true })
 
-  // Opening the row's Thread acknowledges the mention durably: the badge and the
-  // row drop through the existing auto-ack read, and Back lands on the row's
-  // Channel — the Inbox is never on the back path. The row that merely moved is
-  // still waiting, so the badge lands on its count rather than zero — and the
-  // row just read is not gone from the page either: it comes back under
-  // 「最近活跃」 without a count, while the queue keeps the one still waiting.
+  // Opening the Thread acknowledges the mention durably: the badge and row drop,
+  // and Back lands on the row's Channel (the Inbox is not on the back path). The
+  // row still waiting keeps the badge at its count, and the row just read returns
+  // under 「最近活跃」 without a count.
   await inboxRow.click()
   await page.locator('[data-team-thread]').waitFor()
   await expectSidebarUnread(baseUnread === 0 ? '1' : String(baseUnread + 1))
@@ -3056,28 +2731,21 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   await page.locator('button[class*="inboxCard"]').click()
   await page.locator('[data-team-inbox]').waitFor()
-  // Wait on the section rather than on a row count: a row count of zero is also
-  // what the entry frame shows, so only the section proves the fetch settled.
+  // Wait on the section: a zero row count is also what the entry frame shows.
   await page.locator('[data-team-inbox]').getByRole('heading', { name: '最近活跃' }).waitFor({ timeout: 30_000 })
   await expect.poll(async () => await inboxRow.count()).toBe(1)
   await expect.poll(async () => await inboxRow.locator('[data-team-count-badge]').count()).toBe(0)
   await expect.poll(async () => await plainRow.count()).toBe(1)
   await expect.poll(async () => await plainRow.textContent()).toContain('工程侧同步，无需决策')
   await expect.poll(async () => await plainRow.locator('[data-team-count-badge]').count()).toBe(1)
-  // A read row keeps the leading column instead of sliding left: the same Thread
-  // moves between the two sections, so it reads down one column either way, and
-  // a read row is the queue row minus its count rather than a differently shaped
-  // object — both still open on the person who moved them.
+  // A read row keeps the leading column: it moves between sections as the queue
+  // row minus its count.
   expect(await edgeLeft(inboxRow.locator('[class*="rowActor"]'))).toBe(await edgeLeft(plainRow.locator('[class*="rowActor"]')))
   expect(await edgeLeft(inboxRow.locator('[class*="rowCrumb"]'))).toBe(await edgeLeft(plainRow.locator('[class*="rowCrumb"]')))
-  // Reading the second row drains the queue the same way, and a drained queue is
-  // no longer the empty page: both Threads the reader took part in come back as
-  // the 「最近活跃」 tail, so the settled face is that section. The queue's own
-  // heading and count line go with its rows, and the tail's rows carry no count
-  // capsule — zero is the absence of a badge rather than a badge reading zero.
-  // The empty copy is left to the reader who has neither, which the component
-  // spec covers, since this journey's reader always took part somewhere. Wait
-  // for the section rather than for rows: rows are absent while the page loads.
+  // Reading the second row drains the queue; both Threads return as the 「最近活跃」
+  // tail, whose rows carry no count capsule. The empty copy is covered by the
+  // component spec, since this reader always took part somewhere. Wait for the
+  // section: rows are absent while loading.
   await plainRow.click()
   await page.locator('[data-team-thread]').waitFor()
   await expectSidebarUnread(baseUnread === 0 ? null : String(baseUnread))
@@ -3094,22 +2762,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-page-recent.png'), fullPage: true })
   await expect.poll(async () => await page.locator('button[class*="inboxCard"]').getAttribute('aria-current')).toBe('page')
 
-  // Both Threads above are taskless, so they only ever exercise the fallback: a
-  // row names whoever moved a Thread nobody claimed. A Task's row is the case the
-  // leading column is laid out for, and it leads with the same stack, the same
-  // rule, and the same words the Channel feed's Thread entry row leads with.
-  // Seeded here on real Host facts — a Task thread an Agent opens, plus the Claims
-  // its peers put on it — because a stack is the one thing a fake row could too
-  // easily fake. Every enabled Member still live in this Channel claims it, and the
-  // row is read against whatever roster the Host really has: this journey archives
-  // builder before it reaches the Inbox, and a peer cannot be provisioned here at
-  // all — a direct `agentTeam.addMember` call mounts no `team-member` preset in
-  // this lane (that call path resolves the shipped presets only, at boot as much as
-  // at the end), while the Client's own dialog provisions Members normally — so the
-  // count is asserted rather than assumed. The stack's geometry is what scales — one
-  // face or three, the row pays for exactly the faces it draws — and the multi-face
-  // shape itself is pinned in the Client component spec and the Host's claim-owner
-  // spec.
+  // Both Threads above are taskless and only exercise the fallback. A Task's row
+  // leads with the same stack, rule, and words as the Channel feed's Thread
+  // entry; it is seeded from real Host facts (a Task thread plus peers' Claims)
+  // because a stack is easy to fake. This journey archives builder before the
+  // Inbox, and `agentTeam.addMember` mounts no `team-member` preset in this lane,
+  // so the live roster count is asserted rather than assumed. The multi-face
+  // shape is pinned in the Client component spec and the Host's claim-owner spec.
   const stackStarted = await scaffold.ctx.agentTeam.sendMessageForAgent(inboxAgent, {
     requestId: 'm2-09-stack-task' as never, workspaceId: inboxWorkspace.id, channelRef: deliveryChannel.channelRef,
     asTask: true, body: '叠放校验：谁在这个 Task 上', recipients: [scaffold.ctx.agentTeam.status().humanMemberId],
@@ -3117,8 +2776,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   if (stackStarted.kind !== 'committed') throw new Error(`stack fixture was rejected: ${stackStarted.kind}`)
   const stackTaskRef = stackStarted.task!.taskRef
   const stackThreadRef = stackStarted.thread.threadRef
-  // Only a Member of the Task's own Channel may claim it, so the roster to draw
-  // from is the Channel's, not the Workspace's.
+  // Only a Member of the Task's Channel may claim it.
   const channelMemberIds = new Set(scaffold.ctx.agentTeam.view({ workspaceId: inboxWorkspace.id }).members
     .filter((membership: { channelRef: string }) => membership.channelRef === deliveryChannel.channelRef)
     .map((membership: { memberId: string }) => membership.memberId))
@@ -3127,15 +2785,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       && channelMemberIds.has(entry.member.memberId)
       && scaffold.ctx.agents.get(entry.member.sessionId as never) !== undefined)
     .slice(0, 3)
-  // A Member of this Channel is live, so the Task has an owner to lead with rather
-  // than falling back to `newestActor` — which is the branch the two rows above
-  // already covered.
+  // A live Channel Member gives the Task an owner, not the `newestActor` fallback
+  // covered above.
   expect(claimants.length).toBeGreaterThanOrEqual(1)
   for (const [index, entry] of claimants.entries()) {
     const claimant = scaffold.ctx.agents.get(entry.member.sessionId as never)!
-    // A Claim is a Thread write, so the claimant drains its own unread first —
-    // the read that also hands back the revision the write is based on. The
-    // Claim itself is what makes the claimant a follower.
+    // A Claim is a Thread write: the claimant drains its own unread first to get
+    // the revision, and the Claim makes it a follower.
     const read = await scaffold.ctx.agentTeam.readThreadForAgent(claimant, {
       requestId: `m2-09-stack-read-${index}` as never, workspaceId: inboxWorkspace.id, taskRef: stackTaskRef,
     })
@@ -3147,10 +2803,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   }
   const stackRow = page.locator('[data-team-inbox] button').filter({ hasText: '叠放校验：谁在这个 Task 上' })
   await expect.poll(async () => await stackRow.count(), { timeout: 30_000 }).toBe(1)
-  // The cluster is the Host's own roster made pixels: one face per owner, in
-  // claim order, under the same words the Channel feed uses — and the row around
-  // it pays for exactly those faces, so the widest stack costs the rows that
-  // carry one and no row a pixel more.
+  // One face per owner in claim order, under the Channel feed's words; the row
+  // pays exactly for those faces.
   const stackBox = await stackRow.evaluate(row => {
     const cluster = row.querySelector('[class*="rowActor"] [role="img"]') as HTMLElement
     const gutter = row.querySelector('[class*="rowActor"]') as HTMLElement
@@ -3165,8 +2819,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   const stackItem = scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id }).items
     .find(item => item.thread.threadRef === stackThreadRef)!
-  // Every claimant the Host accepted is an owner on the row, and the row paid one
-  // face per owner rather than the width of the stack it could have carried.
   expect(stackItem.liveClaimOwners.length).toBe(claimants.length)
   expect(stackItem.liveClaimOwners.map(owner => owner.name).sort()).toEqual(
     claimants.map((entry: { member: { handle: string } }) => entry.member.handle).sort())
@@ -3174,23 +2826,19 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(stackBox.label).toBe(`由 ${stackItem.liveClaimOwners.map(owner => `@${owner.name}`).join(', ')} 处理`)
   expect(stackBox.width).toBe(clusterWidth(stackItem.liveClaimOwners.length))
   expect(stackBox.inset).toBe(stackBox.width + 8)
-  // The row also states where its Task stands, behind the Task's own number and in
-  // the pair every other Task surface prints: a dot and the word the Host's status
-  // renders as. This row is the busiest shape a row has — live owners in the gutter
-  // and a standing on the identity line — and it arrived after the page had already
-  // opened, so the standing came in on a wake rather than with the first render.
+  // The row also states the Task's standing (dot plus status word, as on every
+  // Task surface). It arrives on a wake after the page opened, in the busiest row
+  // shape.
   await expect.poll(async () => await stackRow.locator('[data-team-task-state]').getAttribute('data-team-task-state')).toBe(stackItem.task!.status)
   expect(await stackRow.locator('[data-team-task-state]').textContent()).toBe('进行中')
-  // The two Threads the tail above still holds carry no Task, and so draw no
-  // standing at all: the mark belongs to a Task, never to a row.
+  // Taskless Threads in the tail draw no standing: the mark belongs to a Task.
   expect(await inboxRow.locator('[data-team-task-state]').count()).toBe(0)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-row-owners-desktop.png'), fullPage: true })
 
-  // Losing the Host connection surfaces the failure in two places, and both
-  // must read as states rather than as drift: the Channel body centers in the
-  // free space exactly like the loading and empty surfaces it replaces, and the
-  // rail line sits on the rail's alert scale, on the row labels, in the error
-  // colour. A failed load also never reads as an empty workspace.
+  // A lost Host connection shows in two places: the Channel body centres in the
+  // free space like the loading and empty surfaces, and the rail line uses the
+  // rail's alert scale in the error colour. A failed load never reads as an empty
+  // workspace.
   await page.getByRole('button', { name: '新建频道' }).click()
   const probeDialog = page.getByRole('dialog', { name: '新建频道' })
   await probeDialog.getByLabel('名称').fill('recovery')
@@ -3198,17 +2846,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await probeDialog.getByRole('button', { name: '创建频道' }).click()
   const recoveryRow = page.getByRole('button', { name: '# recovery' })
   await recoveryRow.waitFor()
-  // The row label sets the inset every line in the rail agrees with, so read it
-  // while the list is still there to read it from: a failed load leaves the rail
-  // with no rows at all, and the error line is what stands in their place.
+  // The row label sets the rail's inset; read it while the list exists, since a
+  // failed load leaves no rows.
   const railLabel = await recoveryRow.locator('strong').evaluate(element => ({ x: element.getBoundingClientRect().x, color: getComputedStyle(element).color }))
-  // Cutting the network is this block's own doing, so the ordinary shell's
-  // connection-loss warnings from this window are acknowledged — and only those:
-  // gap-repair and discontinuity warnings stay fatal.
+  // Cutting the network acknowledges only connection-loss warnings from this
+  // window; gap-repair and discontinuity warnings stay fatal.
   const offlineWarningStart = consoleWatch.warnings.length
   await page.context().setOffline(true)
-  // A Channel whose projection was never loaded is the one that shows the
-  // whole-surface error state instead of a stale timeline.
+  // A never-loaded Channel projection shows the whole-surface error, not a stale
+  // timeline.
   await recoveryRow.click()
   const channelSurface = page.locator('[data-team-channel]')
   const bodyError = channelSurface.locator('[role="alert"]').first()
@@ -3223,8 +2869,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   await page.screenshot({ path: join(UI08_SHOTS, 'channel-error-offline.png'), fullPage: true })
 
-  // Rail Panels only re-subscribe when they remount, so leaving Team mode and
-  // returning is what makes the sideways surfaces report the same drop.
+  // Rail Panels re-subscribe only on remount, so leave and re-enter Team mode.
   await page.getByRole('button', { name: '对话' }).click()
   await page.getByRole('button', { name: '团队' }).click()
   const railAlert = page.locator('section[aria-label="工作区"] [role="alert"]')
@@ -3245,8 +2890,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   await page.screenshot({ path: join(UI08_SHOTS, 'sidebar-error-offline.png'), fullPage: true })
 
-  // Reopening the stream supplies a baseline even without a new commit;
-  // both the Channel and sidebar must recover without a manual retry.
+  // Reopening the stream supplies a baseline without a new commit; Channel and
+  // sidebar must recover without a manual retry.
   await page.context().setOffline(false)
   await page.getByRole('heading', { name: '# recovery' }).waitFor({ timeout: 30_000 })
   await expect.poll(() => channelSurface.locator('[role="alert"]').count()).toBe(0)
@@ -3257,9 +2902,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   await page.screenshot({ path: join(UI08_SHOTS, 'sidebar-recovered-online.png'), fullPage: true })
 
-  // One member posting several Messages in a row: each is its own Thread entry
-  // and its own Task, so the feed has to keep three entries readable without
-  // repeating the identity line the run already carries.
+  // Several Messages in a row from one member: each is its own Thread entry and
+  // Task, kept readable without repeating the identity line.
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   for (const body of ['连续消息之一', '连续消息之二', '连续消息之三']) {
@@ -3273,17 +2917,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   }
   await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'consecutive-entries.png'), fullPage: true })
-  // The operator's case, as an assertion: several Messages from one member in a
-  // row. Each is its own Thread entry and its own Task, and a continuation row's
-  // identity line carries nothing but its own time — so the state has to ride
-  // each entry's own row, opening it, instead of parking at a line's far end.
+  // A continuation row's identity line carries only its time, so the state rides
+  // each entry's own row instead of a line's far end.
   const consecutive = await page.evaluate(() => [...document.querySelectorAll('[data-team-channel] article')]
     .filter(article => /连续消息之[一二三]/.test(article.textContent ?? ''))
     .map(article => {
       const body = article.lastElementChild
       const entry = [...(body?.children ?? [])].find(child => child.hasAttribute('data-thread-entry'))
-      // The identity line is whatever the body box opens with, unless the entry
-      // line itself does — a grouped row renders no identity line at all.
+      // The identity line is the body box's opening unless the entry line opens:
+      // grouped rows render none.
       const opening = body?.firstElementChild
       const nameRow = opening !== null && opening !== undefined && !opening.hasAttribute('data-thread-entry') ? opening : null
       const left = (element: Element | null | undefined): number => element === null || element === undefined ? -1 : Math.round(element.getBoundingClientRect().left)
@@ -3297,17 +2939,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
         columnLeft: left(body),
       }
     }))
-  // Chinese numerals do not collate into counting order, so the send order is
-  // the only correct key here.
+  // Chinese numerals do not collate in counting order; send order is the key.
   const seriesOrder = ['一', '二', '三']
   consecutive.sort((first, second) => seriesOrder.indexOf(first.series) - seriesOrder.indexOf(second.series))
   expect(consecutive.map(row => row.series)).toEqual(seriesOrder)
   expect(consecutive.some(row => row.grouped)).toBe(true)
   for (const row of consecutive) {
-    // The identity line stays identity — the status word is not on it, so no
-    // continuation row shows a lone status floating where a sender would be.
+    // The status word is not on the identity line, so no continuation row shows a
+    // lone status where a sender would be.
     expect(row.identityLine).not.toContain('待处理')
-    // …and it did land on the entry line, opening it level with the body.
     expect(row.entryText).toContain('待处理')
     expect(row.stateLeft).toBe(row.entryLeft)
     expect(row.stateLeft).toBe(row.columnLeft)
@@ -3323,12 +2963,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const inboxEntry = page.locator('button[class*="inboxCard"]')
   await expect.poll(async () => await inboxEntry.getAttribute('aria-current')).toBe('page')
 
-  // An Agent card is the one Team row a reader can open from the Inbox page, and
-  // the overlay embeds that Session over the page instead of replacing it. That
-  // makes the Inbox the one face that can stand underneath the Member view, so
-  // the two must not both claim the seat: the Agent card takes the marker and the
-  // Inbox entry stands down — it is the remembered face underneath, not a second
-  // current page — while the page itself leaves the seat with the overlay.
+  // The Agent card is the one Team row openable from the Inbox page, and its
+  // overlay embeds the Session over the page, so the Inbox is the face
+  // underneath: the card takes the marker and the Inbox entry stands down.
   const liveAgentCard = page.locator('button[class*="agentSelect"]:not([disabled])').first()
   const liveAgentName = await liveAgentCard.getAttribute('aria-label')
   await liveAgentCard.click()
@@ -3339,12 +2976,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await inboxEntry.getAttribute('aria-current')).toBeNull()
   await settleLayout(page)
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-under-agent-overlay.png'), fullPage: true })
-  // Asking for the Inbox is Team navigation: it closes the overlay and puts the
-  // reader back on the page they were reading, marker included — one marked leaf
-  // at every step, never two and never none, while the rail's own marker returns
-  // with the panel the overlay had cleared. The seat matters as much as the
-  // sidebar here: the shipped composer belongs to the Member Session, so the
-  // page the reader asked for is only really back once that composer is gone.
+  // Asking for the Inbox closes the overlay and restores the page with one marked
+  // leaf at every step, and the rail marker returns. The page is only really back
+  // once the Member Session's composer is gone.
   await inboxEntry.click()
   await page.locator('[data-team-inbox]').waitFor()
   await expect.poll(async () => await teamCurrentPage.count()).toBe(1)
@@ -3367,10 +3001,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const leaveTeamKeyboard = page.getByRole('button', { name: '对话' })
   await leaveTeamKeyboard.focus()
   await leaveTeamKeyboard.press('Space')
-  // Leaving Team restores the Human's original session (see the Member view
-  // above), so the ordinary shell renders a conversation composer.
-  // The restored ordinary shell may hold an inert composer (blank session),
-  // so the wait is on the composer surface, not its editable state.
+  // Leaving Team restores the Human's session. The restored shell may hold an
+  // inert composer (blank session), so wait on the composer surface, not
+  // editability.
   await page.locator('[data-composer-input]').first().waitFor({ timeout: 20_000 })
   await expect.poll(() => page.locator('[data-team-channel]').count()).toBe(0)
 
@@ -3434,9 +3067,6 @@ it('keeps four same-origin Team pages responsive and independently subscribed', 
 
 it('opens a taskless thread from its ref chip in real Web', async () => {
   await installLocalBundle(false)
-  // Same install flow as the other journeys: installLocalBundle stages the
-  // bundle, so no extra install anchor is needed (an undefined anchor
-  // identifier here failed the whole journey with a ReferenceError).
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -3455,8 +3085,8 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await channelComposer.fill('ALPHA-ROOT-MARKER alpha discussion opens here')
   await page.getByRole('button', { name: '发送', exact: true }).click()
   await page.locator('[data-team-channel] article').filter({ hasText: 'ALPHA-ROOT-MARKER' }).waitFor()
-  // The cited form is the abbreviated spelling from the report (8 hex chars):
-  // resolution, not spelling, must decide linkability.
+  // The abbreviated 8-hex spelling: resolution, not spelling, decides
+  // linkability.
   const workspaceId = scaffold.ctx.workspaceRegistry.list()[0]!.id
   const projection = scaffold.ctx.agentTeam.view({ workspaceId })
   const alphaThread = projection.threads.find((thread: { taskRef?: string }) => thread.taskRef === undefined)!
@@ -3468,16 +3098,16 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await betaArticle.waitFor()
   const chip = betaArticle.locator(`button[title="${alphaShort}"]`)
   await chip.waitFor()
-  // Thread chip titles cap at 40 characters: the 43-char anchor below renders
-  // truncated, and navigation still proves identity.
+  // Chip titles cap at 40 characters, so the 43-char anchor renders truncated;
+  // navigation still proves identity.
   await expect.poll(() => chip.textContent()).toMatch(/ALPHA-ROOT-MARKER alpha discussion open…/)
   await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip.png'), fullPage: true })
   await chip.click()
-  // Split "never navigated" from "navigated but failed to render": the
+  // Separate "never navigated" from "navigated but failed to render": the
   // persisted snapshot answers the first without waiting on the second.
   await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { threadRef?: string }).threadRef), { timeout: 10_000 }).toBe(alphaRef)
-  // Arrival at the cited Thread (not just any navigation): the Thread page
-  // marker carries the cited full ref, and the persisted snapshot agrees.
+  // Arrival at the cited Thread: the page marker carries the full ref and the
+  // persisted snapshot agrees.
   await page.locator(`[data-team-thread="${alphaRef}"]`).waitFor({ timeout: 20_000 })
   await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { threadRef?: string }).threadRef)).toBe(alphaRef)
   await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip-opened.png'), fullPage: true })
@@ -3487,17 +3117,17 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
 
-/** One real 1×1 RGBA PNG: the avatar store validates the payload as an image and
- * the page must decode it, so a placeholder byte string would prove nothing. The
- * single pixel is opaque amber rather than white so the screenshot shows the
- * uploaded avatar filling the identity seat instead of a blank circle. */
+/**
+ * A 1×1 opaque amber RGBA PNG: the avatar store validates an image payload,
+ * and the colour makes the avatar visibly fill the seat.
+ */
 const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP4Oo/7PwAGyAKe4yFCTgAAAABJRU5ErkJggg=='
 
 /**
- * The Human's own settings page: display name, avatar, version footnote. It is
- * an ordinary-mode settings section — Team mode's sidebar takeover makes the
- * panel unreachable by design — so this journey does its panel work first and
- * only then enters Team mode, to prove the same rename reaches the timeline.
+ * The Human's own settings page: name, avatar, version footnote. It is an
+ * ordinary-mode section (Team mode's sidebar takeover makes it unreachable),
+ * so panel work comes first, then Team mode proves the rename reaches the
+ * timeline.
  */
 it('configures the Team page identity from Settings in real Web', async () => {
   await installLocalBundle(false)
@@ -3514,18 +3144,18 @@ it('configures the Team page identity from Settings in real Web', async () => {
   const nameField = panel.getByLabel('名字')
   await nameField.waitFor()
   const nameSave = panel.locator('form button[type="submit"]')
-  // The Host has no override stored yet, so the page shows the historic default
-  // and the version footnote's two facts: the bundle version and the repo link.
+  // With no stored override the page shows the default name plus the bundle
+  // version and repo link.
   expect(await nameField.inputValue()).toBe('human')
-  // The page states what owns it before anything else: among the Harness's own
-  // settings pages, a bare 「团队」 leaves the reader guessing.
+  // The page names its owner first: among the Harness's settings pages a bare
+  // 「团队」 is ambiguous.
   expect(await panel.textContent()).toContain('你在 Team 里的身份')
   expect(await panel.textContent()).toMatch(/版本 \d+\.\d+\.\d+/)
   expect(await panel.getByRole('link', { name: 'GitHub' }).getAttribute('href')).toBe('https://github.com/Contexera/dsh-agent-team')
   expect(await panel.getByRole('button', { name: '移除头像' }).count()).toBe(0)
 
-  // Keyboard rename, no pointer involved: typing makes the field dirty, Tab
-  // hands focus to the Save button that owns the form, and Enter activates it.
+  // Keyboard-only rename: typing dirties the field, Tab reaches the owning Save
+  // button, Enter submits.
   await nameField.fill('Ada')
   await nameField.press('Tab')
   const saveRing = await focusRing(page, '[role="dialog"] form button[type="submit"]')
@@ -3535,8 +3165,8 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await expect.poll(() => scaffold!.ctx.agentTeam.humanHandle()).toBe('Ada')
   await expect.poll(async () => await nameSave.isDisabled()).toBe(true)
 
-  // Avatar upload: bytes go to the persistent store, the reference into
-  // settings, and the page draws what the browser can decode.
+  // Avatar bytes go to the persistent store, the reference into settings, and the
+  // page draws what the browser can decode.
   const avatarPath = join(HOME, 'ada-avatar.png')
   await writeFile(avatarPath, Buffer.from(ONE_PIXEL_PNG, 'base64'))
   await panel.locator('input[type="file"]').setInputFiles(avatarPath)
@@ -3547,8 +3177,8 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef !== undefined).toBe(true)
   await page.screenshot({ path: join(UI09_SHOTS, 'team-page.png'), fullPage: true })
 
-  // A refused name is refused before the round trip: the field keeps what the
-  // reader typed and the notice states the rule.
+  // A refused name is refused before the round trip: the field keeps the typed
+  // text and the notice states the rule.
   await nameField.fill('   ')
   await panel.getByText('名字不能为空。').waitFor()
   expect(await nameSave.isDisabled()).toBe(true)
@@ -3556,8 +3186,8 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await nameField.fill('Ada')
   await expect.poll(async () => await nameSave.isDisabled()).toBe(true)
 
-  // 390×844: the shipped panel keeps its 188px nav rail at every viewport, so
-  // the question this answers is whether OUR column survives the squeeze.
+  // The shipped panel keeps its 188px nav rail at every viewport; this checks
+  // whether our column survives the squeeze.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await page.screenshot({ path: join(UI09_SHOTS, 'team-page-narrow.png'), fullPage: true })
@@ -3570,23 +3200,21 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
 
-  // Bytes this browser cannot decode fall back to the initial, exactly like a
-  // removed avatar. The Host accepts them — it checks the declared media type,
-  // not the payload — so this is also the state a phone photo in HEIC lands in,
-  // and the page's own copy promises the initial for it.
+  // Undecodable bytes fall back to the initial like a removed avatar. The Host
+  // checks only the declared media type, so a HEIC phone photo lands here, and
+  // the page copy promises the initial.
   await panel.locator('input[type="file"]').setInputFiles([{ name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('this is not a PNG') }])
   await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef !== undefined).toBe(true)
   await expect.poll(async () => await panel.locator('[data-avatar="initial"]').textContent()).toBe('A')
   expect(await panel.locator('img').count()).toBe(0)
   await page.screenshot({ path: join(UI09_SHOTS, 'team-page-undecodable-avatar.png'), fullPage: true })
 
-  // Removal returns the identity to the initial while the rename stands.
   await panel.getByRole('button', { name: '移除头像' }).click()
   await expect.poll(async () => await panel.locator('img').count()).toBe(0)
   await expect.poll(() => scaffold!.ctx.agentTeam.humanProfile().avatarRef).toBeUndefined()
   await expect.poll(async () => await panel.getByRole('button', { name: '上传头像' }).count()).toBe(1)
-  // The readable bytes go back in: the Inbox leg below draws the compact stack
-  // from the same profile, and a seat can only prove that with a picture.
+  // Restore readable bytes: the Inbox leg below draws the compact stack from the
+  // same profile and needs a picture.
   await panel.locator('input[type="file"]').setInputFiles(avatarPath)
   await expect.poll(async () => await panel.locator('img').count()).toBe(1)
   await panel.getByRole('button', { name: '关闭' }).click()
@@ -3606,18 +3234,16 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await row.waitFor()
   await expect.poll(async () => await row.textContent()).toContain('Ada')
   expect(await row.textContent()).not.toContain('Human')
-  // The picture lands on the row the profile describes: the Human's own message
-  // draws it in the assembled bundle (the Agent row keeping its initial is
-  // pinned by the component suite, which seeds both authors into one feed).
+  // The picture lands on the Human's own message row; the Agent row keeping its
+  // initial is pinned by the component suite.
   const humanPicture = row.locator('[data-avatar="image"]')
   await expect.poll(async () => await humanPicture.count()).toBe(1)
   expect(await humanPicture.getAttribute('src')).toMatch(/^data:image\/png;base64,/)
   await page.screenshot({ path: join(UI09_SHOTS, 'renamed-human-in-timeline.png'), fullPage: true })
 
-  // The identity is not page-local either. The Inbox row that names the Human
-  // leads with the profile picture in the very circle an Agent's initial fills
-  // — the same seat, the same 18px geometry — and the row reads the display
-  // name rather than the durable `member:human` id no Agent roster holds.
+  // The Inbox row naming the Human leads with the profile picture in the same
+  // 18px circle an Agent's initial fills, and reads the display name rather than
+  // the `member:human` id.
   await page.locator('button[class*="inboxCard"]').click()
   const identityRow = page.locator('[data-team-inbox] button').filter({ hasText: 'PROFILE-NAME-MARKER' })
   await expect.poll(async () => await identityRow.count(), { timeout: 30_000 }).toBe(1)
@@ -3636,18 +3262,13 @@ it('configures the Team page identity from Settings in real Web', async () => {
 }, 180_000)
 
 /**
- * The environment check above the version footnote. The versions it prints are
- * the whole point: `0.1.15` comes from the installed manifest and the DSH
- * version from the running Host's own reader, so this journey proves the Host
- * resolved its real manifests rather than a fixture. Only the `ok` tier is
- * reachable in a browser — the other two describe an environment this run does
- * not have (a different DSH cut, or unreadable facts) and are pinned by the Host
- * and component suites. The `ok` line names the **running** version, never the
- * declared range's lower bound: that bound belongs to the out-of-range tier,
- * which is why this case also pins its absence. The expectation therefore comes
- * from `getDshRuntimeVersion()` — the call the Host itself makes — so the
- * journey states the fact on rc.1, rc.2, and whatever cut the adjacent checkout
- * carries instead of naming one cut once.
+ * The environment check above the version footnote. Expected versions come
+ * from the installed manifest and `getDshRuntimeVersion()` (the call the Host
+ * makes), so the journey proves real manifests were resolved on whichever cut
+ * the checkout carries. Only the `ok` tier is reachable in a browser (the
+ * others are pinned by Host and component suites); it names the running
+ * version, never the declared range's lower bound, so that bound's absence is
+ * asserted.
  */
 it('states the local environment check on the Team page', async () => {
   await installLocalBundle(false)
@@ -3664,22 +3285,20 @@ it('states the local environment check on the Team page', async () => {
   const block = panel.locator('[data-environment]')
   await block.waitFor()
   await expect.poll(async () => await block.getAttribute('data-environment')).toBe('ok')
-  // The running version is stated as a fact and in words: no raw semver range
-  // appears anywhere, and the certified line stays out of the `ok` tier.
+  // The running version is stated as a fact in words: no raw semver range, and
+  // the certified line stays out of the `ok` tier.
   expect(await block.textContent()).toContain('在支持范围内')
   expect(await block.textContent()).toContain(`正在运行的 DSH ${getDshRuntimeVersion()} 在我们声明的支持范围内。`)
   expect(await block.textContent()).not.toContain('>=0.1.7-rc.1')
   expect(await block.textContent()).not.toContain('我们实测认证的组合')
   expect(await block.locator('a').count()).toBe(0)
-  // Reading both versions is what proves the Host reached its own manifests:
-  // the bundle version resolves from the staged install, and the DSH version
-  // from the app-boot package the running host ships.
+  // The bundle version resolves from the staged install and the DSH version from
+  // the app-boot package the running host ships.
   expect(await block.textContent()).not.toContain('unknown')
   await page.screenshot({ path: join(UI09_SHOTS, 'environment-check-ok.png'), fullPage: true })
 
-  // 390×844: the shipped panel keeps its 188px nav rail, so the block has to
-  // survive a column far narrower than its sentence. It must stay inside the
-  // panel and add no horizontal overflow of its own.
+  // At 390×844 the block must stay inside the panel and add no horizontal
+  // overflow.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await page.screenshot({ path: join(UI09_SHOTS, 'environment-check-narrow.png'), fullPage: true })
