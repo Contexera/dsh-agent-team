@@ -1,26 +1,12 @@
 import type { AgentTeamMemberId } from './types.ts'
 
-/**
- * Error families the automatic recovery may act on. A failure classifies from
- * the Harness's structured data whenever it carries any — the stable code
- * first, then the HTTP status — and only an error with no usable code falls
- * back to conservative string signatures. The falsifiers: a structured code
- * other than `RATE_LIMIT`/`TRANSPORT`/`TIMEOUT` without a 429/503 status is a
- * provider, credential, quota, context, or request state that a wake cannot
- * fix (including context-overflow and auth failures, where retrying is
- * pointless or harmful) and stays manual; so does any failure whose only
- * evidence is unstructured wording that matches neither signature.
- */
+/** Error families automatic recovery may act on. Classification uses the Harness's structured data first (stable code, then HTTP status); only an error with no usable code falls back to conservative string signatures. Any other structured code without a 429/503 status (provider, credential, quota, context, or request state) stays manual, as does unstructured wording matching neither signature. */
 export type RecoverableErrorKind = 'transient network' | 'rate limiting'
 
 const TRANSIENT_NETWORK_PATTERNS = [/fetch failed/i, /econnreset/i, /etimedout/i, /socket hang up/i]
 const RATE_LIMIT_PATTERNS = [/\b429\b/, /rate limit/i, /\b503\b/, /overloaded/i]
 
-/**
- * Read the stable code/status off any Harness-shaped failure without trusting
- * class identity: a cross-package copy of `dsh-llm` preserves own data but
- * not `instanceof`, so the own fields are the contract.
- */
+/** Reads the stable code/status off any Harness-shaped failure by own fields, since a cross-package copy of `dsh-llm` loses `instanceof`. */
 function structuredFailure(error: unknown): { readonly code?: string; readonly status?: number } {
   if (typeof error !== 'object' || error === null) return {}
   const root = error as { code?: unknown; status?: unknown; failure?: unknown }
@@ -45,12 +31,7 @@ function failureMessage(error: unknown): string {
   return String(error)
 }
 
-/**
- * One thrown value as the diagnostic detail a report carries: the error name,
- * its stable code when it has one, and its message. A stack or a cause chain
- * stays with the Harness exporter that owns the events carrying them, so a
- * single-line report keeps the part an operator can act on and nothing private.
- */
+/** One thrown value as a single-line diagnostic: error name, stable code if any, and message. Stacks and cause chains stay with the Harness exporter. */
 export function failureDetail(error: unknown): string {
   const message = failureMessage(error)
   if (!(error instanceof Error)) return message
@@ -60,11 +41,7 @@ export function failureDetail(error: unknown): string {
 
 /** Classify one `agent/error` occurrence into the family automatic recovery may act on, or `undefined` when a wake cannot help. */
 export function classifyRecoverableError(error: unknown): RecoverableErrorKind | undefined {
-  // Structured data outranks wording: a Harness code decides alone (a message
-  // can never upgrade a terminal failure back to recoverable), and the narrow
-  // message signatures run only when no usable code exists at all — `UNKNOWN`
-  // means the Harness folded a foreign error whose own taxonomy Team must not
-  // trust.
+// Structured data outranks wording: a Harness code decides alone, and message signatures run only when no usable code exists (`UNKNOWN` is a folded foreign error whose taxonomy Team must not trust).
   const { code, status } = structuredFailure(error)
   if (code !== undefined && code !== 'UNKNOWN') return kindFromProvenance(code, status)
   const message = failureMessage(error)
@@ -73,13 +50,7 @@ export function classifyRecoverableError(error: unknown): RecoverableErrorKind |
   return undefined
 }
 
-/**
- * Classify one Harness failure code. A code from the recoverable families maps
- * directly; any other code is a provider, credential, quota, context, or
- * request state a wake cannot fix, so it stays manual — a matching HTTP status
- * is the one escape, for a transport that reports rate limiting as status
- * alone.
- */
+/** Classifies one Harness failure code: recoverable families map directly, any other code stays manual unless a matching HTTP status shows rate limiting. */
 function kindFromProvenance(code: string, status: number | undefined): RecoverableErrorKind | undefined {
   if (code === 'RATE_LIMIT') return 'rate limiting'
   if (code === 'TRANSPORT' || code === 'TIMEOUT') return 'transient network'
@@ -96,15 +67,7 @@ export type RecoveryClearReason =
   | 'manual'
   | 'host-disposed'
 
-/**
- * One observable step of one Member's automatic recovery. Every decision the
- * coordinator makes is reported — the family it classified, how many
- * consecutive occurrences count, the wait it armed, the wakeup that fired, the
- * stand-down at the limit, and why tracking ended — because none of it is
- * reconstructible from the `agent/error` events alone: a terminal error cancels
- * a pending wakeup, a stood-down episode suppresses later ones, and a wake
- * whose target is gone ends tracking without a failure of its own.
- */
+/** One observable step of a Member's automatic recovery. Every decision is reported because none is reconstructible from `agent/error` events alone: terminal errors cancel pending wakeups, stood-down episodes suppress later ones, and a wake with a missing target ends tracking silently. */
 export type RecoveryFact =
   | {
       readonly kind: 'scheduled'
@@ -158,11 +121,7 @@ interface EpisodeState {
 export const RECOVERY_DELAY_MS = 120_000
 export const RECOVERY_MAX_CONSECUTIVE_ERRORS = 3
 
-/**
- * Per-member automatic recovery episodes. An episode is every recoverable
- * `agent/error` occurrence until a clean turn end, regardless of error text
- * or family. Each of the first two occurrences schedules its own wakeup.
- */
+/** Per-member automatic recovery episodes. An episode is every recoverable `agent/error` until a clean turn end, regardless of text or family; each of the first two occurrences schedules its own wakeup. */
 export class RecoveryCoordinator {
   private readonly episodes = new Map<AgentTeamMemberId, EpisodeState>()
   private readonly wake: RecoveryCoordinatorOptions['wake']
