@@ -431,13 +431,12 @@ export class MemberRuntime {
 }
 
 /**
- * One-time in-place migration of a pre-fix colon-named private memory
+ * One-time in-place migration of a colon-named private memory
  * directory onto its sanitized path. A sanitized target that already exists
  * wins (idempotent across restarts and partially migrated installs); a legacy
  * source that never existed is simply the fresh-install case.
  *
- * The rename is confined to one parent directory, which is what the migration
- * has always meant: the recorded path is a durable absolute fact, so a process
+ * The rename is confined to one parent directory: the recorded path is a durable absolute fact, so a process
  * resolving a different DSH home (an isolated test home, a second instance, a
  * moved home) holds a sanitized target in ITS tree while the record still names
  * the real one. Renaming across trees would take a Member's whole private
