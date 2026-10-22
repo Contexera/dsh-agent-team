@@ -8,13 +8,8 @@ export function useEditDialogSave<Request>({ save, onCommitted, onClose }: {
 }): {
   readonly saving: boolean
   readonly error: string | undefined
-  /**
-   * Submit one request. `build` receives the still-pending request — the one a
-   * previous attempt sent and the Host has not yet answered — so a retry of an
-   * unchanged form re-mints nothing; anything else starts a new operation.
-   */
+  /** `build` receives the still-pending request, so a retry of an unchanged form re-mints nothing; anything else starts a new operation. */
   readonly save: (build: (previous: Request | undefined) => Request) => Promise<void>
-  /** Forget the pending request: an edit means the next submit is a new operation. */
   readonly invalidate: () => void
 } {
   const [saving, setSaving] = useState(false)
