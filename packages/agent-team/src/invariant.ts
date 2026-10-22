@@ -6,53 +6,29 @@ const PACKAGE_NAME = '@contexera/dsh-agent-team'
 
 /** Cordis companion plugin name. */
 export const name = 'agent-team-invariant'
-/**
- * Services required before the companion can validate Team state. The check
- * is self-hosted in this plugin's own fiber — companions used to register
- * into `@deepseek-ai/dsh-invariants`, which the Harness line after `rc.2`
- * removes wholesale.
- */
+/** Services required before validation; the check is self-hosted in this plugin's fiber, not registered into `@deepseek-ai/dsh-invariants`. */
 export const inject = ['agentTeam']
 
-/**
- * A violated Team ledger invariant, raised on the frame that triggered the
- * check: boot when the mount replay fails, the committing call while a
- * divergence is latched. The Host's post-commit boundary recognizes this class
- * and re-raises it instead of degrading it to a log line.
- */
+/** A violated Team ledger invariant, raised on the triggering frame (boot replay or the committing call). The Host's post-commit boundary re-raises it instead of logging. */
 export class AgentTeamInvariantError extends Error {
-  /** Stable failure code, carried over from the removed upstream error class. */
+/** Stable failure code. */
   readonly code = 'INVARIANT' as const
   /** Full npm package name that owns the violated invariant. */
   readonly packageName = PACKAGE_NAME
 
-  /**
-   * Construct a Team invariant failure.
-   * @param message - violated contract, without the standard error prefix.
-   */
   constructor(message: string) {
     super(`invariant violated by "${PACKAGE_NAME}": ${message}`)
     this.name = 'AgentTeamInvariantError'
   }
 }
 
-/**
- * Validate Team state at mount and keep validating it after every commit.
- * @param ctx - Cordis context carrying the Agent Team service.
- * @returns nothing; listeners and the pending check ride the plugin fiber.
- */
+/** Validates Team state at mount and after every commit. */
 export const apply = (ctx: Context): void => {
   validateAtMount(ctx)
   watchCommits(ctx)
 }
 
-/**
- * Mounting stays synchronous: a durable ledger that cannot be re-derived must
- * fail startup instead of racing the first commit. The mount adopts the
- * record-level replay the constructor already ran, once and only while nothing
- * has committed since; every later validation, and every commit-driven one,
- * replays the whole durable table.
- */
+/** Synchronous so a ledger that cannot be re-derived fails startup instead of racing the first commit. Adopts the constructor's record-level replay once, while nothing has committed since; every later validation replays the whole durable table. */
 function validateAtMount(ctx: Context): void {
   try {
     ctx.agentTeam.validateLedgerAtMount()
@@ -61,14 +37,7 @@ function validateAtMount(ctx: Context): void {
   }
 }
 
-/**
- * The commit path cannot pay a full replay before its Remote response returns,
- * and opening a Thread commits. The replay stays the same full one over the
- * durable table, but commits coalesce into a single run in the check phase,
- * after the I/O turn carrying the response. A divergence stays loud: it is
- * logged where it is detected, and every later commit re-raises it on a
- * caller-owned frame until a replay comes back clean.
- */
+/** Opening a Thread commits, and the commit path cannot afford a full replay before its response returns, so commits coalesce into one full replay after the response's I/O turn. A divergence is logged where detected and re-raised on every later commit until a replay comes back clean. */
 function watchCommits(ctx: Context): void {
   let latched: string | undefined
   let pending: NodeJS.Immediate | undefined
