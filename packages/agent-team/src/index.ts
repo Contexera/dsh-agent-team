@@ -186,12 +186,8 @@ interface ChangeWaiter {
 }
 
 /**
- * Why one Inbox wake ran. The business identity that caused it — the committed
- * operation with its request id, or the lifecycle step rederiving the same
- * durable facts — stays separate from the delivery attempt the wake spends: a
- * retry after a failed wake is a new attempt over the same facts, never a new
- * request. A lifecycle cause names the previous Session when the line covers a
- * transition, so both generations stay locatable.
+ * Why one Inbox wake ran: the committed operation (with its request id) or the lifecycle step rederiving the same durable facts.
+ * A retry after a failed wake is a new attempt over the same facts, never a new request.
  */
 type NotificationCause =
   | { readonly kind: 'commit'; readonly receipt: AgentTeamOperationReceipt; readonly operationKind: AgentTeamOperation['kind'] }
@@ -200,11 +196,8 @@ type NotificationCause =
   | { readonly kind: 'running' }
 
 /**
- * One Member's Inbox notice delivery state. `covered` is the durable fact set
- * the queued notice answers; `attempt` counts delivery attempts over that
- * Member, so a retry is visibly the same work tried again rather than a new
- * request. A membership whose last delivery failed keeps its attempt count and
- * drops `covered`, which is what makes the next fact rederive and retry.
+ * One Member's Inbox notice delivery state. `covered` is the durable fact set the queued notice answers;
+ * `attempt` counts delivery attempts. A failed delivery keeps `attempt` and drops `covered`, so the next fact rederives and retries.
  */
 interface InboxNoticeDelivery {
   readonly covered: string
@@ -219,7 +212,6 @@ function sameChangeScope(left: AgentTeamChangeScope, right: AgentTeamChangeScope
   return false
 }
 
-/** Mark the preset's `team_message` definition as an Agent Team consumer. */
 export function markAgentTeamPreset<T extends object>(definition: T): T {
   Object.defineProperty(definition, AGENT_TEAM_PRESET_MARKER, { value: true })
   return definition
@@ -227,12 +219,7 @@ export function markAgentTeamPreset<T extends object>(definition: T): T {
 
 /**
  * Whether the running dsh loads workspace packages from source via tsx.
- *
- * The Harness `tsconfig.base.json` maps `@deepseek-ai/*` package names onto
- * `src/` directories; tsx honors those paths, so a CLI launched with
- * `node --import tsx/esm apps/cli/src/bin.ts` imports `@deepseek-ai/dsh-scope`
- * from `src/index.ts` while a profile-installed bundle resolves the compiled
- * `lib/index.js` — two module instances with independent scope keys.
+ * tsx honors the Harness tsconfig path map onto `src/`, while a profile-installed bundle resolves compiled `lib/`: two module instances with independent scope keys.
  */
 export function isTsxDevMode(): boolean {
   const flags = [...process.execArgv]
@@ -242,11 +229,8 @@ export function isTsxDevMode(): boolean {
 }
 
 /**
- * The activation diagnostic for a dsh-scope module-instance mismatch.
- *
- * `agentPresets.mount` already rejected an unscoped context, so a scope key
- * the harness sees but this bundle does not can only mean the two sides
- * loaded different physical copies of `@deepseek-ai/dsh-scope`.
+ * Activation diagnostic for a dsh-scope module-instance mismatch: the harness sees a scope key this bundle does not,
+ * so the two sides loaded different physical copies of `@deepseek-ai/dsh-scope`.
  */
 export function teamPresetScopeMismatchMessage(tsxDevMode: boolean): string {
   if (tsxDevMode) {
@@ -278,18 +262,13 @@ declare module '@deepseek-ai/cordis' {
   }
 
   interface Events {
-    /** One new Team operation is durable and visible through Host projections. */
     'agent-team/committed'(event: AgentTeamCommitted): void
   }
 }
 
 /**
- * Config of the Team Host row: the Human profile (see human-profile.ts). The
- * settings service derives the form from the owning plugin's Config, so the
- * profile is this plugin's own config rather than a section of its own.
- *
- * The settings service offers a form only for volatile fields, so a
- * non-volatile field is invisible AND unwritable — it could only be patched.
+ * Config of the Team Host row: the Human profile (see human-profile.ts).
+ * The settings service offers a form only for volatile fields, so a non-volatile field would be invisible and unwritable.
  */
 export interface Config {
   name: Volatile<string>
@@ -298,11 +277,7 @@ export interface Config {
   memberCompaction: Volatile<MemberCompactionConfig>
 }
 
-/**
- * The wake-swap thresholds as one volatile group. The group carries its own
- * defaults so a profile that has never written one still resolves a complete
- * config, and each field is writable without remounting the Host.
- */
+/** The wake-swap thresholds as one volatile group, with its own defaults so an unwritten profile still resolves a complete config. */
 export const WAKE_RECYCLE_SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(DEFAULT_WAKE_RECYCLE.enabled),
   idleMs: z.number().min(0).default(DEFAULT_WAKE_RECYCLE.idleMs),
@@ -316,10 +291,8 @@ export const MEMBER_COMPACTION_SETTINGS_SCHEMA = z.object({
 }).default({}).volatile()
 
 /**
- * The Host row's whole schema: the profile fields verbatim, so their volatility
- * and defaults stay owned by {@link HUMAN_PROFILE_SETTINGS_SCHEMA}. A patch
- * layer replaces this row's whole config, so the parts are declared together
- * and nowhere else.
+ * The Host row's whole schema: the profile fields verbatim, so {@link HUMAN_PROFILE_SETTINGS_SCHEMA} keeps owning their volatility and defaults.
+ * A patch layer replaces the row's whole config, so the parts are declared together.
  */
 export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
@@ -327,7 +300,6 @@ export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   memberCompaction: MEMBER_COMPACTION_SETTINGS_SCHEMA,
 })
 
-/** Host owner of the single Agent Team in one dshHome. */
 export default class AgentTeam extends TypertRemoteService {
   static Config = TEAM_HOST_ROW_SETTINGS_SCHEMA
   static inject = [
@@ -349,30 +321,23 @@ export default class AgentTeam extends TypertRemoteService {
   private readonly modelSelections = new Map<AgentTeamMemberId, ModelSelectionRef>()
   /** Agent ids with a turn in flight; restarts must wait for the boundary. */
   private readonly runningAgents = new Set<SessionId>()
-  /** Per-Member runtime state: tool restrictions, skill mounts, warnings, private memory. */
   private readonly memberRuntime = new MemberRuntime({
     ctx: this.ctx,
     liveMemberContext: memberId => this.liveContextFor(memberId),
     runningAgents: this.runningAgents,
   })
   /**
-   * The single seam for every per-Session stored read: handle lifecycle and
-   * failure normalization live here, so a DSH persistence-interface change is
-   * adapted once, and consumers choose policy by failure category instead of
-   * matching error text.
+   * The single seam for every per-Session stored read: handle lifecycle and failure normalization live here,
+   * and consumers choose policy by failure category instead of matching error text.
    */
   private readonly sessionReader = new StoredSessionReader(this.ctx)
   /**
-   * Why one Member shows error presence, per failure source. Reads prefer
-   * activation, then runtime, then compaction; slots clear independently, so
-   * a recovered runtime error re-reveals an outstanding compaction failure.
-   * Keyed by Member rather than Session so a restarted Session cannot leak
-   * stale keys.
+   * Why one Member shows error presence, per failure source. Reads prefer activation, then runtime, then compaction;
+   * slots clear independently, so a recovered runtime error re-reveals an outstanding compaction failure.
+   * Keyed by Member rather than Session so a restarted Session cannot leak stale keys.
    */
   private readonly memberFailures = new Map<AgentTeamMemberId, {
-    /** Activation failed; the Member has no live Session to recover into. */
     activation?: AgentTeamMemberDiagnostic
-    /** The Member Session reported agent/error. */
     runtime?: string
     /** A Team wake was discarded before the Agent opened its turn boundary. */
     preTurnCancellation?: AgentTeamMemberDiagnostic
@@ -386,18 +351,14 @@ export default class AgentTeam extends TypertRemoteService {
   /** Notice removals initiated by Team itself, which are normal replacement/disposal operations. */
   private readonly expectedInboxDiscards = new Set<string>()
   /**
-   * Per-Member Inbox notice delivery: which unread facts the last attempt
-   * covered, and how many attempts those facts have spent. The two live in one
-   * record because the attempt is not the business request that revealed the
-   * facts — a retry after a failed wake spends the next attempt over the same
-   * durable facts, never a second operation.
+   * Per-Member Inbox notice delivery: the unread facts the last attempt covered and the attempts they have spent.
+   * A retry after a failed wake spends the next attempt over the same durable facts, never a second operation.
    */
   private readonly inboxNoticeDeliveries = new Map<AgentTeamMemberId, InboxNoticeDelivery>()
   private attachmentGcTimer?: ReturnType<typeof setInterval> | undefined
   /**
-   * New-release check behind the settings footnote. Memory-only and
-   * background-refreshed, so the profile read path never waits on the
-   * network and every failure settles as "no update known".
+   * New-release check behind the settings footnote. Memory-only and background-refreshed,
+   * so the profile read path never waits on the network and every failure settles as "no update known".
    */
   private readonly humanUpdateCheck = createHumanUpdateChecker({ currentVersion: HUMAN_PROFILE_VERSION })
 
@@ -419,12 +380,8 @@ export default class AgentTeam extends TypertRemoteService {
     log: message => { this.ctx.logger.warn(`agent-team: ${message}`) },
   })
   /**
-   * Per-Member lifecycle chains: one Member's long waits (its turn boundary,
-   * its idle) hold only that Member's later operations, so managing another
-   * Member never queues behind them. Order within a chain is submission
-   * order, preserving same-Member edit/stop/archive/remove/transition
-   * sequencing; cross-Member commits stay totally ordered by the ledger's own
-   * single writer queue.
+   * Per-Member lifecycle chains: one Member's long waits (turn boundary, idle) hold only that Member's later operations.
+   * Order within a chain is submission order; cross-Member commits stay ordered by the ledger's single writer queue.
    */
   private readonly memberLifecycleTails = new Map<AgentTeamMemberId, Promise<void>>()
   private readonly retiringAgents = new WeakSet<Agent>()
@@ -448,9 +405,8 @@ export default class AgentTeam extends TypertRemoteService {
   /** One adoption attempt per boot: the two readiness edges fire once each, and this keeps their attempt single. */
   private legacyAdoptionStarted = false
   /**
-   * Presence wake epoch: Agent running/idle/failure is runtime state with no
-   * durable fact behind it, so the presence scope counts those edge wakes in
-   * process. It never takes part in a projection waiter's comparison.
+   * Presence wake epoch: Agent running/idle/failure has no durable fact behind it, so the presence scope counts those edge wakes in process.
+   * It never takes part in a projection waiter's comparison.
    */
   private presenceEpoch = 0
   private readonly changeWaiters = new Set<ChangeWaiter>()
@@ -472,13 +428,7 @@ export default class AgentTeam extends TypertRemoteService {
       : this.requireLedger().getMember(memberId)?.handle ?? memberId
   }
 
-  /**
-   * What every reply in this window answers, resolved in one pass.
-   *
-   * One call for the whole window rather than one per reply: a read is a
-   * bounded batch and the resolution is a pure ledger lookup, so the cost
-   * belongs to the read, not to each fact in it.
-   */
+  /** What every reply in this window answers, resolved in one pass: a read is a bounded batch and the resolution is a pure ledger lookup. */
   private replyContextsFor(facts: readonly AgentTeamThreadFact[], workspaceId: WorkspaceId): ReadonlyMap<AgentTeamMessageRef, AgentTeamMessageReplyContext> {
     const contexts = new Map<AgentTeamMessageRef, AgentTeamMessageReplyContext>()
     const refs = facts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined
@@ -492,12 +442,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The same fact with its reply target attached.
-   *
-   * A new object, never an edit in place: these facts are the payload of a
-   * durable read, and writing a read-time projection into one would either
-   * freeze-throw or leave a stored record carrying a field its schema does not
-   * know — which is how a whole domain stops reopening.
+   * The same fact with its reply target attached, as a new object: writing a read-time projection into a durable read's payload
+   * would freeze-throw or leave a stored record carrying a field its schema does not know.
    */
   private withReplyTo(fact: AgentTeamThreadFact, contexts: ReadonlyMap<AgentTeamMessageRef, AgentTeamMessageReplyContext>): AgentTeamThreadFact {
     if (fact.kind !== 'message') return fact
@@ -508,10 +454,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /**
    * The `Replies to:` line for one notice, or nothing when it answers nothing.
-   *
-   * An unresolvable target falls back to the bare ref instead of failing or
-   * inventing a summary: an archived Channel stops resolving, and the ref is
-   * then the only true thing left to say.
+   * An unresolvable target (e.g. an archived Channel) falls back to the bare ref.
    */
   private repliesToLine(message: AgentTeamMessage, workspaceId: WorkspaceId): string | undefined {
     const ref = message.replyToMessageRef
@@ -522,11 +465,7 @@ export default class AgentTeam extends TypertRemoteService {
       : `Replies to: @${this.printableSender(parent.sender)} — "${parent.excerpt}" [${ref}]`
   }
 
-  /**
-   * The live agent context of one Member, resolved at call time. A Member with
-   * no live handle cannot take a tool-policy update, so that is an error rather
-   * than an undefined return.
-   */
+  /** The live agent context of one Member, resolved at call time; throws when the Member has no live handle. */
   private liveContextFor(memberId: AgentTeamMemberId): Context {
     const handle = this.handles.get(memberId)
     if (handle === undefined) throw new Error(`Agent Member '${this.memberLabel(memberId)}' has no live session for a tool-policy update`)
@@ -542,11 +481,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Whether this generation should be replaced before the next message reaches
-   * it. The cheap gates decide from the log's own newest event time; only a
-   * generation that passed all of them is priced, because pricing rebuilds a
-   * cold Session — the whole-log replay this order keeps off every ordinary
-   * wake.
+   * Whether this generation should be replaced before the next message reaches it. Cheap gates decide from the log's newest event time;
+   * only a generation that passed them is priced, because pricing rebuilds a cold Session (a whole-log replay).
    */
   private async planWakeForMember(member: AgentTeamAgentMember, agent: Agent | undefined): Promise<WakeRecyclePlan> {
     const stored = agent === undefined ? await this.sessionReader.read(member.sessionId) : undefined
@@ -618,12 +554,7 @@ export default class AgentTeam extends TypertRemoteService {
     return name === '' ? HUMAN_PROFILE_DEFAULT_NAME : name
   }
 
-  /**
-   * Current human profile reference held in this Host row's Config (name +
-   * avatarRef). `avatarRef` is present only when one is configured — never
-   * explicit `undefined` — so the shape satisfies optional-property consumers
-   * under exactOptionalPropertyTypes.
-   */
+  /** Current human profile reference from this Host row's Config. `avatarRef` is present only when configured, never explicit `undefined` (exactOptionalPropertyTypes). */
   humanProfile(): { readonly name: string; readonly avatarRef?: string } {
     const avatarRef = this.config.avatarRef.get()
     return Object.freeze({ name: this.humanHandle(), ...(avatarRef === undefined ? {} : { avatarRef }) })
@@ -635,11 +566,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The two judgements the Config schema cannot make about a Human name: the
-   * same non-empty floor as Member handles, plus global uniqueness against live
-   * Members. `setHumanProfile` runs it before the write, so a colliding rename
-   * rejects instead of persisting. It reads the one field it judges, so the
-   * caller passes the name alone rather than a whole profile shape.
+   * The judgements the Config schema cannot make about a Human name: the same non-empty floor as Member handles,
+   * plus global uniqueness against live Members. Runs before the write so a colliding rename rejects instead of persisting.
    */
   private validateHumanProfile(value: { readonly name: string }): void {
     const name = assertValidHumanName(value.name)
@@ -655,15 +583,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * One-time adoption of the profile facts the retired `agent-team-human`
-   * settings section held (see `LEGACY_HUMAN_PROFILE_SECTION` for why the
-   * upstream importer cannot carry them over). The values land in this Host
-   * row's own Config through the same Remote the profile page writes, so the
-   * page, the ledger's @ handle, and every avatar seat follow as after any
-   * edit. Readiness has two one-way edges — the settings service arrives, the
-   * ledger opens — and whichever fires second starts the attempt; only a
-   * pristine profile is adopted, and one attempt per boot is its whole
-   * lifetime, so adoption never loops and never re-writes.
+   * One-time adoption of the profile facts the retired `agent-team-human` settings section held (see `LEGACY_HUMAN_PROFILE_SECTION`).
+   * Whichever readiness edge fires second (settings service, ledger open) starts the attempt; only a pristine profile is adopted, once per boot.
    */
   private adoptLegacyHumanProfile(): void {
     if (this.legacyAdoptionStarted) return
@@ -674,11 +595,10 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  /** Carry the first legacy document that still has the section into a pristine profile. */
   private async adoptLegacyHumanProfileNow(): Promise<void> {
     // A profile-launched Host always carries the profile context; a Host booted
-    // without one still adopts from the DSH home, which is where a pre-rc.1
-    // install kept the document. Read through `get`: cordis refuses a direct
+    // without one still adopts from the DSH home, which is where the
+    // document may still live. Read through `get`: cordis refuses a direct
     // `ctx.profileContext` for a service this plugin does not declare, and
     // adoption may not gate the Host on app-boot.
     const profileHome: string | undefined = this.ctx.get('profileContext')?.home
@@ -691,9 +611,7 @@ export default class AgentTeam extends TypertRemoteService {
       try {
         text = readFileSync(candidate, 'utf8')
       } catch {
-        // Absent candidates are the steady state once adoption settles; the
-        // live document is one only because the first boot after the upgrade
-        // can race the importer that renames it.
+        // Absent candidates are the steady state; the live document is one only because the first boot after the upgrade can race the importer that renames it.
         continue
       }
       const parsed = parseLegacyHumanProfile(text)
@@ -717,13 +635,9 @@ export default class AgentTeam extends TypertRemoteService {
     this.ctx.logger.info('agent-team: adopted the legacy human profile from %s', source)
   }
 
-  /** Open the durable ledger and restore every enabled Member independently. */
   protected async [Service.init](): Promise<void> {
-    // The continuity projection registers once per Host: the framework keeps
-    // one unit per projection key and drives it for every Session, so Team's
-    // fold is session-agnostic and the state carries the identity it folds.
-    // The registration rides this plugin's fiber — unloading Team removes the
-    // key (and its cached cells) from later drives and snapshots.
+    // Registered once per Host: the framework keeps one unit per projection key and drives it for every Session, so the fold is session-agnostic.
+    // The registration rides this plugin's fiber, so unloading Team removes the key and its cached cells.
     this.ctx.effect(() => this.ctx.root.sessionProjections.register(
       createTeamContextProjectionDefinition(),
     ), 'agentTeam.contextProjection')
@@ -732,11 +646,8 @@ export default class AgentTeam extends TypertRemoteService {
       if (member === undefined) return
       const message = error instanceof Error ? error.message : String(error)
       this.setMemberFailure(member.memberId, 'runtime', message)
-      // Every occurrence is classified here, including the two verdicts the
-      // coordinator then reports no state change for (a terminal error with no
-      // episode to cancel, and a repeat after standing down). Those belong at
-      // diagnostic level: they explain why no automatic recovery was scheduled,
-      // while the coordinator's own lines stay bounded by state changes.
+      // Every occurrence is classified here, including verdicts the coordinator reports no state change for;
+      // those are logged at diagnostic level to explain why no automatic recovery was scheduled.
       const kind = classifyRecoverableError(error)
       this.ctx.logger.debug(`agent-team: ${this.memberScope(member.memberId, agent.id)} reported an error classified as ${kind === undefined ? 'not automatically recoverable' : `recoverable ${kind}`}: ${message}`)
       this.recovery.onError(member.memberId, error)
@@ -756,10 +667,7 @@ export default class AgentTeam extends TypertRemoteService {
         if (!this.contextManagement.isTransitioning(member.memberId)) this.notifyMember(agent, { kind: 'running' })
       }
       // A turn that ends without an error closes any automatic recovery episode.
-      // The idle transition is itself presence-affecting (working → available),
-      // so it must wake presence watchers exactly like the running transition
-      // above; without this wake, cached Client member rows keep showing the
-      // Member as working after every turn until an unrelated change arrives.
+      // The idle transition is presence-affecting (working → available), so it wakes presence watchers like the running transition; otherwise cached Client rows keep showing the Member as working.
       if (status === 'idle' && member !== undefined) {
         this.acceptanceBoundaries.delete(agent)
         if (this.memberFailures.get(member.memberId)?.runtime === undefined) {
@@ -832,11 +740,8 @@ export default class AgentTeam extends TypertRemoteService {
     await this.sweepWorkspaceParticipations(ledger)
     for (const member of ledger.listMembers()) {
       if (member.state === 'enabled') {
-        // A swap that committed but never finished leaves no live handle to
-        // reveal it: startup derives the outstanding effects from the ledger
-        // and the registry's archive set. A Workspace fault must not keep the
-        // Member from running, so the ordinary activation path still runs when
-        // the retire half cannot be finished here.
+        // A swap that committed but never finished leaves no live handle to reveal it: startup derives the outstanding effects from the ledger and the registry's archive set.
+        // A Workspace fault must not keep the Member from running, so activation still runs when the retire half cannot be finished.
         try {
           await this.finishMemberTransition(member.memberId, { knownSessions: persistedSessions })
         } catch (error) {
@@ -851,11 +756,8 @@ export default class AgentTeam extends TypertRemoteService {
           await this.activateMember(current, undefined, persistedSessions)
         }
       } else {
-        // Every other durable state converges through the same effect table
-        // its operation runs after the commit, so a crash or a failed call
-        // between commit and effect is finished here. One Member's fault
-        // must not fail the boot: it is logged and retried at the next
-        // startup, where the call that failed may have healed.
+        // Every other durable state converges through the effect table its operation runs after commit, finishing a crash or failed call between commit and effect.
+        // One Member's fault must not fail the boot: it is logged and retried at the next startup.
         try {
           await this.convergeMemberEffects(member)
         } catch (error) {
@@ -866,12 +768,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Lazy Workspace-deletion handling: a Workspace that no longer exists can
-   * only be detected through the registry — there is no deletion event. A
-   * dead non-default participation is withdrawn here (its Claims and
-   * Attention release through the normal leave path); a dead default
-   * Workspace is left alone — activation fails on its missing cwd and the
-   * Member surfaces as unavailable for Human attention.
+   * Lazy Workspace-deletion handling: deletion is detectable only through the registry (no event).
+   * A dead non-default participation is withdrawn through the normal leave path; a dead default Workspace is left alone and the Member surfaces as unavailable.
    */
   private async sweepWorkspaceParticipations(ledger: AgentTeamLedger): Promise<void> {
     for (const member of ledger.listMembers()) {
@@ -889,12 +787,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Whether one Member Session has durable persisted content, decided through
-   * {@link SessionPersistence.stat} rather than a bare metadata listing: the
-   * backend reports a still-draining session through its pending header, so a
-   * resume racing a suspend's fire-and-forget final flush cannot mistake a
-   * still-draining persisted Session for an unpersisted one and fork a fresh
-   * generation over it.
+   * Whether one Member Session has durable persisted content, decided through {@link SessionPersistence.stat}:
+   * it reports a still-draining session via its pending header, so a resume racing a suspend's final flush cannot fork a fresh generation over it.
    */
   private async sessionPersisted(sessionId: SessionId): Promise<boolean> {
     return this.sessionReader.exists(sessionId)
@@ -908,7 +802,6 @@ export default class AgentTeam extends TypertRemoteService {
     return undefined
   }
 
-  /** Return every durable Member with current process availability. */
   members(): readonly AgentTeamAgentMemberStatus[] {
     return this.requireLedger().listMembers().map(member => this.memberStatus(member))
   }
@@ -952,7 +845,6 @@ export default class AgentTeam extends TypertRemoteService {
     return Object.freeze({ resolved: Object.freeze(this.requireLedger().resolveMessageRefs(request.workspaceId, messageRefs)) })
   }
 
-  /** Browser-safe Human roster, optionally filtered to one participation. */
   @Remote('members')
   membersForClient(request: AgentTeamMembersRequest): readonly AgentTeamClientMemberStatus[] {
     if (request.workspaceId !== undefined) this.requireWorkspace(request.workspaceId)
@@ -1025,10 +917,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Archive one Channel: hidden from every surface with all facts kept. Pure
-   * ledger projection change — Member sessions stay live (they may work in
-   * other Channels), every active Claim on the Channel's Threads releases,
-   * and affected Members' Attention clears.
+   * Archive one Channel: hidden from every surface with all facts kept. Member sessions stay live,
+   * active Claims on its Threads release, and affected Members' Attention clears.
    */
   @Remote('archiveChannel')
   async archiveChannel(request: AgentTeamArchiveChannelRequest): Promise<AgentTeamArchiveChannelResult> {
@@ -1069,7 +959,7 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  /** Commit suspended intent, then run the suspended row of the effect table: the owned AgentHandle is disposed, the Session stays. */
+  /** Commit suspended intent, then dispose the owned AgentHandle; the Session stays. */
   async suspendMember(request: AgentTeamSetMemberStateRequest): Promise<AgentTeamMemberResult> {
     return this.enqueueLifecycle(request.memberId, async () => {
       const result = await this.requireLedger().suspendMember({ ...request, actor: agentTeamHumanActor() })
@@ -1079,31 +969,23 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  /** Commit enabled intent and restore the exact persisted Session. */
   async resumeMember(request: AgentTeamSetMemberStateRequest): Promise<AgentTeamMemberResult> {
     return this.enqueueLifecycle(request.memberId, async () => {
       const result = await this.requireLedger().resumeMember({ ...request, actor: agentTeamHumanActor() })
       if (result.committed) this.emitCommitted(result.value.receipt)
       this.dropInboxCoverage(result.value.member.memberId)
-      // The suspended Session's log is durable once its retirement completes,
-      // and agents.resume() waits for exactly that retirement before loading.
-      // Consulting the persistence tree here instead would race the
-      // fire-and-forget retirement on Windows, where the JSONL backend
-      // publishes directories through transient staging entries that surface
-      // as ENOENT mid-walk — so pass the known session rather than re-listing.
+      // The suspended Session's log is durable once its retirement completes, and agents.resume() waits for exactly that.
+      // Re-listing the persistence tree would race the retirement on Windows (transient staging entries surface as ENOENT), so pass the known session.
       await this.activateMember(result.value.member, undefined, new Set([result.value.member.sessionId]))
       return Object.freeze({ receipt: result.value.receipt, status: this.memberStatus(result.value.member) })
     })
   }
 
   /**
-   * Operator nudge for a Member that stopped making progress: steer a
-   * continuation prompt into its live session, rebuild it after an orphaned
-   * preset composition, or re-run activation when no live session exists.
-   * Runtime-only — no ledger operation, no suspend. Taking over manually also
-   * cancels any pending automatic recovery episode. A non-enabled Member
-   * still holding a live handle is an interrupted suspend/archive/remove,
-   * not a stalled one; recovery finishes that cleanup instead of nudging it.
+   * Operator nudge for a Member that stopped making progress: steer a continuation prompt into its live session,
+   * rebuild it after an orphaned preset composition, or re-run activation when none is live.
+   * Runtime-only (no ledger operation); also cancels any pending automatic recovery episode.
+   * A non-enabled Member still holding a live handle is an interrupted suspend/archive/remove; recovery finishes that cleanup.
    */
   @Remote('recoverMember')
   async recoverMember(request: AgentTeamRecoverMemberRequest): Promise<AgentTeamRecoverMemberResult> {
@@ -1112,11 +994,8 @@ export default class AgentTeam extends TypertRemoteService {
     if (member === undefined || !this.requireLedger().participatesIn(request.memberId, request.workspaceId)) throw new Error(`unknown Member '${request.memberId}' in workspace '${request.workspaceId}'`)
     this.recovery.stopTracking(request.memberId, 'manual')
     const handle = this.handles.get(request.memberId)
-    // A committed renewal or rollover whose retire or activation never finished
-    // is what leaves a Member with no live generation on its binding, or with
-    // the retired generation still live: this explicit recovery path finishes
-    // that recorded transition rather than restarting a Session the ledger has
-    // already moved off. Every other stranded case keeps its old behavior.
+    // A committed renewal or rollover whose retire or activation never finished leaves no live generation (or the retired one still live):
+    // recovery finishes that recorded transition rather than restarting a Session the ledger has moved off.
     const stranded = handle === undefined || handle.agent.id !== member.sessionId
     const recordedTransition = this.requireLedger().lastTransitionForMember(request.memberId)
     if (stranded && member.state === 'enabled' && recordedTransition !== undefined) {
@@ -1127,11 +1006,8 @@ export default class AgentTeam extends TypertRemoteService {
       })
       return Object.freeze({ status: this.memberStatus(settled) })
     }
-    // A live handle on a non-enabled Member is the residue of a suspend,
-    // archive, or removal whose disposal failed after its commit: the
-    // durable state already says no live generation, so explicit recovery
-    // re-runs that state's effects rather than feeding the stray generation
-    // a resume prompt or rebuilding it as if it were enabled.
+    // A live handle on a non-enabled Member is residue of a suspend, archive, or removal whose disposal failed after commit:
+    // recovery re-runs that state's effects instead of resuming or rebuilding the stray generation.
     if (member.state !== 'enabled' && handle !== undefined) {
       this.ctx.logger.info(`agent-team: finishing the interrupted ${member.state} cleanup for ${this.memberScope(request.memberId)}`)
       const settled = await this.enqueueLifecycle(request.memberId, async () => {
@@ -1153,10 +1029,8 @@ export default class AgentTeam extends TypertRemoteService {
     if (handle === undefined) {
       if (member.state !== 'enabled') throw new Error(`Agent Member '${member.handle}' is ${member.state}; only enabled Members can be restarted`)
       this.ctx.logger.info(`agent-team: restarting ${this.memberScope(request.memberId)} after a failed activation`)
-      // There is no write-side repair pass anymore: dsh 0.1.7 converts the
-      // released V3 history at read time, and this bundle no longer authors
-      // the old wrapper shape, so a refusal stays a deterministic failure the
-      // retry reports again rather than something the restart heals.
+      // A refusal stays a deterministic failure the retry reports again; the
+      // restart does not heal it.
       await this.reactivateMember(request.memberId)
       return Object.freeze({ status: this.memberStatus(member) })
     }
@@ -1165,26 +1039,12 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Finish one Member's committed Session transition, whichever half a failure
-   * interrupted. The ledger already records the binding the Member should run
-   * and the Session it left, so only external effects remain and each is
-   * derived fresh: a generation still live on the old Session is retired, the
-   * retired Session is archived once the registry does not yet report it
-   * archived, and the target activates when no live generation runs it.
+   * Finish one Member's committed Session transition, whichever half a failure interrupted. Each external effect is derived fresh:
+   * retire a generation still live on the old Session, archive the retired Session unless the registry already reports it archived,
+   * and activate the target when no live generation runs it. A live handle alone never decides completion; the registry's archive set is the evidence for the archive step.
    *
-   * A live handle alone never decides completion — disposal can succeed and
-   * leave the archive half owed — so the registry's own archive set is the
-   * evidence for that step.
-   *
-   * `forkedFrom` marks a PLANNED in-process activation (the caller just
-   * retired that Session in this same request): `activateMember` reads its
-   * absence as a recovered Session that may never have materialized and runs
-   * the carried-input replay. Startup, retry, and explicit recovery therefore
-   * leave it unset; only the request that committed the transition supplies
-   * it.
-   *
-   * Callers must already hold the lifecycle queue (or run before any other
-   * lifecycle work): this method does not re-enter it.
+   * `forkedFrom` marks a planned in-process activation (the caller just retired that Session): its absence tells `activateMember` the Session may never have materialized, so it runs the carried-input replay.
+   * Callers must hold the lifecycle queue (or run before other lifecycle work); this method does not re-enter it.
    */
   private async finishMemberTransition(memberId: AgentTeamMemberId, options?: {
     readonly knownSessions?: ReadonlySet<SessionId>
@@ -1205,24 +1065,14 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Converge one Member's external effects onto its durable lifecycle state
-   * — the single effect table every lifecycle operation runs right after its
-   * commit and startup re-runs for every non-enabled Member:
+   * Converge one Member's external effects onto its durable lifecycle state: the effect table every lifecycle operation runs after commit and startup re-runs for non-enabled Members.
    *
    * - `suspended`: no live handle; the Session and private memory stay.
-   * - `archived`: no live handle; the Session is hidden from grouping
-   *   surfaces while its log and private memory stay on disk.
-   * - `inactive`: no live handle; the Session is archived and the private
-   *   memory deleted — removeMember's cleanup primitives.
+   * - `archived`: no live handle; the Session is hidden from grouping surfaces; log and private memory stay.
+   * - `inactive`: no live handle; the Session is archived and private memory deleted.
    *
-   * `enabled` has no entry here: its effects belong to the recorded Session
-   * transition and activation. Every step is derived from the durable state
-   * and safe to repeat — the registry's archive set decides whether the
-   * hide half is owed, disposal tolerates an absent handle, and removal
-   * cleanup force-tolerates an already-cleaned target — so a repeat after a
-   * crash or a failed call runs exactly the owed steps and never a second
-   * durable write. Callers must already hold the lifecycle queue (or run
-   * before any other lifecycle work, as startup does).
+   * `enabled` has no entry: its effects belong to the Session transition and activation. Every step is derived from durable state and safe to repeat,
+   * so a repeat after a crash runs exactly the owed steps and never a second durable write. Callers must hold the lifecycle queue (or run before other lifecycle work).
    */
   private async convergeMemberEffects(member: AgentTeamAgentMember): Promise<void> {
     if (member.state === 'enabled') return
@@ -1271,12 +1121,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Execute one prepared generation swap at a true idle boundary: commit the
-   * idempotent Host-actor operation, retire the previous generation, and
-   * activate the fresh Session. The Team Inbox is rederived, never copied, and
-   * the successor starts from its own durable context alone — there is no
-   * handoff envelope, because a successor that is told it received one performs
-   * the handoff instead of reading its memory.
+   * Execute one prepared generation swap at a true idle boundary: commit the idempotent Host-actor operation, retire the previous generation, activate the fresh Session.
+   * The Team Inbox is rederived, never copied; there is no handoff envelope, because a successor told it received one performs the handoff instead of reading its memory.
    */
   private async executeMemberTransition(memberId: AgentTeamMemberId, plan: TeamTransitionPlan): Promise<void> {
     await this.enqueueLifecycle(memberId, async () => {
@@ -1340,17 +1186,13 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  /** Ledger handle for log lines; falls back to the raw id when unknown. */
   private memberLabel(memberId: AgentTeamMemberId): string {
     return this.ledger?.getMember(memberId)?.handle ?? memberId
   }
 
   /**
-   * Run one lifecycle wait and log its class, subject, and duration. Waits are
-   * the only lifecycle step whose latency is not the commit's own: with these
-   * lines an operator can tell a Member parked on its own turn (`wait-turn`)
-   * from one parked on an external service (`wait-external`), while a real
-   * failure keeps its own warn line with the same member/session correlation.
+   * Run one lifecycle wait and log its class, subject, and duration, so an operator can tell a Member parked on its own turn (`wait-turn`)
+   * from one parked on an external service (`wait-external`).
    */
   private async waitLogged<T>(
     stage: 'wait-turn' | 'wait-external',
@@ -1367,10 +1209,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Cache GC: uploads referenced by a Message survive 72h from upload so
-   * Member agents keep a consumption window; orphans (never sent) go after
-   * 24h. Runs once at startup and then daily — in-process only, because the
-   * cache is transient by design and rebuilds nothing across restarts.
+   * Cache GC: uploads referenced by a Message survive 72h from upload; orphans (never sent) go after 24h.
+   * Runs at startup and then daily, in-process only because the cache is transient.
    */
   private startAttachmentGc(ledger: AgentTeamLedger): void {
     const sweep = async (): Promise<void> => {
@@ -1390,12 +1230,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Steer one continuation message into a Member's live session and report the
-   * delivery with the same correlation group as every other Member-scoped
-   * line. Throws when no handle exists so the coordinator stops tracking;
-   * appends the inbox snapshot whenever there is anything new to read, and says
-   * so — a steered continuation is queued for the Member's next step, which is
-   * not the same claim as the model having read it.
+   * Steer one continuation message into a Member's live session and log the delivery. Throws when no handle exists so the coordinator stops tracking.
+   * Appends the inbox snapshot when there is anything new; a steered continuation is queued for the next step, not read.
    */
   private steerResume(member: AgentTeamAgentMember, text: string, trigger: 'automatic recovery' | 'operator recovery'): void {
     const handle = this.handles.get(member.memberId)
@@ -1424,10 +1260,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Human edit of one Member's mutable facts. A live model selection is
-   * updated in place: disposing an Agent emits session/disposed, which makes
-   * the Web Client permanently mark the same Session id unavailable even when
-   * Team immediately recreates it.
+   * Human edit of one Member's mutable facts. A live model selection is updated in place: disposing an Agent emits session/disposed,
+   * which makes the Web Client permanently mark the same Session id unavailable even if Team recreates it.
    */
   @Remote('updateMember')
   async updateMember(request: AgentTeamUpdateMemberRequest): Promise<AgentTeamUpdateMemberResult> {
@@ -1436,11 +1270,8 @@ export default class AgentTeam extends TypertRemoteService {
       const previous = this.requireLedger().getMember(request.memberId)
       const result = await this.requireLedger().updateMember({ ...request, actor: agentTeamHumanActor() })
       if (result.committed) this.emitCommitted(result.value.receipt)
-      // A replayed request resolves to the member AS IT WAS at its own commit;
-      // driving the runtime or the reported status from that history would let
-      // a late retry roll back a configuration accepted in the meantime. Apply
-      // and report the currently accepted member instead — lifecycle calls
-      // serialize, so for a fresh commit it is the row just written.
+      // A replayed request resolves to the member as it was at its own commit; driving the runtime from that history would let a late retry roll back a newer configuration.
+      // Apply and report the currently accepted member instead (lifecycle calls serialize).
       const current = this.requireLedger().getMember(request.memberId)
       if (current === undefined) throw new Error(`Agent Member '${request.memberId}' no longer exists`)
       const active = this.handles.get(request.memberId)
@@ -1457,9 +1288,7 @@ export default class AgentTeam extends TypertRemoteService {
           try {
             effect = await this.applyCapabilityEdit(active, current)
           } catch (error) {
-            // The rejection stays loud for the caller; the same failure is
-            // kept as a routable, member-visible diagnostic (ids in detail)
-            // and logged with the same correlation group before it escapes.
+            // The rejection stays loud for the caller; the failure is also kept as a routable, member-visible diagnostic and logged before it escapes.
             const message = error instanceof Error ? error.message : String(error)
             this.setCapabilityApplyDiagnostic(current.memberId, Object.freeze({
               class: 'capability-apply' as const,
@@ -1481,13 +1310,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Live-apply a capability edit at a turn boundary: while the Agent runs, the
-   * current turn keeps its schemas and catalog; the swap happens once idle,
-   * so the next step recomputes schemas from the new restriction and the
-   * durable replacement skill catalog from the new selection, with the same
-   * Session and history surviving. Suspend/remove during the wait cancels
-   * the swap — the disposed handle released the old restriction already and
-   * no disposer leaks.
+   * Live-apply a capability edit at a turn boundary: the current turn keeps its schemas and catalog; once idle, the next step recomputes them
+   * from the new restriction and selection, with the same Session and history. Suspend/remove during the wait cancels the swap.
    */
   private async applyCapabilityEdit(active: AgentHandle, stored: AgentTeamAgentMember): Promise<'applied' | 'deferred:generation-changed'> {
     const memberId = stored.memberId
@@ -1506,10 +1330,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Whether this Member's live handle was replaced while `applyCapabilityEdit`
-   * waited for the turn boundary — a suspend, removal, or restart that the
-   * queued edit must not apply to the generation it originally targeted. An
-   * edit that never waited cannot have been overtaken.
+   * Whether this Member's live handle was replaced while `applyCapabilityEdit` waited for the turn boundary (suspend, removal, restart),
+   * so the queued edit must not apply to the generation it originally targeted.
    */
   private generationSwappedDuringWait(memberId: AgentTeamMemberId, waitedOn: AgentHandle, boundary: TurnBoundary): boolean {
     return boundary === 'waited' && this.handles.get(memberId) !== waitedOn
@@ -1526,10 +1348,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Archive one Member: commit the archival, stop its live session (disposal
-   * only — private memory and the Session log stay on disk for a future
-   * restore), and archive the Session from every grouping surface. Like
-   * removal, all active Claims release and the Member's Attention clears.
+   * Archive one Member: commit the archival, dispose its live session (private memory and the Session log stay on disk),
+   * and archive the Session from every grouping surface. All active Claims release and the Member's Attention clears.
    */
   @Remote('archiveMember')
   async archiveMember(request: AgentTeamArchiveMemberRequest): Promise<AgentTeamArchiveMemberResult> {
@@ -1586,11 +1406,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Resolve uploaded ids and agent-supplied absolute paths into one attachment
-   * metadata list. Paths are all validated before anything is copied, so one
-   * rejection leaves the cache untouched and the message uncommitted. Each copy
-   * takes the id its request derives, so a retry converges on the entry the
-   * first attempt prepared instead of writing an orphan.
+   * Resolve uploaded ids and agent-supplied absolute paths into one attachment metadata list. All paths are validated before anything is copied,
+   * so one rejection leaves the cache untouched; each copy takes a request-derived id, so a retry converges instead of writing an orphan.
    */
   private async resolveMessageAttachments(request: { readonly requestId: AgentTeamRequestId; readonly attachments?: readonly AgentTeamAttachmentId[] | undefined; readonly attachmentPaths?: readonly string[] | undefined }): Promise<readonly AgentTeamMessageAttachment[]> {
     const fromPaths: AgentTeamMessageAttachment[] = []
@@ -1603,7 +1420,6 @@ export default class AgentTeam extends TypertRemoteService {
     return [...fromPaths, ...await this.prepareAttachments(request.attachments)]
   }
 
-  /** Verify requested attachment ids against the cache. */
   private async prepareAttachments(requested?: readonly AgentTeamAttachmentId[]): Promise<readonly AgentTeamMessageAttachment[]> {
     if (requested === undefined || requested.length === 0) return []
     const metadata: AgentTeamMessageAttachment[] = []
@@ -1657,35 +1473,21 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Human profile read for the settings page and footnote: name + avatar
-   * reference from this Host row's live Config plus version facts. Human-scoped
-   * (the Web Client calls it); agent tools never receive avatar bytes, only the
-   * name through team_view. The new-release check stays best-effort and cached —
-   * `latestVersion` is absent until a background refresh actually observes a
-   * newer published release.
-   */
-  /**
-   * Local environment check for the settings page: which DSH line this Host
-   * runs against, and whether that line is inside the range this bundle
-   * declares. Human-scoped and read-only — the Client renders the verdict and
-   * states the range in words, and nothing here is written back.
+   * Local environment check for the settings page: which DSH line this Host runs against and whether it is inside this bundle's declared range.
+   * Human-scoped and read-only; the verdict comes from the Harness's own compatibility evaluator.
    *
-   * Synchronous like `humanProfile`: both read the installed manifest once and
-   * settle immediately, and the verdict comes from the Harness's own
-   * compatibility evaluator rather than a second version comparison written
-   * here.
-   *
-   * The wire type and `EnvironmentReport` keep separate top-level field lists on
-   * purpose: the contract states every fact as optional because a Transport may
-   * withhold any of them, while the report is the stricter thing the checker
-   * guarantees. This assignment is where the compiler holds the two together,
-   * and a new required contract field fails it here.
+   * The wire type and `EnvironmentReport` keep separate field lists on purpose: the contract states every fact as optional because a Transport may withhold any,
+   * while the report is stricter. This assignment is where the compiler holds them together.
    */
   @Remote('environment')
   environmentForClient(_request: AgentTeamEnvironmentRequest): AgentTeamEnvironmentResult {
     return Object.freeze(reportEnvironment())
   }
 
+  /**
+   * Human profile read for the settings page and footnote: name and avatar reference from the live Config plus version facts.
+   * `latestVersion` is absent until a background refresh observes a newer published release.
+   */
   @Remote('humanProfile')
   humanProfileForClient(_request: AgentTeamHumanProfileRequest): AgentTeamHumanProfileResult {
     const profile = this.humanProfile()
@@ -1700,10 +1502,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Upload one human avatar image into the persistent store. Human-only by
-   * construction: only the Web Client calls this Remote, never agent tools.
-   * The caller stores the returned ref in settings; bytes never enter the
-   * TTL-bound attachment cache.
+   * Upload one human avatar image into the persistent store; the caller stores the returned ref in settings.
+   * Bytes never enter the TTL-bound attachment cache.
    */
   @Remote('putHumanAvatar')
   async putHumanAvatar(request: AgentTeamPutHumanAvatarRequest): Promise<AgentTeamPutHumanAvatarResult> {
@@ -1729,19 +1529,9 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Overwrite the Human profile fields the caller supplies. The Host owns this
-   * write because the profile is the Host row's own Config: the schema supplies
-   * the shape, this method supplies the two judgements the schema cannot make
-   * (a non-empty name, a name no live Member already answers to), and the
-   * settings service persists the result into the active profile's patch
-   * document and applies it to the running plugin live.
-   *
-   * No expected revision accompanies the write: the profile is two scalar
-   * fields written from the Human's own pages, where the last write wins. This
-   * is not a hard boundary around a user-editable document — the settings
-   * service's own document opener (and a text editor) can change the stored
-   * name without passing here, exactly as the retired section validator could
-   * not stop it.
+   * Overwrite the Human profile fields the caller supplies. The schema supplies the shape; this method adds the two judgements it cannot make
+   * (a non-empty name, a name no live Member answers to); the settings service persists the result and applies it live.
+   * No expected revision: the last write wins. The stored document can also change outside this method (settings document opener, text editor).
    */
   @Remote('setHumanProfile')
   async setHumanProfile(request: AgentTeamSetHumanProfileRequest): Promise<AgentTeamSetHumanProfileResult> {
@@ -1755,12 +1545,8 @@ export default class AgentTeam extends TypertRemoteService {
     if (request.avatarRef === null) ops.push({ op: 'unset', path: ['avatarRef'] })
     else if (request.avatarRef !== undefined) ops.push({ op: 'set', path: ['avatarRef'], value: request.avatarRef })
     if (ops.length !== 0) {
-      // The settings namespace IS this Host row's id in the composition, and it
-      // must be addressed by that name rather than by `ctx.fiber.entry` here: a
-      // Remote call runs under its caller's context, whose fiber entry is the
-      // RPC gateway's row (`typert-gateway`), which the settings service then
-      // looks up as an unrelated plugin. shipping.spec.ts pins the constant to
-      // the row `cordis.patch.yml` declares.
+      // The settings namespace is this Host row's id, addressed by name rather than `ctx.fiber.entry`: a Remote call runs under its caller's context,
+      // whose fiber entry is the RPC gateway's row (`typert-gateway`). shipping.spec.ts pins the constant to the row `cordis.patch.yml` declares.
       await settings.mutate(HUMAN_PROFILE_SETTINGS_NAMESPACE, ops)
     }
     return Object.freeze({ ...this.humanProfile() })
@@ -1887,11 +1673,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * A read that acknowledged the acceptance of work this Member contributed to
-   * hands the reader its own boundary: one reminder to write down what is
-   * durable, and — above the acceptance budget — one compaction once the Agent
-   * settles. The advice is priced from the committed read, never persisted, and
-   * never reverses it.
+   * A read that acknowledged the acceptance of work this Member contributed to hands the reader one reminder to write down what is durable,
+   * and, above the acceptance budget, one compaction once the Agent settles. Priced from the committed read, never persisted, never reverses it.
    */
   private afterAcceptanceRead(agent: Agent, memberId: AgentTeamMemberId, read: AgentTeamThreadReadResult): void {
     // A retiring Agent is about to be disposed; a reminder injected into its
@@ -1975,11 +1758,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Agent-only direct message: append the audit-only dm-sent operation, then
-   * inject the body into the recipient's live session. The ledger commit is
-   * the durable fact; the injection is a transient runtime effect, so a
-   * missing handle or a failed wake returns a structured delivery error while
-   * the recorded DM stays durable for the recipient's recovery path.
+   * Agent-only direct message: append the audit-only dm-sent operation, then inject the body into the recipient's live session.
+   * The commit is the durable fact; a missing handle or failed wake returns a structured delivery error while the DM stays durable for recovery.
    */
   async dmForAgent(agent: Agent, request: AgentTeamDmRequest): Promise<AgentTeamDmResult> {
     const actor = this.memberCall(agent, request.workspaceId)
@@ -1995,10 +1775,8 @@ export default class AgentTeam extends TypertRemoteService {
       content: [{ type: 'text', text: this.dmRelayText(agent, recipient, request.body.trim(), result.value.receipt.occurredAt, result.value.receipt.operationId, request.workspaceId) }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'relay' },
     })
-    // A cold generation is swapped before the relay lands, and a swap in
-    // flight holds the relay until the successor exists: delivering into a
-    // Session about to be disposed would lose the message the DM recorded.
-    // The handle is re-read afterwards because a swap replaces the Agent.
+    // A cold generation is swapped before the relay lands, and an in-flight swap holds the relay until the successor exists,
+    // since delivering into a Session about to be disposed would lose the DM. The handle is re-read afterwards because a swap replaces the Agent.
     const gate = await this.wakeGateFor(handle.agent)
     const recipientAgent = this.handles.get(recipient.memberId)?.agent
     if (gate !== undefined || recipientAgent === undefined) {
@@ -2041,7 +1819,6 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
-  /** Attach every resolved reply target in one read window; one resolution for the window. */
   private withReplyContexts(value: AgentTeamThreadReadResult, workspaceId: WorkspaceId): AgentTeamThreadReadResult {
     const contexts = this.replyContextsFor(value.facts.map(entry => entry.fact), workspaceId)
     if (contexts.size === 0) return value
@@ -2080,7 +1857,6 @@ export default class AgentTeam extends TypertRemoteService {
     })) })
   }
 
-  /** Validate the durable ledger against an independently replayed projection. */
   validateLedger(): void {
     this.requireLedger().validate()
   }
@@ -2187,12 +1963,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Shared append envelope for both message commits: resolve uploads into
-   * metadata lines, append through the chosen ledger method, emit the committed
-   * receipt, and on any failure drop whatever cache entries this attempt
-   * prepared. `commit` only selects which ledger call runs — the ordering of
-   * resolution, emission, and failure cleanup is identical for send and reply
-   * and lives here once so the two can never drift apart.
+   * Shared append envelope for both message commits: resolve uploads, append through the chosen ledger method, emit the committed receipt,
+   * and on failure drop the cache entries this attempt prepared. Keeping the order here once stops send and reply from drifting.
    */
   private async commitMessageAs<
     Req extends { readonly requestId: AgentTeamRequestId; readonly body: string; readonly attachmentPaths?: readonly string[] | undefined },
@@ -2217,7 +1989,6 @@ export default class AgentTeam extends TypertRemoteService {
     }
   }
 
-  /** Task-creation commit (new Thread): the shared envelope over the ledger's sendMessage. */
   private sendMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamSendMessageRequest): Promise<AgentTeamSendMessageResult> {
     return this.commitMessageAs(actor, request, authorized => this.requireLedger().sendMessage(authorized))
   }
@@ -2227,19 +1998,13 @@ export default class AgentTeam extends TypertRemoteService {
     return this.requireLedger().readMessage(actor, request)
   }
 
-  /** Existing-Thread reply commit: the shared envelope over the ledger's reply. */
   private replyAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReplyRequest): Promise<AgentTeamReplyResult> {
     return this.commitMessageAs(actor, request, authorized => this.requireLedger().reply(authorized))
   }
 
   /**
-   * After a failed message or reply attempt, remove the cache entries this
-   * attempt could have prepared — the request-stable path copies — unless a
-   * committed Message references them. The ledger's own reference set is the
-   * guard, so a post-commit failure or a colliding retry can never delete bytes
-   * a stored Message still points at; uploads are untouched, because an
-   * unreferenced upload is a legitimate state the GC owns. Cleanup failures are
-   * logged and never mask the original error.
+   * After a failed message or reply attempt, remove the request-stable cache copies it could have prepared unless a committed Message references them.
+   * The ledger's reference set is the guard; uploads are untouched (the GC owns unreferenced ones). Cleanup failures are logged and never mask the original error.
    */
   private async dropUnreferencedPrepared(request: { readonly requestId: AgentTeamRequestId; readonly attachmentPaths?: readonly string[] | undefined }, cause: unknown): Promise<void> {
     const prepared = (request.attachmentPaths ?? []).map((_, index) => pathAttachmentId(request.requestId, index))
@@ -2295,12 +2060,8 @@ export default class AgentTeam extends TypertRemoteService {
   private async assertModelRoute(model: AgentTeamModelSelection | null | undefined): Promise<void> {
     // No route to check: absent keeps the stored selection and null clears it.
     if (model === undefined || model === null) return
-    // No LLM service means no adapter to check against; the reasoning-effort
-    // branch below already defers in that case, and so does this one. The
-    // LLM service is read through `get`, not the `ctx.llm` property: the Host
-    // does not hard-inject it, and an undeclared property read throws instead
-    // of yielding `undefined`, which would surface as an unrelated error to
-    // the caller saving a Member's model.
+    // No LLM service means no adapter to check against. It is read through `get`, not `ctx.llm`: the Host does not hard-inject it,
+    // and an undeclared property read throws instead of yielding `undefined`.
     const llm = this.ctx.get('llm')
     const providers = llm === undefined ? undefined : llm.listProviders()
     if (providers !== undefined && !providers.some(provider => provider.id === model.provider)) {
@@ -2322,13 +2083,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Session headers currently durable in the persistence backend.
-   *
-   * The Host retires a disposed Session's log without awaiting it, so a
-   * concurrent activation can observe the JSONL backend's transient win32
-   * staging directories (.dsh-mkdir-*) as ENOENT while they rename into
-   * place. The read is idempotent; back off briefly instead of failing the
-   * activation on a race the publisher resolves within milliseconds.
+   * Session headers currently durable in the persistence backend. A disposed Session's log is retired without awaiting,
+   * so the JSONL backend's transient win32 staging directories (.dsh-mkdir-*) can surface as ENOENT; the idempotent read backs off briefly.
    */
   private async persistedSessionHeaders() {
     for (let attempt = 0; ; attempt += 1) {
@@ -2353,11 +2109,8 @@ export default class AgentTeam extends TypertRemoteService {
       await this.memberRuntime.initializePrivateMemory(sanitizedMemoryPath, member.privateMemoryPath)
       const persisted = knownSessions !== undefined ? knownSessions.has(member.sessionId)
         : await this.sessionPersisted(member.sessionId)
-      // A restart or a resume meets the same wake boundary a message does: the
-      // generation it would restore is priced from its stored log, and a cold
-      // one is replaced instead of resumed, so the old Session is never even
-      // loaded. A planned activation of a successor (`forkedFrom`) never
-      // re-decides — the swap that built it already did.
+      // A restart or resume meets the same wake boundary a message does: a cold stored generation is replaced instead of resumed.
+      // A planned activation of a successor (`forkedFrom`) never re-decides; the swap that built it already did.
       if (forkedFrom === undefined && persisted) {
         const plan = await this.planWakeForMember(member, undefined)
         if (plan.action === 'recycle') {
@@ -2395,21 +2148,15 @@ export default class AgentTeam extends TypertRemoteService {
         })
         return {
           commit: () => {
-            // The member scope composes no sandbox-policy service (the preset
-            // owns no sandbox row), so read the last logged mode straight from
-            // the session log; `sandbox/mode` is log-only and never joins the
-            // model-visible surface. Re-appending only when the effective mode
-            // differs keeps resumed members from growing redundant events.
+            // The member scope composes no sandbox-policy service, so read the last logged mode from the session log (`sandbox/mode` is log-only).
+            // Re-appending only when the effective mode differs keeps resumed members from growing redundant events.
             const logged = agent.session.ownEvents().toReversed().find(event => event.type === 'sandbox/mode')
             if (logged?.data.mode !== 'danger-full-access') setSandboxMode(agent.session, 'danger-full-access')
           },
         }
       }
-      // A renewal's create path parents at the ledger-recorded previous
-      // Session even when the caller does not pass one: a crash between the
-      // durable swap commit and this activation recreates the Session from the
-      // ledger binding alone, and the lineage parent keeps the succession
-      // readable from the durable header.
+      // A renewal's create path parents at the ledger-recorded previous Session even when the caller passes none:
+      // a crash between the durable swap commit and this activation recreates the Session from the ledger binding alone.
       const lineageParent = forkedFrom ?? (!persisted ? this.requireLedger().previousSessionForMember(member.memberId) : undefined)
       let recoveryCarried = 0
       created = persisted
@@ -2425,10 +2172,7 @@ export default class AgentTeam extends TypertRemoteService {
             setup,
           })
       this.memberRuntime.mountMemberSkillProvider(member, created.agent.ctx, member.capabilities?.skills?.allow)
-      // Both capability effects are now live (the tool restriction inside
-      // `setup`, the skill selection here): record the intent the surface
-      // reflects so a later edit or retry compares against reality instead
-      // of against this request's own history.
+      // Both capability effects are now live: record the intent the surface reflects so a later edit or retry compares against reality.
       this.memberRuntime.recordAppliedCapabilities(member.memberId, member.capabilities)
       await workspace.attachSession(member.sessionId)
       this.handles.set(member.memberId, created)
@@ -2448,13 +2192,8 @@ export default class AgentTeam extends TypertRemoteService {
           { sessionId: created.agent.session.id, inheritedEventCount },
         )
         if (state.pending !== null) this.contextManagement.recoverPendingTransition(member.memberId, created.agent, member.sessionId)
-        // A restart between one checkpoint's durable result and its quiet
-        // follow-up delivery repairs exactly once; delivered continuations
-        // stay delivered through the projection's own delivery record.
-        this.contextManagement.repairContinuations(created.agent, state)
-        // Carried input redelivery binds to the committed transition target —
-        // this Session. A crash after the binding flipped but before the
-        // carried enqueue still replays here.
+        // A restart between a checkpoint's durable result and its quiet follow-up delivery repairs exactly once.
+        // Carried input redelivery binds to the committed transition target (this Session), so a crash after the binding flipped still replays here.
         recoveryCarried = await this.replayCarriedInput(member, created.agent, generationStarted)
       } else if (lineageParent !== undefined) {
         recoveryCarried = await this.replayCarriedInput(member, created.agent, generationStarted)
@@ -2478,21 +2217,14 @@ export default class AgentTeam extends TypertRemoteService {
       this.ctx.logger.warn(`agent-team: activation failed for member '${this.memberLabel(member.memberId)}': ${message}`)
       this.setActivationDiagnostic(member.memberId, this.activationDiagnosticOf(error, member.sessionId))
     } finally {
-      // Activation only changes this Workspace's presence projection.
       this.emitMemberPresenceChanged(member)
     }
   }
 
 
   /**
-   * Rebuild one enabled Member in place from its persisted Session.
-   *
-   * A bundle-row reload tears down the preset roster subtree, which prunes the
-   * standing mount while live agents keep their dead scope bindings: the
-   * Member keeps its session but loses its composed tools and services.
-   * Re-running the preset composition requires a fresh Agent, and disposal is
-   * the cost — the Web Client marks the recreated Session unavailable until it
-   * is reopened, the same trade the shipped suspend/resume cycle makes.
+   * Rebuild one enabled Member in place from its persisted Session. A bundle-row reload prunes the preset roster mount while live agents keep dead scope bindings,
+   * so the Member loses its composed tools. Re-running composition needs a fresh Agent; disposal marks the recreated Session unavailable in the Web Client until reopened, as suspend/resume does.
    */
   private reactivateMember(memberId: AgentTeamMemberId): Promise<boolean> {
     return this.enqueueLifecycle(memberId, async () => {
@@ -2534,10 +2266,7 @@ export default class AgentTeam extends TypertRemoteService {
     const scope = scopeOf(agentCtx)
     const teamMessage = this.ctx.tools.get('team_message', scope)
     if ((teamMessage as Record<PropertyKey, unknown> | undefined)?.[AGENT_TEAM_PRESET_MARKER] !== true) {
-      // `agentPresets.mount` already rejected an unscoped context, so a scope
-      // key the harness sees but this bundle does not means the two sides
-      // loaded different module instances of @deepseek-ai/dsh-scope (the
-      // common trigger is running the CLI from source via tsx).
+      // Different module instances of @deepseek-ai/dsh-scope (commonly from running the CLI from source via tsx).
       if (scope === undefined) throw new Error(teamPresetScopeMismatchMessage(isTsxDevMode()))
       throw new Error('selected preset is not team-enabled')
     }
@@ -2582,8 +2311,6 @@ export default class AgentTeam extends TypertRemoteService {
         ...(capabilityWarnings === undefined ? {} : { capabilityWarnings }),
       })
     }
-    // Capability warnings are runtime-derived at activation (handles-scoped,
-    // like failures): absent while capabilities resolve cleanly.
     const capabilityWarnings = this.memberRuntime.capabilityWarningsFor(member.memberId)
     return Object.freeze({
       member, availability: 'active', presence: handle.agent.status === 'running' ? 'working' : 'available',
@@ -2612,11 +2339,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Route one activation failure to its diagnostic class: preset composition
-   * failures by their own error class, session failures by the seam's typed
-   * classification (our call sites carry it directly; a Harness resume
-   * failure carries it through the cause chain), everything else as an
-   * unclassified activation failure.
+   * Route one activation failure to its diagnostic class: preset composition failures by error class, session failures by the seam's typed classification,
+   * everything else as an unclassified activation failure.
    */
   private activationDiagnosticOf(error: unknown, sessionId: SessionId): AgentTeamMemberDiagnostic {
     if (error instanceof PresetCompositionError) return { class: 'preset-composition' as const, detail: error.message }
@@ -2652,11 +2376,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   private emitCommitted(receipt: AgentTeamOperationReceipt): void {
-    // Everything below runs after the ledger append, so nothing here may turn
-    // a committed operation into a failed Remote call. Each effect that runs
-    // third-party code — Cordis listeners, change waiters, agent wakes — goes
-    // through `afterCommit`; the ordering itself is unchanged: listeners,
-    // then Client invalidation, then the participation notice, then wakes.
+    // Nothing after the ledger append may turn a committed operation into a failed Remote call; effects that run third-party code go through `afterCommit`.
+    // Order: listeners, Client invalidation, participation notice, wakes.
     this.afterCommit('commit listener dispatch', () => this.ctx.emit('agent-team/committed', { receipt }))
     const operation = this.ledger?.getOperation(receipt.operationId)
     if (operation === undefined) {
@@ -2692,11 +2413,6 @@ export default class AgentTeam extends TypertRemoteService {
     }
   }
 
-  /**
-   * Finish a recorded Session transition that a failed retire or activation
-   * left outstanding, inside the Member's own lifecycle chain, and then
-   * rederive its Inbox for the successor.
-   */
   private async finishRecordedTransitionThenNotify(memberId: AgentTeamMemberId, cause: NotificationCause): Promise<void> {
     if (!this.accepting || this.contextManagement.isTransitioning(memberId)) return
     let finished = false
@@ -2726,16 +2442,9 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Run one effect that follows the ledger append. The operation is durable by
-   * the time this runs, so a delivery or listener failure degrades to a log
-   * line: the Remote answer stays the committed result instead of a false
-   * rollback, and an Inbox wake that failed clears its own signature, so the
-   * next commit touching that Member rederives the same durable facts and
-   * retries without appending a second operation.
-   *
-   * An invariant divergence is the deliberate exception — the invariant
-   * companion re-raises it on the caller's frame precisely to stay loud, and
-   * swallowing it would silence a failed integrity check.
+   * Run one effect that follows the ledger append. The operation is durable by now, so a delivery or listener failure degrades to a log line;
+   * a failed Inbox wake clears its own signature so the next commit retries the same durable facts without a second operation.
+   * An invariant divergence is the exception: it is re-raised on the caller's frame so a failed integrity check stays loud.
    */
   private afterCommit(label: string, effect: () => void): void {
     try {
@@ -2762,11 +2471,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The stable correlation group every Member-scoped diagnostic line carries:
-   * the ledger's Member id and the Session that owns the effect, with the
-   * renameable handle as readable context only. The Session resolves from the
-   * live generation first and from the ledger binding second, so a line about
-   * a disposed or failed generation still names the Session it concerns.
+   * The correlation group every Member-scoped diagnostic line carries: ledger Member id and owning Session, with the renameable handle as context.
+   * The Session resolves from the live generation first, then the ledger binding.
    */
   private memberScope(memberId: AgentTeamMemberId, sessionId?: SessionId): string {
     const handle = this.ledger?.getMember(memberId)?.handle
@@ -2774,7 +2480,6 @@ export default class AgentTeam extends TypertRemoteService {
     return `member '${handle ?? memberId}' memberId '${memberId}'${session === undefined ? '' : ` session '${session}'`}`
   }
 
-  /** The business identity one notification line states, so a wake is traceable to what caused it. */
   private notificationCauseText(cause: NotificationCause): string {
     if (cause.kind === 'commit') {
       return `requestId '${cause.receipt.requestId}' operationId '${cause.receipt.operationId}' operation '${cause.operationKind}' sequence ${cause.receipt.sequence}`
@@ -2790,7 +2495,6 @@ export default class AgentTeam extends TypertRemoteService {
     return 'running transition'
   }
 
-  /** The unread facts one notice covers, bounded to what identifies them durably. */
   private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>): string {
     let newest = 0
     for (const { item } of notifications) newest = Math.max(newest, item.newestSequence)
@@ -2798,18 +2502,9 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Wake from durable unread state with bounded facts for direct and
-   * state-changing work. One correlated line states what the wake did: which
-   * business operation or lifecycle step caused it, which delivery attempt it
-   * spent, and whether the notice was queued, already carried by a recovery
-   * instruction, skipped, or failed. A queued notice is delivery intent —
-   * never evidence that the model read it.
-   *
-   * A delivery failure is contained here instead of escaping to the commit
-   * boundary: the operation is already durable, so a failed wake must not read
-   * as a failed write, and this line names the Member, Session, and attempt the
-   * generic post-commit warning could not. Only an invariant divergence still
-   * leaves on the caller's frame.
+   * Wake from durable unread state with bounded facts. One correlated line states what the wake did: its cause, the attempt it spent,
+   * and whether the notice was queued, already carried by a recovery instruction, skipped, or failed. A queued notice is delivery intent, not evidence the model read it.
+   * A delivery failure is contained here: the operation is already durable. Only an invariant divergence leaves on the caller's frame.
    */
   private notifyMember(agent: Agent, cause: NotificationCause, sequenced = false): void {
     const member = this.memberForAgent(agent)
@@ -2914,12 +2609,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * One line per automatic-recovery state change — the family it classified,
-   * the consecutive occurrence that counts, the wait it armed, the wakeup that
-   * fired, the stand-down at the limit, and why tracking ended. Each is
-   * reported once per change, so the automatic path stays explainable without
-   * turning on debug output, and no stop is silent: not a canceled wakeup, not
-   * a stand-down, and not a wake whose target is gone.
+   * One line per automatic-recovery state change (classified family, counted occurrence, armed wait, fired wakeup, stand-down, end of tracking),
+   * so no stop is silent and the automatic path is explainable without debug output.
    */
   private reportRecovery(fact: RecoveryFact): void {
     const scope = this.memberScope(fact.memberId)
@@ -2944,11 +2635,7 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_INBOX_NOTICE_SUMMARY
   }
 
-  /**
-   * Every Team-authored notice, including the acceptance reminder: a queued one
-   * is Host context, not the Member's own unfinished input, so it must not read
-   * as work that pins the current generation.
-   */
+  /** Every Team-authored notice, including the acceptance reminder: a queued one is Host context, not the Member's own unfinished input, so it must not pin the current generation. */
   private isTeamWake(message: UserMessage): boolean {
     return this.isInboxNotice(message) || this.isRecoveryNotice(message) || isAcceptanceNotice(message)
   }
@@ -3027,8 +2714,6 @@ export default class AgentTeam extends TypertRemoteService {
         if (direct && fact.kind === 'message') {
           const sender = fact.message.sender === AGENT_TEAM_HUMAN_MEMBER_ID
             ? 'human' : this.requireLedger().getMember(fact.message.sender)?.handle ?? fact.message.sender
-          // Resolved once: the line is optional, and resolving twice would be
-          // two ledger lookups for one sentence.
           const repliesTo = this.repliesToLine(fact.message, item.workspaceId)
           const detail = ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Channel: ${item.channelRef}`,
             ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
@@ -3060,18 +2745,12 @@ export default class AgentTeam extends TypertRemoteService {
   private activityNotification(activity: AgentTeamActivity, readerId?: AgentTeamMemberId): string {
     const actor = activity.actor === AGENT_TEAM_HUMAN_MEMBER_ID
       ? 'human' : this.requireLedger().getMember(activity.actor)?.handle ?? activity.actor
-    // An acceptance concludes the reader's own Claims in two ways: a Claim
-    // already finished before the accept was accepted (its work stands), and
-    // a still-open Claim the accept completed atomically (no further work is
-    // needed). Both must be said plainly, or the owner keeps working on a
-    // done Task or never learns its contribution was accepted.
+    // An acceptance concludes the reader's own Claims two ways: already finished before the accept (work stands), or still open and completed atomically by it.
+    // Both must be said, or the owner keeps working on a done Task or never learns its contribution was accepted.
     if (activity.kind === 'accept' && activity.actor === AGENT_TEAM_HUMAN_MEMBER_ID && readerId !== undefined) {
       const acceptedOwn = (activity.acceptedClaimRefs ?? []).filter(claimRef => this.requireLedger().getClaim(claimRef)?.owner === readerId)
       const completedOwn = (activity.completedClaimRefs ?? []).filter(claimRef => this.requireLedger().getClaim(claimRef)?.owner === readerId)
-      // The early-accept-only reader holds no finished Claim: every own Claim
-      // was completed atomically, so the "finished Claim" clause's ref list
-      // would be empty. Render the completed semantics alone instead of a
-      // sentence with a dangling empty list.
+      // An early-accept-only reader holds no finished Claim; render the completed semantics alone rather than a dangling empty list.
       const finishedOwn = acceptedOwn.filter(claimRef => !completedOwn.includes(claimRef))
       if (completedOwn.length > 0 && finishedOwn.length > 0) {
         return `Team Task update\n${actor} accepted Task ${activity.taskRef}. Your Claim ${completedOwn.join(', ')} was completed with the acceptance, and your finished Claim ${finishedOwn.join(', ')} was accepted. No further work is needed.`
@@ -3097,7 +2776,6 @@ export default class AgentTeam extends TypertRemoteService {
     return `Team Task update\n${actor} ${activity.kind} Task ${activity.taskRef}.${released}`
   }
 
-  /** Dispose one live Member Session and drop its per-Member runtime state. */
   private async disposeMemberSession(memberId: AgentTeamMemberId, member: Pick<AgentTeamAgentMember, 'memberId' | 'sessionId'>): Promise<void> {
     this.clearMemberRecoveryState(member)
     const handle = this.handles.get(memberId)
@@ -3128,47 +2806,28 @@ export default class AgentTeam extends TypertRemoteService {
     this.inboxNoticeDeliveries.delete(memberId)
   }
 
-  /**
-   * Record that the queued notice now answers these facts, keeping the attempt
-   * count: what was delivered is settled, but the delivery work is the same
-   * continuing effort.
-   */
+  /** Record that the queued notice now answers these facts, keeping the attempt count. */
   private coverInboxFacts(memberId: AgentTeamMemberId, covered: string): void {
     this.inboxNoticeDeliveries.set(memberId, { covered, attempt: this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0 })
   }
 
-  /**
-   * Spend one delivery attempt and mark the facts it covers. The count rises
-   * before the attempt runs, so a failed wake still reports the attempt it
-   * really spent.
-   */
+  /** Spend one delivery attempt and mark the facts it covers; the count rises first so a failed wake still reports the attempt it spent. */
   private beginInboxDelivery(memberId: AgentTeamMemberId, covered: string): number {
     const attempt = (this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0) + 1
     this.inboxNoticeDeliveries.set(memberId, { covered, attempt })
     return attempt
   }
 
-  /**
-   * Drop the fact coverage while keeping the attempt count: the same durable
-   * facts are still undealt with, so the next commit rederives and retries
-   * them as the next attempt rather than as a fresh delivery.
-   */
+  /** Drop the fact coverage but keep the attempt count, so the next commit retries the same facts as the next attempt. */
   private dropInboxCoverage(memberId: AgentTeamMemberId): void {
     const delivery = this.inboxNoticeDeliveries.get(memberId)
     if (delivery !== undefined) this.inboxNoticeDeliveries.set(memberId, { covered: '', attempt: delivery.attempt })
   }
 
   /**
-   * Wake waiters for one committed or lifecycle change. Undefined broadcasts
-   * to everyone; an empty scope list invalidates nobody because no shared
-   * projection changed; otherwise global and matching scoped waiters wake.
-   * Presence-only scopes sit outside that: they change no durable projection,
-   * so only matching presence waiters wake and the scope-less Inbox
-   * subscriptions stay parked.
-   *
-   * Each woken waiter receives the version of its own scope's domain, so a
-   * wake can never hand a projection waiter a presence number or the other way
-   * around. Nothing here advances the projection version.
+   * Wake waiters for one committed or lifecycle change. Undefined broadcasts to everyone; an empty scope list invalidates nobody;
+   * otherwise global and matching scoped waiters wake. Presence-only scopes wake only matching presence waiters.
+   * Each waiter receives the version of its own scope's domain; nothing here advances the projection version.
    */
   private emitChanged(scopes?: readonly AgentTeamChangeScope[]): void {
     const touchesProjection = scopes === undefined || scopes.some(scope => scope.kind !== 'presence')
@@ -3183,11 +2842,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The cursor domain of one scope: presence scopes count process-local edge
-   * wakes, every other scope compares against the durable ledger position of
-   * the newest shared-projection commit. The two domains are deliberately
-   * separate, so a presence edge cannot invalidate a projection subscriber and
-   * a private read invalidates no one.
+   * The cursor domain of one scope: presence scopes count process-local edge wakes, every other scope compares against the ledger position of the newest shared-projection commit.
+   * Keeping them separate stops a presence edge from invalidating a projection subscriber.
    */
   private changeVersionOf(scope: AgentTeamChangeScope | undefined): number {
     if (scope?.kind === 'presence') return this.presenceEpoch
