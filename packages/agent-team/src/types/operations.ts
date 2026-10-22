@@ -96,12 +96,12 @@ export interface AgentTeamMemberSessionRestartedOperation extends AgentTeamOpera
 }
 
 /**
- * Legacy audit record of one in-place Member context clear (superseded by
- * `team/member-session-renewed`). The Host discarded the Member's persisted
+ * Legacy audit record of one in-place Member context clear (see
+ * `team/member-session-renewed` for the current flow). The Host discarded the Member's persisted
  * Session log and recreated the live Session under the same sessionId.
  * Projection state is unchanged, so apply() treats this operation as a marker
- * only. Never written again; the schema and replay validation stay so
- * ledgers recorded before the renewal redesign keep replaying.
+ * only. Never written; the schema and replay validation stay so existing
+ * ledgers keep replaying.
  */
 export interface AgentTeamMemberContextClearedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/member-context-cleared'
