@@ -1,7 +1,4 @@
-/* Quiet statuses mirror the StateDot geometry without its color semantics:
-   todo is a hollow ring (not started), quiet a solid tertiary dot with the
-   same 10% halo as StateDot (closed, unavailable). Size comes from the
-   component's inline style. */
+/* todo is a hollow ring, quiet a solid tertiary dot with the same 10% halo as StateDot. Size comes from the component's inline style. */
 .quiet {
   border-radius: 50%;
   corner-shape: round;

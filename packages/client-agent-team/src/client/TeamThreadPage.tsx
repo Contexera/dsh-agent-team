@@ -34,7 +34,6 @@ import threadCss from './thread.module.css'
 
 interface TeamThreadPageProps {
   readonly workspaceId: WorkspaceId
-  /** The Human's own display name and avatar, from the shared identity projection. */
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
   readonly channelRef?: AgentTeamChannelRef
@@ -67,23 +66,15 @@ type ReadProjection = Awaited<ReturnType<TeamThreadPageProps['readThread']>> ext
   ? Result extends { ok: true; value: infer Value } ? Value : never
   : never
 
-/** This read's per-fact flags, keyed to the facts the timeline renders. */
 function readMeta(facts: readonly AgentTeamThreadReadFact[]): ReadonlyMap<ThreadFactKey, AgentTeamThreadReadFact> {
   return new Map(facts.map(fact => [factKey(fact.fact), fact]))
 }
 
-/**
- * The first Message in read order that names the Human reader and is still
- * unread — where a Thread opens when the Inbox just said something here is for
- * them. The flags come from the read that produced these facts, not from the
- * live projection, because opening a Thread acknowledges what it read.
- */
+/** First unread Message that names the Human reader; flags come from the read that produced these facts, since opening a Thread acknowledges them. */
 function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], humanName: string): AgentTeamMessageRef | undefined {
   for (const entry of facts) {
     if (entry.unread !== true || entry.fact.kind !== 'message') continue
-    // The same body scan the card chip answers by: a Thread reaches its Human
-    // in every row, so "delivered" cannot decide where an opening lands — and a
-    // Message that named somebody else must not claim the opening either.
+    // The same body scan the card chip answers by: a Thread reaches its Human in every row, so "delivered" cannot decide where an opening lands.
     if (!bodyMentionsHuman(entry.fact.message.body, humanName)) continue
     return entry.fact.message.messageRef
   }
@@ -108,18 +99,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const [readFacts, setReadFacts] = useState<readonly AgentTeamThreadReadFact[]>([])
   const [historyCursor, setHistoryCursor] = useState<number>()
   const [historyHasMore, setHistoryHasMore] = useState(false)
-  // A bounded read acknowledges at most 20 unread facts; larger backlogs need
-  // continuation reads. Reads also never self-wake a change scope, so a
-  // backlog beyond a handful of batches would otherwise linger forever. The
-  // cap stops a pathological feed (facts arriving faster than they are read)
-  // from looping without bound; the error surface keeps the remainder visible.
+  // A bounded read acknowledges at most 20 unread facts and reads never self-wake a change scope,
+  // so larger backlogs need continuation reads; the cap stops a feed that outpaces reading.
   const MAX_AUTO_READ_ROUNDS = 50
   const [autoReadExhausted, setAutoReadExhausted] = useState(false)
   const [newFactsCount, setNewFactsCount] = useState(0)
-  // The reply draft lives in the keyed draft cache: view switches unmount
-  // this page, and a refresh must not cost the half-written message either.
-  // The composer owns the subscription — this page only reads a snapshot when
-  // it sends, so typing never re-renders the timeline.
+  // The draft cache outlives this page across view switches; the composer owns the subscription so typing never re-renders the timeline.
   const draftKey: TeamDraftKey = `thread:${threadRef}`
   // Early acceptance: the Human may accept while Claims are still open; the
   // confirm dialog lists exactly what will be completed with the Task.
@@ -128,11 +113,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     if (confirmingAccept && projection?.task?.resolution === 'accepted') setConfirmingAccept(false)
   }, [confirmingAccept, projection?.task?.resolution])
   const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
-  // The Message the composer is currently answering, and the parent a reader
-  // just jumped back to (a short pulse, then it clears).
   const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
   const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
-  /** The one row whose actions a reader opened by hand; hover reveals the rest. */
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
   // The Message this opening lands on, held until its row exists: the jump is
   // decided from the first read, and rows render a paint later.
@@ -170,11 +152,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     })
   }
 
-  // Continue a bounded read while unread facts remain. Each round must mint a
-  // fresh requestId: the Host replays a repeated id from its idempotency
-  // cache, which would return the same batch forever. The loop terminates on
-  // a zero remainder, a failed read (the existing error surface offers
-  // retry), a superseding sequence, or the round cap.
+  // Each round mints a fresh requestId (the Host replays a repeated id from its idempotency cache). Terminates on a zero
+  // remainder, a failed read, a superseding sequence, or the round cap.
   const drainUnread = async (): Promise<void> => {
     for (let round = 1; round <= MAX_AUTO_READ_ROUNDS; round += 1) {
       const snapshot = projectionRef.current
@@ -210,7 +189,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     }
   }
 
-  /** One roster + view read. Answers false once the page is gone. */
   const applySupplemental = async (): Promise<boolean> => {
     try {
       const [loadedMembers, loadedView] = await Promise.all([
@@ -235,7 +213,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     supplementalPendingRef.current = true
     if (supplementalRef.current !== undefined) return supplementalRef.current
     const round = (async () => {
-      // Collect synchronous scope notifications before issuing the shared read.
       await Promise.resolve()
       while (mountedRef.current && supplementalPendingRef.current) {
         supplementalPendingRef.current = false
@@ -248,8 +225,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return round
   }
 
-  // Presence and roster live in the workspace projection; they never need
-  // the channel view that the supplemental fetch performs.
   const refreshMembers = async (): Promise<void> => {
     if (!mountedRef.current) return
     try {
@@ -269,9 +244,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       const shown = currentFactsRef.current
       if (shown.length === 0) return
       const known = new Set(shown.map(fact => factKey(fact)))
-      // Facts older than everything already rendered are backfill of the
-      // wider history window this fetch uses, not new updates; counting
-      // them would re-flag already-read messages after every change wake.
+      // Facts older than everything rendered are backfill of the wider history window, not new updates; counting them would re-flag read messages.
       const newestShown = shown.reduce((maximum, fact) => Math.max(maximum, fact.sequence), 0)
       const additions = incoming.filter(fact => !known.has(factKey(fact)) && fact.sequence > newestShown)
       setCurrentFacts(current => {
@@ -285,16 +258,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return next
       })
       if (additions.length === 0) return
-      // Every arrival while the Thread is open is acknowledged durably: the
-      // timeline renders it either way, and the Human has no manual read
-      // action anymore. The count only feeds the pure jump hint for a reader
-      // away from the tail; a bottom-pinned reader already sees the arrivals.
+      // Every arrival while the Thread is open is acknowledged durably. The count only feeds the
+      // jump hint for a reader away from the tail.
       if (!timeline.isPinned()) setNewFactsCount(current => current + additions.length)
       // The acknowledgment outcome does not change what is on screen: a
       // failed read surfaces through the error surface, not through the count.
       await readCurrent(true)
     } catch {
-      // A passive refresh is an invalidation convenience; the next explicit action rereads Host state.
     }
   }
 
@@ -306,13 +276,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       if (!mountedRef.current || !result.ok) return
       setFollowerIds(new Set(result.value.followers))
     } catch {
-      // The next thread-scope wake retries; ranking falls back to roster order.
     }
   }
 
   useEffect(() => {
     mountedRef.current = true
-    // The previous mount's supplemental round must not answer for this one.
     supplementalRef.current = undefined
     supplementalPendingRef.current = false
     projectionRef.current = undefined
@@ -336,9 +304,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     sequenceRef.current = sequence
     setLoading(true)
     void (async () => {
-      // One parallel round covers the whole first paint. The durable read no
-      // longer wakes any change scope; only the subscription baseline can
-      // request a catch-up while this first paint is loading.
       const [read, history, observations] = await Promise.all([
         readThread({ requestId: readRequestIdRef.current, workspaceId, ...threadRequest }),
         loadThreadHistory({ workspaceId, ...threadRequest, limit: 20 }).catch(() => undefined),
@@ -351,13 +316,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return
       }
       updateProjection(read.value)
-      // Opening a Thread parks the reader on the first Message that names them
-      // and has not been read yet: the Inbox already said something here is for
-      // them, so the page opens where that is instead of at the latest fact. It
-      // is decided from this first read, before the acknowledgement below clears
-      // the flags — a mention the reader has already seen never pulls the view
-      // again. With nothing unread and addressed to them, the Thread still opens
-      // at its latest fact.
+      // Open on the first unread Message that names the reader, decided from this first read before the acknowledgement clears the
+      // flags; with none, open at the latest fact.
       const addressed = firstUnreadMention(read.value.facts, humanName)
       if (addressed === undefined) timeline.scrollToBottom()
       else setPendingJump(addressed)
@@ -370,9 +330,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         setHistoryCursor(history.value.cursor)
         setHistoryHasMore(history.value.hasMore)
       } else {
-        // A history read that rejected or was refused must not take the only way
-        // back to older facts with it: the affordance stands, and pressing it
-        // pages from the oldest fact on screen under its own error surface.
+        // A rejected or refused history read must not take the only way back to older facts with it: pressing the affordance pages under its own error surface.
         setHistoryHasMore(true)
       }
       if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
@@ -386,7 +344,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         if (!mountedRef.current) return
         if (update.type === 'failed') { setError(update.message); return }
         void refreshPassiveFacts()
-        // Attention changes wake this scope too; keep the mention ranking current.
         void refreshFollowers()
       }),
       subscribeChanges({ kind: 'workspace', workspaceId }, update => {
@@ -394,9 +351,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         if (update.type === 'failed') { setError(update.message); return }
         void refreshSupplemental()
       }),
-      // Presence transitions commit nothing: only the member rows move, so
-      // the roster refreshes alone — the supplemental fetch's channel view
-      // stays reserved for workspace membership changes that can move it.
+      // Presence commits nothing: refresh the roster alone; the channel view is reserved for workspace membership changes.
       subscribeChanges({ kind: 'presence', workspaceId }, update => {
         if (!mountedRef.current) return
         if (update.type === 'failed') { setError(update.message); return }
@@ -410,16 +365,12 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     }
   }, [workspaceId, taskRef, threadRef])
 
-  // Returning to the bottom is the reader's answer to the jump hint: the
-  // arrivals are on screen, their durable read already happened (or will be
-  // retried by the next change wake), and the hint has nothing left to say.
+  // Returning to the bottom answers the jump hint: arrivals are on screen and their durable read already happened or will be retried.
   useEffect(() => {
     if (newFactsCount > 0 && timeline.isPinned()) setNewFactsCount(0)
   }, [newFactsCount, currentFacts, olderFacts, timeline])
 
-  // The hint answers "where is the tail?"; the moment the reader is back
-  // within the follow margin — by the jump click or their own scroll — it
-  // must go away even when no render follows that position change.
+  // The hint must go away the moment the reader is back within the follow margin, even when no render follows the position change.
   const handleTimelineScroll = (): void => {
     timeline.onScroll()
     if (timeline.isPinned()) setNewFactsCount(0)
@@ -476,23 +427,18 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
 
-  // Branded-ref navigation for message bodies: channel refs hop to the
-  // Channel; thread and task refs cited here resolve through the Host and
-  // jump to their home Channel. Unresolvable refs never become links (see
-  // TeamMessage), so this path only fires for refs the Host already confirmed.
-  // Identity-stable: a fresh closure per render would defeat TeamMessage's memo.
+  // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here. Identity-stable: a fresh
+  // closure per render would defeat TeamMessage's memo.
   const openRef = useCallback((ref: string): void => {
     if (ref.startsWith('channel:') && ref !== channelRef) {
       selectChannel(ref as AgentTeamChannelRef)
       return
     }
     if (ref.startsWith('thread:') && ref !== threadRef) {
-      // Another Thread cited here: resolve its home Channel and jump.
       jumpToThread(resolveThreadRefs, workspaceId, ref as AgentTeamThreadRef, selectThread)
       return
     }
     if (ref.startsWith('task:') && ref !== taskRef) {
-      // Another Task cited here: resolve its home Channel and jump.
       jumpToTaskThread(resolveTaskRefs, workspaceId, ref as AgentTeamTaskRef, selectThread)
     }
   }, [channelRef, threadRef, taskRef, workspaceId, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs])
@@ -505,41 +451,28 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
   const messageRefVersion = useResolvedMessageRefVersion()
   useEffect(() => {
-    // Two kinds of Message need context: every reply's parent (for its quote
-    // block) and the composer's current target (for its banner). The target is
-    // usually not itself a reply, so resolving only reply parents would leave
-    // the banner with no author and no excerpt.
+    // Every reply's parent (for its quote block) and the composer's current target (for its banner) need context; the target is usually not itself a reply.
     const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
     if (replyTarget !== undefined && !refs.includes(replyTarget)) refs.push(replyTarget)
     if (refs.length > 0) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
   }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion])
   useEffect(() => {
     if (flashedMessage === undefined) return
-    // The pulse is also the opening jump's lifetime: releasing it releases the
-    // target, so a jump that is still settling can never outlive the mark that
-    // explains it — and never pulls a reader who has moved on.
+    // The pulse is the opening jump's lifetime: releasing it releases the target, so a settling jump never outlives its mark or pulls a reader who moved on.
     const timer = setTimeout(() => { setFlashedMessage(undefined); setPendingJump(undefined) }, 1200)
     return () => { clearTimeout(timer) }
   }, [flashedMessage])
-  // The opening jump centres the Message that names the reader and pulses its row
-  // layer once — the reader lands on what addresses them instead of hunting for
-  // it. An instant scroll, not a smooth one: this is where the page opens, not a
-  // move the reader asked for. The target stays pending while the pulse lasts
-  // because the first paint can still be growing: a jump made against a timeline
-  // that has not finished laying out would be undone by the pin-to-bottom policy,
-  // so every later commit re-centres it until the pulse releases the target.
+  // Centre the Message that names the reader and pulse its row once, with an instant scroll since this is where the page opens.
+  // The target stays pending for the pulse: the first paint may still be growing and the pin-to-bottom policy would undo an early jump, so every commit re-centres it until the pulse releases it.
   useLayoutEffect(() => {
     if (pendingJump === undefined) return
     const node = document.querySelector(`[data-message-ref="${pendingJump}"]`)
     if (node === null) return
     node.scrollIntoView({ block: 'center' })
-    // The reader now sits on one Message rather than at the tail, so the shared
-    // scroll policy has to hear it: otherwise the next arriving fact counts them
-    // as pinned and pulls the view back to the bottom, undoing the jump.
+    // Tell the shared scroll policy the reader is off the tail, or the next arriving fact counts them as pinned and undoes the jump.
     timelineOnScroll()
     setFlashedMessage(pendingJump)
   }, [pendingJump, currentFacts, readFacts, timelineOnScroll])
-  /** Take the reader to the Message a reply answers, when it is on screen. */
   const jumpToMessage = useCallback((messageRef: AgentTeamMessageRef): void => {
     const node = document.querySelector(`[data-message-ref="${messageRef}"]`)
     if (node === null) return
@@ -553,12 +486,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     setOpenCard(current => current === messageRef ? undefined : messageRef)
   }, [])
   const handleOpenReplyTo = useCallback((messageRef: AgentTeamMessageRef): void => { jumpToMessage(messageRef) }, [jumpToMessage])
-  // Roster chips resolve synchronously from loaded data: channel names from
-  // the Channel view, member facts from the member list. Anything outside the
-  // loaded window stays plain text — the same rule unresolvable Task/Thread
-  // refs follow. The lookups key on roster content, not array identity: every
-  // refresh hands over fresh arrays, and the memoized rows must survive
-  // change bursts that leave the roster itself untouched.
+  // Keyed on roster content, not array identity, so memoized rows survive change bursts that leave the roster untouched.
   const rosterKey = useMemo(() => [
     (channelView?.channels ?? []).map(channel => `${channel.channelRef}=${channel.name}=${channel.state}`).join(','),
     members.map(status => `${status.member.memberId}=${status.member.handle}=${status.member.sessionId}=${status.availability}`).join(','),
@@ -573,9 +501,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return (ref: AgentTeamMemberId) => rosterMember(members, humanMemberId, humanName, ref)
   }, [rosterKey, humanName])
 
-  // Reply contexts keyed by the replying Message. Built once per change in the
-  // facts, roster, or resolution cache so each row keeps one stable object:
-  // TeamMessage is memoized and an object literal per render would undo it.
+  // One stable object per row: TeamMessage is memoized and an object literal per render would undo it.
   const replyContexts = useMemo(() => {
     const contexts = new Map<AgentTeamMessageRef, { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef }>()
     const nameOf = (memberId: AgentTeamMemberId): string => {
@@ -600,8 +526,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       const sender = memberName(fact.message.sender)
       const senderStatus = members.find(candidate => candidate.member.memberId === fact.message.sender)
       const human = fact.message.sender === channelView?.humanMemberId
-      // The card states one fact — this Message names the reader — and states it
-      // for good: the mention belongs to the Message, not to the reader's read
       return <TeamMessage
         key={factKey(fact)}
         senderName={sender}
@@ -764,10 +688,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     }
   }
 
-  // Editing the draft invalidates one-shot send state: a confirmation token,
-  // the retained requestId, and the status line. Every setter returns the same
-  // state when there is nothing to clear, so a keystroke does not re-render the
-  // timeline now that the composer owns the draft.
+  // Every setter returns the same state when there is nothing to clear, so a keystroke does not re-render the timeline.
+  // Editing invalidates the confirmation token, the retained requestId, and the status line.
   const clearSendState = useCallback((): void => {
     setConfirmation(current => current === undefined ? current : undefined)
     setReplyRequestId(current => current === undefined ? current : undefined)
@@ -775,8 +697,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   }, [])
 
   const sendReply = async (): Promise<void> => {
-    // Read the draft at send time: this page no longer subscribes to it, so a
-    // captured render value would be stale after the composer's own edits.
+    // Read at send time: this page does not subscribe to the draft.
     const { draft, recipients } = drafts.getSnapshot(draftKey)
     if (pending || thread === undefined || draft.trim() === '') return
     const id = replyRequestId ?? mintRequestId()
@@ -784,8 +705,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     setPending(true)
     setError(undefined)
     try {
-      // Upload chosen files first; any failure aborts the reply with the
-      // existing error surface and keeps the chips for a retry.
       const upload = await uploadComposerFiles(putAttachment, workspaceId, pendingFiles)
       if (!upload.ok) {
         setError(upload.error)
@@ -799,9 +718,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       }
       if (result.value.kind === 'committed') {
         const committed = result.value as Extract<typeof result.value, { kind: 'committed' }>
-        // The optimistic row chips what the Host is about to report: a
-        // hand-typed `@Handle` delivers exactly like a picked recipient, and the
-        // committed facts replace this row as soon as they arrive.
+        // A hand-typed `@Handle` delivers like a picked recipient; committed facts replace this row on arrival.
         const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, channelMembers)])].sort()
         setCurrentFacts(current => {
           const merged = mergeFacts(current, [{ kind: 'message', sequence: committed.message.sequence, message: committed.message, mentions: optimisticMentions, occurredAt: committed.receipt.occurredAt }])
@@ -844,10 +761,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
 
   const currentFactsWithAnchor = mergeFacts(activeProjection === undefined ? [] : [messageFact(activeProjection.anchor, activeProjection.anchorMentions)], currentFacts)
   const unreadBoundary = unreadIndex >= 0 ? unreadIndex : undefined
-  // One row per erroring Member holding a live Claim. The row shows the
-  // diagnostic's structured class — the localizable axis — beside the first
-  // sentence of the Host's own reason; the full English text moves to the
-  // row's title.
+  // One row per erroring Member holding a live Claim: the diagnostic's structured class beside the first sentence of the Host's
+  // reason; the full text rides the row's title.
   const risks = taskClaims.filter(claim => claim.state === 'active').flatMap(claim => {
     const status = members.find(candidate => candidate.member.memberId === claim.owner)
     if (status?.presence !== 'error') return []
@@ -902,7 +817,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         </p>)}
       </section>}
       {task !== undefined && thread !== undefined && (() => {
-        // Recomputed here so the confirm list never shows stale rows.
         const activeClaims = projection?.claims.filter(claim => claim.taskRef === task.taskRef && claim.state === 'active') ?? []
         return <Modal
           open={confirmingAccept}
@@ -970,9 +884,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       {...(replyTarget === undefined ? {} : {
         replyTo: (() => {
           const target = cachedResolvedMessageRef(replyTarget)
-          // The member id travels so the author joins the composer's ordinary
-          // "will notify" row; an unresolved parent cannot name one, and the
-          // Host still delivers without it.
+          // The member id lets the author join the composer's "will notify" row; an unresolved parent cannot name one, and the Host still delivers.
           return target === undefined
             ? { senderName: t('memberUnknown'), excerpt: '' }
             : { memberId: target.sender, senderName: memberName(target.sender), excerpt: target.excerpt }

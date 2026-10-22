@@ -1,14 +1,12 @@
 import type { AgentTeamMemberId, AgentTeamMessage, AgentTeamThreadFact } from '@contexera/dsh-agent-team/types'
 import { mentionNameOf, mentionNamesOf, type MentionHandle } from './team-formatters.ts'
 
-/** Identity of one rendered fact: a Message or an activity, each with its own durable ref. */
 export type ThreadFactKey = string
 
 export function factKey(fact: AgentTeamThreadFact): ThreadFactKey {
   return fact.kind === 'message' ? `message:${fact.message.messageRef}` : `activity:${fact.activity.activityRef}`
 }
 
-/** Wrap a Message as the `message` fact the timeline renders, with the mentions its send recorded. */
 export function messageFact(message: AgentTeamMessage, mentions: readonly AgentTeamMemberId[] = []): AgentTeamThreadFact {
   return { kind: 'message', sequence: message.sequence, message, mentions, occurredAt: message.occurredAt }
 }
@@ -24,13 +22,7 @@ export function minSequence(facts: readonly AgentTeamThreadFact[]): number | und
   return facts.reduce<number | undefined>((minimum, fact) => minimum === undefined ? fact.sequence : Math.min(minimum, fact.sequence), undefined)
 }
 
-/**
- * A fact owns its mention array, so the rendered name list is cached against
- * that array. Every roster refresh replaces the handles map with a fresh Map of
- * identical content, so the cache compares the resolved names rather than the
- * map identity: identity stays stable while the names are unchanged, which is
- * what keeps a memoized row from re-rendering on every refresh.
- */
+/** Cached against the fact's mention array; compares resolved names, not map identity, since every roster refresh hands over an identical fresh Map and a memoized row must not re-render. */
 const mentionNamesCache = new WeakMap<readonly AgentTeamMemberId[], readonly MentionHandle[]>()
 
 export function stableMentionNames(mentions: readonly AgentTeamMemberId[], handles: ReadonlyMap<AgentTeamMemberId, string>, humanName: string): readonly MentionHandle[] {
