@@ -34,7 +34,6 @@ import threadCss from './thread.module.css'
 
 interface TeamThreadPageProps {
   readonly workspaceId: WorkspaceId
-  /** The Human's own display name and avatar, from the shared identity projection. */
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
   readonly channelRef?: AgentTeamChannelRef
@@ -67,17 +66,11 @@ type ReadProjection = Awaited<ReturnType<TeamThreadPageProps['readThread']>> ext
   ? Result extends { ok: true; value: infer Value } ? Value : never
   : never
 
-/** This read's per-fact flags, keyed to the facts the timeline renders. */
 function readMeta(facts: readonly AgentTeamThreadReadFact[]): ReadonlyMap<ThreadFactKey, AgentTeamThreadReadFact> {
   return new Map(facts.map(fact => [factKey(fact.fact), fact]))
 }
 
-/**
- * The first Message in read order that names the Human reader and is still
- * unread — where a Thread opens when the Inbox just said something here is for
- * them. The flags come from the read that produced these facts, not from the
- * live projection, because opening a Thread acknowledges what it read.
- */
+/** First unread Message that names the Human reader; flags come from the read that produced these facts, since opening a Thread acknowledges them. */
 function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], humanName: string): AgentTeamMessageRef | undefined {
   for (const entry of facts) {
     if (entry.unread !== true || entry.fact.kind !== 'message') continue
@@ -108,11 +101,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const [readFacts, setReadFacts] = useState<readonly AgentTeamThreadReadFact[]>([])
   const [historyCursor, setHistoryCursor] = useState<number>()
   const [historyHasMore, setHistoryHasMore] = useState(false)
-  // A bounded read acknowledges at most 20 unread facts; larger backlogs need
-  // continuation reads. Reads also never self-wake a change scope, so a
-  // backlog beyond a handful of batches would otherwise linger forever. The
-  // cap stops a pathological feed (facts arriving faster than they are read)
-  // from looping without bound; the error surface keeps the remainder visible.
+  // A bounded read acknowledges at most 20 unread facts and reads never self-wake a change scope,
+  // so larger backlogs need continuation reads; the cap stops a feed that outpaces reading.
   const MAX_AUTO_READ_ROUNDS = 50
   const [autoReadExhausted, setAutoReadExhausted] = useState(false)
   const [newFactsCount, setNewFactsCount] = useState(0)
@@ -128,11 +118,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     if (confirmingAccept && projection?.task?.resolution === 'accepted') setConfirmingAccept(false)
   }, [confirmingAccept, projection?.task?.resolution])
   const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
-  // The Message the composer is currently answering, and the parent a reader
-  // just jumped back to (a short pulse, then it clears).
   const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
   const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
-  /** The one row whose actions a reader opened by hand; hover reveals the rest. */
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
   // The Message this opening lands on, held until its row exists: the jump is
   // decided from the first read, and rows render a paint later.
@@ -210,7 +197,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     }
   }
 
-  /** One roster + view read. Answers false once the page is gone. */
   const applySupplemental = async (): Promise<boolean> => {
     try {
       const [loadedMembers, loadedView] = await Promise.all([
@@ -235,7 +221,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     supplementalPendingRef.current = true
     if (supplementalRef.current !== undefined) return supplementalRef.current
     const round = (async () => {
-      // Collect synchronous scope notifications before issuing the shared read.
       await Promise.resolve()
       while (mountedRef.current && supplementalPendingRef.current) {
         supplementalPendingRef.current = false
@@ -285,16 +270,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return next
       })
       if (additions.length === 0) return
-      // Every arrival while the Thread is open is acknowledged durably: the
-      // timeline renders it either way, and the Human has no manual read
-      // action anymore. The count only feeds the pure jump hint for a reader
-      // away from the tail; a bottom-pinned reader already sees the arrivals.
+      // Every arrival while the Thread is open is acknowledged durably. The count only feeds the
+      // jump hint for a reader away from the tail.
       if (!timeline.isPinned()) setNewFactsCount(current => current + additions.length)
       // The acknowledgment outcome does not change what is on screen: a
       // failed read surfaces through the error surface, not through the count.
       await readCurrent(true)
     } catch {
-      // A passive refresh is an invalidation convenience; the next explicit action rereads Host state.
     }
   }
 
@@ -306,7 +288,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       if (!mountedRef.current || !result.ok) return
       setFollowerIds(new Set(result.value.followers))
     } catch {
-      // The next thread-scope wake retries; ranking falls back to roster order.
     }
   }
 
@@ -336,9 +317,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     sequenceRef.current = sequence
     setLoading(true)
     void (async () => {
-      // One parallel round covers the whole first paint. The durable read no
-      // longer wakes any change scope; only the subscription baseline can
-      // request a catch-up while this first paint is loading.
+      // One parallel round covers the whole first paint; only the subscription baseline can
+      // request a catch-up while it loads.
       const [read, history, observations] = await Promise.all([
         readThread({ requestId: readRequestIdRef.current, workspaceId, ...threadRequest }),
         loadThreadHistory({ workspaceId, ...threadRequest, limit: 20 }).catch(() => undefined),

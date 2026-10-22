@@ -1,10 +1,5 @@
 /**
- * Per-Member private skill provider: the Team-owned wrapper around the
- * Harness filesystem provider that scopes one Member's skill discovery to
- * exactly the plugin's bundled read-only core skills plus that Member's
- * private `skills/` directory (default roots excluded), and filters `list()`
- * output by that Member's selection ref.
- *
+ * Per-Member private skill provider: wraps the Harness filesystem provider so one Member discovers only the plugin's bundled read-only core skills plus its private `skills/` directory (default roots excluded), filtered by that Member's selection.
  * @module @contexera/dsh-agent-team/member-skills
  */
 
@@ -12,16 +7,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { SkillCandidate, SkillProvider, SkillProviderControl, SkillProviderObservation, SkillRegistry } from '@deepseek-ai/dsh-skill'
 import { FileSystemSkillProvider } from '@deepseek-ai/dsh-skill-filesystem'
 
-/**
- * Handle to one mounted Member skill provider: the selection swap the Host's
- * edit path drives, and the disposer that unmounts the provider.
- */
+/** Handle to one mounted Member skill provider: the selection swap and the disposer. */
 export interface MemberSkillProviderMount {
-  /**
-   * Swap the live selection filter and drop cached catalogs, so the next
-   * catalog query sees the new selection. `undefined` loads every discovered
-   * skill.
-   */
+  /** Swaps the live selection filter and drops cached catalogs; `undefined` loads every discovered skill. */
   readonly swap: (allow: readonly string[] | undefined) => void
   /** Unregister the provider. */
   readonly dispose: () => void
@@ -38,24 +26,13 @@ export interface MemberSkillsConfig {
 }
 
 /**
- * Register the Member-private skill provider on one Member's agent scope and
- * return its disposer. The provider files into that agent's exact layer, so
- * no sibling Member or ordinary session can observe the catalog; discovery,
- * watching, and invalidation flow through the same Harness provider below.
+ * Registers the Member-private skill provider on one Member's agent scope and returns its disposer; no sibling Member or ordinary session sees the catalog.
  *
- * Registration goes through the traceable service resolved FROM the agent
- * context (the same shape as `tools.restrict()`), never through a plugin
- * mount: a plugin mounted from Host activation code lands on the Host's
- * async-trace fiber instead of the agent scope, and a plugin `inject` would
- * hold Member activation open while the Host is still starting. A deployment
- * without the skill registry keeps its Members; they simply carry no private
- * skill catalog.
+ * Registration goes through the traceable service resolved from the agent context (like `tools.restrict()`), never a plugin mount: a mount from Host activation lands on the Host's trace fiber instead of the agent scope, and a plugin `inject` would hold Member activation open. Without a skill registry the Member has no private catalog.
  */
 export function mountMemberSkillProvider(agentCtx: Context, config: MemberSkillsConfig): MemberSkillProviderMount | undefined {
   const skills = agentCtx.get('skills') as SkillRegistry | undefined
-  // No skill registry: this Member carries no private catalog, and there is no
-  // selection for the edit path to swap. Absent is the honest answer — a no-op
-  // handle would pretend a filter exists.
+  // No registry: return no handle, since a no-op handle would pretend a filter exists.
   if (skills === undefined) return undefined
   let mounted: MemberPrivateSkillProvider | undefined
   const dispose = skills.registerProvider(control => {
@@ -84,12 +61,7 @@ class MemberPrivateSkillProvider implements SkillProvider {
     this.control = control
     this.allow = config.initialSelection
     this.name = `member-private:${config.skillsDirectory}`
-    // Two Team-owned roots, no project/user/global leakage: the bundled
-    // read-only core skills first, then the Member's writable private
-    // directory. Within one provider both roots share the custom rank, and
-    // discovery keeps the first root's same-name candidate, so a bundled
-    // skill stays stable across plugin upgrades while a Member installs
-    // its own additions under their own names.
+    // Bundled read-only core skills first, then the Member's private directory; both share the custom rank and discovery keeps the first root's same-name candidate, so bundled skills stay stable across upgrades.
     const customSkillDirs = config.bundledSkillsDirectory === undefined
       ? [config.skillsDirectory]
       : [config.bundledSkillsDirectory, config.skillsDirectory]
@@ -106,11 +78,7 @@ class MemberPrivateSkillProvider implements SkillProvider {
     this.control.invalidate()
   }
 
-  /**
-   * Filter the wrapped discovery to the Member's selection. Filtering is
-   * list()-output only — the directory is still scanned and watched, so this
-   * is a performance/visibility semantic, not a security boundary.
-   */
+  /** Filters the wrapped discovery to the Member's selection. `list()` output only: the directory is still scanned and watched, so this is not a security boundary. */
   async list(options: Parameters<SkillProvider['list']>[0]): Promise<readonly SkillCandidate[] | SkillProviderObservation> {
     const output = await this.wrapped.list(options)
     const allow = this.allow
