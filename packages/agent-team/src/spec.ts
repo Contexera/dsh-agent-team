@@ -59,10 +59,7 @@ const modelSelectionSchema = z.object({
   ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
 }))
 
-// Pure intent: allow-list entries are plain strings. They are never
-// validated against a known-name set here — committing must survive Harness
-// upgrades that rename or remove tools, so divergence is derived at
-// activation instead (see AgentTeamCapabilityWarning).
+// Allow-list entries are plain strings, never validated against known names here: committing must survive Harness upgrades that rename or remove tools, so divergence is derived at activation (see AgentTeamCapabilityWarning).
 const memberCapabilitiesSchema = z.object({
   tools: z.object({ allow: z.array(z.string().min(1)) }).strict().transform(omitUndefined).optional(),
   skills: z.object({ allow: z.array(z.string().min(1)) }).strict().transform(omitUndefined).optional(),
@@ -120,10 +117,7 @@ const messageSchema = z.object({
   /**
    * The Message this one answers, when it is a reply.
    *
-   * Durable records are parsed strictly at every open, so a field the write
-   * path stores and this schema does not name makes the whole domain fail to
-   * reopen — the record is on disk, and every later mount dies on it. Adding a
-   * durable field therefore means adding it here in the same change.
+   * Records are parsed strictly at every open, so a durable field the write path stores but this schema omits makes the whole domain fail to reopen; add durable fields here in the same change.
    */
   replyToMessageRef: messageRefSchema.optional(),
   topLevel: z.boolean(),
@@ -273,12 +267,7 @@ const claimOperation = (kind: 'team/claim-created' | 'team/claim-done' | 'team/c
   }).strict(),
 }).strict()
 
-/**
- * The departure facts a releasing operation persists. Every release kind
- * carries this snapshot under its own `kind` literal and its own identifying
- * fields; the durable half that must stay identical lives here once, so a new
- * release kind cannot silently drop or invent a field.
- */
+/** Departure facts a releasing operation persists. Every release kind carries this snapshot once here, so a new kind cannot drop or invent a field. */
 const releaseSnapshotSchema = {
   claims: z.array(claimSchema),
   activities: z.array(claimsReleasedActivitySchema),
@@ -297,11 +286,7 @@ const threadReadReceiptDataSchema = z.object({
   inbox: inboxDeltaSchema,
 }).strict().transform(omitUndefined)
 
-/**
- * The pre-receipt Thread-read snapshot. Still accepted so a ledger written
- * before the receipt form keeps opening; both shapes are strict, so a stored
- * record parses as exactly one of them.
- */
+/** Pre-receipt Thread-read snapshot, still accepted so older ledgers open; both shapes are strict, so a record parses as exactly one. */
 const threadReadSnapshotDataSchema = z.object({
   workspaceId: workspaceIdSchema,
   memberId: memberIdSchema,
@@ -566,14 +551,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
 /** Durable validator for the closed Agent Team operation union; ledgers written before message occurredAt existed normalize on load. */
 export const agentTeamOperationSchema: z.ZodType<AgentTeamOperation> = storedAgentTeamOperationSchema.transform(stampOperationMessages)
 
-/**
- * Versioned durable Agent Team declaration; v1 is the first public ledger
- * format and older local media reject at open. The number moves only when a
- * stored record would mean something different: this layout has no migration,
- * so a bump breaks every existing ledger. Adding an operation kind is not that
- * — an older build's records keep parsing — which is why every additive kind
- * since the public format landed at v1.
- */
+/** Versioned durable declaration. The version moves only when a stored record would mean something different: there is no migration, so a bump breaks every existing ledger. Additive operation kinds stay at v1. */
 export const agentTeamDomainSpec = defineDomain({
   name: 'agent_team',
   version: 1,
