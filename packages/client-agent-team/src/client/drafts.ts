@@ -1,21 +1,11 @@
 import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 
-/**
- * Keyed draft cache for the Channel/Thread composers. Drafts are local UI
- * convenience state — never Host-authoritative facts — so localStorage is the
- * right home: switching views unmounts the pages, and a refresh should not
- * cost the Human their half-written message.
- */
+/** Drafts are local UI convenience state, never Host-authoritative, so localStorage is their home. */
 export type TeamDraftKey = `channel:${AgentTeamChannelRef}` | `thread:${AgentTeamThreadRef}`
 
-/** The conversation kind one draft key names. */
 export type TeamDraftKind = 'channel' | 'thread'
 
-/**
- * Read the conversation kind back out of one draft key. The key format is this
- * module's contract, so parsing it belongs here rather than in every consumer
- * that needs the discriminant.
- */
+/** The key format is this module's contract, so parsing it belongs here. */
 export function draftKindOf(key: TeamDraftKey): TeamDraftKind {
   return key.startsWith('channel:') ? 'channel' : 'thread'
 }
@@ -32,11 +22,7 @@ interface StoredDraft {
   savedAt: number
 }
 
-/**
- * Whether one write would restate the stored entry. Rewriting identical
- * content must not bump `savedAt` or notify: convergence effects re-run
- * freely and would otherwise loop through persistence.
- */
+/** Rewriting identical content must not bump `savedAt` or notify: convergence effects re-run freely and would loop through persistence. */
 function sameDraftEntry(previous: StoredDraft | undefined, next: StoredDraft): boolean {
   return previous !== undefined && previous.draft === next.draft
     && previous.recipientIds.length === next.recipientIds.length
@@ -82,11 +68,7 @@ function persistStored(entries: ReadonlyMap<TeamDraftKey, StoredDraft>): void {
   }
 }
 
-/**
- * Root-scoped draft cache, one instance per Client context (created in
- * `applyUi` and injected like the navigation service — never a module
- * singleton). Slot lifetimes subscribe per key.
- */
+/** One instance per Client context (created in `applyUi`), never a module singleton. */
 export class TeamDraftStore {
   private entries = readStored()
   private readonly snapshots = new Map<TeamDraftKey, TeamDraftState>()
@@ -97,7 +79,6 @@ export class TeamDraftStore {
     return () => { this.listeners.delete(listener) }
   }
 
-  /** Release listeners when the owning Client context disposes. */
   dispose(): void {
     this.listeners.clear()
   }
@@ -121,7 +102,6 @@ export class TeamDraftStore {
     this.write(key, { recipientIds: [...recipients] })
   }
 
-  /** Drop one key entirely — the success path after a committed send. */
   clear(key: TeamDraftKey): void {
     if (!this.entries.delete(key)) return
     this.snapshots.delete(key)
@@ -137,7 +117,6 @@ export class TeamDraftStore {
     for (const listener of this.listeners) listener()
   }
 
-  /** Re-read persisted content — what a fresh page load starts from. */
   reload(): void {
     this.entries = readStored()
     this.snapshots.clear()
@@ -152,7 +131,6 @@ export class TeamDraftStore {
       savedAt: Date.now(),
     }
     if (sameDraftEntry(previous, next)) return
-    // An emptied composer leaves nothing worth restoring behind.
     if (next.draft === '' && next.recipientIds.length === 0) {
       this.clear(key)
       return
