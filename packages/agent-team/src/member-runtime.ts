@@ -1,16 +1,5 @@
 /**
- * Per-Member runtime state extracted from the Agent Team Host service: the
- * cohesive per-Member maps and methods that must dispose together across
- * activation, edit, suspend, and removal — the tool-policy restriction seam,
- * the private skill selection/provider mounts, capability warnings, and
- * private-memory provisioning.
- *
- * This class is Host-side by design: its turn-boundary wait subscribes to
- * Host-level agent events, and every traceable-service registration goes
- * through contexts the Host already owns. The service keeps orchestration
- * (ledger, handles, notifications, recovery); this module owns per-Member
- * runtime invariants.
- *
+ * Per-Member runtime state split out of the Host service: the maps and methods that must dispose together across activation, edit, suspend, and removal (tool-policy restriction, private skill mounts, capability warnings, private-memory provisioning). Host-side by design: the turn-boundary wait subscribes to Host-level agent events. The service keeps orchestration (ledger, handles, notifications, recovery).
  * @module @contexera/dsh-agent-team/member-runtime
  */
 
@@ -32,19 +21,10 @@ import type {
 import * as memberSkills from './member-skills.ts'
 import type { MemberSkillProviderMount } from './member-skills.ts'
 
-/**
- * Outcome of waiting for a Member's turn boundary: `waited` means a running
- * turn had to finish first, `idle` means the Member was already between turns
- * and nothing was awaited.
- */
+/** Result of waiting for a turn boundary: `waited` if a running turn had to finish first, `idle` if the Member was already between turns. */
 export type TurnBoundary = 'waited' | 'idle'
 
-/**
- * Read-only core skills shipped beside the preset (the meta skill first:
- * its description routes any skill-management work to itself). Resolved
- * from this module's emitted location so it follows the installed plugin,
- * like the preset roster's own root.
- */
+/** Read-only core skills shipped beside the preset (meta skill first: its description routes skill-management work to itself), resolved from this module's emitted location so it follows the installed plugin. */
 const BUNDLED_SKILLS_DIRECTORY = resolve(dirname(fileURLToPath(import.meta.url)), '../core-skills')
 
 /** Model-facing capabilities every Team-enabled preset must publish. */
@@ -68,25 +48,14 @@ export function deepCopyCapabilities(capabilities: AgentTeamMemberCapabilities):
   }
 }
 
-/**
- * Filesystem directory segment for one Member's private memory namespace.
- * The `member:<uuid>` ref is a durable ledger identity and must never appear
- * in a path: Windows rejects `:` in a path segment (NTFS parses it as an
- * Alternate Data Stream separator), which made Member activation fail at its
- * first `mkdir` on Windows (issue #7).
- */
+/** Directory segment for a Member's private memory. The `member:<uuid>` ref must never appear in a path: Windows rejects `:` in a path segment (NTFS reads it as an Alternate Data Stream separator). */
 export function memberMemoryDirectoryName(memberId: AgentTeamMemberId): string {
   return memberId.replaceAll(':', '-')
 }
 
 /** The sanitized absolute private-memory path for one Member, regardless of what the ledger recorded. */
 export function memberMemoryDirectoryPath(member: Pick<AgentTeamAgentMember, 'memberId' | 'privateMemoryPath'>): string {
-  // Sanitize per segment: only a segment that actually contains the ledger's
-  // member identity colon needs rewriting, and the recorded final segment is
-  // the only place it can appear. The drive-letter colon of a Windows
-  // absolute prefix is not a member identity and must survive untouched, so
-  // a colon-free final segment keeps the recorded path verbatim even when
-  // earlier segments carry colons.
+  // Only the recorded final segment can carry the ledger's member-identity colon, so only it is rewritten. A Windows drive-letter colon is not an identity and must survive: a colon-free final segment keeps the recorded path verbatim.
   const separator = Math.max(member.privateMemoryPath.lastIndexOf('/'), member.privateMemoryPath.lastIndexOf('\\'))
   const finalSegment = separator === -1 ? member.privateMemoryPath : member.privateMemoryPath.slice(separator + 1)
   if (!finalSegment.includes(':')) return member.privateMemoryPath
@@ -106,37 +75,15 @@ export interface MemberRuntimeDeps {
 
 /** Per-Member runtime state: every map here is keyed by Member and released together with that Member. */
 export class MemberRuntime {
-  /**
-   * Live per-Member tool restriction disposers, mirroring modelSelections:
-   * activation registers, disposal paths release, edits swap at a turn boundary.
-   */
+  /** Per-Member tool restriction disposers: activation registers, disposal releases, edits swap at a turn boundary. */
   private readonly memberRestrictions = new Map<AgentTeamMemberId, () => void>()
-  /**
-   * The allow-list currently enforced behind `memberRestrictions`: the
-   * rollback source when a swap's new restriction fails to install, so a
-   * failed apply never leaves the Member less restricted than before.
-   */
+  /** The allow-list enforced behind `memberRestrictions`: the rollback source when a swap fails, so a failed apply never leaves the Member less restricted. */
   private readonly enforcedToolAllow = new Map<AgentTeamMemberId, readonly string[]>()
-  /**
-   * Capability intent the live surface is known to reflect: presence in this
-   * map is the proof, and a stored `undefined` means applied with no
-   * capabilities. Runtime-derived like `capabilityWarnings`, never persisted,
-   * and absent whenever the runtime cannot prove it — an unknown surface
-   * re-applies rather than trusting a guess.
-   */
+  /** Capability intent the live surface is known to reflect: presence is the proof, a stored `undefined` means applied with no capabilities. Never persisted; absent when unprovable, so an unknown surface re-applies. */
   private readonly appliedCapabilities = new Map<AgentTeamMemberId, AgentTeamMemberCapabilities | undefined>()
-  /**
-   * Runtime-derived capability warnings, recomputed at every activation (like
-   * memberFailures, keyed by Member and never persisted): persisted warnings
-   * would lie after a Host restart or a Harness upgrade renames tools.
-   */
+  /** Capability warnings, recomputed at every activation and never persisted: stored ones would lie after a Host restart or a Harness upgrade that renames tools. */
   private readonly capabilityWarnings = new Map<AgentTeamMemberId, readonly AgentTeamCapabilityWarning[]>()
-  /**
-   * Per-Member private skill provider mounts. One entry holds both halves of
-   * one mount — the live selection swap and the disposer — so a capability edit
-   * that re-filters the catalog without disposing the Session, and the release
-   * that unmounts it, can never disagree about which provider is live.
-   */
+  /** Per-Member skill provider mounts. One entry holds the selection swap and the disposer, so a catalog re-filter and the unmount never disagree about which provider is live. */
   private readonly skillProviderMounts = new Map<AgentTeamMemberId, MemberSkillProviderMount>()
 
   constructor(private readonly deps: MemberRuntimeDeps) {}
@@ -146,24 +93,14 @@ export class MemberRuntime {
     return this.capabilityWarnings.get(memberId)
   }
 
-  /**
-   * Apply one Member's persisted tool allow-list as a scoped restriction on
-   * the freshly composed preset surface, and derive activation-time warnings
-   * for entries the current tool surface no longer knows. Runs inside setup
-   * BEFORE validateMemberPreset so the validation observes the restricted
-   * view (the Host always unions the Team tools and `working_directory` over
-   * the configured list).
-   */
+  /** Applies a Member's persisted tool allow-list as a scoped restriction on the freshly composed preset surface and derives warnings for entries the surface no longer knows. Runs before validateMemberPreset so validation sees the restricted view (the Host always unions the Team tools and `working_directory` over the list). */
   applyMemberToolPolicy(agentCtx: Context, member: AgentTeamAgentMember): void {
     const configured = member.capabilities?.tools?.allow
     if (configured === undefined) {
       this.capabilityWarnings.delete(member.memberId)
       return
     }
-    // Drop names the current surface does not know rather than failing the
-    // activation: a Harness upgrade renaming a tool must not make the Member
-    // unavailable. The warning carries the known-name digest so a distant
-    // future reader can diagnose the drift.
+    // Drop unknown names instead of failing activation: a Harness upgrade renaming a tool must not make the Member unavailable. The warning carries the known-name digest for diagnosing drift.
     const known = this.deps.ctx.tools.schemas(scopeOf(agentCtx)).map(tool => tool.name)
     const knownSet = new Set(known)
     const dropped = configured.filter(name => !knownSet.has(name))
@@ -171,16 +108,11 @@ export class MemberRuntime {
     const allow = [...new Set([
       ...configured.filter(name => knownSet.has(name)),
       ...AGENT_TEAM_TOOL_NAMES,
-      // A Member's directory is how it works in a Workspace it was invited
-      // into. An allow-list narrows capability, not the checkout it may stand
-      // in, so this survives the restriction the way the Team tools do. A
-      // deployment that mounts no such tool never reaches the filter.
+      // An allow-list narrows capability, not the checkout the Member works in, so `working_directory` survives like the Team tools.
       ...knownSet.has('working_directory') ? ['working_directory'] : [],
     ])]
     if (allow.length === 0) return
-    // tools.restrict() requires a scoped context and rejects names outside
-    // the inherited surface; both errors surface as this Member's activation
-    // failure without touching any other Member.
+    // `tools.restrict()` requires a scoped context and rejects names outside the inherited surface; either error fails only this Member's activation.
     const dispose = agentCtx.tools.restrict({ allow })
     this.memberRestrictions.set(member.memberId, dispose)
     this.enforcedToolAllow.set(member.memberId, Object.freeze([...allow]))
@@ -197,12 +129,7 @@ export class MemberRuntime {
     this.appliedCapabilities.set(memberId, capabilities)
   }
 
-  /**
-   * Swap a live Member's tool policy at a turn boundary: dispose the old
-   * restriction, apply the new one, and when the new install fails restore
-   * the previous allow-list before rethrowing — the swap must never leave the
-   * Member wider than the surface it started from.
-   */
+  /** Swaps a live Member's tool policy at a turn boundary: disposes the old restriction, applies the new one, and on failure restores the previous allow-list before rethrowing. */
   reapplyMemberToolPolicy(member: AgentTeamAgentMember): void {
     const agentCtx = this.deps.liveMemberContext(member.memberId)
     const previousAllow = this.enforcedToolAllow.get(member.memberId)
@@ -215,18 +142,7 @@ export class MemberRuntime {
     }
   }
 
-  /**
-   * Put the previous allow-list back after a failed swap, so the Member is
-   * never wider than the surface it started from. Capability warnings are
-   * deliberately NOT restored: they describe the STORED configuration's
-   * divergence from the tool surface (the input `applyMemberToolPolicy`
-   * derives from), and the accepted edit is stored even though its runtime
-   * apply failed — reporting the restored leftover here would make one stored
-   * configuration render two different warnings depending on the prior state.
-   * When the failure precedes the derivation itself (schemas throws), warnings
-   * stay empty rather than inventing a known-name digest; the next successful
-   * apply or activation re-derives them.
-   */
+  /** Puts the previous allow-list back after a failed swap. Warnings are deliberately not restored: they describe the stored configuration's divergence, and the accepted edit is stored even though its apply failed. If the failure precedes derivation (schemas throws), warnings stay empty; the next apply or activation re-derives them. */
   private restoreEnforcedToolAllow(member: AgentTeamAgentMember, agentCtx: Context, previousAllow: readonly string[]): void {
     try {
       const dispose = agentCtx.tools.restrict({ allow: [...previousAllow] })
@@ -257,18 +173,7 @@ export class MemberRuntime {
   /** Outstanding boundary waits, held so Host shutdown can release them all. */
   private readonly turnWaitResolvers = new Set<() => void>()
 
-  /**
-   * Wait until one live Member's current turn ends or its Session is
-   * disposed. While the Agent runs, the current turn keeps its schemas and
-   * catalog; the swap happens once idle, so the next step recomputes schemas
-   * from the new restriction and the durable replacement skill catalog from
-   * the new selection, with the same Session and history surviving.
-   * Suspend/remove during the wait resolves it — the disposed handle released
-   * the old restriction already and no disposer leaks. Host shutdown resolves
-   * every wait through `releaseTurnWaits` instead of waiting out a turn that
-   * may never end. Returns whether a running turn had to be awaited, so the
-   * caller can re-check the handle afterwards.
-   */
+  /** Waits until a live Member's current turn ends or its Session is disposed; returns whether a running turn had to be awaited. The running turn keeps its schemas and catalog; the swap happens once idle so the next step sees the new restriction and skill selection on the same Session. Suspend/remove resolves the wait (the disposed handle already released the restriction); Host shutdown resolves every wait through `releaseTurnWaits`. */
   async awaitTurnBoundary(active: AgentHandle): Promise<TurnBoundary> {
     if (!this.deps.runningAgents.has(active.agent.id)) return 'idle'
     await new Promise<void>(resolve => {
@@ -282,13 +187,10 @@ export class MemberRuntime {
       disposers.push(
         this.deps.ctx.on('agent/status', (payload: { agent: Agent; status: string }) => {
           if (payload.agent !== active.agent) return
-          // A turn that ends — clean idle or error — is the boundary; the
-          // next step recomputes schemas from the new restriction.
+          // A turn ending, cleanly or by error, is the boundary.
           if (payload.status !== 'running') settle()
         }),
-        // Disposal (suspend/remove/reactivation) resolves the wait: the old
-        // restriction went with the disposed scope, so only the ledger
-        // intent remains to apply at the next activation.
+        // Disposal resolves the wait: the restriction went with the disposed scope, leaving only the ledger intent for the next activation.
         this.deps.ctx.on('session/disposed', (session: { id: SessionId }) => {
           if (session.id === active.agent.session.id) settle()
         }),
@@ -297,26 +199,13 @@ export class MemberRuntime {
     return 'waited'
   }
 
-  /**
-   * Host-shutdown exit for every boundary wait: resolve them all so the
-   * Member's lifecycle chain drains without depending on a turn that may
-   * never end. `settle` removes each wait's listeners, so no subscription,
-   * waiter, or model request survives the shutdown.
-   */
+  /** Host-shutdown exit: resolves every boundary wait so the Member's lifecycle chain drains; `settle` removes each wait's listeners, so nothing survives shutdown. */
   releaseTurnWaits(): void {
     // Snapshot: every `settle` removes its own entry from the set.
     for (const settle of Array.from(this.turnWaitResolvers)) settle()
   }
 
-  /**
-   * Register the Member-private skill provider on the created agent's exact
-   * scope layer (the traceable-service seam, like the tool restriction):
-   * bundled read-only core skills plus this Member's own private directory.
-   * A deployment with no skill registry registers nothing, and the Member then
-   * simply carries no private catalog. The sanitized directory is
-   * authoritative: activateMember migrated any legacy colon directory onto it
-   * before the provider mounted.
-   */
+  /** Registers the Member-private skill provider on the created agent's exact scope layer (the traceable-service seam, like the tool restriction): bundled core skills plus the Member's private directory. Without a skill registry nothing is registered. The sanitized directory is authoritative; activateMember migrates any legacy colon directory onto it first. */
   mountMemberSkillProvider(
     member: AgentTeamAgentMember,
     agentCtx: Context,
@@ -337,34 +226,16 @@ export class MemberRuntime {
   }
 
   /**
-   * Provision one Member's private memory namespace: notes/, skills/, and a
-   * first-run memory.md scaffold. The Member-private skills directory starts
-   * empty; the per-Member provider scans exactly this root (default roots
-   * excluded).
+   * Provisions a Member's private memory namespace: notes/, skills/, and a first-run memory.md scaffold. The per-Member skill provider scans exactly this root.
    *
-   * Existing installs recorded the pre-fix colon directory in the ledger, and
-   * `privateMemoryPath` is a durable Member fact the renewal path cannot
-   * rewrite: when the legacy directory exists it is renamed onto the sanitized
-   * path once (same-parent rename, atomic), so existing private memory
-   * survives instead of being silently orphaned. A recorded path that names a
-   * different DSH home is never acted on — see `migrateLegacyMemoryDirectory`.
+   * `privateMemoryPath` is a durable Member fact that cannot be rewritten, so a legacy colon directory recorded in the ledger is renamed onto the sanitized path once (same-parent, atomic) rather than orphaning existing memory. A recorded path in a different DSH home is never acted on (see `migrateLegacyMemoryDirectory`).
    *
-   * A colon-form twin directory is also merged when it exists: a Member may
-   * have written files under the ledger identity spelling (the branded
-   * `member:<uuid>` ref is what every Team tool result shows, so a
-   * hand-assembled path carries the colon). Linux accepts the segment
-   * silently — two directories for one Member — while Windows would have
-   * failed the write outright. The twin is never a durable-Member-Fact
-   * candidate: only the files the Member actually wrote there are worth
-   * keeping, and `memory.md` cannot merge, so the sanitized copy always wins
-   * and twin-only notes/skills are moved in without overwriting.
+   * A colon-form twin directory is merged too: the branded `member:<uuid>` ref shown by every Team tool result leads Members to hand-assemble colon paths, which Linux accepts silently (two directories for one Member) and Windows rejects. `memory.md` cannot merge, so the sanitized copy wins and twin-only notes/skills move in without overwriting.
    */
   async initializePrivateMemory(path: string, legacyPath?: string): Promise<void> {
     if (legacyPath !== undefined && legacyPath !== path) {
       const migration = await migrateLegacyMemoryDirectory(legacyPath, path)
-      // A refusal means the record names a directory in ANOTHER DSH home: this
-      // process provisions the Member fresh here instead of taking that
-      // directory out of its own home.
+            // A refusal means the record names a directory in another DSH home: provision fresh here rather than take that directory out of its home.
       if (migration === 'refused-foreign-home') this.deps.ctx.logger.warn(`agent-team: refused to migrate the recorded Member private memory '${legacyPath}' into '${path}': they are not in the same directory, so the recorded directory names a different DSH home and is left untouched`)
     }
     const twinPath = twinMemoryDirectoryPath(path)
@@ -380,13 +251,7 @@ export class MemberRuntime {
 
   /** Irreversibly remove one Member: archive its Session and delete its private namespace. */
   async cleanupRemovedMember(member: AgentTeamAgentMember): Promise<void> {
-    // The ledger path may still name the legacy colon directory (never
-    // activated after the fix): remove both spellings; rm is force-tolerant
-    // of the one that does not exist. Every target must sit inside THIS
-    // process's members root: the recorded path is a durable absolute fact,
-    // and a process resolving another DSH home (an isolated test home, a
-    // second instance) would otherwise delete the directory that fact names —
-    // the real Member's private memory.
+        // The ledger path may still name the legacy colon directory: remove both spellings (rm tolerates the missing one). Every target must sit inside this process's members root: the recorded path is a durable absolute fact, and a process resolving another DSH home would otherwise delete the real Member's private memory.
     const sanitized = memberMemoryDirectoryPath(member)
     const targets = sanitized === member.privateMemoryPath ? [sanitized] : [sanitized, member.privateMemoryPath]
     const owned = targets.filter(target => isInsideMembersRoot(target))
@@ -410,10 +275,7 @@ export class MemberRuntime {
     this.releaseMemberToolPolicy(memberId)
   }
 
-  /**
-   * Every Member id any per-Member map still holds, so a release path that
-   * iterates Members cannot miss one that only a single map knows about.
-   */
+    /** Every Member id any per-Member map holds, so a release path cannot miss one only a single map knows. */
   private trackedMemberIds(): readonly AgentTeamMemberId[] {
     return [...new Set([
       ...this.memberRestrictions.keys(),
@@ -431,19 +293,9 @@ export class MemberRuntime {
 }
 
 /**
- * One-time in-place migration of a pre-fix colon-named private memory
- * directory onto its sanitized path. A sanitized target that already exists
- * wins (idempotent across restarts and partially migrated installs); a legacy
- * source that never existed is simply the fresh-install case.
+ * One-time in-place migration of a colon-named private memory directory onto its sanitized path. An existing sanitized target wins (idempotent across restarts); a missing legacy source is the fresh-install case.
  *
- * The rename is confined to one parent directory, which is what the migration
- * has always meant: the recorded path is a durable absolute fact, so a process
- * resolving a different DSH home (an isolated test home, a second instance, a
- * moved home) holds a sanitized target in ITS tree while the record still names
- * the real one. Renaming across trees would take a Member's whole private
- * memory out of its home — silently, since only the next session notices an
- * empty index. Such a source is left exactly where it is, and only that
- * refusal is reported back: every other outcome needs nothing from the caller.
+ * The rename is confined to one parent directory: a process resolving a different DSH home (isolated test home, second instance) holds a sanitized target in its own tree while the record names the real one, and renaming across trees would silently take a Member's private memory out of its home. Such a source is left in place and only that refusal is reported.
  */
 async function migrateLegacyMemoryDirectory(legacyPath: string, path: string): Promise<'refused-foreign-home' | undefined> {
   let legacy: Awaited<ReturnType<typeof stat>>
@@ -465,12 +317,7 @@ async function migrateLegacyMemoryDirectory(legacyPath: string, path: string): P
   return undefined
 }
 
-/**
- * Whether one absolute path names a Member directory inside THIS process's
- * members root. Only such a path is this process's to delete: a recorded path
- * may name the same Member in another DSH home, where the removal happening
- * here has no authority.
- */
+/** Whether an absolute path names a Member directory inside this process's members root; only such a path is this process's to delete. */
 function isInsideMembersRoot(candidate: string): boolean {
   const fromRoot = relative(dshHomePath('agent-team', 'members'), resolve(candidate))
   // '' is the members root itself and '..' escapes it: only a real descendant is authorized.
@@ -482,8 +329,7 @@ function twinMemoryDirectoryPath(sanitizedPath: string): string | undefined {
   const separator = Math.max(sanitizedPath.lastIndexOf('/'), sanitizedPath.lastIndexOf('\\'))
   const prefix = separator === -1 ? '' : sanitizedPath.slice(0, separator + 1)
   const finalSegment = separator === -1 ? sanitizedPath : sanitizedPath.slice(separator + 1)
-  // Only the exact sanitized identity segment (`member-<uuid>`) has a colon
-  // twin (`member:<uuid>`); any other segment shape has no identity mapping.
+    // Only the exact sanitized identity segment (`member-<uuid>`) has a colon twin (`member:<uuid>`).
   if (!/^member-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(finalSegment)) return undefined
   return `${prefix}member:${finalSegment.slice('member-'.length)}`
 }
@@ -494,16 +340,7 @@ function colonTwinTraceName(name: string): string {
   return dot <= 0 ? `${name}.colon-twin` : `${name.slice(0, dot)}.colon-twin${name.slice(dot)}`
 }
 
-/**
- * Merge a hand-created colon-form twin directory into the sanitized Member
- * memory directory. Unlike the ledger legacy migration this is a merge, not a
- * rename: the sanitized directory is the Member's live root (the injected
- * paths and the skill provider point at it), so on a same-path conflict the
- * live root's copy wins and the twin's losing copy is preserved beside it
- * under a `.colon-twin` name instead of being silently discarded. Twin-only
- * files move in under their own names; the emptied twin directory is then
- * removed so the drift cannot silently recur.
- */
+/** Merges a hand-created colon-form twin into the sanitized Member memory directory. Unlike the legacy migration this is a merge: the sanitized directory is the live root, so on conflict its copy wins and the twin's copy is kept beside it under a `.colon-twin` name. Twin-only files move in under their own names, then the emptied twin is removed. */
 async function mergeTwinMemoryDirectory(twinPath: string, path: string): Promise<void> {
   let twin: Awaited<ReturnType<typeof stat>>
   try {
@@ -526,11 +363,7 @@ async function mergeDirectoryContents(source: string, target: string): Promise<v
     if (entry.isDirectory()) {
       await mergeDirectoryContents(sourcePath, targetPath)
     } else if (entry.isFile()) {
-      // rename(2) silently REPLACES an existing target on POSIX (the EEXIST
-      // error only exists on Windows, where the colon twin cannot exist at
-      // all), so a collision must be detected, not caught: probe the target
-      // first. Activation is the single serialized writer, so the
-      // probe-to-rename window has no concurrent writer to race.
+            // rename(2) silently replaces an existing target on POSIX (EEXIST exists only on Windows, where the twin cannot exist), so probe first. Activation is the single serialized writer, so the probe-to-rename window has no race.
       let liveFilePresent = true
       try {
         await stat(targetPath)
@@ -538,8 +371,7 @@ async function mergeDirectoryContents(source: string, target: string): Promise<v
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         liveFilePresent = false
       }
-      // The live root stays authoritative; the twin's losing copy stays
-      // traceable beside it instead of being silently discarded.
+            // The live root stays authoritative; the twin's losing copy stays traceable beside it.
       await rename(sourcePath, liveFilePresent ? join(target, colonTwinTraceName(entry.name)) : targetPath)
     }
   }
