@@ -1207,6 +1207,22 @@ describe('operation protocol coverage', () => {
     }
   })
 
+  it.each(Object.entries(protocol))('the Project spelling of %s decodes to the same record', (kind, row) => {
+    for (const shape of [row.stored, ...row.legacyShapes]) {
+      const projectSpelled: unknown = JSON.parse(JSON.stringify(shape)
+        .replace(/"team\/channel-/g, '"team/project-')
+        .replace(/"channel(Ref|Refs)?":/g, '"project$1":')
+        .replace(/"channel:/g, '"project:'))
+      expect(agentTeamOperationSchema.parse(projectSpelled), `${kind}: both spellings must replay as one record`).toEqual(agentTeamOperationSchema.parse(shape))
+    }
+  })
+
+  it('rejects a record that holds both spellings of one field', () => {
+    const stored = row('team/channel-member-added').stored as Extract<AgentTeamOperation, { kind: 'team/channel-member-added' }>
+    const ambiguous = { ...stored, data: { ...stored.data, projectRef: stored.data.channelRef } }
+    expect(agentTeamOperationSchema.safeParse(ambiguous).success, 'two spellings of one field must not silently merge').toBe(false)
+  })
+
   it.each(Object.entries(protocol))('same-request comparison and result mapping cover %s', async (kind, row) => {
     const coverage = row.retry
     if ('replayOnly' in coverage) {

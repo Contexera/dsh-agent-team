@@ -45,7 +45,7 @@ beforeAll(async () => {
   await mkdir(scope, { recursive: true })
   await cp(TEAM_ROOT, `${scope}/dsh-agent-team`, {
     recursive: true,
-    filter: source => !source.includes('/node_modules') && !source.includes('/src') && !source.includes('/artifacts') && !source.includes('/.hoplite'),
+    filter: source => !source.includes('/node_modules') && !source.includes('/src') && !source.includes('/artifacts') && !source.includes('/.hoplite') && !/\/\.git(\/|$)/.test(source),
   })
   // Production installs the bundle's regular dependencies with it; stage the
   // same closure inside the staged dir, whose nearest node_modules is what its

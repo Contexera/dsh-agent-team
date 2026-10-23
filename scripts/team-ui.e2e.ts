@@ -252,8 +252,9 @@ async function installLocalBundle(clearArtifacts = true): Promise<void> {
     recursive: true,
     filter: source => {
       const normalized = source.replaceAll('\\', '/')
-      // .hoplite is agent-workspace state (runtime FIFOs kill fs.cp).
+      // .hoplite and .git hold agent-workspace state (runtime FIFOs kill fs.cp), and no installed bundle carries either.
       return !normalized.includes('/node_modules') && !normalized.includes('/src') && !normalized.includes('/artifacts') && !normalized.includes('/.hoplite')
+        && !/\/\.git(\/|$)/.test(normalized)
     },
   })
   // Stage regular dependencies inside the bundle dir, as the production installer
