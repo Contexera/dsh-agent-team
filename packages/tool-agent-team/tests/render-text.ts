@@ -4,7 +4,7 @@ import { apply } from '../src/index.ts'
 /**
  * Shared render-spec harness: registers the Team tools into a throwaway
  * registry and renders one structured value to text, because renders are the
- * only project a tool result reaches the model through. Asserting on this
+ * only channel a tool result reaches the model through. Asserting on this
  * text — not the schema — is what locks the model-visible contract.
  */
 export function teamTools(): Map<string, ToolDefinition> {

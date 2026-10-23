@@ -275,7 +275,7 @@ const teamAttention = defineTool({
       revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
       following: { type: 'boolean', required: true },
     } },
-        // Renders are the only project a tool result reaches the model through. One outcome line plus the Attention state; a yes/no on one Thread needs no orientation, facts, or write token (a status read authorizes no mutation).
+        // Renders are the only channel a tool result reaches the model through. One outcome line plus the Attention state; a yes/no on one Thread needs no orientation, facts, or write token (a status read authorizes no mutation).
     render: (args, value) => {
       const standing = taskStanding(value)
       const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef}`
@@ -353,7 +353,7 @@ const teamThread = defineTool({
       } } },
       facts: { type: 'array', required: true, items: FACT_SCHEMA },
     } },
-        // Renders are the only project a tool result reaches the model through. read renders outcome → context → orientation → active collision surface → facts → watermark, handing off the next-write token only when no unread remains. history renders deep orientation and never the collision surface or a write token.
+        // Renders are the only channel a tool result reaches the model through. read renders outcome → context → orientation → active collision surface → facts → watermark, handing off the next-write token only when no unread remains. history renders deep orientation and never the collision surface or a write token.
     render: (args, value) => {
       const standing = taskStanding(value)
       const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef}`
@@ -535,7 +535,7 @@ const teamDm = defineTool({
       recipientMemberId: { type: 'string', required: true }, recipientHandle: { type: 'string', required: true },
       delivered: { type: 'boolean', required: true }, deliveryNote: { type: 'string' }, occurredAt: { type: 'string' },
     } },
-        // Renders are the only project a tool result reaches the model through. A DM is recorded either way, so the first line says whether it was delivered or recorded without a live session to wake.
+        // Renders are the only channel a tool result reaches the model through. A DM is recorded either way, so the first line says whether it was delivered or recorded without a live session to wake.
     render: (_args, value) => {
       if (value.delivered === false) return [{ type: 'text', text: [
         `Recorded, not delivered — DM to @${value.recipientHandle} (${value.recipientMemberId}).`,

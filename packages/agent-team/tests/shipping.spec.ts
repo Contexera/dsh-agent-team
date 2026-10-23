@@ -508,7 +508,7 @@ describe('Agent Team Member persona', () => {
   // Token-level anchors, not sentences: rewording is Cole's issue 07 territory and
   // must stay free, while losing a whole rule has to fail. These are the rules the
   // persona is the only carrier of, chosen to not overlap the sentence assertions
-  // in the shipping contract above (reply projects, the token story, the two
+  // in the shipping contract above (reply channels, the token story, the two
   // message tiers, the private space).
   it('keeps the rules only the persona carries', async () => {
     const preset = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8').then(teamMemberPresetText)
