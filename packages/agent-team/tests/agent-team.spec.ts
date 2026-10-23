@@ -443,6 +443,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // as recorded — no discriminator, no marker, no ordinary visibility.
     const revivedLedger = ledgerAtBoot(revived)
     expect(revivedLedger.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
+    // Adopting a later rules version afterwards must not re-judge the legacy accept recorded before it.
+    const table = revived.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
+    await new AgentTeamLedger(table, { rulesVersion: 2 }).initialize()
+    const upgraded = new AgentTeamLedger(table, { rulesVersion: 2 })
+    expect(() => upgraded.validate()).not.toThrow()
+    expect(upgraded.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
   })
 
   it('records DMs as audit-only operations with idempotent retries and unchanged projections', async () => {

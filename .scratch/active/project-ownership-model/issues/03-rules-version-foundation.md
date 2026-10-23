@@ -4,10 +4,10 @@
 
 **Blocked by:** 02
 
-**Status:** ready
+**Status:** complete
 
-- [ ] 新增 `team/rules-version-adopted`（Host actor，`{ version }`）；无标记的 ledger 段为版本 1
-- [ ] 标记单调递增、每个版本至多一条；重复、倒退或晚于该版本段内其他写入时加载失败
-- [ ] 查清 Host 挂载与启动恢复的写入顺序，保证标记早于启动恢复期间的生命周期 effect；全新 ledger 在 `team/initialized` 后立即写当前版本
-- [ ] 现行 inbox delta 校验规则集中为版本 1 校验器；写路径只调用当前版本
-- [ ] 补一个测试：历史 accept 缺 `acceptedClaimRefs` 时的唤醒语义在新机制下不变
+- [x] 新增 `team/rules-version-adopted`（Host actor，`{ version }`）；无标记的 ledger 段为版本 1
+- [x] 标记单调递增、每个版本至多一条；重复、倒退、非 Host 写入、或版本高于本构建实现的版本时加载失败（“早于该版本的写入”由写入顺序保证，回放无法区分，不在回放中校验）
+- [x] Host 启动顺序：`initialize()` → `sweepWorkspaceParticipations`（会写 leave）→ 换代收尾 → 激活 / converge。标记在 `initialize()` 自己排队的任务里追加，因此早于之后所有写入（含启动恢复和中途插队的 Remote 调用）；全新 ledger 在 `team/initialized` 后立即写。当前实现版本为 1，不写任何标记
+- [x] 规则版本成为 Projection 上的事实（`rulesVersion`），校验与写路径都从这里取。现行规则暂不搬到独立模块：还没有任何规则分叉，提前拆分属于投机结构；04–06 第一条按版本分叉的规则落地时，再把旧分支集中为 replay-only 校验
+- [x] 历史 accept 缺 `acceptedClaimRefs`：原有测试已覆盖回放与静默语义，本票在其后追加版本 2 标记再回放，结果不变

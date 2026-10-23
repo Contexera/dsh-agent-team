@@ -132,6 +132,16 @@ export interface AgentTeamMemberSessionRecycledOperation extends AgentTeamOperat
   }
 }
 
+/**
+ * The ledger switches to a later set of validation rules from this record on. Records before it keep validating under the rules
+ * they were written with; a ledger with no marker is rules version 1.
+ */
+export interface AgentTeamRulesVersionAdoptedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/rules-version-adopted'
+  readonly actor: AgentTeamHostActor
+  readonly data: { readonly version: number }
+}
+
 /** Durable Human rename of one Project's display facts; identity refs never change. */
 export interface AgentTeamProjectUpdatedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/project-updated'
@@ -356,6 +366,7 @@ export type AgentTeamOperation =
   | AgentTeamMemberSessionRenewedOperation
   | AgentTeamMemberSessionRolledOverOperation
   | AgentTeamMemberSessionRecycledOperation
+  | AgentTeamRulesVersionAdoptedOperation
   | AgentTeamProjectUpdatedOperation
   | AgentTeamMemberUpdatedOperation
   | AgentTeamProjectMemberAddedOperation
