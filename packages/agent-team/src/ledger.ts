@@ -4102,7 +4102,6 @@ export class AgentTeamLedger {
   }
 
   private isProjectMemberFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
-    if (projection.memberships.get(projectRef)?.has(memberId) === true) return true
     // Deriving stays inside the Workspace boundary: a Member who has left the
     // Workspace stops seeing its Projects even though the Threads it wrote
     // there are still on the record.
@@ -4110,11 +4109,15 @@ export class AgentTeamLedger {
     const project = projection.projects.get(projectRef)
     if (project === undefined || !this.participatesInFrom(projection, memberId, project.workspaceId)) return false
     if (projection.rulesVersion >= 2) {
-      // Version 2 widens membership to owners and anyone ever named in the Project, and drops departed Members.
+      // Version 2 widens membership to owners and anyone ever named in the Project, and drops departed Members,
+      // enrolled ones included: the rule intersects every source with the Member lifecycle (spec §2).
       const state = projection.members.get(memberId)?.state
       if (state === 'inactive' || state === 'archived') return false
       if (projection.owners.get(projectRef)?.has(memberId) === true) return true
       if (projection.mentionedByProject.get(projectRef)?.has(memberId) === true) return true
+      if (projection.memberships.get(projectRef)?.has(memberId) === true) return true
+    } else if (projection.memberships.get(projectRef)?.has(memberId) === true) {
+      return true
     }
     for (const threadRef of this.projectThreadRefsFrom(projection, projectRef)) {
       if (this.everParticipatedFrom(projection, threadRef, memberId)) return true

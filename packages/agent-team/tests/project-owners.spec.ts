@@ -118,4 +118,26 @@ describe('Project owners', () => {
     expect(ledger.projectOwnerIds(projectRef)).toEqual([other])
     expect(new AgentTeamLedger(table, { rulesVersion: 2 }).projectOwnerIds(projectRef)).toEqual([other])
   })
+
+  it('ends ownership when the Member is removed', async () => {
+    const { table, ledger, owner, projectRef, change } = await seed(2)
+    await ledger.addProjectOwner(change(owner))
+    await ledger.removeMember({ requestId: requestId('remove'), memberId: owner, actor: human })
+    expect(ledger.projectOwnerIds(projectRef)).toEqual([])
+    expect(new AgentTeamLedger(table, { rulesVersion: 2 }).projectOwnerIds(projectRef)).toEqual([])
+  })
+
+  it('counts an archived enrolled Member as a Project member at version 1 but not at version 2', async () => {
+    const enrolled = async (rulesVersion: number) => {
+      const pool = new MemoryMediaPool()
+      const ledger = new AgentTeamLedger(await openTable(pool), { rulesVersion })
+      await ledger.initialize()
+      const enrolledId = await addAgent(ledger, 'enrolled')
+      const project = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'alpha', description: '', memberIds: [enrolledId] })).value.project
+      await ledger.archiveMember({ requestId: requestId('archive'), memberId: enrolledId, actor: human })
+      return ledger.isProjectMember(project.projectRef, enrolledId)
+    }
+    expect(await enrolled(1)).toBe(true)
+    expect(await enrolled(2)).toBe(false)
+  })
 })
