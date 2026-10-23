@@ -4,7 +4,7 @@
 
 **Blocked by:** 03
 
-**Status:** pending
+**Status:** ready
 
 - [ ] `team/project-owner-added` / `team/project-owner-removed`；目标须参与该项目所在 Workspace；Human 不能被移除
 - [ ] 成员离开 Workspace、归档、删除时同一 operation 移除其 owner 身份；暂停不影响
