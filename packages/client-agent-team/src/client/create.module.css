@@ -155,6 +155,19 @@
   gap: 2px;
 }
 
+/* The Project dialog's owners block sits under the form, which the Modal body does not space. */
+.ownersSection {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.sectionLabel {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 /* The retry sits 8px under the message (the shipped message-then-action gap) in one alert region; the button keeps its own shape. */
 .failure {
   display: grid;

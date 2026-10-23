@@ -736,7 +736,11 @@ const teamView = defineTool({
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
-      projects: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { projectRef: { type: 'string', required: true }, name: { type: 'string', required: true } } } },
+      projects: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+        projectRef: { type: 'string', required: true }, name: { type: 'string', required: true },
+        // Present only once the ledger has Project owners (rules version 2).
+        owners: { type: 'array', items: { type: 'string' } }, role: { type: 'string' },
+      } } },
       workspaceId: { type: 'string', required: true },
       workspaces: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { workspaceId: { type: 'string', required: true }, title: { type: 'string' }, default: { type: 'boolean', required: true } } } },
       members: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
@@ -761,7 +765,7 @@ const teamView = defineTool({
       if (!continuation) {
         lines.push('Team directory', '', 'Projects — current')
         if (value.projects.length === 0) lines.push('No authorized Projects.')
-        else lines.push(...value.projects.map(project => `${project.projectRef} · ${project.name}`))
+        else lines.push(...value.projects.map(project => `${project.projectRef} · ${project.name}${project.owners === undefined ? '' : ` · owners ${project.owners.map(handle => `@${handle}`).join(', ')} · you: ${project.role}`}`))
         lines.push('')
       }
       lines.push('Threads')
@@ -792,11 +796,20 @@ const teamView = defineTool({
         // `includeCatalog` makes this the address book: the radar and Task/Thread catalog of the whole Workspace scope, not just this page's Threads. Other `view` callers keep the bounded page projection.
     const view = host.viewForAgent(agent, { workspaceId, ...(args.projectRef === undefined ? {} : { projectRef: projectRefOf(args.projectRef) as never }), ...(args.limit === undefined ? {} : { limit: args.limit }), ...(args.cursor === undefined ? {} : { cursor: args.cursor }), topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true })
     const visibleMemberIds = new Set(view.members.map(membership => membership.memberId))
+    const self = host.memberForAgent(agent)
+    const handles = new Map(host.members().map(status => [status.member.memberId, status.member.handle]))
+    const ownership = view.rulesVersion >= 2
     return {
       workspaceId,
       workspaces: view.workspaces.map(participation => ({ workspaceId: participation.workspaceId,
         ...(participation.title === undefined ? {} : { title: participation.title }), default: participation.default })),
-      projects: view.projects.map(project => ({ projectRef: project.projectRef, name: project.name })),
+      projects: view.projects.map(project => {
+        if (!ownership) return { projectRef: project.projectRef, name: project.name }
+        const ownerIds = view.owners.filter(owner => owner.projectRef === project.projectRef).map(owner => owner.memberId)
+        return { projectRef: project.projectRef, name: project.name,
+          owners: [host.humanHandle(), ...ownerIds.map(memberId => handles.get(memberId) ?? memberId)],
+          role: self !== undefined && ownerIds.includes(self.memberId) ? 'owner' : 'member' }
+      }),
       members: [
         { memberId: view.humanMemberId, kind: 'human', handle: host.humanHandle(), description: 'Human Team Member', presence: 'available' },
         ...host.members().filter(status => visibleMemberIds.has(status.member.memberId)).map(status => ({ memberId: status.member.memberId,

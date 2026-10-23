@@ -5,6 +5,8 @@ import type {
   AgentTeamArchiveProjectResult,
   AgentTeamArchiveMemberRequest,
   AgentTeamArchiveMemberResult,
+  AgentTeamProjectOwnerRequest,
+  AgentTeamProjectOwnerResult,
   AgentTeamProjectRef,
   AgentTeamClientMemberStatus,
   AgentTeamCreateProjectRequest,
@@ -107,6 +109,10 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     createProject: (request: AgentTeamCreateProjectRequest) => Promise<RemoteResult<AgentTeamCreateProjectResult>>
     updateProject: (request: AgentTeamUpdateProjectRequest) => Promise<RemoteResult<AgentTeamUpdateProjectResult>>
     archiveProject: (request: AgentTeamArchiveProjectRequest) => Promise<RemoteResult<AgentTeamArchiveProjectResult>>
+    /** Host status; the Project owners editor appears only from rules version 2. */
+    addProjectOwner: (request: AgentTeamProjectOwnerRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
+    removeProjectOwner: (request: AgentTeamProjectOwnerRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
+    humanIdentity: TeamHumanIdentitySource
     updateMember: (request: AgentTeamUpdateMemberRequest) => Promise<RemoteResult<AgentTeamMemberResult>>
     recoverMember: (request: AgentTeamRecoverMemberRequest) => Promise<RemoteResult<AgentTeamRecoverMemberResult>>
     archiveMember: (request: AgentTeamArchiveMemberRequest) => Promise<RemoteResult<AgentTeamArchiveMemberResult>>

@@ -252,6 +252,72 @@ describe('Team agent surfaces', () => {
     await b.runtime.dispose()
   })
 
+  async function openProjectEditor(b: Awaited<ReturnType<typeof runtimeWithTeam>>): Promise<HTMLElement> {
+    fireEvent.click(b.view.getByRole('button', { name: '团队' }))
+    expect(await b.view.findByText('# engineering')).toBeTruthy()
+    fireEvent.click(b.view.getByRole('button', { name: 'engineering 的操作' }))
+    fireEvent.click(await b.view.findByRole('menuitem', { name: '编辑项目' }))
+    return b.view.getByRole('dialog', { name: '编辑项目' })
+  }
+
+  it('hides the Project owners editor while the Host runs rules version 1', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true })
+    const editor = await openProjectEditor(b)
+    await waitFor(() => { expect(b.viewProjects).toHaveBeenCalled() })
+    expect(within(editor).queryByRole('group', { name: '负责人' })).toBeNull()
+    expect(within(editor).queryByRole('button', { name: /负责人/ })).toBeNull()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await b.runtime.dispose()
+  })
+
+  it('grants and withdraws Agent owners non-optimistically beside the fixed Human owner', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true, rulesVersion: 2 })
+    const editor = await openProjectEditor(b)
+    const owners = await within(editor).findByRole('group', { name: '负责人' })
+    // The Human always owns the Project: named, marked, and without a remove control.
+    expect(within(owners).getByText('human')).toBeTruthy()
+    expect(within(owners).getByText('始终是负责人')).toBeTruthy()
+    expect(within(owners).queryByRole('button', { name: /移除负责人/ })).toBeNull()
+    expect(within(owners).queryByRole('button', { name: '移除负责人 @human' })).toBeNull()
+
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const commit = b.addProjectOwner.getMockImplementation()!
+    b.addProjectOwner.mockImplementationOnce(async request => { await gate; return commit(request) })
+    fireEvent.click(within(owners).getByRole('button', { name: '添加负责人 @builder' }))
+    await waitFor(() => { expect(b.addProjectOwner).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: 'w1', projectRef: 'project:engineering', memberId: 'member:builder', requestId: expect.any(String),
+    })) })
+    // Pending: every owner control is disabled and nothing has moved yet.
+    expect((within(owners).getByRole('button', { name: '添加负责人 @worker' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(within(owners).queryByRole('button', { name: '移除负责人 @builder' })).toBeNull()
+    release()
+    const remove = await within(owners).findByRole('button', { name: '移除负责人 @builder' })
+    expect(within(owners).queryByRole('button', { name: '添加负责人 @builder' })).toBeNull()
+
+    fireEvent.click(remove)
+    await waitFor(() => { expect(b.removeProjectOwner).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: 'w1', projectRef: 'project:engineering', memberId: 'member:builder',
+    })) })
+    expect(await within(owners).findByRole('button', { name: '添加负责人 @builder' })).toBeTruthy()
+    expect(b.addProjectOwner.mock.calls[0]![0].requestId).not.toBe(b.removeProjectOwner.mock.calls[0]![0].requestId)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await b.runtime.dispose()
+  })
+
+  it('keeps a Host owner error visible and leaves the owners unchanged', async () => {
+    const b = await runtimeWithTeam({ initialProjects: true, rulesVersion: 2 })
+    const editor = await openProjectEditor(b)
+    const owners = await within(editor).findByRole('group', { name: '负责人' })
+    b.failProjectOwnerWrite('Project owners need rules version 2')
+    fireEvent.click(within(owners).getByRole('button', { name: '添加负责人 @builder' }))
+    expect((await within(owners).findByRole('alert')).textContent).toBe('Project owners need rules version 2')
+    expect(within(owners).queryByRole('button', { name: '移除负责人 @builder' })).toBeNull()
+    expect((within(owners).getByRole('button', { name: '添加负责人 @builder' }) as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await b.runtime.dispose()
+  })
+
   it('offers 恢复 and 重启 in the row menu only where they apply and routes both through the Host remote', async () => {
     const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))

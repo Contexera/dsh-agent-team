@@ -247,7 +247,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('boots a v1 empty Team and rejects old ledger media', async () => {
     const pool = new MemoryMediaPool()
     const first = await harness(pool)
-    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 1, operationCount: 1, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID })
+    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 1, operationCount: 1, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, rulesVersion: 1 })
     const records = [...pool.media.get('agent_team')!.tables.get('operations')!.values()]
     await first.fiber.dispose()
     const replay = await first.ctx.plugin(AgentTeam)
@@ -3057,6 +3057,29 @@ describe('body-authored mentions', () => {
     const reopened = ledgerAtBoot(await harness(storedPool(legacyJoinLedger.records)))
     expect(reopened.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).projects.map(project => project.projectRef))
       .toEqual([legacyJoinLedger.projectRef as never])
+  })
+
+  it('keeps every Project an Agent saw before adopting rules version 2 visible after it', async () => {
+    const test = await harness(storedPool(legacyJoinLedger.records))
+    const before = ledgerAtBoot(test)
+    // Beside the frozen hand enrolment: a writer, a Member the Human named, and a bystander who never took part.
+    const writer = await addLedgerMember(before, undefined, undefined, 'Test Agent', 'writer')
+    const named = await addLedgerMember(before, undefined, undefined, 'Test Agent', 'named')
+    const bystander = await addLedgerMember(before, undefined, undefined, 'Test Agent', 'bystander')
+    const projectRef = legacyJoinLedger.projectRef as never
+    committed((await before.sendMessage({ requestId: requestId('legacy-writer'), workspaceId: alpha, projectRef, body: 'Writer thread', asTask: false, actor: writer.actor })).value)
+    committed((await before.sendMessage({ requestId: requestId('legacy-named'), workspaceId: alpha, projectRef, body: 'Looping in @named', asTask: false, actor: agentTeamHumanActor() })).value)
+    const memberIds = [legacyJoinLedger.memberId as never, writer.member.memberId, named.member.memberId, bystander.member.memberId]
+    const visibleTo = (ledger: AgentTeamLedger) => Object.fromEntries(memberIds.map(memberId => [memberId,
+      ledger.view({ workspaceId: alpha }, memberId).projects.map(project => project.projectRef)]))
+    const v1 = visibleTo(ledgerAtBoot(test))
+
+    const table = test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
+    await new AgentTeamLedger(table, { rulesVersion: 2 }).initialize()
+    const v2 = visibleTo(new AgentTeamLedger(table, { rulesVersion: 2 }))
+    for (const memberId of memberIds) expect(v2[memberId], `${memberId} keeps what it saw`).toEqual(expect.arrayContaining(v1[memberId]!))
+    expect(v1[bystander.member.memberId]).toEqual([])
+    expect(v2[bystander.member.memberId]).toEqual([])
   })
 
   it('confirms the same way for an Agent outside the Project and one outside the Thread', async () => {

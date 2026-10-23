@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** pending
+**Status:** ready
 
 - [ ] `team/main-message-posted`、`team/main-stream-read`、`team/thread-started`；`team/message-sent` 在版本 2 起禁止写入
 - [ ] `team_message.post` / `start` 与 Human composer；非 owner 开 Thread 得到 `project_owner_required` 并被指向 `post`；owner 有主对话未读时写入要求先读；`replyToMessageRef` 限同一 scope

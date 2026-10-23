@@ -34,6 +34,7 @@ import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { AgentTeamLedger, agentTeamHumanActor, threadReadTargetOf } from '../src/ledger.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/index.ts'
 import type { AgentTeamLedgerResult } from '../src/ledger.ts'
 import { agentTeamDomainSpec, agentTeamOperationSchema } from '../src/spec.ts'
 import type {
@@ -505,6 +506,20 @@ const rulesVersionAdopted: Op<'team/rules-version-adopted'> = {
   data: { version: 2 },
 }
 
+const projectOwnerAdded: Op<'team/project-owner-added'> = {
+  ...opBase('operation:protocol-30', 'request:protocol-project-owner-added', 30),
+  previousOperationId,
+  kind: 'team/project-owner-added',
+  data: { workspaceId: alpha, projectRef, memberId },
+}
+
+const projectOwnerRemoved: Op<'team/project-owner-removed'> = {
+  ...opBase('operation:protocol-31', 'request:protocol-project-owner-removed', 31),
+  previousOperationId,
+  kind: 'team/project-owner-removed',
+  data: { workspaceId: alpha, projectRef, memberId },
+}
+
 const dmSent: Op<'team/dm-sent'> = {
   ...opBase('operation:protocol-28', 'request:protocol-dm-sent', 28, memberActor),
   previousOperationId,
@@ -751,6 +766,34 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     retry: { replayOnly: 'Host-internal: initialize appends it once per adopted version and skips it when the ledger already carries that version, so no caller request id can retry or collide' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'no-op', inbox: 'none' },
+  },
+  'team/project-owner-added': {
+    stored: projectOwnerAdded,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.addProjectOwner({ requestId: projectOwnerAdded.requestId, actor: human, ...projectOwnerAdded.data })
+        expect(out.value.projectRef, 'the owner mapper answers with the stored Project').toBe(projectRef)
+        return out
+      },
+      changed: () => ledger.addProjectOwner({ requestId: projectOwnerAdded.requestId, actor: human, ...projectOwnerAdded.data, memberId: AGENT_TEAM_HUMAN_MEMBER_ID }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/project-owner-removed': {
+    stored: projectOwnerRemoved,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.removeProjectOwner({ requestId: projectOwnerRemoved.requestId, actor: human, ...projectOwnerRemoved.data })
+        expect(out.value.projectRef, 'the owner mapper answers with the stored Project').toBe(projectRef)
+        return out
+      },
+      changed: () => ledger.removeProjectOwner({ requestId: projectOwnerRemoved.requestId, actor: human, ...projectOwnerRemoved.data, memberId: AGENT_TEAM_HUMAN_MEMBER_ID }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
   },
   'team/project-updated': {
     stored: projectUpdated,
@@ -1209,6 +1252,9 @@ function committedValue<T>(result: AgentTeamLedgerResult<T>): T {
   return result.value
 }
 
+/** Kinds added after the rename: no record ever carried a Channel spelling of their name. */
+const kindsBornAsProject: ReadonlySet<AgentTeamOperation['kind']> = new Set(['team/project-owner-added', 'team/project-owner-removed'])
+
 describe('operation protocol coverage', () => {
   beforeAll(async () => { await seedLedger() })
   afterAll(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
@@ -1224,7 +1270,7 @@ describe('operation protocol coverage', () => {
   it.each(Object.entries(protocol))('the legacy Channel spelling of %s decodes to the same record', (kind, row) => {
     for (const shape of [row.stored, ...row.legacyShapes]) {
       const channelSpelled: unknown = JSON.parse(JSON.stringify(shape)
-        .replace(/"team\/project-/g, '"team/channel-')
+        .replace(/"team\/project-/g, kindsBornAsProject.has(shape.kind) ? '"team/project-' : '"team/channel-')
         .replace(/"project(Ref|Refs)?":/g, '"channel$1":')
         .replace(/"project:/g, '"channel:'))
       expect(agentTeamOperationSchema.parse(channelSpelled), `${kind}: both spellings must replay as one record`).toEqual(agentTeamOperationSchema.parse(shape))

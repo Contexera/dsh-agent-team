@@ -142,6 +142,26 @@ export interface AgentTeamRulesVersionAdoptedOperation extends AgentTeamOperatio
   readonly data: { readonly version: number }
 }
 
+/** Durable Human grant of Project ownership to one Agent Member; the Human owns every Project and is never recorded. Rules version 2 and later only. */
+export interface AgentTeamProjectOwnerAddedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-owner-added'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly memberId: AgentTeamMemberId
+  }
+}
+
+/** Durable Human withdrawal of one Agent Member's Project ownership. Rules version 2 and later only. */
+export interface AgentTeamProjectOwnerRemovedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/project-owner-removed'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly memberId: AgentTeamMemberId
+  }
+}
+
 /** Durable Human rename of one Project's display facts; identity refs never change. */
 export interface AgentTeamProjectUpdatedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/project-updated'
@@ -367,6 +387,8 @@ export type AgentTeamOperation =
   | AgentTeamMemberSessionRolledOverOperation
   | AgentTeamMemberSessionRecycledOperation
   | AgentTeamRulesVersionAdoptedOperation
+  | AgentTeamProjectOwnerAddedOperation
+  | AgentTeamProjectOwnerRemovedOperation
   | AgentTeamProjectUpdatedOperation
   | AgentTeamMemberUpdatedOperation
   | AgentTeamProjectMemberAddedOperation

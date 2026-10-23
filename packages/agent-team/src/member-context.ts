@@ -5,7 +5,7 @@ import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContextFormed } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { matchesProducerKind } from './context-source.ts'
-import type { AgentTeamAgentMember } from './types.ts'
+import type { AgentTeamAgentMember, AgentTeamProject } from './types.ts'
 import { memberMemoryDirectoryPath } from './member-runtime.ts'
 
 export const name = 'wowyuarm-agent-team-member-context'
@@ -46,7 +46,9 @@ export function apply(ctx: Context): void {
         : 'memory.md is currently unreadable; do not use any earlier private memory context.')
     }
     const workspaces = renderMemberWorkspaces(host.workspacesForAgent(agent))
-    const text = `${renderMemberIdentity(member)}\n\n${memory}${workspaces === '' ? '' : `\n\n${workspaces}`}`
+    const owned = host.ownedProjectsForAgent(agent)
+    const ownership = owned === undefined ? '' : `\n\n${renderMemberOwnership(owned)}`
+    const text = `${renderMemberIdentity(member)}${ownership}\n\n${memory}${workspaces === '' ? '' : `\n\n${workspaces}`}`
     const latestText = agent.session.surface.nodes.toReversed().flatMap(sequence => {
       // `nodes` are event identities (SessionSeq); snapshotEvents takes log
       // offsets. Re-entering through the validating constructor keeps the two
@@ -72,6 +74,13 @@ export function renderMemberIdentity(member: Pick<AgentTeamAgentMember, 'handle'
   return member.description === ''
     ? `Team identity: you are @${member.handle}.`
     : `Team identity: you are @${member.handle} — ${member.description}`
+}
+
+/** Rendered even when empty, so a withdrawn ownership replaces the earlier list instead of lingering in context. */
+export function renderMemberOwnership(projects: readonly Pick<AgentTeamProject, 'projectRef' | 'name' | 'workspaceId'>[]): string {
+  const header = 'Team Project ownership — this list replaces all earlier ownership context.'
+  if (projects.length === 0) return `${header}\nYou own no Projects.`
+  return [header, 'You own these Projects:', ...projects.map(project => `- ${project.name} ${project.projectRef} (Workspace ${project.workspaceId})`)].join('\n')
 }
 
 export function renderMemberWorkspaces(workspaces: readonly { readonly workspaceId: string; readonly path: string | undefined; readonly default: boolean }[]): string {

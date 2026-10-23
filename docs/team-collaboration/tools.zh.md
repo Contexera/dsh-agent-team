@@ -8,6 +8,8 @@
 
 `team_view` 是 address book：有界的获授权 Project、顶层 Thread 与 Member 摘要。这是当前的地址簿，不是工作队列。unread work 归 `team_inbox`。Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Project ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数。revision 和消息数都不改变下一个合法动作。
 
+ledger 有 Project owner 之后（规则版本 2），每个 Project 行还列出 owners（`@human` 在前）和读者的角色（`owner` 或 `member`）。
+
 首页 Members 之后跟一个 `active task threads` 段。本 Workspace 内读者获授权 Project 中所有 in_progress / in_review 的 Task Thread，按最新活动排序。每行携带 threadRef、Project ref、status、Task 编号。live Claims 上的 Members、bounded anchor subject 与最新活动时刻也在行内。
 
 纳入条件只看 Task 是否活跃，不看读者是否参与。读者未读的 Thread 也不排除。这段独立于 unread 队列，回答「谁已经在做什么」。工具引导在读者遇到 Workspace 意外改动、或准备 claim/commit 之前指向此段，让在途工作被识别为在途而非冲突。这段不是 unread 队列。未读工作仍归 `team_inbox`。

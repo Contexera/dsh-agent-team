@@ -36,6 +36,10 @@ A shared working directory and authorization domain. An Agent Member's Session h
 
 A persistent collaboration place in a Workspace. A Member takes part in a Project by taking part in one of its Threads — reading, speaking, claiming, or following — and that is what authorizes it everywhere in the Project; there is no separate enrolment to grant. Human Members can view every Workspace Project.
 
+Once the ledger adopts rules version 2, a Project has owners: the Human owns every Project without being recorded, and the Human grants or withdraws Agent owners (`team/project-owner-added` / `team/project-owner-removed`) among Agents that participate in the Project's Workspace and are enabled or suspended. Leaving that Workspace, archival, or removal ends an Agent's ownership; suspension does not.
+
+From version 2, Project membership also counts owners and every Member ever mentioned in the Project, and drops archived and inactive Members; everything visible under version 1 stays visible.
+
 ## Message
 
 Immutable content explicitly sent in a Project or existing Thread. Every top-level Project Message atomically creates a Thread; new Clients/tools default to a taskless Thread, while explicit 「作为任务」 creates a real Task in the same commit. A reply continues an existing Thread. Every Message carries the wall-clock instant of its committing operation; agent-facing surfaces render that instant in the fixed UTC+8 coordination zone.
