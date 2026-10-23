@@ -12,7 +12,7 @@ import { AgentTeamLedger } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import type { AgentTeamChannelRef, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamProjectRef, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 const alpha = WorkspaceId('workspace:alpha')
@@ -59,65 +59,65 @@ function storedPool(records: Array<[string, unknown]>): MemoryMediaPool {
   return pool
 }
 
-async function seedMember(ctx: Context, channelRef: AgentTeamChannelRef, label: string) {
+async function seedMember(ctx: Context, projectRef: AgentTeamProjectRef, label: string) {
   return ctx.agentTeam.addMember({
     requestId: requestId(`${label}-add`), workspaceId: alpha,
     handle: label, description: `${label} member`, presetId: 'team-member',
-    channelRefs: [channelRef],
+    projectRefs: [projectRef],
   })
 }
 
 describe('Agent Team display-fact updates', () => {
-  it('renames a Channel durably, resolves retries by request id, and replays cleanly', async () => {
+  it('renames a Project durably, resolves retries by request id, and replays cleanly', async () => {
     const { ctx, facility } = await harness()
-    const created = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const created = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
 
-    // The rename keeps the Channel's immutable identity facts intact.
-    const renamed = await ctx.agentTeam.updateChannel({ requestId: requestId('rename'), workspaceId: alpha, channelRef: created.channel.channelRef, name: 'platform', description: 'Infrastructure work' })
-    expect(renamed.channel.name).toBe('platform')
-    expect(renamed.channel.description).toBe('Infrastructure work')
-    expect(renamed.channel.channelRef).toBe(created.channel.channelRef)
-    expect(renamed.channel.createdAtSequence).toBe(created.channel.createdAtSequence)
+    // The rename keeps the Project's immutable identity facts intact.
+    const renamed = await ctx.agentTeam.updateProject({ requestId: requestId('rename'), workspaceId: alpha, projectRef: created.project.projectRef, name: 'platform', description: 'Infrastructure work' })
+    expect(renamed.project.name).toBe('platform')
+    expect(renamed.project.description).toBe('Infrastructure work')
+    expect(renamed.project.projectRef).toBe(created.project.projectRef)
+    expect(renamed.project.createdAtSequence).toBe(created.project.createdAtSequence)
 
     // Same request id with the same payload resolves without a second record;
     // reusing it with different content collides loudly instead.
-    const retried = await ctx.agentTeam.updateChannel({ requestId: requestId('rename'), workspaceId: alpha, channelRef: created.channel.channelRef, name: 'platform', description: 'Infrastructure work' })
-    expect(retried.channel.name).toBe('platform')
-    await expect(ctx.agentTeam.updateChannel({ requestId: requestId('rename'), workspaceId: alpha, channelRef: created.channel.channelRef, name: 'other', description: 'Infrastructure work' })).rejects.toThrow(/was reused with a different operation or payload/)
+    const retried = await ctx.agentTeam.updateProject({ requestId: requestId('rename'), workspaceId: alpha, projectRef: created.project.projectRef, name: 'platform', description: 'Infrastructure work' })
+    expect(retried.project.name).toBe('platform')
+    await expect(ctx.agentTeam.updateProject({ requestId: requestId('rename'), workspaceId: alpha, projectRef: created.project.projectRef, name: 'other', description: 'Infrastructure work' })).rejects.toThrow(/was reused with a different operation or payload/)
 
     const view = await ctx.agentTeam.view({ workspaceId: alpha, topLevelOnly: true, limit: 10 })
-    expect(view.channels.find(channel => channel.channelRef === created.channel.channelRef)?.name).toBe('platform')
+    expect(view.projects.find(project => project.projectRef === created.project.projectRef)?.name).toBe('platform')
 
     // A cold replay accepts the update record and reproduces the projection.
     const replayed = ledgerAtBoot(facility)
     expect(() => replayed.validate()).not.toThrow()
     const replayView = replayed.view({ workspaceId: alpha, topLevelOnly: true })
-    expect(replayView.channels.find(channel => channel.channelRef === created.channel.channelRef)).toMatchObject({ name: 'platform', description: 'Infrastructure work' })
+    expect(replayView.projects.find(project => project.projectRef === created.project.projectRef)).toMatchObject({ name: 'platform', description: 'Infrastructure work' })
 
     // Blank display facts and unknown refs are rejected before any record lands;
     // clearing the description is a legal edit, matching optional creation.
-    await expect(ctx.agentTeam.updateChannel({ requestId: requestId('blank-name'), workspaceId: alpha, channelRef: created.channel.channelRef, name: '   ', description: 'x' })).rejects.toThrow(/name must not be empty/)
-    await expect(ctx.agentTeam.updateChannel({ requestId: requestId('unknown-ref'), workspaceId: alpha, channelRef: 'channel:missing' as AgentTeamChannelRef, name: 'x', description: 'y' })).rejects.toThrow(/unknown Channel ref/)
-    const cleared = await ctx.agentTeam.updateChannel({ requestId: requestId('clear-description'), workspaceId: alpha, channelRef: created.channel.channelRef, name: 'platform', description: '' })
-    expect(cleared.channel.description).toBe('')
+    await expect(ctx.agentTeam.updateProject({ requestId: requestId('blank-name'), workspaceId: alpha, projectRef: created.project.projectRef, name: '   ', description: 'x' })).rejects.toThrow(/name must not be empty/)
+    await expect(ctx.agentTeam.updateProject({ requestId: requestId('unknown-ref'), workspaceId: alpha, projectRef: 'project:missing' as AgentTeamProjectRef, name: 'x', description: 'y' })).rejects.toThrow(/unknown Project ref/)
+    const cleared = await ctx.agentTeam.updateProject({ requestId: requestId('clear-description'), workspaceId: alpha, projectRef: created.project.projectRef, name: 'platform', description: '' })
+    expect(cleared.project.description).toBe('')
     const replayedCleared = ledgerAtBoot(facility)
     expect(() => replayedCleared.validate()).not.toThrow()
-    expect(replayedCleared.view({ workspaceId: alpha, topLevelOnly: true }).channels.find(channel => channel.channelRef === created.channel.channelRef)).toMatchObject({ name: 'platform', description: '' })
+    expect(replayedCleared.view({ workspaceId: alpha, topLevelOnly: true }).projects.find(project => project.projectRef === created.project.projectRef)).toMatchObject({ name: 'platform', description: '' })
   })
 
-  it('creates a Channel with an empty description and no initial Members', async () => {
+  it('creates a Project with an empty description and no initial Members', async () => {
     const { ctx } = await harness()
-    const created = await ctx.agentTeam.createChannel({ requestId: requestId('bare-channel'), workspaceId: alpha, name: 'ops', description: '' })
-    expect(created.channel.description).toBe('')
+    const created = await ctx.agentTeam.createProject({ requestId: requestId('bare-project'), workspaceId: alpha, name: 'ops', description: '' })
+    expect(created.project.description).toBe('')
     expect(created.memberIds).toEqual([])
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
   })
 
   it('edits Member facts with handle uniqueness, model pinning, and replay validation', async () => {
     const { ctx, facility } = await harness()
-    const created = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const builder = await seedMember(ctx, created.channel.channelRef, 'builder')
-    const reviewer = await seedMember(ctx, created.channel.channelRef, 'reviewer')
+    const created = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const builder = await seedMember(ctx, created.project.projectRef, 'builder')
+    const reviewer = await seedMember(ctx, created.project.projectRef, 'reviewer')
 
     // One durable edit renames the handle, updates the description, and pins
     // a per-Member model while identity and memory paths stay untouched.
@@ -171,24 +171,24 @@ describe('Agent Team display-fact updates', () => {
 
   it('carries Member capabilities through lifecycle operations, edits, replay, and Host restart', async () => {
     const { ctx, facility } = await harness()
-    const created = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const created = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const capabilities = {
       tools: { allow: ['bash', 'read', 'web-search'] },
       skills: { allow: ['code-review'] },
     } as const
     const added = await ctx.agentTeam.addMember({
       requestId: requestId('capabilities-add'), workspaceId: alpha, handle: 'builder', description: 'Builds changes',
-      presetId: 'team-member', channelRefs: [created.channel.channelRef], capabilities,
+      presetId: 'team-member', projectRefs: [created.project.projectRef], capabilities,
     })
     const memberId = added.status.member.memberId
     expect(added.status.member.capabilities).toEqual(capabilities)
 
     // Pure intent: unknown tool names commit anyway (divergence is derived at
     // activation, never rejected here), and the status projection exposes the
-    // warnings channel empty while capabilities resolve cleanly.
+    // warnings project empty while capabilities resolve cleanly.
     const hostile = await ctx.agentTeam.addMember({
       requestId: requestId('drift-add'), workspaceId: alpha, handle: 'drift', description: 'Old ledger entry',
-      presetId: 'team-member', channelRefs: [], capabilities: { tools: { allow: ['tool-renamed-away'] } },
+      presetId: 'team-member', projectRefs: [], capabilities: { tools: { allow: ['tool-renamed-away'] } },
     })
     expect(hostile.status.member.capabilities).toEqual({ tools: { allow: ['tool-renamed-away'] } })
     expect(hostile.status.capabilityWarnings).toBeUndefined()
@@ -225,7 +225,7 @@ describe('Agent Team display-fact updates', () => {
     expect(replayed.getMember(hostile.status.member.memberId)?.capabilities).toEqual({ tools: { allow: ['tool-renamed-away'] } })
 
     // Host restart: a fresh process replays the same ledger and restores the
-    // durable intent, warnings channel still absent.
+    // durable intent, warnings project still absent.
     const records = [...facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
     const revived = await harness(storedPool(records))
     expect(revived.ctx.agentTeam.status()).toMatchObject({ agentMemberCount: 2 })
@@ -241,7 +241,7 @@ describe('AgentTeam updateMember is a partial update (issue #43 #10)', () => {
     const { ctx } = await harness()
     const added = await ctx.agentTeam.addMember({
       requestId: requestId('partial-add'), workspaceId: alpha, handle: 'builder', description: 'Builds',
-      presetId: 'team-member', channelRefs: [],
+      presetId: 'team-member', projectRefs: [],
       model: { provider: 'mock', model: 'pinned' },
       capabilities: { skills: { allow: ['alpha'] } },
     })

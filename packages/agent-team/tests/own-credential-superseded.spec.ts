@@ -23,15 +23,15 @@ async function addLedgerMember(ledger: AgentTeamLedger, workspaceId: TeamWorkspa
     description: 'Test Agent', presetId: 'team-member', privateMemoryPath: `/tmp/${memberId}`, state: 'enabled',
   }
   const added = (await ledger.addMember({ requestId: `add:${memberId}` as AgentTeamRequestId, actor: agentTeamHumanActor(), member,
-    handle, description: member.description, presetId: member.presetId, workspaceId, channelRefs: [] })).value
+    handle, description: member.description, presetId: member.presetId, workspaceId, projectRefs: [] })).value
   return { actor: { kind: 'member', memberId: added.member.memberId, handle } }
 }
 
 async function followedThread(ledger: AgentTeamLedger, workspaceId: TeamWorkspaceId, actor: AgentTeamMemberActor) {
-  const channel = (await ledger.createChannel({ requestId: 'channel' as AgentTeamRequestId, workspaceId,
-    name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.channel
+  const project = (await ledger.createProject({ requestId: 'project' as AgentTeamRequestId, workspaceId,
+    name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.project
   const started = (await ledger.sendMessage({ requestId: 'start' as AgentTeamRequestId, workspaceId,
-    channelRef: channel.channelRef, body: 'Thread anchor', asTask: true, actor: agentTeamHumanActor() })).value
+    projectRef: project.projectRef, body: 'Thread anchor', asTask: true, actor: agentTeamHumanActor() })).value
   if (started.kind !== 'committed' || started.task === undefined) throw new Error('setup failed')
   await ledger.changeAttention({ requestId: 'follow' as AgentTeamRequestId, workspaceId,
     taskRef: started.task.taskRef, action: 'follow', actor })
@@ -108,15 +108,15 @@ describe("a write whose credential was superseded by the writer's own previous w
     const test = await harness()
     const ledger = ledgerFor(test.facility)
     const { actor } = await addLedgerMember(ledger, test.workspaceId, 'writer')
-    const channel = (await ledger.createChannel({ requestId: 'channel' as AgentTeamRequestId, workspaceId: test.workspaceId,
-      name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.channel
+    const project = (await ledger.createProject({ requestId: 'project' as AgentTeamRequestId, workspaceId: test.workspaceId,
+      name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.project
     const older = (await ledger.sendMessage({ requestId: 'older' as AgentTeamRequestId, workspaceId: test.workspaceId,
-      channelRef: channel.channelRef, body: 'An older Thread', actor: agentTeamHumanActor() }))
+      projectRef: project.projectRef, body: 'An older Thread', actor: agentTeamHumanActor() }))
     if (older.value.kind !== 'committed') throw new Error('setup failed')
     const olderToken = older.value.thread.revision
 
     const newer = (await ledger.sendMessage({ requestId: 'newer' as AgentTeamRequestId, workspaceId: test.workspaceId,
-      channelRef: channel.channelRef, body: 'A newer Thread', asTask: true, actor: agentTeamHumanActor() }))
+      projectRef: project.projectRef, body: 'A newer Thread', asTask: true, actor: agentTeamHumanActor() }))
     if (newer.value.kind !== 'committed' || newer.value.task === undefined) throw new Error('setup failed')
     await ledger.changeAttention({ requestId: 'follow' as AgentTeamRequestId, workspaceId: test.workspaceId,
       taskRef: newer.value.task.taskRef, action: 'follow', actor })

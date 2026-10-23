@@ -16,12 +16,12 @@ interface GeneratedRemote {
 
 const EXPECTED_REMOTE_METHODS = [
   'addMember',
-  'archiveChannel',
   'archiveMember',
+  'archiveProject',
   'changeAttention',
   'changeTask',
   'changes',
-  'createChannel',
+  'createProject',
   'environment',
   'getAttachment',
   'getHumanAvatar',
@@ -45,8 +45,8 @@ const EXPECTED_REMOTE_METHODS = [
   'setHumanProfile',
   'threadHistory',
   'threadObservations',
-  'updateChannel',
   'updateMember',
+  'updateProject',
   'view',
 ]
 

@@ -9,17 +9,17 @@ usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
-describe('Team Channel board', () => {
+describe('Team Project board', () => {
   it('switches feed and board through the header tabs and opens a Task card on the Thread level', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seedTaskStatus: 'todo', seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'todo', seededMessages: [
       { body: '实现 API 网关\n细节在 Thread 里', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
-    expect(b.view.container.querySelector('[data-team-channel]')).toBeTruthy()
+    expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy()
     // The feed is the default reading: its tab is selected, and both the
     // timeline entry and the composer stand in the content seat.
-    const feedTab = b.view.getByRole('tab', { name: '频道' })
+    const feedTab = b.view.getByRole('tab', { name: '项目' })
     const boardTab = b.view.getByRole('tab', { name: '看板' })
     expect(feedTab.getAttribute('aria-selected')).toBe('true')
     expect(boardTab.getAttribute('aria-selected')).toBe('false')
@@ -58,22 +58,22 @@ describe('Team Channel board', () => {
     // entry row goes, not a new surface.
     fireEvent.click(card)
     expect(await b.view.findByRole('heading', { name: 'Task #1' })).toBeTruthy()
-    fireEvent.click(b.view.getByRole('button', { name: '返回频道' }))
+    fireEvent.click(b.view.getByRole('button', { name: '返回项目' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     // Returning remounts the page on its default reading; switching back to
     // the feed restores the timeline and the composer.
-    expect(b.view.getByRole('tab', { name: '频道' }).getAttribute('aria-selected')).toBe('true')
+    expect(b.view.getByRole('tab', { name: '项目' }).getAttribute('aria-selected')).toBe('true')
     expect(b.view.getByRole('button', { name: '打开 Task #1' })).toBeTruthy()
     expect(b.view.getByRole('textbox', { name: '消息内容' })).toBeTruthy()
     await b.runtime.dispose()
   })
 
   it('moves the selection with the arrow keys and reaches both tabs from the keyboard', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seedTaskStatus: 'todo', seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'todo', seededMessages: [
       { body: '实现 API 网关', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    const feedTab = await b.view.findByRole('tab', { name: '频道' })
+    const feedTab = await b.view.findByRole('tab', { name: '项目' })
     const boardTab = b.view.getByRole('tab', { name: '看板' })
     feedTab.focus()
     // Right moves the selection and the focus together, so the reader never has
@@ -96,22 +96,22 @@ describe('Team Channel board', () => {
   })
 
   it('reads the same window the feed has loaded and offers the way to older work', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seedTaskStatus: 'in_progress', seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'in_progress', seededMessages: [
       { body: '实现 API 网关', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
-    b.viewChannels.mockImplementation(async () => ({
+    b.viewProjects.mockImplementation(async () => ({
       ok: true,
       value: {
         humanMemberId: 'member:human',
-        channels: [{ channelRef: 'channel:engineering', workspaceId: 'w1', name: 'engineering', description: 'Engineering work', createdAtSequence: 1 }],
+        projects: [{ projectRef: 'project:engineering', workspaceId: 'w1', name: 'engineering', description: 'Engineering work', createdAtSequence: 1 }],
         members: [],
-        tasks: [{ taskRef: 'task:1', channelRef: 'channel:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' }],
+        tasks: [{ taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' }],
         threads: [{ threadRef: 'thread:1', taskRef: 'task:1', revision: 2 }],
         taskNumbers: [{ taskRef: 'task:1', taskNumber: 1 }],
         items: [{
-          message: { messageRef: 'message:seed-0', channelRef: 'channel:engineering', threadRef: 'thread:1', taskRef: 'task:1', sender: 'member:human', body: '实现 API 网关', topLevel: true, sequence: 1, occurredAt: '2026-10-14T09:00:00.000Z' },
+          message: { messageRef: 'message:seed-0', projectRef: 'project:engineering', threadRef: 'thread:1', taskRef: 'task:1', sender: 'member:human', body: '实现 API 网关', topLevel: true, sequence: 1, occurredAt: '2026-10-14T09:00:00.000Z' },
           mentions: [],
-          task: { taskRef: 'task:1', channelRef: 'channel:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
+          task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
           taskNumber: 1,
           thread: { threadRef: 'thread:1', taskRef: 'task:1', revision: 2 },
           liveClaimOwners: [],
@@ -128,12 +128,12 @@ describe('Team Channel board', () => {
     fireEvent.click(await b.view.getByRole('tab', { name: '看板' }))
     expect(await b.view.findByRole('button', { name: '加载更早消息' })).toBeTruthy()
     // Opening the board issues no read of its own: the tab is a second reading
-    // of the window the feed already holds, not a reason to page the Channel.
-    const before = b.viewChannels.mock.calls.length
-    fireEvent.click(b.view.getByRole('tab', { name: '频道' }))
+    // of the window the feed already holds, not a reason to page the Project.
+    const before = b.viewProjects.mock.calls.length
+    fireEvent.click(b.view.getByRole('tab', { name: '项目' }))
     fireEvent.click(b.view.getByRole('tab', { name: '看板' }))
     await Promise.resolve()
-    expect(b.viewChannels.mock.calls.length).toBe(before)
+    expect(b.viewProjects.mock.calls.length).toBe(before)
     await b.runtime.dispose()
   })
 })

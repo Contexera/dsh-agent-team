@@ -7,22 +7,22 @@
 [![Release](https://img.shields.io/github/v/release/Contexera/dsh-agent-team?include_prereleases&style=flat-square)](https://github.com/Contexera/dsh-agent-team/releases)
 [![Listed on Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Contexera/dsh-agent-team/)
 
-**dsh-agent-team** gives DeepSeek Harness agents that don't reset. Each agent is a durable Member with its own memory, notes, and skills — the Member you set up last week is still the same one this week, after its session ended, its context was compacted or replaced, or DSH restarted. You set the direction; Workspaces organize teams per project, Channels route responsibilities, and Task Threads keep one line of progress.
+**dsh-agent-team** gives DeepSeek Harness agents that don't reset. Each agent is a durable Member with its own memory, notes, and skills — the Member you set up last week is still the same one this week, after its session ended, its context was compacted or replaced, or DSH restarted. You set the direction; Workspaces organize teams per codebase, Projects route responsibilities, and Task Threads keep one line of progress.
 
 An opt-in plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): install it only where Team mode is needed; ordinary DSH sessions keep their normal preset roster.
 
 ## Core ideas
 
-- **Agents are first-class team members, not just sessions.** Each member keeps its own memory, responsibility boundaries, and private space (memory, notes, and skills), while all agents collaborate in one shared project Workspace; multiple Workspaces manage multiple teams.
-- **Workspaces organize everything.** Different projects live in different Workspaces, each managing its own Agents and Channels.
-- **The Human routes Channels and responsibilities.** You decide who is in which channel and what they own; mentions route work to the right agent.
+- **Agents are first-class team members, not just sessions.** Each member keeps its own memory, responsibility boundaries, and private space (memory, notes, and skills), while all agents collaborate in one shared Workspace; multiple Workspaces manage multiple teams.
+- **Workspaces organize everything.** Different codebases live in different Workspaces, each managing its own Agents and Projects.
+- **The Human routes Projects and responsibilities.** You decide who is in which project and what they own; mentions route work to the right agent.
 - **Task Threads carry one line of progress.** Claims set the direction, Threads hold the context, and multiple session agents advance the same line of work without talking past each other — the facts of the work live in one Thread.
 
 ## Preview
 
-Team mode lives inside the ordinary DSH Web UI: Channels carry the discussion, the Inbox gathers what needs you, and Task Threads keep one line of progress.
+Team mode lives inside the ordinary DSH Web UI: Projects carry the discussion, the Inbox gathers what needs you, and Task Threads keep one line of progress.
 
-![Channel in the DSH Web UI: member roster, @mentions, and Task references in the message flow](assets/readme/channel.png)
+![Project in the DSH Web UI: member roster, @mentions, and Task references in the message flow](assets/readme/project.png)
 
 The Human Inbox leads with unread Threads that need you, followed by recently active ones:
 
@@ -81,8 +81,8 @@ The output should include Team rows such as `wowyuarm-agent-team-scope` and `wow
 ```text
 Team mode
 └── select a Workspace
-    ├── Channels -> New Channel -> send the first message
-    └── Agents   -> Add Agent -> choose its initial Channels
+    ├── Projects -> New Project -> send the first message
+    └── Agents   -> Add Agent -> choose its initial Projects
 ```
 
 Create an Agent only in a trusted Workspace. The Team Member preset intentionally grants managed Agent Sessions `danger-full-access`.
@@ -96,7 +96,7 @@ Three other DSH plugins carry similar names and solve a different problem — on
 | [`NanmiCoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams) | Turns the current DSH session into a captain that assembles sub-agents, splits a goal into dependency-aware tasks, and coordinates them through direct messages | one **session** |
 | [`toolclub/dsh-agent-team-gui`](https://github.com/toolclub/dsh-agent-team-gui) | A reusable plan → implement → review team with a model chosen per member, and a Run Center for token usage | one **workflow run** |
 | [`limuyang2/agent-team`](https://github.com/limuyang2/agent-team) — publishes `@limuyang2/dsh-agent-team` | Builds a team of independent root agents inside one DSH window: mix models and providers, assign one Leader, and let every member work in its own conversation over a shared Workspace | one **assembled team** |
-| **`dsh-agent-team`** (this plugin) | Every agent is a durable Member identity with its own private memory, notes and skills; Channels and responsibilities are yours to assign, and a Task Thread is one line of progress | a **standing team** |
+| **`dsh-agent-team`** (this plugin) | Every agent is a durable Member identity with its own private memory, notes and skills; Projects and responsibilities are yours to assign, and a Task Thread is one line of progress | a **standing team** |
 
 The practical difference: a Member you created last week is still the same Member today — same memory, same responsibilities, same private notes — after its session ended, its context was compacted or replaced, or DSH restarted. In the other three, a team is assembled around the work at hand — a session, a workflow run, or a Leader-led team.
 
@@ -110,8 +110,8 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 
 ## What it adds
 
-- A durable single-host Team with Channels, Messages, Tasks, Threads, Claims, and Agent membership.
-- A Web Client for Human control: create Channels and Agents, manage membership, send Messages, open Threads, and handle Tasks.
+- A durable single-host Team with Projects, Messages, Tasks, Threads, Claims, and Agent membership.
+- A Web Client for Human control: create Projects and Agents, manage membership, send Messages, open Threads, and handle Tasks.
 - An isolated `team-member` preset with seven model-facing Team tools: `team_inbox`, `team_thread`, `team_attention`, `team_message`, `team_dm`, `team_claim`, and `team_view`.
 - A pull-based collaboration protocol. Agent Inbox admission is durable, but it does not claim that the model has already processed the update.
 
@@ -150,7 +150,7 @@ Architecture and the collaboration contract are documented in [`docs/architectur
 
 ## Acknowledgments
 
-The collaboration shape of dsh-agent-team — named agent members, Channels, Task Threads, @mention routing, and per-member memory — originates from and borrows several design ideas from [Raft](https://raft.build/). Thank you for the work.
+The collaboration shape of dsh-agent-team — named agent members, Projects, Task Threads, @mention routing, and per-member memory — originates from and borrows several design ideas from [Raft](https://raft.build/). Thank you for the work.
 
 ## License
 

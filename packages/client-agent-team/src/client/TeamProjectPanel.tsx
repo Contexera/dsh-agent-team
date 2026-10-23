@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
-  AgentTeamChannelRef,
+  AgentTeamProjectRef,
   AgentTeamClientMemberStatus,
   AgentTeamConfirmationToken,
   AgentTeamMemberId,
@@ -23,23 +23,23 @@ import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { chunkRunsWithDays } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, resolveUnknownMessageRefs, useResolvedMessageRefVersion, type ResolvedMemberRef } from './refs.ts'
-import channelCss from './channel.module.css'
+import projectCss from './project.module.css'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
 
-interface TeamChannelPanelProps {
+interface TeamProjectPanelProps {
   /** The surface this panel is seated in: it owns the width the handle writes. */
   readonly surface: HTMLElement | null
   readonly workspaceId: WorkspaceId
-  readonly channelRef: AgentTeamChannelRef
+  readonly projectRef: AgentTeamProjectRef
   readonly threadRef: AgentTeamThreadRef
-  readonly channelName: string
+  readonly projectName: string
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
   readonly humanMemberId?: AgentTeamMemberId | undefined
-  /** The Channel page's roster: the panel reads it instead of pulling its own copy. */
+  /** The Project page's roster: the panel reads it instead of pulling its own copy. */
   readonly members: readonly AgentTeamClientMemberStatus[]
-  readonly channelMemberIds: ReadonlySet<AgentTeamMemberId>
+  readonly projectMemberIds: ReadonlySet<AgentTeamMemberId>
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -50,18 +50,18 @@ interface TeamChannelPanelProps {
   readonly promoteThread: TeamConversationProps['promoteThread']
   readonly subscribeChanges: TeamConversationProps['subscribeChanges']
   readonly selectThread: TeamConversationProps['selectThread']
-  readonly selectChannel: TeamConversationProps['selectChannel']
+  readonly selectProject: TeamConversationProps['selectProject']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
   readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
   readonly openMemberSession: TeamConversationProps['openMemberSession']
-  readonly channelNameOf: (ref: AgentTeamChannelRef) => string | undefined
+  readonly projectNameOf: (ref: AgentTeamProjectRef) => string | undefined
   readonly memberOf: (ref: AgentTeamMemberId) => ResolvedMemberRef | undefined
-  /** Task number for one ref, from the Channel projection; undefined stays 「…」. */
+  /** Task number for one ref, from the Project projection; undefined stays 「…」. */
   readonly taskNumberOf: (taskRef: AgentTeamTaskRef) => number | undefined
   /** A durable read committed: the feed's unread badge clears without waiting for the Inbox. */
   readonly onRead: (threadRef: AgentTeamThreadRef) => void
-  /** This Thread is a Task now — the Channel closes the panel and walks the reader into it. */
+  /** This Thread is a Task now — the Project closes the panel and walks the reader into it. */
   readonly onPromoted: (taskRef: AgentTeamTaskRef) => void
   readonly onClose: () => void
   readonly t: TeamConversationProps['t']
@@ -70,12 +70,12 @@ interface TeamChannelPanelProps {
 const factSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined => fact.kind === 'message' ? fact.message.sender : undefined
 const factOccurredAt = (fact: AgentTeamThreadFact): string | undefined => fact.kind === 'message' ? fact.message.occurredAt : undefined
 
-type ReadProjection = Awaited<ReturnType<TeamChannelPanelProps['readThread']>> extends infer Result
+type ReadProjection = Awaited<ReturnType<TeamProjectPanelProps['readThread']>> extends infer Result
   ? Result extends { ok: true; value: infer Value } ? Value : never
   : never
 
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
-export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, channelName, humanName, humanAvatarUrl, humanMemberId, members, channelMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectChannel, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, channelNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamChannelPanelProps) {
+export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
@@ -278,7 +278,7 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
   const task = projection?.task
   const thread = projection?.thread
   const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
-  const channelMembers = members.filter(status => channelMemberIds.size === 0 || channelMemberIds.has(status.member.memberId))
+  const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
 
   const memberName = (memberId: AgentTeamMemberId): string => {
     if (memberId === humanMemberId) return humanName
@@ -287,8 +287,8 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
   }
 
   const openRef = useCallback((ref: string): void => {
-    if (ref.startsWith('channel:')) {
-      if (ref !== channelRef) selectChannel(ref as AgentTeamChannelRef)
+    if (ref.startsWith('project:')) {
+      if (ref !== projectRef) selectProject(ref as AgentTeamProjectRef)
       return
     }
     if (ref === threadRef) return
@@ -299,7 +299,7 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
     if (ref.startsWith('task:')) {
       jumpToTaskThread(resolveTaskRefs, workspaceId, ref as AgentTeamTaskRef, selectThread)
     }
-  }, [channelRef, threadRef, workspaceId, selectChannel, selectThread, resolveTaskRefs, resolveThreadRefs])
+  }, [projectRef, threadRef, workspaceId, selectProject, selectThread, resolveTaskRefs, resolveThreadRefs])
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
@@ -358,7 +358,7 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
         onOpenRef={openRef}
         onResolveTaskRefs={lookupTaskRefs}
         onResolveThreadRefs={lookupThreadRefs}
-        channelNameOf={channelNameOf}
+        projectNameOf={projectNameOf}
         memberOf={memberOf}
         onOpenMemberSession={openMemberSession}
         grouped={grouped}
@@ -449,7 +449,7 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
         const committed = result.value as Extract<typeof result.value, { kind: 'committed' }>
         // Chips what the Host is about to report; its committed facts replace
         // this row as soon as they arrive.
-        const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, channelMembers)])].sort()
+        const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, projectMembers)])].sort()
         setCurrentFacts(current => {
           const merged = mergeFacts(current, [{ kind: 'message', sequence: committed.message.sequence, message: committed.message, mentions: optimisticMentions, occurredAt: committed.receipt.occurredAt }])
           currentFactsRef.current = merged
@@ -490,17 +490,17 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
 
   const currentFactsWithAnchor = mergeFacts(projection === undefined ? [] : [messageFact(projection.anchor, projection.anchorMentions)], currentFacts)
   const resolvedTaskNumber = task === undefined ? undefined : taskNumberOf(task.taskRef)
-  const title = `${t('threadLabel')} · #${channelName}`
+  const title = `${t('threadLabel')} · #${projectName}`
 
-  return <aside ref={rootRef} className={channelCss.panel} aria-label={t('threadLabel')} data-team-panel={threadRef} data-team-thread={threadRef}>
+  return <aside ref={rootRef} className={projectCss.panel} aria-label={t('threadLabel')} data-team-panel={threadRef} data-team-thread={threadRef}>
     <TeamPanelHandle surface={surface} label={t('panelResize')} />
-    <div className={channelCss.panelHead}>
-      <span className={channelCss.panelTitle} title={title}>{title}</span>
+    <div className={projectCss.panelHead}>
+      <span className={projectCss.panelTitle} title={title}>{title}</span>
       {task === undefined && thread !== undefined && <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>}
       {task !== undefined && <Button size="sm" variant="primary" onClick={() => { onPromoted(task.taskRef) }}>{t('openTask', { number: resolvedTaskNumber ?? '…' })}</Button>}
       <Button size="sm" icon={<IconCloseOutlineRegular size={14} />} aria-label={t('panelClose')} onClick={onClose} />
     </div>
-    <section ref={timeline.ref} onScroll={timeline.onScroll} className={channelCss.panelBody} aria-label={t('timelineLabel')}>
+    <section ref={timeline.ref} onScroll={timeline.onScroll} className={projectCss.panelBody} aria-label={t('timelineLabel')}>
       {loading && projection === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingThread')}</p></div>}
       {projection === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void readCurrent() }}>{t('retry')}</Button></div>}
       {renderBlocks(olderFacts)}
@@ -515,7 +515,7 @@ export function TeamChannelPanel({ surface, workspaceId, channelRef, threadRef, 
       key={draftKey}
       members={members}
       followerMemberIds={followerIds}
-      channelPeerMemberIds={channelMemberIds}
+      projectPeerMemberIds={projectMemberIds}
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}

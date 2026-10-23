@@ -10,10 +10,10 @@ export interface TeamWorkspaceChoice {
 }
 
 /**
- * The single-line Workspace selector scoping the Team sidebar: Channels and Agents belong to one Workspace, so a selector
+ * The single-line Workspace selector scoping the Team sidebar: Projects and Agents belong to one Workspace, so a selector
  * reads as "you are in X". Cross-Workspace unread is summarized by the Inbox entry, which stays outside the selector.
  *
- * The trigger is a field, not a row, so it does not read as the first Channels entry; its accessible name states the shown
+ * The trigger is a field, not a row, so it does not read as the first Projects entry; its accessible name states the shown
  * Workspace. The menu is the only way to switch, so it takes focus on open and returns it to the trigger on Escape.
  */
 export function TeamWorkspaceSelector({ workspaces, selectedId, current, onSelect, t }: {

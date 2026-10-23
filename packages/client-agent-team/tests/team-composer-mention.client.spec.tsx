@@ -68,10 +68,10 @@ describe('TeamComposer mention menu', () => {
     vi.stubGlobal('localStorage', storage())
   })
 
-  it('offers every Workspace participant, not only the Channel roster', () => {
+  it('offers every Workspace participant, not only the Project roster', () => {
     const drafts = new TeamDraftStore()
-    const ui = render(<TeamComposer members={[inside, outsider]} channelPeerMemberIds={new Set([inside.member.memberId])} drafts={drafts}
-      draftKey={'channel:channel:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
+    const ui = render(<TeamComposer members={[inside, outsider]} projectPeerMemberIds={new Set([inside.member.memberId])} drafts={drafts}
+      draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@')
     const texts = optionTexts(ui)
@@ -79,12 +79,12 @@ describe('TeamComposer mention menu', () => {
     expect(texts.some(text => text.includes('outsider'))).toBe(true)
   })
 
-  it('ranks this Thread\'s followers above other Channel participants and the rest', () => {
+  it('ranks this Thread\'s followers above other Project participants and the rest', () => {
     const drafts = new TeamDraftStore()
     const ui = render(<TeamComposer members={[outsider, inside, follower]}
       followerMemberIds={new Set([follower.member.memberId])}
-      channelPeerMemberIds={new Set([inside.member.memberId])}
-      drafts={drafts} draftKey={'channel:channel:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
+      projectPeerMemberIds={new Set([inside.member.memberId])}
+      drafts={drafts} draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@')
     const memberRows = optionTexts(ui).filter(text => /insider|outsider|follower/u.test(text))
@@ -98,16 +98,16 @@ describe('TeamComposer mention menu', () => {
     expect(tiers).toEqual(['0', '1', '2'])
   })
 
-  it('keeps @all scoped to the Channel even when the picker offers the wider roster', () => {
+  it('keeps @all scoped to the Project even when the picker offers the wider roster', () => {
     const drafts = new TeamDraftStore()
-    const ui = render(<TeamComposer members={[inside, outsider]} channelPeerMemberIds={new Set([inside.member.memberId])} drafts={drafts}
-      draftKey={'channel:channel:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
+    const ui = render(<TeamComposer members={[inside, outsider]} projectPeerMemberIds={new Set([inside.member.memberId])} drafts={drafts}
+      draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@al')
 
     const allRow = [...ui.container.querySelectorAll('[role="option"]')].find(row => row.textContent?.includes('通知所有成员'))
     expect(allRow).toBeDefined()
-    // The count next to `@all` is the Channel's own participants; the Host
+    // The count next to `@all` is the Project's own participants; the Host
     // expands it the same way, so a Workspace-wide count would over-promise.
     expect(allRow?.textContent).toContain('1')
   })

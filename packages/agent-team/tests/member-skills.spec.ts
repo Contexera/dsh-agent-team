@@ -46,7 +46,7 @@ function memberSkillsHarness() {
 async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string): Promise<{ memberId: AgentTeamMemberId; sessionId: SessionId; privateMemoryPath: string }> {
   const added = await ctx.agentTeam.addMember({
     requestId: requestId(`add-${handle}`), workspaceId, handle, description: 'Skills member',
-    presetId: 'team-member', channelRefs: [],
+    presetId: 'team-member', projectRefs: [],
   })
   expect(added.status.availability).toBe('active')
   return {

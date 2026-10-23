@@ -98,4 +98,4 @@ A command-line overlay is not an equivalent mount. The Host row's Human-profile 
 
 `test:browser` does not cover the two preview lanes, so boot them by hand after any change to scaffold composition or profile resolution.
 
-The browser journey uses a deterministic keyless Host/Client driver. It covers Agent Inbox reading/replying, Human Channel and Thread navigation, persistence after reload, and restoration of the ordinary DSH surface after leaving Team mode.
+The browser journey uses a deterministic keyless Host/Client driver. It covers Agent Inbox reading/replying, Human Project and Thread navigation, persistence after reload, and restoration of the ordinary DSH surface after leaving Team mode.

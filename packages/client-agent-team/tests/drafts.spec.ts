@@ -26,17 +26,17 @@ describe('TeamDraftStore', () => {
   it('round-trips drafts and recipients per key and writes through to localStorage', () => {
     const store = new TeamDraftStore()
     const changes: string[] = []
-    const off = store.subscribe(() => { changes.push(store.getSnapshot('channel:channel:one' as never).draft) })
+    const off = store.subscribe(() => { changes.push(store.getSnapshot('project:project:one' as never).draft) })
 
-    store.writeDraft('channel:channel:one' as never, 'half written')
-    store.writeRecipients('channel:channel:one' as never, ['member:builder' as AgentTeamMemberId])
+    store.writeDraft('project:project:one' as never, 'half written')
+    store.writeRecipients('project:project:one' as never, ['member:builder' as AgentTeamMemberId])
 
-    const snapshot = store.getSnapshot('channel:channel:one' as never)
+    const snapshot = store.getSnapshot('project:project:one' as never)
     expect(snapshot.draft).toBe('half written')
     expect([...snapshot.recipients]).toEqual(['member:builder'])
     // Snapshot identity is stable across unrelated reads for useSyncExternalStore.
-    expect(store.getSnapshot('channel:channel:one' as never)).toBe(snapshot)
-    expect(stored()['channel:channel:one']).toMatchObject({ draft: 'half written', recipientIds: ['member:builder'] })
+    expect(store.getSnapshot('project:project:one' as never)).toBe(snapshot)
+    expect(stored()['project:project:one']).toMatchObject({ draft: 'half written', recipientIds: ['member:builder'] })
     expect(changes).toEqual(['half written', 'half written'])
     off()
   })
@@ -52,38 +52,43 @@ describe('TeamDraftStore', () => {
     expect([...snapshot.recipients]).toEqual(['member:lead'])
   })
 
+  it('keeps a Project draft saved before Projects were renamed from Channels', () => {
+    localStorage.setItem(TEAM_DRAFTS_STORAGE_KEY, JSON.stringify({ 'channel:channel:old': { draft: 'kept', recipientIds: [], savedAt: 1 } }))
+    expect(new TeamDraftStore().getSnapshot('project:project:old' as never).draft).toBe('kept')
+  })
+
   it('clears one key on demand and keeps sibling keys intact', () => {
     const store = new TeamDraftStore()
-    store.writeDraft('channel:channel:a' as never, 'keep me')
+    store.writeDraft('project:project:a' as never, 'keep me')
     store.writeDraft('thread:thread:b' as never, 'drop me')
 
     store.clear('thread:thread:b' as never)
 
     expect(store.getSnapshot('thread:thread:b' as never)).toEqual({ draft: '', recipients: new Set() })
-    expect(store.getSnapshot('channel:channel:a' as never).draft).toBe('keep me')
-    expect(Object.keys(stored())).toEqual(['channel:channel:a'])
+    expect(store.getSnapshot('project:project:a' as never).draft).toBe('keep me')
+    expect(Object.keys(stored())).toEqual(['project:project:a'])
   })
 
   it('drops fully emptied composers instead of storing them', () => {
     const store = new TeamDraftStore()
-    store.writeDraft('channel:channel:a' as never, 'text')
-    store.writeDraft('channel:channel:a' as never, '')
+    store.writeDraft('project:project:a' as never, 'text')
+    store.writeDraft('project:project:a' as never, '')
 
-    expect(stored()['channel:channel:a']).toBeUndefined()
-    store.writeDraft('channel:channel:empty' as never, '')
-    expect(stored()['channel:channel:empty']).toBeUndefined()
+    expect(stored()['project:project:a']).toBeUndefined()
+    store.writeDraft('project:project:empty' as never, '')
+    expect(stored()['project:project:empty']).toBeUndefined()
   })
 
   it('ignores identical rewrites instead of bumping savedAt or notifying', () => {
     const store = new TeamDraftStore()
-    store.writeDraft('channel:channel:a' as never, 'same')
-    const before = (stored()['channel:channel:a'] as { savedAt: number }).savedAt
+    store.writeDraft('project:project:a' as never, 'same')
+    const before = (stored()['project:project:a'] as { savedAt: number }).savedAt
     let notifications = 0
     const off = store.subscribe(() => { notifications += 1 })
 
-    store.writeDraft('channel:channel:a' as never, 'same')
+    store.writeDraft('project:project:a' as never, 'same')
 
-    expect((stored()['channel:channel:a'] as { savedAt: number }).savedAt).toBe(before)
+    expect((stored()['project:project:a'] as { savedAt: number }).savedAt).toBe(before)
     expect(notifications).toBe(0)
     off()
   })
@@ -91,27 +96,27 @@ describe('TeamDraftStore', () => {
   it('evicts the oldest entries beyond the retention limit', () => {
     const store = new TeamDraftStore()
     for (let index = 0; index < 51; index += 1) {
-      store.writeDraft(`channel:channel:${index}` as never, `draft ${index}`)
+      store.writeDraft(`project:project:${index}` as never, `draft ${index}`)
     }
-    expect(store.getSnapshot('channel:channel:0' as never).draft).toBe('')
-    expect(store.getSnapshot('channel:channel:50' as never).draft).toBe('draft 50')
+    expect(store.getSnapshot('project:project:0' as never).draft).toBe('')
+    expect(store.getSnapshot('project:project:50' as never).draft).toBe('draft 50')
     expect(Object.keys(stored())).toHaveLength(50)
   })
 
   it('tolerates malformed persisted content', () => {
     localStorage.setItem(TEAM_DRAFTS_STORAGE_KEY, '{broken')
-    expect(new TeamDraftStore().getSnapshot('channel:channel:a' as never)).toEqual({ draft: '', recipients: new Set() })
+    expect(new TeamDraftStore().getSnapshot('project:project:a' as never)).toEqual({ draft: '', recipients: new Set() })
 
     localStorage.setItem(TEAM_DRAFTS_STORAGE_KEY, JSON.stringify({
-      'channel:good': { draft: 'kept', recipientIds: [], savedAt: 1 },
+      'project:good': { draft: 'kept', recipientIds: [], savedAt: 1 },
       'bogus:key': { draft: 'wrong prefix', recipientIds: [], savedAt: 1 },
-      'channel:mismatch': { draft: 42, recipientIds: [], savedAt: 1 },
+      'project:mismatch': { draft: 42, recipientIds: [], savedAt: 1 },
       'thread:no-recipients': { draft: 'no ids', savedAt: 1 },
     }))
     const store = new TeamDraftStore()
-    expect(store.getSnapshot('channel:good' as never).draft).toBe('kept')
+    expect(store.getSnapshot('project:good' as never).draft).toBe('kept')
     expect(store.getSnapshot('bogus:key' as never).draft).toBe('')
-    expect(store.getSnapshot('channel:mismatch' as never).draft).toBe('')
+    expect(store.getSnapshot('project:mismatch' as never).draft).toBe('')
     expect(store.getSnapshot('thread:no-recipients' as never).draft).toBe('')
   })
 })

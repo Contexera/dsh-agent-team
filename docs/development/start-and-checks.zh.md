@@ -103,4 +103,4 @@ npm run test:browser
 
 `test:browser` 不覆盖这两条 preview 通道。改动 scaffold composition 或 profile resolution 之后，必须手工启动它们各一次。
 
-`test:browser` 固定使用 keyless、确定性的 Host/Client 驱动，不读取真实 provider 凭据。代表性链路从已有 Thread 开始。Human 两次确认邀请未关注 Agent。随后验证 Agent Inbox 读取/回复、Human Channel 与 Thread、页面 reload 后的 Host 持久事实。退出 Team mode 后验证普通 DSH surface 恢复。
+`test:browser` 固定使用 keyless、确定性的 Host/Client 驱动，不读取真实 provider 凭据。代表性链路从已有 Thread 开始。Human 两次确认邀请未关注 Agent。随后验证 Agent Inbox 读取/回复、Human Project 与 Thread、页面 reload 后的 Host 持久事实。退出 Team mode 后验证普通 DSH surface 恢复。

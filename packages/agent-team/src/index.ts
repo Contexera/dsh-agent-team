@@ -56,8 +56,8 @@ import type {
   AgentTeamAddMemberResult,
   AgentTeamAgentMember,
   AgentTeamAgentMemberStatus,
-  AgentTeamArchiveChannelRequest,
-  AgentTeamArchiveChannelResult,
+  AgentTeamArchiveProjectRequest,
+  AgentTeamArchiveProjectResult,
   AgentTeamArchiveMemberRequest,
   AgentTeamArchiveMemberResult,
   AgentTeamChangeScope,
@@ -70,8 +70,8 @@ import type {
   AgentTeamClientMemberStatus,
   AgentTeamAttachmentId,
   AgentTeamModelSelection,
-  AgentTeamCreateChannelRequest,
-  AgentTeamCreateChannelResult,
+  AgentTeamCreateProjectRequest,
+  AgentTeamCreateProjectResult,
   AgentTeamEnvironmentRequest,
   AgentTeamEnvironmentResult,
   AgentTeamGetAttachmentRequest,
@@ -146,8 +146,8 @@ import type {
   AgentTeamMemberDiagnostic,
   AgentTeamThreadObservations,
   AgentTeamThreadObservationsRequest,
-  AgentTeamUpdateChannelRequest,
-  AgentTeamUpdateChannelResult,
+  AgentTeamUpdateProjectRequest,
+  AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
   AgentTeamUpdateMemberResult,
   AgentTeamView,
@@ -206,7 +206,7 @@ interface InboxNoticeDelivery {
 
 function sameChangeScope(left: AgentTeamChangeScope, right: AgentTeamChangeScope): boolean {
   if (left.kind === 'workspace' && right.kind === 'workspace') return left.workspaceId === right.workspaceId
-  if (left.kind === 'channel' && right.kind === 'channel') return left.channelRef === right.channelRef
+  if (left.kind === 'project' && right.kind === 'project') return left.projectRef === right.projectRef
   if (left.kind === 'thread' && right.kind === 'thread') return left.threadRef === right.threadRef
   if (left.kind === 'presence' && right.kind === 'presence') return left.workspaceId === right.workspaceId
   return false
@@ -454,7 +454,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /**
    * The `Replies to:` line for one notice, or nothing when it answers nothing.
-   * An unresolvable target (e.g. an archived Channel) falls back to the bare ref.
+   * An unresolvable target (e.g. an archived Project) falls back to the bare ref.
    */
   private repliesToLine(message: AgentTeamMessage, workspaceId: WorkspaceId): string | undefined {
     const ref = message.replyToMessageRef
@@ -895,41 +895,41 @@ export default class AgentTeam extends TypertRemoteService {
     return this.requireLedger().status()
   }
 
-  @Remote('createChannel')
-  async createChannel(request: AgentTeamCreateChannelRequest): Promise<AgentTeamCreateChannelResult> {
+  @Remote('createProject')
+  async createProject(request: AgentTeamCreateProjectRequest): Promise<AgentTeamCreateProjectResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
     const ledger = this.requireLedger()
-    if (!ledger.hasCommitted(request.requestId)) this.assertChannelMembersAvailable(request.memberIds)
-    const result = await ledger.createChannel({ ...request, actor: agentTeamHumanActor() })
+    if (!ledger.hasCommitted(request.requestId)) this.assertProjectMembersAvailable(request.memberIds)
+    const result = await ledger.createProject({ ...request, actor: agentTeamHumanActor() })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
 
-  /** Human rename of one Channel's display facts; identity refs are immutable. */
-  @Remote('updateChannel')
-  async updateChannel(request: AgentTeamUpdateChannelRequest): Promise<AgentTeamUpdateChannelResult> {
+  /** Human rename of one Project's display facts; identity refs are immutable. */
+  @Remote('updateProject')
+  async updateProject(request: AgentTeamUpdateProjectRequest): Promise<AgentTeamUpdateProjectResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
-    const result = await this.requireLedger().updateChannel({ ...request, actor: agentTeamHumanActor() })
+    const result = await this.requireLedger().updateProject({ ...request, actor: agentTeamHumanActor() })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
 
   /**
-   * Archive one Channel: hidden from every surface with all facts kept. Member sessions stay live,
+   * Archive one Project: hidden from every surface with all facts kept. Member sessions stay live,
    * active Claims on its Threads release, and affected Members' Attention clears.
    */
-  @Remote('archiveChannel')
-  async archiveChannel(request: AgentTeamArchiveChannelRequest): Promise<AgentTeamArchiveChannelResult> {
+  @Remote('archiveProject')
+  async archiveProject(request: AgentTeamArchiveProjectRequest): Promise<AgentTeamArchiveProjectResult> {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
-    const result = await this.requireLedger().archiveChannel({ ...request, actor: agentTeamHumanActor() })
+    const result = await this.requireLedger().archiveProject({ ...request, actor: agentTeamHumanActor() })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
 
-  /** Create a durable Member and atomically grant its declared initial Channels. */
+  /** Create a durable Member and atomically grant its declared initial Projects. */
   @Remote('addMember')
   async addMember(request: AgentTeamAddMemberRequest): Promise<AgentTeamAddMemberResult> {
     return this.enqueueAddition(request.requestId, async () => {
@@ -1954,11 +1954,11 @@ export default class AgentTeam extends TypertRemoteService {
     if (result.committed && result.value.kind === 'committed' && result.value.receipt !== undefined) this.emitCommitted(result.value.receipt)
   }
 
-  private assertChannelMembersAvailable(memberIds: readonly AgentTeamMemberId[] | undefined): void {
+  private assertProjectMembersAvailable(memberIds: readonly AgentTeamMemberId[] | undefined): void {
     for (const memberId of memberIds ?? []) {
       const member = this.requireLedger().getMember(memberId)
       if (member === undefined) throw new Error(`unknown Agent Member '${memberId}'`)
-      if (this.memberStatus(member).availability !== 'active') throw new Error(`Agent Member '${memberId}' is not available for Channel membership`)
+      if (this.memberStatus(member).availability !== 'active') throw new Error(`Agent Member '${memberId}' is not available for Project membership`)
     }
   }
 
@@ -2706,7 +2706,7 @@ export default class AgentTeam extends TypertRemoteService {
       return true
     }
     for (const { item, facts } of notifications.slice(0, 8)) {
-      if (!append(`Workspace: ${item.workspaceId}\nChannel: ${item.channelRef}`)) break
+      if (!append(`Workspace: ${item.workspaceId}\nProject: ${item.projectRef}`)) break
       for (const { fact, direct } of facts) {
         if (detailedFactCount >= 20) {
           omitted = true
@@ -2716,7 +2716,7 @@ export default class AgentTeam extends TypertRemoteService {
           const sender = fact.message.sender === AGENT_TEAM_HUMAN_MEMBER_ID
             ? 'human' : this.requireLedger().getMember(fact.message.sender)?.handle ?? fact.message.sender
           const repliesTo = this.repliesToLine(fact.message, item.workspaceId)
-          const detail = ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Channel: ${item.channelRef}`,
+          const detail = ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Project: ${item.projectRef}`,
             ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
             `Thread: ${item.thread.threadRef}`, `Message ref: ${fact.message.messageRef}`,
             ...(repliesTo === undefined ? [] : [repliesTo]),
@@ -2853,7 +2853,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   private validateChangeScope(scope: AgentTeamChangeScope | undefined): AgentTeamChangeScope | undefined {
     if (scope === undefined) return undefined
-    const ref = scope.kind === 'workspace' || scope.kind === 'presence' ? scope.workspaceId : scope.kind === 'channel' ? scope.channelRef : scope.threadRef
+    const ref = scope.kind === 'workspace' || scope.kind === 'presence' ? scope.workspaceId : scope.kind === 'project' ? scope.projectRef : scope.threadRef
     if (typeof ref !== 'string' || ref.length === 0) throw new Error(`change scope of kind '${scope.kind}' requires a non-empty ref`)
     return scope
   }

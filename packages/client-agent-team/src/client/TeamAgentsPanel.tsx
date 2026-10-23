@@ -202,15 +202,15 @@ export function TeamAgentsPanel({ workspaceId, loadMembers, subscribeChanges, ad
     const sameRequest = retryRequest !== undefined && retryRequest.workspaceId === workspaceId
       && retryRequest.handle === normalizedHandle && retryRequest.description === normalizedDescription
       && sameModel(retryRequest.model, model)
-      && retryRequest.channelRefs.length === 0
+      && retryRequest.projectRefs.length === 0
     void provision(sameRequest ? retryRequest : {
       requestId: mintRequestId(),
       workspaceId,
       handle: normalizedHandle,
       description: normalizedDescription,
       presetId: 'team-member',
-      // No initial Channels: the Member joins later from the Channel side, reachable through its DM view meanwhile.
-      channelRefs: [],
+      // No initial Projects: the Member joins later from the Project side, reachable through its DM view meanwhile.
+      projectRefs: [],
       ...(model === undefined ? {} : { model }),
     })
   }

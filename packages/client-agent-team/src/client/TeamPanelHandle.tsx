@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import channelCss from './channel.module.css'
+import projectCss from './project.module.css'
 import { PANEL_MAX, PANEL_MIN, clampPanelWidth, readPanelWidthPreference, writePanelWidthPreference } from './panel-width.ts'
 
 const STEP = 24
@@ -29,7 +29,7 @@ export function TeamPanelHandle({ surface, label }: {
     return Number.isFinite(declared) ? declared : clampPanelWidth(surface.offsetWidth * 0.52, surface.offsetWidth)
   }, [surface])
 
-  // Once per mounted surface: the choice follows the reader across channels, each
+  // Once per mounted surface: the choice follows the reader across projects, each
   // re-clamping it to its own width.
   useEffect(() => {
     if (surface === null) return
@@ -103,7 +103,7 @@ export function TeamPanelHandle({ surface, label }: {
   return (
     <button
       type="button"
-      className={channelCss.panelHandle}
+      className={projectCss.panelHandle}
       role="separator"
       aria-orientation="vertical"
       aria-label={label}

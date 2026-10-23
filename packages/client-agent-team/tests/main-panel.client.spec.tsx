@@ -42,7 +42,7 @@ describe('Team mode and the shell main panel', () => {
   })
 
   it('keeps the Team panel selected while the mode navigates inside itself', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
     await act(async () => { b.selectPanel('agent-team') })
     // The Team's own overview stands in the column while the panel is selected.
     expect(await b.view.findByRole('button', { name: '# engineering' })).toBeTruthy()

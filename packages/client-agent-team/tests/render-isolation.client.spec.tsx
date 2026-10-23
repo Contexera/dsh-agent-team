@@ -55,7 +55,7 @@ interface Counts {
   readonly rows: number
   readonly composers: number
   readonly readThread: number
-  /** Channel views that carry a threadRef: this page's own supplemental read. */
+  /** Project views that carry a threadRef: this page's own supplemental read. */
   readonly pageRounds: number
   readonly view: number
   readonly members: number
@@ -71,8 +71,8 @@ function counts(b: Runtime): Counts {
     rows: counters.messages.length,
     composers: counters.composers,
     readThread: b.readThread.mock.calls.length,
-    pageRounds: b.viewChannels.mock.calls.filter(([request]) => (request as { threadRef?: string }).threadRef !== undefined).length,
-    view: b.viewChannels.mock.calls.length,
+    pageRounds: b.viewProjects.mock.calls.filter(([request]) => (request as { threadRef?: string }).threadRef !== undefined).length,
+    view: b.viewProjects.mock.calls.length,
     members: b.members.mock.calls.length,
     history: b.loadThreadHistory.mock.calls.length,
     observations: b.threadObservations.mock.calls.length,
@@ -100,7 +100,7 @@ async function settle(b: Runtime): Promise<void> {
   }
 }
 
-/** Open the seeded Channel and follow the first Task footer into its Thread page. */
+/** Open the seeded Project and follow the first Task footer into its Thread page. */
 async function openThread(b: Runtime): Promise<void> {
   fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
   // Every seeded message is its own top-level Task entry, so the footer label
@@ -123,7 +123,7 @@ describe('Thread page render isolation', () => {
     const bursts: Array<Record<keyof Counts, number>> = []
     const arrivals: Array<Record<keyof Counts, number>> = []
     for (const count of [10, 30]) {
-      const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seededMessages: seed(count) })
+      const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seededMessages: seed(count) })
       await openThread(b)
       const input = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
 

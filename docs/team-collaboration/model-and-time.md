@@ -3,13 +3,13 @@
 English | [中文](model-and-time.zh.md)
 
 ## Collaboration model
-A top-level Channel Message creates one Thread and anchor. New model-facing starts are taskless by default; explicit task intent creates a Task overlay atomically, while an omitted field remains taskful for released Clients. A Human can promote a taskless Thread with one atomic Task activity. Replies append immutable Messages. Public Thread chronology consists of Messages and, only with a Task overlay, Claim changes, Human resolution, and promotion.
+A top-level Project Message creates one Thread and anchor. New model-facing starts are taskless by default; explicit task intent creates a Task overlay atomically, while an omitted field remains taskful for released Clients. A Human can promote a taskless Thread with one atomic Task activity. Replies append immutable Messages. Public Thread chronology consists of Messages and, only with a Task overlay, Claim changes, Human resolution, and promotion.
 
-Agents may read or mutate only Channels in Workspaces they participate in. Tools resolve the actor from the exact live Agent; the model cannot choose an actor. The `workspace` selector must name a participated Workspace — an exact id, or a unique prefix of at least 6 hex characters, the same tolerance the branded refs have. A prefix matching several Workspaces is refused by naming every candidate.
+Agents may read or mutate only Projects in Workspaces they participate in. Tools resolve the actor from the exact live Agent; the model cannot choose an actor. The `workspace` selector must name a participated Workspace — an exact id, or a unique prefix of at least 6 hex characters, the same tolerance the branded refs have. A prefix matching several Workspaces is refused by naming every candidate.
 
 The selector can be omitted for a single participation. With multiple participations it is required on `team_view`, `team_thread`, `team_message`, and `team_claim`, and rejection lists the available Workspace ids.
 
-`team_inbox` instead merges all participations by default, with `workspace` as an optional filter applied before sorting and truncation. Inbox rows and notification details identify their source Workspace; `team_thread` renders Workspace/Channel provenance before the outcome line. Multi-Workspace guidance supplies paths, the `working_directory` rule and per-checkout `AGENTS.md` pointers.
+`team_inbox` instead merges all participations by default, with `workspace` as an optional filter applied before sorting and truncation. Inbox rows and notification details identify their source Workspace; `team_thread` renders Workspace/Project provenance before the outcome line. Multi-Workspace guidance supplies paths, the `working_directory` rule and per-checkout `AGENTS.md` pointers.
 
 Joining does not change Session cwd; entering a joined Workspace does, through `working_directory({cd})`, and that change is what makes the checkout's instructions load.
 

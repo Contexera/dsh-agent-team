@@ -29,31 +29,37 @@ describe('moveSidebarItem persistence semantics', () => {
   const refs: readonly Ref[] = ['a', 'b', 'c']
 
   it('commits once per gesture path and persists across reloads', () => {
-    expect(moveSidebarItem('w1' as never, 'channels', refs, 'c', 'a', 'before')).toEqual(['c', 'a', 'b'])
-    const first = renderHook(() => useSidebarOrder<Ref>('w1' as never, 'channels', refs)).result.current
+    expect(moveSidebarItem('w1' as never, 'projects', refs, 'c', 'a', 'before')).toEqual(['c', 'a', 'b'])
+    const first = renderHook(() => useSidebarOrder<Ref>('w1' as never, 'projects', refs)).result.current
     expect(first).toEqual(['c', 'a', 'b'])
   })
 
   it('no-ops on self-drops, no-op moves, unknown refs, and missing workspace', () => {
-    expect(moveSidebarItem('w1' as never, 'channels', refs, 'a', 'a', 'after')).toBeUndefined()
-    expect(moveSidebarItem('w1' as never, 'channels', refs, 'b', 'a', 'after')).toBeUndefined()
-    expect(moveSidebarItem('w1' as never, 'channels', refs, 'x' as never, 'a', 'before')).toBeUndefined()
-    expect(moveSidebarItem(undefined, 'channels', refs, 'c', 'a', 'before')).toBeUndefined()
+    expect(moveSidebarItem('w1' as never, 'projects', refs, 'a', 'a', 'after')).toBeUndefined()
+    expect(moveSidebarItem('w1' as never, 'projects', refs, 'b', 'a', 'after')).toBeUndefined()
+    expect(moveSidebarItem('w1' as never, 'projects', refs, 'x' as never, 'a', 'before')).toBeUndefined()
+    expect(moveSidebarItem(undefined, 'projects', refs, 'c', 'a', 'before')).toBeUndefined()
     // None of the failed moves persisted.
-    const after = renderHook(() => useSidebarOrder<Ref>('w1' as never, 'channels', refs)).result.current
+    const after = renderHook(() => useSidebarOrder<Ref>('w1' as never, 'projects', refs)).result.current
     expect(after).toEqual(refs)
   })
 
   it('isolates workspaces and list kinds; corrupted storage falls back to default order', () => {
-    moveSidebarItem('w1' as never, 'channels', refs, 'c', 'a', 'before')
+    moveSidebarItem('w1' as never, 'projects', refs, 'c', 'a', 'before')
     moveSidebarItem('w2' as never, 'agents', ['x', 'y'], 'y', 'x', 'before')
-    expect(renderHook(() => useSidebarOrder<Ref>('w1' as never, 'channels', refs)).result.current).toEqual(['c', 'a', 'b'])
+    expect(renderHook(() => useSidebarOrder<Ref>('w1' as never, 'projects', refs)).result.current).toEqual(['c', 'a', 'b'])
     expect(renderHook(() => useSidebarOrder<Ref>('w1' as never, 'agents', refs)).result.current).toEqual(refs)
     // A payload written behind this module's back replaces everything it can
     // no longer parse: the exact corruption semantics are "no preference".
     localStorage.setItem('dsh.agent-team.sidebar-order', '{oops')
     const corrupted = renderHook(() => useSidebarOrder<'x' | 'y'>('w2' as never, 'agents', ['x', 'y'] as ('x' | 'y')[])).result.current
     expect(corrupted).toEqual(['x', 'y'])
+  })
+
+  it('keeps a Project order saved before Projects were renamed from Channels', () => {
+    localStorage.setItem('dsh.agent-team.sidebar-order', JSON.stringify({ 'w1|channels': ['channel:c', 'channel:a'] }))
+    const projects = ['project:a', 'project:b', 'project:c'] as never[]
+    expect(renderHook(() => useSidebarOrder('w1' as never, 'projects', projects)).result.current).toEqual(['project:c', 'project:a', 'project:b'])
   })
 
   it('presence-style data changes keep the personal relative order stable', () => {

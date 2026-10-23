@@ -15,7 +15,7 @@ export type TeamChangeListener = (update: TeamChangeUpdate) => void
 function scopeKey(scope: TeamChangeScope): string {
   return scope === undefined ? 'all'
     : scope.kind === 'workspace' ? `workspace:${scope.workspaceId}`
-    : scope.kind === 'channel' ? `channel:${scope.channelRef}`
+    : scope.kind === 'project' ? `project:${scope.projectRef}`
     : scope.kind === 'presence' ? `presence:${scope.workspaceId}`
     : `thread:${scope.threadRef}`
 }

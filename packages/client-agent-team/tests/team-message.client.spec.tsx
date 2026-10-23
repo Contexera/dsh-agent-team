@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamProjectRef, AgentTeamMemberId, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
 import { rememberResolvedThreadRef, type ResolvedThreadRef } from '../src/client/refs.ts'
@@ -129,7 +129,7 @@ describe('TeamMessage structured mention rendering', () => {
         onResolveThreadRefs={async threadRefs => {
           const entries = threadRefs.map((ref): ResolvedThreadRef => ({
             threadRef: ref,
-            channelRef: 'channel:11111111-2222-4333-8333-111111111111' as AgentTeamChannelRef,
+            projectRef: 'project:11111111-2222-4333-8333-111111111111' as AgentTeamProjectRef,
             title: 'alpha discussion opens here',
           }))
           for (const entry of entries) rememberResolvedThreadRef(entry)
@@ -162,7 +162,7 @@ describe('TeamMessage structured mention rendering', () => {
         onResolveThreadRefs={async threadRefs => {
           const entries = threadRefs.map((ref, index): ResolvedThreadRef => ({
             threadRef: ref,
-            channelRef: 'channel:11111111-2222-4333-8333-111111111111' as AgentTeamChannelRef,
+            projectRef: 'project:11111111-2222-4333-8333-111111111111' as AgentTeamProjectRef,
             title: index === 0 ? 'alpha root marker' : 'beta root marker',
           }))
           for (const entry of entries) rememberResolvedThreadRef(entry)
@@ -202,9 +202,9 @@ describe('TeamMessage structured mention rendering', () => {
     expect(container.textContent).toContain(unknownRef)
   })
 
-  it('names known channel refs and leaves unknown ones as plain text', async () => {
-    const knownRef = 'channel:11111111-2222-4333-8333-111111111111' as AgentTeamChannelRef
-    const unknownRef = 'channel:99999999-2222-4333-8333-999999999999' as AgentTeamChannelRef
+  it('names known project refs and leaves unknown ones as plain text', async () => {
+    const knownRef = 'project:11111111-2222-4333-8333-111111111111' as AgentTeamProjectRef
+    const unknownRef = 'project:99999999-2222-4333-8333-999999999999' as AgentTeamProjectRef
     const opened: string[] = []
     const { container, findByRole } = render(
       <TeamMessage
@@ -213,11 +213,11 @@ describe('TeamMessage structured mention rendering', () => {
         human={false}
         body={`见 ${knownRef} 和 ${unknownRef} 定夺`}
         onOpenRef={ref => { opened.push(ref) }}
-        channelNameOf={ref => ref === knownRef ? '工程' : undefined}
+        projectNameOf={ref => ref === knownRef ? '工程' : undefined}
         t={t}
       />,
     )
-    const chip = await findByRole('button', { name: '频道 · 工程' })
+    const chip = await findByRole('button', { name: '项目 · 工程' })
     expect(chip.getAttribute('title')).toBe(knownRef)
     fireEvent.click(chip)
     expect(opened).toEqual([knownRef])
@@ -472,7 +472,7 @@ describe('TeamMessage reading row and mention line', () => {
     expect(head.container.querySelector('strong')!.parentElement!.textContent).toContain(formatMessageTime('2026-10-09T12:34:00.000Z'))
     cleanup()
 
-    // A surface that never asked for the reading language — the Channel feed —
+    // A surface that never asked for the reading language — the Project feed —
     // renders no time at all: the Thread owns all of it.
     const feed = render(
       <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="续一条" grouped occurredAt="2026-10-09T12:34:00.000Z" t={t} />,
@@ -589,7 +589,7 @@ describe('TeamMessage quote line and card actions', () => {
     rerender(<TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以"
       messageRef={'message:abc' as never} replyTarget t={t} />)
     expect(container.querySelector('[data-replying-to]')).not.toBeNull()
-    // A row without the action offers none: the Channel feed passes no onReply.
+    // A row without the action offers none: the Project feed passes no onReply.
     rerender(<TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="可以" t={t} />)
     expect(container.querySelector('[data-message-card]')).toBeNull()
     expect(container.querySelector('[data-replying-to]')).toBeNull()

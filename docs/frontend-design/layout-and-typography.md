@@ -3,21 +3,21 @@
 English | [中文](layout-and-typography.zh.md)
 
 ## Layout skeleton
-Channel and Thread surfaces use `display:grid; grid-template-rows: auto 1fr auto` for header, scrollable timeline, and composer at `height:100%`, with contained inner scrolling. The content column is centered at `max-width: 880px`; timeline padding is `clamp(18px, 3vw, 36px)`.
+Project and Thread surfaces use `display:grid; grid-template-rows: auto 1fr auto` for header, scrollable timeline, and composer at `height:100%`, with contained inner scrolling. The content column is centered at `max-width: 880px`; timeline padding is `clamp(18px, 3vw, 36px)`.
 
-The Channel page's feed stage takes the content and composer rows together (`grid-row: 2 / 4`) so an open discussion panel can span both. At `max-width: 600px`, padding tightens and the header stacks; acceptance covers 390×844 without horizontal overflow. The host sidebar controls wide/rail widths; rail renders Team icon buttons.
+The Project page's feed stage takes the content and composer rows together (`grid-row: 2 / 4`) so an open discussion panel can span both. At `max-width: 600px`, padding tightens and the header stacks; acceptance covers 390×844 without horizontal overflow. The host sidebar controls wide/rail widths; rail renders Team icon buttons.
 
-Browser storage retains Team mode, Workspace, the last Channel/Thread location, and the Inbox page position (a navigation fact, not an unread fact), but never unread or Attention. Welcome is a separate centered surface. Thread is the navigation endpoint; an existing Task is a header/card overlay. Taskless Threads show a localized Thread/讨论 label and a promote action, never a fake status. Closed Tasks replace the composer with an explanatory notice and reopen action; taskless Threads retain the normal reply composer.
+Browser storage retains Team mode, Workspace, the last Project/Thread location, and the Inbox page position (a navigation fact, not an unread fact), but never unread or Attention. Welcome is a separate centered surface. Thread is the navigation endpoint; an existing Task is a header/card overlay. Taskless Threads show a localized Thread/讨论 label and a promote action, never a fake status. Closed Tasks replace the composer with an explanatory notice and reopen action; taskless Threads retain the normal reply composer.
 
-Channel and Thread pages share a header band, a hairline, and the 880px centered reading column, and both subscribe to workspace changes through the shared abortable `TeamChangeStream`; every opening or reconnection baseline requests a catch-up read, followed by matching streamed invalidations.
+Project and Thread pages share a header band, a hairline, and the 880px centered reading column, and both subscribe to workspace changes through the shared abortable `TeamChangeStream`; every opening or reconnection baseline requests a catch-up read, followed by matching streamed invalidations.
 
-The Channel band is the shipped session header's shape at its own rhythm — a 30px identity row under a 10px top inset, then the tab strip. Its identity row is the Channel title with the description beside it on the title's baseline, clamped to one line with the full text on its `title`, so the band's height never depends on how much someone wrote into the description.
+The Project band is the shipped session header's shape at its own rhythm — a 30px identity row under a 10px top inset, then the tab strip. Its identity row is the Project title with the description beside it on the title's baseline, clamped to one line with the full text on its `title`, so the band's height never depends on how much someone wrote into the description.
 
-The band is pane chrome and does **not** share the reading column's edge. The shipped session header leaks left to a 20px inset (`padding: 10px 28px 0 20px`) while its transcript stays a centered column, so on that page the title and the words under it deliberately sit on different x positions; the Team surfaces copy that arrangement rather than centering the band over the column. The band carries no back row either: the browsing sidebar already lists every Channel, so a second way back would be a duplicate control on the page.
+The band is pane chrome and does **not** share the reading column's edge. The shipped session header leaks left to a 20px inset (`padding: 10px 28px 0 20px`) while its transcript stays a centered column, so on that page the title and the words under it deliberately sit on different x positions; the Team surfaces copy that arrangement rather than centering the band over the column. The band carries no back row either: the browsing sidebar already lists every Project, so a second way back would be a duplicate control on the page.
 
-The Channel page additionally seats a `频道 | 看板` tab strip on its header's closing rule and, for a taskless discussion, a 360px right-hand panel whose seat is reserved only while it is open; the board is the one Team surface allowed past the reading column, up to 1240px.
+The Project page additionally seats a `项目 | 看板` tab strip on its header's closing rule and, for a taskless discussion, a 360px right-hand panel whose seat is reserved only while it is open; the board is the one Team surface allowed past the reading column, up to 1240px.
 
-Successful Channel refreshes clear load errors without clearing unrelated action errors. Channel top-level and Thread replies are idempotent by request ID. The Channel 「作为任务」 control is a default-off native pressed control, sends explicit taskless intent unless selected, and resets off after success.
+Successful Project refreshes clear load errors without clearing unrelated action errors. Project top-level and Thread replies are idempotent by request ID. The Project 「作为任务」 control is a default-off native pressed control, sends explicit taskless intent unless selected, and resets off after success.
 
 It sits beside the attach control as the labeled mode chip of the language table above, keeping its word at every width — the composer narrows its control gaps below 560px instead of dropping the label.
 
@@ -36,11 +36,11 @@ It sits beside the attach control as the labeled mode chip of the language table
 | Entry state cluster | 11px/18px leading the entry row: 18px avatar circles, 8px status dot, status word, 18px unread capsule at 11px/600 |
 | Empty/loading | 13px tertiary; 8px pulsing dots, disabled for reduced motion |
 
-Message time comes from Host projection and shares the ledger operation instant. Consecutive same-sender messages form a run, and time is stated by the row itself: beside the name where the row has an identity line, in the avatar seat under the pointer where it is a continuation. A day boundary gets a centered date anchor, and the Channel feed alone draws a `TeamRunDivider` hairline at a five-minute boundary, with no instant on it. `team-separators.ts` is the single authority for both decisions.
+Message time comes from Host projection and shares the ledger operation instant. Consecutive same-sender messages form a run, and time is stated by the row itself: beside the name where the row has an identity line, in the avatar seat under the pointer where it is a continuation. A day boundary gets a centered date anchor, and the Project feed alone draws a `TeamRunDivider` hairline at a five-minute boundary, with no instant on it. `team-separators.ts` is the single authority for both decisions.
 
 The identity line and the avatar seat do not state the same label. The identity line has the reading column to itself and takes the whole wall-clock form (`formatMessageTime`: clock today, month-day within the year, full date across it).
 
-The seat is 34px and neither clips nor grows, so it states the time of day alone (`formatClockTime`). The dated forms measure 57px within the year and 87px across it — wide enough to paint over the words beside them. A run breaks at every calendar-day change, so a continuation always shares its run head's day and the date is already one row up. The exact instant stays on the label's `title` (`formatAbsoluteTime`), as the Inbox row and the Channel entry line do.
+The seat is 34px and neither clips nor grows, so it states the time of day alone (`formatClockTime`). The dated forms measure 57px within the year and 87px across it — wide enough to paint over the words beside them. A run breaks at every calendar-day change, so a continuation always shares its run head's day and the date is already one row up. The exact instant stays on the label's `title` (`formatAbsoluteTime`), as the Inbox row and the Project entry line do.
 
 Agent avatar hue is a stable hash of `memberId`; Human uses `--dsw-alias-state-business-primary`. That color and initial stay the Human's fallback: a stored profile avatar image replaces the initial in every seat the Human occupies, while the displayed name comes from the same profile projection, resolved once in `TeamConversation` as `name ?? t('human')` and passed down as `humanName` to both pages.
 
@@ -52,7 +52,7 @@ The `TeamAvatarStack` circles on a Thread entry reuse the same hue hash but carr
 
 No Agent seat ever draws an image — the hue and initial are the whole identity an Agent has — so the compact stack draws the Human's picture in the one chip that is the Human, and names that chip from the same profile projection.
 
-The Inbox row's leading cluster and the Channel feed's Thread entry rows each take the Human's Member id from the Host (`AgentTeamInbox.humanMemberId`, the same initialization record `AgentTeamView` carries). Each then lets `namedAvatarOwners(owners, human)` replace that one owner with `humanName`/`humanAvatarUrl`, so a rename moves the chip's letter and the stack's label together instead of leaving an initial the profile no longer uses.
+The Inbox row's leading cluster and the Project feed's Thread entry rows each take the Human's Member id from the Host (`AgentTeamInbox.humanMemberId`, the same initialization record `AgentTeamView` carries). Each then lets `namedAvatarOwners(owners, human)` replace that one owner with `humanName`/`humanAvatarUrl`, so a rename moves the chip's letter and the stack's label together instead of leaving an initial the profile no longer uses.
 
 Owners that are not the Human keep the shared initials, and bytes that do not decode fall back to the display name's initial through the same `useAvatarImage` the other seats use.
 

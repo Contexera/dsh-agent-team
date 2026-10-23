@@ -80,7 +80,7 @@
   min-width: 0;
 }
 
-/* Provenance is the row's identity: the Channel varies from row to row, so it leads in primary 600 while the Workspace stays
+/* Provenance is the row's identity: the Project varies from row to row, so it leads in primary 600 while the Workspace stays
    a quiet prefix. Styled runs are safe because the separator is a text node of its own, so the control's accessible name
    keeps its spaces. The one-line clamp stops a squeezed seat from crushing the run to two characters. */
 .rowCrumb {
@@ -97,7 +97,7 @@
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
 }
-.rowChannel {
+.rowProject {
   color: var(--dsw-alias-label-primary);
   font-weight: 600;
 }
@@ -115,9 +115,9 @@
   padding: 0 5px;
   white-space: nowrap;
 }
-/* The Task's standing rides the provenance run behind its number, as in the Channel feed's Thread entry row and the Thread
+/* The Task's standing rides the provenance run behind its number, as in the Project feed's Thread entry row and the Thread
    header: an 8px state dot then the status word, the shipped pill's 4px pairing at this row's 11px step. The pair is
-   inline-level, so a squeezed seat shortens it together with the Channel name instead of cutting its own hole in the line;
+   inline-level, so a squeezed seat shortens it together with the Project name instead of cutting its own hole in the line;
    a discussion draws nothing. */
 .rowTaskState {
   align-items: center;

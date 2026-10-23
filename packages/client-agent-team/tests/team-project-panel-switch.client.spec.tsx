@@ -10,26 +10,26 @@ afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
 /**
- * Two taskless discussions in one Channel, each with its own anchor. The panel
+ * Two taskless discussions in one Project, each with its own anchor. The panel
  * stays mounted while the reader moves from one to the other, so a read that is
  * not re-issued for the new Thread leaves the previous discussion's anchor on
  * screen — which is what this pins shut.
  */
-describe('Team Channel discussion panel switching', () => {
+describe('Team Project discussion panel switching', () => {
   it('reads the discussion the reader opened, not the one before it', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialChannels: true, seedTaskless: true, seededMessages: [
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seededMessages: [
       { body: '第一条讨论', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
     const bodies: Record<string, string> = { 'thread:1': '第一条讨论', 'thread:2': '第二条讨论' }
-    const base = b.viewChannels.getMockImplementation()!
-    b.viewChannels.mockImplementation(async (request: { threadRef?: string; topLevelOnly?: boolean }) => {
+    const base = b.viewProjects.getMockImplementation()!
+    b.viewProjects.mockImplementation(async (request: { threadRef?: string; topLevelOnly?: boolean }) => {
       const result = await base(request)
       if (!result.ok) return result
       // Only the feed's own window gains the second discussion: a thread-scoped
       // read answers for one Thread and is left alone.
       if (request.threadRef !== undefined || request.topLevelOnly !== true) return result
       return { ok: true as const, value: { ...result.value, items: [...result.value.items, {
-        message: { messageRef: 'message:seed-1', channelRef: 'channel:engineering', threadRef: 'thread:2', sender: 'member:human', body: bodies['thread:2'], topLevel: true, sequence: 2, occurredAt: '2026-10-14T10:00:00.000Z' },
+        message: { messageRef: 'message:seed-1', projectRef: 'project:engineering', threadRef: 'thread:2', sender: 'member:human', body: bodies['thread:2'], topLevel: true, sequence: 2, occurredAt: '2026-10-14T10:00:00.000Z' },
         mentions: [], thread: { threadRef: 'thread:2', revision: 2 }, liveClaimOwners: [], messageCount: 1,
         lastActivityAt: '2026-10-14T10:00:00.000Z',
       }] } }
@@ -43,7 +43,7 @@ describe('Team Channel discussion panel switching', () => {
       if (!result.ok) return result
       const threadRef = request.threadRef ?? 'thread:1'
       const anchor = threadRef === 'thread:2'
-        ? { messageRef: 'message:seed-1', channelRef: 'channel:engineering', threadRef, sender: 'member:human',
+        ? { messageRef: 'message:seed-1', projectRef: 'project:engineering', threadRef, sender: 'member:human',
             body: bodies[threadRef], topLevel: true, sequence: 2, occurredAt: '2026-10-14T10:00:00.000Z' }
         : result.value.anchor
       return { ok: true as const, value: {

@@ -137,7 +137,7 @@ function buildSharedHarness() {
     // working_directory is mounted for real: the allow-list union keeps it, and
     // the policy case below enters a second checkout through it.
     workingDirectory: 'real',
-    otherProjects: 1,
+    otherCheckouts: 1,
   })
 }
 
@@ -166,7 +166,7 @@ interface MemberFacts {
 async function addMember(ctx: Context, workspaceId: WorkspaceId, handle: string, capabilities?: AgentTeamMemberCapabilities): Promise<MemberFacts> {
   const added = await ctx.agentTeam.addMember({
     requestId: requestId(`add-${handle}`), workspaceId, handle, description: 'Policy member',
-    presetId: 'team-member', channelRefs: [], ...(capabilities === undefined ? {} : { capabilities }),
+    presetId: 'team-member', projectRefs: [], ...(capabilities === undefined ? {} : { capabilities }),
   })
   expect(added.status.availability).toBe('active')
   return { memberId: added.status.member.memberId, sessionId: added.status.member.sessionId, privateMemoryPath: added.status.member.privateMemoryPath }
@@ -201,8 +201,8 @@ describe('Agent Team member tool policy', () => {
 
   it('keeps working_directory on a narrowed Member so it can enter a joined Workspace', async () => {
     useAdapter(new EmptyAdapter())
-    const { ctx, workspaceId, otherProjects } = shared
-    const otherWorkspace = otherProjects[0]!
+    const { ctx, workspaceId, otherCheckouts } = shared
+    const otherWorkspace = otherCheckouts[0]!
     const narrow = await addMember(ctx, workspaceId, 't15-narrow', { tools: { allow: ['ordinary_tool'] } })
     const agent = liveAgent(ctx, narrow)
     // An allow-list narrows capability, never the Member's ability to be in the

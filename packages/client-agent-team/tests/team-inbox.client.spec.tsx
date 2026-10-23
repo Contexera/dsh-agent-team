@@ -13,10 +13,10 @@ beforeEach(() => { localStorage.clear() })
 function inboxRow(workspaceId: string, threadRef: string, overrides: Record<string, unknown> = {}): { readonly workspaceId: string } & Record<string, unknown> {
   return {
     workspaceId,
-    channelRef: 'channel:engineering',
-    channelName: 'engineering',
+    projectRef: 'project:engineering',
+    projectName: 'engineering',
     taskNumber: 1,
-    task: { taskRef: 'task:1', channelRef: 'channel:engineering', threadRef, status: 'in_progress', resolution: 'open' },
+    task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef, status: 'in_progress', resolution: 'open' },
     thread: { threadRef, taskRef: 'task:1', revision: 5 },
     unreadCount: 1,
     directCount: 1,
@@ -27,7 +27,7 @@ function inboxRow(workspaceId: string, threadRef: string, overrides: Record<stri
     // Member view of its own to name them.
     newestActor: { memberId: 'member:iris', name: 'iris' },
     // Nor a roster to draw a Task's live owners: the Host resolves those too, and
-    // an Inbox row leads with them the same way the Channel feed's entry does.
+    // an Inbox row leads with them the same way the Project feed's entry does.
     liveClaimOwners: [],
     ...overrides,
   }
@@ -89,7 +89,7 @@ describe('Team Inbox surfaces', () => {
     await waitForEntryUnread(card, 1)
     fireEvent.click(card)
     // The rows replace the empty state: one merged row for the seeded Workspace.
-    // The row addresses the reader by Channel, not by Workspace: with a single
+    // The row addresses the reader by Project, not by Workspace: with a single
     // Workspace on screen that name is the same on every row, so the identity
     // line spends its first position on what actually varies.
     const row = await b.view.findByRole('button', { name: /#engineering/ })
@@ -109,7 +109,7 @@ describe('Team Inbox surfaces', () => {
     expect(row.textContent).not.toContain('@1')
     expect(b.view.container.querySelector('[data-team-inbox] time')?.getAttribute('dateTime')).toBe('2026-09-13T04:00:00.000Z')
     expect(b.view.queryByText('收件箱是空的')).toBeNull()
-    // The queue carries the same header band as Channel and Thread: its name
+    // The queue carries the same header band as Project and Thread: its name
     // plus what the queue currently holds, as segments the reader scans rather
     // than a clause to parse.
     expect(b.view.getByRole('heading', { name: '收件箱' })).toBeTruthy()
@@ -134,12 +134,12 @@ describe('Team Inbox surfaces', () => {
     // Task's own fact, so no row may borrow its neighbour's, and a Thread that
     // is only a discussion must not grow one at all.
     const rows = standing.map(([, status], index) => inboxRow('w1', `thread:${status}`, {
-      channelName: status,
+      projectName: status,
       previewText: `${status} row`,
       taskNumber: index + 1,
-      task: { taskRef: `task:${index + 1}`, channelRef: 'channel:engineering', threadRef: `thread:${status}`, status, resolution: 'open' },
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${status}`, status, resolution: 'open' },
     }))
-    const tasklessRow = (): ReturnType<typeof inboxRow> => inboxRow('w1', 'thread:taskless', { channelName: 'taskless', previewText: 'taskless row', task: undefined, taskNumber: undefined })
+    const tasklessRow = (): ReturnType<typeof inboxRow> => inboxRow('w1', 'thread:taskless', { projectName: 'taskless', previewText: 'taskless row', task: undefined, taskNumber: undefined })
     await b.changeSubscriptionsReady()
     b.seedInbox([...rows, tasklessRow()])
     await waitForEntryUnread(card, 6)
@@ -203,8 +203,8 @@ describe('Team Inbox surfaces', () => {
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const rows = [
       inboxRow('w1', 'thread:named', { previewText: 'named row' }),
-      inboxRow('w1', 'thread:ambient', { channelName: 'delivery', previewText: 'ambient row', task: undefined, taskNumber: undefined, directCount: 0, unreadCount: 4, newestSequence: 12 }),
-      inboxRow('w1', 'thread:capped', { channelName: 'general', previewText: 'capped row', task: undefined, taskNumber: undefined, directCount: 3, unreadCount: 150, newestSequence: 13 }),
+      inboxRow('w1', 'thread:ambient', { projectName: 'delivery', previewText: 'ambient row', task: undefined, taskNumber: undefined, directCount: 0, unreadCount: 4, newestSequence: 12 }),
+      inboxRow('w1', 'thread:capped', { projectName: 'general', previewText: 'capped row', task: undefined, taskNumber: undefined, directCount: 3, unreadCount: 150, newestSequence: 13 }),
     ]
     await b.changeSubscriptionsReady()
     b.seedInbox(rows)
@@ -214,7 +214,7 @@ describe('Team Inbox surfaces', () => {
     const ambient = await b.view.findByRole('button', { name: /#delivery/ })
     const capped = await b.view.findByRole('button', { name: /#general/ })
     // The ink is the whole difference: the row that names the reader wears the
-    // solid fill the sidebar's unread dot and the Channel entry's count both
+    // solid fill the sidebar's unread dot and the Project entry's count both
     // speak, and the row that merely moved keeps a hairline in the same geometry.
     expect(named.hasAttribute('data-named')).toBe(true)
     expect(ambient.hasAttribute('data-named')).toBe(false)
@@ -232,7 +232,7 @@ describe('Team Inbox surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('leads a row with the Task\'s live owners in the Channel feed\'s own words, and with its newest actor when there are none', async () => {
+  it('leads a row with the Task\'s live owners in the Project feed\'s own words, and with its newest actor when there are none', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
     const rows = [
@@ -240,11 +240,11 @@ describe('Team Inbox surfaces', () => {
         { memberId: 'member:reviewer', name: 'reviewer' },
         { memberId: 'member:builder', name: 'builder' },
       ] }),
-      inboxRow('w1', 'thread:taskless', { channelName: 'delivery', previewText: 'taskless row', task: undefined, taskNumber: undefined }),
+      inboxRow('w1', 'thread:taskless', { projectName: 'delivery', previewText: 'taskless row', task: undefined, taskNumber: undefined }),
       // The tail answers 「谁在这个 Task 上」 exactly as the queue does: which cluster
       // a row leads with is the Thread's own fact, never the section's, or a
       // Thread would change shape on its way from the queue into the tail.
-      inboxRow('w1', 'thread:read', { channelName: 'general', previewText: 'read tail row', directCount: 0, unreadCount: 0, newestSequence: 2,
+      inboxRow('w1', 'thread:read', { projectName: 'general', previewText: 'read tail row', directCount: 0, unreadCount: 0, newestSequence: 2,
         liveClaimOwners: [{ memberId: 'member:vera', name: 'vera' }] }),
     ]
     await b.changeSubscriptionsReady()
@@ -252,7 +252,7 @@ describe('Team Inbox surfaces', () => {
     await waitForEntryUnread(card, 2)
     fireEvent.click(card)
     // One language for 「谁在这个 Task 上」 across both surfaces: the same stack, the
-    // same rule, and the same words the Channel feed's Thread entry row uses.
+    // same rule, and the same words the Project feed's Thread entry row uses.
     const owned = await b.view.findByRole('button', { name: /owner stack row/ })
     expect(owned.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('由 @reviewer, @builder 处理')
     expect(owned.querySelectorAll('[role="img"] > span')).toHaveLength(2)
@@ -286,7 +286,7 @@ describe('Team Inbox surfaces', () => {
       inboxRow('w1', 'thread:open', { previewText: 'still waiting' }),
       // Nothing unread can only come from the tail: the Host admitted this row
       // for participation, so the page renders a Thread rather than a quantity.
-      inboxRow('w1', 'thread:read', { channelName: 'delivery', previewText: 'already handled', taskNumber: undefined, directCount: 0, unreadCount: 0, newestSequence: 3 }),
+      inboxRow('w1', 'thread:read', { projectName: 'delivery', previewText: 'already handled', taskNumber: undefined, directCount: 0, unreadCount: 0, newestSequence: 3 }),
     ]
     await b.changeSubscriptionsReady()
     b.seedInbox(rows)
@@ -302,7 +302,7 @@ describe('Team Inbox surfaces', () => {
     const open = b.view.getByRole('button', { name: /#engineering/ })
     expect(capsuleOf(open)?.textContent).toBe('1')
     // Zero is the absence of a badge, not a badge reading zero — the rule the
-    // Channel feed's own Thread entry already follows. The row still names who
+    // Project feed's own Thread entry already follows. The row still names who
     // moved it: the leading circle is what every row has, the count is not.
     const read = b.view.getByRole('button', { name: /already handled/ })
     expect(capsuleOf(read)).toBeNull()
@@ -317,7 +317,7 @@ describe('Team Inbox surfaces', () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     fireEvent.click(await b.view.findByRole('button', { name: '收件箱' }))
     const tailRows = (workspaceId: string, prefix: string) => Array.from({ length: 6 }, (_, index) =>
-      inboxRow(workspaceId, `thread:${prefix}${index}`, { channelName: prefix, previewText: `${prefix} ${index}`, taskNumber: undefined, directCount: 0, unreadCount: 0,
+      inboxRow(workspaceId, `thread:${prefix}${index}`, { projectName: prefix, previewText: `${prefix} ${index}`, taskNumber: undefined, directCount: 0, unreadCount: 0,
         newestSequence: index + 1, newestOccurredAt: `2026-09-13T0${index}:00:00.000Z` }))
     const rows = [...tailRows('w1', 'a'), ...tailRows('w2', 'b')]
     await b.changeSubscriptionsReady()
@@ -343,7 +343,7 @@ describe('Team Inbox surfaces', () => {
     fireEvent.click(card)
     const single = await b.view.findByRole('button', { name: /only workspace/ })
     // One Workspace in the list: the segment would be a constant printed down
-    // every row, so the identity line leads with the Channel instead.
+    // every row, so the identity line leads with the Project instead.
     expect(single.textContent).not.toContain('Alpha')
     expect(single.textContent).toContain('#engineering')
     // A second Workspace reaching the list brings it back — two rows now have to
@@ -378,8 +378,8 @@ describe('Team Inbox surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('opens the row Thread through selectWorkspace + selectThread, drops the unread dot, and lands Back on its Channel', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', seededMessages: [{ body: 'Thread opener', occurredAt: '2026-09-13T03:00:00.000Z' }], remainingUnreadCounts: [0], initialChannels: true, seedThreadRef: 'thread:w2' })
+  it('opens the row Thread through selectWorkspace + selectThread, drops the unread dot, and lands Back on its Project', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', seededMessages: [{ body: 'Thread opener', occurredAt: '2026-09-13T03:00:00.000Z' }], remainingUnreadCounts: [0], initialProjects: true, seedThreadRef: 'thread:w2' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
     await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w2', 'thread:w2')])
@@ -389,21 +389,21 @@ describe('Team Inbox surfaces', () => {
     fireEvent.click(row)
     // The row's own Workspace is selected first, then the Thread: the durable
     // read consumes the mention, and the persisted location is Thread + its
-    // Channel — never the Inbox.
+    // Project — never the Inbox.
     await waitFor(() => expect(b.readThread).toHaveBeenCalled())
     // The dot drops from the completed read itself — reads never ride a
     // changes wake.
     await waitForEntryUnread(card, 0)
-    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toMatchObject({ mode: 'team', workspaceId: 'w2', channelRef: 'channel:engineering', threadRef: 'thread:w2' })
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toMatchObject({ mode: 'team', workspaceId: 'w2', projectRef: 'project:engineering', threadRef: 'thread:w2' })
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('inbox')
-    // Back goes to the Thread's Channel, not the Inbox.
-    fireEvent.click(await b.view.findByRole('button', { name: '返回频道' }))
+    // Back goes to the Thread's Project, not the Inbox.
+    fireEvent.click(await b.view.findByRole('button', { name: '返回项目' }))
     await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('threadRef'))
     expect(b.view.container.querySelector('[data-team-inbox]')).toBeNull()
     await b.runtime.dispose()
   })
 
-  it('orders the narrow rail Conversations → Inbox → Channels → Agents with the unread dot on the Inbox icon', async () => {
+  it('orders the narrow rail Conversations → Inbox → Projects → Agents with the unread dot on the Inbox icon', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     // Collapse the fixture sidebar to the narrow rail.
     fireEvent.click(b.view.container.querySelector('[data-test-control]')!)
@@ -415,7 +415,7 @@ describe('Team Inbox surfaces', () => {
     const labels = [...rail.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))
     // The mode's way back to the conversation leads the rail, above the
     // destinations: an exit is not a page inside the mode.
-    expect(labels).toEqual(['对话', '收件箱', '频道', 'Agents'])
+    expect(labels).toEqual(['对话', '收件箱', '项目', 'Agents'])
     await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w1', 'thread:w1')])
     const inboxButton = within(rail).getByRole('button', { name: '收件箱' })

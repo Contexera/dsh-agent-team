@@ -99,18 +99,18 @@ beforeAll(async () => {
   // carry a runtime-fault banner over a preview that never runs a turn.
   for (const agent of AGENTS) recordPriceableRoute(agentFor(agent.handle)!)
 
-  const channel = await team.createChannel({
-    requestId: 'ui-preview-channel' as never,
+  const project = await team.createProject({
+    requestId: 'ui-preview-project' as never,
     workspaceId: workspace.id,
     name: 'delivery',
     description: '预览样本：气泡、分组、有人@我、引用回复、长文折叠、Task 条目',
   })
-  const channelRef = channel.channel.channelRef
+  const projectRef = project.project.projectRef
 
   const opener = await team.sendMessage({
     requestId: 'ui-preview-opener' as never,
     workspaceId: workspace.id,
-    channelRef,
+    projectRef,
     asTask: false,
     body: '预览样本 Thread：气泡两侧、同人分组、有人@我、引用回复、长文折叠都在这一条里。',
   })
@@ -172,13 +172,13 @@ beforeAll(async () => {
   await asHuman('ui-preview-h3', '我也引用同一条，只是列序镜像到右侧。', quoted.message.messageRef)
   await asHuman('ui-preview-h4', '这条是普通消息，用来看分组之外的行距。')
 
-  // A Task thread: its entry row in the Channel feed carries the state cluster
+  // A Task thread: its entry row in the Project feed carries the state cluster
   // and the owner stack this preview is meant to show, and the claims land as
   // activity rows inside the Thread.
   const taskStart = await team.sendMessageForAgent(agentFor('aster')!, {
     requestId: 'ui-preview-task' as never,
     workspaceId: workspace.id,
-    channelRef,
+    projectRef,
     asTask: true,
     body: '叠放校验：这条 Task 用来验证 feed 条目行的状态列与所有者叠放。',
     recipients: [humanMemberId],

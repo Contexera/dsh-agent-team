@@ -13,7 +13,7 @@ import { agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import type { AgentTeamChannelRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamProjectRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
 const alpha = WorkspaceId('workspace:alpha')
@@ -48,13 +48,13 @@ async function harness(): Promise<{ readonly ctx: Context }> {
   return { ctx }
 }
 
-/** One durable, enabled Member in the channel, added through the live ledger so the Host's own state carries it. */
-async function addLiveMember(ctx: Context, channelRef: AgentTeamChannelRef): Promise<AgentTeamMemberActor> {
+/** One durable, enabled Member in the project, added through the live ledger so the Host's own state carries it. */
+async function addLiveMember(ctx: Context, projectRef: AgentTeamProjectRef): Promise<AgentTeamMemberActor> {
   const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberActor['memberId']
   const handle = 'reader'
   await ctx.agentTeam['ledger']!.addMember({
     requestId: requestId(`ledger-member-${memberId}`), workspaceId: alpha, handle, description: 'Reads work', presetId: 'team-member',
-    channelRefs: [channelRef], actor: agentTeamHumanActor(),
+    projectRefs: [projectRef], actor: agentTeamHumanActor(),
     member: {
       memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle, description: 'Reads work',
       presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' as const,
@@ -89,8 +89,8 @@ describe('post-commit delivery', () => {
     const { ctx } = await harness()
     const warn = vi.spyOn(ctx.logger, 'warn')
     const info = vi.spyOn(ctx.logger, 'info')
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('wake-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
-    const member = await addLiveMember(ctx, channel.channel.channelRef)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('wake-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
     const { agent, state } = wakeSeam()
     ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
     const lines = (spy: typeof info): string[] => spy.mock.calls.map(args => String(args[0]))
@@ -99,7 +99,7 @@ describe('post-commit delivery', () => {
     const before = ctx.agentTeam.status().sequence
     // The message commits durably; only the recipient's wake fails afterwards.
     const sent = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('wake-fail'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Needs a look', recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body: 'Needs a look', recipients: [member.memberId] })
     expect(sent.kind).toBe('committed')
     if (sent.kind !== 'committed') return
     // Exactly one operation landed: the failure is not a second write or a rollback.
@@ -154,15 +154,15 @@ describe('post-commit delivery', () => {
     const { ctx } = await harness()
     const info = vi.spyOn(ctx.logger, 'info')
     const debug = vi.spyOn(ctx.logger, 'debug')
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('duplicate-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
-    const member = await addLiveMember(ctx, channel.channel.channelRef)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('duplicate-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
     const { agent, state } = wakeSeam()
     state.fail = false
     ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
     const lines = (spy: typeof info): string[] => spy.mock.calls.map(args => String(args[0]))
 
     const sent = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('duplicate-send'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Needs a look', recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body: 'Needs a look', recipients: [member.memberId] })
     expect(sent.kind).toBe('committed')
     expect(state.calls).toHaveLength(1)
     expect(lines(info).filter(line => line.includes('Team Inbox notice queued'))).toHaveLength(1)
@@ -184,15 +184,15 @@ describe('post-commit delivery', () => {
   it('answers with the committed result when a synchronous commit listener throws', async () => {
     const { ctx } = await harness()
     ctx.on('agent-team/committed', () => { throw new Error('listener failed (test seam)') })
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('listener-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
-    expect(channel.channel.channelRef).toBeDefined()
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('listener-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    expect(project.project.projectRef).toBeDefined()
     expect(ctx.agentTeam.status().sequence).toBe(2)
   })
 
   it('keeps an invariant divergence loud on the caller frame instead of swallowing it', async () => {
     const { ctx } = await harness()
     ctx.on('agent-team/committed', () => { throw new agentTeamInvariant.AgentTeamInvariantError('projection diverged (test seam)') })
-    await expect(ctx.agentTeam.createChannel({ requestId: requestId('invariant-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' }))
+    await expect(ctx.agentTeam.createProject({ requestId: requestId('invariant-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' }))
       .rejects.toThrow(/invariant violated/)
     // The loud path still reports a real commit: the operation is durable.
     expect(ctx.agentTeam.status().sequence).toBe(2)

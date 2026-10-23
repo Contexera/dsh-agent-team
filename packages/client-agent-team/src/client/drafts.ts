@@ -1,13 +1,13 @@
-import type { AgentTeamChannelRef, AgentTeamMemberId, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamProjectRef, AgentTeamMemberId, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 
 /** Drafts are local UI convenience state, never Host-authoritative, so localStorage is their home. */
-export type TeamDraftKey = `channel:${AgentTeamChannelRef}` | `thread:${AgentTeamThreadRef}`
+export type TeamDraftKey = `project:${AgentTeamProjectRef}` | `thread:${AgentTeamThreadRef}`
 
-export type TeamDraftKind = 'channel' | 'thread'
+export type TeamDraftKind = 'project' | 'thread'
 
 /** The key format is this module's contract, so parsing it belongs here. */
 export function draftKindOf(key: TeamDraftKey): TeamDraftKind {
-  return key.startsWith('channel:') ? 'channel' : 'thread'
+  return key.startsWith('project:') ? 'project' : 'thread'
 }
 
 /** One cached composer state; `recipients` mirrors the structured mention set. */
@@ -36,7 +36,7 @@ const LIMIT = 50
 const EMPTY: TeamDraftState = Object.freeze({ draft: '', recipients: new Set<AgentTeamMemberId>() })
 
 function isTeamDraftKey(value: string): value is TeamDraftKey {
-  return value.startsWith('channel:') || value.startsWith('thread:')
+  return value.startsWith('project:') || value.startsWith('thread:')
 }
 
 function readStored(): Map<TeamDraftKey, StoredDraft> {
@@ -44,7 +44,9 @@ function readStored(): Map<TeamDraftKey, StoredDraft> {
   try {
     const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '') as Record<string, unknown>
     const restored = new Map<TeamDraftKey, StoredDraft>()
-    for (const [key, value] of Object.entries(parsed)) {
+    for (const [storedKey, value] of Object.entries(parsed)) {
+      // Projects were called Channels; their drafts were keyed `channel:channel:<id>`.
+      const key = storedKey.replace(/^channel:channel:/, 'project:project:')
       if (!isTeamDraftKey(key) || typeof value !== 'object' || value === null) continue
       const candidate = value as Partial<StoredDraft>
       if (typeof candidate.draft !== 'string' || !Array.isArray(candidate.recipientIds) || typeof candidate.savedAt !== 'number') continue

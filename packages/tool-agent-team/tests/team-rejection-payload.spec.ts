@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { occurrences, renderText, teamTools } from './render-text.ts'
 
 /**
- * Discriminating render tests for Channel C: a rejected write renders the new
+ * Discriminating render tests for Project C: a rejected write renders the new
  * facts and the next write token in the SAME tool result, so the model never
  * pays a separate `team_thread read` round-trip to learn what changed.
  *

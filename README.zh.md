@@ -7,22 +7,22 @@
 [![Release](https://img.shields.io/github/v/release/Contexera/dsh-agent-team?include_prereleases&style=flat-square)](https://github.com/Contexera/dsh-agent-team/releases)
 [![Listed on Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Contexera/dsh-agent-team/)
 
-**dsh-agent-team** 给 DeepSeek Harness 一批不会归零的 Agent。每个 Agent 是持久的 Member，带着自己的 memory、notes 与 skills——上周你配好的成员，这周还是它，哪怕会话结束、上下文被压缩或换代、或 DSH 重启过。方向由你定；Workspace 按项目组织团队，Channel 路由职责，Task Thread 保持一条推进线。
+**dsh-agent-team** 给 DeepSeek Harness 一批不会归零的 Agent。每个 Agent 是持久的 Member，带着自己的 memory、notes 与 skills——上周你配好的成员，这周还是它，哪怕会话结束、上下文被压缩或换代、或 DSH 重启过。方向由你定；Workspace 按代码库组织团队，Project 路由职责，Task Thread 保持一条推进线。
 
 一个为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 提供的按需启用插件：只在需要 Team mode 的 profile 安装，普通 DSH Session 保持原有 preset roster。
 
 ## 核心想法
 
-- **Agent 是 Team 的一等成员，不只是会话。** 每个 Agent 成员有自己的记忆与职责边界，以及私有空间——memory、notes 与 skills 单独维护；同时所有 Agent 在同一个共享项目 Workspace 下协作，多 Workspace 可管理多支 Team。
-- **Workspace 组织一切。** 不同项目放在不同 Workspace，各自管理自己的 Agents 与 Channels。
-- **Human 管 Channel 与职责。** 你决定谁在哪个频道、负责什么；@提及把工作路由到对的 Agent。
+- **Agent 是 Team 的一等成员，不只是会话。** 每个 Agent 成员有自己的记忆与职责边界，以及私有空间——memory、notes 与 skills 单独维护；同时所有 Agent 在同一个共享 Workspace 下协作，多 Workspace 可管理多支 Team。
+- **Workspace 组织一切。** 不同代码库放在不同 Workspace，各自管理自己的 Agents 与 Projects。
+- **Human 管 Project 与职责。** 你决定谁在哪个项目、负责什么；@提及把工作路由到对的 Agent。
 - **Task Thread 串联推进。** 用 Task 认领方向、Thread 保持上下文，多个 Session Agent 围绕同一条工作线推进而不散乱。工作事实落在同一条 Thread 里，成员之间不会各说各的。
 
 ## 预览
 
-Team mode 就在普通 DSH Web UI 里：Channel 承载讨论，收件箱收拢需要你的事项，Task Thread 把一条工作线保留在同一条上下文里。
+Team mode 就在普通 DSH Web UI 里：Project 承载讨论，收件箱收拢需要你的事项，Task Thread 把一条工作线保留在同一条上下文里。
 
-![DSH Web UI 中的 Channel：成员名单、@提及与消息流中的 Task 引用](assets/readme/channel.png)
+![DSH Web UI 中的 Project：成员名单、@提及与消息流中的 Task 引用](assets/readme/project.png)
 
 Human 收件箱把需要你的未读 Thread 置顶，其下是最近活跃：
 
@@ -81,8 +81,8 @@ dsh --profile web --dump-config
 ```text
 Team mode
 └── 选择一个 Workspace
-    ├── Channels -> 新建频道 -> 发送第一条消息
-    └── Agents   -> 添加 Agent -> 选择初始频道
+    ├── Projects -> 新建项目 -> 发送第一条消息
+    └── Agents   -> 添加 Agent -> 选择初始项目
 ```
 
 只在可信 Workspace 中创建 Agent。Team Member preset 会给被管理的 Agent Session 授予 `danger-full-access`。
@@ -96,7 +96,7 @@ Team mode
 | [`NanmiCoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams) | 把**当前** DSH session 变成 captain，由它组建 sub-agent、把目标拆成带依赖的任务、并通过直接通信协调 | 一个 **session** |
 | [`toolclub/dsh-agent-team-gui`](https://github.com/toolclub/dsh-agent-team-gui) | 可复用的「规划 → 实现 → 评审」团队，每个成员可选不同模型，Run Center 查看 token 用量 | 一次 **workflow run** |
 | [`limuyang2/agent-team`](https://github.com/limuyang2/agent-team)（npm 名 `@limuyang2/dsh-agent-team`） | 在一个 DSH 窗口里组一支独立 root agent 的队：混用模型与 provider、指定一个 Leader，每个成员在自己的会话里工作、共享同一个 Workspace | 一支**组起来执行任务的队** |
-| **`dsh-agent-team`**（本插件） | 每个 agent 是持久 Member 身份，带自己的私有记忆、笔记与技能；Channel 与职责由你分配，Task Thread 是一条进度线 | 一支**常驻团队** |
+| **`dsh-agent-team`**（本插件） | 每个 agent 是持久 Member 身份，带自己的私有记忆、笔记与技能；Project 与职责由你分配，Task Thread 是一条进度线 | 一支**常驻团队** |
 
 实际差别：你上周创建的 Member，今天还是同一个 Member —— 同样的记忆、职责和私有笔记 —— 即使它的 session 已结束、上下文已滚动、或 DSH 重启过。另外三个里，团队是围绕手头这次工作组建的 —— 一次 session、一次 workflow run，或一支有 Leader 的队。
 
@@ -110,8 +110,8 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 
 ## 提供的能力
 
-- 持久化的单 Host Team，包含 Channel、Message、Task、Thread、Claim 和 Agent membership。
-- 面向 Human 的 Web Client 控制界面：创建 Channel 和 Agent、管理成员、发送 Message、打开 Thread、处理 Task。
+- 持久化的单 Host Team，包含 Project、Message、Task、Thread、Claim 和 Agent membership。
+- 面向 Human 的 Web Client 控制界面：创建 Project 和 Agent、管理成员、发送 Message、打开 Thread、处理 Task。
 - 隔离的 `team-member` preset，以及七个面向模型的 Team 工具：`team_inbox`、`team_thread`、`team_attention`、`team_message`、`team_dm`、`team_claim`、`team_view`。
 - 拉取式协作协议。Agent Inbox admission 是持久化事实，但不表示模型已经处理了更新。
 
@@ -150,7 +150,7 @@ npm pack --dry-run
 
 ## 致谢
 
-dsh-agent-team 的协作形态——具名 Agent 成员、Channel、Task Thread、@mention 路由与成员级记忆——来源于 [Raft](https://raft.build/) 并借鉴了它的若干设计。感谢他们的工作。
+dsh-agent-team 的协作形态——具名 Agent 成员、Project、Task Thread、@mention 路由与成员级记忆——来源于 [Raft](https://raft.build/) 并借鉴了它的若干设计。感谢他们的工作。
 
 ## 许可证
 

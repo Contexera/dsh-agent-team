@@ -88,28 +88,28 @@ async function sqliteHarness(path: string): Promise<TeamHarness> {
 }
 
 /**
- * A frozen old ledger whose Member was enrolled into the Channel by hand and
+ * A frozen old ledger whose Member was enrolled into the Project by hand and
  * never wrote a word — the historical explicit membership that membership
  * derivation still has to keep visible.
  */
-const legacyJoinLedger = JSON.parse("{\"records\":[[\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",{\"sequence\":1,\"operationId\":\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",\"requestId\":\"agent-team:initialize:v1\",\"occurredAt\":\"2026-10-12T11:38:19.890Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":null,\"kind\":\"team/initialized\",\"data\":{\"humanMemberId\":\"member:human\"}}],[\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",{\"sequence\":2,\"operationId\":\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",\"requestId\":\"cap3-channel\",\"occurredAt\":\"2026-10-12T11:38:19.892Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",\"kind\":\"team/channel-created\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channel\":{\"channelRef\":\"channel:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"workspaceId\":\"workspace:alpha\",\"name\":\"engineering\",\"description\":\"\",\"createdAtSequence\":2,\"state\":\"active\"},\"memberIds\":[]}}],[\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",{\"sequence\":3,\"operationId\":\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",\"requestId\":\"add:member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"occurredAt\":\"2026-10-12T11:38:19.894Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",\"kind\":\"team/member-added\",\"data\":{\"member\":{\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"sessionId\":\"session:member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"workspaceId\":\"workspace:alpha\",\"handle\":\"silent3\",\"description\":\"Test Agent\",\"presetId\":\"team-member\",\"privateMemoryPath\":\"/tmp/member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"state\":\"enabled\"},\"channelRefs\":[]}}],[\"operation:ef94c3ad-2c33-4f80-95ea-649ad7b125ea\",{\"sequence\":4,\"operationId\":\"operation:ef94c3ad-2c33-4f80-95ea-649ad7b125ea\",\"requestId\":\"cap3-join\",\"occurredAt\":\"2026-10-12T11:38:19.894Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",\"kind\":\"team/channel-member-added\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channelRef\":\"channel:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\"}}]],\"channelRef\":\"channel:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\"}") as {
+const legacyJoinLedger = JSON.parse("{\"records\":[[\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",{\"sequence\":1,\"operationId\":\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",\"requestId\":\"agent-team:initialize:v1\",\"occurredAt\":\"2026-10-12T11:38:19.890Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":null,\"kind\":\"team/initialized\",\"data\":{\"humanMemberId\":\"member:human\"}}],[\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",{\"sequence\":2,\"operationId\":\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",\"requestId\":\"cap3-project\",\"occurredAt\":\"2026-10-12T11:38:19.892Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:8898b8c4-9487-4fe3-bf50-7b69e6bb54b3\",\"kind\":\"team/project-created\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"project\":{\"projectRef\":\"project:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"workspaceId\":\"workspace:alpha\",\"name\":\"engineering\",\"description\":\"\",\"createdAtSequence\":2,\"state\":\"active\"},\"memberIds\":[]}}],[\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",{\"sequence\":3,\"operationId\":\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",\"requestId\":\"add:member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"occurredAt\":\"2026-10-12T11:38:19.894Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:5e6e01e1-3382-4a5e-aca3-af5bec36cad0\",\"kind\":\"team/member-added\",\"data\":{\"member\":{\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"sessionId\":\"session:member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"workspaceId\":\"workspace:alpha\",\"handle\":\"silent3\",\"description\":\"Test Agent\",\"presetId\":\"team-member\",\"privateMemoryPath\":\"/tmp/member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\",\"state\":\"enabled\"},\"projectRefs\":[]}}],[\"operation:ef94c3ad-2c33-4f80-95ea-649ad7b125ea\",{\"sequence\":4,\"operationId\":\"operation:ef94c3ad-2c33-4f80-95ea-649ad7b125ea\",\"requestId\":\"cap3-join\",\"occurredAt\":\"2026-10-12T11:38:19.894Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:9b80f06c-d220-454f-b89d-0897030a7669\",\"kind\":\"team/project-member-added\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"projectRef\":\"project:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\"}}]],\"projectRef\":\"project:faf3838a-8b87-45fb-aa3d-3b9722c61027\",\"memberId\":\"member:agent-fe323dab-364c-44a5-aa60-77b85911f3e2\"}") as {
   readonly records: Array<[string, unknown]>
-  readonly channelRef: string
+  readonly projectRef: string
   readonly memberId: string
 }
 
 /**
- * A frozen old ledger: Channel membership was still granted and revoked by
- * hand, so it carries `team/channel-member-removed` with its real cleanup
+ * A frozen old ledger: Project membership was still granted and revoked by
+ * hand, so it carries `team/project-member-removed` with its real cleanup
  * payload. Nothing writes these operations any more — membership is derived
  * from participation — so the replay-side tests load the history instead of
  * committing it.
  */
-const legacyRemovalLedger = JSON.parse("{\"records\":[[\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",{\"sequence\":1,\"operationId\":\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",\"requestId\":\"agent-team:initialize:v1\",\"occurredAt\":\"2026-10-12T11:32:27.794Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":null,\"kind\":\"team/initialized\",\"data\":{\"humanMemberId\":\"member:human\"}}],[\"operation:90650574-c253-459a-bf9f-78a43409277e\",{\"sequence\":2,\"operationId\":\"operation:90650574-c253-459a-bf9f-78a43409277e\",\"requestId\":\"cap2-channel\",\"occurredAt\":\"2026-10-12T11:32:27.796Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",\"kind\":\"team/channel-created\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channel\":{\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"workspaceId\":\"workspace:alpha\",\"name\":\"engineering\",\"description\":\"\",\"createdAtSequence\":2,\"state\":\"active\"},\"memberIds\":[]}}],[\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",{\"sequence\":3,\"operationId\":\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",\"requestId\":\"add:cap-agent\",\"occurredAt\":\"2026-10-12T11:32:27.797Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:90650574-c253-459a-bf9f-78a43409277e\",\"kind\":\"team/member-added\",\"data\":{\"member\":{\"memberId\":\"member:cap-agent\",\"sessionId\":\"session:cap-agent\",\"workspaceId\":\"workspace:alpha\",\"handle\":\"cap-agent\",\"description\":\"Test Agent\",\"presetId\":\"team-member\",\"privateMemoryPath\":\"/tmp/dsh-agent-team-cap-agent\",\"state\":\"enabled\"},\"channelRefs\":[\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\"]}}],[\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",{\"sequence\":4,\"operationId\":\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",\"requestId\":\"cap2-chat\",\"occurredAt\":\"2026-10-12T11:32:27.798Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",\"kind\":\"team/message-sent\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"mentions\":[\"member:cap-agent\"],\"message\":{\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"sender\":\"member:human\",\"body\":\"plain conversation\",\"topLevel\":true,\"sequence\":4,\"occurredAt\":\"2026-10-12T11:32:27.798Z\"},\"thread\":{\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"revision\":4},\"inbox\":{\"attention\":{\"set\":[{\"memberId\":\"member:human\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"startSequence\":4,\"readThroughSequence\":3},{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"startSequence\":4,\"readThroughSequence\":3}],\"removed\":[]},\"directMarkers\":{\"added\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"sequence\":4}],\"removed\":[]},\"activityMarkers\":{\"added\":[],\"removed\":[]}}}}],[\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",{\"sequence\":5,\"operationId\":\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",\"requestId\":\"cap2-remove\",\"occurredAt\":\"2026-10-12T11:32:27.799Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",\"kind\":\"team/channel-member-removed\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"memberId\":\"member:cap-agent\",\"claims\":[],\"activities\":[],\"tasks\":[],\"threads\":[],\"inbox\":{\"attention\":{\"set\":[],\"removed\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\"}]},\"directMarkers\":{\"added\":[],\"removed\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"sequence\":4}]},\"activityMarkers\":{\"added\":[],\"removed\":[]}}}}]],\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"operationId\":\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",\"channelRef\":\"channel:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"memberId\":\"member:cap-agent\"}") as {
+const legacyRemovalLedger = JSON.parse("{\"records\":[[\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",{\"sequence\":1,\"operationId\":\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",\"requestId\":\"agent-team:initialize:v1\",\"occurredAt\":\"2026-10-12T11:32:27.794Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":null,\"kind\":\"team/initialized\",\"data\":{\"humanMemberId\":\"member:human\"}}],[\"operation:90650574-c253-459a-bf9f-78a43409277e\",{\"sequence\":2,\"operationId\":\"operation:90650574-c253-459a-bf9f-78a43409277e\",\"requestId\":\"cap2-project\",\"occurredAt\":\"2026-10-12T11:32:27.796Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:0c1feff4-292a-4734-bc55-5f9ee1da7fd3\",\"kind\":\"team/project-created\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"project\":{\"projectRef\":\"project:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"workspaceId\":\"workspace:alpha\",\"name\":\"engineering\",\"description\":\"\",\"createdAtSequence\":2,\"state\":\"active\"},\"memberIds\":[]}}],[\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",{\"sequence\":3,\"operationId\":\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",\"requestId\":\"add:cap-agent\",\"occurredAt\":\"2026-10-12T11:32:27.797Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:90650574-c253-459a-bf9f-78a43409277e\",\"kind\":\"team/member-added\",\"data\":{\"member\":{\"memberId\":\"member:cap-agent\",\"sessionId\":\"session:cap-agent\",\"workspaceId\":\"workspace:alpha\",\"handle\":\"cap-agent\",\"description\":\"Test Agent\",\"presetId\":\"team-member\",\"privateMemoryPath\":\"/tmp/dsh-agent-team-cap-agent\",\"state\":\"enabled\"},\"projectRefs\":[\"project:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\"]}}],[\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",{\"sequence\":4,\"operationId\":\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",\"requestId\":\"cap2-chat\",\"occurredAt\":\"2026-10-12T11:32:27.798Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:0eef8f04-2f1e-4ffc-97de-8639d7164506\",\"kind\":\"team/message-sent\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"mentions\":[\"member:cap-agent\"],\"message\":{\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"projectRef\":\"project:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"sender\":\"member:human\",\"body\":\"plain conversation\",\"topLevel\":true,\"sequence\":4,\"occurredAt\":\"2026-10-12T11:32:27.798Z\"},\"thread\":{\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"revision\":4},\"inbox\":{\"attention\":{\"set\":[{\"memberId\":\"member:human\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"startSequence\":4,\"readThroughSequence\":3},{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"startSequence\":4,\"readThroughSequence\":3}],\"removed\":[]},\"directMarkers\":{\"added\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"sequence\":4}],\"removed\":[]},\"activityMarkers\":{\"added\":[],\"removed\":[]}}}}],[\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",{\"sequence\":5,\"operationId\":\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",\"requestId\":\"cap2-remove\",\"occurredAt\":\"2026-10-12T11:32:27.799Z\",\"actor\":{\"kind\":\"human\",\"memberId\":\"member:human\",\"handle\":\"human\"},\"previousOperationId\":\"operation:ee943931-dbc2-4c3f-8e86-9b57bc87011b\",\"kind\":\"team/project-member-removed\",\"data\":{\"workspaceId\":\"workspace:alpha\",\"projectRef\":\"project:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"memberId\":\"member:cap-agent\",\"claims\":[],\"activities\":[],\"tasks\":[],\"threads\":[],\"inbox\":{\"attention\":{\"set\":[],\"removed\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\"}]},\"directMarkers\":{\"added\":[],\"removed\":[{\"memberId\":\"member:cap-agent\",\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"messageRef\":\"message:8046d83c-1f01-4f48-89b7-82bf5e52727e\",\"sequence\":4}]},\"activityMarkers\":{\"added\":[],\"removed\":[]}}}}]],\"threadRef\":\"thread:5e4bd95e-d0d8-43aa-a5be-f02d9027f05e\",\"operationId\":\"operation:3300fba5-7ca8-456f-90b8-fb4de741066f\",\"projectRef\":\"project:a71b388d-1dbf-41eb-ae5d-7f7e80a93358\",\"memberId\":\"member:cap-agent\"}") as {
   readonly records: Array<[string, unknown]>
   readonly threadRef: string
   readonly operationId: string
-  readonly channelRef: string
+  readonly projectRef: string
   readonly memberId: string
 }
 
@@ -136,7 +136,7 @@ function ledgerAtBoot(test: TeamHarness): AgentTeamLedger {
 
 async function addLedgerMember(
   ledger: AgentTeamLedger,
-  channelRef: string | undefined,
+  projectRef: string | undefined,
   memberId = `member:agent-${crypto.randomUUID()}`,
   description = 'Test Agent',
   handle = memberId.slice('member:'.length),
@@ -153,7 +153,7 @@ async function addLedgerMember(
   }
   await ledger.addMember({ requestId: requestId(`add:${memberId}`), actor: agentTeamHumanActor(), member, handle: member.handle,
     description: member.description, presetId: member.presetId, workspaceId: alpha,
-    channelRefs: channelRef === undefined ? [] : [channelRef as never] })
+    projectRefs: projectRef === undefined ? [] : [projectRef as never] })
   return { member, actor: { kind: 'member', memberId: member.memberId, handle: member.handle } }
 }
 
@@ -173,15 +173,15 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(ledger.view({ workspaceId: beta }, member.memberId).workspaces).toEqual([
       { workspaceId: alpha, default: true }, { workspaceId: beta, default: false },
     ])
-    const channel = (await ledger.createChannel({ requestId: requestId('joined-channel'), workspaceId: beta,
-      name: 'joined', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.channel
+    const project = (await ledger.createProject({ requestId: requestId('joined-project'), workspaceId: beta,
+      name: 'joined', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
     const sent = committed((await ledger.sendMessage({ requestId: requestId('joined-message'), workspaceId: beta,
-      channelRef: channel.channelRef, body: 'Working in beta', asTask: false, actor })).value)
+      projectRef: project.projectRef, body: 'Working in beta', asTask: false, actor })).value)
     expect(sent.message.sender).toBe(member.memberId)
     const replay = ledgerAtBoot(test)
     expect(replay.workspacesOf(member.memberId)).toEqual([alpha, beta])
     expect(replay.getMember(member.memberId)).toEqual(member)
-    expect(replay.view({ workspaceId: beta }, member.memberId).channels).toContainEqual(channel)
+    expect(replay.view({ workspaceId: beta }, member.memberId).projects).toContainEqual(project)
     replay.validate()
   })
 
@@ -192,13 +192,13 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await ledger.joinWorkspace({ requestId: requestId('join-beta'), workspaceId: beta, memberId: member.memberId, actor: agentTeamHumanActor() })
     const claims = []
     for (const workspaceId of [alpha, beta]) {
-      const channel = (await ledger.createChannel({ requestId: requestId(`channel-${workspaceId}`), workspaceId,
-        name: 'work', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.channel
+      const project = (await ledger.createProject({ requestId: requestId(`project-${workspaceId}`), workspaceId,
+        name: 'work', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
       const sent = withTask(committed((await ledger.sendMessage({ requestId: requestId(`message-${workspaceId}`), workspaceId,
-        channelRef: channel.channelRef, body: 'Task', asTask: true, actor })).value))
+        projectRef: project.projectRef, body: 'Task', asTask: true, actor })).value))
       const claim = committed((await ledger.changeClaim({ requestId: requestId(`claim-${workspaceId}`), workspaceId,
         taskRef: sent.task.taskRef, baseRevision: sent.thread.revision, action: 'claim', direction: 'Implement', actor })).value)
-      claims.push({ workspaceId, channel, sent, claim })
+      claims.push({ workspaceId, project, sent, claim })
     }
     const leaveRequest = { requestId: requestId('leave-beta'), workspaceId: beta, memberId: member.memberId, actor: agentTeamHumanActor() }
     const left = await ledger.leaveWorkspace(leaveRequest)
@@ -209,7 +209,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(ledger.getMember(member.memberId)).toEqual(member)
     expect(ledger.listClaims(actor, { workspaceId: alpha, taskRef: claims[0]!.sent.task.taskRef }).claims[0]?.state).toBe('active')
     expect(() => ledger.view({ workspaceId: beta }, member.memberId)).toThrow(/another Workspace/)
-    expect(ledger.view({ workspaceId: beta }).members).not.toContainEqual({ channelRef: claims[1]!.channel.channelRef, memberId: member.memberId })
+    expect(ledger.view({ workspaceId: beta }).members).not.toContainEqual({ projectRef: claims[1]!.project.projectRef, memberId: member.memberId })
     await expect(ledger.reply({ requestId: requestId('reply-after-leave'), workspaceId: beta,
       threadRef: claims[1]!.sent.thread.threadRef, baseRevision: claims[1]!.claim.thread.revision, body: 'Late reply', actor })).rejects.toThrow(/another Workspace/)
     await expect(ledger.leaveWorkspace({ ...leaveRequest, requestId: requestId('leave-default'), workspaceId: alpha })).rejects.toThrow(/default Workspace/)
@@ -218,10 +218,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     replay.validate()
     await replay.joinWorkspace({ ...leaveRequest, requestId: requestId('rejoin-beta') })
     // Rejoining restores the derived half of visibility: this Member wrote in
-    // that Channel's Thread before leaving, so "has taken part" brings it back
-    // — Channel participation is derived from Threads now, not re-enrolled.
-    expect(replay.view({ workspaceId: beta }, member.memberId).channels.map(channel => channel.channelRef))
-      .toEqual([claims[1]!.channel.channelRef])
+    // that Project's Thread before leaving, so "has taken part" brings it back
+    // — Project participation is derived from Threads now, not re-enrolled.
+    expect(replay.view({ workspaceId: beta }, member.memberId).projects.map(project => project.projectRef))
+      .toEqual([claims[1]!.project.projectRef])
   })
 
   it('checks handle collisions across all participations, including suspended Members', async () => {
@@ -234,7 +234,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(ledger.getMember(first.member.memberId)?.state).toBe('suspended')
     const other = { ...second.member, memberId: 'member:beta-peer' as AgentTeamAgentMember['memberId'], workspaceId: beta, sessionId: SessionId('session:beta-peer') }
     await ledger.addMember({ requestId: requestId('beta-peer'), workspaceId: beta, member: other,
-      handle: 'peer', description: '', presetId: 'team-member', channelRefs: [], actor: agentTeamHumanActor() })
+      handle: 'peer', description: '', presetId: 'team-member', projectRefs: [], actor: agentTeamHumanActor() })
     await expect(ledger.updateMember({ requestId: requestId('rename-collision'), memberId: first.member.memberId,
       handle: 'PEER', description: '', actor: agentTeamHumanActor() })).rejects.toThrow(/already active/)
     await ledger.updateMember({ requestId: requestId('rename-second'), memberId: second.member.memberId,
@@ -247,7 +247,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('boots a v1 empty Team and rejects old ledger media', async () => {
     const pool = new MemoryMediaPool()
     const first = await harness(pool)
-    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 1, operationCount: 1, channelCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID })
+    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 1, operationCount: 1, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID })
     const records = [...pool.media.get('agent_team')!.tables.get('operations')!.values()]
     await first.fiber.dispose()
     const replay = await first.ctx.plugin(AgentTeam)
@@ -259,8 +259,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('creates a top-level Task, starts creator Attention, and returns no own unread work', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Investigate the regression' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     expect(sent).toMatchObject({ message: { topLevel: true, sender: AGENT_TEAM_HUMAN_MEMBER_ID }, task: { status: 'todo' }, attention: [expect.objectContaining({ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, startSequence: sent.message.sequence, readThroughSequence: sent.message.sequence - 1 })] })
     // The creator's own Message is not unread for them, and the Thread they
     // started is already theirs to step back into: participation — writing a
@@ -278,10 +278,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('accepts a Task early and completes active Claims inside the same operation', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claimed = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     expect(claimed.task.status).toBe('in_progress')
@@ -310,8 +310,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('accepts an unclaimed todo Task directly and stays honest about the empty Claim list', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     expect(started.task.status).toBe('todo')
     const ledger = ledgerAtBoot(test)
 
@@ -341,11 +341,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('notifies every done Claim owner on a normal accept and dedupes multi-claim owners into one marker', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:agent-ship', 'ship')
-    const { actor: actorTwo } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:agent-fix', 'fix')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:agent-ship', 'ship')
+    const { actor: actorTwo } = await addLedgerMember(ledger, project.project.projectRef, 'member:agent-fix', 'fix')
     // Two Claims: the same owner finished one earlier (normal flow, the claim
     // was done BEFORE the accept), another member still holds an active one.
     const firstRead = (await ledger.readThread({ requestId: requestId('read-claim-1'), workspaceId: alpha, taskRef: started.task.taskRef, actor })).value
@@ -398,10 +398,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // (silent, exactly as recorded).
     const pool = new MemoryMediaPool()
     const test = await harness(pool)
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:agent-done', 'done-owner')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:agent-done', 'done-owner')
     const memberRead = (await ledger.readThread({ requestId: requestId('member-legacy-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor })).value
     const claim = committed((await ledger.changeClaim({ requestId: requestId('legacy-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'legacy', baseRevision: memberRead.thread.revision, actor })).value)
@@ -447,10 +447,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('records DMs as audit-only operations with idempotent retries and unchanged projections', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const sender = await addLedgerMember(ledger, channel.channel.channelRef, 'member:sender', 'sender')
-    const receiver = await addLedgerMember(ledger, channel.channel.channelRef, 'member:receiver', 'receiver')
+    const sender = await addLedgerMember(ledger, project.project.projectRef, 'member:sender', 'sender')
+    const receiver = await addLedgerMember(ledger, project.project.projectRef, 'member:receiver', 'receiver')
 
     const before = ledger.view({ workspaceId: alpha })
     const beforeInbox = ledger.inbox(receiver.actor, { workspaceId: alpha })
@@ -461,7 +461,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(dm.receipt).toMatchObject({ sequence: beforeStatus.sequence + 1 })
     expect(dm.recipient.memberId).toBe(receiver.member.memberId)
 
-    // Audit-only: no Thread, Task, Message, or channel membership appears.
+    // Audit-only: no Thread, Task, Message, or project membership appears.
     const after = ledger.view({ workspaceId: alpha })
     expect(after.threads).toHaveLength(before.threads.length)
     expect(after.items).toHaveLength(before.items.length)
@@ -487,11 +487,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('rejects DMs to other Workspaces, the Human, and the sender itself', async () => {
     const test = await harness(new MemoryMediaPool(), [alpha, beta])
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     // A second Workspace with its own Member: cross-workspace DM must fail.
-    const betaChannel = await test.ctx.agentTeam.createChannel({ requestId: requestId('beta-channel'), workspaceId: beta, name: 'beta', description: '' })
+    const betaProject = await test.ctx.agentTeam.createProject({ requestId: requestId('beta-project'), workspaceId: beta, name: 'beta', description: '' })
     const ledger = ledgerAtBoot(test)
-    const sender = await addLedgerMember(ledger, channel.channel.channelRef, 'member:sender', 'sender')
+    const sender = await addLedgerMember(ledger, project.project.projectRef, 'member:sender', 'sender')
     const betaLedgerMember = {
       memberId: 'member:beta-peer' as never,
       sessionId: SessionId('session:beta-peer'),
@@ -501,8 +501,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     }
     await ledger.addMember({ requestId: requestId('add-beta'), actor: agentTeamHumanActor(), member: betaLedgerMember, handle: betaLedgerMember.handle,
       description: betaLedgerMember.description, presetId: betaLedgerMember.presetId, workspaceId: beta,
-      channelRefs: [betaChannel.channel.channelRef] })
-    const receiver = await addLedgerMember(ledger, channel.channel.channelRef, 'member:receiver', 'receiver')
+      projectRefs: [betaProject.project.projectRef] })
+    const receiver = await addLedgerMember(ledger, project.project.projectRef, 'member:receiver', 'receiver')
 
     await expect(ledger.sendDm({ requestId: requestId('dm-cross'), workspaceId: alpha,
       recipientMemberId: 'member:beta-peer' as never, body: 'hi', actor: sender.actor })).rejects.toThrow(/not in Workspace/)
@@ -516,8 +516,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('closes an unclaimed todo Task through the close path, not acceptance', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const closed = committed((await ledger.changeTask({ requestId: requestId('close'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'close', baseRevision: started.thread.revision, actor: agentTeamHumanActor() })).value)
@@ -530,51 +530,51 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('resolves branded Task refs to navigation facts and omits unknown refs', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const first = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('first'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'first task' })))
-    const second = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('second'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'second task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const first = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'first task' })))
+    const second = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'second task' })))
     const resolved = test.ctx.agentTeam.resolveTaskRefs({ workspaceId: alpha, taskRefs: [first.task.taskRef, second.task.taskRef, 'task:00000000-0000-4000-8000-000000000000' as AgentTeamTaskRef] })
     expect(resolved.resolved).toEqual([
-      { taskRef: first.task.taskRef, channelRef: channel.channel.channelRef, threadRef: first.thread.threadRef, taskNumber: 1 },
-      { taskRef: second.task.taskRef, channelRef: channel.channel.channelRef, threadRef: second.thread.threadRef, taskNumber: 2 },
+      { taskRef: first.task.taskRef, projectRef: project.project.projectRef, threadRef: first.thread.threadRef, taskNumber: 1 },
+      { taskRef: second.task.taskRef, projectRef: project.project.projectRef, threadRef: second.thread.threadRef, taskNumber: 2 },
     ])
-    // Display numbers are per home Channel: a second Channel's first Task
+    // Display numbers are per home Project: a second Project's first Task
     // resolves as #1 even though it is the workspace's third Task, and a
-    // Channel-less view (inbox renders) numbers it the same way.
-    const other = await test.ctx.agentTeam.createChannel({ requestId: requestId('other'), workspaceId: alpha, name: 'audit', description: 'Audit trail' })
-    const audit = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('audit'), workspaceId: alpha, channelRef: other.channel.channelRef, body: 'audit task' })))
-    const crossChannel = test.ctx.agentTeam.resolveTaskRefs({ workspaceId: alpha, taskRefs: [audit.task.taskRef, second.task.taskRef] })
-    expect(crossChannel.resolved).toEqual([
-      { taskRef: audit.task.taskRef, channelRef: other.channel.channelRef, threadRef: audit.thread.threadRef, taskNumber: 1 },
-      { taskRef: second.task.taskRef, channelRef: channel.channel.channelRef, threadRef: second.thread.threadRef, taskNumber: 2 },
+    // Project-less view (inbox renders) numbers it the same way.
+    const other = await test.ctx.agentTeam.createProject({ requestId: requestId('other'), workspaceId: alpha, name: 'audit', description: 'Audit trail' })
+    const audit = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('audit'), workspaceId: alpha, projectRef: other.project.projectRef, body: 'audit task' })))
+    const crossProject = test.ctx.agentTeam.resolveTaskRefs({ workspaceId: alpha, taskRefs: [audit.task.taskRef, second.task.taskRef] })
+    expect(crossProject.resolved).toEqual([
+      { taskRef: audit.task.taskRef, projectRef: other.project.projectRef, threadRef: audit.thread.threadRef, taskNumber: 1 },
+      { taskRef: second.task.taskRef, projectRef: project.project.projectRef, threadRef: second.thread.threadRef, taskNumber: 2 },
     ])
-    const channelless = test.ctx.agentTeam.view({ workspaceId: alpha })
-    expect(channelless.taskNumbers).toContainEqual({ taskRef: audit.task.taskRef, taskNumber: 1 })
-    expect(channelless.taskNumbers).toContainEqual({ taskRef: second.task.taskRef, taskNumber: 2 })
+    const projectless = test.ctx.agentTeam.view({ workspaceId: alpha })
+    expect(projectless.taskNumbers).toContainEqual({ taskRef: audit.task.taskRef, taskNumber: 1 })
+    expect(projectless.taskNumbers).toContainEqual({ taskRef: second.task.taskRef, taskNumber: 2 })
     // An unregistered workspace is rejected before any lookup.
     expect(() => test.ctx.agentTeam.resolveTaskRefs({ workspaceId: beta, taskRefs: [first.task.taskRef] })).toThrow(/unknown Workspace/)
   })
 
   it('resolves branded Thread refs to navigation facts and omits unknown refs', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('thread-refs-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const first = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-refs-first'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'alpha discussion opens here' }))
-    const second = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-refs-second'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'beta discussion opens here' }))
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('thread-refs-task'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'task work' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('thread-refs-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const first = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-refs-first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'alpha discussion opens here' }))
+    const second = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-refs-second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'beta discussion opens here' }))
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('thread-refs-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'task work' })))
     // Taskless Threads resolve with their opening-line title and no Task
     // overlay; taskful Threads carry the Task home alongside the same title.
     // Unknown refs are omitted so message bodies render them as plain text.
     const resolved = test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [first.thread.threadRef, second.thread.threadRef, started.thread.threadRef, 'thread:00000000-0000-4000-8000-000000000000' as AgentTeamThreadRef] })
     expect(resolved.resolved).toEqual([
-      { threadRef: first.thread.threadRef, channelRef: channel.channel.channelRef, title: 'alpha discussion opens here' },
-      { threadRef: second.thread.threadRef, channelRef: channel.channel.channelRef, title: 'beta discussion opens here' },
-      { threadRef: started.thread.threadRef, channelRef: channel.channel.channelRef, taskRef: started.task.taskRef, taskNumber: 1, title: 'task work' },
+      { threadRef: first.thread.threadRef, projectRef: project.project.projectRef, title: 'alpha discussion opens here' },
+      { threadRef: second.thread.threadRef, projectRef: project.project.projectRef, title: 'beta discussion opens here' },
+      { threadRef: started.thread.threadRef, projectRef: project.project.projectRef, taskRef: started.task.taskRef, taskNumber: 1, title: 'task work' },
     ])
     // The abbreviated spelling from the report (8 hex chars) resolves when
     // unambiguous, answering with the full ref the click path navigates by.
     const abbreviated = `thread:${first.thread.threadRef.slice('thread:'.length).replaceAll('-', '').slice(0, 8).toLowerCase()}` as AgentTeamThreadRef
     expect(test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [abbreviated] }).resolved).toEqual([
-      { threadRef: first.thread.threadRef, channelRef: channel.channel.channelRef, title: 'alpha discussion opens here' },
+      { threadRef: first.thread.threadRef, projectRef: project.project.projectRef, title: 'alpha discussion opens here' },
     ])
     // The same abbreviation addresses the bounded Thread view: the filter
     // compares the resolved full key, not the authored spelling (task #17 root
@@ -586,32 +586,32 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('caps resolved Thread chip titles at 40 characters', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('thread-title-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('thread-title-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const exact = `x${'y'.repeat(38)}z`
-    const exactThread = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-title-exact'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: exact }))
+    const exactThread = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-title-exact'), workspaceId: alpha, projectRef: project.project.projectRef, body: exact }))
     // A 40-character opening line passes through untouched; anything longer
     // is cut to 39 characters plus the mark so chips share the line with prose.
     expect(test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [exactThread.thread.threadRef] }).resolved).toEqual([
-      { threadRef: exactThread.thread.threadRef, channelRef: channel.channel.channelRef, title: exact },
+      { threadRef: exactThread.thread.threadRef, projectRef: project.project.projectRef, title: exact },
     ])
-    const longThread = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-title-long'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: `${'a'.repeat(100)}\nsecond line` }))
+    const longThread = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-title-long'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'a'.repeat(100)}\nsecond line` }))
     expect(test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [longThread.thread.threadRef] }).resolved).toEqual([
-      { threadRef: longThread.thread.threadRef, channelRef: channel.channel.channelRef, title: `${'a'.repeat(39)}…` },
+      { threadRef: longThread.thread.threadRef, projectRef: project.project.projectRef, title: `${'a'.repeat(39)}…` },
     ])
   })
 
-  it('adds an Agent with initial Channel membership and persists no Inbox delivery facts', async () => {
+  it('adds an Agent with initial Project membership and persists no Inbox delivery facts', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
     expect(member.status.member).toMatchObject({ workspaceId: alpha, handle: 'reviewer' })
-    expect(test.ctx.agentTeam.view({ workspaceId: alpha }).members).toEqual([{ channelRef: channel.channel.channelRef, memberId: member.status.member.memberId }])
+    expect(test.ctx.agentTeam.view({ workspaceId: alpha }).members).toEqual([{ projectRef: project.project.projectRef, memberId: member.status.member.memberId }])
     const records = [...(test.facility.get('agent_team')?.table('operations').entries() ?? [])].map(([, operation]) => JSON.stringify(operation))
     expect(records.join('\n')).not.toContain('delivery')
     expect(records.join('\n')).not.toContain('follow-changed')
   })
 
-  it('opens a persisted Member with no initial Channels in a fresh Host', async () => {
+  it('opens a persisted Member with no initial Projects in a fresh Host', async () => {
     const first = await harness()
     const ledger = ledgerAtBoot(first)
     await addLedgerMember(ledger, undefined, 'member:bare', '')
@@ -621,22 +621,22 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(() => ledgerAtBoot(revived).validate()).not.toThrow()
   })
 
-  it('opens a persisted Channel with no initial Members in a fresh Host', async () => {
+  it('opens a persisted Project with no initial Members in a fresh Host', async () => {
     const first = await harness()
-    await first.ctx.agentTeam.createChannel({ requestId: requestId('bare-channel'), workspaceId: alpha, name: 'ops', description: '' })
+    await first.ctx.agentTeam.createProject({ requestId: requestId('bare-project'), workspaceId: alpha, name: 'ops', description: '' })
     const records = [...first.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
     const revived = await harness(storedPool(records))
-    expect(revived.ctx.agentTeam.status()).toMatchObject({ channelCount: 1, agentMemberCount: 0 })
+    expect(revived.ctx.agentTeam.status()).toMatchObject({ projectCount: 1, agentMemberCount: 0 })
     expect(() => ledgerAtBoot(revived).validate()).not.toThrow()
   })
 
   it('starts Agent Attention and direct Inbox delivery after a top-level mention without confirmation', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     const before = ledger.status().sequence
-    const sent = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('mention'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    const sent = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('mention'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'Please investigate this', recipients: [member.memberId], actor: agentTeamHumanActor() })).value))
     expect(ledger.status().sequence).toBe(before + 1)
     expect(sent.attention).toEqual(expect.arrayContaining([expect.objectContaining({ memberId: member.memberId,
@@ -650,13 +650,13 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('records the Message a reply answers and delivers to that Message author', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { member: builder, actor: builderActor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
-    const { actor: reviewerActor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:reviewer')
+    const { member: builder, actor: builderActor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
+    const { actor: reviewerActor } = await addLedgerMember(ledger, project.project.projectRef, 'member:reviewer')
 
     const sent = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('anchor'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Please investigate this', recipients: [builder.memberId], actor: agentTeamHumanActor() })).value))
+      projectRef: project.project.projectRef, body: 'Please investigate this', recipients: [builder.memberId], actor: agentTeamHumanActor() })).value))
     // The anchor mentions the builder, so the unread fence stands until the
     // builder acknowledges it; an unread mutation would be refused.
     await ledger.readThread({ requestId: requestId('builder-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: builderActor })
@@ -695,13 +695,13 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('refuses a reply target that is unknown or belongs to another Thread', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     const first = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('first'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'First thread', actor: agentTeamHumanActor() })).value))
+      projectRef: project.project.projectRef, body: 'First thread', actor: agentTeamHumanActor() })).value))
     const second = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('second'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Second thread', actor: agentTeamHumanActor() })).value))
+      projectRef: project.project.projectRef, body: 'Second thread', actor: agentTeamHumanActor() })).value))
 
     await expect(ledger.reply({ requestId: requestId('unknown-target'), workspaceId: alpha, taskRef: first.task.taskRef,
       baseRevision: first.thread.revision, body: 'Answering nothing', replyToMessageRef: 'message:missing' as never, actor }))
@@ -716,14 +716,14 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('reads one Message back verbatim, by identity rather than by its neighbours', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     // A body whose summary cannot stand in for it: a short first line, a
     // mention, and more than the quote's 120-character bound behind it.
     const longBody = `Please investigate this\n第二行 @reviewer 提到别人\n${'x'.repeat(200)}`
     const sent = committed((await ledger.sendMessage({ requestId: requestId('anchor'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: longBody, actor: agentTeamHumanActor() })).value)
+      projectRef: project.project.projectRef, body: longBody, actor: agentTeamHumanActor() })).value)
     const middle = committed((await ledger.reply({ requestId: requestId('middle'), workspaceId: alpha,
       threadRef: sent.thread.threadRef, baseRevision: sent.thread.revision, body: 'A middle message', actor: agentTeamHumanActor() })).value)
     const last = committed((await ledger.reply({ requestId: requestId('last'), workspaceId: alpha,
@@ -734,7 +734,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(readBack.body).toBe(longBody)
     expect(readBack.body.length).toBeGreaterThan(120)
     expect(readBack.body).not.toContain('…')
-    expect(readBack).toMatchObject({ messageRef: sent.message.messageRef, threadRef: sent.thread.threadRef, channelRef: channel.channel.channelRef, sender: AGENT_TEAM_HUMAN_MEMBER_ID, sequence: sent.message.sequence })
+    expect(readBack).toMatchObject({ messageRef: sent.message.messageRef, threadRef: sent.thread.threadRef, projectRef: project.project.projectRef, sender: AGENT_TEAM_HUMAN_MEMBER_ID, sequence: sent.message.sequence })
 
 
     // Identity, not position: the Message before and the Message after come
@@ -748,24 +748,24 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('reads one Message back through the Client Remote, on the Host\'s own ledger', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const longBody = `Please investigate this\n${'y'.repeat(200)}`
     const sent = committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('remote-anchor'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: longBody }))
+      projectRef: project.project.projectRef, body: longBody }))
     const readBack = test.ctx.agentTeam.readMessage({ workspaceId: alpha, threadRef: sent.thread.threadRef, messageRef: sent.message.messageRef })
     expect(readBack.body).toBe(longBody)
-    expect(readBack).toMatchObject({ threadRef: sent.thread.threadRef, channelRef: channel.channel.channelRef, sender: AGENT_TEAM_HUMAN_MEMBER_ID, sequence: sent.message.sequence })
+    expect(readBack).toMatchObject({ threadRef: sent.thread.threadRef, projectRef: project.project.projectRef, sender: AGENT_TEAM_HUMAN_MEMBER_ID, sequence: sent.message.sequence })
   })
 
-  it('refuses an unknown Message, another Thread\'s Message, and an archived Channel\'s — distinguishably', async () => {
+  it('refuses an unknown Message, another Thread\'s Message, and an archived Project\'s — distinguishably', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     const first = committed((await ledger.sendMessage({ requestId: requestId('first'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'First thread', actor: agentTeamHumanActor() })).value)
+      projectRef: project.project.projectRef, body: 'First thread', actor: agentTeamHumanActor() })).value)
     const second = committed((await ledger.sendMessage({ requestId: requestId('second'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Second thread', actor: agentTeamHumanActor() })).value)
+      projectRef: project.project.projectRef, body: 'Second thread', actor: agentTeamHumanActor() })).value)
 
     // Each refusal names its own cause, so a reader can tell a wrong ref from a
     // closed Thread — and none of them returns a substitute body.
@@ -776,30 +776,30 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(() => ledger.readMessage(actor, { workspaceId: alpha, threadRef: 'thread:missing' as never, messageRef: first.message.messageRef }))
       .toThrow(/unknown Thread ref/)
 
-    await ledger.archiveChannel({ requestId: requestId('archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
     expect(() => ledger.readMessage(actor, { workspaceId: alpha, threadRef: first.thread.threadRef, messageRef: first.message.messageRef }))
       .toThrow(/is archived/)
   })
 
   it('serves the Human Inbox with row previews and whole-unread totals', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     // One ledger instance commits and projects every step below: a second
     // instance's state is its construction-time replay, so mixing instances
     // would resolve refs against a stale snapshot.
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
 
     // A followed Thread carrying BOTH an unread mention and ordinary follow
     // unread: one row, and the badge counts every unread fact on it.
-    const followed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('followed'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Followed thread anchor', actor: agentTeamHumanActor() })).value))
+    const followed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('followed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Followed thread anchor', actor: agentTeamHumanActor() })).value))
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: followed.task.taskRef, body: 'Decision needed on the rollout', baseRevision: followed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
     committed((await ledger.reply({ requestId: requestId('ordinary'), workspaceId: alpha, taskRef: followed.task.taskRef, body: 'Ordinary progress reply', baseRevision: mentioned.thread.revision, actor })).value)
 
     // An unfollowed Thread whose fresh mention must still surface: direct
     // markers never depended on Human follow. Its anchor's first line exceeds
     // the 120-character preview bound the Thread page applies to Task titles.
-    const unfollowed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('unfollowed'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: `${'x'.repeat(130)}\nsecond line`, actor: agentTeamHumanActor() })).value))
+    const unfollowed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('unfollowed'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'x'.repeat(130)}\nsecond line`, actor: agentTeamHumanActor() })).value))
     await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, action: 'unfollow', actor: agentTeamHumanActor() })
     committed((await ledger.reply({ requestId: requestId('ping'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, body: 'Blocking on your call', baseRevision: unfollowed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
 
@@ -811,11 +811,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(inbox.totalUnreadCount).toBe(3)
     expect(inbox.totalDirectCount).toBe(2)
     expect(inbox.items[1]).toMatchObject({
-      channelRef: channel.channel.channelRef, channelName: 'engineering', taskNumber: 1,
+      projectRef: project.project.projectRef, projectName: 'engineering', taskNumber: 1,
       directCount: 1, unreadCount: 2, previewText: 'Followed thread anchor',
     })
     expect(inbox.items[0]).toMatchObject({
-      channelName: 'engineering', taskNumber: 2, directCount: 1, unreadCount: 1,
+      projectName: 'engineering', taskNumber: 2, directCount: 1, unreadCount: 1,
       previewText: `${'x'.repeat(119)}…`,
     })
     expect(inbox.items[0]?.newestOccurredAt).not.toBe('')
@@ -834,12 +834,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('discloses a capped unread queue instead of letting a full page read as all of it', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     let lastTaskRef: AgentTeamTaskRef | undefined
     for (const [index, body] of ['First thread anchor', 'Second thread anchor'].entries()) {
-      const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`capped-${index}`), workspaceId: alpha, channelRef: channel.channel.channelRef, body, actor: agentTeamHumanActor() })).value))
+      const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`capped-${index}`), workspaceId: alpha, projectRef: project.project.projectRef, body, actor: agentTeamHumanActor() })).value))
       committed((await ledger.reply({ requestId: requestId(`capped-reply-${index}`), workspaceId: alpha, taskRef: started.task.taskRef, body: `Progress on thread ${index}`, baseRevision: started.thread.revision, actor })).value)
       lastTaskRef = started.task.taskRef
     }
@@ -856,14 +856,14 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('serves pure follow unread on the same data', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:builder')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     // The Human creates the Thread and therefore follows it; the Agent's reply
     // carries NO mentions parameter, so the only unread it produces is the
     // ordinary follow unread — which is exactly what the Inbox now admits,
     // with no mention marker behind it.
-    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Pure follow thread anchor', actor: agentTeamHumanActor() })).value))
+    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Pure follow thread anchor', actor: agentTeamHumanActor() })).value))
     committed((await ledger.reply({ requestId: requestId('progress'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Ordinary progress, nobody mentioned', baseRevision: started.thread.revision, actor })).value)
 
     const inbox = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })
@@ -876,10 +876,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('keeps the later follow watermark when an older direct marker is consumed', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'unfollow', actor: agentTeamHumanActor() })).value
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -904,10 +904,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('moves a participated Thread from the unread queue into the Human recent slice once it is read', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Rollout plan' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Rollout plan' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'On it', baseRevision: started.thread.revision, actor })).value)
     // One Thread is never in both slices: while the reply is unread the row is
     // the queue's, and the tail admits nothing.
@@ -915,7 +915,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
     const inbox = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })
     expect(inbox).toMatchObject({ items: [], totalUnreadCount: 0,
-      recent: [expect.objectContaining({ channelName: 'engineering', taskNumber: 1, previewText: 'Rollout plan', unreadCount: 0, directCount: 0,
+      recent: [expect.objectContaining({ projectName: 'engineering', taskNumber: 1, previewText: 'Rollout plan', unreadCount: 0, directCount: 0,
         thread: expect.objectContaining({ threadRef: started.task.threadRef }) })] })
     expect(ledgerAtBoot(test).inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual(inbox)
     // The tail is a Human surface: an Agent's Inbox stays exactly its unread
@@ -925,19 +925,19 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('admits every Thread the reader wrote in and nothing they only arrived at', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     // Three Threads, three ways a Human reader meets one. Their own Thread with
     // nobody else in it is theirs from the start; somebody else's Thread they
     // replied to is theirs too, even though a reply does not follow a Thread —
     // that gap is exactly what reading Attention as the candidate set used to
     // hide; and a Thread they were told about but never wrote in stays out,
     // because participation, not arrival, is the admission rule.
-    const alone = committed((await ledger.sendMessage({ requestId: requestId('alone'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Notes to self', actor: agentTeamHumanActor() })).value)
-    const theirs = committed((await ledger.sendMessage({ requestId: requestId('theirs'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Agent thread', actor })).value)
+    const alone = committed((await ledger.sendMessage({ requestId: requestId('alone'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Notes to self', actor: agentTeamHumanActor() })).value)
+    const theirs = committed((await ledger.sendMessage({ requestId: requestId('theirs'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Agent thread', actor })).value)
     committed((await ledger.reply({ requestId: requestId('join'), workspaceId: alpha, threadRef: theirs.thread.threadRef, body: 'Looking now', baseRevision: theirs.thread.revision, actor: agentTeamHumanActor() })).value)
-    const told = committed((await ledger.sendMessage({ requestId: requestId('told'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Status only', recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
+    const told = committed((await ledger.sendMessage({ requestId: requestId('told'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Status only', recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
     for (const [name, threadRef] of [['alone', alone.thread.threadRef], ['theirs', theirs.thread.threadRef], ['told', told.thread.threadRef]] as const) {
       await ledger.readThread({ requestId: requestId(`read-${name}`), workspaceId: alpha, threadRef, actor: agentTeamHumanActor() })
     }
@@ -962,11 +962,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('bounds the Human recent slice to the ten newest participated Threads', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     for (let index = 0; index < 11; index += 1) {
-      const started = committed((await ledger.sendMessage({ requestId: requestId(`start-${index}`), workspaceId: alpha, channelRef: channel.channel.channelRef, body: `Thread ${index}`, actor: agentTeamHumanActor() })).value)
+      const started = committed((await ledger.sendMessage({ requestId: requestId(`start-${index}`), workspaceId: alpha, projectRef: project.project.projectRef, body: `Thread ${index}`, actor: agentTeamHumanActor() })).value)
       committed((await ledger.reply({ requestId: requestId(`reply-${index}`), workspaceId: alpha, threadRef: started.thread.threadRef, body: 'Ack', baseRevision: started.thread.revision, actor })).value)
       await ledger.readThread({ requestId: requestId(`read-${index}`), workspaceId: alpha, threadRef: started.thread.threadRef, actor: agentTeamHumanActor() })
     }
@@ -978,18 +978,18 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('lists every active Task Thread in the view radar for an Agent reader, whoever took part', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    const { actor: bystander } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:bystander', 'Bystander', 'Bystander')
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor: bystander } = await addLedgerMember(ledger, project.project.projectRef, 'member:bystander', 'Bystander', 'Bystander')
     // A claimed Task (in_progress), a done Task still in review, and an untouched
     // Task with no Claim. The radar should carry the first two and drop the third.
-    const claimed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('claimed'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Claimed work', actor: agentTeamHumanActor() })).value))
+    const claimed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('claimed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Claimed work', actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: claimed.task.taskRef, action: 'claim', direction: 'building it', baseRevision: claimed.thread.revision, actor })).value)
-    const reviewed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('reviewed'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Reviewed work', actor: agentTeamHumanActor() })).value))
+    const reviewed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('reviewed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Reviewed work', actor: agentTeamHumanActor() })).value))
     const reviewClaim = committed((await ledger.changeClaim({ requestId: requestId('review-claim'), workspaceId: alpha, taskRef: reviewed.task.taskRef, action: 'claim', direction: 'reviewing it', baseRevision: reviewed.thread.revision, actor })).value)
     committed((await ledger.changeClaim({ requestId: requestId('review-done'), workspaceId: alpha, taskRef: reviewed.task.taskRef, action: 'done', claimRef: reviewClaim.claim.claimRef, baseRevision: reviewClaim.thread.revision, actor })).value)
-    withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('idle'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Idle work', actor: agentTeamHumanActor() })).value))
+    withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('idle'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Idle work', actor: agentTeamHumanActor() })).value))
     // The bystander never wrote in either active Thread, yet the radar surfaces
     // both to them: admission is the Task being active, not participation.
     const radar = ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true }, bystander.memberId).activeTaskThreads
@@ -1002,11 +1002,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('keeps an active Task Thread in the radar even while the reader has it unread', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    const { actor: reader } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:reader', 'Reader', 'Reader')
-    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Active task', recipients: [reader.memberId], actor })).value))
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor: reader } = await addLedgerMember(ledger, project.project.projectRef, 'member:reader', 'Reader', 'Reader')
+    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Active task', recipients: [reader.memberId], actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'claim', direction: 'on it', baseRevision: started.thread.revision, actor })).value)
     // The reader was mentioned and has an unread on this Thread — the unread
     // queue carries it, and so does the radar, independently.
@@ -1016,32 +1016,32 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(radar.map(row => row.threadRef)).toEqual([started.task.threadRef])
   })
 
-  it('excludes archived-Channel Tasks and isolates Workspaces in the view radar', async () => {
+  it('excludes archived-Project Tasks and isolates Workspaces in the view radar', async () => {
     const test = await harness(new MemoryMediaPool(), [alpha, beta])
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, undefined)
     await ledger.joinWorkspace({ requestId: requestId('join-beta'), workspaceId: beta, memberId: member.memberId, actor: agentTeamHumanActor() })
-    const alphaChannel = (await ledger.createChannel({ requestId: requestId('alpha-ch'), workspaceId: alpha, name: 'alpha', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.channel
-    const betaChannel = (await ledger.createChannel({ requestId: requestId('beta-ch'), workspaceId: beta, name: 'beta', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.channel
-    const betaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('beta-task'), workspaceId: beta, channelRef: betaChannel.channelRef, body: 'Beta work', actor })).value))
+    const alphaProject = (await ledger.createProject({ requestId: requestId('alpha-ch'), workspaceId: alpha, name: 'alpha', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
+    const betaProject = (await ledger.createProject({ requestId: requestId('beta-ch'), workspaceId: beta, name: 'beta', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
+    const betaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('beta-task'), workspaceId: beta, projectRef: betaProject.projectRef, body: 'Beta work', actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('beta-claim'), workspaceId: beta, taskRef: betaTask.task.taskRef, action: 'claim', direction: 'beta angle', baseRevision: betaTask.thread.revision, actor })).value)
     // Beta's active Task does not leak into the alpha radar.
     expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads).toEqual([])
-    // An active Task whose Channel is then archived leaves the radar.
-    const alphaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('alpha-task'), workspaceId: alpha, channelRef: alphaChannel.channelRef, body: 'Alpha work', actor })).value))
+    // An active Task whose Project is then archived leaves the radar.
+    const alphaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('alpha-task'), workspaceId: alpha, projectRef: alphaProject.projectRef, body: 'Alpha work', actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('alpha-claim'), workspaceId: alpha, taskRef: alphaTask.task.taskRef, action: 'claim', direction: 'alpha angle', baseRevision: alphaTask.thread.revision, actor })).value)
     expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads.map(row => row.threadRef)).toEqual([alphaTask.task.threadRef])
-    await ledger.archiveChannel({ requestId: requestId('alpha-arch'), workspaceId: alpha, channelRef: alphaChannel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('alpha-arch'), workspaceId: alpha, projectRef: alphaProject.projectRef, actor: agentTeamHumanActor() })
     expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads).toEqual([])
   })
 
   it('leaves the view radar empty when no Task has an active Claim', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     // A taskful Thread with no Claim stays at todo and never enters the radar.
-    withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('todo'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Unclaimed task', actor })).value))
+    withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('todo'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Unclaimed task', actor })).value))
     expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, actor.memberId).activeTaskThreads).toEqual([])
   })
 
@@ -1050,16 +1050,16 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   // way to ask for the address-book projection `team_view` renders.
   it('bounds the view catalog to the page unless the caller asks for the whole scope', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'First task', actor: agentTeamHumanActor() })).value))
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
+    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First task', actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'claim', direction: 'on it', baseRevision: started.thread.revision, actor })).value)
     // 39 more Tasks behind it: a newest-first page of one cannot cover them.
     let newest = started
     for (let index = 1; index < 40; index += 1) {
       newest = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`task-${index}`), workspaceId: alpha,
-        channelRef: channel.channel.channelRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
+        projectRef: project.project.projectRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
       committed((await ledger.changeClaim({ requestId: requestId(`claim-${index}`), workspaceId: alpha, taskRef: newest.task.taskRef, action: 'claim',
         direction: `on ${index}`, baseRevision: newest.thread.revision, actor })).value)
     }
@@ -1094,12 +1094,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   // unread queue instead of the slice it happened to keep.
   it('reports whole-queue Inbox totals from a bounded one-row read', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     for (let index = 0; index < 6; index += 1) {
       const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`task-${index}`), workspaceId: alpha,
-        channelRef: channel.channel.channelRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
+        projectRef: project.project.projectRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
       await ledger.reply({ requestId: requestId(`reply-${index}`), workspaceId: alpha, taskRef: started.task.taskRef,
         body: `Update ${index}`, baseRevision: started.thread.revision, actor })
     }
@@ -1117,10 +1117,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('does not duplicate a direct marker when follow starts after the marker', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'unfollow', actor: agentTeamHumanActor() })).value
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1136,8 +1136,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('returns Human-only follow observations without changing public Thread facts or Inbox state', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     await test.ctx.agentTeam.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'unfollow' })
     await test.ctx.agentTeam.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow' })
 
@@ -1161,9 +1161,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('invites an unfollowed Agent only after Human confirmation and leaves old history background-only', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', channelRefs: [channel.channel.channelRef] })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Old task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Old task' })))
     const history = committed(await test.ctx.agentTeam.reply({ requestId: requestId('history'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Old discussion', baseRevision: started.thread.revision }))
     const held = await test.ctx.agentTeam.reply({ requestId: requestId('invite'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Please review this', baseRevision: history.thread.revision, recipients: [member.status.member.memberId] })
     expect(held).toMatchObject({ kind: 'confirmation_required', recipients: [member.status.member.memberId] })
@@ -1178,11 +1178,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('reports how much of a Thread a bounded read left behind, so a returning reader can size what it has not read', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Thread anchor' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Thread anchor' })))
     committed(await test.ctx.agentTeam.reply({ requestId: requestId('history'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Older discussion', baseRevision: started.thread.revision }))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef, 'member:reviewer', 'Reviews changes', 'reviewer')
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:reviewer', 'Reviews changes', 'reviewer')
     // Joining takes the watermark to the tail, so the two facts already in the
     // Thread stay behind an Attention period this member has never read through.
     const joined = (await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })).value
@@ -1201,8 +1201,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('a read that reached a Thread\'s first fact reports nothing left behind it', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Only task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Only task' })))
     // The Thread holds one fact and this read acknowledges it, so the span
     // before what it was shown is empty and the render stays silent about it.
     const read = await test.ctx.agentTeam.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef })
@@ -1211,10 +1211,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('gates existing Thread mutations on unread work before revision and makes reads idempotent', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const follow = await ledger.changeAttention({ requestId: requestId('agent-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
     expect(follow.value.attention).toMatchObject({ readThroughSequence: started.thread.revision })
     const update = committed((await ledger.reply({ requestId: requestId('human-update'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1245,10 +1245,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('a rejected write carries the facts it gated on and the token to retry with', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('agent-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
     expect(followed.value.attention).toMatchObject({ readThroughSequence: started.thread.revision })
     const update = committed((await ledger.reply({ requestId: requestId('human-update'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1284,7 +1284,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const readsBeforeRetry = readCount()
     expect(committed((await ledger.reply({ requestId: requestId('retry'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: 'Retry with the named revision', baseRevision: own.thread.revision, actor })).value).message.body).toBe('Retry with the named revision')
-    // The whole point of the channel: the retry committed with zero additional
+    // The whole point of the project: the retry committed with zero additional
     // read operations, so the reject → read → write chain is now reject → write.
     expect(readCount()).toBe(readsBeforeRetry)
     ledger.validate()
@@ -1292,10 +1292,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('makes a 21-update read continue explicit with a remaining unread count', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow-21'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
     let revision = followed.value.attention?.readThroughSequence ?? started.thread.revision
     for (let index = 0; index < 21; index++) {
@@ -1326,12 +1326,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('counts remaining unread from the reader own marker state, not the whole ledger', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'First task' })))
-    const other = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start-other'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Second task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First task' })))
+    const other = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start-other'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Second task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor: reader } = await addLedgerMember(ledger, channel.channel.channelRef)
-    const { actor: bystander } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor: reader } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor: bystander } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('follow-first'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor: reader })
     await ledger.changeAttention({ requestId: requestId('follow-second'), workspaceId: alpha, taskRef: other.task.taskRef, action: 'follow', actor: reader })
     // Following keeps the mention a plain marker: an unfollowed Member would
@@ -1377,10 +1377,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('releases Claims and clears Attention on close without restoring it on reopen', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claim = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     expect(claim.attention).toMatchObject({ memberId: actor.memberId })
@@ -1408,12 +1408,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('retains a later reopen update for Members that have not read the close', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('reopen-channel'), workspaceId: alpha,
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('reopen-project'), workspaceId: alpha,
       name: 'engineering', description: 'Engineering work' })
     const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('reopen-start'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Task' })))
+      projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('reopen-follow'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'follow', actor })
     const humanRead = (await ledger.readThread({ requestId: requestId('reopen-human-read'), workspaceId: alpha,
@@ -1433,17 +1433,17 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(ledger.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
   })
 
-  // Removal from a single Channel is retired (membership is derived from
+  // Removal from a single Project is retired (membership is derived from
   // participation now), so the live side of this cleanup is the whole-Team
-  // removal; the Channel case survives as the frozen-history replay above.
+  // removal; the Project case survives as the frozen-history replay above.
   it('replays terminal Activity marker cleanup after Team removal', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('cleanup-team-channel'), workspaceId: alpha,
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('cleanup-team-project'), workspaceId: alpha,
       name: 'cleanup-team', description: 'Cleanup replay' })
     const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('cleanup-team-start'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Task' })))
+      projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('cleanup-team-follow'), workspaceId: alpha,
       taskRef: started.task.taskRef, action: 'follow', actor })
     const humanRead = (await ledger.readThread({ requestId: requestId('cleanup-team-human-read'), workspaceId: alpha,
@@ -1460,24 +1460,24 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(() => ledgerAtBoot(replayed).validate()).not.toThrow()
   })
 
-  it('replays a historical Channel member-removal that cleaned a taskless Thread', async () => {
+  it('replays a historical Project member-removal that cleaned a taskless Thread', async () => {
     // Membership is derived now and nothing writes a removal any more, so this
     // history is loaded rather than committed: the cleanup it carries is what
     // old ledgers still depend on.
     const ledger = ledgerAtBoot(await harness(storedPool(legacyRemovalLedger.records)))
     const operation = ledger.getOperation(legacyRemovalLedger.operationId as never)!
-    expect(operation.kind === 'team/channel-member-removed' ? operation.data.inbox.attention.removed : [])
+    expect(operation.kind === 'team/project-member-removed' ? operation.data.inbox.attention.removed : [])
       .toEqual(expect.arrayContaining([{ memberId: legacyRemovalLedger.memberId, threadRef: legacyRemovalLedger.threadRef }]))
     ledger.validate()
   })
 
-  it('repairs a legacy Channel member-removal record that omitted taskless-Thread cleanup on load', async () => {
+  it('repairs a legacy Project member-removal record that omitted taskless-Thread cleanup on load', async () => {
     // The removal is historical, so the ledger is loaded from the frozen
     // history and then rewritten into the 0.1.7-0.1.9 shape: cleanup scoped to
     // taskful Threads only.
     const records = legacyRemovalLedger.records.map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/channel-member-removed') return [id, typed] as [string, unknown]
+      if (typed.kind !== 'team/project-member-removed') return [id, typed] as [string, unknown]
       const dropTaskless = (entries: readonly { threadRef: string }[]) => entries.filter(entry => entry.threadRef !== legacyRemovalLedger.threadRef)
       return [id, { ...typed, data: { ...typed.data, inbox: {
         attention: { set: [], removed: dropTaskless(typed.data.inbox.attention.removed) },
@@ -1488,19 +1488,19 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const legacyLedger = ledgerAtBoot(await harness(storedPool(records)))
     expect(() => legacyLedger.validate()).not.toThrow()
     const repaired = legacyLedger.getOperation(legacyRemovalLedger.operationId as never)!
-    expect(repaired.kind === 'team/channel-member-removed' ? repaired.data.inbox.attention.removed : [])
+    expect(repaired.kind === 'team/project-member-removed' ? repaired.data.inbox.attention.removed : [])
       .toEqual(expect.arrayContaining([{ memberId: legacyRemovalLedger.memberId, threadRef: legacyRemovalLedger.threadRef }]))
   })
 
   it('rejects a structurally valid Thread read receipt with a forged watermark during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Task' })))
+      projectRef: project.project.projectRef, body: 'Task' })))
     const updated = committed(await test.ctx.agentTeam.reply({ requestId: requestId('update'), workspaceId: alpha,
       taskRef: started.task.taskRef, body: 'Unread update', baseRevision: started.thread.revision }))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.reply({ requestId: requestId('agent-update'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: 'Unread agent update', baseRevision: updated.thread.revision, actor })
     // The Human has an unseen reply, so this read advances the watermark and
@@ -1522,13 +1522,13 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('rejects a pre-receipt Thread read snapshot with a forged watermark during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Task' })))
+      projectRef: project.project.projectRef, body: 'Task' })))
     const updated = committed(await test.ctx.agentTeam.reply({ requestId: requestId('update'), workspaceId: alpha,
       taskRef: started.task.taskRef, body: 'Unread update', baseRevision: started.thread.revision }))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.reply({ requestId: requestId('agent-update'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: 'Unread agent update', baseRevision: updated.thread.revision, actor })
     const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).value
@@ -1551,11 +1551,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // A historical removal carries the cleanup snapshot; forging a released
     // Task into it must still fail the replay, since old ledgers are validated
     // on load.
-    const forgedTask = Object.freeze({ taskRef: 'task:forged' as never, channelRef: legacyRemovalLedger.channelRef as never,
+    const forgedTask = Object.freeze({ taskRef: 'task:forged' as never, projectRef: legacyRemovalLedger.projectRef as never,
       threadRef: legacyRemovalLedger.threadRef as never, status: 'todo' as const, resolution: 'open' as const })
     const records = legacyRemovalLedger.records.map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/channel-member-removed') return [id, typed] as [string, unknown]
+      if (typed.kind !== 'team/project-member-removed') return [id, typed] as [string, unknown]
       return [id, { ...typed, data: { ...typed.data, tasks: [forgedTask] } }] as [string, unknown]
     })
     await expect(harness(storedPool(records))).rejects.toThrow(/invalid released Claim Task or Thread projection/)
@@ -1563,10 +1563,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('rejects a forged direct marker that does not match its Message during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
     committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Check this', baseRevision: followed.value.thread.revision, recipients: [actor.memberId], actor: agentTeamHumanActor() })).value)
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
@@ -1582,10 +1582,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('rejects a direct marker that resolves only against a later record during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Check this', baseRevision: followed.value.thread.revision, recipients: [actor.memberId], actor: agentTeamHumanActor() })).value)
     const later = committed((await ledger.reply({ requestId: requestId('later'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Later update', baseRevision: mentioned.thread.revision, actor: agentTeamHumanActor() })).value)
@@ -1613,10 +1613,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     cleanups.push(() => rm(root, { recursive: true, force: true }))
     const path = join(root, 'team.sqlite')
     const first = await sqliteHarness(path)
-    const channel = await first.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await first.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Persistent task' })))
+    const project = await first.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await first.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Persistent task' })))
     const ledger = ledgerAtBoot(first)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
     const update = committed((await ledger.reply({ requestId: requestId('update'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: 'Persistent update', baseRevision: started.thread.revision, actor: agentTeamHumanActor() })).value)
@@ -1634,8 +1634,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('normalizes bare pre-occurredAt messages with the wrapping operation instant during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Legacy' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Legacy' })))
     const ledger = ledgerAtBoot(test)
     const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).value
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
@@ -1670,10 +1670,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('normalizes bare pre-occurredAt Activity facts with their committing operation instant during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Legacy task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Legacy task' })))
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claimed = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     const memberReadId = requestId('member-read-claim')
@@ -1764,8 +1764,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // An existing profile boots by replaying its records; initialize() commits
     // only on a fresh one, so seed the storage to reach the case that matters.
     const seeded = await harness()
-    const channel = await seeded.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    await seeded.ctx.agentTeam.sendMessage({ requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })
+    const project = await seeded.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    await seeded.ctx.agentTeam.sendMessage({ requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })
     const records = [...seeded.facility.get('agent_team')!.table('operations').entries()]
     const test = await harness(storedPool(records as Array<[string, unknown]>))
     const entries = vi.spyOn(test.facility.get('agent_team')!.table('operations'), 'entries')
@@ -1780,7 +1780,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const seeded = await harness()
     const records = [...seeded.facility.get('agent_team')!.table('operations').entries()]
     const test = await harness(storedPool(records as Array<[string, unknown]>))
-    await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const entries = vi.spyOn(test.facility.get('agent_team')!.table('operations'), 'entries')
     await test.ctx.plugin(agentTeamInvariant)
     // A commit invalidates the boot conclusion, so the mount reads the table again.
@@ -1790,7 +1790,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('fails closed at the mount when a commit excludes adoption and the records are invalid', async () => {
     const test = await harness()
-    await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const table = test.facility.get('agent_team')!.table('operations')
     const [id, operation] = [...table.entries()].at(-1)!
     await table.put(id, { ...(operation as AgentTeamOperation), sequence: 9 })
@@ -1836,22 +1836,22 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const pool = new MemoryMediaPool()
     const test = await harness(pool, [alpha, beta])
     pool.injectedWriteFailuresRemaining = 1
-    await expect(test.ctx.agentTeam.createChannel({ requestId: requestId('failed'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })).rejects.toThrow(/injected write failure/)
-    expect(test.ctx.agentTeam.status()).toMatchObject({ channelCount: 0, sequence: 1 })
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    expect(() => test.ctx.agentTeam.view({ workspaceId: beta, channelRef: channel.channel.channelRef })).toThrow(/does not belong to Workspace/)
+    await expect(test.ctx.agentTeam.createProject({ requestId: requestId('failed'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })).rejects.toThrow(/injected write failure/)
+    expect(test.ctx.agentTeam.status()).toMatchObject({ projectCount: 0, sequence: 1 })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    expect(() => test.ctx.agentTeam.view({ workspaceId: beta, projectRef: project.project.projectRef })).toThrow(/does not belong to Workspace/)
   })
 
   it('explains a missing branded prefix when a Task ref lookup fails', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const bare = started.task.taskRef.replace(/^task:/, '') as AgentTeamTaskRef
     await expect(test.ctx.agentTeam.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: bare })).rejects.toThrow(/unknown Task ref '.+' A Task ref must start with 'task:'/)
     expect(() => test.ctx.agentTeam.threadHistory({ workspaceId: alpha, taskRef: bare })).toThrow(/must start with 'task:'/)
-    expect(() => test.ctx.agentTeam.view({ workspaceId: alpha, channelRef: 'engineering' as never })).toThrow(/unknown Channel ref 'engineering' A Channel ref must start with 'channel:'/)
+    expect(() => test.ctx.agentTeam.view({ workspaceId: alpha, projectRef: 'engineering' as never })).toThrow(/unknown Project ref 'engineering' A Project ref must start with 'project:'/)
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claimed = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha,
       taskRef: started.task.taskRef, action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     await expect(ledger.changeClaim({ requestId: requestId('done'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1861,8 +1861,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('resolves unambiguous UUID-prefix refs across ledger entry points', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const taskRef = started.task.taskRef
     const threadRef = started.thread.threadRef
     // Plain 6-hex prefix, a hyphenated truncated form, and the full ref all resolve.
@@ -1874,7 +1874,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await expect(test.ctx.agentTeam.readThread({ requestId: requestId('read-hyphen'), workspaceId: alpha, taskRef: hyphenated })).resolves.toBeDefined()
     await expect(test.ctx.agentTeam.readThread({ requestId: requestId('read-thread'), workspaceId: alpha, threadRef: threadPrefix })).resolves.toBeDefined()
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claimed = committed((await ledger.changeClaim({ requestId: requestId('claim-prefix'), workspaceId: alpha,
       taskRef: taskPrefix, action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     await expect(ledger.changeClaim({ requestId: requestId('done-prefix'), workspaceId: alpha, taskRef: taskPrefix,
@@ -1883,8 +1883,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('rejects refs that are too short, unknown, or from another Workspace', async () => {
     const test = await harness(undefined, [alpha, beta])
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const taskRef = started.task.taskRef
     const shortPrefix = `${taskRef.slice(0, 'task:'.length + 5)}` as never
     await expect(test.ctx.agentTeam.readThread({ requestId: requestId('read-short'), workspaceId: alpha, taskRef: shortPrefix }))
@@ -1897,26 +1897,26 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('reports ambiguous abbreviated refs with candidate full refs', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     let refs = 0
     const ledger = new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, {
       ref: kind => `${kind}:aaaaaa${String(refs++).padStart(2, '0')}-0000-0000-0000-000000000000` as never,
     })
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    await ledger.sendMessage({ requestId: requestId('first'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'First', asTask: true, actor })
-    await ledger.sendMessage({ requestId: requestId('second'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Second', asTask: true, actor })
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    await ledger.sendMessage({ requestId: requestId('first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First', asTask: true, actor })
+    await ledger.sendMessage({ requestId: requestId('second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Second', asTask: true, actor })
     await expect(ledger.readThread({ requestId: requestId('amb'), workspaceId: alpha, taskRef: 'task:aaaaaa' as never, actor }))
       .rejects.toThrow(/ambiguous Task ref 'task:aaaaaa' matches 'task:aaaaaa\d\d-0000-0000-0000-000000000000', 'task:aaaaaa\d\d-0000-0000-0000-000000000000'/)
     await expect(ledger.readThread({ requestId: requestId('amb-thread'), workspaceId: alpha, threadRef: 'thread:aaaaaa' as never, actor }))
       .rejects.toThrow(/ambiguous Thread ref 'thread:aaaaaa' matches/)
   })
 
-  it('keeps archived Channel Task and Thread refs unreachable under abbreviation', async () => {
+  it('keeps archived Project Task and Thread refs unreachable under abbreviation', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    await ledger.archiveChannel({ requestId: requestId('ch-arch'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('ch-arch'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
     const taskPrefix = `${started.task.taskRef.slice(0, 'task:'.length + 6)}` as never
     const threadPrefix = `${started.thread.threadRef.slice(0, 'thread:'.length + 6)}` as never
     await expect(ledger.readThread({ requestId: requestId('read-task'), workspaceId: alpha, taskRef: taskPrefix, actor: agentTeamHumanActor() })).rejects.toThrow(/archived/)
@@ -1926,11 +1926,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
   it('creates a taskless Thread, keeps Inbox visible, and promotes with a Task activity', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const sent = committed((await ledger.sendMessage({
-      requestId: requestId('chat'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+      requestId: requestId('chat'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId],
     })).value)
     expect(sent.task).toBeUndefined()
@@ -1944,7 +1944,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await expect(ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: 'task:missing' as AgentTeamTaskRef,
       action: 'claim', direction: 'work', baseRevision: sent.thread.revision, actor })).rejects.toThrow(/unknown Task/)
     const later = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('later-task'),
-      workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'later Task', actor: agentTeamHumanActor() })).value))
+      workspaceId: alpha, projectRef: project.project.projectRef, body: 'later Task', actor: agentTeamHumanActor() })).value))
     const promoted = committed((await ledger.promoteThread({
       requestId: requestId('promote'), workspaceId: alpha, threadRef: sent.thread.threadRef,
       baseRevision: sent.thread.revision, actor: agentTeamHumanActor(),
@@ -1962,7 +1962,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(history.facts.map(fact => fact.kind === 'message' ? fact.message.body : fact.activity.kind)).toEqual([
       'plain conversation', 'promote',
     ])
-    const view = ledger.view({ workspaceId: alpha, channelRef: channel.channel.channelRef, topLevelOnly: true, includeActivities: false })
+    const view = ledger.view({ workspaceId: alpha, projectRef: project.project.projectRef, topLevelOnly: true, includeActivities: false })
     const promotedItem = view.items.find(item => item.thread.threadRef === sent.thread.threadRef)
     expect(promotedItem?.message.taskRef).toBeUndefined()
     expect(promotedItem?.task?.taskRef).toBe(promoted.task.taskRef)
@@ -1979,10 +1979,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 describe('AgentTeam Member archival ledger', () => {
   it('archives a Member: claims release, attention clears, view hides, removal still available', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('archive-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('archive-start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     expect(ledger.view({ workspaceId: alpha }).members).toEqual([expect.objectContaining({ memberId: member.memberId })])
@@ -2005,9 +2005,9 @@ describe('AgentTeam Member archival ledger', () => {
     await expect(ledger.suspendMember({ requestId: requestId('archive-suspend'), memberId: member.memberId, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
     await expect(ledger.resumeMember({ requestId: requestId('archive-resume'), memberId: member.memberId, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
     await expect(ledger.updateMember({ requestId: requestId('archive-edit'), memberId: member.memberId, handle: member.handle, description: 'new', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and can no longer be edited/)
-    const second = await addLedgerMember(ledger, channel.channel.channelRef, 'member:blocker')
-    await expect(ledger.sendMessage({ requestId: requestId('archive-mention'), workspaceId: alpha, channelRef: channel.channel.channelRef,
-      body: 'ping', recipients: [member.memberId], actor: agentTeamHumanActor() })).rejects.toThrow(/not authorized for Channel/)
+    const second = await addLedgerMember(ledger, project.project.projectRef, 'member:blocker')
+    await expect(ledger.sendMessage({ requestId: requestId('archive-mention'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: 'ping', recipients: [member.memberId], actor: agentTeamHumanActor() })).rejects.toThrow(/not authorized for Project/)
     await expect(ledger.sendDm({ requestId: requestId('archive-dm'), workspaceId: alpha, recipientMemberId: member.memberId,
       body: 'still there?', actor: second.actor })).rejects.toThrow(/archived; DM delivery requires an enabled Member/)
 
@@ -2019,9 +2019,9 @@ describe('AgentTeam Member archival ledger', () => {
 
   it('archives a suspended Member and replays archival across a cold restart', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('susp-archive-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering Work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('susp-archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering Work' })
     const ledger = ledgerAtBoot(test)
-    const { member } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { member } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.suspendMember({ requestId: requestId('susp-archive-suspend'), memberId: member.memberId, actor: agentTeamHumanActor() })
     const archived = (await ledger.archiveMember({ requestId: requestId('susp-archive'), memberId: member.memberId, actor: agentTeamHumanActor() })).value
     expect(archived.member.state).toBe('archived')
@@ -2035,10 +2035,10 @@ describe('AgentTeam Member archival ledger', () => {
 
   it('rejects a forged archival release snapshot during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('forge-archive-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('forge-archive-start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forge-archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('forge-archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('forge-archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     await ledger.archiveMember({ requestId: requestId('forge-archive'), memberId: member.memberId, actor: agentTeamHumanActor() })
@@ -2052,15 +2052,15 @@ describe('AgentTeam Member archival ledger', () => {
 
   it('archives a Member that also follows a taskless Thread: attention clears there too', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('taskless-archive-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('taskless-archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     // One taskful Thread (for the Claim) and one taskless Thread the Member
     // follows: leaving must clear Attention on BOTH, not just taskful ones —
     // the replay validator scopes cleanup to every Thread.
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('taskless-archive-task'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('taskless-archive-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const plain = committed((await ledger.sendMessage({ requestId: requestId('taskless-archive-plain'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Plain conversation', asTask: false, actor: agentTeamHumanActor() })).value)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+      projectRef: project.project.projectRef, body: 'Plain conversation', asTask: false, actor: agentTeamHumanActor() })).value)
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('taskless-archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     await ledger.changeAttention({ requestId: requestId('taskless-archive-follow'), workspaceId: alpha,
@@ -2077,18 +2077,18 @@ describe('AgentTeam Member archival ledger', () => {
 
   it('rejects a forged Member departure inbox during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('forge-member-inbox-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('forge-member-inbox-task'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forge-member-inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('forge-member-inbox-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const plain = committed((await ledger.sendMessage({ requestId: requestId('forge-member-inbox-plain'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'Plain conversation', asTask: false, actor: agentTeamHumanActor() })).value)
-    const { member, actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+      projectRef: project.project.projectRef, body: 'Plain conversation', asTask: false, actor: agentTeamHumanActor() })).value)
+    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('forge-member-inbox-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
     await ledger.changeAttention({ requestId: requestId('forge-member-inbox-follow'), workspaceId: alpha,
       threadRef: plain.thread.threadRef, action: 'follow', actor })
     await ledger.archiveMember({ requestId: requestId('forge-member-inbox-archive'), memberId: member.memberId, actor: agentTeamHumanActor() })
-    // The Channel archival path's own message is pinned by its test above; this
+    // The Project archival path's own message is pinned by its test above; this
     // is the only place the Member-scoped wording and filter are asserted at all.
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
@@ -2102,48 +2102,48 @@ describe('AgentTeam Member archival ledger', () => {
   })
 })
 
-describe('AgentTeam Channel archival ledger', () => {
-  it('archives a Channel: every owner releases, attention clears, view hides, mutations reject', async () => {
+describe('AgentTeam Project archival ledger', () => {
+  it('archives a Project: every owner releases, attention clears, view hides, mutations reject', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('ch-arch-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const channelRef = channel.channel.channelRef
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-arch-start'), workspaceId: alpha, channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const projectRef = project.project.projectRef
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-arch-start'), workspaceId: alpha, projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const first = await addLedgerMember(ledger, channelRef, 'member:first')
-    const second = await addLedgerMember(ledger, channelRef, 'member:second')
+    const first = await addLedgerMember(ledger, projectRef, 'member:first')
+    const second = await addLedgerMember(ledger, projectRef, 'member:second')
     const firstClaim = committed((await ledger.changeClaim({ requestId: requestId('ch-arch-claim-1'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'first direction', baseRevision: started.thread.revision, actor: first.actor })).value)
     committed((await ledger.changeClaim({ requestId: requestId('ch-arch-claim-2'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'second direction', baseRevision: firstClaim.thread.revision, actor: second.actor })).value)
     expect(ledger.view({ workspaceId: alpha }).tasks[0]).toMatchObject({ status: 'in_progress' })
-    expect(ledger.view({ workspaceId: alpha }).channels).toEqual([expect.objectContaining({ channelRef })])
+    expect(ledger.view({ workspaceId: alpha }).projects).toEqual([expect.objectContaining({ projectRef })])
 
-    const archived = (await ledger.archiveChannel({ requestId: requestId('ch-arch'), workspaceId: alpha, channelRef, actor: agentTeamHumanActor() })).value
-    expect(archived.channel).toMatchObject({ channelRef, state: 'archived' })
+    const archived = (await ledger.archiveProject({ requestId: requestId('ch-arch'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).value
+    expect(archived.project).toMatchObject({ projectRef, state: 'archived' })
     expect(archived.releasedClaims).toHaveLength(2)
     expect(archived.releasedClaims.map(claim => claim.owner).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
 
-    // Hidden from view: channel, threads, and tasks all leave the projection.
+    // Hidden from view: project, threads, and tasks all leave the projection.
     // The per-owner release activities stay as durable audit facts on the
     // hidden Threads (replay validation in the cold-restart test recomputes
     // them exactly).
-    expect(ledger.view({ workspaceId: alpha }).channels).toEqual([])
+    expect(ledger.view({ workspaceId: alpha }).projects).toEqual([])
     expect(ledger.view({ workspaceId: alpha }).threads).toEqual([])
     expect(ledger.view({ workspaceId: alpha }).tasks).toEqual([])
     const operation = ledger.getOperation(archived.receipt.operationId)!
-    expect(operation.kind === 'team/channel-archived' ? operation.data.activities.map(activity => activity.actor).sort()
+    expect(operation.kind === 'team/project-archived' ? operation.data.activities.map(activity => activity.actor).sort()
       : []).toEqual([first.member.memberId, second.member.memberId].sort())
 
     // Idempotent retry; mutation guards reject with the archived message.
-    const again = (await ledger.archiveChannel({ requestId: requestId('ch-arch'), workspaceId: alpha, channelRef, actor: agentTeamHumanActor() })).value
+    const again = (await ledger.archiveProject({ requestId: requestId('ch-arch'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).value
     expect(again.receipt.operationId).toBe(archived.receipt.operationId)
-    await expect(ledger.archiveChannel({ requestId: requestId('ch-arch-2'), workspaceId: alpha, channelRef, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
-    await expect(ledger.updateChannel({ requestId: requestId('ch-arch-rename'), workspaceId: alpha, channelRef, name: 'renamed', description: '', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    await expect(ledger.sendMessage({ requestId: requestId('ch-arch-send'), workspaceId: alpha, channelRef, body: 'hello', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    // A brand-new Member cannot be created into the archived Channel, and
+    await expect(ledger.archiveProject({ requestId: requestId('ch-arch-2'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
+    await expect(ledger.updateProject({ requestId: requestId('ch-arch-rename'), workspaceId: alpha, projectRef, name: 'renamed', description: '', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
+    await expect(ledger.sendMessage({ requestId: requestId('ch-arch-send'), workspaceId: alpha, projectRef, body: 'hello', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
+    // A brand-new Member cannot be created into the archived Project, and
     // existing Members (Memberships survive archival) cannot follow or
     // mutate its Tasks.
-    await expect((async () => addLedgerMember(ledger, channelRef, 'member:third'))()).rejects.toThrow(/archived and no longer accepts Team work/)
+    await expect((async () => addLedgerMember(ledger, projectRef, 'member:third'))()).rejects.toThrow(/archived and no longer accepts Team work/)
     await expect(ledger.changeAttention({ requestId: requestId('ch-arch-follow'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'follow', actor: first.actor })).rejects.toThrow(/archived and no longer accepts Team work/)
     await expect(ledger.changeTask({ requestId: requestId('ch-arch-close'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -2151,73 +2151,73 @@ describe('AgentTeam Channel archival ledger', () => {
     ledger.validate()
   })
 
-  it('replays Channel archival across a cold restart', async () => {
+  it('replays Project archival across a cold restart', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('ch-replay-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-replay-start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-replay-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-replay-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('ch-replay-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    await ledger.archiveChannel({ requestId: requestId('ch-replay-archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('ch-replay-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
     ledger.validate()
     const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
     const replayed = await harness(storedPool(records))
     expect(() => ledgerAtBoot(replayed).validate()).not.toThrow()
-    expect(ledgerAtBoot(replayed).view({ workspaceId: alpha }).channels).toEqual([])
+    expect(ledgerAtBoot(replayed).view({ workspaceId: alpha }).projects).toEqual([])
   })
 
-  it('normalizes legacy channel records without state to active on load', async () => {
+  it('normalizes legacy project records without state to active on load', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('ch-legacy-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-legacy-start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' }))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-legacy-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-legacy-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' }))
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/channel-created') return [id, typed] as [string, unknown]
-      const { state: _state, ...legacyChannel } = typed.data.channel
-      return [id, { ...typed, data: { ...typed.data, channel: legacyChannel } }] as [string, unknown]
+      if (typed.kind !== 'team/project-created') return [id, typed] as [string, unknown]
+      const { state: _state, ...legacyProject } = typed.data.project
+      return [id, { ...typed, data: { ...typed.data, project: legacyProject } }] as [string, unknown]
     })
     const legacy = await harness(storedPool(records))
     const legacyLedger = ledgerAtBoot(legacy)
     expect(() => legacyLedger.validate()).not.toThrow()
-    expect(legacyLedger.view({ workspaceId: alpha }).channels[0]).toMatchObject({ channelRef: channel.channel.channelRef, state: 'active' })
+    expect(legacyLedger.view({ workspaceId: alpha }).projects[0]).toMatchObject({ projectRef: project.project.projectRef, state: 'active' })
   })
 
-  it('rejects a forged Channel archival snapshot during replay', async () => {
+  it('rejects a forged Project archival snapshot during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('ch-forge-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-forge-start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-forge-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-forge-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('ch-forge-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    await ledger.archiveChannel({ requestId: requestId('ch-forge-archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('ch-forge-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/channel-archived') return [id, typed] as [string, unknown]
+      if (typed.kind !== 'team/project-archived') return [id, typed] as [string, unknown]
       return [id, { ...typed, data: { ...typed.data, claims: [] } }] as [string, unknown]
     })
     await expect(harness(storedPool(records))).rejects.toThrow(/invalid released Claim projection/)
   })
 
-  it('archives a Channel containing a taskless Thread: cleanup covers it and cold restart replays', async () => {
+  it('archives a Project containing a taskless Thread: cleanup covers it and cold restart replays', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('taskless-arch-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const channelRef = channel.channel.channelRef
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('taskless-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const projectRef = project.project.projectRef
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channelRef)
+    const { actor } = await addLedgerMember(ledger, projectRef)
     // A taskless Thread carries Human and Member Attention that archival must clear.
-    const chat = committed((await ledger.sendMessage({ requestId: requestId('taskless-arch-chat'), workspaceId: alpha, channelRef,
+    const chat = committed((await ledger.sendMessage({ requestId: requestId('taskless-arch-chat'), workspaceId: alpha, projectRef,
       body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
     // A taskful Thread keeps the archival snapshot meaningful (claim release).
-    const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('taskless-arch-start'), workspaceId: alpha, channelRef,
+    const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('taskless-arch-start'), workspaceId: alpha, projectRef,
       body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('taskless-arch-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
 
-    const archived = (await ledger.archiveChannel({ requestId: requestId('taskless-arch-archive'), workspaceId: alpha, channelRef, actor: agentTeamHumanActor() })).value
+    const archived = (await ledger.archiveProject({ requestId: requestId('taskless-arch-archive'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).value
     const operation = ledger.getOperation(archived.receipt.operationId)!
-    const removed = operation.kind === 'team/channel-archived' ? operation.data.inbox.attention.removed : []
+    const removed = operation.kind === 'team/project-archived' ? operation.data.inbox.attention.removed : []
     expect(removed.map(entry => entry.threadRef)).toEqual(expect.arrayContaining([chat.thread.threadRef, started.thread.threadRef]))
     ledger.validate()
 
@@ -2225,21 +2225,21 @@ describe('AgentTeam Channel archival ledger', () => {
     const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
     const replayed = await harness(storedPool(records))
     expect(() => ledgerAtBoot(replayed)).not.toThrow()
-    expect(ledgerAtBoot(replayed).view({ workspaceId: alpha }).channels).toEqual([])
+    expect(ledgerAtBoot(replayed).view({ workspaceId: alpha }).projects).toEqual([])
   })
 
-  it('repairs a legacy Channel archival record that omitted taskless-Thread cleanup on load', async () => {
+  it('repairs a legacy Project archival record that omitted taskless-Thread cleanup on load', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('legacy-arch-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('legacy-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    const chat = committed((await ledger.sendMessage({ requestId: requestId('legacy-arch-chat'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    const chat = committed((await ledger.sendMessage({ requestId: requestId('legacy-arch-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-    const archived = (await ledger.archiveChannel({ requestId: requestId('legacy-arch-archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })).value
+    const archived = (await ledger.archiveProject({ requestId: requestId('legacy-arch-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })).value
     // Rewrite the archive to the 0.1.7-0.1.9 shape: cleanup scoped to taskful Threads only.
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/channel-archived') return [id, typed] as [string, unknown]
+      if (typed.kind !== 'team/project-archived') return [id, typed] as [string, unknown]
       const dropTaskless = (removed: readonly { threadRef: string }[]) => removed.filter(entry => entry.threadRef !== chat.thread.threadRef)
       return [id, { ...typed, data: { ...typed.data, inbox: {
         attention: { set: [], removed: dropTaskless(typed.data.inbox.attention.removed) },
@@ -2251,42 +2251,42 @@ describe('AgentTeam Channel archival ledger', () => {
     const legacyLedger = ledgerAtBoot(legacy)
     expect(() => legacyLedger.validate()).not.toThrow()
     const repaired = legacyLedger.getOperation(archived.receipt.operationId)!
-    expect(repaired.kind === 'team/channel-archived' ? repaired.data.inbox.attention.removed.map(entry => entry.threadRef) : [])
+    expect(repaired.kind === 'team/project-archived' ? repaired.data.inbox.attention.removed.map(entry => entry.threadRef) : [])
       .toContain(chat.thread.threadRef)
   })
 
-  it('still rejects a forged Channel archival inbox during replay', async () => {
+  it('still rejects a forged Project archival inbox during replay', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('forged-inbox-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forged-inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
-    committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-chat'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-    const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-start'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('forged-inbox-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
-    await ledger.archiveChannel({ requestId: requestId('forged-inbox-archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('forged-inbox-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
     // Forge the opposite omission (drop a taskful-Thread cleanup entry): not the legacy shape, so it must still fail.
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/channel-archived') return [id, typed] as [string, unknown]
+      if (typed.kind !== 'team/project-archived') return [id, typed] as [string, unknown]
       return [id, { ...typed, data: { ...typed.data, inbox: {
         ...typed.data.inbox,
         attention: { set: [], removed: typed.data.inbox.attention.removed.filter(entry => entry.threadRef !== started.thread.threadRef) },
       } } }] as [string, unknown]
     })
-    await expect(harness(storedPool(records))).rejects.toThrow(/invalid Channel archival inbox cleanup/)
+    await expect(harness(storedPool(records))).rejects.toThrow(/invalid Project archival inbox cleanup/)
   })
 })
 
 describe('AgentTeam archived read surfaces', () => {
-  it('hides archived-Channel Tasks from ref resolution and rejects direct thread reads', async () => {
+  it('hides archived-Project Tasks from ref resolution and rejects direct thread reads', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('reads-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('reads-start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('reads-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('reads-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('reads-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
     await ledger.readThread({ requestId: requestId('reads-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
     // Pre-archival everything resolves and reads.
@@ -2294,9 +2294,9 @@ describe('AgentTeam archived read surfaces', () => {
     expect(ledger.threadHistory(actor, { workspaceId: alpha, taskRef: started.task.taskRef })).toMatchObject({ thread: { threadRef: started.thread.threadRef } })
     expect(ledger.threadObservations(agentTeamHumanActor(), { workspaceId: alpha, threadRef: started.thread.threadRef })).toBeTruthy()
 
-    await ledger.archiveChannel({ requestId: requestId('reads-archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('reads-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
 
-    // Archived Channels do not exist on Team API surfaces: refs stop
+    // Archived Projects do not exist on Team API surfaces: refs stop
     // resolving and every ref-addressed read rejects with the explicit
     // archived error instead of an unknown-ref disguise.
     expect(ledger.resolveTaskRefs(alpha, [started.task.taskRef])).toEqual([])
@@ -2308,7 +2308,7 @@ describe('AgentTeam archived read surfaces', () => {
     expect(() => ledger.listClaims(actor, { workspaceId: alpha, taskRef: started.task.taskRef })).toThrow(/archived and no longer accepts Team work/)
 
     // The durable layer stays whole: replay validates every pre-archival
-    // read against the then-active Channel, and the facts survive intact.
+    // read against the then-active Project, and the facts survive intact.
     ledger.validate()
     const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
     const replayed = await harness(storedPool(records))
@@ -2318,20 +2318,20 @@ describe('AgentTeam archived read surfaces', () => {
     expect(cold.resolveTaskRefs(alpha, [started.task.taskRef])).toEqual([])
   })
 
-  it('excludes archived-Channel Threads from every Inbox slice', async () => {
+  it('excludes archived-Project Threads from every Inbox slice', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('inbox-channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('inbox-start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Task' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.readThread({ requestId: requestId('inbox-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
     // Pre-archival the participated Thread is the Human recent tail's.
     expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toMatchObject({ items: [],
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.thread.threadRef }) })] })
 
-    await ledger.archiveChannel({ requestId: requestId('inbox-archive'), workspaceId: alpha, channelRef: channel.channel.channelRef, actor: agentTeamHumanActor() })
+    await ledger.archiveProject({ requestId: requestId('inbox-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
 
-    // Archived Channels do not exist on Team API surfaces: neither the unread
+    // Archived Projects do not exist on Team API surfaces: neither the unread
     // queue nor the Human recent tail names their Threads, for the Human or
     // for a Member, and the picture survives a cold restart.
     expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
@@ -2564,10 +2564,10 @@ describe('AgentTeam durable Thread read progress', () => {
    */
   async function committedHumanRead(): Promise<{ readonly test: TeamHarness; readonly read: AgentTeamThreadReadResult; readonly records: Array<[string, unknown]> }> {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Investigate the regression' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(writer, project.project.projectRef)
     let revision = sent.thread.revision
     for (const body of ['Working on it', 'Pushed a fix']) {
       revision = committed((await writer.reply({ requestId: requestId(body), workspaceId: alpha, taskRef: sent.task.taskRef, body, baseRevision: revision, actor })).value).thread.revision
@@ -2588,8 +2588,8 @@ describe('AgentTeam durable Thread read progress', () => {
 
   it('answers a Thread with nothing unread for its reader without writing a receipt', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Investigate the regression' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const table = test.facility.get('agent_team')!.table('operations')
     const committedOperations = table.size
     const commits: unknown[] = []
@@ -2616,10 +2616,10 @@ describe('AgentTeam durable Thread read progress', () => {
 
   it('keeps the watermark a progress read advanced across a restart', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Investigate the regression' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(writer, project.project.projectRef)
     committed((await writer.reply({ requestId: requestId('agent-reply'), workspaceId: alpha, taskRef: sent.task.taskRef, body: 'Working on it', baseRevision: sent.thread.revision, actor })).value)
 
     // A reply the reader has not seen is real progress: it commits a watermark.
@@ -2640,10 +2640,10 @@ describe('AgentTeam durable Thread read progress', () => {
 
   it('drains unread replies by remainingUnreadCount and stops writing once caught up', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Investigate the regression' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(writer, project.project.projectRef)
     let revision = sent.thread.revision
     for (const body of ['first reply', 'second reply', 'third reply']) {
       const replied = committed((await writer.reply({ requestId: requestId(body), workspaceId: alpha, taskRef: sent.task.taskRef, body, baseRevision: revision, actor })).value)
@@ -2764,10 +2764,10 @@ describe('AgentTeam durable Thread read progress', () => {
 
   it('replays frozen snapshots and slim receipts into the same projections, mixed or uniform', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, channelRef: channel.channel.channelRef, body: 'Investigate the regression' })))
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, channel.channel.channelRef)
+    const { actor } = await addLedgerMember(writer, project.project.projectRef)
     await writer.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: sent.task.taskRef, action: 'follow', actor })
     const claimed = committed((await writer.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: sent.task.taskRef,
       action: 'claim', direction: 'read the regression', baseRevision: sent.thread.revision, actor })).value)
@@ -2817,28 +2817,28 @@ describe('AgentTeam durable Thread read progress', () => {
 })
 
 describe('body-authored mentions', () => {
-  /** One Channel and every write in it run through the same ledger projection. */
-  async function channelOf(test: TeamHarness) {
+  /** One Project and every write in it run through the same ledger projection. */
+  async function projectOf(test: TeamHarness) {
     const ledger = ledgerAtBoot(test)
-    const created = (await ledger.createChannel({ requestId: requestId('channel'), actor: agentTeamHumanActor(), workspaceId: alpha,
+    const created = (await ledger.createProject({ requestId: requestId('project'), actor: agentTeamHumanActor(), workspaceId: alpha,
       name: 'engineering', description: 'Engineering work' })).value
-    return { ledger, channelRef: created.channel.channelRef }
+    return { ledger, projectRef: created.project.projectRef }
   }
 
   /** A Member with a readable handle and a realistic branded id. */
-  const enroll = (ledger: AgentTeamLedger, channelRef: string, handle: string) =>
-    addLedgerMember(ledger, channelRef, `member:${crypto.randomUUID()}`, 'Test Agent', handle)
+  const enroll = (ledger: AgentTeamLedger, projectRef: string, handle: string) =>
+    addLedgerMember(ledger, projectRef, `member:${crypto.randomUUID()}`, 'Test Agent', handle)
 
-  const start = async (ledger: AgentTeamLedger, channelRef: string, body: string) =>
+  const start = async (ledger: AgentTeamLedger, projectRef: string, body: string) =>
     withTask(committed((await ledger.sendMessage({ requestId: requestId(`start:${crypto.randomUUID()}`), actor: agentTeamHumanActor(),
-      asTask: true, workspaceId: alpha, channelRef: channelRef as never, body })).value))
+      asTask: true, workspaceId: alpha, projectRef: projectRef as never, body })).value))
 
   it('drops a body mention the Thread has never carried and reports it as undelivered', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const sent = await start(ledger, channelRef, 'Investigate the regression')
-    const author = await enroll(ledger, channelRef, 'author')
-    const stranger = await enroll(ledger, channelRef, 'stranger')
+    const { ledger, projectRef } = await projectOf(test)
+    const sent = await start(ledger, projectRef, 'Investigate the regression')
+    const author = await enroll(ledger, projectRef, 'author')
+    const stranger = await enroll(ledger, projectRef, 'stranger')
 
     // A text mention never fails the write. Inviting a Member into an existing
     // Thread stays a Human decision, so the named Member is reported instead.
@@ -2853,12 +2853,12 @@ describe('body-authored mentions', () => {
 
   it('delivers to a Member the Thread already carried, even after it unfollowed', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const peer = await enroll(ledger, channelRef, 'peer')
-    const author = await enroll(ledger, channelRef, 'author')
+    const { ledger, projectRef } = await projectOf(test)
+    const peer = await enroll(ledger, projectRef, 'peer')
+    const author = await enroll(ledger, projectRef, 'author')
 
     // A body mention on a new Thread enrolls the peer: they follow it.
-    const sent = await start(ledger, channelRef, '@peer, please join')
+    const sent = await start(ledger, projectRef, '@peer, please join')
     expect(ledger.attentionStatus(peer.actor, { workspaceId: alpha, taskRef: sent.task.taskRef }).attention).toBeDefined()
     await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: sent.task.taskRef, action: 'unfollow', actor: peer.actor })
     expect(ledger.attentionStatus(peer.actor, { workspaceId: alpha, taskRef: sent.task.taskRef }).attention).toBeUndefined()
@@ -2875,9 +2875,9 @@ describe('body-authored mentions', () => {
 
   it('keeps the Human confirmation step for a body mention, then delivers once confirmed', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const sent = await start(ledger, channelRef, 'Investigate the regression')
-    const stranger = await enroll(ledger, channelRef, 'stranger')
+    const { ledger, projectRef } = await projectOf(test)
+    const sent = await start(ledger, projectRef, 'Investigate the regression')
+    const stranger = await enroll(ledger, projectRef, 'stranger')
 
     const held = (await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
       body: '@stranger, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor() })).value
@@ -2894,120 +2894,120 @@ describe('body-authored mentions', () => {
 
   it('expands @all to the roster as of that write', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const first = await enroll(ledger, channelRef, 'first')
-    const second = await enroll(ledger, channelRef, 'second')
+    const { ledger, projectRef } = await projectOf(test)
+    const first = await enroll(ledger, projectRef, 'first')
+    const second = await enroll(ledger, projectRef, 'second')
 
     const sent = committed((await ledger.sendMessage({ requestId: requestId('all'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: '@all, standup in ten minutes' })).value)
-    const late = await enroll(ledger, channelRef, 'late')
+      projectRef: projectRef as never, body: '@all, standup in ten minutes' })).value)
+    const late = await enroll(ledger, projectRef, 'late')
 
     // The expansion is snapshotted into the operation: a Member who joins the
-    // Channel afterwards is not retroactively addressed by this write.
+    // Project afterwards is not retroactively addressed by this write.
     expect(sent.directMarkers.map(marker => marker.memberId).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
     expect(ledger.inbox(late.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
   })
 
-  it('names a Workspace participant who is not a Channel Member', async () => {
+  it('names a Workspace participant who is not a Project Member', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const insider = await enroll(ledger, channelRef, 'insider')
-    // Participates in the Workspace, never enrolled in the Channel: Channel
+    const { ledger, projectRef } = await projectOf(test)
+    const insider = await enroll(ledger, projectRef, 'insider')
+    // Participates in the Workspace, never enrolled in the Project: Project
     // membership is a Human-side organisation, not a gate on being addressed.
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).channels.map(channel => channel.channelRef)).toEqual([channelRef as never])
+    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).projects.map(project => project.projectRef)).toEqual([projectRef as never])
 
     const sent = committed((await ledger.sendMessage({ requestId: requestId('name-outsider'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: '@outsider, please look at this' })).value)
+      projectRef: projectRef as never, body: '@outsider, please look at this' })).value)
     expect(sent.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
     // A Human naming someone is a pull-in, not a report: the write commits
     // outright and the marker is durable. (Inbox listing and Attention reads
-    // stay Channel-gated until visibility is derived from participation.)
+    // stay Project-gated until visibility is derived from participation.)
 
   })
 
-  it('keeps @all inside the Channel while @Handle reaches the Workspace', async () => {
+  it('keeps @all inside the Project while @Handle reaches the Workspace', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const insider = await enroll(ledger, channelRef, 'insider')
+    const { ledger, projectRef } = await projectOf(test)
+    const insider = await enroll(ledger, projectRef, 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
 
-    const all = committed((await ledger.sendMessage({ requestId: requestId('all-stays-in-channel'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: '@all, standup in ten minutes' })).value)
-    // `@all` is the Channel's own roster, so the Workspace participant outside
-    // that Channel is not addressed by it — while `@Handle` still reaches them.
+    const all = committed((await ledger.sendMessage({ requestId: requestId('all-stays-in-project'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      projectRef: projectRef as never, body: '@all, standup in ten minutes' })).value)
+    // `@all` is the Project's own roster, so the Workspace participant outside
+    // that Project is not addressed by it — while `@Handle` still reaches them.
     expect(all.directMarkers.map(marker => marker.memberId).sort()).toEqual([insider.member.memberId].sort())
     const named = committed((await ledger.sendMessage({ requestId: requestId('all-stays-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: `@${outsider.member.handle}, named from the Workspace` })).value)
+      projectRef: projectRef as never, body: `@${outsider.member.handle}, named from the Workspace` })).value)
     expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
   })
 
-  it('lists a derived Channel participant in the view roster the composer reads', async () => {
+  it('lists a derived Project participant in the view roster the composer reads', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('roster-channel'), workspaceId: alpha, name: 'engineering', description: '' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('roster-project'), workspaceId: alpha, name: 'engineering', description: '' })
     const ledger = ledgerAtBoot(test)
-    const insider = await addLedgerMember(ledger, channel.channel.channelRef, undefined, 'Test Agent', 'insider')
+    const insider = await addLedgerMember(ledger, project.project.projectRef, undefined, 'Test Agent', 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    committed((await ledger.sendMessage({ requestId: requestId('roster-msg'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    committed((await ledger.sendMessage({ requestId: requestId('roster-msg'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: '@outsider, please look', asTask: false, actor: agentTeamHumanActor() })).value)
 
     // The roster a UI mention picker reads is derived the same way visibility
     // is: the Member the Host now lets you address must appear in it, or the
     // composer offers a narrower set than the ledger accepts.
     const roster = ledger.view({ workspaceId: alpha }).members
-    expect(roster).toContainEqual({ channelRef: channel.channel.channelRef, memberId: insider.member.memberId })
-    expect(roster).toContainEqual({ channelRef: channel.channel.channelRef, memberId: outsider.member.memberId })
+    expect(roster).toContainEqual({ projectRef: project.project.projectRef, memberId: insider.member.memberId })
+    expect(roster).toContainEqual({ projectRef: project.project.projectRef, memberId: outsider.member.memberId })
 
     // Removing the Member ends it: derivation never outlives the Member.
     await ledger.removeMember({ requestId: requestId('roster-remove'), memberId: outsider.member.memberId, actor: agentTeamHumanActor() })
-    expect(ledger.view({ workspaceId: alpha }).members).not.toContainEqual({ channelRef: channel.channel.channelRef, memberId: outsider.member.memberId })
+    expect(ledger.view({ workspaceId: alpha }).members).not.toContainEqual({ projectRef: project.project.projectRef, memberId: outsider.member.memberId })
     ledger.validate()
   })
 
   it('reloads a ledger written with the widened mention rules and keeps committing', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const insider = await enroll(ledger, channelRef, 'insider')
+    const { ledger, projectRef } = await projectOf(test)
+    const insider = await enroll(ledger, projectRef, 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
 
     const historic = committed((await ledger.sendMessage({ requestId: requestId('historic-all'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: '@all and @insider, historic write' })).value)
+      projectRef: projectRef as never, body: '@all and @insider, historic write' })).value)
     const named = committed((await ledger.sendMessage({ requestId: requestId('historic-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: '@outsider, named from the Workspace' })).value)
+      projectRef: projectRef as never, body: '@outsider, named from the Workspace' })).value)
     expect(historic.directMarkers.map(marker => marker.memberId).sort()).toEqual([insider.member.memberId].sort())
     expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
 
     // A fresh Ledger over the same persisted operations re-validates every
     // record on load. Widening is replay-safe, so both the historic `@all`
-    // (Channel Member) and the Workspace-only mention survive the re-check and
+    // (Project Member) and the Workspace-only mention survive the re-check and
     // the next commit still lands.
     const reopened = ledgerAtBoot(test)
     // Naming the Workspace-only Member again through the reloaded Ledger proves
     // the widened target check is live after a replay, not just on first write.
     const again = committed((await reopened.sendMessage({ requestId: requestId('after-reload'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: '@outsider, again after the reload' })).value)
+      projectRef: projectRef as never, body: '@outsider, again after the reload' })).value)
     expect(again.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
   })
 
-  it('lets a Workspace participant reply, claim and follow without joining the Channel', async () => {
+  it('lets a Workspace participant reply, claim and follow without joining the Project', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    await enroll(ledger, channelRef, 'insider')
+    const { ledger, projectRef } = await projectOf(test)
+    await enroll(ledger, projectRef, 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
 
-    // The mention is what brings the Member onto the Thread: no Channel join
+    // The mention is what brings the Member onto the Thread: no Project join
     // happens at any point below.
-    const sent = await start(ledger, channelRef, '@outsider, please take this')
+    const sent = await start(ledger, projectRef, '@outsider, please take this')
 
     // The unread fence stands for a Member too: the Thread has to be read
-    // before the reply, and reading it needs no Channel membership either.
+    // before the reply, and reading it needs no Project membership either.
     const read = await ledger.readThread({ requestId: requestId('outsider-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: outsider.actor })
     const replied = committed((await ledger.reply({ requestId: requestId('outsider-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
       body: 'Taking it', baseRevision: read.value?.thread.revision ?? sent.thread.revision, actor: outsider.actor })).value)
     expect(replied.message.sender).toBe(outsider.member.memberId)
 
     // The mention itself started Attention, so the round trip is unfollow then
-    // follow — both without any Channel membership behind them.
+    // follow — both without any Project membership behind them.
     const unfollowed = (await ledger.changeAttention({ requestId: requestId('outsider-unfollow'), workspaceId: alpha, taskRef: sent.task.taskRef,
       action: 'unfollow', actor: outsider.actor })).value
     expect(unfollowed?.attention).toBeUndefined()
@@ -3020,50 +3020,50 @@ describe('body-authored mentions', () => {
     expect(claimed.task.status).toBe('in_progress')
   })
 
-  it('shows a Member the Channel of a Thread they took part in', async () => {
+  it('shows a Member the Project of a Thread they took part in', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    await enroll(ledger, channelRef, 'insider')
+    const { ledger, projectRef } = await projectOf(test)
+    await enroll(ledger, projectRef, 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    const elsewhere = (await ledger.createChannel({ requestId: requestId('channel-elsewhere'), workspaceId: alpha,
-      name: 'elsewhere', description: '', memberIds: [], actor: agentTeamHumanActor() })).value.channel
+    const elsewhere = (await ledger.createProject({ requestId: requestId('project-elsewhere'), workspaceId: alpha,
+      name: 'elsewhere', description: '', memberIds: [], actor: agentTeamHumanActor() })).value.project
 
-    // Channel participation is derived now: no enrolment happens, and taking
-    // part in one Thread of the Channel is what makes it visible.
-    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).channels.map(channel => channel.channelRef)).toEqual([])
-    await start(ledger, channelRef, '@outsider, please look')
+    // Project participation is derived now: no enrolment happens, and taking
+    // part in one Thread of the Project is what makes it visible.
+    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects.map(project => project.projectRef)).toEqual([])
+    await start(ledger, projectRef, '@outsider, please look')
 
-    const seen = ledger.view({ workspaceId: alpha }, outsider.member.memberId).channels.map(channel => channel.channelRef)
-    expect(seen).toEqual([channelRef as never])
-    // The derived rule does not widen to the Workspace: a Channel this Member
+    const seen = ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects.map(project => project.projectRef)
+    expect(seen).toEqual([projectRef as never])
+    // The derived rule does not widen to the Workspace: a Project this Member
     // never took part in stays out of reach.
-    expect(seen).not.toContain(elsewhere.channelRef)
+    expect(seen).not.toContain(elsewhere.projectRef)
   })
 
-  it('keeps a Channel visible for an explicit Member who never wrote, across a reload', async () => {
+  it('keeps a Project visible for an explicit Member who never wrote, across a reload', async () => {
     // Enrolment by hand is retired, so this Member comes from a frozen old
     // ledger: the explicit membership it carries must stay visible even though
     // nothing can produce one any more.
     const ledger = ledgerAtBoot(await harness(storedPool(legacyJoinLedger.records)))
-    const visible = () => ledger.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).channels.map(channel => channel.channelRef)
-    expect(visible()).toEqual([legacyJoinLedger.channelRef as never])
+    const visible = () => ledger.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).projects.map(project => project.projectRef)
+    expect(visible()).toEqual([legacyJoinLedger.projectRef as never])
 
     const reopened = ledgerAtBoot(await harness(storedPool(legacyJoinLedger.records)))
-    expect(reopened.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).channels.map(channel => channel.channelRef))
-      .toEqual([legacyJoinLedger.channelRef as never])
+    expect(reopened.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).projects.map(project => project.projectRef))
+      .toEqual([legacyJoinLedger.projectRef as never])
   })
 
-  it('confirms the same way for an Agent outside the Channel and one outside the Thread', async () => {
+  it('confirms the same way for an Agent outside the Project and one outside the Thread', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    // Case ②: in the Channel, never in this Thread. Case ③: neither.
-    const insider = await enroll(ledger, channelRef, 'insider')
+    const { ledger, projectRef } = await projectOf(test)
+    // Case ②: in the Project, never in this Thread. Case ③: neither.
+    const insider = await enroll(ledger, projectRef, 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    const sent = await start(ledger, channelRef, 'Investigate the regression')
-    // ② is enrolled in the Channel but has never carried this Thread; ③ is
+    const sent = await start(ledger, projectRef, 'Investigate the regression')
+    // ② is enrolled in the Project but has never carried this Thread; ③ is
     // neither. Both are confirmed, so the Agent cannot tell them apart.
-    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).channels.map(channel => channel.channelRef)).toEqual([channelRef as never])
-    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).channels).toEqual([])
+    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).projects.map(project => project.projectRef)).toEqual([projectRef as never])
+    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects).toEqual([])
 
     const heldInsider = (await ledger.reply({ requestId: requestId('pull-insider'), workspaceId: alpha, taskRef: sent.task.taskRef,
       body: '@insider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor() })).value
@@ -3074,21 +3074,21 @@ describe('body-authored mentions', () => {
     if (heldOutsider.kind !== 'confirmation_required') throw new Error(`expected confirmation, received ${heldOutsider.kind}`)
 
     // The two cases collapse: the Agent's only signal is this Thread's own
-    // delivery, and the Channel side is derived silently with no notice of its
+    // delivery, and the Project side is derived silently with no notice of its
     // own. Confirming is what grants Attention on the Thread.
     const pulled = committed((await ledger.reply({ requestId: requestId('pull-outsider'), workspaceId: alpha, taskRef: sent.task.taskRef,
       body: '@outsider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor(), confirmationToken: heldOutsider.confirmationToken })).value)
     expect(pulled.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
     expect(ledger.attentionStatus(outsider.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeDefined()
-    // Now a Channel participant by derivation, the Thread reaches the Inbox.
+    // Now a Project participant by derivation, the Thread reaches the Inbox.
     expect(ledger.inbox(outsider.actor, { workspaceId: alpha })).toMatchObject({ totalDirectCount: 1 })
   })
 
   it('delivers without confirmation to an Agent already in the Thread', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const insider = await enroll(ledger, channelRef, 'insider')
-    const sent = await start(ledger, channelRef, '@insider, take this')
+    const { ledger, projectRef } = await projectOf(test)
+    const insider = await enroll(ledger, projectRef, 'insider')
+    const sent = await start(ledger, projectRef, '@insider, take this')
     const read = await ledger.readThread({ requestId: requestId('insider-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: insider.actor })
 
     // Already carrying the Thread: naming them again is a delivery, not an
@@ -3100,15 +3100,15 @@ describe('body-authored mentions', () => {
 
   it('still refuses a Member who does not participate in the Workspace', async () => {
     const test = await harness(new MemoryMediaPool(), [alpha, beta])
-    const { ledger, channelRef } = await channelOf(test)
-    const sent = await start(ledger, channelRef, 'Investigate the regression')
-    // A Member rooted in another Workspace: the boundary moved from Channel
+    const { ledger, projectRef } = await projectOf(test)
+    const sent = await start(ledger, projectRef, 'Investigate the regression')
+    // A Member rooted in another Workspace: the boundary moved from Project
     // down to Workspace, it did not disappear, so this Member is refused
     // everywhere in this Workspace.
     const foreignMember: AgentTeamAgentMember = { memberId: `member:foreign-${crypto.randomUUID()}` as never, sessionId: SessionId('session:foreign'),
       workspaceId: beta, handle: 'foreign', description: 'Test Agent', presetId: 'team-member', privateMemoryPath: '/tmp/foreign', state: 'enabled' }
     await ledger.addMember({ requestId: requestId('add-foreign'), actor: agentTeamHumanActor(), member: foreignMember,
-      handle: foreignMember.handle, description: foreignMember.description, presetId: foreignMember.presetId, workspaceId: beta, channelRefs: [] })
+      handle: foreignMember.handle, description: foreignMember.description, presetId: foreignMember.presetId, workspaceId: beta, projectRefs: [] })
     const foreign = { member: foreignMember, actor: { kind: 'member' as const, memberId: foreignMember.memberId, handle: 'foreign' } }
     await expect(ledger.reply({ requestId: requestId('foreign-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
       body: 'Still here', baseRevision: sent.thread.revision, actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)
@@ -3120,20 +3120,20 @@ describe('body-authored mentions', () => {
 
   it('merges explicit recipients with body mentions without duplicating a Member', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const first = await enroll(ledger, channelRef, 'first')
-    const second = await enroll(ledger, channelRef, 'second')
+    const { ledger, projectRef } = await projectOf(test)
+    const first = await enroll(ledger, projectRef, 'first')
+    const second = await enroll(ledger, projectRef, 'second')
 
     const sent = committed((await ledger.sendMessage({ requestId: requestId('merge'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      channelRef: channelRef as never, body: '@first please look', recipients: [first.member.memberId, second.member.memberId] })).value)
+      projectRef: projectRef as never, body: '@first please look', recipients: [first.member.memberId, second.member.memberId] })).value)
     expect(sent.directMarkers.map(marker => marker.memberId).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
   })
 
   it('keeps @human deliverable after the human renames, under any casing', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
-    const sent = await start(ledger, channelRef, 'Investigate the regression')
-    const author = await enroll(ledger, channelRef, 'author')
+    const { ledger, projectRef } = await projectOf(test)
+    const sent = await start(ledger, projectRef, 'Investigate the regression')
+    const author = await enroll(ledger, projectRef, 'author')
     ledger.setHumanDisplayHandle('YuCreate')
 
     // The historic literal survives as a permanent alias: every casing reaches
@@ -3157,31 +3157,31 @@ describe('body-authored mentions', () => {
 
   it('reserves the historic human literal against agent handles even after a rename', async () => {
     const test = await harness()
-    const { ledger, channelRef } = await channelOf(test)
+    const { ledger, projectRef } = await projectOf(test)
     ledger.setHumanDisplayHandle('YuCreate')
-    await expect(enroll(ledger, channelRef, 'human')).rejects.toThrow('reserved human alias')
-    await expect(enroll(ledger, channelRef, 'Human')).rejects.toThrow('reserved human alias')
+    await expect(enroll(ledger, projectRef, 'human')).rejects.toThrow('reserved human alias')
+    await expect(enroll(ledger, projectRef, 'Human')).rejects.toThrow('reserved human alias')
   })
 })
 
 describe('AgentTeam sendMessage asTask is explicit (issue #43 #9)', () => {
   it('creates no Task when asTask is omitted', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('explicit-omit'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('explicit-omit'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-omit-send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-omit-send'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'plain conversation', actor: agentTeamHumanActor() })).value)
     expect(sent.task).toBeUndefined()
   })
 
   it('creates a Task only when asTask is true', async () => {
     const test = await harness()
-    const channel = await test.ctx.agentTeam.createChannel({ requestId: requestId('explicit-true'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('explicit-true'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-true-send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-true-send'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value)
     expect(sent.task?.taskRef).toBeTruthy()
-    const plain = committed((await ledger.sendMessage({ requestId: requestId('explicit-false-send'), workspaceId: alpha, channelRef: channel.channel.channelRef,
+    const plain = committed((await ledger.sendMessage({ requestId: requestId('explicit-false-send'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'no task', asTask: false, actor: agentTeamHumanActor() })).value)
     expect(plain.task).toBeUndefined()
   })

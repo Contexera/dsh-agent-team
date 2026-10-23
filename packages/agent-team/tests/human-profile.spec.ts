@@ -66,7 +66,7 @@ describe('ledger runtime human handle', () => {
     await team.initialize()
     team.setHumanDisplayHandle('Ada')
     const renamedActor = Object.freeze({ ...agentTeamHumanActor(), handle: 'Ada' })
-    const created = await team.createChannel({ requestId: requestId('human-rename-ok'), workspaceId: alpha, name: 'general', description: '', memberIds: [], actor: renamedActor })
+    const created = await team.createProject({ requestId: requestId('human-rename-ok'), workspaceId: alpha, name: 'general', description: '', memberIds: [], actor: renamedActor })
     expect(created.committed).toBe(true)
   })
 
@@ -76,7 +76,7 @@ describe('ledger runtime human handle', () => {
     team.setHumanDisplayHandle('Ada')
     await expect(team.addMember({
       requestId: requestId('agent-collides'), workspaceId: alpha, handle: 'ada', description: '', presetId: 'preset',
-      channelRefs: [], member: {
+      projectRefs: [], member: {
         memberId: memberId('m1'), sessionId: 'session:m1' as never, workspaceId: alpha,
         handle: 'ada', description: '', presetId: 'preset', privateMemoryPath: '/tmp/m1', state: 'enabled',
       },

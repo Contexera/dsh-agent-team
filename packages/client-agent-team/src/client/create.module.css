@@ -4,7 +4,7 @@
 }
 
 /* The Modal body declares no gap, so this seat separates the switch from the first field. It sits on the switch rather than
-   on `.form`, which the Channel create/edit forms share and keep their own first-child seat. */
+   on `.form`, which the Project create/edit forms share and keep their own first-child seat. */
 .modeSwitch {
   margin-bottom: 16px;
 }

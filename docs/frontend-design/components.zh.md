@@ -10,7 +10,7 @@
 - `children`：渲染进 messageBody 尾部，承载入口行等扩展。
 - 分组规则：相邻两条同为消息、sender 相同，才折叠。活动行会打断 run。折叠行隐藏头像与名字。`visibility:hidden` 保持栅格对齐，padding 收紧为 `2px`。
 - 头像座位只替一位作者画图片：资料头像只在**这一行就是 Human 本人**时才落座。Agent 行无论上层传下来什么，都保持共享色相 + 发送者首字母。同一个座位替别的作者画读者的脸，等于把两个人画成一个人。头像首字母取 senderName 去掉 `@` 后首个字符大写。
-- 行的操作**浮在** Message 旁边的一张卡上，而不是长在行里：复制、引用，以及正文点名读者时的那枚「提到了你」提示。这张卡属于**行**而不是属于某一个动作，所以收起引用（只传 `rowActions`、不传 `onReply`）会保留复制与提示、只去掉引用钮。两者都不传的表面则完全没有卡，Channel feed 就是如此；而读同一条 Thread 的两个面——Thread 页与 Channel feed 旁边的讨论面板——都提供这张卡，因为它们渲染的是同一批行，否则读者一旦转向面板，就得离开面板才能引用眼前这条 Message。行本身保持扁平，因此一次 hover 只让一条 Message 得到一层底色，而不是让整条时间线长出纹理。
+- 行的操作**浮在** Message 旁边的一张卡上，而不是长在行里：复制、引用，以及正文点名读者时的那枚「提到了你」提示。这张卡属于**行**而不是属于某一个动作，所以收起引用（只传 `rowActions`、不传 `onReply`）会保留复制与提示、只去掉引用钮。两者都不传的表面则完全没有卡，Project feed 就是如此；而读同一条 Thread 的两个面——Thread 页与 Project feed 旁边的讨论面板——都提供这张卡，因为它们渲染的是同一批行，否则读者一旦转向面板，就得离开面板才能引用眼前这条 Message。行本身保持扁平，因此一次 hover 只让一条 Message 得到一层底色，而不是让整条时间线长出纹理。
 - 回答另一条 Message 的正文，先给出**已解析的引用**（`data-quote-line`）：父消息作者 + 一行带省略号的开头文字。两者都由 Host 从 ledger 解析，而不是从正文里读出来，因此引用永不与它所指向的内容不一致，父消息落在已加载历史窗口之外时也照样填得上。凡是能到达原文的表面，整块引用都是跳转入口；到不了就是惰性文字。不是回复的 Message 不渲染引用。
 - 超长正文折叠看 display 字符数。超过 `MESSAGE_COLLAPSE_CHARS`（`team-formatters.ts` 单一权威，600）的正文默认收进限高预览。预览约 8 行 / 176px，底部 alpha 渐隐遮罩，不涂主题底色。预览下方「展开全文」安静文本钮负责展开，展开后同位置「收起」收回。`aria-expanded` 随之翻转。
 - 按钮独占一行。反馈是文字级的：变色 + 下划线，无底色框。markdown 根节点的 `font: inherit` 重置选择器按后代匹配（`.messageBody .messageMarkdown > div:first-child`）。夹具容器不得隔断这个选择器，否则预览字号会大于展开态。夹具容器对可折叠正文**常驻**、展开/收起只切换类名。不能出现/消失式包裹。那会重挂载 Markdown 子树，丢掉渲染后注入的 ref 链接与 mention chip。是否折叠只由正文本身决定。这是确定性默认，无需持久化，也不构成 Host 事实。夹具只包正文分支。run 分组、附件条、兜底 chip 行与 children 都在夹具外照常渲染，预览内 ref/mention 照常可点。
@@ -21,7 +21,7 @@
 - 一个 run = 一次发言。同一 sender 连续的消息与其 Thread 入口行包进一个 `.messageRun` 块。活动行与未读边界打断 run。
 - 日界同样打断 run。跨天的相邻消息之间插入居中的日期锚：`.daySeparator`，`MM-DD` 格式，跨年用完整 `YYYY-MM-DD`。锚的数字风格与消息时间一致。活动没有自己的时钟 instant。活动继承前一条消息的日界，不触发锚。时间线的第一条消息不带头部锚。分块逻辑统一在 `team-separators.ts` 的 `chunkRunsWithDays`（单一权威实现）。
 - 块内分界看折叠行是否自带 Thread 入口行。自带时上方画一条 border-l2 发丝线并稍增间距。自带的判定是 `.messageRow[data-grouped]` 且 `:has([data-thread-entry])`。普通文字接续不加线，避免整块被切碎。锚点是入口行自己的 `data-thread-entry`，不是「正文里的某个 button」。长文折叠的展开/收起钮与正文里渲染出的 Task ref 链接都是 button，按 button 认边界会误判。
-- 回合边界线是 `TeamRunDivider`。同一 sender 的相邻消息间隔 ≥5 分钟，即视为两次独立发言；agent 长发布常间隔小时级，纯折叠会抹掉层次。**只有 Channel feed 画这条线**——feed 陈述的是「块」，Thread 读的是一条连续流，所以 Thread 侧不画。形态是全宽 border-l2 发丝线，`role="separator"`，缩进对齐正文列（座位 + 间距 10，从座位派生，改头像尺寸自动跟随），**线上不写任何时刻**。这条线替代其后折叠行自带的入口行发丝线，相邻选择器覆盖，不叠双线。
+- 回合边界线是 `TeamRunDivider`。同一 sender 的相邻消息间隔 ≥5 分钟，即视为两次独立发言；agent 长发布常间隔小时级，纯折叠会抹掉层次。**只有 Project feed 画这条线**——feed 陈述的是「块」，Thread 读的是一条连续流，所以 Thread 侧不画。形态是全宽 border-l2 发丝线，`role="separator"`，缩进对齐正文列（座位 + 间距 10，从座位派生，改头像尺寸自动跟随），**线上不写任何时刻**。这条线替代其后折叠行自带的入口行发丝线，相邻选择器覆盖，不叠双线。
 - run 是纯分组块：无 hover 边框/底色/阴影，无常驻边框。run 自身只保留块间 2px 垂直空隙（`margin: 2px` + `padding: 3px`），不给内容"加笼子"。Thread 侧不再有任何 run 级分隔线，边界感只剩日界锚与未读线。
 - **时刻由行自己说，从不由线说**：有身份行的在名字旁常驻；续行（没有身份行）在头像座（`[data-gutter-time]`）hover 或键盘焦点时出现，同一行永远只说一次。时间线里没有常驻的时刻标签。
 - **座位只写时刻**：它 34px 且不裁剪，而带日期的形态同年 57px、跨年 87px。日期留给开这一 run 的身份行与其上的日分隔条，精确瞬间挂在标签的 `title` 上。
@@ -30,12 +30,12 @@
 - mention chip 挂三处。Human 字面正文在字面分段时挂 chip。Agent plain-prose 正文复用同一条 `splitMentionNames` 分段。Agent 富 Markdown 正文在公共 `MarkdownText` 渲染完成后，于普通文字节点原位替换出 chip。三种路径都只挂 Message 已解析 mention 列表内的 handle。大小写不敏感，书写必须带 `@`。裸名是正文，永不挂 chip。代码段落保持原文。effect 重跑不会对已生成的 chip 再包层。正文未出现的名字才落到尾部兜底 chip 行，不与内联 chip 重复。**chip 按「今天怎么称呼这个人」显示**。Human 改名前的 `human` 是 Host 仍会送达的别名。所以正文写着 `@human` 的旧消息在原位挂 chip，显示当前名。正文从没写过的名字不会掉进尾部兜底行。这与 member ref 一律按当前 handle 命名是同一条规则。
 - 读者自己的 handle 是唯一离开 business 族的 chip。`[data-mention-human]` 用 success 档着色（error 与 warn 两族分别意味着失败与警示，其它 chip 一律保持 business）。尾部兜底行永不重复读者自己的名字 —— 那会在一个已经把名字 chip 在正文里的消息下面再印一个光秃秃的 `@me`。它也不重复上方引用行已经点名的作者，因为那一行本身就说明了这次投递。引用不再可解析时不点名任何人，那里的 chip 就是这次投递唯一还看得见的地方。
 - 已知的 branded Task ref（`task:*`）通过 Host 的 `resolveTaskRefs` 批量解析。Task ref 在 Human 字面文本、Agent plain-prose 和 Agent 富 Markdown 的原出现位置渲染为可点击的 `Task #N`。富 Markdown 正文下方不再重复补入口。富 Markdown 在公共 `MarkdownText` 完成渲染后替换普通文字节点和"整段恰好是一个 ref"的行内代码。模型把 ref 当标识符加反引号样式是常态。代码围栏、缩进代码、混合内容的行内代码和已有链接保留原文。模型输出的双冒号/大写拼写（如 `task::…`）在 `splitBrandedRefs` 解析口统一归一化为 ledger 铸造的单冒号小写 ref 后再解析与导航。
-- 点击当前视图未加载的 Task ref，Client 解析 Task ref 所属 Workspace、Channel 和 Thread，再跨 Channel 跳转。解析失败的 ref 保留为非导航原文。已解析链接用原始 ref 作为 tooltip。Task number（如 `Task #12`）是 Task 在其 home Channel 内的创建序号。Host 侧单一派生（`taskNumbers`）。Channel 任务卡、Thread 标题、跨 Channel ref 解析与 Agent inbox 标注共用同一口径。序号跨 Channel 不唯一，稳定导航身份始终是 branded Task ref。
+- 点击当前视图未加载的 Task ref，Client 解析 Task ref 所属 Workspace、Project 和 Thread，再跨 Project 跳转。解析失败的 ref 保留为非导航原文。已解析链接用原始 ref 作为 tooltip。Task number（如 `Task #12`）是 Task 在其 home Project 内的创建序号。Host 侧单一派生（`taskNumbers`）。Project 任务卡、Thread 标题、跨 Project ref 解析与 Agent inbox 标注共用同一口径。序号跨 Project 不唯一，稳定导航身份始终是 branded Task ref。
 - 已知的 branded Thread ref（`thread:*`）走同一条路，经 Host 的 `resolveThreadRefs` 批量解析。解析结果在原出现位置渲染为可点击 Thread chip：带所指 Thread 首行摘要，中文为`讨论 · …`。taskless Thread 之间不再长得一模一样。只有 Host 确认过的 ref（缩写拼写同样要过解析）才会成链。点击按解析出的完整 ref 导航。解析失败的保留为非导航原文，永远不会静默无响应。
-- 已知的 branded Channel ref（`channel:*`）在原出现位置渲染为带频道名的可点击 Channel chip，中文为`频道 · …`。点击跳到这个 Channel。已知的 branded Member ref（`member:*`）渲染为带 handle 的 Member chip（中文为`成员 · @…`）。它与会发通知的 `@mention` chip 刻意区分。引用永不发通知。点击活跃 Member 的 chip，按 agent card 同款行为打开这个 Member 的 session。被暂停的 Member 与 Human 只渲染为带名但不可点的文本。两者都直接复用已加载的 Channel/Member roster 解析，不新增 Host 接口。落在已加载窗口之外的 ref 按解析失败同规则保留原文。
+- 已知的 branded Project ref（`project:*`）在原出现位置渲染为带项目名的可点击 Project chip，中文为`项目 · …`。点击跳到这个 Project。已知的 branded Member ref（`member:*`）渲染为带 handle 的 Member chip（中文为`成员 · @…`）。它与会发通知的 `@mention` chip 刻意区分。引用永不发通知。点击活跃 Member 的 chip，按 agent card 同款行为打开这个 Member 的 session。被暂停的 Member 与 Human 只渲染为带名但不可点的文本。两者都直接复用已加载的 Project/Member roster 解析，不新增 Host 接口。落在已加载窗口之外的 ref 按解析失败同规则保留原文。
 
 ## 计数胶囊（count capsule）
-- `TeamCountBadge.tsx` 配上 `countBadge.module.css .badge` 是**唯一**一枚计数胶囊，读者能看到的每一处计数都穿它。三处是：Channel feed 的 Thread 入口、Inbox 队列行，以及 Channel 看板上的 Task 卡。同一套声明每面各写一份，共享之前就是如此。正是 feed 那一份落到与队列行不同的行盒、数字彼此差出一个像素的原因。侧栏「收件箱」入口有意不用胶囊。入口把未读说成一个点，而不是一个数字（见「Inbox（收件箱）」）。读者扫侧栏问的是「有没有东西在等」。数量随每一条 fact 变动，是专门去问才要的答案。数字留在控件自己的可访问名里。
+- `TeamCountBadge.tsx` 配上 `countBadge.module.css .badge` 是**唯一**一枚计数胶囊，读者能看到的每一处计数都穿它。三处是：Project feed 的 Thread 入口、Inbox 队列行，以及 Project 看板上的 Task 卡。同一套声明每面各写一份，共享之前就是如此。正是 feed 那一份落到与队列行不同的行盒、数字彼此差出一个像素的原因。侧栏「收件箱」入口有意不用胶囊。入口把未读说成一个点，而不是一个数字（见「Inbox（收件箱）」）。读者扫侧栏问的是「有没有东西在等」。数量随每一条 fact 变动，是专门去问才要的答案。数字留在控件自己的可访问名里。
 - 这份规则是：高 18px、`min-width: 18px` 配 `box-sizing: border-box`（平台没有全局 border-box reset，否则内边距会把一位数字撑成椭圆）、`border-radius: 999px` 配 `corner-shape: round`、`display: inline-flex` 双向居中、11px/600 配 `font-variant-numeric: tabular-nums`（两位计数不会推动墨迹）、`line-height: 18px`。行盒就取胶囊自己的高度，而不是各面碰巧继承到的值。一面的入口行继承 `normal`，另一面自己设了高度。再加 `flex: none`：座位被挤时 Inbox 行不会把圆圈压小。定位仍留在挂胶囊的那个面上。窄轨要把胶囊钉在 36px 图标盒内，挂载点是 `className`。
 - 计数为 0 不渲染任何东西：计数的缺失不是「一枚写着 0 的胶囊」。超过 99 显示 `99+`。`tone` 只换墨色。Thread 点名了这位读者时是实心底色。只是有新动静时，用完全相同的几何画成 `--dsw-alias-border-l2` 发丝线。发丝线那 1px 边框从发丝线自己的内边距里出。4px + 1px 就是实心那份的 5px。于是两种墨色在任何计数下都是同一个边框盒、同一个内容盒，同一 Thread 再次被点名时行不会跳动。`label` 决定计数如何抵达读屏。有 label 时胶囊是 `role="img"`，由胶囊的可访问名与 `title` 承载数字。没有 label 时是 `aria-hidden`，因为外层控件已经说了这个数。
 - 数字墨迹落在盒中心偏右约半个像素处。十个数字皆然。这是字形在自身 advance 里的落点，不是布局问题，任何声明都改不了。规则真正负责的是「一个字符保持 18px 的盒子」与「两处共用同一条规则」。`scripts/audit-ui-parity.mjs` 直接审计这条规则。重新引入第二份拷贝会让审计报错。
@@ -73,9 +73,9 @@
 
 本块用 `data-environment` 携带自己的判定。验收 journey 因此等待一个状态，而不是一段文案。
 
-## Channel 页与讨论面板（channel page / discussion panel）
-- Channel 页把同一条时间线读成两种视图。头部下方一条页签行在两者之间切换：`频道` 是 feed，`看板` 是按 Task 状态投影的四列看板。看板是第二种**读法**，不是第二个表面。它重排同一份投影，所以一个 Task 的状态、所有者、标题不会在两个视图之间出现分歧，也不会有哪个视图去拉另一个没拉过的东西。
-- 看板只读 feed 已经加载的那一段窗口，不读 Channel 的全部历史。为了填满四列而一直翻到 `hasMore` 为假，等于把每一条 top-level Message 都并进时间线，为了四列而废掉 feed 自己的分页；同时会把「打开一个页签」变成一次无界读取。看板拿更早工作的方式就是 feed 的 `加载更早消息`：一个入口、一个页大小，两个视图永远描述同一批事实。
+## Project 页与讨论面板（project page / discussion panel）
+- Project 页把同一条时间线读成两种视图。头部下方一条页签行在两者之间切换：`项目` 是 feed，`看板` 是按 Task 状态投影的四列看板。看板是第二种**读法**，不是第二个表面。它重排同一份投影，所以一个 Task 的状态、所有者、标题不会在两个视图之间出现分歧，也不会有哪个视图去拉另一个没拉过的东西。
+- 看板只读 feed 已经加载的那一段窗口，不读 Project 的全部历史。为了填满四列而一直翻到 `hasMore` 为假，等于把每一条 top-level Message 都并进时间线，为了四列而废掉 feed 自己的分页；同时会把「打开一个页签」变成一次无界读取。看板拿更早工作的方式就是 feed 的 `加载更早消息`：一个入口、一个页大小，两个视图永远描述同一批事实。
 - 四列是 `待处理` / `进行中` / `待验收` / `已完成`。五个 Task 状态里 `done` 与 `closed` 合进「已完成」一列。已了结的卡片降透明度而不是隐藏。看板的职责是让在动的工作最响，同时让已完的仍可找到。空列只在列头写自己的 `0`，不画占位行：在计数已经说清的列里再放一行占位，是把同一件事说两遍。
 - 看板是唯一被允许超出 880px 阅读列的 Client 表面，上限 1240px。四个状态列是扫描型表面，压到阅读列宽度会让每一列都失去卡片宽度。四列等宽（`flex: 1` 配 `min-width: 0`），所以某一列标题更长也换不来更多宽度；底色用 `--dsw-alias-bg-module-platform`（shipped 给分组模块的凹陷底色），卡片自身的底层色因此读起来是浮起的。
 - 页签行是复合控件：`role="tablist"` 加两个 `role="tab"` 按钮，整组只有一个 tab stop（未选中那个 `tabIndex` 为 -1），每个页签通过 `aria-controls`/`aria-labelledby` 指明自己控制的 panel，Left/Right/Home/End 同时移动选中与焦点。它取 shipped 会话页自己那套页签语言：13px/16px、weight 500、36px 间距、`--dsw-alias-state-business-primary` 的 2px 下划线。下划线走伪元素并伸出盒底 1px，正好压在页头收口线上，两者读成同一条边（shipped 同款做法）。未选中页签取 tertiary，选中页取 business blue 而非墨色，因为 `--dsw-alias-brand-primary` 在这张 token 表里解析成中性黑；shipped 在自己那条页签上也陈述了同样的理由。

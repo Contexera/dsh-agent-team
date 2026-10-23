@@ -98,10 +98,10 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
 
   const open = (row: TeamInboxRow): void => {
     selectWorkspace(row.workspaceId)
-    selectThread(row.item.thread.threadRef, row.item.channelRef, row.item.task?.taskRef, row.item.taskNumber)
+    selectThread(row.item.thread.threadRef, row.item.projectRef, row.item.task?.taskRef, row.item.taskNumber)
   }
 
-  // Shares the conversation seat's header band and reading column with Channel and Thread, so switching surfaces does not shift content.
+  // Shares the conversation seat's header band and reading column with Project and Thread, so switching surfaces does not shift content.
   const totalUnread = rows?.reduce((sum, row) => sum + row.item.unreadCount, 0) ?? 0
   const totalMentions = rows?.reduce((sum, row) => sum + row.item.directCount, 0) ?? 0
   // A row names its Workspace only while the rows on screen span more than one; a constant segment wastes the row's most readable position.
@@ -161,7 +161,7 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
 
 /**
  * One queue row, shaped like the shipped two-line result row. The gutter leads with who is on the work (or who moved an
- * unclaimed Thread), the Channel feed's Thread entry grammar. The count closes the identity line and only its ink changes:
+ * unclaimed Thread), the Project feed's Thread entry grammar. The count closes the identity line and only its ink changes:
  * capsule fill when the row names the reader, a hairline otherwise. Unread and mention counts reach assistive tech through
  * the capsule's own name, so no second visible count competes.
  */
@@ -195,11 +195,11 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
       <span className={inboxCss.rowCrumb}>
         {showWorkspace && <span className={inboxCss.rowWorkspace}>{row.workspaceTitle}</span>}
         {showWorkspace && ' / '}
-        <span className={inboxCss.rowChannel}>#{item.channelName}</span>
+        <span className={inboxCss.rowProject}>#{item.projectName}</span>
         {' '}
         {item.taskNumber !== undefined && <span className={inboxCss.rowTask}>{t('taskLabel', { number: item.taskNumber })}</span>}
-        {/* The state dot and word, as in the Channel feed and the Thread header. A discussion draws nothing; it rides the clamped
-            provenance run so a squeezed seat shortens it with the Channel name. */}
+        {/* The state dot and word, as in the Project feed and the Thread header. A discussion draws nothing; it rides the clamped
+            provenance run so a squeezed seat shortens it with the Project name. */}
         {item.task !== undefined && <>
           {' '}
           <span className={inboxCss.rowTaskState} data-team-task-state={item.task.status}>

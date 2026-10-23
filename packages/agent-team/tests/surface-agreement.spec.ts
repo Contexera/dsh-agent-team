@@ -10,12 +10,12 @@ import AgentTeam from '../src/index.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
-import type { AgentTeamChannelRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
+import type { AgentTeamProjectRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
 import { isFactOnSurface } from '../src/surface-visibility.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 
 /**
- * Channel B's load-bearing agreement: the Host's real notice rendering and the
+ * Project B's load-bearing agreement: the Host's real notice rendering and the
  * probe's notion of "the model saw this" must refer to the same bytes.
  *
  * The integration suite proves the gate honours the probe; the probe suite
@@ -56,13 +56,13 @@ async function harness(): Promise<{ readonly ctx: Context }> {
   return { ctx }
 }
 
-/** One durable, enabled Member in the channel, added through the live ledger. */
-async function addLiveMember(ctx: Context, channelRef: AgentTeamChannelRef): Promise<AgentTeamMemberActor> {
+/** One durable, enabled Member in the project, added through the live ledger. */
+async function addLiveMember(ctx: Context, projectRef: AgentTeamProjectRef): Promise<AgentTeamMemberActor> {
   const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberActor['memberId']
   const handle = 'reader'
   await ctx.agentTeam['ledger']!.addMember({
     requestId: requestId(`ledger-member-${memberId}`), workspaceId: alpha, handle, description: 'Reads work', presetId: 'team-member',
-    channelRefs: [channelRef], actor: agentTeamHumanActor(),
+    projectRefs: [projectRef], actor: agentTeamHumanActor(),
     member: { memberId, sessionId: SessionId(`session:${memberId}`), workspaceId: alpha, handle, description: 'Reads work',
       presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' as const },
   })
@@ -80,15 +80,15 @@ function wakeSeam(): { readonly agent: Agent; readonly state: { readonly calls: 
 describe('the Host notice rendering and the probe agree on the same bytes', () => {
   it('a real direct-mention notice makes its own unread fact exempt', async () => {
     const { ctx } = await harness()
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
-    const member = await addLiveMember(ctx, channel.channel.channelRef)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
     const { agent, state } = wakeSeam()
     ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
 
     // A real commit that names the Member, which is what makes the fact direct.
     const body = 'please review this before the release'
     const sent = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('direct'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body, recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body, recipients: [member.memberId] })
     expect(sent.kind).toBe('committed')
     if (sent.kind !== 'committed') return
     // The Host rendered and delivered one notice.
@@ -109,8 +109,8 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
 
   it('an ordinary notice carries no body, so its own fact stays unexempt', async () => {
     const { ctx } = await harness()
-    const channel = await ctx.agentTeam.createChannel({ requestId: requestId('channel'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
-    const member = await addLiveMember(ctx, channel.channel.channelRef)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
     const { agent, state } = wakeSeam()
     ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
 
@@ -118,7 +118,7 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     // Member who follows the Thread, so the anchor is sent with the Member
     // named once to enrol them, and the update is ordinary.
     const anchor = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('anchor'), workspaceId: alpha,
-      channelRef: channel.channel.channelRef, body: 'anchor for the ordinary case', recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body: 'anchor for the ordinary case', recipients: [member.memberId] })
     expect(anchor.kind).toBe('committed')
     if (anchor.kind !== 'committed') return
     // Being named in the anchor already follows the Thread for this Member, so

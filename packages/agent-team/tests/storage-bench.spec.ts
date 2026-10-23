@@ -36,7 +36,7 @@ function operationPayload(sequence: number): Record<string, unknown> {
     kind: 'team/message-sent',
     data: {
       workspaceId: 'workspace:alpha',
-      channelRef: 'channel:engineering',
+      projectRef: 'project:engineering',
       taskRef: `task:bench-${sequence}`,
       threadRef: `thread:bench-${sequence}`,
       message: { messageRef: `message:bench-${sequence}`, sequence, sender: 'member:human', body },

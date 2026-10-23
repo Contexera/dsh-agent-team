@@ -9,17 +9,17 @@ usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
-async function openSeededChannel(options?: Parameters<typeof runtimeWithTeam>[0]) {
+async function openSeededProject(options?: Parameters<typeof runtimeWithTeam>[0]) {
   const b = await runtimeWithTeam({
-    initialChannels: true,
+    initialProjects: true,
     seededMessages: [{ body: 'human note', occurredAt: '2026-08-21T10:00:00.000Z', sender: 'human' }],
     ...options,
   })
   fireEvent.click(b.view.getByRole('button', { name: '团队' }))
   fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
   const page = await waitFor(() => {
-    const node = b.view.container.querySelector('[data-team-channel]') as HTMLElement | null
-    if (node === null) throw new Error('channel page not mounted')
+    const node = b.view.container.querySelector('[data-team-project]') as HTMLElement | null
+    if (node === null) throw new Error('project page not mounted')
     return node
   })
   return { b, page }
@@ -27,25 +27,25 @@ async function openSeededChannel(options?: Parameters<typeof runtimeWithTeam>[0]
 
 describe('Human identity in the Team surfaces', () => {
   it('names the Human by the profile name the Host reports', async () => {
-    const { page } = await openSeededChannel({ humanProfile: { name: 'Ada' } })
+    const { page } = await openSeededProject({ humanProfile: { name: 'Ada' } })
     await waitFor(() => { expect(within(page).getByText('Ada')).toBeTruthy() })
     expect(within(page).queryByText('Human')).toBeNull()
     expect(page.querySelector('img')).toBeNull()
   })
 
   it('keeps the localized name when the profile cannot be read', async () => {
-    const { page } = await openSeededChannel({ humanProfileFailure: 'host offline' })
+    const { page } = await openSeededProject({ humanProfileFailure: 'host offline' })
     await waitFor(() => { expect(within(page).getByText('Human')).toBeTruthy() })
   })
 
   it('draws the uploaded avatar in the message identity seat', async () => {
-    const { b, page } = await openSeededChannel({ humanProfile: { name: 'Ada', avatarRef: 'avatar:1' } })
+    const { b, page } = await openSeededProject({ humanProfile: { name: 'Ada', avatarRef: 'avatar:1' } })
     await waitFor(() => { expect(page.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AAAA') })
     expect(b.getHumanAvatar).toHaveBeenCalledWith({ avatarRef: 'avatar:1' })
   })
 
   it('keeps the initial in the message seat when those bytes do not decode', async () => {
-    const { page } = await openSeededChannel({ humanProfile: { name: 'Ada', avatarRef: 'avatar:1' } })
+    const { page } = await openSeededProject({ humanProfile: { name: 'Ada', avatarRef: 'avatar:1' } })
     const image = await waitFor(() => {
       const node = page.querySelector('[data-avatar="image"]')
       if (node === null) throw new Error('message avatar not mounted')
@@ -56,8 +56,8 @@ describe('Human identity in the Team surfaces', () => {
     expect(page.querySelector('img')).toBeNull()
   })
 
-  it('keeps the uploaded avatar off Agent rows in the channel feed', async () => {
-    const { page } = await openSeededChannel({
+  it('keeps the uploaded avatar off Agent rows in the project feed', async () => {
+    const { page } = await openSeededProject({
       humanProfile: { name: 'Ada', avatarRef: 'avatar:1' },
       seededMessages: [
         { body: 'human note', occurredAt: '2026-08-21T10:00:00.000Z', sender: 'human' },
@@ -82,7 +82,7 @@ describe('Human identity in the Team surfaces', () => {
   })
 
   it('chips an agent message that wrote the historic human handle as the renamed Human', async () => {
-    const { page } = await openSeededChannel({
+    const { page } = await openSeededProject({
       humanProfile: { name: 'Ada' },
       seededMessages: [{
         body: 'ping @human please look',

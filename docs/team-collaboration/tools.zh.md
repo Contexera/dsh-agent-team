@@ -6,9 +6,9 @@
 
 ## `team_view`
 
-`team_view` 是 address book：有界的获授权 Channel、顶层 Thread 与 Member 摘要。这是当前的地址簿，不是工作队列。unread work 归 `team_inbox`。Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Channel ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数。revision 和消息数都不改变下一个合法动作。
+`team_view` 是 address book：有界的获授权 Project、顶层 Thread 与 Member 摘要。这是当前的地址簿，不是工作队列。unread work 归 `team_inbox`。Threads 是唯一分页目录。行按 newest-first 排列，携带 threadRef、Project ref、bounded anchor subject。taskful Threads 在行内呈现 Task standing：Task ref、编号、status/resolution。绝无第二个 Task 索引，也不渲染 revision 或消息数。revision 和消息数都不改变下一个合法动作。
 
-首页 Members 之后跟一个 `active task threads` 段。本 Workspace 内读者获授权 Channel 中所有 in_progress / in_review 的 Task Thread，按最新活动排序。每行携带 threadRef、Channel ref、status、Task 编号。live Claims 上的 Members、bounded anchor subject 与最新活动时刻也在行内。
+首页 Members 之后跟一个 `active task threads` 段。本 Workspace 内读者获授权 Project 中所有 in_progress / in_review 的 Task Thread，按最新活动排序。每行携带 threadRef、Project ref、status、Task 编号。live Claims 上的 Members、bounded anchor subject 与最新活动时刻也在行内。
 
 纳入条件只看 Task 是否活跃，不看读者是否参与。读者未读的 Thread 也不排除。这段独立于 unread 队列，回答「谁已经在做什么」。工具引导在读者遇到 Workspace 意外改动、或准备 claim/commit 之前指向此段，让在途工作被识别为在途而非冲突。这段不是 unread 队列。未读工作仍归 `team_inbox`。
 
@@ -16,7 +16,7 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 ## `team_inbox`
 
-`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Channel ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看他人在途的工作（无论是否有未读），用 `team_view` 的 active-task-threads 段。页脚把正文阅读与确认指向 `team_thread read`。渲染不携带 revision 与写令牌。当前 read 才是必需的变更基础，并提供令牌。
+`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Project ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看他人在途的工作（无论是否有未读），用 `team_view` 的 active-task-threads 段。页脚把正文阅读与确认指向 `team_thread read`。渲染不携带 revision 与写令牌。当前 read 才是必需的变更基础，并提供令牌。
 
 ## `team_thread`
 
@@ -44,7 +44,7 @@ Attention 不是 reading。这三个 action 都不渲染 Thread 的 facts、不�
 
 ## `team_message`
 
-`team_message.start` 创建 Channel 顶层 Thread。默认 taskless，也接受明确 task intent 以原子创建 Task。`team_message.reply` 向既有 Thread 追加明确的 reply。二者都接受 `attachments` 中的可选 absolute file paths。Host 验证每个 path，把 bytes 复制到 attachment cache。收件人看到 thumbnails/chips 与一行 cached path。任一 path 验证失败都会拒绝整个 send。commit 的 start/reply 渲染一个 committed-verb 结果：Thread created 或 reply added。结果携带 Message ref、新 Thread ref（taskful 时含 Task ref），以及恰好一个 next-write token hand-off。新建 Thread 立即可寻址，下一次变更也拿到了基础。
+`team_message.start` 创建 Project 顶层 Thread。默认 taskless，也接受明确 task intent 以原子创建 Task。`team_message.reply` 向既有 Thread 追加明确的 reply。二者都接受 `attachments` 中的可选 absolute file paths。Host 验证每个 path，把 bytes 复制到 attachment cache。收件人看到 thumbnails/chips 与一行 cached path。任一 path 验证失败都会拒绝整个 send。commit 的 start/reply 渲染一个 committed-verb 结果：Thread created 或 reply added。结果携带 Message ref、新 Thread ref（taskful 时含 Task ref），以及恰好一个 next-write token hand-off。新建 Thread 立即可寻址，下一次变更也拿到了基础。
 
  类型化拒绝结果（`unread_required`、`stale_revision`）以 `Not committed` 开头。保留重读与审慎重试所需的结构化 refs 与计数，并渲染挡住这次写入的事实——`unread_required` 是未读批次，`stale_revision` 是过期令牌之后的增量——形状与 `team_thread read` 返回的完全一致，同时把当前 revision 作为下次写入的写令牌交回。因此被拒的写入方在拒绝本身里就知道什么变了、该用哪个令牌，重试无需中间再读一次即可提交。恢复路径仍是 read-and-reconsider：拒绝里的事实是那道门，不是替代确认的手段。mention 一个该 Thread 从未承载过的 Member 不是拒绝。Message 照常提交，结果里报告未送达的名字。
 
@@ -60,7 +60,7 @@ Team 行设置里的开关决定这个参数是否可用。开关关闭时，携
 
 `team_dm` 向同一 Workspace 内一个 enabled Agent Member 发送私有 direct message。它只接受 `memberRef` 与 `body`，别无其他——没有 Thread、没有 Task、没有写令牌、没有附件——因为 DM 寻址的是人，不是会话。多带的参数会被拒绝而不是被忽略，因此伸手去拿 Thread 写入形状的模型会被告知：你想要的其实是 Thread reply。
 
-DM 是纯送达。ledger 追加一个 audit-only 的 `team/dm-sent` operation，requestId 幂等。收件人的 live session 以 relay-form 注入的 user message 收到正文。idle 收件人开新 turn，busy 收件人 steer 进当前 turn。DM 不创建 Channel、Thread、revision、Attention 或 Inbox markers，也不唤醒任何 change waiters。Human 不能被 DM。
+DM 是纯送达。ledger 追加一个 audit-only 的 `team/dm-sent` operation，requestId 幂等。收件人的 live session 以 relay-form 注入的 user message 收到正文。idle 收件人开新 turn，busy 收件人 steer 进当前 turn。DM 不创建 Project、Thread、revision、Attention 或 Inbox markers，也不唤醒任何 change waiters。Human 不能被 DM。
 
 每条结果的第一行都说明它是哪一种：已送达，还是只记录在案、没有可唤醒的 live session。没有自动重投，因此只记录在案的 DM 绝不被盲目重发。
 

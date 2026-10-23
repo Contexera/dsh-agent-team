@@ -1,7 +1,7 @@
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
-import type { AgentTeamChannelRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamProjectRef, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 
 export type TeamMode = 'conversation' | 'team'
 
@@ -11,11 +11,11 @@ export const TEAM_PANEL_ID = 'agent-team' as MainPanelId
 export interface TeamNavigationSnapshot {
   mode: TeamMode
   workspaceId?: WorkspaceId
-  channelRef?: AgentTeamChannelRef
+  projectRef?: AgentTeamProjectRef
   taskRef?: AgentTeamTaskRef
   threadRef?: AgentTeamThreadRef
   taskNumber?: number
-  /** A navigation fact, not an unread fact: selecting Inbox clears the Channel/Thread faces, and a reload reopens the page. */
+  /** A navigation fact, not an unread fact: selecting Inbox clears the Project/Thread faces, and a reload reopens the page. */
   inbox?: boolean
   /** Runtime-only Member Session embedded in the conversation seat; never persisted. */
   memberSessionId?: SessionId
@@ -28,12 +28,14 @@ const STORAGE_KEY = 'dsh.agent-team.navigation'
 function readSnapshot(): TeamNavigationSnapshot {
   if (typeof localStorage === 'undefined') return { mode: 'conversation' }
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '') as Partial<TeamNavigationSnapshot>
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '') as Partial<TeamNavigationSnapshot> & { channelRef?: unknown }
+    // Projects were called Channels; a snapshot saved before the rename still reopens its page.
+    const projectRef = typeof parsed.channelRef === 'string' ? parsed.channelRef.replace(/^channel:/, 'project:') : parsed.projectRef
     const hasThread = typeof parsed.threadRef === 'string'
     return {
       mode: parsed.mode === 'team' ? 'team' : 'conversation',
       ...(typeof parsed.workspaceId === 'string' ? { workspaceId: parsed.workspaceId as WorkspaceId } : {}),
-      ...(typeof parsed.channelRef === 'string' ? { channelRef: parsed.channelRef as AgentTeamChannelRef } : {}),
+      ...(typeof projectRef === 'string' ? { projectRef: projectRef as AgentTeamProjectRef } : {}),
       ...(parsed.inbox === true ? { inbox: true } : {}),
       ...(hasThread ? {
         threadRef: parsed.threadRef as AgentTeamThreadRef,
@@ -48,11 +50,11 @@ function readSnapshot(): TeamNavigationSnapshot {
 
 function persistSnapshot(snapshot: TeamNavigationSnapshot): void {
   if (typeof localStorage === 'undefined') return
-  const { mode, workspaceId, channelRef, taskRef, threadRef, taskNumber, inbox } = snapshot
+  const { mode, workspaceId, projectRef, taskRef, threadRef, taskNumber, inbox } = snapshot
   persistLocallyBestEffort({
     mode,
     ...(workspaceId === undefined ? {} : { workspaceId }),
-    ...(channelRef === undefined ? {} : { channelRef }),
+    ...(projectRef === undefined ? {} : { projectRef }),
     ...(inbox === true ? { inbox: true } : {}),
     ...(taskRef === undefined ? {} : { taskRef }),
     ...(threadRef === undefined ? {} : { threadRef }),
@@ -78,8 +80,8 @@ export interface TeamNavigationActions {
    */
   leaveTeamForConversation: (releasePanel: () => void) => void
   selectWorkspace: (workspaceId: WorkspaceId) => void
-  selectChannel: (channelRef: AgentTeamChannelRef) => void
-  selectThread: (threadRef: AgentTeamThreadRef, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void
+  selectProject: (projectRef: AgentTeamProjectRef) => void
+  selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void
   selectInbox: () => void
   backToWorkspace: () => void
   /** Swap the conversation seat to a Member Session. `returnToSessionId` is captured once, so switching Member Sessions keeps the original target. */
@@ -112,8 +114,8 @@ export class TeamNavigation {
         this.setMode('conversation')
       },
       selectWorkspace: workspaceId => { this.clearMemberSession(); this.setWorkspace(workspaceId) },
-      selectChannel: channelRef => { this.clearMemberSession(); this.setChannel(channelRef) },
-      selectThread: (threadRef, channelRef, taskRef, taskNumber) => { this.clearMemberSession(); this.setThread(threadRef, channelRef, taskRef, taskNumber) },
+      selectProject: projectRef => { this.clearMemberSession(); this.setProject(projectRef) },
+      selectThread: (threadRef, projectRef, taskRef, taskNumber) => { this.clearMemberSession(); this.setThread(threadRef, projectRef, taskRef, taskNumber) },
       selectInbox: () => { this.clearMemberSession(); this.setInbox() },
       backToWorkspace: () => { this.clearMemberSession(); this.setThread(undefined) },
       enterMemberSession: (sessionId, returnToSessionId) => { this.setMemberSession(sessionId, returnToSessionId) },
@@ -153,37 +155,37 @@ export class TeamNavigation {
 
   private setWorkspace(workspaceId: WorkspaceId): void {
     if (this.snapshot.workspaceId === workspaceId && this.snapshot.inbox !== true) return
-    const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
     this.snapshot = { ...base, workspaceId }
     this.commit()
   }
 
-  private setChannel(channelRef: AgentTeamChannelRef): void {
-    if (this.snapshot.channelRef === channelRef && this.snapshot.threadRef === undefined && this.snapshot.inbox !== true) return
+  private setProject(projectRef: AgentTeamProjectRef): void {
+    if (this.snapshot.projectRef === projectRef && this.snapshot.threadRef === undefined && this.snapshot.inbox !== true) return
     const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
-    this.snapshot = { ...base, channelRef }
+    this.snapshot = { ...base, projectRef }
     this.commit()
   }
 
   /** The Inbox is a face, not workspace content: selecting a Workspace leaves it. */
   private setInbox(): void {
-    if (this.snapshot.inbox === true && this.snapshot.channelRef === undefined && this.snapshot.threadRef === undefined) return
-    const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
+    if (this.snapshot.inbox === true && this.snapshot.projectRef === undefined && this.snapshot.threadRef === undefined) return
+    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
     this.snapshot = { ...base, inbox: true }
     this.commit()
   }
 
-  private setThread(threadRef: AgentTeamThreadRef | undefined, channelRef?: AgentTeamChannelRef, taskRef?: AgentTeamTaskRef, taskNumber?: number): void {
-    if (this.snapshot.threadRef === threadRef && this.snapshot.taskRef === taskRef && this.snapshot.channelRef === channelRef && this.snapshot.taskNumber === taskNumber && this.snapshot.inbox !== true) return
+  private setThread(threadRef: AgentTeamThreadRef | undefined, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number): void {
+    if (this.snapshot.threadRef === threadRef && this.snapshot.taskRef === taskRef && this.snapshot.projectRef === projectRef && this.snapshot.taskNumber === taskNumber && this.snapshot.inbox !== true) return
     if (threadRef === undefined) {
       const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
       this.snapshot = base
     } else {
-      const { channelRef: _channelRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+      const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
       this.snapshot = {
         ...base,
         threadRef,
-        ...(channelRef === undefined ? {} : { channelRef }),
+        ...(projectRef === undefined ? {} : { projectRef }),
         ...(taskRef === undefined ? {} : { taskRef }),
         ...(taskNumber === undefined ? {} : { taskNumber }),
       }

@@ -5,7 +5,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { TeamSidebarProps } from './slots.ts'
 import { TeamWorkspaceSelector } from './TeamWorkspaceSelector.tsx'
 import { TeamAgentsPanel } from './TeamAgentsPanel.tsx'
-import { TeamChannelsPanel } from './TeamChannelsPanel.tsx'
+import { TeamProjectsPanel } from './TeamProjectsPanel.tsx'
 import css from './sidebar.module.css'
 
 /** A failed read keeps the last good total: it must never fold into zero and read as "no unread". Recovery overwrites the kept value. */
@@ -20,7 +20,7 @@ function mergeInboxTotals(
   return totals
 }
 
-type SidebarSection = 'channels' | 'agents'
+type SidebarSection = 'projects' | 'agents'
 
 /**
  * The quantity lives in the control's accessible name. The mark hangs off the icon so the wide card and the 36px rail
@@ -33,21 +33,21 @@ function InboxMark({ unread }: { readonly unread: number }) {
   </span>
 }
 
-export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectChannel, selectInbox, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadChannels, createChannel, updateChannel, archiveChannel, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
+export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectProject, selectInbox, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadProjects, createProject, updateProject, archiveProject, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   const workspaces = useWorkspaces(state => state.items)
   const selected = navigationState.workspaceId
   const selectedExists = selected !== undefined && workspaces.some(workspace => workspace.workspaceId === selected)
   const selectedId = selectedExists ? selected : workspaces[0]?.workspaceId
-  // Exactly one sidebar row carries aria-current='page': the open Channel, else the selected Agent card while a Member Session
+  // Exactly one sidebar row carries aria-current='page': the open Project, else the selected Agent card while a Member Session
   // view is open, else the Workspace overview. The Inbox card takes the marker while the Inbox page stands, but not while an
   // embedded Member Session covers it (the Inbox stays the remembered face underneath).
-  const overviewIsCurrent = navigationState.channelRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true
+  const overviewIsCurrent = navigationState.projectRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true
   const inboxIsCurrent = navigationState.inbox === true && navigationState.memberSessionId === undefined
   const [creatingAgents, setCreatingAgents] = useState<readonly AgentTeamAddMemberRequest[]>([])
   // Rail icons request expansion and name the section to reveal once wide.
   const [pendingSection, setPendingSection] = useState<SidebarSection>()
-  const channelsRef = useRef<HTMLDivElement>(null)
+  const projectsRef = useRef<HTMLDivElement>(null)
   const agentsRef = useRef<HTMLDivElement>(null)
   // One scope-less subscription re-pulls each Workspace's unread total (limit 1) on every wake; same-burst wakes coalesce behind a short debounce.
   const [inboxTotal, setInboxTotal] = useState(0)
@@ -97,7 +97,7 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
 
   useEffect(() => {
     if (!wide || pendingSection === undefined) return
-    const node = pendingSection === 'agents' ? agentsRef.current : channelsRef.current
+    const node = pendingSection === 'agents' ? agentsRef.current : projectsRef.current
     setPendingSection(undefined)
     queueMicrotask(() => { node?.querySelector<HTMLButtonElement>('button')?.focus() })
   }, [wide, pendingSection])
@@ -114,8 +114,8 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
           <InboxMark unread={inboxTotal} />
         </button>
       </Tooltip>
-      <Tooltip label={t('channels')} side="right">
-        <button type="button" className={css.railButton} aria-label={t('channels')} onClick={() => { setPendingSection('channels'); expandSidebar() }}>
+      <Tooltip label={t('projects')} side="right">
+        <button type="button" className={css.railButton} aria-label={t('projects')} onClick={() => { setPendingSection('projects'); expandSidebar() }}>
           <IconListPenOutlineRegular size={16} />
         </button>
       </Tooltip>
@@ -142,8 +142,8 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
     </button>
     <TeamWorkspaceSelector workspaces={workspaces} selectedId={selectedId} current={overviewIsCurrent} onSelect={selectWorkspace} t={t} />
     {selectedId !== undefined && <div className={css.workspaceSection}>
-      <div ref={channelsRef}>
-        <TeamChannelsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} loadChannels={loadChannels} subscribeChanges={subscribeChanges} createChannel={createChannel} updateChannel={updateChannel} archiveChannel={archiveChannel} creatingAgents={creatingAgents.filter(request => request.workspaceId === selectedId)} {...(navigationState.memberSessionId !== undefined || navigationState.channelRef === undefined ? {} : { selectedChannelRef: navigationState.channelRef })} selectChannel={selectChannel} t={t} />
+      <div ref={projectsRef}>
+        <TeamProjectsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} loadProjects={loadProjects} subscribeChanges={subscribeChanges} createProject={createProject} updateProject={updateProject} archiveProject={archiveProject} creatingAgents={creatingAgents.filter(request => request.workspaceId === selectedId)} {...(navigationState.memberSessionId !== undefined || navigationState.projectRef === undefined ? {} : { selectedProjectRef: navigationState.projectRef })} selectProject={selectProject} t={t} />
       </div>
       <div ref={agentsRef}>
         <TeamAgentsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} subscribeChanges={subscribeChanges} addMember={addMember} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} joinWorkspace={joinWorkspace} leaveWorkspace={leaveWorkspace} loadModels={loadModels} {...(navigationState.memberSessionId === undefined ? {} : { memberSessionId: navigationState.memberSessionId })} openMemberSession={openMemberSession} onCreatingChange={(request, creating) => { setCreatingAgents(current => creating ? [...current.filter(item => item.requestId !== request.requestId), request] : current.filter(item => item.requestId !== request.requestId)) }} t={t} />

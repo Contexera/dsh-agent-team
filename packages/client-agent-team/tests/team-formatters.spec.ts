@@ -181,6 +181,11 @@ describe('Team presentation formatters', () => {
       { text: 'TASK::0F0AD7CE-11D3-4C05-8A9E-6F2B1C9D7E01', ref: refText },
       { text: ' 即可' },
     ])
+    // Bodies written before the rename cite Projects by their Channel ref.
+    expect(splitBrandedRefs('见 channel:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e01')).toEqual([
+      { text: '见 ' },
+      { text: 'channel:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e01', ref: 'project:0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e01' },
+    ])
     // A tripled colon is not a ref, and prose colons never linkify.
     expect(splitBrandedRefs('task:::0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e01')).toEqual([
       { text: 'task:::0f0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e01' },
@@ -355,7 +360,7 @@ describe('Team presentation formatters', () => {
   })
 
   it('keeps rich Agent bodies on Markdown and paints their refs inline when navigation is available', () => {
-    const body = '# 标题\n\n见 channel:0123abcd-0000-0000-0000-000000000000'
+    const body = '# 标题\n\n见 project:0123abcd-0000-0000-0000-000000000000'
     const plan = planMessageBody(body, { human: false, mentionNames: ['tester'], canOpenRefs: true })
     expect(plan.render).toBe('markdown')
     expect(plan.richAgentBody).toBe(true)
@@ -378,9 +383,9 @@ describe('Team presentation formatters', () => {
     expect(rich.taskRefs).toEqual([])
     // Without navigation the post-render pass cannot paint refs inline, so
     // rich Markdown bodies keep their branded refs in the trailing row.
-    const refBody = planMessageBody('**粗体** 见 channel:0123abcd-0000-0000-0000-000000000000', { human: false, mentionNames: ['builder'], canOpenRefs: false })
+    const refBody = planMessageBody('**粗体** 见 project:0123abcd-0000-0000-0000-000000000000', { human: false, mentionNames: ['builder'], canOpenRefs: false })
     expect(refBody.render).toBe('markdown')
-    expect(refBody.fallbackRefs).toEqual(['channel:0123abcd-0000-0000-0000-000000000000'])
+    expect(refBody.fallbackRefs).toEqual(['project:0123abcd-0000-0000-0000-000000000000'])
   })
 
   it('strips attachment prompt lines and keeps the raw body when stripping empties it', () => {

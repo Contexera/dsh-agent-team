@@ -400,7 +400,7 @@
 
 /* The rows run the column's full content box, so their hover fill shows the row's extent as wide as the header above. The 1px
    step keeps rows separate; no bottom padding, since the section boundary below already carries the step. */
-.channelList,
+.projectList,
 .agentList {
   display: flex;
   flex-direction: column;
@@ -452,7 +452,7 @@
   bottom: -7px;
 }
 
-.channelRow {
+.projectRow {
   align-items: center;
   border-radius: var(--dsw-radius-md, 12px);
   color: var(--dsw-alias-label-primary);
@@ -460,7 +460,7 @@
   min-height: 32px;
   position: relative;
 }
-.channelSelect {
+.projectSelect {
   align-items: center;
   background: transparent;
   border: 0;
@@ -475,12 +475,12 @@
   padding: 0 4px 0 8px;
   text-align: left;
 }
-.channelSelect:focus-visible {
+.projectSelect:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: -2px;
 }
-/* A Channel row is a peer of the shipped list row, so it reads at that row's title grade in either mode. */
-.channelName {
+/* A Project row is a peer of the shipped list row, so it reads at that row's title grade in either mode. */
+.projectName {
   font-size: 14px;
   font-weight: 400;
   line-height: 20px;
@@ -606,21 +606,21 @@
   flex: none;
   padding-right: 4px;
 }
-.channelRow:hover .rowMenu,
-.channelRow:focus-within .rowMenu,
-.channelRow[data-menu-open] .rowMenu,
+.projectRow:hover .rowMenu,
+.projectRow:focus-within .rowMenu,
+.projectRow[data-menu-open] .rowMenu,
 .agentRow:hover .rowMenu,
 .agentRow:focus-within .rowMenu,
 .agentRow[data-menu-open] .rowMenu {
   display: inline-flex;
 }
-.channelRow[data-menu-open],
+.projectRow[data-menu-open],
 .agentRow[data-menu-open],
-.channelRow:hover,
+.projectRow:hover,
 .agentRow:hover,
-.channelRow:focus-within,
+.projectRow:focus-within,
 .agentRow:focus-within,
-.channelRow[aria-current='page'] {
+.projectRow[aria-current='page'] {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
@@ -681,7 +681,7 @@
   margin: 0 0 10px;
 }
 .editMemberList { display: grid; gap: 2px; }
-.editChannelName {
+.editProjectName {
   font-size: 13px;
   font-weight: 400;
   line-height: 18px;

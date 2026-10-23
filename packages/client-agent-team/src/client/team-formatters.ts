@@ -81,15 +81,16 @@ export interface RefSegment {
 // or without the original hyphens) both match; resolution decides whether an
 // abbreviation is real, so unresolvable matches stay plain text. Member refs
 // match the same shape; the roster map decides whether one names a member.
-const BRANDED_REF_PATTERN = /\b(task|channel|thread|member):{1,2}[0-9a-f]{6,}(?:-[0-9a-f]{1,})*\b/gi
+const BRANDED_REF_PATTERN = /\b(task|project|channel|thread|member):{1,2}[0-9a-f]{6,}(?:-[0-9a-f]{1,})*\b/gi
 
 /**
  * Canonical form of one matched ref: models occasionally double the colon or
  * uppercase the UUID when citing a ref in prose, while Host lookups and
  * navigation only accept the lowercase single-colon ref the ledger mints.
+ * Bodies written before Projects were renamed cite them as `channel:`.
  */
 function canonicalBrandedRef(match: string): string {
-  return match.replace('::', ':').toLowerCase()
+  return match.replace('::', ':').toLowerCase().replace(/^channel:/, 'project:')
 }
 
 /** Splits a literal run into plain and canonical branded-ref segments; prose colons never linkify. */
@@ -314,7 +315,7 @@ function calendarDayDelta(at: Date, now: Date): number {
 }
 
 /**
-* Recency label for an Inbox row, shared with the Channel feed entry line. Today is a bare
+* Recency label for an Inbox row, shared with the Project feed entry line. Today is a bare
 * clock time; yesterday keeps its word; older entries use the Message date form.
 */
 export function formatInboxTime(occurredAt: string, t: TeamConversationProps['t'], now = new Date()): string {

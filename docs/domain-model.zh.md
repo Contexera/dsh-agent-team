@@ -12,11 +12,11 @@ Agent Team 中可被授权读取、发言、认领并接收 Inbox 提示的稳�
 
 ## Workspace Participation
 
-Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都以 ledger operation 提交。它与 channel 参与关系是同一种关系形状，位置在其上一级。层级是 workspace participation → channel 参与（由 Thread 派生）→ Thread Attention。Member 的 `workspaceId` 只记录创建地、永不改变。一切授权只看当前参与集合，不看创建字段。加入带来协作能力，但不移动也不创建 Member 的 session。当前每个 Member 只有创建 Workspace 下的一条 Session 血统。新增参与不创建另一条 Session；Member 用 `working_directory` 把自己的工作目录切进去。Member 在其他已参与的 Workspace 中同样可以发言、认领和回复。Human Member 参与每个 workspace。
+Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都以 ledger operation 提交。它与 project 参与关系是同一种关系形状，位置在其上一级。层级是 workspace participation → project 参与（由 Thread 派生）→ Thread Attention。Member 的 `workspaceId` 只记录创建地、永不改变。一切授权只看当前参与集合，不看创建字段。加入带来协作能力，但不移动也不创建 Member 的 session。当前每个 Member 只有创建 Workspace 下的一条 Session 血统。新增参与不创建另一条 Session；Member 用 `working_directory` 把自己的工作目录切进去。Member 在其他已参与的 Workspace 中同样可以发言、认领和回复。Human Member 参与每个 workspace。
 
 ## Human Member
 
-对应当前 Harness 用户的特殊 Member。Human Member 参与消息、claim 与 activity。它拥有 channel、Member、验收和 task 终态的管理权限。
+对应当前 Harness 用户的特殊 Member。Human Member 参与消息、claim 与 activity。它拥有 project、Member、验收和 task 终态的管理权限。
 
 ## Agent Member
 
@@ -28,29 +28,29 @@ Member 与 workspace 之间是可 join、可 leave 的关系。每次变动都�
 
 ## Workspace
 
-一个项目及其共享工作目录。Agent Member 的 session header cwd 是创建 Workspace 的项目目录，永不改变；它实际工作的目录属于 Session 自己，可通过 `working_directory` 切换。Member 私有记忆不存放在项目根目录。
+共享工作目录与授权域。Agent Member 的 session header cwd 是创建 Workspace 的目录，永不改变；它实际工作的目录属于 Session 自己，可通过 `working_directory` 切换。Member 私有记忆不存放在 Workspace 目录中。
 
-## Channel
+## Project
 
-Workspace 内的持久协作场所。Member 通过在 Channel 的任一 Thread 里参与（读取、发言、认领或 follow）而参与该 Channel，这也正是它在 Channel 内一切动作的授权来源；不存在需要另行授予的加入关系。Human Member 可以查看 Workspace 内全部 Channel。
+Workspace 内的持久协作场所。Member 通过在 Project 的任一 Thread 里参与（读取、发言、认领或 follow）而参与该 Project，这也正是它在 Project 内一切动作的授权来源；不存在需要另行授予的加入关系。Human Member 可以查看 Workspace 内全部 Project。
 
 ## Message
 
-Member 在 Channel 或已有 Thread 中显式发出的不可变内容。Channel 顶层每条 Message 原子地创建一个 Thread。新 Client/tool 默认创建 taskless Thread，只有显式选择「作为任务」，同一次提交才会附带真实 Task。Thread Message 只延续已有 Thread。每条 Message 携带提交 operation 的 wall-clock 时刻；agent-facing 表面在固定的 UTC+8 协调时区下渲染该时刻。
+Member 在 Project 或已有 Thread 中显式发出的不可变内容。Project 顶层每条 Message 原子地创建一个 Thread。新 Client/tool 默认创建 taskless Thread，只有显式选择「作为任务」，同一次提交才会附带真实 Task。Thread Message 只延续已有 Thread。每条 Message 携带提交 operation 的 wall-clock 时刻；agent-facing 表面在固定的 UTC+8 协调时区下渲染该时刻。
 
 ## Task
 
-贴在既有 Thread 上的一层可选 work-tracking overlay——Thread 不靠它存在。它的原子创建有两种：顶层 Message 的显式「作为任务」意图，或 Human promotion 的后附。promotion 同时追加一条公开说明 Message。 Task 的工作状态从 Claims 派生。Human acceptance 与 closed 是显式覆盖事实。常规验收要全部 Claim 完成（in_review）。Human 也可在 in_progress 时提前验收。accept 会把当时仍 active 的 Claims 投影为 done，并在 activity 里记下 `completedClaimRefs`。owner 各自收到通知。它不伪造 owner 的 claim-done 事件。从未被 claim 的 todo Task 也能直接验收。activity 里没有 claim 列表，账目上如实记为无 Claim 完成。 面向 Human 的 `Task #N` 是 Task 在 home Channel 内的 durable 创建序号。taskful 顶层发送和后续 promotion 均参与排序。taskless anchor 最初在时间线的位置不参与。既有 ledger 的编号保持不变。
+贴在既有 Thread 上的一层可选 work-tracking overlay——Thread 不靠它存在。它的原子创建有两种：顶层 Message 的显式「作为任务」意图，或 Human promotion 的后附。promotion 同时追加一条公开说明 Message。 Task 的工作状态从 Claims 派生。Human acceptance 与 closed 是显式覆盖事实。常规验收要全部 Claim 完成（in_review）。Human 也可在 in_progress 时提前验收。accept 会把当时仍 active 的 Claims 投影为 done，并在 activity 里记下 `completedClaimRefs`。owner 各自收到通知。它不伪造 owner 的 claim-done 事件。从未被 claim 的 todo Task 也能直接验收。activity 里没有 claim 列表，账目上如实记为无 Claim 完成。 面向 Human 的 `Task #N` 是 Task 在 home Project 内的 durable 创建序号。taskful 顶层发送和后续 promotion 均参与排序。taskless anchor 最初在时间线的位置不参与。既有 ledger 的编号保持不变。
 
-它不是稳定身份；跨 Channel 导航和持久引用必须使用 branded `taskRef`。
+它不是稳定身份；跨 Project 导航和持久引用必须使用 branded `taskRef`。
 
 ## Thread
 
-Channel 内独立的单层公开协作 aggregate：一定有 `threadRef`、anchor Message 和 revision，但可以没有 Task。Thread revision 随公开 Message 递增，Taskful Thread 的 Claim 变化和 Task resolution 也一样。往既有 Thread 公开写入时，必须带上该 Thread 的当前 revision。taskless Thread 仍支持 reply、follow、structured mention、Inbox、read 与 history，但没有 Claims、Task status 或 accept/close/reopen。协作读写定位优先用 `threadRef`。released task-only Client 可把 `taskRef` 用作仅限 taskful Thread 的 Host compatibility alias。Task/Claim 操作的身份仍是 `taskRef`。revision 是内部并发令牌，只在工具 baseRevision 里透传，不写进消息正文当引用事实。
+Project 内独立的单层公开协作 aggregate：一定有 `threadRef`、anchor Message 和 revision，但可以没有 Task。Thread revision 随公开 Message 递增，Taskful Thread 的 Claim 变化和 Task resolution 也一样。往既有 Thread 公开写入时，必须带上该 Thread 的当前 revision。taskless Thread 仍支持 reply、follow、structured mention、Inbox、read 与 history，但没有 Claims、Task status 或 accept/close/reopen。协作读写定位优先用 `threadRef`。released task-only Client 可把 `taskRef` 用作仅限 taskful Thread 的 Host compatibility alias。Task/Claim 操作的身份仍是 `taskRef`。revision 是内部并发令牌，只在工具 baseRevision 里透传，不写进消息正文当引用事实。
 
 ## Direct Message
 
-Member 之间的私有直达消息，不属于 Thread。ledger 只追加一条 audit-only 的 `team/dm-sent` operation。requestId 幂等，sender/recipient 必须是同 Workspace 的 enabled Agent Member。projection 有意不变：不产生 Channel、Thread、revision、Attention 或 Inbox markers。送达是运行时的瞬时效果。收件人 idle 时以 relay-form user message 开一个 followup turn，busy 时 steer 进当前 turn。正文里带一行有界的相邻上下文（紧邻上一条往来 DM 的摘要）。注入失败不影响 durable 事实，发送方收到结构化 delivery error，不自动重投。DM 用于快速澄清与状态同步；任务工作、决策和需追溯的内容归 Thread。
+Member 之间的私有直达消息，不属于 Thread。ledger 只追加一条 audit-only 的 `team/dm-sent` operation。requestId 幂等，sender/recipient 必须是同 Workspace 的 enabled Agent Member。projection 有意不变：不产生 Project、Thread、revision、Attention 或 Inbox markers。送达是运行时的瞬时效果。收件人 idle 时以 relay-form user message 开一个 followup turn，busy 时 steer 进当前 turn。正文里带一行有界的相邻上下文（紧邻上一条往来 DM 的摘要）。注入失败不影响 durable 事实，发送方收到结构化 delivery error，不自动重投。DM 用于快速澄清与状态同步；任务工作、决策和需追溯的内容归 Thread。
 
 ## Claim
 
@@ -70,7 +70,7 @@ Claim 用自由文本写下的工作方向。比较时做 Unicode 规范化、�
 
 ## Follow
 
-Follow 是 Thread Attention 的一种操作语义：不是独立的持久对象，也不是旧版 Delivery 订阅。普通 Thread 更新是否进该 Member 的 Inbox，由 follow 决定；它不撤销 Channel 可见性。unfollow 在没有 active Claim 时结束当前 Attention 周期。
+Follow 是 Thread Attention 的一种操作语义：不是独立的持久对象，也不是旧版 Delivery 订阅。普通 Thread 更新是否进该 Member 的 Inbox，由 follow 决定；它不撤销 Project 可见性。unfollow 在没有 active Claim 时结束当前 Attention 周期。
 
 ## Activity
 
@@ -90,7 +90,7 @@ Agent Team ledger 里一次不可变的原子业务提交。每个 Operation 有
 
 ## Ref
 
-跨重启稳定、带对象类型、调用者拼不出来的标识。Member、Channel、Task、Thread、Message、Claim 和 Operation 使用不同的 branded refs。Attention 拿 Member 与 Thread 的组合当标识，不做成调用者能伪造的对象。
+跨重启稳定、带对象类型、调用者拼不出来的标识。Member、Project、Task、Thread、Message、Claim 和 Operation 使用不同的 branded refs。Attention 拿 Member 与 Thread 的组合当标识，不做成调用者能伪造的对象。
 
 ## Runtime Presence
 
@@ -128,11 +128,11 @@ presence/availability 行不正常时，背后的结构化原因（绝不持久�
 
 ## Withdraw
 
-从一个 workspace 离开：`team/member-workspace-left` 结束 Member 在该 workspace 的参与。退出其在该 workspace 的所有 channel 成员关系。释放该 workspace 的 active claims 并清除其 Thread Attention。其余一切——Member 身份、其他参与、live session 及其 cwd、私有 memory——都不受影响。创建 Workspace 不可撤回，应改用全量归档。UI 把它放在非创建 workspace 的行上，当破坏性动作。
+从一个 workspace 离开：`team/member-workspace-left` 结束 Member 在该 workspace 的参与。退出其在该 workspace 的所有 project 成员关系。释放该 workspace 的 active claims 并清除其 Thread Attention。其余一切——Member 身份、其他参与、live session 及其 cwd、私有 memory——都不受影响。创建 Workspace 不可撤回，应改用全量归档。UI 把它放在非创建 workspace 的行上，当破坏性动作。
 
 ## Archive
 
-藏在 Suspend 和 Remove 之间的第三态，Member 和 Channel 都适用。设计上它可逆。事实完整留在 ledger 里，供重放和未来恢复。但本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。`archiveMember` 放掉 live session。私有 memory 和 Session log 留在磁盘。它同时以一条公开 `claims_released` Activity，放掉全部参与 workspace 里的 active Claims。`archiveChannel` 让 Channel 上所有 Thread 的 owner 走同样的释放。Membership 在归档后保留（隐藏态，非退出）。Archived 实体从所有 Team API surface 消失。projection、mention 候选、ref 解析、ref-addressed read，一律以明确的 archived 错误拒绝。从 archived 状态 Remove 仍可以当数据清理用。
+藏在 Suspend 和 Remove 之间的第三态，Member 和 Project 都适用。设计上它可逆。事实完整留在 ledger 里，供重放和未来恢复。但本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。`archiveMember` 放掉 live session。私有 memory 和 Session log 留在磁盘。它同时以一条公开 `claims_released` Activity，放掉全部参与 workspace 里的 active Claims。`archiveProject` 让 Project 上所有 Thread 的 owner 走同样的释放。Membership 在归档后保留（隐藏态，非退出）。Archived 实体从所有 Team API surface 消失。projection、mention 候选、ref 解析、ref-addressed read，一律以明确的 archived 错误拒绝。从 archived 状态 Remove 仍可以当数据清理用。
 
 ## Remove
 

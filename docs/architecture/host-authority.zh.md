@@ -2,7 +2,7 @@
 
 [English](host-authority.md) | 中文
 
-Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是 Member、Workspace、Channel、Message、独立 Thread aggregate、可选 Task overlay、Claim、Thread Attention、Inbox 和 Activity facts 的 durable authority。
+Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是 Member、Workspace、Project、Message、独立 Thread aggregate、可选 Task overlay、Claim、Thread Attention、Inbox 和 Activity facts 的 durable authority。
 
 修改 Host capability 时，先阅读 package source/tests，再阅读匹配的 Harness capability contract。导航表见 [`harness-navigation.zh.md`](../harness-navigation.zh.md)。导航表把 Host 改动映射到 `deepseek-harness/docs/subsystems/` 和 source packages。
 
@@ -47,7 +47,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲染。它由活动 surface 派生、不落盘。Host 重启后只有在有东西唤醒该 Member 时才会重新派生，所以一个没有被唤醒的 Member 在下次被操作触及前不显示原因。
 
 ## 变更流与 Projection
-- `changes()` 是流式 Remote，可声明一个 scope（workspace/channel/thread/presence）。省略 scope 时观察共享 Team 投影变化，不包含 presence。Host 先注册监听，再发送当前基线，之后只发送匹配的变更通知。消费者暂停期间，只保留最新待发送版本。取消或 Host 释放时关闭订阅。Thread read 与 `team/dm-sent` 不改变共享投影：既不推进版本，也不唤醒订阅者。Presence 使用进程内 epoch，其他 scope 使用最近一次共享投影提交的 ledger sequence。版本只在同一 scope 和 Host 生命周期内有意义。Host 只为受 operation 影响的 Members 重算 Inbox hints。
+- `changes()` 是流式 Remote，可声明一个 scope（workspace/project/thread/presence）。省略 scope 时观察共享 Team 投影变化，不包含 presence。Host 先注册监听，再发送当前基线，之后只发送匹配的变更通知。消费者暂停期间，只保留最新待发送版本。取消或 Host 释放时关闭订阅。Thread read 与 `team/dm-sent` 不改变共享投影：既不推进版本，也不唤醒订阅者。Presence 使用进程内 epoch，其他 scope 使用最近一次共享投影提交的 ledger sequence。版本只在同一 scope 和 Host 生命周期内有意义。Host 只为受 operation 影响的 Members 重算 Inbox hints。
 - `TeamChangeStream` 在每个页面内通过 `ctx.remote.$stream()` 按 scope 共享一个逻辑流。Harness 管理共享的 `/api/remote.mux` WebSocket 和连接恢复。每次开场基线都会触发重新读取 Host，包括重连后的相同或更低版本。开场基线既补上首次读取与订阅之间的变化，也在没有新提交时恢复失败的读取。最后一个 listener 离开时释放这个 scope，插件释放时关闭所有 scope。传输失败在恢复前只报告一次。终止性错误直接报告，不走 Team 自有重试循环。没有长轮询回退、跨页面主从选举或单活跃页面限制。并发的补充读取合并通知。读取期间再收到通知，保留后续一轮读取，不用旧版本过滤重连基线。Human Inbox 徽标订阅无 scope 通知。订阅经 debounce 重拉 Inbox 合计，在本页 Thread read 后刷新。Presence 订阅更新 Member 可用状态，不唤醒 Inbox。通知只是重新读取的提示，不是第二份事实存储。
 - `contextContinuity` unit 经 Harness projection registry 增量折叠活动 Session 事件，只保留恢复所需的旧 intent、checkpoint、continuation 与未答复输入。激活与退休 Session 恢复也可全量折叠被检视日志。
 - Member clock baseline 经 `session-event-cursor.ts` 只消费追加事件。Session 身份、继承前缀、日志长度或锚点事件变化时从头重折。守卫依赖日志只追加的契约；同一 sequence、同一事件类型的就地替换不在检测范围内。
@@ -79,14 +79,14 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 ## 私有记忆、归档与身份效应
 - `$DSH_HOME/agent-team/members/` 下的 private-memory directories 是 Member identity 的 Host-owned effects，不是第二权威。Member activation 确保 private-memory directory、`notes/` 和缺失的 `memory.md` 存在。startup 不会清理 ledger 不知道的 `member:` directories。显式 Member removal 会归档这个 Member 的 Session，并移除这个 Member 的 private-memory directory。Team removal path 之外的 entries 保持不动。
 - 这项删除，以及 activation 时对旧式 colon 目录的改名，都限定在当前进程自己的 members root 之内。记录里的 `privateMemoryPath` 是一条 durable 绝对事实，指向「当初添加这个 Member 的那个 DSH home」里的目录。因此解析到另一个 home 的进程会拒绝搬移或删除这个目录（并告警），而不是把 Member 的真实私有记忆搬出 Member 自己的 home。
-- Member 与 Channel 的归档是介于 suspend 与 remove 之间的可逆第三态。`archiveMember` 提交 `team/member-archived`。dispose live session，私有 memory 与 Session log 留在磁盘，并把 Session 从分组 surface 归档。`archiveMember` 再以公开 `claims_released` Activity 加上 Attention/marker 清理，释放这个 Member 的 active Claims。被隐藏的 Member 不得让 Task 卡在 in progress，也不得留下幻影 unread 计数。`archiveChannel` 提交 `team/channel-archived`，对 Channel 上所有 Thread 的 owner 施加同样的释放形态。两种归档形态下 Membership 都保留（隐藏态，非退出）。
+- Member 与 Project 的归档是介于 suspend 与 remove 之间的可逆第三态。`archiveMember` 提交 `team/member-archived`。dispose live session，私有 memory 与 Session log 留在磁盘，并把 Session 从分组 surface 归档。`archiveMember` 再以公开 `claims_released` Activity 加上 Attention/marker 清理，释放这个 Member 的 active Claims。被隐藏的 Member 不得让 Task 卡在 in progress，也不得留下幻影 unread 计数。`archiveProject` 提交 `team/project-archived`，对 Project 上所有 Thread 的 owner 施加同样的释放形态。两种归档形态下 Membership 都保留（隐藏态，非退出）。
 
   Archived 实体从所有 Team API surface 消失：
-  - projection：view channels/threads/tasks/members、mention 候选、Channel join、编辑。
+  - projection：view projects/threads/tasks/members、mention 候选、Project join、编辑。
   - ref 解析：`resolveTaskRefs`/`resolveThreadRefs` 跳过 Archived 实体，message 正文渲染为纯文本。
   - ref-addressed read：`readThread`、`threadHistory`、`threadObservations`、`listClaims` 以明确的 archived 错误拒绝，绝不伪装成 unknown-ref。
 
-  事实则完整保留在 ledger 中，供重放与未来恢复。这条边界就是 archival 与 remove 的分界。从 archived 状态 Remove 仍可作为数据清理路径。本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。Channel 归档之前写入的 ledger 省略 `channel.state`。记录 schema 在 load 时把 `channel.state` 归一化为 `active`。
+  事实则完整保留在 ledger 中，供重放与未来恢复。这条边界就是 archival 与 remove 的分界。从 archived 状态 Remove 仍可作为数据清理路径。本轮刻意不提供 restore 入口，与 dsh 的 archived session 对齐。Project 归档之前写入的 ledger 省略 `project.state`。记录 schema 在 load 时把 `project.state` 归一化为 `active`。
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。
@@ -121,7 +121,7 @@ Composer attachments 是有界 cache，不是 archive，也不是 ledger bytes�
 
 - `putAttachment` 写入 immutable payload：每个文件上限 10 MB，名称中的 path separators 和 control characters 会被剥离。`getAttachment` 为 Client display 读取它们。两者和其他 Host capabilities 一样都是 typed Remote actions。
 - `requestId` 是一次 upload 的幂等键。同一 payload 的重试 replay 原结果，而不是写第二份条目。复用该 key 携带不同 payload 的调用被拒为 request collision。cache id 单独由 request id 派生，因此 Host 重启后重试仍收敛到同一条目，不需要第二个 durable store 或进程内 map。
-- Channel 与 Thread composer 的附件入口有两个：「+」按钮选择文件，或直接向输入框粘贴。携带文件的粘贴会被拦截，并进入同一 pending-file chips 流。纯文本粘贴保持浏览器原生插入。
+- Project 与 Thread composer 的附件入口有两个：「+」按钮选择文件，或直接向输入框粘贴。携带文件的粘贴会被拦截，并进入同一 pending-file chips 流。纯文本粘贴保持浏览器原生插入。
 - Message 在 ledger 中记录 attachment metadata（`attachmentId`、`name`、`byteSize`、`mediaType`）。存储 body 为每个 attachment 携带一行面向机器的 `[attachment] <absolute path>`，供 Member agents 通过普通 file tools 按 path 读取 bytes。Client 会从 display 中移除这些行，改为根据 metadata 渲染 thumbnails/chips。
 - Ledger 是唯一 durable attachment authority。Bytes 是 transient 的：Host startup 以及每 24h 执行一次 GC sweep。被 Message 引用且超过 72h 的 uploads（Member consumption window）会被移除。从未发送的 orphaned uploads 超过 24h 同样移除。Metadata 保留，Client 随后优雅降级为 name chip。
 - Members 通过 `team_message` 的可选 `attachments` 共享文件。`attachments` 是 absolute paths。Host 先验证每个 path：absolute、regular file、non-empty、10 MB。再以 extension-derived media type 复制到 cache 的 immutable entry。entry id 由该 message/reply request 及 path 在列表中的位置派生，因此 agent-sent images 与 composer uploads 的渲染一致。任一 rejection 都会拒绝整个 send，不提交也不复制。

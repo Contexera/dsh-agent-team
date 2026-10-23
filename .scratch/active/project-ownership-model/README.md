@@ -17,14 +17,15 @@
 
 - 原四张工单拆为九张（原文保留在 `materials/superseded-issues/`）。拆分原因：稳定 profile 与开发 profile 共用 `$DSH_HOME/storages/agent_team.sqlite`，改名必须先发布一个“读得懂 Project 写法”的版本；原 02 范围过大，拆为规则版本机制、owner、主对话、投递四步，规则版本 2 的标记在 06 完成前不写入真实 ledger。
 - 01 已完成（`feat: read the project spelling of stored channel records`），等待发布到稳定 profile。
-- 02 正在进行；真实 `agent_team.sqlite` 的验收由 Human 在本地 dev profile 做。
+- 02 已完成（`refactor: rename channel to project across the bundle`），等待 Human 在本地 dev profile 用真实 `agent_team.sqlite` 副本验收。发布顺序：先发布含 01、不含 02 的版本并装到稳定 profile，再让开发 profile 使用 02。
+- 03 可以开始。
 - `spec.md` §13 三项探针：DM 的 Workspace 边界已在 Host `sendDm` 校验；旧 accept 缺 `acceptedClaimRefs` 时已有回退，03 补测试；规则标记与启动恢复的写入顺序在 03 查清。
 - 无需要 Human 拍板的未决产品问题。
 
 ## 完成条件
 
 - [x] 01 读得懂 Project 写法的发布
-- [ ] 02 Channel 全仓改名为 Project
+- [x] 02 Channel 全仓改名为 Project（真实 ledger 验收待 Human）
 - [ ] 03 规则版本机制
 - [ ] 04 Agent owner 与 Project member 派生
 - [ ] 05 项目主对话与开 Thread 权限

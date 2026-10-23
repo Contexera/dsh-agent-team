@@ -7,7 +7,7 @@
 2. **只用 DSH alias token 取色**，且只允许主题实际定义的名字（`@deepseek-ai/dsh-client-ui-theme` 的 `design-platform.css` 与 `gradient-shadow-text.css` 是唯一定义处）：文字 `--dsw-alias-label-*`、边框 `--dsw-alias-border-l1..l4`（+`l2-darkmode-thin`/`inverted*`）、背景 `--dsw-alias-bg-*` 与 `--dsw-alias-interactive-bg-*`、状态 `--dsw-alias-state-*`、阴影 `--dsw-shadow-lv1..lv3`、具体值 `--dsw-specific-*`。禁止凭印象引用主题不存在的 token。`var()` 对未定义变量会静默回退 initial，边框/背景直接隐形（2026-08 教训：`border-subtle`/`border-default`/`text-*`/`fill-tertiary`/`surface-primary` 曾整批不存在，时间线全部发丝线与 loading 点从未渲染过）。Team 自有变量只允许派生值（见头像色相）。
 3. **聊天密度优先于 assistant 排版密度**：正文统一 14px 档；markdown 原语自带的标题/列表间距在本包内收紧。
 4. **渐进披露**：默认状态安静（细边框、无底色），hover/focus 才提升反馈；次要信息用 tertiary 文字色。
-5. **durable mutation 不做乐观更新**：提交失败保留输入并以 Host 报错为准；成功后从 Host 投影刷新（`mergeChannelView` 合并而非整体替换）。
+5. **durable mutation 不做乐观更新**：提交失败保留输入并以 Host 报错为准；成功后从 Host 投影刷新（`mergeProjectView` 合并而非整体替换）。
 6. **键盘与读屏基线不妥协**：所有自定义复合控件都有 role、aria 状态和完整键盘路径。
 
 ## 设计语言对齐（DSH 0.1.7，rc.2 基线）
@@ -21,8 +21,8 @@ Team Client 渲染在 shipped DSH 外壳内部，必须讲基础 UI 的设计语
 | --- | --- | --- |
 | 纯图标控件 | 28×28 圆形，`border-radius: 999px`，`corner-shape: round`，透明底色，hover 用 `--dsw-alias-interactive-bg-hover-solid`（composer）/ `--dsw-alias-interactive-bg-hover`（侧栏） | `InputBar.module.css .add`、`SidebarRoot.module.css .iconButton` |
 | 主圆形动作（发送/停止） | 34×34 圆形，`--dsw-alias-button-info-fill`，静态 `#fff` 图形，hover info-hover，disabled `opacity .4` + `cursor: default`，`translateY(-2px)` 座位补偿 | `InputBar.module.css .primary` |
-| 列表行 | shipped 圆角刻度的 md 档（12px）；`aria-current="page"` 叶子行底色；hover `--dsw-alias-interactive-bg-hover`。这一档跟着「行」本身，而不是它落在哪个面上：承载一个人或一个实体的行——侧栏的频道与 Agents，以及成员弹窗、频道编辑器与 Agent 导入共用的名册行——渲染在哪里都是列表行。 | `SidebarRoot.module.css .panelRow`（0.1.6 线起 12px，harness c6b81a75；0.1.7-rc.2 起读 `--dsw-radius-md`） |
-| 队列/结果行（双行） | 整宽按钮，lg 档（16px；rc.1 checkout 上为 8px）、左右 8px 内缩，每条事实独占一行、各自省略，hover `--dsw-alias-interactive-bg-hover`，焦点环内缩。字号分级两行：主体 14px/22px primary；来源/元信息 12px/18px tertiary，其中显著片段（频道名）提到 secondary 600；行内 `Task #N` 是小胶囊。哪一行承载哪条事实，由该面自己的信息顺序决定。**这与「列表行」是两个维度**：`.panelRow` 在 0.1.6 线并到了栏的 12px，而 `.searchResultRow` 一直是 8px——直到 0.1.7-rc.2 把它提到 `--dsw-radius-lg`。 | `ui-workspace/src/client/rows/Rows.module.css .searchResultRow`（8px 内缩、整宽按钮、hover 底色、14px 标题 + 12px 元信息） |
+| 列表行 | shipped 圆角刻度的 md 档（12px）；`aria-current="page"` 叶子行底色；hover `--dsw-alias-interactive-bg-hover`。这一档跟着「行」本身，而不是它落在哪个面上：承载一个人或一个实体的行——侧栏的项目与 Agents，以及成员弹窗、项目编辑器与 Agent 导入共用的名册行——渲染在哪里都是列表行。 | `SidebarRoot.module.css .panelRow`（0.1.6 线起 12px，harness c6b81a75；0.1.7-rc.2 起读 `--dsw-radius-md`） |
+| 队列/结果行（双行） | 整宽按钮，lg 档（16px；rc.1 checkout 上为 8px）、左右 8px 内缩，每条事实独占一行、各自省略，hover `--dsw-alias-interactive-bg-hover`，焦点环内缩。字号分级两行：主体 14px/22px primary；来源/元信息 12px/18px tertiary，其中显著片段（项目名）提到 secondary 600；行内 `Task #N` 是小胶囊。哪一行承载哪条事实，由该面自己的信息顺序决定。**这与「列表行」是两个维度**：`.panelRow` 在 0.1.6 线并到了栏的 12px，而 `.searchResultRow` 一直是 8px——直到 0.1.7-rc.2 把它提到 `--dsw-radius-lg`。 | `ui-workspace/src/client/rows/Rows.module.css .searchResultRow`（8px 内缩、整宽按钮、hover 底色、14px 标题 + 12px 元信息） |
 | 胶囊与圆形 | 任何**实质无上限**的圆角——`border-radius: 50%`、`999px`，或等于盒子一半高度的 pill 圆角——都必须在同一条规则内配 `corner-shape: round`。平台把所有圆角面按 `superellipse(1.5)` 弯曲，会把正圆压成方圆、把胶囊两端切平；shipped 的全圆角块 100% 配对，审计对未配对者直接报错。 | `ui-theme/src/styles/corner-shape.css`；`Tag.module.css`、`StateDot.module.css`、`SidebarRoot.module.css .iconButton` |
 | 计数徽标 | 读者看到的每一处计数共用一枚胶囊，声明只有一份，在 `countBadge.module.css .badge`：18px 高、`min-width: 18px`，`border-radius: 999px` 配 `box-sizing: border-box`（单字符保持正圆，不被 padding 撑成椭圆），底色 `--dsw-alias-state-business-primary`、文字 `--dsw-alias-label-primary-foreground`，为 0 隐藏、超过 99 显示 `99+`，数字挂在控件的可访问名（`aria-label`）上，不能只存在于视觉徽标里。 | `Tag.module.css`（只读胶囊语言）；`countBadge.module.css .badge` |
 | 小胶囊 | shipped 圆角刻度的小档（8px；rc.1 checkout 上为 6px——0.1.7-rc.2 淘汰了 6px 档），`--dsw-alias-interactive-bg-hover` 底色 | `composer-editor.module.css .reference`（行内引用；shipped 保持透明、hover 才叠 business 色） |

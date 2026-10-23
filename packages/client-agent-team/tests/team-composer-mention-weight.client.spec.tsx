@@ -46,10 +46,10 @@ function status(handle: string, memberId: string): AgentTeamClientMemberStatus {
   }
 }
 
-// One Member per tier: follows this Thread, takes part in the Channel only,
+// One Member per tier: follows this Thread, takes part in the Project only,
 // and the rest of the Workspace.
 const follower = status('@follower', 'member:follower')
-const channelPeer = status('@channelpeer', 'member:channelpeer')
+const projectPeer = status('@projectpeer', 'member:projectpeer')
 const stranger = status('@stranger', 'member:stranger')
 
 function openMenu(ui: ReturnType<typeof render>, text: string): void {
@@ -73,9 +73,9 @@ function rowOf(ui: ReturnType<typeof render>, handle: string): HTMLElement {
 
 function renderComposer(draftKey: string): ReturnType<typeof render> {
   const drafts = new TeamDraftStore()
-  return render(<TeamComposer members={[stranger, channelPeer, follower]}
+  return render(<TeamComposer members={[stranger, projectPeer, follower]}
     followerMemberIds={new Set([follower.member.memberId])}
-    channelPeerMemberIds={new Set([channelPeer.member.memberId])}
+    projectPeerMemberIds={new Set([projectPeer.member.memberId])}
     drafts={drafts} draftKey={draftKey as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 }
 
@@ -90,22 +90,22 @@ describe('mention row weight', () => {
     const ui = renderComposer('thread:thread:one')
     openMenu(ui, '@')
 
-    // Weight reads whether the Member is in this Thread. A Channel peer takes
-    // part in the Channel yet not in this Thread, so its name drops a weight
-    // even though the Channel counts it as a participant.
+    // Weight reads whether the Member is in this Thread. A Project peer takes
+    // part in the Project yet not in this Thread, so its name drops a weight
+    // even though the Project counts it as a participant.
     expect(rowOf(ui, 'follower').getAttribute('data-mention-inside')).toBe('true')
-    expect(rowOf(ui, 'channelpeer').getAttribute('data-mention-inside')).toBe('false')
+    expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-inside')).toBe('false')
     expect(rowOf(ui, 'stranger').getAttribute('data-mention-inside')).toBe('false')
   })
 
-  it('keeps a Channel peer at full weight on a Channel send, where it is inside', () => {
-    const ui = renderComposer('channel:channel:one')
+  it('keeps a Project peer at full weight on a Project send, where it is inside', () => {
+    const ui = renderComposer('project:project:one')
     openMenu(ui, '@')
 
-    // The two surfaces disagree about the same tier: the Channel is the
+    // The two surfaces disagree about the same tier: the Project is the
     // conversation here, so taking part in it is taking part in this.
     expect(rowOf(ui, 'follower').getAttribute('data-mention-inside')).toBe('true')
-    expect(rowOf(ui, 'channelpeer').getAttribute('data-mention-inside')).toBe('true')
+    expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-inside')).toBe('true')
     expect(rowOf(ui, 'stranger').getAttribute('data-mention-inside')).toBe('false')
   })
 
@@ -114,7 +114,7 @@ describe('mention row weight', () => {
     // announced by the status line after the send, so no row carries words of
     // its own. This is the decision, not an accident — the note that used to sit
     // beside the description must not come back on any tier of either surface.
-    for (const draftKey of ['thread:thread:one', 'channel:channel:one']) {
+    for (const draftKey of ['thread:thread:one', 'project:project:one']) {
       const ui = renderComposer(draftKey)
       openMenu(ui, '@')
       for (const row of rows(ui)) {
