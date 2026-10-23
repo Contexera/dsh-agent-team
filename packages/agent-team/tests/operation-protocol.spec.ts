@@ -498,6 +498,13 @@ const memberRemoved: Op<'team/member-removed'> = {
   },
 }
 
+const rulesVersionAdopted: Op<'team/rules-version-adopted'> = {
+  ...opBase('operation:protocol-29', 'agent-team:rules-version-2', 29, hostActor),
+  previousOperationId,
+  kind: 'team/rules-version-adopted',
+  data: { version: 2 },
+}
+
 const dmSent: Op<'team/dm-sent'> = {
   ...opBase('operation:protocol-28', 'request:protocol-dm-sent', 28, memberActor),
   previousOperationId,
@@ -737,6 +744,13 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/rules-version-adopted': {
+    stored: rulesVersionAdopted,
+    legacyShapes: [],
+    retry: { replayOnly: 'Host-internal: initialize appends it once per adopted version and skips it when the ledger already carries that version, so no caller request id can retry or collide' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'no-op', inbox: 'none' },
   },
   'team/project-updated': {
     stored: projectUpdated,

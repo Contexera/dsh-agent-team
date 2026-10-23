@@ -8,6 +8,7 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 
 ## Ledger 权威与提交
 - mutation 进入 Host authority，并提交一条 durable operation。
+- 重放会重算每条记录应有的 Inbox delta 并逐项比较，所以改变既有 kind 校验规则的版本要先写一条 `team/rules-version-adopted`（Host actor，`{ version }`）。每条记录按它之前最新的标记校验；没有标记的 ledger 为版本 1。标记由 `initialize` 在它自己排队的提交里追加，因此早于之后的所有写入，包括启动恢复。标记只升不降，每个版本至多一条；ledger 采用的版本高于本构建实现的版本时拒绝打开。当前构建实现版本 1，不写标记。
 - 回复把被回答的 Message 记为自身 Message 上的 `replyToMessageRef`，Host 在提交前用 ledger 解析这个 ref：未知的 ref、或属于别的 Thread 的 ref 一律拒绝，不会被存下。父消息作者在提交时加入收件人，邀请规则、direct markers 与 `undeliveredMentions` 报告与 mention 完全一致。被引用的画面 —— 父消息作者与其正文一行 —— 是读取期派生（`replyTo`），绝不是第二份存储副本。因此它不可能与父消息不一致，父消息不在本次读取这一页里时也照样填得上。ref 不再可解析时只留裸 ref。引用不是可选项：这个参数属于回复契约的一部分，携带 ref 的回复只按 ref 本身被接受或拒绝。
 - Projections、Inbox results、tools、commands、Remote responses 和 UI 都从已提交的 operations 派生。
 - Client code 不得解释 ledger records，也不得创建 parallel authority。

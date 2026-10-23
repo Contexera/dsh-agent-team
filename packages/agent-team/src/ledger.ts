@@ -59,6 +59,7 @@ import type {
   AgentTeamMemberRemovedOperation,
   AgentTeamMemberResumedOperation,
   AgentTeamMemberSessionRecycledOperation,
+  AgentTeamRulesVersionAdoptedOperation,
   AgentTeamMemberSuspendedOperation,
   AgentTeamMemberUpdatedOperation,
   AgentTeamMemberWorkspaceJoinedOperation,
@@ -160,6 +161,9 @@ export function agentTeamHumanActor(): AgentTeamHumanActor {
 }
 
 const HOST_ACTOR: AgentTeamHostActor = Object.freeze({ kind: 'host', handle: 'agent-team' })
+
+/** Highest validation-rules version this build implements; a ledger segment without a marker is version 1. */
+export const AGENT_TEAM_RULES_VERSION = 1
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
   if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
@@ -288,6 +292,8 @@ export interface AgentTeamLedgerOptions {
    * only: nothing is persisted, no watermark advances, no marker is consumed.
    */
   readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
+  /** Highest rules version to adopt and accept; defaults to `AGENT_TEAM_RULES_VERSION`. */
+  readonly rulesVersion?: number
 }
 
 /** Internal append result indicating whether this call committed a new record. */
@@ -398,6 +404,8 @@ interface Projection {
   readonly activityMarkersByMember: Map<AgentTeamMemberId, Map<AgentTeamThreadRef, AgentTeamActivityMarker[]>>
   /** Replay-order Attention observations per Thread, appended by committed Inbox deltas only. */
   readonly observationsByThread: Map<AgentTeamThreadRef, AgentTeamAttentionObservation[]>
+  /** Rules version the next record is validated under: the newest marker replayed so far, else 1. */
+  rulesVersion: number
 }
 
 /** Minimal replay-time Attention observation; the read projection adds the current Task ref. */
@@ -432,7 +440,7 @@ function emptyProjection(): Projection {
     attentionByThread: new Map(), sessionTransitions: new Map(),
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
-    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map() }
+    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1 }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -513,6 +521,7 @@ export class AgentTeamLedger {
   private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
   /** Host-supplied surface visibility probe; absent means no write is ever exempt. */
   private readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
+  private readonly rulesVersion: number
   private operationTail: Promise<void> = Promise.resolve()
   /**
    * Runtime human display name. Durable identity stays `member:human`; only
@@ -547,6 +556,7 @@ export class AgentTeamLedger {
     this.createOccurredAt = options.occurredAt ?? (() => new Date().toISOString())
     this.createRef = options.ref ?? (kind => `${kind}:${randomUUID()}`)
     this.isFactVisible = options.isFactVisible
+    this.rulesVersion = options.rulesVersion ?? AGENT_TEAM_RULES_VERSION
     this.replay()
     const head = this.state.ordered.at(-1)
     this.bootValidation = Object.freeze({
@@ -579,6 +589,7 @@ export class AgentTeamLedger {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameInitialization(existing, request)
+        await this.adoptRulesVersion()
         return this.resolved(this.receipt(existing))
       }
       if (this.state.ordered.length !== 0) throw new Error('agent-team ledger has operations but no initialization request')
@@ -594,8 +605,25 @@ export class AgentTeamLedger {
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
+      await this.adoptRulesVersion()
       return this.committed(this.receipt(operation))
     })
+  }
+
+  /**
+   * Append the marker for a rules version this build implements but the ledger has not adopted.
+   * It runs inside initialize's queued task, so it precedes every later write — startup recovery's included.
+   */
+  private async adoptRulesVersion(): Promise<void> {
+    if (this.state.rulesVersion >= this.rulesVersion) return
+    const operation: AgentTeamRulesVersionAdoptedOperation = Object.freeze({
+      ...this.operationBase({ requestId: `agent-team:rules-version-${this.rulesVersion}` as AgentTeamRequestId, actor: HOST_ACTOR }, this.nextSequence()),
+      kind: 'team/rules-version-adopted',
+      actor: HOST_ACTOR,
+      data: Object.freeze({ version: this.rulesVersion }),
+    })
+    await this.table.put(operation.operationId, operation)
+    this.applyAndAdvanceProjectionVersion(operation)
   }
 
   createProject(request: AgentTeamAuthorizedCreateProjectRequest): Promise<AgentTeamLedgerResult<AgentTeamCreateProjectResult>> {
@@ -1978,6 +2006,9 @@ export class AgentTeamLedger {
         // A DM changes no shared projection: delivery is a session-level
         // runtime effect, so no change waiter has anything to refetch.
         return []
+      case 'team/rules-version-adopted':
+        // Later records validate differently; no projection anybody reads changes.
+        return []
       default:
         return assertUnhandledKind(operation)
     }
@@ -2038,6 +2069,7 @@ export class AgentTeamLedger {
       case 'team/project-member-added':
       case 'team/thread-read':
       case 'team/dm-sent':
+      case 'team/rules-version-adopted':
         return []
       default:
         return assertUnhandledKind(operation)
@@ -2152,6 +2184,15 @@ export class AgentTeamLedger {
         || prior.sessionId !== operation.data.previousSessionId
         || operation.data.member.sessionId === operation.data.previousSessionId
         || !this.sameMemberFacts(prior, operation.data.member)) throw new Error('invalid Member session renewal')
+      return
+    }
+    if (operation.kind === 'team/rules-version-adopted') {
+      if (operation.actor.kind !== 'host' || operation.actor.handle !== 'agent-team') throw new Error('invalid rules version authority')
+      const { version } = operation.data
+      if (version <= projection.rulesVersion) throw new Error(`agent-team operation ${operation.sequence} adopts rules version ${version} after version ${projection.rulesVersion}`)
+      if (version > this.rulesVersion) {
+        throw new Error(`agent-team ledger adopted rules version ${version}, but this build implements up to ${this.rulesVersion}; open it with a newer release`)
+      }
       return
     }
     if (operation.kind === 'team/member-session-recycled') {
@@ -2698,6 +2739,10 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/member-session-renewed') {
       target.members.set(operation.data.member.memberId, operation.data.member)
       target.sessionTransitions.set(operation.data.member.memberId, { previousSessionId: operation.data.previousSessionId })
+      return
+    }
+    if (operation.kind === 'team/rules-version-adopted') {
+      target.rulesVersion = operation.data.version
       return
     }
     if (operation.kind === 'team/member-session-recycled') {
