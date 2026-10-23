@@ -8,6 +8,9 @@ import { ToolCallId, createUserMessage, LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import { TeamService as OfficialTeamService } from '@deepseek-ai/dsh-experimental-agent-team'
+import * as OfficialTeamTools from '@deepseek-ai/dsh-experimental-tool-agent-team'
 import AgentTeam, { AGENT_TEAM_TOOL_NAMES } from '../src/index.ts'
 import type { AgentTeamMemberCapabilities, AgentTeamMemberId, AgentTeamRequestId } from '../src/types.ts'
 import { mountTeamMemberHost, provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
@@ -179,6 +182,141 @@ function liveAgent(ctx: Context, facts: MemberFacts): Agent {
 }
 
 describe('Agent Team member tool policy', () => {
+  it('excludes Host tools by default and cannot opt into them through a Member allow-list', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    const dispose = ctx.tools.register(defineContentToolFixture({
+      name: 'foreign_global', description: 'foreign', parameters: {},
+      execute: async () => [{ type: 'text', text: 'foreign executed' }],
+    }))
+    testCleanups.push(dispose)
+    const base = await addMember(ctx, workspaceId, 't16-default')
+    expect(toolNames(ctx, liveAgent(ctx, base))).not.toContain('foreign_global')
+    const narrow = await addMember(ctx, workspaceId, 't16-narrow', { tools: { allow: ['foreign_global', 'ordinary_tool'] } })
+    expect(toolNames(ctx, liveAgent(ctx, narrow))).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool'].sort())
+    expect(ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === narrow.memberId)
+      ?.capabilityWarnings?.map(warning => warning.name)).toEqual(['foreign_global'])
+    expect(ctx.tools.schemas().map(tool => tool.name)).toContain('foreign_global')
+  })
+
+  it('hides late own-scope tools from model requests and rejects direct and nested calls', async () => {
+    const adapter = new ScriptedAdapter()
+    useAdapter(adapter)
+    const { ctx, workspaceId } = shared
+    const body = vi.fn(async () => [{ type: 'text' as const, text: 'foreign executed' }])
+    const install = ctx.on('agent/created', ({ agent }) => {
+      agent.ctx.tools.register(defineContentToolFixture({
+        name: 'foreign_late', description: 'foreign', parameters: {}, execute: body,
+      }))
+      return undefined
+    })
+    testCleanups.push(() => { install() })
+    const member = await addMember(ctx, workspaceId, 't17-late')
+    const agent = liveAgent(ctx, member)
+    const call = { signal: new AbortController().signal, agent, name: 'foreign_late', arguments: {} }
+    expect((await ctx.tools.execute({ ...call, callId: ToolCallId('t17-direct') })).isError).toBe(true)
+    const nested = ctx.on('tools/pre-execute', async (execution, next) => {
+      if (execution.agent === agent && execution.name === 'ordinary_tool') {
+        const result = await ctx.tools.execute({ ...call, callId: ToolCallId('t17-nested'), parent: execution.token })
+        expect(result.isError).toBe(true)
+      }
+      return next()
+    })
+    testCleanups.push(() => { nested() })
+    adapter.enqueue(toolCallResponse('t17-model', 'ordinary_tool', {}))
+    adapter.enqueue([{ type: 'finish', reason: { kind: 'stop' } }])
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'run' }], source: { kind: 'user' } }))
+    await idle
+    expect(adapter.requests).toHaveLength(2)
+    for (const request of adapter.requests) {
+      expect(request.tools?.map(tool => tool.name).sort()).toEqual([...MEMBER_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    }
+    expect(agent.session.requestHeader()?.tools?.map(tool => tool.name).sort())
+      .toEqual(adapter.requests.at(-1)?.tools?.map(tool => tool.name).sort())
+    expect(body).not.toHaveBeenCalled()
+    const ordinary = await ctx.agents.create({ sessionId: SessionId('t17-ordinary') })
+    testCleanups.push(async () => { await ordinary.dispose() })
+    expect((await ctx.tools.execute({ ...call, agent: ordinary.agent, callId: ToolCallId('t17-other') })).isError).not.toBe(true)
+    expect(body).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a same-name replacement without adopting it during a capability edit', async () => {
+    useAdapter(new EmptyAdapter())
+    const { ctx, workspaceId } = shared
+    const member = await addMember(ctx, workspaceId, 't18-shadow')
+    const agent = liveAgent(ctx, member)
+    const body = vi.fn(async () => [{ type: 'text' as const, text: 'replacement executed' }])
+    testCleanups.push(agent.ctx.tools.register(defineContentToolFixture({
+      name: 'ordinary_tool', description: 'replacement', parameters: {}, execute: body,
+    })))
+    await ctx.agentTeam.updateMember({
+      requestId: requestId('t18-edit'), memberId: member.memberId, handle: 't18-shadow', description: 'Policy member',
+      capabilities: { tools: { allow: ['ordinary_tool'] } },
+    })
+    await expect(ctx.systemPrompt.assemble({ scope: agent })).rejects.toThrow(/replaced.*ordinary_tool/)
+    const result = await ctx.tools.execute({
+      signal: new AbortController().signal, agent, name: 'ordinary_tool', arguments: {}, callId: ToolCallId('t18-call'),
+    })
+    expect(result.isError).toBe(true)
+    expect(body).not.toHaveBeenCalled()
+  })
+
+  it.each(['before', 'after'] as const)('keeps Members usable when the official Team plugin loads %s Member activation', async timing => {
+    const cleanups: Array<() => Promise<void>> = []
+    testCleanups.push(async () => { for (const cleanup of cleanups) await cleanup() })
+    const { ctx, workspaceId } = await mountTeamMemberHost({
+      cleanups, prepare: provideQuietTokenMeter,
+      presetPlugins: [{ id: 'team-tools', name: pathToFileURL(join(import.meta.dirname, 'helpers', 'team-tools-fixture.mjs')).href }],
+    })
+    const adapter = new ScriptedAdapter()
+    ctx.llm.registerAdapter(['mock'], adapter)
+    // No delegation is attempted; membership and tool installation use the
+    // real official services, with only their unused provider dependency stubbed.
+    ctx.provide('subagents', {})
+    if (timing === 'before') {
+      await ctx.plugin(OfficialTeamService)
+      await ctx.plugin(OfficialTeamTools)
+    }
+    const member = await addMember(ctx, workspaceId, 't20-official')
+    const agent = liveAgent(ctx, member)
+    if (timing === 'after') {
+      await ctx.plugin(OfficialTeamService)
+      await ctx.plugin(OfficialTeamTools)
+    }
+    const denied = await ctx.tools.execute({
+      signal: new AbortController().signal, agent, name: 'list_agents', arguments: {}, callId: ToolCallId('t20-foreign'),
+    })
+    expect(denied.isError).toBe(true)
+    expect(JSON.stringify(denied)).toContain('not declared for this Team Member')
+    adapter.enqueue(toolCallResponse('t20-model', 'ordinary_tool', {}))
+    adapter.enqueue([{ type: 'finish', reason: { kind: 'stop' } }])
+    const idle = waitForIdle(ctx, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'run' }], source: { kind: 'user' } }))
+    await idle
+    expect(agent.session.ownEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('completed')
+    expect(adapter.requests).toHaveLength(2)
+    for (const request of adapter.requests) {
+      expect(request.tools?.map(tool => tool.name).sort()).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+    }
+    const ordinary = await ctx.agents.create({ sessionId: SessionId('t20-ordinary') })
+    testCleanups.push(async () => { await ordinary.dispose() })
+    expect(toolNames(ctx, ordinary.agent)).toContain('spawn_teammate')
+    const assembly = await ordinary.agent.ctx.systemPrompt.assemble({ scope: ordinary.agent })
+    expect(assembly.contexts.find(context => context.name === 'team:identity')?.text).toContain('Team Lead')
+    await ctx.agentTeam.suspendMember({ requestId: requestId('t20-suspend'), memberId: member.memberId })
+    const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('t20-resume'), memberId: member.memberId })
+    expect(resumed.status.availability).toBe('active')
+    const resumedAgent = liveAgent(ctx, member)
+    adapter.enqueue([{ type: 'finish', reason: { kind: 'stop' } }])
+    const resumedIdle = waitForIdle(ctx, resumedAgent)
+    resumedAgent.followup(createUserMessage({ content: [{ type: 'text', text: 'continue' }], source: { kind: 'user' } }))
+    await resumedIdle
+    expect(resumedAgent.session.ownEvents().filter(event => event.type === 'turn/end').at(-1)?.data.reason.kind).toBe('completed')
+    expect(adapter.requests).toHaveLength(3)
+    expect(adapter.requests.at(-1)?.tools?.map(tool => tool.name).sort()).toEqual([...AGENT_TEAM_TOOL_NAMES, 'ordinary_tool', 'spare_tool'].sort())
+  })
+
   it('restricts each Member to its own allow-list without affecting siblings', async () => {
     useAdapter(new EmptyAdapter())
     const { ctx, workspaceId } = shared

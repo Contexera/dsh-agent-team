@@ -137,13 +137,15 @@ The Harness ships an experimental Agent Teams feature as its own profile bundles
 
 It is a competing Team implementation, not an extension point this bundle builds on. It registers its own model-facing tool family (`spawn_teammate`, `send_message`, `list_agents`, `wait_agent`, `interrupt_agent`, `team_task_*`), disables the shipped global subagent rows in its profile patch to free those names, and carries its own members, tasks, store, and client panel.
 
-This bundle's tools are `team_view`, `team_inbox`, `team_thread`, `team_message`, and `team_claim`, registered only inside its `team-member` preset.
+This bundle's seven tools are `team_view`, `team_inbox`, `team_thread`, `team_attention`, `team_message`, `team_dm`, and `team_claim`, registered only inside its `team-member` preset.
 
 Certification covers profiles that do not mount the experimental packages, and mounting both at once is **unsupported**: two Team authorities, two tool families, and two UI surfaces would be live with no shared authority or naming rule between them.
 
 Choose one Team profile per profile.
 
-This position is recorded rather than tested — a coexistence run has not been performed, and nothing in this bundle inspects or defers to the experimental implementation.
+Member tool-policy tests mount the real experimental Team service and tool plugin before or after Member activation. Members complete model turns using only declared tools, deny official tool calls, and resume while the plugin stays enabled. Ordinary Agents retain the official tools and identity.
+
+Its `team:policy` and required `team:identity` prompts still reach Members. A complete mixed-profile coexistence run has not been certified; these tool checks do not establish general plugin compatibility; [Tools and preset](architecture/tools-and-preset.md) records the local filtering limits.
 
 ## 4. Results and release gates
 

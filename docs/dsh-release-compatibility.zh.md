@@ -183,13 +183,15 @@ Harness 随附一套 experimental Agent Teams，以独立 profile bundle 形式�
 
 它是与本 bundle 竞争的另一套 Team 实现，不是本 bundle 依赖的扩展点。它注册自己的 model-facing 工具族（`spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_*`）。它在自己的 profile patch 里禁掉随附的全局 subagent 行，腾出这些名字。它自带成员、任务、store 与 client 面板。
 
-本 bundle 的工具是 `team_view`、`team_inbox`、`team_thread`、`team_message`、`team_claim`，只在 `team-member` preset 内注册。
+本 bundle 的七个工具是 `team_view`、`team_inbox`、`team_thread`、`team_attention`、`team_message`、`team_dm`、`team_claim`，只在 `team-member` preset 内注册。
 
 认证覆盖的是未挂载这些 experimental 包的 profile。同时挂载两者属于不支持的组合。会出现两套 Team authority、两个工具族、两块 UI surface。它们之间既无共享权威也无命名规则。
 
 一个 profile 只选一套 Team profile。
 
-本条是记录性结论、不是实测结论。没有跑过共存验证，本 bundle 也不检查、不避让那套 experimental 实现。
+Member 工具策略测试在 Member 激活前或激活后挂载真实 experimental Team service 和工具插件。Member 只使用声明的工具完成模型回合，拒绝官方工具调用，并能在插件保持启用时恢复。普通 Agent 仍保留官方工具与身份。
+
+其 `team:policy` 与必需的 `team:identity` 提示仍会进入 Member 上下文。完整混合 profile 的共存运行尚未认证，工具检查不代表通用插件兼容；本地过滤的限制见 [Tools and preset](architecture/tools-and-preset.zh.md)。
 
 ## 4. 认证结果与发布门槛
 

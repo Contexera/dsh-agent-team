@@ -4,6 +4,14 @@
 
 显式的 `team-member` preset 是唯一的 Team Member composition。它含一整套 coding capability rows：shell、filesystem/search、web search 与 fetch。还有 background jobs、skill 加载工具、compaction。skill 发现本身不是 preset row。每个 Member 的 provider 由 Host 注册在自己的 agent scope 上（见 Host authority）。另有 Team collaboration guidance/tools、Harness Workspace instruction discovery，和有界的 private-memory reference context。普通 Sessions 留在这个 isolated roster 之外。它们拿不到 Team prompt sections、tools 或 Member memory。
 
+每个 Member 默认只获准使用所选 preset 注册的工具定义，以及显式共享的 `working_directory`。Host 全局工具不在此范围内。`capabilities.tools.allow` 只能进一步缩减，不能授权 Host 工具或后来插件添加的工具。七个 Team 工具和 `working_directory` 始终保留。
+
+Host 在 Agent 发布前保存这些工具定义，在提示组装时过滤请求中的工具列表，并在直接调用和嵌套调用执行前检查。后来注册到 Member 自身 scope 的工具不会进入请求，调用也会被拒绝；允许的工具定义被替换时，请求组装和执行都会被拒绝。能力编辑沿用原始定义。检查只作用于该 Member，不影响普通 Agent 或委派子 scope。
+
+Team mode 不过滤其他官方或自定义插件注入的提示。当前 Harness 公开接口不支持完整的 Member 提示隔离：必需上下文会在组装后被恢复。例如 experimental Team 的 `team:policy` 与必需的 `team:identity` 仍会进入上下文，但不会因此阻止激活或对话。
+
+这些检查使用 Harness 公开扩展接口，不是强制执行的最终请求策略。其他组装中间件仍可在 Team 过滤之后改变结果。尚未完成通用插件兼容性认证，见[兼容性限制](../dsh-release-compatibility.zh.md#37-并存的另一套-team-实现)。
+
 每一行 `name:` 都是 Loader 按 profile 解析的裸标识符，不按本 bundle 解析。profile 只链接本 bundle 与宿主闭包，所以一行只能点名宿主包或本 bundle 自己的子路径。绝不能点名嵌在本 bundle 依赖树里的包。工作树里能解析的名字，在真实安装里仍可能让该行 `never started`：依赖里的模块只能经由本 bundle 自己名下的再导出到达一行。
 
 七个 model-facing tools 都定义在 `packages/tool-agent-team/src/index.ts`。collaboration contract 记录在 [`tools.zh.md`](../team-collaboration/tools.zh.md)。它们挂载在隔离的 `team-member` preset 下（`cordis.patch.yml` 里的一条 declarative row）。不要为了测试可用，就把 tool package 作为 global row 添加；普通 Sessions 必须保持 Team-free。

@@ -10,7 +10,8 @@ import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import { scopeOf } from '@deepseek-ai/dsh-scope'
+import { scopeOf, scopeParentOf } from '@deepseek-ai/dsh-scope'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { dshHomePath } from '@deepseek-ai/dsh-home-paths'
 import type {
   AgentTeamAgentMember,
@@ -79,6 +80,7 @@ export class MemberRuntime {
   private readonly memberRestrictions = new Map<AgentTeamMemberId, () => void>()
   /** The allow-list enforced behind `memberRestrictions`: the rollback source when a swap fails, so a failed apply never leaves the Member less restricted. */
   private readonly enforcedToolAllow = new Map<AgentTeamMemberId, readonly string[]>()
+  private readonly memberToolBindings = new Map<AgentTeamMemberId, ReadonlyMap<string, ToolDefinition>>()
   /** Capability intent the live surface is known to reflect: presence is the proof, a stored `undefined` means applied with no capabilities. Never persisted; absent when unprovable, so an unknown surface re-applies. */
   private readonly appliedCapabilities = new Map<AgentTeamMemberId, AgentTeamMemberCapabilities | undefined>()
   /** Capability warnings, recomputed at every activation and never persisted: stored ones would lie after a Host restart or a Harness upgrade that renames tools. */
@@ -93,29 +95,70 @@ export class MemberRuntime {
     return this.capabilityWarnings.get(memberId)
   }
 
-  /** Applies a Member's persisted tool allow-list as a scoped restriction on the freshly composed preset surface and derives warnings for entries the surface no longer knows. Runs before validateMemberPreset so validation sees the restricted view (the Host always unions the Team tools and `working_directory` over the list). */
+  /** Restrict every Member to its preset tools; a stored allow-list can only narrow them, retaining Team tools and `working_directory`. */
   applyMemberToolPolicy(agentCtx: Context, member: AgentTeamAgentMember): void {
+    const bindings = this.memberToolBindings.get(member.memberId) ?? this.mountMemberToolBindings(agentCtx, member.memberId)
     const configured = member.capabilities?.tools?.allow
-    if (configured === undefined) {
-      this.capabilityWarnings.delete(member.memberId)
-      return
-    }
     // Drop unknown names instead of failing activation: a Harness upgrade renaming a tool must not make the Member unavailable. The warning carries the known-name digest for diagnosing drift.
-    const known = this.deps.ctx.tools.schemas(scopeOf(agentCtx)).map(tool => tool.name)
+    const known = [...bindings.keys()]
     const knownSet = new Set(known)
-    const dropped = configured.filter(name => !knownSet.has(name))
+    const dropped = (configured ?? []).filter(name => !knownSet.has(name))
     this.setCapabilityWarnings(member.memberId, dropped.map(name => ({ name, knownNames: known })))
     const allow = [...new Set([
-      ...configured.filter(name => knownSet.has(name)),
+      ...(configured ?? known).filter(name => knownSet.has(name)),
       ...AGENT_TEAM_TOOL_NAMES,
       // An allow-list narrows capability, not the checkout the Member works in, so `working_directory` survives like the Team tools.
       ...knownSet.has('working_directory') ? ['working_directory'] : [],
     ])]
-    if (allow.length === 0) return
     // `tools.restrict()` requires a scoped context and rejects names outside the inherited surface; either error fails only this Member's activation.
     const dispose = agentCtx.tools.restrict({ allow })
     this.memberRestrictions.set(member.memberId, dispose)
     this.enforcedToolAllow.set(member.memberId, Object.freeze([...allow]))
+  }
+
+  private mountMemberToolBindings(agentCtx: Context, memberId: AgentTeamMemberId): ReadonlyMap<string, ToolDefinition> {
+    const scope = scopeOf(agentCtx)
+    const presetScope = scope === undefined ? undefined : scopeParentOf(scope)
+    if (presetScope === undefined) throw new Error('Member tool policy requires a mounted preset scope')
+    const tools = this.deps.ctx.tools
+    const bindings = new Map<string, ToolDefinition>()
+    for (const { name } of tools.schemas(presetScope)) {
+      const definition = tools.get(name, presetScope)
+      // The preset view also inherits Host tools. Only its own definitions and
+      // the explicitly shared directory tool belong to the Member's baseline.
+      if (definition !== undefined && (name === 'working_directory' || definition !== tools.get(name))) {
+        bindings.set(name, definition)
+      }
+    }
+    this.memberToolBindings.set(memberId, bindings)
+    agentCtx.tools.guard(execution => {
+      if (execution.agent !== scope) return undefined
+      if (!this.enforcedToolAllow.get(memberId)?.includes(execution.name)) {
+        return `Tool "${execution.name}" is not declared for this Team Member`
+      }
+      if (tools.get(execution.name, scope) !== bindings.get(execution.name)) {
+        return `Team Member tool replaced: ${execution.name}`
+      }
+      return undefined
+    })
+    agentCtx.on('system-prompt/assemble', async (_assembly, context, next) => {
+      if (context.scope !== scope) return next()
+      const assembly = await next()
+      const allow = new Set(this.enforcedToolAllow.get(memberId))
+      for (const name of allow) {
+        if (tools.get(name, scope) !== bindings.get(name)) throw new Error(`Team Member tool replaced: ${name}`)
+      }
+      const schemas = new Map(tools.schemas(scope).map(schema => [schema.name, schema]))
+      return {
+        ...assembly,
+        tools: assembly.tools.filter(schema => allow.has(schema.name)).map(schema => {
+          const declared = schemas.get(schema.name)
+          if (declared === undefined) throw new Error(`Team Member tool unavailable: ${schema.name}`)
+          return declared
+        }),
+      }
+    })
+    return bindings
   }
 
   /** Whether the live surface is known to reflect exactly this capability intent; an absent record never matches. */
@@ -273,6 +316,7 @@ export class MemberRuntime {
       mount.dispose()
     }
     this.releaseMemberToolPolicy(memberId)
+    this.memberToolBindings.delete(memberId)
   }
 
     /** Every Member id any per-Member map holds, so a release path cannot miss one only a single map knows. */
@@ -280,6 +324,7 @@ export class MemberRuntime {
     return [...new Set([
       ...this.memberRestrictions.keys(),
       ...this.enforcedToolAllow.keys(),
+      ...this.memberToolBindings.keys(),
       ...this.appliedCapabilities.keys(),
       ...this.capabilityWarnings.keys(),
       ...this.skillProviderMounts.keys(),

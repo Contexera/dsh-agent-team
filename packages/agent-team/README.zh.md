@@ -24,7 +24,7 @@ Service 使用 `ctx.storageDomain`、`ctx.workspaceRegistry`、`ctx.agents`、`c
 
 Member 可携带持久能力意图（`capabilities.tools.allow`、`capabilities.skills.allow`）。它随全部 lifecycle operation 原样流转，Host restart 后原样重放，commit 时不做已知名校验（Harness 升级不会破坏旧 ledger）；与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。不管理 capabilities 的调用方可以直接省略该字段。
 
-Activation 把 `tools.allow` 作为 scoped restriction 应用在已组合的 preset 面上（mount → restrict → validate），七个 Team tools 在配置之上强制并集；未知名 drop + warning，不使 Member 失败。对 live Member 的 allow-list 编辑在 turn 边界同 Session 换装 restriction——idle 立即生效，与 running turn 竞争的编辑等待其结束，后续 lifecycle 操作在该等待之后排队。restriction 失败只隔离为该 Member 的 activation diagnostic。
+每个 Member 都限制为使用 preset 工具与 `working_directory`，未配置 `tools.allow` 时也生效。allow-list 只能缩减范围，保留七个 Team tools 与 `working_directory`；范围外的名字产生 warning。后来插件添加的工具会从请求中滤除，调用也会被拒绝；同名替换会使请求组装失败。其他插件的提示仍然可见，不会因此阻止对话。检查与限制见 [Tools and preset](../../docs/architecture/tools-and-preset.zh.md)。对 live Member 的编辑在 turn 边界同 Session 换装 restriction，后续 lifecycle 操作在其后排队。激活失败只使该 Member 不可用。
 
 Skills 是 Member 私有的：preset 不带共享 skill-filesystem row，Host 为每个 Member 注册一个 provider，只扫插件内置的只读 core skills（`packages/agent-team/core-skills/`——`member-skill-manager` meta skill，全部 skill 写作/安装/credentials 引导都在它里面）加该 Member 可写的私有 `skills/` 目录（排除默认 roots）。安装就是往自己目录写——目录形态 `skills/<name>/SKILL.md` + 可选 references/scripts，或平铺 `.md`——有意不提供上传 Remote。persona 只陈述私有空间物理事实，meta skill 的 description 负责"涉及 skill 管理工作时先读我"。`skills.allow` 通过已挂载 provider 上同一 turn 边界换装的 live selection swap 过滤 catalog；自装后的发现由 filesystem watcher 驱动。
 
