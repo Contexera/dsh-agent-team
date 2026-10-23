@@ -90,6 +90,21 @@ export interface AgentTeamUpdateProjectResult {
   readonly project: AgentTeamProject
 }
 
+/** Human intent to grant or withdraw one Agent Member's ownership of a Project. The Human owns every Project and is never named. */
+export interface AgentTeamProjectOwnerRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly memberId: AgentTeamMemberId
+}
+
+/** Result of changing or idempotently resolving one Project owner, with the Project's Agent owners after it. */
+export interface AgentTeamProjectOwnerResult {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly projectRef: AgentTeamProjectRef
+  readonly ownerIds: readonly AgentTeamMemberId[]
+}
+
 /** Human intent to archive one Project: hidden everywhere, facts kept. */
 export interface AgentTeamArchiveProjectRequest {
   readonly requestId: AgentTeamRequestId
@@ -763,6 +778,10 @@ export interface AgentTeamView {
   readonly workspaces: readonly AgentTeamWorkspaceParticipation[]
   readonly projects: readonly AgentTeamProject[]
   readonly members: readonly AgentTeamProjectMembership[]
+  /** Agent owners of the listed Projects. The Human owns every Project and is not listed. */
+  readonly owners: readonly AgentTeamProjectMembership[]
+  /** Validation rules version the ledger has adopted; Project owners exist from version 2. */
+  readonly rulesVersion: number
   /** Catalog of the response's scope: visible Tasks, their Threads, ordinals, radar rows, and Claims. With `includeCatalog` this is the whole request scope; otherwise only the Tasks and Threads the fact page and named Thread carry. */
   readonly tasks: readonly AgentTeamTask[]
   readonly threads: readonly AgentTeamThread[]
@@ -812,4 +831,6 @@ export interface AgentTeamStatus {
   readonly projectCount: number
   readonly agentMemberCount: number
   readonly humanMemberId: AgentTeamMemberId
+  /** Validation rules version the ledger has adopted; Project owners exist from version 2. */
+  readonly rulesVersion: number
 }

@@ -45,7 +45,7 @@ import { installMemberCompaction, DEFAULT_MEMBER_COMPACTION, type MemberCompacti
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { surfaceVisibilityProbe, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER } from './surface-visibility.ts'
 import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
-import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_PREVIEW_RULES_ENV, AGENT_TEAM_PREVIEW_RULES_VERSION, AGENT_TEAM_RULES_VERSION, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
@@ -147,6 +147,9 @@ import type {
   AgentTeamThreadObservations,
   AgentTeamThreadObservationsRequest,
   AgentTeamUpdateProjectRequest,
+  AgentTeamProject,
+  AgentTeamProjectOwnerRequest,
+  AgentTeamProjectOwnerResult,
   AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
   AgentTeamUpdateMemberResult,
@@ -724,6 +727,8 @@ export default class AgentTeam extends TypertRemoteService {
     this.domain = domain
     const ledger = new AgentTeamLedger(domain.table('operations'), {
       isFactVisible: surfaceVisibilityProbe(memberId => this.handles.get(memberId)?.agent),
+      // Never set this on a ledger another profile shares: builds without the preview refuse the ledger afterwards.
+      rulesVersion: process.env[AGENT_TEAM_PREVIEW_RULES_ENV] === '1' ? AGENT_TEAM_PREVIEW_RULES_VERSION : AGENT_TEAM_RULES_VERSION,
     })
     this.ledger = ledger
     // A live Config edit in the constructor's window may have arrived before
@@ -925,6 +930,26 @@ export default class AgentTeam extends TypertRemoteService {
     this.requireAccepting()
     this.requireWorkspace(request.workspaceId)
     const result = await this.requireLedger().archiveProject({ ...request, actor: agentTeamHumanActor() })
+    if (result.committed) this.emitCommitted(result.value.receipt)
+    return result.value
+  }
+
+  /** Human grant of Project ownership to one Agent Member of the Project's Workspace. */
+  @Remote('addProjectOwner')
+  async addProjectOwner(request: AgentTeamProjectOwnerRequest): Promise<AgentTeamProjectOwnerResult> {
+    this.requireAccepting()
+    this.requireWorkspace(request.workspaceId)
+    const result = await this.requireLedger().addProjectOwner({ ...request, actor: agentTeamHumanActor() })
+    if (result.committed) this.emitCommitted(result.value.receipt)
+    return result.value
+  }
+
+  /** Human withdrawal of one Agent Member's Project ownership; the Human owner cannot be removed. */
+  @Remote('removeProjectOwner')
+  async removeProjectOwner(request: AgentTeamProjectOwnerRequest): Promise<AgentTeamProjectOwnerResult> {
+    this.requireAccepting()
+    this.requireWorkspace(request.workspaceId)
+    const result = await this.requireLedger().removeProjectOwner({ ...request, actor: agentTeamHumanActor() })
     if (result.committed) this.emitCommitted(result.value.receipt)
     return result.value
   }
@@ -1837,6 +1862,14 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /** Live participation addresses; paths remain owned by the Harness registry. */
+  /** Active Projects the Agent's Member owns, for the per-step Member context; undefined while the ledger predates Project owners. */
+  ownedProjectsForAgent(agent: Agent): readonly AgentTeamProject[] | undefined {
+    const member = this.memberForAgent(agent)
+    const ledger = this.requireLedger()
+    if (member === undefined || ledger.status().rulesVersion < 2) return undefined
+    return ledger.ownedProjects(member.memberId)
+  }
+
   workspacesForAgent(agent: Agent): readonly { readonly workspaceId: WorkspaceId; readonly path: string | undefined; readonly default: boolean }[] {
     const actor = this.memberActor(agent)
     const member = this.requireLedger().getMember(actor.memberId)!
@@ -2397,6 +2430,21 @@ export default class AgentTeam extends TypertRemoteService {
           source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Workspace participation changed' } })
         // Delivered from durable facts; a failed wake cannot roll back the
         // committed participation — the next notice rederives it.
+        if (agent.status === 'idle' || agent.inbox.nextTurn.some(message => message.source.kind === 'user')) agent.followup(notice)
+        else agent.steer(notice)
+      })
+    }
+    if (operation.kind === 'team/project-owner-added' || operation.kind === 'team/project-owner-removed') {
+      this.afterCommit('ownership notice', () => {
+        const agent = this.handles.get(operation.data.memberId)?.agent
+        const project = ledger.getProject(operation.data.projectRef)
+        if (agent === undefined || project === undefined) return
+        const text = operation.kind === 'team/project-owner-added'
+          ? `Team ownership changed: @human made you an owner of Project ${project.name} (${project.projectRef}) in Workspace ${project.workspaceId}. Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
+          : `Team ownership changed: @human removed you as an owner of Project ${project.name} (${project.projectRef}) in Workspace ${project.workspaceId}. You can still take part in it.`
+        const notice = createUserMessage({ content: [{ type: 'text', text }],
+          source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Project ownership changed' } })
+        // Lost on a crash before delivery; the owner block of the per-step Member context rederives it.
         if (agent.status === 'idle' || agent.inbox.nextTurn.some(message => message.source.kind === 'user')) agent.followup(notice)
         else agent.steer(notice)
       })

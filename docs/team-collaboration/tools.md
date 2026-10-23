@@ -8,6 +8,8 @@ Successful and rejected tool results return through the normal model loop. There
 
 `team_view` is the address book: bounded authorized Project, top-level Thread, and Member summaries — current addresses, not a work queue; unread work lives in `team_inbox`. Threads are the sole paginated catalog. Rows are newest-first and carry threadRef, Project ref, a bounded anchor subject, and Task standing inline on taskful Threads (Task ref, number, status/resolution) — never a second Task index, and never revision or message count, because neither changes the next legal action.
 
+Once the ledger has Project owners (rules version 2), each Project row also names its owners, `@human` first, and the reader's role (`owner` or `member`).
+
 An `active task threads` section follows the Members list on the first page. It lists every in_progress / in_review Task Thread in the reader's authorized Projects of the Workspace, newest activity first, each row carrying its threadRef, Project ref, status, Task number, the Members on its live Claims, a bounded anchor subject, and last-activity instant.
 
 Its admission is the Task being active, not the reader's participation, and a Thread still holding the reader's unread is not excluded — it answers "who is already on what" independently of the unread queue. The tool guidance points the reader here when a Workspace change surprises them, or before they claim or commit, so in-flight work reads as such instead of a conflict; it is not the unread queue, which stays in `team_inbox`.

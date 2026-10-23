@@ -8,6 +8,19 @@ const WORKSPACES = [{ workspaceId: 'workspace:alpha', default: true }]
 const CLAIM = 'claim:326f0b21-a41c-4c47-be18-ad0d4ecfc139'
 
 describe('team_view renders one address book', () => {
+  it('names each Project\'s owners and the reader\'s role once the ledger has Project owners', () => {
+    const text = renderText(teamTools().get('team_view')!, {}, {
+      workspaces: WORKSPACES,
+      projects: [
+        { projectRef: PROJECT, name: 'general', owners: ['human', 'Tars'], role: 'owner' },
+        { projectRef: 'project:aaaa1111-0000-4000-8000-000000000002', name: 'ops', owners: ['human'], role: 'member' },
+      ],
+      members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 1, hasMore: false,
+    })
+    expect(text).toContain(`${PROJECT} · general · owners @human, @Tars · you: owner`)
+    expect(text).toContain('project:aaaa1111-0000-4000-8000-000000000002 · ops · owners @human · you: member')
+  })
+
   it('first page: labelled sections, newest-first subjects, Task inline — no Task index, message count, or revision label', () => {
     const text = renderText(teamTools().get('team_view')!, {}, {
       workspaces: WORKSPACES,

@@ -61,9 +61,11 @@ describe('Team Member private memory composition', () => {
     const ctx = new Context()
     const agent = fakeAgent(ctx)
     const workspaces = [{ workspaceId: 'workspace:default', path: root, default: true }]
+    let owned: { projectRef: string; name: string; workspaceId: string }[] | undefined
     ctx.provide('agentTeam', {
       memberForAgent: (subject: Agent) => subject === agent ? { privateMemoryPath: root } : undefined,
       workspacesForAgent: () => workspaces,
+      ownedProjectsForAgent: () => owned,
     } as never)
     await mount(ctx)
 
@@ -80,6 +82,15 @@ describe('Team Member private memory composition', () => {
     workspaces.pop()
     const left = await preStep(ctx, agent)
     expect(left.kind === 'enter' && left.messages.at(-1)?.content[0]).not.toEqual(expect.objectContaining({ text: expect.stringContaining('workspace:other') }))
+
+    // A ledger before Project owners renders no ownership block; once owners exist an empty list is still said.
+    expect(left.kind === 'enter' && left.messages.at(-1)?.content[0]).not.toEqual(expect.objectContaining({ text: expect.stringContaining('Team Project ownership') }))
+    owned = []
+    const unowned = await preStep(ctx, agent)
+    expect(unowned.kind === 'enter' && unowned.messages.at(-1)?.content[0]).toEqual(expect.objectContaining({ text: expect.stringContaining('You own no Projects.') }))
+    owned = [{ projectRef: 'project:alpha', name: 'alpha', workspaceId: 'workspace:default' }]
+    const owning = await preStep(ctx, agent)
+    expect(owning.kind === 'enter' && owning.messages.at(-1)?.content[0]).toEqual(expect.objectContaining({ text: expect.stringContaining('You own these Projects:\n- alpha project:alpha (Workspace workspace:default)') }))
 
     await writeFile(own, 'replacement index')
     const second = await preStep(ctx, agent)

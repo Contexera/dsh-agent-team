@@ -60,6 +60,8 @@ import type {
   AgentTeamMemberResumedOperation,
   AgentTeamMemberSessionRecycledOperation,
   AgentTeamRulesVersionAdoptedOperation,
+  AgentTeamProjectOwnerAddedOperation,
+  AgentTeamProjectOwnerRemovedOperation,
   AgentTeamMemberSuspendedOperation,
   AgentTeamMemberUpdatedOperation,
   AgentTeamMemberWorkspaceJoinedOperation,
@@ -126,6 +128,8 @@ import type {
   AgentTeamThreadRepliedOperation,
   AgentTeamUnreadRequired,
   AgentTeamUpdateProjectRequest,
+  AgentTeamProjectOwnerRequest,
+  AgentTeamProjectOwnerResult,
   AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
   AgentTeamView,
@@ -164,6 +168,13 @@ const HOST_ACTOR: AgentTeamHostActor = Object.freeze({ kind: 'host', handle: 'ag
 
 /** Highest validation-rules version this build implements; a ledger segment without a marker is version 1. */
 export const AGENT_TEAM_RULES_VERSION = 1
+
+/**
+ * Rules version still under construction. Only an explicit preview opt-in adopts it, because its rules may still
+ * change: a ledger that adopted it can stop replaying on a later build, and no build without the opt-in opens it.
+ */
+export const AGENT_TEAM_PREVIEW_RULES_VERSION = 2
+export const AGENT_TEAM_PREVIEW_RULES_ENV = 'DSH_AGENT_TEAM_PREVIEW_RULES'
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
   if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
@@ -263,6 +274,10 @@ export interface AgentTeamAuthorizedArchiveMemberRequest extends AgentTeamArchiv
 }
 
 export interface AgentTeamAuthorizedUpdateProjectRequest extends AgentTeamUpdateProjectRequest {
+  readonly actor: AgentTeamHumanActor
+}
+
+export interface AgentTeamAuthorizedProjectOwnerRequest extends AgentTeamProjectOwnerRequest {
   readonly actor: AgentTeamHumanActor
 }
 
@@ -406,6 +421,10 @@ interface Projection {
   readonly observationsByThread: Map<AgentTeamThreadRef, AgentTeamAttentionObservation[]>
   /** Rules version the next record is validated under: the newest marker replayed so far, else 1. */
   rulesVersion: number
+  /** Agent owners per Project with the sequence that made each one an owner; the Human owns every Project and is never stored. */
+  readonly owners: Map<AgentTeamProjectRef, Map<AgentTeamMemberId, number>>
+  /** Members named by a mention anywhere in each Project; one input to rules-version-2 Project membership. */
+  readonly mentionedByProject: Map<AgentTeamProjectRef, Set<AgentTeamMemberId>>
 }
 
 /** Minimal replay-time Attention observation; the read projection adds the current Task ref. */
@@ -440,7 +459,7 @@ function emptyProjection(): Projection {
     attentionByThread: new Map(), sessionTransitions: new Map(),
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
-    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1 }
+    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map() }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -674,6 +693,61 @@ export class AgentTeamLedger {
       this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.projectUpdateResult(operation))
     })
+  }
+
+  addProjectOwner(request: AgentTeamAuthorizedProjectOwnerRequest): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
+    return this.changeProjectOwner(request, 'team/project-owner-added')
+  }
+
+  removeProjectOwner(request: AgentTeamAuthorizedProjectOwnerRequest): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
+    return this.changeProjectOwner(request, 'team/project-owner-removed')
+  }
+
+  private changeProjectOwner(
+    request: AgentTeamAuthorizedProjectOwnerRequest,
+    kind: 'team/project-owner-added' | 'team/project-owner-removed',
+  ): Promise<AgentTeamLedgerResult<AgentTeamProjectOwnerResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        if (existing.kind !== kind || !this.sameActor(existing.actor, request.actor) || existing.data.workspaceId !== request.workspaceId
+          || existing.data.projectRef !== request.projectRef || existing.data.memberId !== request.memberId) this.throwRequestCollision(request.requestId)
+        return this.resolved(this.projectOwnerResult(existing))
+      }
+      this.assertHumanActor(request.actor)
+      const data = Object.freeze({ workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId })
+      const problem = this.projectOwnerChangeProblem(this.state, kind, data)
+      if (problem !== undefined) throw new Error(problem)
+      const operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation = Object.freeze({
+        ...this.operationBase(request, this.nextSequence()), kind, data,
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.projectOwnerResult(operation))
+    })
+  }
+
+  /** The one owner-change rule, judged against the live projection on write and the replay projection on load. */
+  private projectOwnerChangeProblem(
+    projection: Projection,
+    kind: 'team/project-owner-added' | 'team/project-owner-removed',
+    data: { readonly workspaceId: WorkspaceId; readonly projectRef: AgentTeamProjectRef; readonly memberId: AgentTeamMemberId },
+  ): string | undefined {
+    if (projection.rulesVersion < 2) return `Project owners need rules version 2; this ledger runs version ${projection.rulesVersion}`
+    const project = projection.projects.get(data.projectRef)
+    if (project === undefined || project.workspaceId !== data.workspaceId) return `unknown Project '${data.projectRef}' in Workspace '${data.workspaceId}'`
+    if (project.state === 'archived') return `Project '${data.projectRef}' is archived and no longer accepts Team work`
+    if (data.memberId === AGENT_TEAM_HUMAN_MEMBER_ID) {
+      return kind === 'team/project-owner-added' ? 'the Human already owns every Project' : 'the Human owns every Project and cannot be removed'
+    }
+    const owned = projection.owners.get(data.projectRef)?.has(data.memberId) === true
+    if (kind === 'team/project-owner-removed') return owned ? undefined : `Agent Member '${data.memberId}' does not own Project '${data.projectRef}'`
+    const member = projection.members.get(data.memberId)
+    if (member === undefined) return `unknown Agent Member '${data.memberId}'`
+    if (member.state !== 'enabled' && member.state !== 'suspended') return `Agent Member '${member.handle}' is ${member.state} and cannot own a Project`
+    if (!this.participatesInFrom(projection, member.memberId, project.workspaceId)) return `Agent Member '${member.handle}' does not participate in Workspace '${project.workspaceId}'`
+    if (owned) return `Agent Member '${member.handle}' already owns Project '${data.projectRef}'`
+    return undefined
   }
 
   addMember(request: AgentTeamAuthorizedAddMemberRequest): Promise<AgentTeamLedgerResult<AgentTeamDurableMemberResult>> {
@@ -1859,6 +1933,9 @@ export class AgentTeamLedger {
           return state !== undefined && state !== 'inactive' && state !== 'archived'
             && this.isProjectMemberFrom(this.state, projectRef, memberId)
         }).sort().map(memberId => Object.freeze({ projectRef, memberId })))),
+      owners: Object.freeze([...projectRefs].flatMap(projectRef => this.projectOwnerIds(projectRef)
+        .map(memberId => Object.freeze({ projectRef, memberId })))),
+      rulesVersion: this.state.rulesVersion,
       tasks: Object.freeze(catalogTasks),
       threads: Object.freeze(catalogThreads),
       taskNumbers: Object.freeze(catalogTasks.map(task => Object.freeze({ taskRef: task.taskRef, taskNumber: taskNumbers.get(task.taskRef) ?? 0 }))),
@@ -1874,7 +1951,23 @@ export class AgentTeamLedger {
   status(): AgentTeamStatus {
     const initialization = this.initialization()
     return Object.freeze({ initialized: true, sequence: this.state.ordered.length, operationCount: this.state.ordered.length,
-      projectCount: this.state.projects.size, agentMemberCount: this.state.members.size, humanMemberId: initialization.data.humanMemberId })
+      projectCount: this.state.projects.size, agentMemberCount: this.state.members.size, humanMemberId: initialization.data.humanMemberId,
+      rulesVersion: this.state.rulesVersion })
+  }
+
+  getProject(projectRef: AgentTeamProjectRef): AgentTeamProject | undefined {
+    return this.state.projects.get(projectRef)
+  }
+
+  /** Agent owners of one Project, sorted. The Human owns every Project and is not listed. */
+  projectOwnerIds(projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
+    return Object.freeze([...this.state.owners.get(projectRef)?.keys() ?? []].sort())
+  }
+
+  /** Active Projects the Agent Member owns, in creation order. */
+  ownedProjects(memberId: AgentTeamMemberId): readonly AgentTeamProject[] {
+    return Object.freeze([...this.state.projects.values()]
+      .filter(project => project.state === 'active' && this.state.owners.get(project.projectRef)?.has(memberId) === true))
   }
 
   validate(): void {
@@ -2009,6 +2102,10 @@ export class AgentTeamLedger {
       case 'team/rules-version-adopted':
         // Later records validate differently; no projection anybody reads changes.
         return []
+      case 'team/project-owner-added':
+      case 'team/project-owner-removed':
+        // Ownership shows on the Project rows and widens who sees the Project.
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }, { kind: 'project', projectRef: operation.data.projectRef }]
       default:
         return assertUnhandledKind(operation)
     }
@@ -2070,6 +2167,8 @@ export class AgentTeamLedger {
       case 'team/thread-read':
       case 'team/dm-sent':
       case 'team/rules-version-adopted':
+      case 'team/project-owner-added':
+      case 'team/project-owner-removed':
         return []
       default:
         return assertUnhandledKind(operation)
@@ -2186,12 +2285,19 @@ export class AgentTeamLedger {
         || !this.sameMemberFacts(prior, operation.data.member)) throw new Error('invalid Member session renewal')
       return
     }
+    if (operation.kind === 'team/project-owner-added' || operation.kind === 'team/project-owner-removed') {
+      assertHuman()
+      const problem = this.projectOwnerChangeProblem(projection, operation.kind, operation.data)
+      if (problem !== undefined) throw new Error(`agent-team operation ${operation.sequence}: ${problem}`)
+      return
+    }
     if (operation.kind === 'team/rules-version-adopted') {
       if (operation.actor.kind !== 'host' || operation.actor.handle !== 'agent-team') throw new Error('invalid rules version authority')
       const { version } = operation.data
       if (version <= projection.rulesVersion) throw new Error(`agent-team operation ${operation.sequence} adopts rules version ${version} after version ${projection.rulesVersion}`)
       if (version > this.rulesVersion) {
-        throw new Error(`agent-team ledger adopted rules version ${version}, but this build implements up to ${this.rulesVersion}; open it with a newer release`)
+        const remedy = version <= AGENT_TEAM_PREVIEW_RULES_VERSION ? `it was opened with the ${AGENT_TEAM_PREVIEW_RULES_ENV}=1 preview` : 'open it with a newer release'
+        throw new Error(`agent-team ledger adopted rules version ${version}, but this build implements up to ${this.rulesVersion}; ${remedy}`)
       }
       return
     }
@@ -2745,6 +2851,16 @@ export class AgentTeamLedger {
       target.rulesVersion = operation.data.version
       return
     }
+    if (operation.kind === 'team/project-owner-added') {
+      const owners = target.owners.get(operation.data.projectRef) ?? new Map<AgentTeamMemberId, number>()
+      owners.set(operation.data.memberId, operation.sequence)
+      target.owners.set(operation.data.projectRef, owners)
+      return
+    }
+    if (operation.kind === 'team/project-owner-removed') {
+      target.owners.get(operation.data.projectRef)?.delete(operation.data.memberId)
+      return
+    }
     if (operation.kind === 'team/member-session-recycled') {
       target.members.set(operation.data.member.memberId, operation.data.member)
       target.sessionTransitions.set(operation.data.member.memberId, {
@@ -2786,7 +2902,9 @@ export class AgentTeamLedger {
       // Departure ends Project memberships inside the left Workspace — unlike
       // archival, which keeps them hidden for a possible restore.
       for (const project of target.projects.values()) {
-        if (project.workspaceId === operation.data.workspaceId) target.memberships.get(project.projectRef)?.delete(operation.data.memberId)
+        if (project.workspaceId !== operation.data.workspaceId) continue
+        target.memberships.get(project.projectRef)?.delete(operation.data.memberId)
+        target.owners.get(project.projectRef)?.delete(operation.data.memberId)
       }
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
@@ -2802,14 +2920,16 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/member-removed') {
       target.members.set(operation.data.member.memberId, operation.data.member)
       for (const membership of target.memberships.values()) membership.delete(operation.data.member.memberId)
+      for (const owners of target.owners.values()) owners.delete(operation.data.member.memberId)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
     if (operation.kind === 'team/member-archived') {
       // Archival keeps Memberships: hidden state, not departure — a future
       // restore returns the Member to its Projects. Visibility filters by
-      // member state instead.
+      // member state instead. Ownership is a responsibility, not membership: it ends here.
       target.members.set(operation.data.member.memberId, operation.data.member)
+      for (const owners of target.owners.values()) owners.delete(operation.data.member.memberId)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
@@ -2825,6 +2945,11 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') {
       const { message, mentions } = operation.data
       target.mentionsByMessage.set(message.messageRef, Object.freeze([...mentions]))
+      if (mentions.length > 0) {
+        const mentioned = target.mentionedByProject.get(message.projectRef) ?? new Set<AgentTeamMemberId>()
+        for (const memberId of mentions) mentioned.add(memberId)
+        target.mentionedByProject.set(message.projectRef, mentioned)
+      }
       this.appendMessageFact(target, message, mentions, message.occurredAt ?? operation.occurredAt)
       if (operation.data.task !== undefined) target.tasks.set(operation.data.task.taskRef, operation.data.task)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
@@ -3984,6 +4109,13 @@ export class AgentTeamLedger {
     if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return false
     const project = projection.projects.get(projectRef)
     if (project === undefined || !this.participatesInFrom(projection, memberId, project.workspaceId)) return false
+    if (projection.rulesVersion >= 2) {
+      // Version 2 widens membership to owners and anyone ever named in the Project, and drops departed Members.
+      const state = projection.members.get(memberId)?.state
+      if (state === 'inactive' || state === 'archived') return false
+      if (projection.owners.get(projectRef)?.has(memberId) === true) return true
+      if (projection.mentionedByProject.get(projectRef)?.has(memberId) === true) return true
+    }
     for (const threadRef of this.projectThreadRefsFrom(projection, projectRef)) {
       if (this.everParticipatedFrom(projection, threadRef, memberId)) return true
     }
@@ -4476,6 +4608,10 @@ export class AgentTeamLedger {
 
   private projectResult(operation: AgentTeamProjectCreatedOperation): AgentTeamCreateProjectResult {
     return Object.freeze({ receipt: this.receipt(operation), project: operation.data.project, memberIds: operation.data.memberIds })
+  }
+
+  private projectOwnerResult(operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation): AgentTeamProjectOwnerResult {
+    return Object.freeze({ receipt: this.receipt(operation), projectRef: operation.data.projectRef, ownerIds: this.projectOwnerIds(operation.data.projectRef) })
   }
 
   private projectUpdateResult(operation: AgentTeamProjectUpdatedOperation): AgentTeamUpdateProjectResult {

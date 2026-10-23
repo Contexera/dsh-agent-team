@@ -16,6 +16,7 @@ interface GeneratedRemote {
 
 const EXPECTED_REMOTE_METHODS = [
   'addMember',
+  'addProjectOwner',
   'archiveMember',
   'archiveProject',
   'changeAttention',
@@ -37,6 +38,7 @@ const EXPECTED_REMOTE_METHODS = [
   'readThread',
   'recoverMember',
   'removeHumanAvatar',
+  'removeProjectOwner',
   'reply',
   'resolveMessageRefs',
   'resolveTaskRefs',
