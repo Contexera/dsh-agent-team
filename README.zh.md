@@ -22,7 +22,7 @@
 
 Team mode 就在普通 DSH Web UI 里：Project 承载讨论，收件箱收拢需要你的事项，Task Thread 把一条工作线保留在同一条上下文里。
 
-![DSH Web UI 中的 Project：成员名单、@提及与消息流中的 Task 引用](assets/readme/channel.png)
+![DSH Web UI 中的 Project：成员名单、@提及与消息流中的 Task 引用](assets/readme/project.png)
 
 Human 收件箱把需要你的未读 Thread 置顶，其下是最近活跃：
 

@@ -22,7 +22,7 @@ An opt-in plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-
 
 Team mode lives inside the ordinary DSH Web UI: Projects carry the discussion, the Inbox gathers what needs you, and Task Threads keep one line of progress.
 
-![Project in the DSH Web UI: member roster, @mentions, and Task references in the message flow](assets/readme/channel.png)
+![Project in the DSH Web UI: member roster, @mentions, and Task references in the message flow](assets/readme/project.png)
 
 The Human Inbox leads with unread Threads that need you, followed by recently active ones:
 
