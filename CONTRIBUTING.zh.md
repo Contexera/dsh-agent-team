@@ -24,7 +24,7 @@
 | 可见 UI、Client 加载、slot takeover、Remote 激活 | 以上全部，加 `npm run test:browser` |
 | 构建产物、`exports`、manifest、发布布局 | 以上全部，加 `npm run build` 与 `npm pack --dry-run` |
 
-`npm test` 会先跑生成产物、文档、core skill 与 package 边界四项检查，再跑 Vitest。完整阶梯（含 `lint`、`duplication`）见 [`docs/development/start-and-checks.zh.md`](docs/development/start-and-checks.zh.md) §「检查梯度」。
+`npm test` 会先跑六道机械门：`check:facades`、`check:docs`、`check:core-skills`、`check:boundaries`、`check:versions` 与 `check:comments`，再跑 Vitest。完整阶梯（含 `lint`、`duplication`）见 [`docs/development/start-and-checks.zh.md`](docs/development/start-and-checks.zh.md) §「检查梯度」。
 
 **只写真正跑过的检查**，并说明它覆盖了什么。别人复现不了的结论，会让 review 多走一轮。
 

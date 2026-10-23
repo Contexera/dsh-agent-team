@@ -24,7 +24,7 @@ Run the smallest sufficient set for the change, then escalate with its surface:
 | Visible UI, Client loading, slot takeover, Remote activation | the above plus `npm run test:browser` |
 | Build outputs, `exports`, manifests, release layout | the above plus `npm run build` and `npm pack --dry-run` |
 
-`npm test` runs the generated-artifact, documentation, core-skill, and package-boundary checks before Vitest. The complete ladder — `lint` and `duplication` included — is [`docs/development/start-and-checks.md`](docs/development/start-and-checks.md) § "Verification gradient".
+`npm test` runs six mechanical gates before Vitest: `check:facades`, `check:docs`, `check:core-skills`, `check:boundaries`, `check:versions`, and `check:comments`. The complete ladder — `lint` and `duplication` included — is [`docs/development/start-and-checks.md`](docs/development/start-and-checks.md) § "Verification gradient".
 
 **Report only the checks you actually ran**, and say what each one covered. A claim nobody can reproduce costs a review round trip.
 

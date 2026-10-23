@@ -1,10 +1,16 @@
 /**
  * K/M-suffixed token counts for the settings page.
  *
- * Down-ported from the shipped Models editor so this bundle can spell a
- * capacity the same way the Harness does: one matcher, one scale, one
- * round-trip formatter, kept together so a change to the accepted spelling
- * cannot drift between the two editors.
+ * A copy of the shipped Models editor's capacity matcher, scale, and
+ * round-trip formatter, so this bundle spells a capacity the way the Harness
+ * does. It is a copy and not a dependency because the upstream client face
+ * does not re-export these two functions.
+ *
+ * Source: deepseek-ai/deepseek-harness
+ * `packages/client/ui-settings-models/src/client/DeepSeekModelsEditor.tsx`.
+ * A copy cannot notice an upstream edit, so sync it by diffing against that
+ * file whenever a DSH compat round runs, the way the vendored sqlite fork is
+ * synced. Only the parseCapacity doc sentence differs.
  */
 
 /** Accepted capacity spellings: a decimal count with an optional K/M suffix. */

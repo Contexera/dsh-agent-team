@@ -28,7 +28,7 @@ Run in this order; a failure stops the release, and a fix re-runs from the faile
 | Command | It refuses |
 | --- | --- |
 | `npm run typecheck` | Type errors against the certified harness checkout. |
-| `npm test` | Test failures, and the five mechanical gates it bundles: `check:facades`, `check:docs`, `check:core-skills`, `check:boundaries`, `check:versions`. |
+| `npm test` | Test failures, and the six mechanical gates it bundles: `check:facades`, `check:docs`, `check:core-skills`, `check:boundaries`, `check:versions`, `check:comments`. |
 | `npm run build` | Build errors; also what `prepack` will run at publish time. |
 | `npm run lint` | Lint findings. |
 | `npm run test:browser` | Broken composition, Remote mounting, slot takeover, or ordinary-DSH restoration. Needs the adjacent `../deepseek-harness` checkout; browser acceptance is a local step and never runs in CI. |

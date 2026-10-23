@@ -28,7 +28,7 @@
 | 命令 | 它拦下什么 |
 | --- | --- |
 | `npm run typecheck` | 针对已认证 harness checkout 的类型错误。 |
-| `npm test` | 测试失败，以及它捆绑的五道机械门：`check:facades`、`check:docs`、`check:core-skills`、`check:boundaries`、`check:versions`。 |
+| `npm test` | 测试失败，以及它捆绑的六道机械门：`check:facades`、`check:docs`、`check:core-skills`、`check:boundaries`、`check:versions`、`check:comments`。 |
 | `npm run build` | 构建错误；这也是发布时 `prepack` 会跑的东西。 |
 | `npm run lint` | lint 发现的问题。 |
 | `npm run test:browser` | 组合、Remote 挂载、slot 接管或普通 DSH 恢复被破坏。需要相邻的 `../deepseek-harness` checkout；浏览器验收是本地步骤，从不在 CI 运行。 |

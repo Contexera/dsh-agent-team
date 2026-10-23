@@ -11,9 +11,9 @@ export interface MemberCompactionConfig {
 }
 
 export const MEMBER_COMPACT_TOKENS = 256_000
-export const MEMBER_WINDOW_RATIO = 0.8
-export const MEMBER_CONTEXT_RESERVE = 16_384
-export const MEMBER_OUTPUT_RESERVE = 4_096
+const MEMBER_WINDOW_RATIO = 0.8
+const MEMBER_CONTEXT_RESERVE = 16_384
+const MEMBER_OUTPUT_RESERVE = 4_096
 export const MEMBER_SUMMARY_TOKENS = 16_384
 
 export const DEFAULT_MEMBER_COMPACTION: MemberCompactionConfig = Object.freeze({
