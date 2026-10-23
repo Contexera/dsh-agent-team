@@ -6,6 +6,8 @@ import css from './member-row.module.css'
 
 export interface TeamMemberAction {
   readonly label: string
+  /** Names the action for assistive tech when the visible label alone does not say which Member it acts on. */
+  readonly ariaLabel?: string
   readonly onSelect: () => void
   readonly disabled?: boolean
 }
@@ -39,7 +41,7 @@ export function TeamMemberRow({ status, action, error, className, t }: {
 }) {
   return <div className={className === undefined ? css.row : `${css.row} ${className}`} data-team-member-row>
     <TeamMemberIdentity status={status} t={t} />
-    {action !== undefined && <Button size="sm" variant="outline" className={css.action} disabled={action.disabled === true} onClick={action.onSelect}>{action.label}</Button>}
+    {action !== undefined && <Button size="sm" variant="outline" className={css.action} disabled={action.disabled === true} {...(action.ariaLabel === undefined ? {} : { 'aria-label': action.ariaLabel })} onClick={action.onSelect}>{action.label}</Button>}
     {error !== undefined && <p className={css.error} role="alert">{error}</p>}
   </div>
 }

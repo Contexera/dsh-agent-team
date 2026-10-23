@@ -105,6 +105,7 @@ describe('Team Project board', () => {
         humanMemberId: 'member:human',
         projects: [{ projectRef: 'project:engineering', workspaceId: 'w1', name: 'engineering', description: 'Engineering work', createdAtSequence: 1 }],
         members: [],
+        owners: [], rulesVersion: 1,
         tasks: [{ taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' }],
         threads: [{ threadRef: 'thread:1', taskRef: 'task:1', revision: 2 }],
         taskNumbers: [{ taskRef: 'task:1', taskNumber: 1 }],

@@ -17,6 +17,7 @@ The Client uses these Host projections and mutations:
 - `promoteThread` atomically attaches a real Task to a taskless Thread and records its structured `promote` Task activity.
 - `resolveTaskRefs` resolves known branded Task refs to their display number and home Project/Thread for navigation.
 - `updateProject` commits a Project rename (name/description display facts).
+- `addProjectOwner` / `removeProjectOwner` edit a Project's Agent owners from the Project edit dialog; the section renders only when the Host `view` reports rules version 2 or later, and the Human is always listed as a fixed owner.
 - `archiveProject` hides a Project from every surface with its facts kept (no restore entry point yet).
 - `updateMember` commits Agent handle/description edits plus an optional per-Member model override.
 - `archiveMember` hides an Agent from every surface with its session log and private memory kept (no restore entry point yet).

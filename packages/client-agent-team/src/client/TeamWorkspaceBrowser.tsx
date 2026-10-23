@@ -33,7 +33,7 @@ function InboxMark({ unread }: { readonly unread: number }) {
   </span>
 }
 
-export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectProject, selectInbox, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadProjects, createProject, updateProject, archiveProject, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
+export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectProject, selectInbox, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, humanIdentity, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   const workspaces = useWorkspaces(state => state.items)
   const selected = navigationState.workspaceId
@@ -143,7 +143,7 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
     <TeamWorkspaceSelector workspaces={workspaces} selectedId={selectedId} current={overviewIsCurrent} onSelect={selectWorkspace} t={t} />
     {selectedId !== undefined && <div className={css.workspaceSection}>
       <div ref={projectsRef}>
-        <TeamProjectsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} loadProjects={loadProjects} subscribeChanges={subscribeChanges} createProject={createProject} updateProject={updateProject} archiveProject={archiveProject} creatingAgents={creatingAgents.filter(request => request.workspaceId === selectedId)} {...(navigationState.memberSessionId !== undefined || navigationState.projectRef === undefined ? {} : { selectedProjectRef: navigationState.projectRef })} selectProject={selectProject} t={t} />
+        <TeamProjectsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} loadProjects={loadProjects} subscribeChanges={subscribeChanges} createProject={createProject} updateProject={updateProject} archiveProject={archiveProject} addProjectOwner={addProjectOwner} removeProjectOwner={removeProjectOwner} humanIdentity={humanIdentity} creatingAgents={creatingAgents.filter(request => request.workspaceId === selectedId)} {...(navigationState.memberSessionId !== undefined || navigationState.projectRef === undefined ? {} : { selectedProjectRef: navigationState.projectRef })} selectProject={selectProject} t={t} />
       </div>
       <div ref={agentsRef}>
         <TeamAgentsPanel key={selectedId} workspaceId={selectedId} loadMembers={loadMembers} subscribeChanges={subscribeChanges} addMember={addMember} updateMember={updateMember} recoverMember={recoverMember} archiveMember={archiveMember} joinWorkspace={joinWorkspace} leaveWorkspace={leaveWorkspace} loadModels={loadModels} {...(navigationState.memberSessionId === undefined ? {} : { memberSessionId: navigationState.memberSessionId })} openMemberSession={openMemberSession} onCreatingChange={(request, creating) => { setCreatingAgents(current => creating ? [...current.filter(item => item.requestId !== request.requestId), request] : current.filter(item => item.requestId !== request.requestId)) }} t={t} />

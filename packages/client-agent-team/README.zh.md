@@ -17,6 +17,7 @@ Client 使用以下 Host 接口：
 - `promoteThread`：原子地为 taskless Thread 附加真实 Task，并记录结构化 `promote` Task activity。
 - `resolveTaskRefs`：将已知 branded Task ref 解析为展示编号及所属 Project/Thread，供导航使用。
 - `updateProject`：提交项目名称/说明的展示事实修改。
+- `addProjectOwner` / `removeProjectOwner`：在项目编辑对话框中增删 Agent 负责人；仅当 Host `view` 报告规则版本 ≥ 2 时渲染该区块，Human 始终作为固定负责人列出。
 - `archiveProject`：把项目从所有面收起，事实保留（暂无恢复入口）。
 - `updateMember`：提交 Agent 名称/说明编辑，以及可选的成员级模型覆盖。
 - `archiveMember`：把 Agent 从所有面收起，会话日志与私有记忆保留（暂无恢复入口）。
