@@ -65,7 +65,7 @@ const createProject = (ledger: AgentTeamLedger, name: string) => ledger.createPr
 describe('rules version markers', () => {
   it('writes no marker while the build implements only rules version 1', async () => {
     const pool = new MemoryMediaPool()
-    const ledger = new AgentTeamLedger(await openTable(pool))
+    const ledger = new AgentTeamLedger(await openTable(pool), { rulesVersion: 1 })
     await ledger.initialize()
     await createProject(ledger, 'plain')
     expect(storedKinds(pool)).toEqual(['team/initialized', 'team/project-created'])
@@ -81,7 +81,7 @@ describe('rules version markers', () => {
 
   it('adopts a later version once, ahead of every write queued behind initialize', async () => {
     const pool = new MemoryMediaPool()
-    const before = new AgentTeamLedger(await openTable(pool))
+    const before = new AgentTeamLedger(await openTable(pool), { rulesVersion: 1 })
     await before.initialize()
     await createProject(before, 'old')
     await closeAll()
@@ -107,10 +107,10 @@ describe('rules version markers', () => {
 
   it('refuses a ledger that a newer build has moved to a later version', async () => {
     const pool = new MemoryMediaPool()
-    await new AgentTeamLedger(await openTable(pool), { rulesVersion: 2 }).initialize()
+    await new AgentTeamLedger(await openTable(pool), { rulesVersion: 3 }).initialize()
     await closeAll()
     const table = await openTable(pool)
-    expect(() => new AgentTeamLedger(table)).toThrow(/adopted rules version 2, but this build implements up to 1/)
+    expect(() => new AgentTeamLedger(table)).toThrow(/adopted rules version 3, but this build implements up to 2/)
   })
 
   it.each([

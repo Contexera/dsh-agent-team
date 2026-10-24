@@ -30,6 +30,7 @@ vi.setConfig({ testTimeout: 30_000 })
 function ledgerWithProbe(facility: DomainFacility, probe: (memberId: string, fact: AgentTeamThreadReadFact) => boolean): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, {
     isFactVisible: (memberId, fact) => probe(memberId, fact),
+    rulesVersion: 1,
   })
 }
 
@@ -125,7 +126,7 @@ describe('the visible-surface exemption lets a write through', () => {
     const thread = await threadWithUnreadReply(seed, test.workspaceId, actor)
 
     // A ledger built without the option is exactly the old behaviour.
-    const plain = new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as never)
+    const plain = new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as never, { rulesVersion: 1 })
     const blocked = await plain.reply({ requestId: 'blocked' as AgentTeamRequestId, workspaceId: test.workspaceId, taskRef: thread.taskRef,
       body: 'Reply without read', baseRevision: thread.revision, actor })
     expect(blocked.value.kind).toBe('unread_required')

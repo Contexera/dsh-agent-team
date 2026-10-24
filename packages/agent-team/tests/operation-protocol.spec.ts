@@ -1327,6 +1327,7 @@ async function seedLedger(): Promise<void> {
   const table = domain.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
   const refCounts = new Map<string, number>()
   ledger = new AgentTeamLedger(table, {
+    rulesVersion: 1,
     ref: kind => {
       const next = (refCounts.get(kind) ?? 0) + 1
       refCounts.set(kind, next)

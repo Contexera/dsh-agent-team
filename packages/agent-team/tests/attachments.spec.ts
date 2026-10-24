@@ -50,13 +50,13 @@ async function harness(): Promise<{ readonly ctx: Context; readonly facility: Do
   provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
-  let fiber = await ctx.plugin(AgentTeam)
+  let fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   // Restart the Host in place: the ledger and the attachment cache are durable,
   // so a fresh plugin instance must converge on the entries the old one wrote.
   // The cleanup below always disposes whichever instance is live at the end.
   const restart = async (): Promise<void> => {
     await fiber.dispose()
-    fiber = await ctx.plugin(AgentTeam)
+    fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   }
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, facility, restart }
@@ -68,7 +68,7 @@ async function cacheEntries(): Promise<readonly string[]> {
 }
 
 function ledgerAtBoot(facility: DomainFacility): AgentTeamLedger {
-  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
+  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
 }
 
 describe('attachment file hygiene', () => {

@@ -51,7 +51,7 @@ async function harness(): Promise<{ readonly ctx: Context }> {
   ctx.provide('sessionPersistence', { list: async () => [] })
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx }
 }

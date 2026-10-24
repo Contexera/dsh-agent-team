@@ -58,7 +58,7 @@ async function harness(pool = new MemoryMediaPool(), workspaceIds = [alpha]): Pr
   ctx.provide('sessionPersistence', { list: async () => [] })
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, fiber, facility }
 }
@@ -74,7 +74,7 @@ function withTask<T extends { readonly task?: AgentTeamTask }>(result: T): T & {
 }
 
 function replayLedgerAtConstruction(test: TeamHarness): AgentTeamLedger {
-  return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
+  return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
 }
 
 async function addLedgerMember(

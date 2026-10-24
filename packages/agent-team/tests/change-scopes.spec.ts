@@ -42,13 +42,13 @@ async function harness(): Promise<{ readonly ctx: Context; readonly facility: Do
   provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, facility }
 }
 
 function ledgerAtBoot(facility: DomainFacility): AgentTeamLedger {
-  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
+  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
 }
 
 async function commitMemberRecordDirectlyOnLedger(ledger: AgentTeamLedger, projectRef: AgentTeamProjectRef): Promise<AgentTeamMemberActor> {
@@ -88,7 +88,7 @@ async function restartHarness(pool: MemoryMediaPool): Promise<{ readonly ctx: Co
   provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, facility, fiber }
 }
@@ -354,7 +354,7 @@ describe('ledger change scope and affected member derivation', () => {
     ctx.provide('storageDomain', facility)
     cleanups.push(async () => { await facility.closeAll() })
     const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-    const ledger = new AgentTeamLedger(domain.table('operations'))
+    const ledger = new AgentTeamLedger(domain.table('operations'), { rulesVersion: 1 })
     await ledger.initialize()
 
     const created = (await ledger.createProject({

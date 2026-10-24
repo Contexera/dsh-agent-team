@@ -18,10 +18,10 @@
 - 原四张工单拆为九张（原文保留在 `materials/superseded-issues/`）。拆分原因：稳定 profile 与开发 profile 共用 `$DSH_HOME/storages/agent_team.sqlite`，改名必须先发布一个“读得懂 Project 写法”的版本；原 02 范围过大，拆为规则版本机制、owner、主对话、投递四步，规则版本 2 的标记在 06 完成前不写入真实 ledger。
 - 01 已完成（`feat: read the project spelling of stored channel records`），等待发布到稳定 profile。
 - 02 已完成（`refactor: rename channel to project across the bundle`），等待 Human 在本地 dev profile 用真实 `agent_team.sqlite` 副本验收。发布顺序：先发布含 01、不含 02 的版本并装到稳定 profile，再让开发 profile 使用 02。
-- 03 已完成（`feat: record rules version adoption in the team ledger`）。04 已完成（`feat: add project owners to the team ledger behind rules version 2`）。05 已完成（`feat: add the main stream and owner-only thread start behind rules version 2` 及 Client 的 `feat: show the project main stream with thread cards behind rules version 2`）。06 可以开始；04–05 的规则按版本 2 编写，但 `AGENT_TEAM_RULES_VERSION` 在 06 完成前保持 1，真实 ledger 不会采用版本 2。
-- 05 的 Client 把版本 2 的主对话放在独立组件里（`TeamMainStream` 等）；06 启用版本 2 时删除 Client 的版本 1 路径（旧 feed、`@all`、邀请确认），Host 的版本 1 规则只保留 replay 校验。
+- 03 已完成（`feat: record rules version adoption in the team ledger`）。04 已完成（`feat: add project owners to the team ledger behind rules version 2`）。05 已完成（`feat: add the main stream and owner-only thread start behind rules version 2` 及 Client 的 `feat: show the project main stream with thread cards behind rules version 2`）。06 进行中；预览开关已移除，`AGENT_TEAM_RULES_VERSION` 升到 2，本构建打开的每个 ledger 都采用版本 2，测试用 Host 行的非 volatile `rulesVersion` 配置钉住版本 1 路径。
+- 05 的 Client 把版本 2 的主对话放在独立组件里（`TeamMainStream` 等）；06 删除 Client 的版本 1 路径（旧 feed、`@all`、邀请确认），Host 的版本 1 写入路径一并移除，只保留 replay 校验。
 - `spec.md` §13 三项探针：DM 的 Workspace 边界已在 Host `sendDm` 校验；旧 accept 缺 `acceptedClaimRefs` 时已有回退，03 补测试；规则标记与启动恢复的写入顺序已在 03 查清并由 `initialize()` 保证。
-- 版本 2 的规则在 04–06 间逐步落地；预览开关 `DSH_AGENT_TEAM_PREVIEW_RULES=1` 只用于一次性 `DSH_HOME`（浏览器测试即如此），不可用于与稳定 profile 共用的 ledger。
+- 版本 2 的规则在 04–06 间逐步落地；预览开关 `DSH_AGENT_TEAM_PREVIEW_RULES` 已移除，版本 2 是默认规则，无需任何环境变量。
 - 无需要 Human 拍板的未决产品问题。
 
 ## 完成条件
@@ -31,7 +31,7 @@
 - [x] 03 规则版本机制
 - [x] 04 Agent owner 与 Project member 派生
 - [x] 05 项目主对话与开 Thread 权限
-- [ ] 06 按责任投递、Inbox 与 Agent 指引；启用规则版本 2；之后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续
+- [ ] 06 按责任投递、Inbox 与 Agent 指引；规则版本 2 已随移除预览开关启用；完成后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续
 - [ ] 07 Task board 投影与 `team_task`
 - [ ] 08 Task 负责人、转交与验收限制；启用规则版本 3
 - [ ] 09 待验收积压与停滞提醒

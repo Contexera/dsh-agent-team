@@ -150,10 +150,11 @@ describe('Agent Team real composition', () => {
     process.env.DSH_HOME = roots[0]
     try {
       expect(first.agentTeam.status()).toEqual(expect.objectContaining({
-        sequence: 1,
-        operationCount: 1,
+        sequence: 2,
+        operationCount: 2,
         projectCount: 0,
         agentMemberCount: 0,
+        rulesVersion: 2,
       }))
     } finally {
       if (previous === undefined) delete process.env.DSH_HOME
@@ -167,7 +168,7 @@ describe('Agent Team real composition', () => {
     const reopened = second.agentTeam
     const storageDomain = second.get('storageDomain')
     if (reopened === undefined || storageDomain === undefined) throw new Error('the reopened composition lost a service under test')
-    expect(reopened.status()).toEqual(expect.objectContaining({ sequence: 1, operationCount: 1 }))
+    expect(reopened.status()).toEqual(expect.objectContaining({ sequence: 2, operationCount: 2, rulesVersion: 2 }))
     expect(storageDomain.get('agent_team')).toBeUndefined()
     expect(pool.media.size).toBe(0)
   })
@@ -177,8 +178,8 @@ describe('Agent Team real composition', () => {
     const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000aa' as WorkspaceId
     const first = await load(pool)
     const project = await first.agentTeam.createProject({ requestId: requestId('project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const anchor = committed(await first.agentTeam.sendMessage({ requestId: requestId('anchor'), workspaceId,
-      projectRef: project.project.projectRef, body: 'Please investigate this' }))
+    const anchor = committed(await first.agentTeam.startThread({ requestId: requestId('anchor'), workspaceId,
+      projectRef: project.project.projectRef, kind: 'discussion', body: 'Please investigate this' }))
     const reply = committed(await first.agentTeam.reply({ requestId: requestId('reply'), workspaceId,
       threadRef: anchor.thread.threadRef, baseRevision: anchor.thread.revision, body: 'Looking now',
       replyToMessageRef: anchor.message.messageRef }))

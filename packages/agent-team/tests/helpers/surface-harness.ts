@@ -36,6 +36,6 @@ export async function harness(): Promise<TeamHarness> {
   // boundary; a zero-usage meter keeps pressure out of every surface assertion.
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   return { ctx, fiber, facility, workspaceId }
 }

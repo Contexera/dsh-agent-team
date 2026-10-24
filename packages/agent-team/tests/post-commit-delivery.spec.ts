@@ -23,7 +23,7 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
 
-async function harness(): Promise<{ readonly ctx: Context }> {
+async function harness(rulesVersion: 1 | 2 = 1): Promise<{ readonly ctx: Context }> {
   const ctx = new Context()
   await ctx.plugin(Storage)
   ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
@@ -43,7 +43,7 @@ async function harness(): Promise<{ readonly ctx: Context }> {
   provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion })
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx }
 }
@@ -199,29 +199,22 @@ describe('post-commit delivery', () => {
   })
 
   it('wakes a Member through its Main stream markers: a mention, and its own grant of ownership', async () => {
-    const preview = process.env.DSH_AGENT_TEAM_PREVIEW_RULES
-    process.env.DSH_AGENT_TEAM_PREVIEW_RULES = '1'
-    try {
-      const { ctx } = await harness()
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('main-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
-      const member = await addLiveMember(ctx, project.project.projectRef)
-      const { agent, state } = wakeSeam()
-      state.fail = false
-      ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
+    const { ctx } = await harness(2)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('main-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
+    const { agent, state } = wakeSeam()
+    state.fail = false
+    ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
 
-      await ctx.agentTeam.addProjectOwner({ requestId: requestId('main-owner'), workspaceId: alpha, projectRef: project.project.projectRef, memberId: member.memberId })
-      const owner = state.calls.at(-1)?.content[0]
-      expect(owner).toMatchObject({ type: 'text', text: expect.stringContaining('made you an owner of Project engineering') })
+    await ctx.agentTeam.addProjectOwner({ requestId: requestId('main-owner'), workspaceId: alpha, projectRef: project.project.projectRef, memberId: member.memberId })
+    const owner = state.calls.at(-1)?.content[0]
+    expect(owner).toMatchObject({ type: 'text', text: expect.stringContaining('made you an owner of Project engineering') })
 
-      const posted = await ctx.agentTeam.postMainMessage({ requestId: requestId('main-post'), workspaceId: alpha, projectRef: project.project.projectRef,
-        body: 'Over to you', recipients: [member.memberId] })
-      expect(posted.kind).toBe('committed')
-      const mention = state.calls.at(-1)?.content[0]
-      expect(mention).toMatchObject({ type: 'text', text: expect.stringContaining('Direct Main stream mention') })
-      expect(mention).toMatchObject({ text: expect.stringContaining(`team_thread read with the relevant workspace and projectRef`) })
-    } finally {
-      if (preview === undefined) delete process.env.DSH_AGENT_TEAM_PREVIEW_RULES
-      else process.env.DSH_AGENT_TEAM_PREVIEW_RULES = preview
-    }
+    const posted = await ctx.agentTeam.postMainMessage({ requestId: requestId('main-post'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: 'Over to you', recipients: [member.memberId] })
+    expect(posted.kind).toBe('committed')
+    const mention = state.calls.at(-1)?.content[0]
+    expect(mention).toMatchObject({ type: 'text', text: expect.stringContaining('Direct Main stream mention') })
+    expect(mention).toMatchObject({ text: expect.stringContaining(`team_thread read with the relevant workspace and projectRef`) })
   })
 })

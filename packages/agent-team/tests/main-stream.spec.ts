@@ -108,7 +108,7 @@ describe('rules version gating of the Main stream kinds', () => {
 
     for (const record of copied) {
       const pool = new MemoryMediaPool()
-      await new AgentTeamLedger(await openTable(pool)).initialize()
+      await new AgentTeamLedger(await openTable(pool), { rulesVersion: 1 }).initialize()
       appendStored(pool, record)
       const table = await openTable(pool)
       expect(() => new AgentTeamLedger(table), record.kind).toThrow(/needs rules version 2/)
@@ -326,7 +326,7 @@ describe('earlier-version Threads and replay', () => {
   it('shows version-1 top-level Threads as cards that are not unread, and reproduces every projection on replay', async () => {
     const pool = new MemoryMediaPool()
     const table = await openTable(pool)
-    const legacy = new AgentTeamLedger(table)
+    const legacy = new AgentTeamLedger(table, { rulesVersion: 1 })
     await legacy.initialize()
     const projectRef = (await legacy.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'alpha', description: '', memberIds: [] })).value.project.projectRef
     const sent = await legacy.sendMessage({ requestId: requestId('send'), actor: human, workspaceId: alpha, projectRef, body: 'old task', asTask: true })

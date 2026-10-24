@@ -61,7 +61,7 @@ async function harness(
   ctx.provide('sessionPersistence', { list: async () => [] })
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = config === undefined ? await ctx.plugin(AgentTeam) : await ctx.plugin(AgentTeam, config)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1, ...config })
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, fiber, facility }
 }
@@ -82,7 +82,7 @@ async function sqliteHarness(path: string): Promise<TeamHarness> {
   ctx.provide('sessionPersistence', { list: async () => [] })
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll(); await backend.close() })
   return { ctx, fiber, facility }
 }
@@ -131,7 +131,7 @@ function withTask<T extends { readonly task?: AgentTeamTask }>(result: T): T & {
 }
 
 function ledgerAtBoot(test: TeamHarness): AgentTeamLedger {
-  return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
+  return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
 }
 
 async function addLedgerMember(
@@ -250,7 +250,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 1, operationCount: 1, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, rulesVersion: 1 })
     const records = [...pool.media.get('agent_team')!.tables.get('operations')!.values()]
     await first.fiber.dispose()
-    const replay = await first.ctx.plugin(AgentTeam)
+    const replay = await first.ctx.plugin(AgentTeam, { rulesVersion: 1 })
     expect(first.ctx.agentTeam.status()).toMatchObject({ sequence: 1 })
     expect([...pool.media.get('agent_team')!.tables.get('operations')!.values()]).toEqual(records)
     await replay.dispose()

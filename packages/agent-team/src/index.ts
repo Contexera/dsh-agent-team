@@ -46,7 +46,7 @@ import { installMemberCompaction, DEFAULT_MEMBER_COMPACTION, type MemberCompacti
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { surfaceVisibilityProbe, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER } from './surface-visibility.ts'
 import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
-import { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_PREVIEW_RULES_ENV, AGENT_TEAM_PREVIEW_RULES_VERSION, AGENT_TEAM_RULES_VERSION, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_RULES_VERSION, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
@@ -283,12 +283,15 @@ declare module '@deepseek-ai/cordis' {
 /**
  * Config of the Team Host row: the Human profile (see human-profile.ts).
  * The settings service offers a form only for volatile fields, so a non-volatile field would be invisible and unwritable.
+ * `rulesVersion` is that invisible kind: the ledger opens at the build's current rules version unless a deployment pins
+ * an older one, and only the plugin config (not the settings form) can set it.
  */
 export interface Config {
   name: Volatile<string>
   avatarRef: Volatile<string | undefined>
   wakeRecycle: Volatile<WakeRecycleConfig>
   memberCompaction: Volatile<MemberCompactionConfig>
+  rulesVersion?: number
 }
 
 /** The wake-swap thresholds as one volatile group, with its own defaults so an unwritten profile still resolves a complete config. */
@@ -312,6 +315,7 @@ export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
   wakeRecycle: WAKE_RECYCLE_SETTINGS_SCHEMA,
   memberCompaction: MEMBER_COMPACTION_SETTINGS_SCHEMA,
+  rulesVersion: z.number().step(1).min(1).max(AGENT_TEAM_RULES_VERSION).default(AGENT_TEAM_RULES_VERSION),
 })
 
 export default class AgentTeam extends TypertRemoteService {
@@ -753,8 +757,7 @@ export default class AgentTeam extends TypertRemoteService {
     this.domain = domain
     const ledger = new AgentTeamLedger(domain.table('operations'), {
       isFactVisible: surfaceVisibilityProbe(memberId => this.handles.get(memberId)?.agent),
-      // Never set this on a ledger another profile shares: builds without the preview refuse the ledger afterwards.
-      rulesVersion: process.env[AGENT_TEAM_PREVIEW_RULES_ENV] === '1' ? AGENT_TEAM_PREVIEW_RULES_VERSION : AGENT_TEAM_RULES_VERSION,
+      rulesVersion: this.config.rulesVersion ?? AGENT_TEAM_RULES_VERSION,
     })
     this.ledger = ledger
     // A live Config edit in the constructor's window may have arrived before

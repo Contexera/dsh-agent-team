@@ -202,6 +202,7 @@ async function realHarness(
   persistenceBackend: PersistenceBackend = 'jsonl',
   reopen?: { readonly root: string },
   realCompaction = false,
+  rulesVersion: 1 | 2 = 1,
 ): Promise<{
   readonly ctx: Context
   readonly workspaceId: WorkspaceId
@@ -302,7 +303,7 @@ async function realHarness(
       archived.push(sessionId)
     },
   })
-  const teamFiber = await ctx.plugin(AgentTeam)
+  const teamFiber = await ctx.plugin(AgentTeam, { rulesVersion })
   cleanups.push(async () => { await ctx.fiber.dispose(); await facility.closeAll(); await rm(root, { recursive: true, force: true }) })
   return { ctx, workspaceId, root, checkout, workspaces, teamFiber, archived, archiveFailures, presets: ctx.agentPresets as TestablePresets, pressureState, jobsState }
 }
@@ -364,39 +365,32 @@ describe('Agent Team Member lifecycle', () => {
   })
 
   it('speaks, reads and starts through the Main stream tools once the ledger runs rules version 2', async () => {
-    const preview = process.env.DSH_AGENT_TEAM_PREVIEW_RULES
-    process.env.DSH_AGENT_TEAM_PREVIEW_RULES = '1'
-    try {
-      const adapter = new ScriptedAdapter()
-      const { ctx, workspaceId } = await realHarness(adapter)
-      const project = await ctx.agentTeam.createProject({ requestId: requestId('main-project'), workspaceId, name: 'work', description: '', memberIds: [] })
-      const projectRef = project.project.projectRef
-      const added = await ctx.agentTeam.addMember({ requestId: requestId('main-add'), workspaceId, handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef] })
-      const agent = ctx.agents.get(added.status.member.sessionId)!
-      const run = async (name: string, args: Record<string, unknown>) => {
-        const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`main-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
-        return result.isError ? { error: result.error.message } : { text: JSON.stringify(result) }
-      }
-
-      await ctx.agentTeam.postMainMessage({ requestId: requestId('main-human'), workspaceId, projectRef, body: 'Plain note from the Human' })
-      expect(await run('team_thread', { action: 'read', projectRef })).toMatchObject({ text: expect.stringContaining('Plain note from the Human') })
-      expect(await run('team_message', { action: 'post', projectRef, body: 'Agent speaking' })).toMatchObject({ text: expect.stringContaining('Main stream message posted') })
-      // Not an owner yet: starting a Thread points back to the Main stream.
-      expect(await run('team_message', { action: 'start', projectRef, kind: 'discussion', body: 'x' })).toMatchObject({ error: expect.stringMatching(/project_owner_required.*team_message post/s) })
-      // The removed asTask spelling is refused with the route to kind, never dropped: a silent drop would commit a
-      // discussion while the model believes it started a Task.
-      expect(await run('team_message', { action: 'start', projectRef, asTask: true, body: 'x' })).toMatchObject({ error: expect.stringMatching(/start does not accept asTask.*kind: 'task'/s) })
-
-      adapter.enqueue(textResponse('Noted my new ownership.'))
-      await ctx.agentTeam.addProjectOwner({ requestId: requestId('main-owner'), workspaceId, projectRef, memberId: added.status.member.memberId })
-      await agent.whenIdle()
-      expect(await run('team_message', { action: 'start', projectRef, kind: 'task', body: 'Build the importer' })).toMatchObject({ text: expect.stringContaining('Thread created') })
-      expect(ctx.agentTeam.mainStreamHistory({ workspaceId, projectRef }).entries.map(entry => entry.kind)).toEqual(['message', 'message', 'activity', 'thread-card'])
-      ctx.agentTeam.validateLedger()
-    } finally {
-      if (preview === undefined) delete process.env.DSH_AGENT_TEAM_PREVIEW_RULES
-      else process.env.DSH_AGENT_TEAM_PREVIEW_RULES = preview
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter, 'jsonl', undefined, false, 2)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('main-project'), workspaceId, name: 'work', description: '', memberIds: [] })
+    const projectRef = project.project.projectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('main-add'), workspaceId, handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef] })
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const run = async (name: string, args: Record<string, unknown>) => {
+      const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`main-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
+      return result.isError ? { error: result.error.message } : { text: JSON.stringify(result) }
     }
+
+    await ctx.agentTeam.postMainMessage({ requestId: requestId('main-human'), workspaceId, projectRef, body: 'Plain note from the Human' })
+    expect(await run('team_thread', { action: 'read', projectRef })).toMatchObject({ text: expect.stringContaining('Plain note from the Human') })
+    expect(await run('team_message', { action: 'post', projectRef, body: 'Agent speaking' })).toMatchObject({ text: expect.stringContaining('Main stream message posted') })
+    // Not an owner yet: starting a Thread points back to the Main stream.
+    expect(await run('team_message', { action: 'start', projectRef, kind: 'discussion', body: 'x' })).toMatchObject({ error: expect.stringMatching(/project_owner_required.*team_message post/s) })
+    // The removed asTask spelling is refused with the route to kind, never dropped: a silent drop would commit a
+    // discussion while the model believes it started a Task.
+    expect(await run('team_message', { action: 'start', projectRef, asTask: true, body: 'x' })).toMatchObject({ error: expect.stringMatching(/start does not accept asTask.*kind: 'task'/s) })
+
+    adapter.enqueue(textResponse('Noted my new ownership.'))
+    await ctx.agentTeam.addProjectOwner({ requestId: requestId('main-owner'), workspaceId, projectRef, memberId: added.status.member.memberId })
+    await agent.whenIdle()
+    expect(await run('team_message', { action: 'start', projectRef, kind: 'task', body: 'Build the importer' })).toMatchObject({ text: expect.stringContaining('Thread created') })
+    expect(ctx.agentTeam.mainStreamHistory({ workspaceId, projectRef }).entries.map(entry => entry.kind)).toEqual(['message', 'message', 'activity', 'thread-card'])
+    ctx.agentTeam.validateLedger()
   })
 
   it('accepts a unique Workspace id abbreviation and points at the fix when the abbreviation is not unique', async () => {
@@ -562,7 +556,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(ctx.agents.get(added.status.member.sessionId)).toBeUndefined()
 
     await teamFiber.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
     // Startup finishes the owed hide half from the durable state alone and
     // never activates the archived Member as an enabled one.
@@ -596,7 +590,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(ctx.agentTeam['handles'].has(memberId)).toBe(true)
 
     await teamFiber.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
     expect(archived).toEqual([added.status.member.sessionId])
     expect(ctx.agents.get(added.status.member.sessionId)).toBeUndefined()
@@ -624,7 +618,7 @@ describe('Agent Team Member lifecycle', () => {
     await expect(access(join(memoryPath, 'notes', 'kept.md'))).resolves.toBeUndefined()
 
     await teamFiber.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
     await expect(access(memoryPath)).rejects.toThrow()
     expect(archived).toEqual([added.status.member.sessionId])
@@ -648,7 +642,7 @@ describe('Agent Team Member lifecycle', () => {
     // cleanup, fails again, and must neither take the Host down with it nor
     // cost the rest of the roster their activation.
     await teamFiber.dispose()
-    const boot = await ctx.plugin(AgentTeam)
+    const boot = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
     expect(boot).toBeDefined()
     expect(ctx.agentTeam.members().find(item => item.member.memberId === removed.status.member.memberId)?.availability).toBe('inactive')
     expect(ctx.agentTeam.members().find(item => item.member.memberId === keeper.status.member.memberId)?.availability).toBe('active')
@@ -659,7 +653,7 @@ describe('Agent Team Member lifecycle', () => {
     // finishes what is still owed.
     rmFault.match = ''
     await boot.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
     await expect(access(removed.status.member.privateMemoryPath)).rejects.toThrow()
     expect(archived).toEqual([removed.status.member.sessionId])
     expect(ctx.agentTeam.members().find(item => item.member.memberId === keeper.status.member.memberId)?.availability).toBe('active')
@@ -689,7 +683,7 @@ describe('Agent Team Member lifecycle', () => {
     await expect(access(join(added.status.member.privateMemoryPath, 'notes', 'kept.md'))).resolves.toBeUndefined()
 
     await teamFiber.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
     const restored = ctx.agentTeam.members().find(item => item.member.memberId === memberId)
     expect(restored).toMatchObject({ availability: 'suspended', presence: 'unavailable' })
@@ -802,7 +796,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(before?.diagnostic?.detail).toContain('401')
 
     await teamFiber.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
     // Straight after the boot the Member has already been woken by the
     // restart, so it is working rather than still marked failed — the error
@@ -917,7 +911,7 @@ describe('Agent Team Member lifecycle', () => {
       if (consulted === 1) throw persistenceRaceError()
       return realList()
     }
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
     const restored = await waitFor(() => {
       const status = ctx.agentTeam.members().find(item => item.member.handle === 'retrier')
       return status !== undefined && status.availability === 'active' ? status : undefined
@@ -935,7 +929,7 @@ describe('Agent Team Member lifecycle', () => {
     // initial Project list is valid and must not be rejected as divergent.
     expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
     await teamFiber.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
     expect(ctx.agentTeam.status().agentMemberCount).toBe(1)
     const agent = ctx.agents.get(bare.status.member.sessionId)!
     expect(agent).toBeDefined()
@@ -1861,7 +1855,7 @@ describe('Agent Team Member lifecycle', () => {
     adapter.enqueue(textResponse('I will inspect remounted Inbox work.'))
     const info = vi.spyOn(ctx.logger, 'info')
     await teamFiber.dispose()
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
     const restored = ctx.agents.get(builder.status.member.sessionId)!
     await restored.whenIdle()
     const lastRequest = JSON.stringify(adapter.requests.at(-1)!.messages)
@@ -1914,7 +1908,7 @@ describe('Agent Team Member lifecycle', () => {
     await ctx.agentTeam.suspendMember({ requestId: requestId('persisted-model-suspend'), memberId: added.status.member.memberId })
     await teamFiber.dispose()
     await new Promise(resolve => setImmediate(resolve))
-    await ctx.plugin(AgentTeam)
+    await ctx.plugin(AgentTeam, { rulesVersion: 1 })
     await ctx.agentTeam.resumeMember({ requestId: requestId('persisted-model-resume'), memberId: added.status.member.memberId })
     const resumed = await waitFor(() => {
       const restarted = ctx.agents.get(added.status.member.sessionId)
@@ -2343,7 +2337,7 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       }
       await initialFiber.dispose()
       await new Promise(resolve => setImmediate(resolve))
-      await ctx.plugin(AgentTeam)
+      await ctx.plugin(AgentTeam, { rulesVersion: 1 })
       const blocked = await waitFor(() => {
         const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         return status !== undefined && status.availability === 'unavailable' ? status : undefined
@@ -2376,7 +2370,7 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       }
       await initialFiber.dispose()
       await new Promise(resolve => setImmediate(resolve))
-      await ctx.plugin(AgentTeam)
+      await ctx.plugin(AgentTeam, { rulesVersion: 1 })
       await waitFor(() => {
         const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         return status !== undefined && status.availability === 'unavailable' ? status : undefined
@@ -2404,7 +2398,7 @@ describe('Agent Team Member lifecycle: context, acceptance, and activation (tick
       const warn = vi.spyOn(ctx.logger, 'warn')
       await initialFiber.dispose()
       await new Promise(resolve => setImmediate(resolve))
-      await ctx.plugin(AgentTeam)
+      await ctx.plugin(AgentTeam, { rulesVersion: 1 })
       await waitFor(() => {
         const status = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
         return status !== undefined && status.availability === 'unavailable' && status.diagnostic?.class === 'preset-composition' ? status : undefined
@@ -3678,7 +3672,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       // A restart re-activates from the ledger binding alone: the stored log is
       // priced first, and a cold generation is never even resumed.
       await teamFiber.dispose()
-      await ctx.plugin(AgentTeam)
+      await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
       const successor = await vi.waitFor(() => {
         const current = ctx.agentTeam.members().find(entry => entry.member.memberId === memberId)
@@ -3727,7 +3721,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
         await handle.close()
       }
 
-      await ctx.plugin(AgentTeam)
+      await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
       const resumed = await vi.waitFor(() => {
         const live = ctx.agents.get(sessionId)
@@ -3799,7 +3793,7 @@ describe('Agent Team cold-generation activation (ticket 05)', () => {
       await vi.advanceTimersByTimeAsync(10 * 60_000)
 
       await teamFiber.dispose()
-      await ctx.plugin(AgentTeam)
+      await ctx.plugin(AgentTeam, { rulesVersion: 1 })
 
       await vi.waitFor(() => {
         const live = ctx.agents.get(sessionId)

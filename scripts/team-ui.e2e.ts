@@ -243,6 +243,16 @@ async function entryUnreadCapsule(page: Page, lineSelector: string): Promise<Ret
  * profile package. Only the first case of a run clears the artifacts
  * directory (`clearArtifacts`).
  */
+/** Pin the staged bundle's Host row to an older rules version: the v1-era journeys still cover the v1 Client paths and invitation flow that ticket 06 deletes. */
+async function pinRulesVersion(version: 1 | 2): Promise<void> {
+  if (version === 2) return
+  const patch = join(STAGED_BUNDLE, 'cordis.patch.yml')
+  const text = await readFile(patch, 'utf8')
+  const host = "        - id: wowyuarm-agent-team-host\n          name: '@contexera/dsh-agent-team/host'\n"
+  if (!text.includes(host)) throw new Error('host row not found in the staged patch')
+  await writeFile(patch, text.replace(host, `${host}          config:\n            rulesVersion: ${version}\n`))
+}
+
 async function installLocalBundle(clearArtifacts = true): Promise<void> {
   await rm(HOME, { recursive: true, force: true })
   if (clearArtifacts) await rm(BROWSER_ARTIFACTS, { recursive: true, force: true })
@@ -319,6 +329,7 @@ it('toggles the complete bundle without restarting the session controller', asyn
 
 it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await installLocalBundle()
+  await pinRulesVersion(1)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -3120,9 +3131,12 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await page.getByRole('button', { name: '# ref-repro', exact: true }).click()
   await page.getByRole('heading', { name: '# ref-repro', exact: true }).waitFor()
   const projectComposer = page.getByRole('textbox', { name: '消息内容' })
+  // At rules version 2 a plain send posts to the Main stream, so the cited Thread
+  // comes from the 讨论 toggle instead of a top-level send.
+  await page.getByRole('button', { name: '讨论/任务' }).click()
   await projectComposer.fill('ALPHA-ROOT-MARKER alpha discussion opens here')
   await page.getByRole('button', { name: '发送', exact: true }).click()
-  await page.locator('[data-team-project] article').filter({ hasText: 'ALPHA-ROOT-MARKER' }).waitFor()
+  await page.locator('[data-main-card="discussion"]').filter({ hasText: 'ALPHA-ROOT-MARKER' }).waitFor()
   // The abbreviated 8-hex spelling: resolution, not spelling, decides
   // linkability.
   const workspaceId = scaffold.ctx.workspaceRegistry.list()[0]!.id
@@ -3169,6 +3183,7 @@ const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42
  */
 it('configures the Team page identity from Settings in real Web', async () => {
   await installLocalBundle(false)
+  await pinRulesVersion(1)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -3430,9 +3445,7 @@ it('states the local environment check on the Team page', async () => {
 
 it('edits Project owners from the Project dialog under rules version 2 in real Web', async () => {
   await installLocalBundle(false)
-  // The Host adopts rules version 2 on its ledger at mount; the default build stays on version 1.
-  process.env.DSH_AGENT_TEAM_PREVIEW_RULES = '1'
-  try {
+  {
     scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
     browser = await chromium.launch({ headless: true, executablePath: CHROME })
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -3492,15 +3505,12 @@ it('edits Project owners from the Project dialog under rules version 2 in real W
     await narrowOwners.getByRole('button', { name: '添加负责人 @steward' }).waitFor()
     expect(scaffold.ctx.agentTeam.view({ workspaceId }).owners).toHaveLength(0)
     expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
-  } finally {
-    delete process.env.DSH_AGENT_TEAM_PREVIEW_RULES
   }
 }, 180_000)
 
 it('posts, starts a discussion and a Task, and opens cards in the Main stream under rules version 2 in real Web', async () => {
   await installLocalBundle(false)
-  process.env.DSH_AGENT_TEAM_PREVIEW_RULES = '1'
-  try {
+  {
     scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
     browser = await chromium.launch({ headless: true, executablePath: CHROME })
     const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -3602,7 +3612,5 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
       .filter(element => element.getBoundingClientRect().right > window.innerWidth + 0.5).length)
     expect(overflowing).toBe(0)
     expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
-  } finally {
-    delete process.env.DSH_AGENT_TEAM_PREVIEW_RULES
   }
 }, 180_000)

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
+## [Unreleased]
+
+**Upgrade note**
+
+- Rules version 2 is now the default and the `DSH_AGENT_TEAM_PREVIEW_RULES` preview switch is gone: this build adopts version 2 on every ledger it opens. A build at or below 0.2.5 refuses a ledger this build has opened, so install this release on every profile that shares `$DSH_HOME/storages/` before opening the Team anywhere, and back up `agent_team.sqlite` first. A deployment can pin the older rules through the Host row's non-volatile `rulesVersion` config.
+
 ## [0.2.5] - 2026-10-24
 
 **Upgrade note**

@@ -188,14 +188,7 @@ export function agentTeamHumanActor(): AgentTeamHumanActor {
 const HOST_ACTOR: AgentTeamHostActor = Object.freeze({ kind: 'host', handle: 'agent-team' })
 
 /** Highest validation-rules version this build implements; a ledger segment without a marker is version 1. */
-export const AGENT_TEAM_RULES_VERSION = 1
-
-/**
- * Rules version still under construction. Only an explicit preview opt-in adopts it, because its rules may still
- * change: a ledger that adopted it can stop replaying on a later build, and no build without the opt-in opens it.
- */
-export const AGENT_TEAM_PREVIEW_RULES_VERSION = 2
-export const AGENT_TEAM_PREVIEW_RULES_ENV = 'DSH_AGENT_TEAM_PREVIEW_RULES'
+export const AGENT_TEAM_RULES_VERSION = 2
 
 function freezeActor(actor: AgentTeamActor): AgentTeamActor {
   if (actor.kind === 'host') return Object.freeze({ kind: 'host', handle: actor.handle })
@@ -2598,8 +2591,7 @@ export class AgentTeamLedger {
       const { version } = operation.data
       if (version <= projection.rulesVersion) throw new Error(`agent-team operation ${operation.sequence} adopts rules version ${version} after version ${projection.rulesVersion}`)
       if (version > this.rulesVersion) {
-        const remedy = version <= AGENT_TEAM_PREVIEW_RULES_VERSION ? `it was opened with the ${AGENT_TEAM_PREVIEW_RULES_ENV}=1 preview` : 'open it with a newer release'
-        throw new Error(`agent-team ledger adopted rules version ${version}, but this build implements up to ${this.rulesVersion}; ${remedy}`)
+        throw new Error(`agent-team ledger adopted rules version ${version}, but this build implements up to ${this.rulesVersion}; open it with a newer release`)
       }
       return
     }

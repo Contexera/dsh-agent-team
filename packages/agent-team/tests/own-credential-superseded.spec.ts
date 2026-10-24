@@ -9,7 +9,7 @@ import { harness } from './helpers/surface-harness.ts'
 vi.setConfig({ testTimeout: 30_000 })
 
 function ledgerFor(facility: DomainFacility): AgentTeamLedger {
-  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, {})
+  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
 }
 
 function operationsOf(facility: DomainFacility): readonly AgentTeamOperation[] {

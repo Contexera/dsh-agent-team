@@ -43,7 +43,7 @@ async function openLedger(): Promise<{ readonly ledger: AgentTeamLedger; readonl
   cleanups.push(async () => { await facility.closeAll() })
   const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
   const table = domain.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
-  return { ledger: new AgentTeamLedger(table), table }
+  return { ledger: new AgentTeamLedger(table, { rulesVersion: 1 }), table }
 }
 
 function memberActor(memberId: string, handle: string): AgentTeamMemberActor {
@@ -292,7 +292,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
 
     // ---- Independent replay: the derived indexes rebuild identically. ----
     expect(() => ledger.validate()).not.toThrow()
-    const fresh = new AgentTeamLedger(table)
+    const fresh = new AgentTeamLedger(table, { rulesVersion: 1 })
     expect(projectionSnapshot(fresh, projectA.projectRef)).toEqual(projectionSnapshot(ledger, projectA.projectRef))
   })
 
@@ -349,7 +349,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     } as AgentTeamOperation)
 
     // Independent replay over the same table rebuilds the identical index.
-    const fresh = new AgentTeamLedger(table)
+    const fresh = new AgentTeamLedger(table, { rulesVersion: 1 })
     expect(fresh.previousSessionForMember(memberId)).toBe(session('1'))
     expect(fresh.lastTransitionForMember(memberId)).toEqual({ previousSessionId: session('1'), targetSessionId: session('2') })
     expect(() => ledger.validate()).not.toThrow()
@@ -440,7 +440,7 @@ describe('large-ledger projection equivalence (issue #21)', () => {
 
     // Independent replay over the same table rebuilds the identical bucket.
     expect(() => ledger.validate()).not.toThrow()
-    const fresh = new AgentTeamLedger(table)
+    const fresh = new AgentTeamLedger(table, { rulesVersion: 1 })
     expect(described(fresh)).toEqual(described(ledger))
   })
 })
