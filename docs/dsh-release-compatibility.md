@@ -324,3 +324,21 @@ The engine keeps its own declaration across this release. `@contexera/dsh-contex
 Evidence on the certified tree: `npm run typecheck` (514 Harness mappings), `npm test` (1135 passed, 1 skipped), `npm run lint`, `npm run build`, `npm pack --dry-run` (288 files), `check:artifact` (49 runtime relative imports resolved), and `npm run test:browser` (6 journeys).
 
 The CI run on the release commit is green on both lanes; `check:public-baseline` is red until this release updates the pinned discussion body, which happens at publish time by design.
+
+### DSH 0.2.1-rc.3
+
+DSH `0.2.1-rc.3` is certified on the same peers with no manifest change, shipped as Agent Team `0.2.5`. The candidate falls inside `>=0.2.1-rc.2 <0.2.2`, so section 4 records a baseline instead of a peer move, and every version spot keeps naming the range's lower bound. At certification time npm `next` already pointed at the candidate while `latest` still pointed at `0.2.1-rc.2`, so the declared line keeps admitting the host a default install actually resolves.
+
+Tag `1f81c047` (2026-10-23) carries 640 changed files against `dsh-v0.2.1-rc.2`. No symbol this bundle imports was removed or renamed.
+
+The three Client slot contracts this bundle composes into — `ui-conversation`, `ui-sidebar`, and `ui-sidebar-right` — change additively. Each gains a new More-menu list and optional owner-props fields, while `sidebar.panellist`, the slot this bundle injects, keeps its signature.
+
+The new lists are `sidebar.panellist.actions`, `conversation.session.header.views.actions`, and `sidebar.right.tab.guide.actions`. `SidebarRootInjected` gains `setPinned`, `trackEntryClick`, and `entryPins`; that is the sidebar's own host-side face, which this bundle does not implement.
+
+One test needed the new shape rather than the bundle: the panel-rail journey pinned Team's launcher to the list's last row, and a shipped release may now append its own launcher after the registered panels. The assertion holds Team on the list's pitch and on one of its rows instead of terminating it, which passes against both `0.2.1-rc.2` and the candidate.
+
+Section 3.6 is not re-triggered by a format change: no released artifact content is refused, and the Team ledger's own domain version stays at 1.
+
+Evidence on the certified tree: `npm run typecheck` (517 Harness mappings), `npm test` (1164 passed, 1 skipped), `npm run lint` (3 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (306 files), `check:artifact` (53 runtime relative imports resolved), and `npm run test:browser` (6 journeys).
+
+The browser journey and the full suite were also re-run against the daily `0.2.1-rc.2` checkout, where the same 6 journeys pass, because the assertion above ships to a line that still resolves the previous host.

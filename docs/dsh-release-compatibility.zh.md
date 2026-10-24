@@ -387,3 +387,21 @@ Tag `687f282e`（2026-10-17）位于 `dsh-v0.2.0-rc.2` 之后 1,925 个提交。
 认证树上的证据：`npm run typecheck`（514 个 Harness 映射）、`npm test`（1135 通过、1 跳过）、`npm run lint`、`npm run build`、`npm pack --dry-run`（288 文件）、`check:artifact`（49 个运行时相对导入全部解析）、`npm run test:browser`（6 条旅程）。
 
 发布提交上的 CI 双 lane 全绿；`check:public-baseline` 在本次发布更新置顶讨论正文之前是红的，这是设计如此，改动作发生在发布时刻。
+
+### DSH 0.2.1-rc.3
+
+DSH `0.2.1-rc.3` 在同一 peer 区间上认证通过，manifest 无改动，随 Agent Team `0.2.5` 发布。候选版本落在 `>=0.2.1-rc.2 <0.2.2` 之内，因此按 §4 记录基线而不移动 peer，所有版本位仍指向该区间下界。认证时 npm `next` 已指向它，而 `latest` 仍停在 `0.2.1-rc.2`，所以声明线继续接纳默认安装真正会解析到的那个宿主。
+
+Tag `1f81c047`（2026-10-23）相对 `dsh-v0.2.1-rc.2` 改动 640 个文件。本 bundle 导入的符号没有被删除或改名。
+
+它组合进去的三个 Client slot 契约——`ui-conversation`、`ui-sidebar`、`ui-sidebar-right`——都是增量变化。各自新增一个 More 菜单列表以及若干可选 owner props 字段，而本 bundle 注入的 `sidebar.panellist` 槽位签名不变。
+
+新增的列表是 `sidebar.panellist.actions`、`conversation.session.header.views.actions`、`sidebar.right.tab.guide.actions`。`SidebarRootInjected` 新增 `setPinned`、`trackEntryClick`、`entryPins`，那是 sidebar 自己的宿主侧接口，本 bundle 不实现它。
+
+有一处测试需要跟上新形状，而不是 bundle 本身：面板导轨的旅程把 Team 的启动器钉在列表最后一行，而已发布版本现在可能在自己注册的面板之后再追加启动器。断言改为把 Team 钉在列表的同一节距上、且落在其中一行，而不再要求它终结该列表，因此在 `0.2.1-rc.2` 与候选版本上都通过。
+
+§3.6 未因格式变化重新触发：没有已发布产物被拒，Team ledger 自己的 domain 版本仍为 1。
+
+认证树上的证据：`npm run typecheck`（517 个 Harness 映射）、`npm test`（1164 通过、1 跳过）、`npm run lint`（3 warning、0 error）、`npm run build`、`npm pack --dry-run`（306 文件）、`check:artifact`（53 个运行时相对导入全部解析）、`npm run test:browser`（6 条旅程）。
+
+浏览器旅程与整套测试也在日常 `0.2.1-rc.2` 检出上重跑过，同样 6 条旅程全绿，因为上面的断言要发到仍解析上一版宿主的那条线上。
