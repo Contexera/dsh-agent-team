@@ -6,6 +6,7 @@ import type {
   AgentTeamArchiveMemberRequest,
   AgentTeamClientMemberStatus,
   AgentTeamInboxRequest,
+  AgentTeamTaskBoardRequest,
   AgentTeamProjectOwnerRequest,
   AgentTeamStartThreadRequest,
   AgentTeamPostMainMessageRequest,
@@ -185,6 +186,9 @@ function teamSharedRemotes(
   return {
     loadProjects: (request: AgentTeamViewRequest) => ctx.remote.agentTeam.view(request),
     loadInbox: (request: AgentTeamInboxRequest) => queries.read(inboxQuery(request), () => ctx.remote.agentTeam.inbox(request)),
+    loadTaskBoard: typeof ctx.remote.agentTeam?.taskBoard === 'function'
+      ? (request: AgentTeamTaskBoardRequest) => ctx.remote.agentTeam.taskBoard(request)
+      : undefined,
     subscribeReads: (listener: () => void) => reads.subscribe(listener),
     subscribeChanges: (scope: TeamChangeScope, listener: TeamChangeListener) => queries.subscribeChanges(scope, listener),
     drafts,

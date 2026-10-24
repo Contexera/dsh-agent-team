@@ -13,6 +13,8 @@ import type {
   AgentTeamCreateProjectResult,
   AgentTeamInbox,
   AgentTeamInboxRequest,
+  AgentTeamTaskBoard,
+  AgentTeamTaskBoardRequest,
   AgentTeamJoinWorkspaceRequest,
   AgentTeamJoinWorkspaceResult,
   AgentTeamLeaveWorkspaceRequest,
@@ -106,6 +108,7 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     loadMembers: (request: AgentTeamMembersRequest) => Promise<RemoteResult<readonly AgentTeamClientMemberStatus[]>>
     /** Human direct-only Inbox slice; the badge sums each visible Workspace's total. */
     loadInbox: (request: AgentTeamInboxRequest) => Promise<RemoteResult<AgentTeamInbox>>
+    loadTaskBoard?: (request: AgentTeamTaskBoardRequest) => Promise<RemoteResult<AgentTeamTaskBoard>>
     /** Fired after every committed durable Thread read; the badge refreshes without waiting for a changes wake. */
     subscribeReads: (listener: () => void) => () => void
     subscribeChanges: SubscribeTeamChanges
@@ -154,6 +157,7 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   loadMembers: (request: AgentTeamMembersRequest) => Promise<RemoteResult<readonly AgentTeamClientMemberStatus[]>>
   /** Human direct-only Inbox slice; the Inbox page merges one call per visible Workspace. */
   loadInbox: (request: AgentTeamInboxRequest) => Promise<RemoteResult<AgentTeamInbox>>
+  loadTaskBoard?: (request: AgentTeamTaskBoardRequest) => Promise<RemoteResult<AgentTeamTaskBoard>>
   /** Human-only Thread Attention observations; the Thread composer ranks the returned followers first. */
   threadObservations: (request: AgentTeamThreadObservationsRequest) => Promise<RemoteResult<AgentTeamThreadObservations>>
   /** Agent-card session jump, shared by every slot; message member chips reuse it. */

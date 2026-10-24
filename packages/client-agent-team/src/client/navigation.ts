@@ -17,6 +17,7 @@ export interface TeamNavigationSnapshot {
   taskNumber?: number
   /** A navigation fact, not an unread fact: selecting Inbox clears the Project/Thread faces, and a reload reopens the page. */
   inbox?: boolean
+  board?: boolean
   /** Runtime-only Member Session embedded in the conversation seat; never persisted. */
   memberSessionId?: SessionId
   /** Runtime-only session to restore when the Member view closes; never persisted. */
@@ -37,6 +38,7 @@ function readSnapshot(): TeamNavigationSnapshot {
       ...(typeof parsed.workspaceId === 'string' ? { workspaceId: parsed.workspaceId as WorkspaceId } : {}),
       ...(typeof projectRef === 'string' ? { projectRef: projectRef as AgentTeamProjectRef } : {}),
       ...(parsed.inbox === true ? { inbox: true } : {}),
+      ...(parsed.board === true ? { board: true } : {}),
       ...(hasThread ? {
         threadRef: parsed.threadRef as AgentTeamThreadRef,
         ...(typeof parsed.taskRef === 'string' ? { taskRef: parsed.taskRef as AgentTeamTaskRef } : {}),
@@ -50,12 +52,13 @@ function readSnapshot(): TeamNavigationSnapshot {
 
 function persistSnapshot(snapshot: TeamNavigationSnapshot): void {
   if (typeof localStorage === 'undefined') return
-  const { mode, workspaceId, projectRef, taskRef, threadRef, taskNumber, inbox } = snapshot
+  const { mode, workspaceId, projectRef, taskRef, threadRef, taskNumber, inbox, board } = snapshot
   persistLocallyBestEffort({
     mode,
     ...(workspaceId === undefined ? {} : { workspaceId }),
     ...(projectRef === undefined ? {} : { projectRef }),
     ...(inbox === true ? { inbox: true } : {}),
+    ...(board === true ? { board: true } : {}),
     ...(taskRef === undefined ? {} : { taskRef }),
     ...(threadRef === undefined ? {} : { threadRef }),
     ...(taskNumber === undefined ? {} : { taskNumber }),
@@ -83,6 +86,7 @@ export interface TeamNavigationActions {
   selectProject: (projectRef: AgentTeamProjectRef) => void
   selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void
   selectInbox: () => void
+  selectBoard: () => void
   backToWorkspace: () => void
   /** Swap the conversation seat to a Member Session. `returnToSessionId` is captured once, so switching Member Sessions keeps the original target. */
   enterMemberSession: (sessionId: SessionId, returnToSessionId?: SessionId) => void
@@ -117,6 +121,7 @@ export class TeamNavigation {
       selectProject: projectRef => { this.clearMemberSession(); this.setProject(projectRef) },
       selectThread: (threadRef, projectRef, taskRef, taskNumber) => { this.clearMemberSession(); this.setThread(threadRef, projectRef, taskRef, taskNumber) },
       selectInbox: () => { this.clearMemberSession(); this.setInbox() },
+      selectBoard: () => { this.clearMemberSession(); this.setBoard() },
       backToWorkspace: () => { this.clearMemberSession(); this.setThread(undefined) },
       enterMemberSession: (sessionId, returnToSessionId) => { this.setMemberSession(sessionId, returnToSessionId) },
       exitMemberSession: () => { this.clearMemberSession() },
@@ -154,34 +159,41 @@ export class TeamNavigation {
   }
 
   private setWorkspace(workspaceId: WorkspaceId): void {
-    if (this.snapshot.workspaceId === workspaceId && this.snapshot.inbox !== true) return
-    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+    if (this.snapshot.workspaceId === workspaceId && this.snapshot.inbox !== true && this.snapshot.board !== true) return
+    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, board: _board, ...base } = this.snapshot
     this.snapshot = { ...base, workspaceId }
     this.commit()
   }
 
   private setProject(projectRef: AgentTeamProjectRef): void {
-    if (this.snapshot.projectRef === projectRef && this.snapshot.threadRef === undefined && this.snapshot.inbox !== true) return
-    const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+    if (this.snapshot.projectRef === projectRef && this.snapshot.threadRef === undefined && this.snapshot.inbox !== true && this.snapshot.board !== true) return
+    const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, board: _board, ...base } = this.snapshot
     this.snapshot = { ...base, projectRef }
     this.commit()
   }
 
   /** The Inbox is a face, not workspace content: selecting a Workspace leaves it. */
   private setInbox(): void {
-    if (this.snapshot.inbox === true && this.snapshot.projectRef === undefined && this.snapshot.threadRef === undefined) return
-    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
+    if (this.snapshot.inbox === true && this.snapshot.projectRef === undefined && this.snapshot.threadRef === undefined && this.snapshot.board !== true) return
+    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, board: _board, ...base } = this.snapshot
     this.snapshot = { ...base, inbox: true }
     this.commit()
   }
 
+  private setBoard(): void {
+    if (this.snapshot.board === true && this.snapshot.projectRef === undefined && this.snapshot.threadRef === undefined) return
+    const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+    this.snapshot = { ...base, board: true }
+    this.commit()
+  }
+
   private setThread(threadRef: AgentTeamThreadRef | undefined, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number): void {
-    if (this.snapshot.threadRef === threadRef && this.snapshot.taskRef === taskRef && this.snapshot.projectRef === projectRef && this.snapshot.taskNumber === taskNumber && this.snapshot.inbox !== true) return
+    if (this.snapshot.threadRef === threadRef && this.snapshot.taskRef === taskRef && this.snapshot.projectRef === projectRef && this.snapshot.taskNumber === taskNumber && this.snapshot.inbox !== true && this.snapshot.board !== true) return
     if (threadRef === undefined) {
       const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = this.snapshot
       this.snapshot = base
     } else {
-      const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, ...base } = this.snapshot
+      const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, board: _board, ...base } = this.snapshot
       this.snapshot = {
         ...base,
         threadRef,

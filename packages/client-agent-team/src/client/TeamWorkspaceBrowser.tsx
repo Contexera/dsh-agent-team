@@ -33,7 +33,7 @@ function InboxMark({ unread }: { readonly unread: number }) {
   </span>
 }
 
-export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectProject, selectInbox, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, humanIdentity, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
+export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWorkspace, selectProject, selectInbox, selectBoard, leaveTeam, t, useWorkspaces, loadMembers, loadInbox, subscribeChanges, subscribeReads, addMember, loadProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, humanIdentity, updateMember, recoverMember, archiveMember, joinWorkspace, leaveWorkspace, loadModels, openMemberSession }: TeamSidebarProps) {
   const navigationState = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot)
   const workspaces = useWorkspaces(state => state.items)
   const selected = navigationState.workspaceId
@@ -44,6 +44,7 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   // embedded Member Session covers it (the Inbox stays the remembered face underneath).
   const overviewIsCurrent = navigationState.projectRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true
   const inboxIsCurrent = navigationState.inbox === true && navigationState.memberSessionId === undefined
+  const boardIsCurrent = navigationState.board === true && navigationState.memberSessionId === undefined
   const [creatingAgents, setCreatingAgents] = useState<readonly AgentTeamAddMemberRequest[]>([])
   // Rail icons request expansion and name the section to reveal once wide.
   const [pendingSection, setPendingSection] = useState<SidebarSection>()
@@ -140,6 +141,7 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
       <InboxMark unread={inboxTotal} />
       <span className={css.inboxCardLabel}>{t('inboxTitle')}</span>
     </button>
+    <button type="button" className={css.taskBoardCard} aria-label={t('taskBoard')} aria-current={boardIsCurrent ? 'page' : undefined} onClick={selectBoard}><InboxMark unread={0} /><span className={css.inboxCardLabel}>{t('taskBoard')}</span></button>
     <TeamWorkspaceSelector workspaces={workspaces} selectedId={selectedId} current={overviewIsCurrent} onSelect={selectWorkspace} t={t} />
     {selectedId !== undefined && <div className={css.workspaceSection}>
       <div ref={projectsRef}>

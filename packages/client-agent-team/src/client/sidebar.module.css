@@ -220,6 +220,27 @@
   white-space: nowrap;
 }
 
+.taskBoardCard {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-md, 12px);
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  height: 34px;
+  margin: 2px 0;
+  padding: 0 8px;
+  text-align: left;
+  width: 100%;
+}
+.taskBoardCard:hover,
+.taskBoardCard:focus-visible,
+.taskBoardCard[aria-current='page'] { background: var(--dsw-alias-interactive-bg-hover); }
+.taskBoardCard:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: -2px; }
+
 /* Anchored to the glyph rather than the control, so the wide card and the 36px rail button put the same dot on the same corner. Zero renders no mark. */
 .inboxMark {
   display: inline-flex;

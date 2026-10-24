@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { AgentTeamClientMemberStatus, AgentTeamProjectRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamTask, AgentTeamView, AgentTeamViewItem,
-  AgentTeamTaskRef, AgentTeamThreadRef,
+  AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamTaskBoard, AgentTeamTaskBoardItem,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
@@ -30,6 +30,7 @@ interface TeamProjectPageProps {
   readonly loadMembers: TeamConversationProps['loadMembers']
   /** The Human's own unread per Thread: the Host's three-class judgement, never a Client guess. */
   readonly loadInbox: TeamConversationProps['loadInbox']
+  readonly loadTaskBoard?: TeamConversationProps['loadTaskBoard']
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -79,8 +80,9 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
+  const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
   const [actionError, setError] = useState<string>()
@@ -192,10 +194,11 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
 
   // The loaded window is all the board shows: walking the Project's remaining history would defeat its pagination.
   const boardColumns = useMemo(() => {
-    const taskful = (view?.items ?? []).filter((item): item is AgentTeamViewItem & { readonly task: AgentTeamTask } => item.task !== undefined)
-    const byNumber = (left: AgentTeamViewItem, right: AgentTeamViewItem): number => (right.taskNumber ?? 0) - (left.taskNumber ?? 0)
-    return BOARD_COLUMNS.map(column => ({ ...column, items: taskful.filter(item => column.match(item.task.status)).sort(byNumber) }))
-  }, [view])
+    const items = taskBoard === undefined
+      ? (view?.items ?? []).flatMap(item => item.task === undefined ? [] : [{ workspaceId, projectRef, projectName: view?.projects.find(entry => entry.projectRef === projectRef)?.name ?? '', task: item.task, taskNumber: item.taskNumber ?? 0, threadRef: item.thread.threadRef, subject: formatTaskTitle(item.message.body), liveClaimOwners: item.liveClaimOwners, lastActivitySequence: item.message.sequence, lastActivityAt: item.lastActivityAt, relation: 'none' as const }])
+      : [...taskBoard.open, ...taskBoard.finished]
+    return BOARD_COLUMNS.map(column => ({ ...column, items: items.filter(item => column.match(item.task.status)) }))
+  }, [projectRef, taskBoard, view, workspaceId])
 
   // The surface is laid out after this effect first runs, so the seat follows its box; a dragged choice is re-clamped, never re-derived.
   useEffect(() => {
@@ -220,19 +223,21 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     if (!loadedRef.current) setLoading(true)
     if (clearError) setLoadError(undefined)
     try {
-      const [loaded, loadedMembers, loadedInbox] = await Promise.all([
+      const [loaded, loadedTaskBoard, loadedMembers, loadedInbox] = await Promise.all([
         loadProjects({ workspaceId, projectRef, direction: 'before', topLevelOnly: true, includeActivities: false, limit: 20 }),
+        loadTaskBoard?.({ workspaceId, projectRef }) ?? Promise.resolve({ ok: true as const, value: { open: [], finished: [] } }),
         loadMembers({ workspaceId }),
         // The Host Inbox is the authority for unread; never re-derive it from message mentions.
         loadInbox({ workspaceId, limit: 100 }),
       ])
       if (!mountedRef.current || sequence !== refreshSequenceRef.current) return false
       if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeProjectView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
+      if (loadTaskBoard !== undefined) { if (loadedTaskBoard.ok) setTaskBoard(loadedTaskBoard.value); else setLoadError(loadedTaskBoard.error.message) }
       if (loadedMembers.ok) setMembers(loadedMembers.value); else setLoadError(loadedMembers.error.message)
       if (!loadedInbox.ok) setLoadError(loadedInbox.error.message)
       setUnreadByThread(current => applyInboxRead(current, loadedInbox))
-      if (loaded.ok && loadedMembers.ok && loadedInbox.ok) setLoadError(undefined)
-      return loaded.ok && loadedMembers.ok && loadedInbox.ok
+      if (loaded.ok && loadedTaskBoard.ok && loadedMembers.ok && loadedInbox.ok) setLoadError(undefined)
+      return loaded.ok && loadedTaskBoard.ok && loadedMembers.ok && loadedInbox.ok
     } catch (cause) {
       if (mountedRef.current && sequence === refreshSequenceRef.current) setLoadError(cause instanceof Error ? cause.message : String(cause))
       return false
@@ -324,13 +329,13 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
         {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>
           <div className={projectCss.boardColumnHead}>{t(column.labelKey)}<span className={projectCss.boardColumnCount}>{column.items.length}</span></div>
-          {column.items.map(item => <BoardCard
-            key={item.message.messageRef}
+          {column.items.map(item => <ProjectionBoardCard
+            key={item.task.taskRef}
             item={item}
-            unread={unreadByThread.get(item.thread.threadRef) ?? 0}
+            unread={unreadByThread.get(item.threadRef) ?? 0}
             human={humanIdentity}
             t={t}
-            onOpen={() => { selectThread(item.thread.threadRef, projectRef, item.task.taskRef, item.taskNumber) }}
+            onOpen={() => { selectThread(item.threadRef, projectRef, item.task.taskRef, item.taskNumber) }}
           />)}
         </div>)}
       </div>}
@@ -417,8 +422,8 @@ const BOARD_COLUMNS = [
 ] as const
 
 /** One Task on the board; resolved work dims so moving work stays loudest. */
-function BoardCard({ item, unread, human, t, onOpen }: {
-  readonly item: AgentTeamViewItem & { readonly task: AgentTeamTask }
+function ProjectionBoardCard({ item, unread, human, t, onOpen }: {
+  readonly item: AgentTeamTaskBoardItem
   readonly unread: number
   readonly human: TeamAvatarHuman | undefined
   readonly t: TeamConversationProps['t']
@@ -442,7 +447,7 @@ function BoardCard({ item, unread, human, t, onOpen }: {
       {t('taskLabel', { number: taskNumber })}
       <TeamCountBadge count={unread} />
     </span>
-    <span className={projectCss.boardCardTitle}>{formatTaskTitle(item.message.body)}</span>
+    <span className={projectCss.boardCardTitle}>{item.subject}</span>
     <span className={projectCss.boardCardFoot}>
       {namedOwners.length === 0
         ? <span>{t('boardUnassigned')}</span>
