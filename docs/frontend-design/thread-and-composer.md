@@ -42,6 +42,14 @@ The 「作为任务」 intent is not persisted and resets off after success. The
 
 The reader's own handle is the one mention chip they must find without reading, so it is the one chip that leaves the business family: `[data-mention-human]` paints it in the success alias, because the error and warn families mean a failure and a caution. A body that wrote the reader's older handle still marks that chip — the mark follows the identity, not the spelling.
 
+At `view.rulesVersion >= 2` the Project composer posts to the Main stream and its tool slot holds `讨论/任务` instead of the as-task pill. The toggle is a pressed button; once on, it reveals a native `作为任务` checkbox.
+
+Off sends `postMainMessage`, with `replyToMessageRef` when a Main message is quoted. On sends `startThread` as a discussion, or as a Task when the box is checked; a committed Task moves the page to the `看板` tab with focus on it. Quoting turns the toggle off and turning it on drops the quote, since a new Thread has no quote target.
+
+When the Host answers `main_unread_required` the draft stays, the stream is refreshed and read, and a status line asks the Human to look and send again; the retry is a new operation.
+
+Replies never ask for confirmation at version 2, and neither the Main stream nor Thread composers offer `@all` or expand it into recipients; a typed `@all` is plain text.
+
 ## Quoting a Message
 A Thread Message can be answered by picking the Message it answers. The affordance is unconditional: the reply action, the stored quote lines, and the composer banner are one feature the Host serves in full, so no surface asks whether quoting is available.
 

@@ -40,6 +40,18 @@ Once the ledger adopts rules version 2, a Project has owners: the Human owns eve
 
 From version 2, Project membership also counts owners and every Member ever mentioned in the Project, and drops archived and inactive Members; everything visible under version 1 stays visible.
 
+Behind rules version 2 a Project also has a Main stream: a conversation of its own, outside every Thread. Any Project member may post to it (`team/main-message-posted`). A Main stream Message carries `scope: 'main'`, no Thread or Task, and may only answer another Main stream Message of the same Project. Mentioning a Member, or answering their Message (the Human included), gives them one Main stream marker; `@all` is plain text.
+
+An owner's Main stream unread is what other Members wrote after the owner started and after its read watermark — Messages, owner changes and new discussion Threads — plus its markers; the Human starts at the later of the Project's creation and the version-2 adoption. Anyone else has markers only, and an Agent that stops being an owner keeps its markers but loses the ordinary unread.
+
+A writer holding Main stream unread reads first (`main_unread_required`). `team/main-stream-read` advances an owner's watermark and consumes markers, and writes nothing when it would change neither.
+
+Behind rules version 2 only a Project owner starts a Thread (`team/thread-started`, kind `discussion` or `task`) and the top-level `team/message-sent` is no longer written; anyone else gets `project_owner_required`, which points to the Main stream.
+
+A Thread appears in the Main stream as a card showing its current state: anchor preview, reply count, writers and newest activity for a discussion; Task number, status and live Claim owners for a Task. Version-1 top-level Threads appear as cards in creation order and are never unread.
+
+Behind rules version 2 any Project member may reply in any Thread. A mention or an answer is one direct marker and never starts or resumes Attention, and the Human invitation confirmation no longer exists.
+
 ## Message
 
 Immutable content explicitly sent in a Project or existing Thread. Every top-level Project Message atomically creates a Thread; new Clients/tools default to a taskless Thread, while explicit 「作为任务」 creates a real Task in the same commit. A reply continues an existing Thread. Every Message carries the wall-clock instant of its committing operation; agent-facing surfaces render that instant in the fixed UTC+8 coordination zone.

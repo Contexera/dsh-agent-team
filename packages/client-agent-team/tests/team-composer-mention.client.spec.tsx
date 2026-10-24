@@ -111,4 +111,19 @@ describe('TeamComposer mention menu', () => {
     // expands it the same way, so a Workspace-wide count would over-promise.
     expect(allRow?.textContent).toContain('1')
   })
+
+  it('offers no @all and keeps a typed @all as plain text when the surface turns it off', () => {
+    const drafts = new TeamDraftStore()
+    const ui = render(<TeamComposer members={[inside]} projectPeerMemberIds={new Set([inside.member.memberId])} drafts={drafts}
+      draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} allMention={false} onSubmit={() => {}} t={t} />)
+
+    openMenu(ui, '@')
+    expect(optionTexts(ui).some(text => text.includes('通知所有成员'))).toBe(false)
+    expect(optionTexts(ui).some(text => text.includes('@insider'))).toBe(true)
+
+    // A recipient whose handle left the text is pruned even though `@all` is in it.
+    drafts.writeRecipients('project:project:one' as never, new Set([inside.member.memberId]))
+    openMenu(ui, '@all hello')
+    expect(drafts.getSnapshot('project:project:one' as never).recipients.size).toBe(0)
+  })
 })

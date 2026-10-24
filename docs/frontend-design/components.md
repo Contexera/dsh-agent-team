@@ -126,6 +126,14 @@ The feed's `加载更早消息` is how the board gets older work: one affordance
 
 Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
 
+At `view.rulesVersion >= 2` the first tab is `主对话` and the feed is replaced by the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. Version 1 keeps `项目` and the feed unchanged.
+
+The Main stream holds three entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, and Thread cards.
+
+A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and live Claim owners. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
+
+While the tab is mounted, a standing with unread entries or markers is acknowledged through `readMainStream`. Entries that arrived unread keep a thin accent bar for that visit.
+
 The board is the one Client surface allowed past the 880px reading column, up to 1240px: four status columns are a scanning surface, and narrowing them to the reading measure would cost every column its card width.
 
 The columns are equal (`flex: 1` with `min-width: 0`), so a longer title in one column cannot buy it more room than its neighbours, and they sit on `--dsw-alias-bg-module-platform` — the shipped recessed fill a grouped module uses — so the cards' own base fill reads as raised against them.

@@ -47,6 +47,14 @@ import type {
   AgentTeamTaskResult,
   AgentTeamSendMessageRequest,
   AgentTeamSendMessageResult,
+  AgentTeamStartThreadRequest,
+  AgentTeamStartThreadResult,
+  AgentTeamPostMainMessageRequest,
+  AgentTeamPostMainMessageResult,
+  AgentTeamMainStreamReadRequest,
+  AgentTeamMainStreamReadResult,
+  AgentTeamMainStreamHistoryRequest,
+  AgentTeamMainStreamHistory,
   AgentTeamUpdateProjectRequest,
   AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
@@ -136,6 +144,11 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   putAttachment: (request: AgentTeamPutAttachmentRequest) => Promise<RemoteResult<AgentTeamPutAttachmentResult>>
   getAttachment: (request: AgentTeamGetAttachmentRequest) => Promise<RemoteResult<AgentTeamGetAttachmentResult>>
   sendMessage: (request: AgentTeamSendMessageRequest) => Promise<RemoteResult<AgentTeamSendMessageResult>>
+  /** Rules version 2 Main stream: post, read, page, and start Threads (owners only). */
+  postMainMessage: (request: AgentTeamPostMainMessageRequest) => Promise<RemoteResult<AgentTeamPostMainMessageResult>>
+  startThread: (request: AgentTeamStartThreadRequest) => Promise<RemoteResult<AgentTeamStartThreadResult>>
+  readMainStream: (request: AgentTeamMainStreamReadRequest) => Promise<RemoteResult<AgentTeamMainStreamReadResult>>
+  mainStreamHistory: (request: AgentTeamMainStreamHistoryRequest) => Promise<RemoteResult<AgentTeamMainStreamHistory>>
   reply: (request: AgentTeamReplyRequest) => Promise<RemoteResult<AgentTeamReplyResult | AgentTeamConfirmationRequired>>
   changeTask: (request: AgentTeamTaskRequest) => Promise<RemoteResult<AgentTeamTaskResult>>
   promoteThread: (request: AgentTeamPromoteThreadRequest) => Promise<RemoteResult<AgentTeamPromoteThreadResult>>

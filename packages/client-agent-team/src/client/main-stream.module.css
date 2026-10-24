@@ -1,0 +1,85 @@
+/* The unread bar lives in a reserved gutter, so an entry never shifts when it is read. */
+.entry {
+  border-left: 2px solid transparent;
+  margin-left: -10px;
+  padding-left: 8px;
+}
+.entry[data-unread] { border-left-color: var(--dsw-alias-state-business-primary); }
+
+.card {
+  appearance: none;
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  box-sizing: border-box;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+  max-width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+.card:hover { border-color: var(--dsw-alias-border-l1); }
+.card:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+.card[data-resolved] { opacity: 0.62; }
+
+.cardHead {
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 4px 8px;
+  line-height: 18px;
+}
+.cardKind {
+  align-items: center;
+  color: var(--dsw-alias-label-secondary);
+  display: inline-flex;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  gap: 6px;
+}
+.cardStatus { color: var(--dsw-alias-label-secondary); }
+.cardMeta {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-left: auto;
+}
+.cardTitle {
+  color: var(--dsw-alias-label-primary);
+  display: -webkit-box;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.startCheck {
+  align-items: center;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  gap: 6px;
+  min-height: 28px;
+  white-space: nowrap;
+}
+.startCheck input { margin: 0; }
+.startCheck:has(input:focus-visible) {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+.startCheck:has(input:disabled) { color: var(--dsw-alias-label-dimmed); cursor: default; }

@@ -363,6 +363,42 @@ describe('Agent Team Member lifecycle', () => {
     ctx.agentTeam.validateLedger()
   })
 
+  it('speaks, reads and starts through the Main stream tools once the ledger runs rules version 2', async () => {
+    const preview = process.env.DSH_AGENT_TEAM_PREVIEW_RULES
+    process.env.DSH_AGENT_TEAM_PREVIEW_RULES = '1'
+    try {
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId } = await realHarness(adapter)
+      const project = await ctx.agentTeam.createProject({ requestId: requestId('main-project'), workspaceId, name: 'work', description: '', memberIds: [] })
+      const projectRef = project.project.projectRef
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('main-add'), workspaceId, handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef] })
+      const agent = ctx.agents.get(added.status.member.sessionId)!
+      const run = async (name: string, args: Record<string, unknown>) => {
+        const result = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId(`main-${name}-${JSON.stringify(args)}`), name, arguments: args, agent })
+        return result.isError ? { error: result.error.message } : { text: JSON.stringify(result) }
+      }
+
+      await ctx.agentTeam.postMainMessage({ requestId: requestId('main-human'), workspaceId, projectRef, body: 'Plain note from the Human' })
+      expect(await run('team_thread', { action: 'read', projectRef })).toMatchObject({ text: expect.stringContaining('Plain note from the Human') })
+      expect(await run('team_message', { action: 'post', projectRef, body: 'Agent speaking' })).toMatchObject({ text: expect.stringContaining('Main stream message posted') })
+      // Not an owner yet: starting a Thread points back to the Main stream.
+      expect(await run('team_message', { action: 'start', projectRef, kind: 'discussion', body: 'x' })).toMatchObject({ error: expect.stringMatching(/project_owner_required.*team_message post/s) })
+      // The removed asTask spelling is refused with the route to kind, never dropped: a silent drop would commit a
+      // discussion while the model believes it started a Task.
+      expect(await run('team_message', { action: 'start', projectRef, asTask: true, body: 'x' })).toMatchObject({ error: expect.stringMatching(/start does not accept asTask.*kind: 'task'/s) })
+
+      adapter.enqueue(textResponse('Noted my new ownership.'))
+      await ctx.agentTeam.addProjectOwner({ requestId: requestId('main-owner'), workspaceId, projectRef, memberId: added.status.member.memberId })
+      await agent.whenIdle()
+      expect(await run('team_message', { action: 'start', projectRef, kind: 'task', body: 'Build the importer' })).toMatchObject({ text: expect.stringContaining('Thread created') })
+      expect(ctx.agentTeam.mainStreamHistory({ workspaceId, projectRef }).entries.map(entry => entry.kind)).toEqual(['message', 'message', 'activity', 'thread-card'])
+      ctx.agentTeam.validateLedger()
+    } finally {
+      if (preview === undefined) delete process.env.DSH_AGENT_TEAM_PREVIEW_RULES
+      else process.env.DSH_AGENT_TEAM_PREVIEW_RULES = preview
+    }
+  })
+
   it('accepts a unique Workspace id abbreviation and points at the fix when the abbreviation is not unique', async () => {
     const { ctx, workspaces } = await realHarness()
     const homeId = WorkspaceId('workspace:1a2b3c4d-0000-4000-8000-000000000001')
@@ -961,7 +997,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(beforeThreads.threads).toEqual([])
     const plainStart = await call('team_message', { action: 'start', projectRef: project.project.projectRef, body: 'Agent-led taskless discussion' })
     expect(plainStart).toMatchObject({ kind: 'committed' })
-    const taskfulStart = await call('team_message', { action: 'start', asTask: true, projectRef: project.project.projectRef, body: 'Agent-led task with work' })
+    const taskfulStart = await call('team_message', { action: 'start', kind: 'task', projectRef: project.project.projectRef, body: 'Agent-led task with work' })
     expect(taskfulStart).toMatchObject({ kind: 'committed' })
     await call('team_message', { action: 'reply', threadRef: plainStart.threadRef, body: 'One follow-up reply', baseRevision: plainStart.revision })
     const threadDirectory = await call('team_view', {})

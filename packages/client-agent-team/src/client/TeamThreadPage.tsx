@@ -879,6 +879,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       onEdit={clearSendState}
       onSubmit={() => { void sendReply() }}
       placeholder={t('replyPlaceholder')}
+      allMention={(projectView?.rulesVersion ?? 1) < 2}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
       {...(replyTarget === undefined ? {} : {

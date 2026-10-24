@@ -12,6 +12,11 @@ import {
 /** The situations the model-facing code can actually produce, by hand. */
 const PRODUCED_KINDS: readonly string[] = Object.freeze([
   'unread_required',
+  'main_unread_required',
+  'project_owner_required',
+  'not_project_member',
+  'main_stream_addressing',
+  'post_requires_project',
   'unread_remaining',
   'stale_revision',
   'stale_revision_token_unrecognized',

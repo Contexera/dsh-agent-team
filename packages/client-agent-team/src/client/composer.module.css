@@ -146,6 +146,7 @@
 .toolbar {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   /* Same 12px control rhythm as the base composer's .row; the send circle's auto margin seats it alone at the right edge. */
   gap: 12px;

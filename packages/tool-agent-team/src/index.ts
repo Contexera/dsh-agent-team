@@ -8,11 +8,14 @@ import type {
   AgentTeamMemberId,
   AgentTeamRequestId,
   AgentTeamMessageRef,
+  AgentTeamProjectRef,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
   AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { MAIN_ENTRY_SCHEMA, MAIN_STANDING_SCHEMA, mainEntryLine, mainEntryView, standingView } from './main-stream.ts'
+import type { MainEntryView } from './main-stream.ts'
 
 export const name = 'wowyuarm-agent-team-tools'
 export const inject = ['tools']
@@ -326,10 +329,11 @@ function attentionResult(
 
 const teamThread = defineTool({
   name: 'team_thread',
-  description: `Read one Thread's facts. read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit are history-only: read and message reject them — ${recoveryFor('history_only_arguments').sentence({ action: 'those actions' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here.`,
+  description: `Read one Thread's facts, or a Project's Main stream (pass projectRef instead of threadRef — exactly one). read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit are history-only: read and message reject them — ${recoveryFor('history_only_arguments').sentence({ action: 'those actions' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here. On the Main stream, read answers with its newest entries (plus any entry carrying a mention of you) and acknowledges through them — an owner's unread and the mentions of every Member; a backlog longer than one page is read oldest first, one page per read, until none remains; history pages older entries; Thread cards in it name the Thread to read.`,
   parameters: {
     action: { type: 'string', required: true, enum: ['read', 'history', 'message'] },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    projectRef: { type: 'string', description: "Full branded Project ref: reads that Project's Main stream instead of a Thread. Give this or threadRef, never both." },
     taskRef: { type: 'string', description: "Optional Task ref alias for released clients. Prefer threadRef; if both are given they must identify the same Thread." },
     messageRef: { type: 'string', description: "For action `message`: the full branded Message ref to read back, exactly as rendered by this tool or by an inbox notice — including the `message:` prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     beforeSequence: { type: 'number', description: 'history only: the oldest fact sequence to page before (exclusive). read and message reject it.' }, limit: { type: 'number', description: 'history only: max older facts to return. read and message reject it.' }, workspace: workspaceParam,
@@ -337,24 +341,27 @@ const teamThread = defineTool({
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
       workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
-      kind: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, taskRef: { type: 'string' },
+      kind: { type: 'string', required: true }, scope: { type: 'string' }, threadRef: { type: 'string' }, taskRef: { type: 'string' },
+      entries: { type: 'array', items: MAIN_ENTRY_SCHEMA }, standing: MAIN_STANDING_SCHEMA,
       message: { type: 'object', additionalProperties: false, properties: {
         messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' }, body: { type: 'string', required: true },
       } },
-      revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
-      following: { type: 'boolean', required: true }, readThroughSequence: { type: 'number' }, remainingUnreadCount: { type: 'number' }, earlierFactCount: { type: 'number' }, cursor: { type: 'number' }, hasMore: { type: 'boolean' },
-      anchor: { type: 'object', required: true, additionalProperties: false, properties: {
+      revision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
+      following: { type: 'boolean' }, readThroughSequence: { type: 'number' }, remainingUnreadCount: { type: 'number' }, earlierFactCount: { type: 'number' }, cursor: { type: 'number' }, hasMore: { type: 'boolean' },
+      anchor: { type: 'object', additionalProperties: false, properties: {
         messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, body: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' },
         replyToMessageRef: { type: 'string' },
         replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } },
       } },
-      claims: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+      claims: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
       } } },
-      facts: { type: 'array', required: true, items: FACT_SCHEMA },
+      facts: { type: 'array', items: FACT_SCHEMA },
     } },
         // Renders are the only channel a tool result reaches the model through. read renders outcome → context → orientation → active collision surface → facts → watermark, handing off the next-write token only when no unread remains. history renders deep orientation and never the collision surface or a write token.
-    render: (args, value) => {
+    render: (args, raw) => {
+      if (raw.scope === 'main') return [{ type: 'text', text: mainStreamLines(args.action, raw).join('\n') }]
+      const value = asThreadValue(raw)
       const standing = taskStanding(value)
       const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef}`
       if (value.kind === 'message') {
@@ -420,6 +427,7 @@ const teamThread = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_thread requires an Agent session')
     const host = service(agent)
+    if (args.projectRef !== undefined) return mainStreamOutcome(host, agent, args, requestId(agent.id, exec.callId))
     if (args.threadRef === undefined && args.taskRef === undefined) throw new Error(`team_thread needs threadRef (or taskRef on a Taskful Thread) — ${recoveryFor('missing_thread_identity').sentence({})}`)
     const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
     const taskNumberOf = (task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } => {
@@ -461,6 +469,72 @@ const teamThread = defineTool({
     return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), ...taskNumberOf(read.task) })
   },
 })
+
+/** A Thread-scoped result always carries the Thread fields the shared schema leaves optional for the Main stream. */
+function asThreadValue<V extends { anchor?: unknown; claims?: unknown; facts?: unknown; revision?: number | undefined; threadRef?: string | undefined; following?: boolean | undefined }>(value: V): V & {
+  anchor: NonNullable<V['anchor']>; claims: NonNullable<V['claims']>; facts: NonNullable<V['facts']>; revision: number; threadRef: string; following: boolean
+} {
+  return value as never
+}
+
+/** The Main stream reads of `team_thread`, rendered from the Host's timeline entries. */
+function mainStreamLines(action: string, value: {
+  readonly workspaceId: string; readonly projectRef: string; readonly kind: string
+  readonly entries?: readonly MainEntryView[] | undefined; readonly cursor?: number | undefined; readonly hasMore?: boolean | undefined
+  readonly readThroughSequence?: number | undefined; readonly remainingUnreadCount?: number | undefined
+  readonly message?: { readonly messageRef: string; readonly sender: string; readonly sequence: number; readonly occurredAt?: string | undefined; readonly body: string } | undefined
+}): string[] {
+  const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef} · Main stream`
+  if (value.kind === 'message') {
+    const message = value.message!
+    return [source, `Message ${message.messageRef}`, `${message.sequence}${message.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(message.occurredAt)}`} [${message.sender}]`, '', message.body]
+  }
+  const entries = value.entries ?? []
+  if (value.kind === 'history') {
+    return [source, `History for ${value.projectRef}`, '', 'Entries', ...(entries.length === 0 ? ['No entries before this cursor.'] : entries.map(mainEntryLine)), '',
+      `History cursor ${value.cursor}; hasMore=${value.hasMore ? 'true' : 'false'}${value.hasMore ? ' — older entries exist; page again with beforeSequence set to the cursor.' : ' — no older entries remain.'}`]
+  }
+  const acknowledged = entries.filter(entry => entry.unread).length
+  const remaining = value.remainingUnreadCount ?? 0
+  return [source,
+    acknowledged === 0 ? `Read — no unread updates on the Main stream of ${value.projectRef}.`
+      : `Read committed — acknowledged ${acknowledged} unread update(s) on the Main stream of ${value.projectRef}; ${remaining} remain.`,
+    '', 'Entries', ...(entries.length === 0 ? ['The Main stream is empty.'] : entries.map(mainEntryLine)), '',
+    `Read through sequence ${value.readThroughSequence}; ${remaining} unread update(s) remaining${remaining > 0 ? ' — read again for the next page before you post.' : '.'} Speak here with team_message post; read a Thread card's Thread with team_thread read.`]
+}
+
+async function mainStreamOutcome(
+  host: AgentTeam,
+  agent: Parameters<typeof workspaceOf>[1],
+  args: { readonly action: string; readonly projectRef?: string | undefined; readonly threadRef?: string | undefined; readonly taskRef?: string | undefined
+    readonly messageRef?: string | undefined; readonly beforeSequence?: number | undefined; readonly limit?: number | undefined; readonly workspace?: string | undefined },
+  readRequestId: AgentTeamRequestId,
+) {
+  if (args.threadRef !== undefined || args.taskRef !== undefined) throw new Error(recoveryFor('main_stream_addressing').sentence({ refused: 'threadRef and projectRef' }))
+  const workspaceId = workspaceOf(args, agent)
+  const projectRef = projectRefOf(args.projectRef!) as AgentTeamProjectRef
+  const base = { workspaceId, scope: 'main' }
+  if (args.action !== 'message' && args.messageRef !== undefined) {
+    throw new Error(recoveryFor('action_only_arguments').sentence({ action: args.action, parameter: 'messageRef', owner: 'message' }))
+  }
+  if (args.action === 'message') {
+    if (args.messageRef === undefined) throw new Error(recoveryFor('missing_message_ref').sentence({ refused: 'for action message' }))
+    if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'message' }))
+    const read = host.readMessageForAgent(agent, { workspaceId, projectRef, messageRef: args.messageRef as AgentTeamMessageRef })
+    return { ...base, projectRef: read.projectRef, kind: 'message', message: { messageRef: read.messageRef, sender: read.sender, sequence: read.sequence,
+      ...(read.occurredAt === undefined ? {} : { occurredAt: read.occurredAt }), body: read.body } }
+  }
+  if (args.action === 'history') {
+    const history = host.mainStreamHistoryForAgent(agent, { workspaceId, projectRef,
+      ...(args.beforeSequence === undefined ? {} : { beforeSequence: args.beforeSequence }), ...(args.limit === undefined ? {} : { limit: args.limit }) })
+    return { ...base, projectRef: history.projectRef, kind: 'history', entries: history.entries.map(mainEntryView), cursor: history.cursor,
+      hasMore: history.hasMore, standing: standingView(history.standing) }
+  }
+  if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'read' }))
+  const read = await host.readMainStreamForAgent(agent, { requestId: readRequestId, workspaceId, projectRef })
+  return { ...base, projectRef: read.projectRef, kind: 'read', entries: read.entries.map(mainEntryView), readThroughSequence: read.readThroughSequence,
+    remainingUnreadCount: read.standing.unreadCount, standing: standingView(read.standing) }
+}
 
 /** What a Message answers, as one bracketed clause: resolved context when the reader's window reaches it, otherwise the bare ref, which the reader can hand to `team_thread message` for the original text. */
 function repliesToClause(replyToMessageRef: string | undefined, replyTo: ReplyContextView | undefined): string {
@@ -567,14 +641,14 @@ const teamDm = defineTool({
 
 const teamMessage = markAgentTeamPreset(defineTool({
   name: 'team_message',
-  description: 'Start a top-level Thread, or reply to an existing one. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message and restores Attention, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start defaults to a taskless Thread; pass asTask true to create a Task in the same send. A top-level start may mention related Agents directly; in replies, only a Human can invite a Member the Thread has never carried. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` reaches every Member of the Project. Naming a Member this Thread has never carried still commits, delivers nothing to that Member, and reports them under undeliveredMentions: ask the Human to invite them, or reach them with a team_dm. This tool writes Threads only: a private note to one Member is team_dm, not a reply.',
+  description: 'Post to a Project\'s Main stream, start a Thread, or reply to one. post speaks in the Project\'s Main stream — the conversation outside every Thread — and any Project member may: pass projectRef and body, mention with `@Handle`, and optionally replyToMessageRef (a Main stream Message of the same Project, whose author is delivered to). An owner holding unread Main stream, or any Member holding a mention, reads it first (team_thread read with projectRef); post has no write token. start opens a discussion or a Task (kind) and only a Project owner may — a Thread starts from a standing question or piece of work, not from conversation. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message and restores Attention, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start takes kind discussion (default) or task. Under version 2 of the Team rules a mention in a start or a reply delivers its Message to that Member once and never makes them follow; before it, only a Human could invite a Member into an existing Thread. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` reaches every Member of the Project. Naming a Member this Thread has never carried still commits, delivers nothing to that Member, and reports them under undeliveredMentions: ask the Human to invite them, or reach them with a team_dm. A private note to one Member is team_dm, not a reply.',
   parameters: {
-    action: { type: 'string', required: true, enum: ['start', 'reply'] },
-    projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    action: { type: 'string', required: true, enum: ['start', 'reply', 'post'] },
+    projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves. Required by start and post." },
+    kind: { type: 'string', enum: ['discussion', 'task'], description: 'start only: discussion (default) opens a Thread to talk something through; task opens a Thread that carries a Task.' },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for reply on a Taskful Thread. Prefer threadRef; an unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
-    replyToMessageRef: { type: 'string', description: "Optional: the full branded Message ref you are answering (as rendered by team_thread or an inbox notice). Reply on the Thread you are already replying to; the Message must be one this Thread recorded. The Host links the reply to it, and its author is then delivered to like a mention, so answering a peer reaches them without typing their handle. Use it when the link is the point — the reader needs to know which Message you are answering. A Message that only continues the Thread's conversation needs neither this nor a mention: the Thread already delivers to the Members on it, so the link would announce a delivery that was going to happen anyway." },
-    asTask: { type: 'boolean', description: 'When true, start creates a Task with the Thread. Default false creates a taskless Thread.' },
+    replyToMessageRef: { type: 'string', description: "Optional: the full branded Message ref you are answering (for post: a Main stream Message of the same Project) (as rendered by team_thread or an inbox notice). Reply on the Thread you are already replying to; the Message must be one this Thread recorded. The Host links the reply to it, and its author is then delivered to like a mention, so answering a peer reaches them without typing their handle. Use it when the link is the point — the reader needs to know which Message you are answering. A Message that only continues the Thread's conversation needs neither this nor a mention: the Thread already delivers to the Members on it, so the link would announce a delivery that was going to happen anyway." },
     body: { type: 'string', required: true, description: "Markdown body. Lead with the conclusion or state. Mention the Human only when they must know or decide; when a decision is owed, say plainly what needs deciding and what happens by default if nobody answers — no fixed template. Keep it the shortest useful message for the recipients; mechanical detail follows below. Cite Team refs exactly as returned, as bare text with one colon (e.g. task:0f0a…) — never a double colon, never inside backticks or quotes. Unambiguous UUID abbreviations (first 6+ hex chars) also resolve. Mention a Member by writing `@Handle` (`@` required, case-insensitive) in the prose: that is what delivers the Message to them and renders the mention chip, and `@all` reaches the whole Project." }, baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Thread." },
     attachments: { type: 'array', items: { type: 'string' }, description: 'Absolute file paths to share, e.g. screenshots or generated artifacts; images render as thumbnails for recipients. The Host validates each path and copies the file into the attachment cache, and members also receive one cached path per attachment; if any path fails validation the whole send is rejected.' },
     workspace: workspaceParam,
@@ -583,10 +657,27 @@ const teamMessage = markAgentTeamPreset(defineTool({
     schema: { type: 'object', additionalProperties: false, properties: {
       kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, revision: { type: 'number' },
       expectedRevision: { type: 'number' }, messageRef: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } }, unreadCount: { type: 'number' }, directCount: { type: 'number' },
+      projectRef: { type: 'string' }, entries: { type: 'array', items: MAIN_ENTRY_SCHEMA },
       facts: { type: 'array', items: FACT_SCHEMA },
       undeliveredMentions: { type: 'array', items: { type: 'string' } }, occurredAt: { type: 'string' }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
     } },
     render: (_args, value) => {
+      if (value.kind === 'committed' && value.action === 'post' && value.messageRef !== undefined) {
+        return [{ type: 'text', text: [
+          'Committed — Main stream message posted.',
+          [value.messageRef, ...(value.projectRef === undefined ? [] : [value.projectRef])].join(' · '),
+          ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
+        ].join('\n') }]
+      }
+      if (value.kind === 'main_unread_required') {
+        const entries = (value.entries ?? []) as MainEntryView[]
+        return [{ type: 'text', text: [
+          'Not committed — main_unread_required.',
+          `${value.projectRef ?? ''} · ${value.unreadCount ?? 0} unread, ${value.directCount ?? 0} direct`,
+          ...(entries.length === 0 ? [] : ['', `${entries.length} unread Main stream entr${entries.length === 1 ? 'y' : 'ies'}:`, ...entries.map(mainEntryLine)]),
+          recoveryFor('main_unread_required').sentence({ projectRef: value.projectRef }),
+        ].join('\n') }]
+      }
       if (value.kind === 'committed' && value.messageRef !== undefined && value.threadRef !== undefined && value.revision !== undefined) {
         return [{ type: 'text', text: [
           value.action === 'start' ? 'Committed — Thread created.' : 'Committed — reply added.',
@@ -612,14 +703,29 @@ const teamMessage = markAgentTeamPreset(defineTool({
     const rawPaths = args.attachments
     const attachmentPaths = Array.isArray(rawPaths) ? rawPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '') : undefined
     const paths = attachmentPaths !== undefined && attachmentPaths.length > 0 ? { attachmentPaths } : {}
+    if (args.action === 'post') {
+      if (args.projectRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined
+        || args.kind !== undefined) throw new Error(`post requires projectRef and does not accept threadRef, taskRef, baseRevision, or kind — ${recoveryFor('post_requires_project').sentence({})}`)
+      const result = await host.postMainMessageForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
+        projectRef: projectRefOf(args.projectRef) as never,
+        ...(args.replyToMessageRef === undefined ? {} : { replyToMessageRef: args.replyToMessageRef as AgentTeamMessageRef }), body: args.body, ...paths })
+      if (result.kind === 'committed') {
+        return { kind: result.kind, action: 'post', projectRef: result.message.projectRef, messageRef: result.message.messageRef, occurredAt: result.receipt.occurredAt }
+      }
+      return { kind: result.kind, projectRef: result.projectRef, unreadCount: result.unreadCount, directCount: result.directCount, entries: result.entries.map(mainEntryView) }
+    }
     if (args.action === 'start') {
       if (args.projectRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined) throw new Error(`start requires projectRef and does not accept threadRef, taskRef, or baseRevision — ${recoveryFor('start_requires_project').sentence({})}`)
-      const result = await host.sendMessageForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
-        projectRef: projectRefOf(args.projectRef) as never, body: args.body, asTask: args.asTask === true, ...paths })
+      // The schema is implicitly open, so the removed `asTask` alias would otherwise be dropped silently and the
+      // start would commit as a discussion — the model must learn it was not heard.
+      if ((args as { readonly asTask?: unknown }).asTask !== undefined) throw new Error(`start does not accept asTask — pass kind: 'task' instead — ${recoveryFor('action_only_arguments').sentence({ action: 'start', parameter: 'asTask', owner: 'start' })}`)
+      const kind = args.kind === 'task' ? 'task' : 'discussion'
+      const request = { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent), projectRef: projectRefOf(args.projectRef) as never, body: args.body, ...paths }
+      const result = host.ledgerRulesVersion() >= 2 ? await host.startThreadForAgent(agent, { ...request, kind }) : await host.sendMessageForAgent(agent, { ...request, asTask: kind === 'task' })
       return messageOutcome(result, 'start')
     }
     const baseRevision = args.baseRevision
-    if ((args.threadRef === undefined && args.taskRef === undefined) || args.projectRef !== undefined || args.asTask !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
+    if ((args.threadRef === undefined && args.taskRef === undefined) || args.projectRef !== undefined || args.kind !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
       throw new Error(`reply requires threadRef and a positive baseRevision — ${recoveryFor('missing_write_token').sentence({})}`)
     }
     const result = await host.replyForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),

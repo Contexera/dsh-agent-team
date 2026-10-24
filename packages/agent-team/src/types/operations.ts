@@ -11,6 +11,8 @@ import type {
   AgentTeamClaimActivity,
   AgentTeamClaimsReleasedActivity,
   AgentTeamInboxDelta,
+  AgentTeamMainActivity,
+  AgentTeamMainMessage,
   AgentTeamMemberId,
   AgentTeamMessage,
   AgentTeamStoredMessage,
@@ -142,23 +144,27 @@ export interface AgentTeamRulesVersionAdoptedOperation extends AgentTeamOperatio
   readonly data: { readonly version: number }
 }
 
-/** Durable Human grant of Project ownership to one Agent Member; the Human owns every Project and is never recorded. Rules version 2 and later only. */
+/** Durable Human grant of Project ownership to one Agent Member; the Human owns every Project and is never recorded. Rules version 2 and later only. The Main stream Activity tells the other owners and gives the new owner a Main stream marker. */
 export interface AgentTeamProjectOwnerAddedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/project-owner-added'
   readonly data: {
     readonly workspaceId: WorkspaceId
     readonly projectRef: AgentTeamProjectRef
     readonly memberId: AgentTeamMemberId
+    readonly activity: AgentTeamMainActivity
+    readonly inbox: AgentTeamInboxDelta
   }
 }
 
-/** Durable Human withdrawal of one Agent Member's Project ownership. Rules version 2 and later only. */
+/** Durable Human withdrawal of one Agent Member's Project ownership. Rules version 2 and later only. The removed Agent stays a Project member and gets a Main stream marker. */
 export interface AgentTeamProjectOwnerRemovedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/project-owner-removed'
   readonly data: {
     readonly workspaceId: WorkspaceId
     readonly projectRef: AgentTeamProjectRef
     readonly memberId: AgentTeamMemberId
+    readonly activity: AgentTeamMainActivity
+    readonly inbox: AgentTeamInboxDelta
   }
 }
 
@@ -259,6 +265,44 @@ export interface AgentTeamThreadPromotedOperation extends AgentTeamOperationBase
     readonly baseRevision: number
     readonly activity: AgentTeamTaskActivity
     readonly task: AgentTeamTask
+    readonly thread: AgentTeamThread
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/** Durable Main stream Message from a Project member and the Main stream markers it delivers. Rules version 2 and later only. */
+export interface AgentTeamMainMessagePostedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/main-message-posted'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly mentions: readonly AgentTeamMemberId[]
+    readonly message: AgentTeamMainMessage
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/** Durable Main stream read: the watermark an owner advances to and the markers consumed. Everything else is derived. Rules version 2 and later only. */
+export interface AgentTeamMainStreamReadOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/main-stream-read'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly memberId: AgentTeamMemberId
+    readonly readThroughSequence: number
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/** Durable Project-owner start of a discussion or Task: anchor Message, Thread, optional Task, and the creator's Attention. Replaces `team/message-sent` from rules version 2. */
+export interface AgentTeamThreadStartedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/thread-started'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly kind: 'discussion' | 'task'
+    readonly mentions: readonly AgentTeamMemberId[]
+    readonly anchor: AgentTeamMessage
+    readonly task?: AgentTeamTask
     readonly thread: AgentTeamThread
     readonly inbox: AgentTeamInboxDelta
   }
@@ -398,6 +442,9 @@ export type AgentTeamOperation =
   | AgentTeamProjectArchivedOperation
   | AgentTeamMessageSentOperation
   | AgentTeamThreadRepliedOperation
+  | AgentTeamMainMessagePostedOperation
+  | AgentTeamMainStreamReadOperation
+  | AgentTeamThreadStartedOperation
   | AgentTeamThreadPromotedOperation
   | AgentTeamClaimCreatedOperation
   | AgentTeamClaimDoneOperation

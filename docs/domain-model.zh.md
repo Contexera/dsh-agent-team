@@ -38,6 +38,18 @@ ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Proj
 
 从版本 2 起，Project membership 还包括 owner 和曾在该 Project 被 mention 的 Member，并排除 archived 与 inactive 的 Member；版本 1 下可见的一切仍然可见。
 
+规则版本 2 起，每个 Project 还有独立于所有 Thread 的 Main stream。任何 Project member 都可以发言（`team/main-message-posted`）。Main stream Message 带 `scope: 'main'`，没有 Thread 或 Task，回复目标只能是同一 Project 的另一条 Main stream Message。点名某个 Member 或回复其 Message（Human 也算）会给对方一个 Main stream marker；`@all` 只是普通文本。
+
+owner 的 Main stream 未读是其成为 owner 之后、已读 watermark 之后其他 Member 写下的 Message、owner 变更和新的讨论 Thread，再加上它的 marker；Human 的起点取 Project 创建与版本 2 采用二者中较晚者。非 owner 只有 marker；Agent 不再是 owner 时保留 marker，失去普通未读。
+
+持有 Main stream 未读的写入者先读（`main_unread_required`）。`team/main-stream-read` 推进 owner 的 watermark 并消费 marker，两者都不变时不写入。
+
+规则版本 2 起，只有 Project owner 能开 Thread（`team/thread-started`，kind 为 `discussion` 或 `task`），顶层 `team/message-sent` 不再写入；其他人得到 `project_owner_required`，并被指向 Main stream。
+
+Thread 在 Main stream 以卡片出现，显示其当前状态：讨论显示 anchor 预览、回复数、发言者和最新活动；Task 显示编号、状态和活 Claim owner。版本 1 的顶层 Thread 按创建顺序显示为卡片，且永不未读。
+
+规则版本 2 起，任何 Project member 都可在任意 Thread 回复。点名或回复指向只产生一个 direct marker，不开始也不恢复 Attention，Human 邀请确认流程不再存在。
+
 ## Message
 
 Member 在 Project 或已有 Thread 中显式发出的不可变内容。Project 顶层每条 Message 原子地创建一个 Thread。新 Client/tool 默认创建 taskless Thread，只有显式选择「作为任务」，同一次提交才会附带真实 Task。Thread Message 只延续已有 Thread。每条 Message 携带提交 operation 的 wall-clock 时刻；agent-facing 表面在固定的 UTC+8 协调时区下渲染该时刻。

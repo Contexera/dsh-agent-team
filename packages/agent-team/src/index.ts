@@ -129,8 +129,17 @@ import type {
   AgentTeamReadMessageRequest,
   AgentTeamReadMessageResult,
   AgentTeamReplyResult,
+  AgentTeamMainStreamHistory,
+  AgentTeamMainStreamHistoryRequest,
+  AgentTeamMainStreamReadRequest,
+  AgentTeamMainStreamReadResult,
+  AgentTeamMainTimelineEntry,
+  AgentTeamPostMainMessageRequest,
+  AgentTeamPostMainMessageResult,
   AgentTeamSendMessageRequest,
   AgentTeamSendMessageResult,
+  AgentTeamStartThreadRequest,
+  AgentTeamStartThreadResult,
   AgentTeamSetHumanProfileRequest,
   AgentTeamSetHumanProfileResult,
   AgentTeamSetMemberStateRequest,
@@ -1218,7 +1227,7 @@ export default class AgentTeam extends TypertRemoteService {
         throw new Error(`Agent Member '${stored.handle}' failed to activate its next context: ${this.memberFailures.get(memberId)?.activation ?? 'unknown error'}`)
       }
       const notifications = this.requireLedger().notificationFacts(recycled.value.member.memberId)
-      if (notifications.length > 0) {
+      if (notifications.length > 0 || this.requireLedger().mainNotificationFacts(recycled.value.member.memberId).length > 0) {
         this.notifyMember(reactivated.agent, {
           kind: 'transition',
           requestId: plan.requestId,
@@ -1279,7 +1288,8 @@ export default class AgentTeam extends TypertRemoteService {
     const handle = this.handles.get(member.memberId)
     if (handle === undefined) throw new Error(`member '${member.handle}' has no active session`)
     const notifications = this.requireLedger().notificationFacts(member.memberId)
-    const body = notifications.length === 0 ? text : `${text}\n\n${this.notificationText(notifications, member.memberId)}`
+    const mainNotifications = this.requireLedger().mainNotificationFacts(member.memberId)
+    const body = notifications.length === 0 && mainNotifications.length === 0 ? text : `${text}\n\n${this.notificationText(notifications, member.memberId, mainNotifications)}`
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_RECOVERY_NOTICE_SUMMARY },
@@ -1289,7 +1299,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     this.trackTeamWake(handle.agent, hint)
     handle.agent.steer(hint)
-    this.ctx.logger.info(`agent-team: ${trigger} continuation steered for ${this.memberScope(member.memberId, handle.agent.session.id)}${notifications.length === 0 ? '' : ` carrying ${this.notificationIdentity(notifications)}`}: it is queued for the Member's next step, not yet read by the model`)
+    this.ctx.logger.info(`agent-team: ${trigger} continuation steered for ${this.memberScope(member.memberId, handle.agent.session.id)}${notifications.length === 0 && mainNotifications.length === 0 ? '' : ` carrying ${this.notificationIdentity(notifications, mainNotifications)}`}: it is queued for the Member's next step, not yet read by the model`)
   }
 
   /** Automatic-recovery wakeup; throwing tells the coordinator the target is gone. */
@@ -1445,6 +1455,31 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('sendMessage')
   async sendMessage(request: AgentTeamSendMessageRequest): Promise<AgentTeamSendMessageResult> {
     return this.sendMessageAs(this.humanCall(request.workspaceId), request)
+  }
+
+  /** Human top-level start of a discussion or Task Thread; rules version 2 and later. */
+  @Remote('startThread')
+  async startThread(request: AgentTeamStartThreadRequest): Promise<AgentTeamStartThreadResult> {
+    return this.startThreadAs(this.humanCall(request.workspaceId), request)
+  }
+
+  /** Human Main stream Message; rules version 2 and later. Unread Main stream entries come back as a typed outcome. */
+  @Remote('postMainMessage')
+  async postMainMessage(request: AgentTeamPostMainMessageRequest): Promise<AgentTeamPostMainMessageResult> {
+    return this.postMainMessageAs(this.humanCall(request.workspaceId), request)
+  }
+
+  /** Human's durable, atomically acknowledged Main stream read. */
+  @Remote('readMainStream')
+  async readMainStream(request: AgentTeamMainStreamReadRequest): Promise<AgentTeamMainStreamReadResult> {
+    return this.readMainStreamAs(this.humanCall(request.workspaceId), request)
+  }
+
+  /** Human's non-mutating Main stream page with the Human's own unread standing. */
+  @Remote('mainStreamHistory')
+  mainStreamHistory(request: AgentTeamMainStreamHistoryRequest): AgentTeamMainStreamHistory {
+    this.requireWorkspace(request.workspaceId)
+    return this.requireLedger().mainStreamHistory(agentTeamHumanActor(), request)
   }
 
   /**
@@ -1656,6 +1691,32 @@ export default class AgentTeam extends TypertRemoteService {
   /** Agent-only top-level Thread start. Workspace identity is verified against the live binding. */
   async sendMessageForAgent(agent: Agent, request: AgentTeamSendMessageRequest): Promise<AgentTeamSendMessageResult> {
     return this.sendMessageAs(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  /** The rules version the Team ledger currently validates under; tools branch their shapes on it. */
+  ledgerRulesVersion(): number {
+    return this.requireLedger().status().rulesVersion
+  }
+
+  /** Agent-only start of a discussion or Task Thread; Project owners only. */
+  async startThreadForAgent(agent: Agent, request: AgentTeamStartThreadRequest): Promise<AgentTeamStartThreadResult> {
+    return this.startThreadAs(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  /** Agent-only Main stream Message. */
+  async postMainMessageForAgent(agent: Agent, request: AgentTeamPostMainMessageRequest): Promise<AgentTeamPostMainMessageResult> {
+    return this.postMainMessageAs(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  /** Agent-only Main stream read; a read with nothing to acknowledge commits nothing. */
+  async readMainStreamForAgent(agent: Agent, request: AgentTeamMainStreamReadRequest): Promise<AgentTeamMainStreamReadResult> {
+    return this.readMainStreamAs(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  mainStreamHistoryForAgent(agent: Agent, request: AgentTeamMainStreamHistoryRequest): AgentTeamMainStreamHistory {
+    const actor = this.memberActor(agent)
+    this.requireAgentWorkspace(actor, request.workspaceId)
+    return this.requireLedger().mainStreamHistory(actor, request)
   }
 
   /** Agent-only existing-Thread reply. */
@@ -2041,6 +2102,21 @@ export default class AgentTeam extends TypertRemoteService {
 
   private sendMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamSendMessageRequest): Promise<AgentTeamSendMessageResult> {
     return this.commitMessageAs(actor, request, authorized => this.requireLedger().sendMessage(authorized))
+  }
+
+  private startThreadAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamStartThreadRequest): Promise<AgentTeamStartThreadResult> {
+    return this.commitMessageAs(actor, request, authorized => this.requireLedger().startThread(authorized))
+  }
+
+  private postMainMessageAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamPostMainMessageRequest): Promise<AgentTeamPostMainMessageResult> {
+    return this.commitMessageAs(actor, request, authorized => this.requireLedger().postMainMessage(authorized))
+  }
+
+  private async readMainStreamAs(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamMainStreamReadRequest): Promise<AgentTeamMainStreamReadResult> {
+    const result = await this.requireLedger().readMainStream({ ...request, actor })
+    // A read that made no progress commits no operation and carries no receipt.
+    if (result.committed && result.value.receipt !== undefined) this.emitCommitted(result.value.receipt)
+    return result.value
   }
 
   /** Read one Message back verbatim, whoever is asking. */
@@ -2451,21 +2527,6 @@ export default class AgentTeam extends TypertRemoteService {
         else agent.steer(notice)
       })
     }
-    if (operation.kind === 'team/project-owner-added' || operation.kind === 'team/project-owner-removed') {
-      this.afterCommit('ownership notice', () => {
-        const agent = this.handles.get(operation.data.memberId)?.agent
-        const project = ledger.getProject(operation.data.projectRef)
-        if (agent === undefined || project === undefined) return
-        const text = operation.kind === 'team/project-owner-added'
-          ? `Team ownership changed: @human made you an owner of Project ${project.name} (${project.projectRef}) in Workspace ${project.workspaceId}. Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
-          : `Team ownership changed: @human removed you as an owner of Project ${project.name} (${project.projectRef}) in Workspace ${project.workspaceId}. You can still take part in it.`
-        const notice = createUserMessage({ content: [{ type: 'text', text }],
-          source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Project ownership changed' } })
-        // Lost on a crash before delivery; the owner block of the per-step Member context rederives it.
-        if (agent.status === 'idle' || agent.inbox.nextTurn.some(message => message.source.kind === 'user')) agent.followup(notice)
-        else agent.steer(notice)
-      })
-    }
     for (const memberId of ledger.affectedMembersOf(operation)) {
       const handle = this.handles.get(memberId)
       if (handle !== undefined) {
@@ -2561,10 +2622,11 @@ export default class AgentTeam extends TypertRemoteService {
     return 'running transition'
   }
 
-  private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>): string {
+  private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): string {
     let newest = 0
     for (const { item } of notifications) newest = Math.max(newest, item.newestSequence)
-    return `${notifications.length} unread Thread(s), newest unread fact sequence ${newest}`
+    for (const { entries } of main) newest = Math.max(newest, entries.at(-1)?.sequence ?? 0)
+    return `${notifications.length} unread Thread(s)${main.length === 0 ? '' : `, ${main.length} Project Main stream(s) with direct entries`}, newest unread fact sequence ${newest}`
   }
 
   /**
@@ -2617,9 +2679,10 @@ export default class AgentTeam extends TypertRemoteService {
 
   private deliverInboxNotice(agent: Agent, member: AgentTeamAgentMember, cause: NotificationCause, sequenced = false): void {
     const notifications = this.requireLedger().notificationFacts(member.memberId)
+    const mainNotifications = this.requireLedger().mainNotificationFacts(member.memberId)
     const scope = this.memberScope(member.memberId, agent.id)
     const causeText = this.notificationCauseText(cause)
-    if (notifications.length === 0) {
+    if (notifications.length === 0 && mainNotifications.length === 0) {
       this.dropInboxCoverage(member.memberId)
       this.ctx.logger.debug(`agent-team: Team Inbox notice not attempted for ${scope} cause ${causeText}: the Member has no unread Team facts`)
       return
@@ -2630,10 +2693,10 @@ export default class AgentTeam extends TypertRemoteService {
     if (!sequenced) {
       sequenced = agent.inbox.nextTurn.some(message => message.source.kind === 'user')
     }
-    const signature = JSON.stringify(notifications.map(({ item }) => [
+    const signature = JSON.stringify([...notifications.map(({ item }) => [
       item.thread.threadRef, item.thread.revision, item.unreadCount, item.directCount, item.newestSequence,
-    ]))
-    const facts = this.notificationIdentity(notifications)
+    ]), ...mainNotifications.map(({ project, entries }) => [project.projectRef, entries.map(entry => entry.sequence)])])
+    const facts = this.notificationIdentity(notifications, mainNotifications)
     // An unchanged rederivation spends no attempt: the delivery already made
     // for these facts stands, which is what keeps a repeated commit's logging
     // bounded.
@@ -2652,7 +2715,7 @@ export default class AgentTeam extends TypertRemoteService {
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
     if (existingInboxHint !== undefined) this.removeExpectedTeamWake(agent, existingInboxHint)
     const hint = createUserMessage({
-      content: [{ type: 'text', text: this.notificationText(notifications, member.memberId) }],
+      content: [{ type: 'text', text: this.notificationText(notifications, member.memberId, mainNotifications) }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY },
     })
     this.trackTeamWake(agent, hint)
@@ -2755,7 +2818,7 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId): string {
+  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): string {
     const maxCharacters = 32 * 1024
     const sections: string[] = [TEAM_INBOX_NOTICE_SUMMARY]
     let characterCount = sections[0]!.length
@@ -2798,9 +2861,38 @@ export default class AgentTeam extends TypertRemoteService {
         append(`${route}: ${ordinary.length} unread update${ordinary.length === 1 ? '' : 's'} · newest at ${formatTeamTimestamp(ordinary.at(-1)!.fact.occurredAt)}.`)
       }
     }
+    for (const { project, entries } of main) {
+      if (!append(`Workspace: ${project.workspaceId}\nProject: ${project.projectRef} — Main stream`)) break
+      for (const entry of entries) {
+        if (detailedFactCount >= 20) {
+          omitted = true
+          break
+        }
+        if (append(this.mainNotificationDetail(entry, project))) detailedFactCount += 1
+      }
+    }
     if (omitted) sections.push('More unread work remains in team_inbox; the automatic context is bounded.')
-    sections.push('Use team_thread read with the relevant workspace and threadRef before acting or replying. Use team_inbox only when you need to triage the remaining Threads.')
+    if (notifications.length > 0) sections.push('Use team_thread read with the relevant workspace and threadRef before acting or replying. Use team_inbox only when you need to triage the remaining Threads.')
+    if (main.length > 0) sections.push('Use team_thread read with the relevant workspace and projectRef to read the Project Main stream before answering there.')
     return sections.join('\n\n')
+  }
+
+  private mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: AgentTeamProject): string {
+    if (entry.kind === 'activity') {
+      const { activity } = entry
+      const text = activity.kind === 'owner-added'
+        ? `@human made you an owner of Project ${project.name} (${project.projectRef}). Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
+        : `@human removed you as an owner of Project ${project.name} (${project.projectRef}). You can still take part in it.`
+      return ['Team Project ownership changed', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, `Project: ${project.projectRef}`, text].join('\n')
+    }
+    if (entry.kind !== 'message') return ''
+    const { message } = entry
+    const repliesTo = entry.replyTo === undefined
+      ? (message.replyToMessageRef === undefined ? undefined : `Replies to: ${message.replyToMessageRef}`)
+      : `Replies to: @${entry.replyTo.sender} — "${entry.replyTo.excerpt}" [${message.replyToMessageRef}]`
+    return ['Direct Main stream mention', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, `From: ${this.printableSender(message.sender)}`,
+      `Project: ${project.projectRef}`, `Message ref: ${message.messageRef}`, ...(repliesTo === undefined ? [] : [repliesTo]),
+      `Message: ${this.boundedNotificationBody(message.body)}`].join('\n')
   }
 
   private boundedNotificationBody(body: string): string {

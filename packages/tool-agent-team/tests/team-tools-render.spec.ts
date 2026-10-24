@@ -663,3 +663,32 @@ describe('team tools render absolute event instants in UTC+8', () => {
     expect(reply).not.toContain('+08:00')
   })
 })
+
+describe('the Main stream through team_thread and team_message', () => {
+  const entries = [
+    { sequence: 5, kind: 'message', occurredAt: '2026-09-08T09:00:00.000Z', unread: true, direct: true, sender: 'member:human', messageRef: 'message:main-1',
+      body: 'Ship the draft today', mentions: ['member:me'] },
+    { sequence: 6, kind: 'thread-card', occurredAt: '2026-09-08T09:05:00.000Z', unread: false, direct: false, sender: 'member:human', threadRef: THREAD,
+      preview: 'Fix the importer', replyCount: 2, participants: ['human', 'Tars'], taskRef: TASK, taskNumber: 3, status: 'in_progress', resolution: 'open', liveClaimOwners: ['Tars'] },
+  ]
+
+  it('renders a Main stream read with markers on entries and cards as current state, with no write token', () => {
+    const text = renderText(teamTools().get('team_thread')!, { action: 'read', projectRef: PROJECT }, {
+      workspaceId: 'workspace:alpha', projectRef: PROJECT, scope: 'main', kind: 'read', entries, readThroughSequence: 6, remainingUnreadCount: 0,
+    })
+    expect(text).toContain('Read committed — acknowledged 1 unread update(s) on the Main stream')
+    expect(text).toContain('5 2026-09-08T17:00:00+08:00 [member:human] [direct]')
+    expect(text).toContain(`[thread card] Task ${TASK} (#3), in_progress/open — working: Tars — Fix the importer · ${THREAD} · 2 replies`)
+    expect(text).not.toContain('baseRevision')
+  })
+
+  it('renders posted messages and the owner-read rejection with its single way out', () => {
+    const tool = teamTools().get('team_message')!
+    const committed = renderText(tool, { action: 'post', projectRef: PROJECT, body: 'x' }, { kind: 'committed', action: 'post', projectRef: PROJECT, messageRef: 'message:main-2' })
+    expect(committed).toContain('Committed — Main stream message posted.')
+    expect(committed).not.toContain('baseRevision')
+    const blocked = renderText(tool, { action: 'post', projectRef: PROJECT, body: 'x' }, { kind: 'main_unread_required', projectRef: PROJECT, unreadCount: 1, directCount: 1, entries })
+    expect(blocked).toContain('Not committed — main_unread_required.')
+    expect(blocked).toContain(`team_thread read and projectRef ${PROJECT}`)
+  })
+})

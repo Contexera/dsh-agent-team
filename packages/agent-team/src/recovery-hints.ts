@@ -10,6 +10,8 @@ export interface RecoveryContext {
   readonly threadRef?: string | undefined
   /** The Task the rejected action was aimed at, when there is one. */
   readonly taskRef?: string | undefined
+  /** The Project the rejected action was aimed at, when there is one. */
+  readonly projectRef?: string | undefined
   /** The tool action whose parameter shape was wrong, when the fault is a shape. */
   readonly action?: string | undefined
   /** The parameter that belongs to another action, when the fault is that one. */
@@ -35,6 +37,22 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
       ...(threadRef === undefined ? [] : [threadRef]),
       ...(taskRef === undefined ? [] : [taskRef]),
     ].join(' '),
+  },
+  {
+    kind: 'main_unread_required',
+    sentence: ({ projectRef }: RecoveryContext) => `Read the pending Main stream updates with team_thread read and projectRef${projectRef === undefined ? '' : ` ${projectRef}`} before reconsidering this post.`,
+  },
+  {
+    kind: 'project_owner_required',
+    sentence: ({ projectRef }: RecoveryContext) => `Only a Project owner starts or promotes a Thread — use team_message post to speak in ${projectRef === undefined ? 'the Project' : projectRef}'s Main stream, and mention an owner when the work needs one.`,
+  },
+  {
+    kind: 'not_project_member',
+    sentence: ({ projectRef }: RecoveryContext) => `Only Project members take part in ${projectRef === undefined ? 'a Project' : projectRef} — choose a Project listed by team_view, or ask the Human or a Project owner to mention you there.`,
+  },
+  {
+    kind: 'main_stream_addressing',
+    sentence: ({ refused }: RecoveryContext) => `${refused ?? 'threadRef and projectRef'} address different things — pass threadRef to read a Thread, or projectRef to read a Project's Main stream, and retry with one of them.`,
   },
   {
     kind: 'unread_remaining',
@@ -80,6 +98,10 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   {
     kind: 'start_requires_project',
     sentence: () => 'start opens a new Thread: copy a projectRef from team_view, and use reply instead when you already hold a threadRef.',
+  },
+  {
+    kind: 'post_requires_project',
+    sentence: () => 'post speaks in a Project\'s Main stream: copy a projectRef from team_view, and use reply instead when you already hold a threadRef.',
   },
   {
     kind: 'dm_requires_member',

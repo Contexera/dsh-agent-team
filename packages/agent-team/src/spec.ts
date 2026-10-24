@@ -141,6 +141,9 @@ function stampOperationMessages(operation: z.output<typeof storedAgentTeamOperat
   if (operation.kind === 'team/thread-replied') {
     return { ...operation, data: { ...operation.data, message: stampMessage(operation.occurredAt, operation.data.message) } } as AgentTeamOperation
   }
+  if (operation.kind === 'team/thread-started') {
+    return { ...operation, data: { ...operation.data, anchor: stampMessage(operation.occurredAt, operation.data.anchor) } } as AgentTeamOperation
+  }
   return operation as AgentTeamOperation
 }
 
@@ -184,6 +187,33 @@ const activityMarkerSchema = z.object({
   sequence: z.number().int().positive(),
 }).strict()
 
+const mainMessageSchema = z.object({
+  messageRef: messageRefSchema,
+  projectRef: projectRefSchema,
+  scope: z.literal('main'),
+  sender: memberIdSchema,
+  body: z.string().min(1),
+  attachments: z.array(attachmentSchema).optional(),
+  replyToMessageRef: messageRefSchema.optional(),
+  sequence: z.number().int().positive(),
+  occurredAt: z.string().datetime(),
+}).strict().transform(omitUndefined)
+
+const mainActivitySchema = z.object({
+  activityRef: activityRefSchema,
+  projectRef: projectRefSchema,
+  kind: z.union([z.literal('owner-added'), z.literal('owner-removed')]),
+  memberId: memberIdSchema,
+  actor: memberIdSchema,
+  sequence: z.number().int().positive(),
+  occurredAt: z.string().datetime(),
+}).strict()
+
+const mainMarkerSchema = z.union([
+  z.object({ memberId: memberIdSchema, projectRef: projectRefSchema, messageRef: messageRefSchema, sequence: z.number().int().positive() }).strict(),
+  z.object({ memberId: memberIdSchema, projectRef: projectRefSchema, activityRef: activityRefSchema, sequence: z.number().int().positive() }).strict(),
+])
+
 const inboxDeltaSchema = z.object({
   attention: z.object({
     set: z.array(attentionSchema),
@@ -197,6 +227,10 @@ const inboxDeltaSchema = z.object({
     added: z.array(activityMarkerSchema),
     removed: z.array(activityMarkerSchema),
   }).strict(),
+  mainMarkers: z.object({
+    added: z.array(mainMarkerSchema),
+    removed: z.array(mainMarkerSchema),
+  }).strict().optional(),
 }).strict()
 
 const claimSchema = z.object({
@@ -402,13 +436,15 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/project-owner-added'),
-    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema }).strict(),
+    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema,
+      activity: mainActivitySchema, inbox: inboxDeltaSchema }).strict(),
   }).strict(),
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/project-owner-removed'),
-    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema }).strict(),
+    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema,
+      activity: mainActivitySchema, inbox: inboxDeltaSchema }).strict(),
   }).strict(),
   z.object({
     ...operationBase,
@@ -490,6 +526,44 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       baseRevision: z.number().int().positive(),
       mentions: z.array(memberIdSchema),
       message: messageSchema,
+      task: taskSchema.optional(),
+      thread: threadSchema,
+      inbox: inboxDeltaSchema,
+    }).strict().transform(omitUndefined),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/main-message-posted'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      mentions: z.array(memberIdSchema),
+      message: mainMessageSchema,
+      inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/main-stream-read'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      projectRef: projectRefSchema,
+      memberId: memberIdSchema,
+      readThroughSequence: z.number().int().nonnegative(),
+      inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/thread-started'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      projectRef: projectRefSchema,
+      kind: z.union([z.literal('discussion'), z.literal('task')]),
+      mentions: z.array(memberIdSchema),
+      anchor: messageSchema,
       task: taskSchema.optional(),
       thread: threadSchema,
       inbox: inboxDeltaSchema,

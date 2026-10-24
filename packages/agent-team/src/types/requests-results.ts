@@ -12,6 +12,9 @@ import type {
   AgentTeamClaimRef,
   AgentTeamConfirmationToken,
   AgentTeamDirectMarker,
+  AgentTeamMainActivity,
+  AgentTeamMainMarker,
+  AgentTeamMainMessage,
   AgentTeamMemberCapabilities,
   AgentTeamMemberId,
   AgentTeamMessage,
@@ -462,6 +465,151 @@ export type AgentTeamSendMessageResult =
   | AgentTeamSendMessageCommittedResult
   | AgentTeamConfirmationRequired
   | AgentTeamMemberNotFollowing
+
+/** Which Thread a Main stream card stands for, and the current state it shows. A card is a projection of its Thread, never a stored fact: it changes as the Thread does. */
+export interface AgentTeamMainThreadCard {
+  readonly threadRef: AgentTeamThreadRef
+  readonly anchor: {
+    readonly messageRef: AgentTeamMessageRef
+    readonly sender: AgentTeamMemberId
+    /** Bounded opening line of the anchor Message. */
+    readonly preview: string
+    readonly sequence: number
+    readonly occurredAt: string
+  }
+  /** Present when the Thread is a Task: the card shows its current status, resolution and live Claim owners instead of a discussion summary. */
+  readonly task?: {
+    readonly taskRef: AgentTeamTaskRef
+    readonly taskNumber: number
+    readonly status: AgentTeamTask['status']
+    readonly resolution: AgentTeamTask['resolution']
+    readonly liveClaimOwners: readonly AgentTeamInboxActor[]
+  }
+  /** Messages after the anchor. */
+  readonly replyCount: number
+  /** Members who wrote in the Thread, in order of their first Message. */
+  readonly participants: readonly AgentTeamInboxActor[]
+  readonly newestSequence: number
+  readonly newestOccurredAt: string
+  readonly newestActor: AgentTeamInboxActor
+}
+
+interface AgentTeamMainTimelineBase {
+  /** Position in the ledger; a card sits where its Thread's anchor was written. */
+  readonly sequence: number
+  readonly occurredAt: string
+  /** Unread for the reader: ordinary unread (owners only) or carrying one of the reader's Main stream markers. Task cards are never unread. */
+  readonly unread: boolean
+  /** Carries one of the reader's Main stream markers. */
+  readonly direct: boolean
+}
+
+/** One entry of a Project's Main stream, in ledger order. */
+export type AgentTeamMainTimelineEntry =
+  | (AgentTeamMainTimelineBase & {
+    readonly kind: 'message'
+    readonly message: AgentTeamMainMessage
+    /** Members this Message mentions or answers; each holds a Main stream marker. */
+    readonly mentions: readonly AgentTeamMemberId[]
+    readonly replyTo?: AgentTeamMessageReplyContext | undefined
+  })
+  | (AgentTeamMainTimelineBase & { readonly kind: 'activity'; readonly activity: AgentTeamMainActivity })
+  | (AgentTeamMainTimelineBase & { readonly kind: 'thread-card'; readonly card: AgentTeamMainThreadCard })
+
+/** The reader's own Main stream standing in one Project. */
+export interface AgentTeamMainStreamStanding {
+  /** Owners (the Human always) have ordinary unread; everyone else only has markers. */
+  readonly owner: boolean
+  /** Newest sequence the Main stream holds (0 when empty): what a read can pass as `readThroughSequence`. */
+  readonly head: number
+  readonly unreadCount: number
+  readonly directCount: number
+  readonly markers: readonly AgentTeamMainMarker[]
+}
+
+/** Intent to post one Main stream Message. */
+export interface AgentTeamPostMainMessageRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly body: string
+  readonly recipients?: readonly AgentTeamMemberId[]
+  /** The Main stream Message this answers; its author joins the recipients. */
+  readonly replyToMessageRef?: AgentTeamMessageRef
+  readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
+  readonly attachmentPaths?: readonly string[] | undefined
+}
+
+export interface AgentTeamPostMainMessageCommittedResult {
+  readonly kind: 'committed'
+  readonly receipt: AgentTeamOperationReceipt
+  readonly message: AgentTeamMainMessage
+  readonly markers: readonly AgentTeamMainMarker[]
+}
+
+/** The writer has unread Main stream entries or markers and must read them before posting. */
+export interface AgentTeamMainUnreadRequired {
+  readonly kind: 'main_unread_required'
+  readonly projectRef: AgentTeamProjectRef
+  readonly unreadCount: number
+  readonly directCount: number
+  readonly head: number
+  readonly entries: readonly AgentTeamMainTimelineEntry[]
+}
+
+export type AgentTeamPostMainMessageResult = AgentTeamPostMainMessageCommittedResult | AgentTeamMainUnreadRequired
+
+/** Atomically acknowledge the Main stream up to one sequence. Without `readThroughSequence` the read reaches the current head. */
+export interface AgentTeamMainStreamReadRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly readThroughSequence?: number
+}
+
+export interface AgentTeamMainStreamReadResult {
+  /** Receipt of the durable read this response committed; absent when nothing was left to acknowledge, since no operation was appended. */
+  readonly receipt?: AgentTeamOperationReceipt
+  readonly projectRef: AgentTeamProjectRef
+  readonly readThroughSequence: number
+  /** The newest entries (plus any entry carrying a marker this read consumed), oldest first, flagged as the reader saw them before this read. */
+  readonly entries: readonly AgentTeamMainTimelineEntry[]
+  readonly consumedMarkers: readonly AgentTeamMainMarker[]
+  /** Standing after this read. */
+  readonly standing: AgentTeamMainStreamStanding
+}
+
+/** Non-mutating Main stream page. */
+export interface AgentTeamMainStreamHistoryRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  /** Page entries older than this sequence (exclusive); default the newest page. */
+  readonly beforeSequence?: number
+  /** Entries per page: an integer from 1 to 100, default 20. */
+  readonly limit?: number
+}
+
+export interface AgentTeamMainStreamHistory {
+  readonly projectRef: AgentTeamProjectRef
+  readonly entries: readonly AgentTeamMainTimelineEntry[]
+  readonly cursor: number
+  readonly hasMore: boolean
+  readonly standing: AgentTeamMainStreamStanding
+}
+
+/** Intent to start one discussion or Task Thread; Project owners only. */
+export interface AgentTeamStartThreadRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly kind: 'discussion' | 'task'
+  readonly body: string
+  readonly recipients?: readonly AgentTeamMemberId[]
+  readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
+  readonly attachmentPaths?: readonly string[] | undefined
+}
+
+export type AgentTeamStartThreadResult = AgentTeamSendMessageCommittedResult
 
 export interface AgentTeamReplyCommittedResult {
   readonly kind: 'committed'

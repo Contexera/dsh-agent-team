@@ -9,6 +9,7 @@ import type { TeamConversationProps } from './slots.ts'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
+import { TeamMainStream } from './TeamMainStream.tsx'
 import { TeamProjectPanel } from './TeamProjectPanel.tsx'
 import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
 import { TeamMessage } from './TeamMessage.tsx'
@@ -40,6 +41,10 @@ interface TeamProjectPageProps {
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
   readonly sendMessage: TeamConversationProps['sendMessage']
+  readonly postMainMessage: TeamConversationProps['postMainMessage']
+  readonly startThread: TeamConversationProps['startThread']
+  readonly readMainStream: TeamConversationProps['readMainStream']
+  readonly mainStreamHistory: TeamConversationProps['mainStreamHistory']
   readonly readThread: TeamConversationProps['readThread']
   readonly loadThreadHistory: TeamConversationProps['loadThreadHistory']
   readonly threadObservations: TeamConversationProps['threadObservations']
@@ -56,6 +61,8 @@ interface TeamProjectPageProps {
 
 /** Fresh window is authoritative for every Message it covers; older loaded Messages are retained. */
 function mergeProjectView(current: AgentTeamView, fresh: AgentTeamView): AgentTeamView {
+  // An empty window's cursor is the request default, not a loaded boundary, so it must not cap the fresh one.
+  if (current.items.length === 0) return fresh
   const freshRefs = new Set(fresh.items.map(item => item.message.messageRef))
   const items = [...current.items.filter(item => !freshRefs.has(item.message.messageRef)), ...fresh.items]
     .sort((left, right) => left.message.sequence - right.message.sequence)
@@ -92,7 +99,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
@@ -198,6 +205,12 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     if (panelThreadRef !== undefined) selectThread(panelThreadRef, projectRef, taskRef, taskNumberOf(taskRef))
     setPanelThreadRef(undefined)
   }, [panelThreadRef, projectRef, selectThread, taskNumberOf])
+  // The board is the Task's home and the Task just started is its newest card; refresh so it is there before the Human looks.
+  const handleTaskStarted = (): void => {
+    setTab('board')
+    void refresh()
+    requestAnimationFrame(() => { boardTabRef.current?.focus() })
+  }
   const handlePanelClose = useCallback((): void => { setPanelThreadRef(undefined) }, [])
   const humanMemberId = view?.humanMemberId
   const humanIdentity: TeamAvatarHuman | undefined = humanMemberId === undefined
@@ -227,6 +240,8 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     return () => { observer.disconnect() }
   }, [panelSurface, panelThreadRef])
   const project = view?.projects.find(item => item.projectRef === projectRef)
+  // Rules version 2 reads the Main stream; version 1 keeps the Project feed.
+  const mainStreamActive = view !== undefined && view.rulesVersion >= 2 && project !== undefined
   const projectMemberIds = new Set(view?.members.filter(item => item.projectRef === projectRef).map(item => item.memberId) ?? [])
   const messageSender = (item: AgentTeamViewItem): AgentTeamMemberId => item.message.sender
   const handleByMember = new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')]))
@@ -385,7 +400,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         </div>
       </header>
       <nav className={projectCss.tabs} role="tablist" aria-label={project === undefined ? '# …' : `# ${project.name}`} onKeyDown={onTabKeyDown}>
-        <button ref={feedTabRef} id={`${tabIdPrefix}-feed`} type="button" role="tab" aria-selected={tab === 'feed'} aria-controls={`${tabIdPrefix}-feed-panel`} tabIndex={tab === 'feed' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('feed') }}>{t('projectTabFeed')}</button>
+        <button ref={feedTabRef} id={`${tabIdPrefix}-feed`} type="button" role="tab" aria-selected={tab === 'feed'} aria-controls={`${tabIdPrefix}-feed-panel`} tabIndex={tab === 'feed' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('feed') }}>{t(mainStreamActive ? 'projectTabMain' : 'projectTabFeed')}</button>
         <button ref={boardTabRef} id={`${tabIdPrefix}-board`} type="button" role="tab" aria-selected={tab === 'board'} aria-controls={`${tabIdPrefix}-board-panel`} tabIndex={tab === 'board' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('board') }}>{t('projectTabBoard')}</button>
       </nav>
     </div>
@@ -409,6 +424,33 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     </section>}
 
     {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={projectCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
+      {mainStreamActive ? <TeamMainStream
+        workspaceId={workspaceId}
+        projectRef={projectRef}
+        humanName={humanName}
+        humanAvatarUrl={humanAvatarUrl}
+        humanMemberId={view.humanMemberId}
+        members={members}
+        projectMemberIds={projectMemberIds}
+        drafts={drafts}
+        mainStreamHistory={mainStreamHistory}
+        readMainStream={readMainStream}
+        postMainMessage={postMainMessage}
+        startThread={startThread}
+        putAttachment={putAttachment}
+        getAttachment={getAttachment}
+        subscribeChanges={subscribeChanges}
+        openRef={openRef}
+        onResolveTaskRefs={lookupTaskRefs}
+        onResolveThreadRefs={lookupThreadRefs}
+        projectNameOf={projectNameOf}
+        memberOf={memberOf}
+        openMemberSession={openMemberSession}
+        onOpenDiscussion={setPanelThreadRef}
+        onOpenTask={(threadRef, taskRef, taskNumber) => { selectThread(threadRef, projectRef, taskRef, taskNumber) }}
+        onTaskStarted={handleTaskStarted}
+        t={t}
+      /> : <>
       <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
         {loading && project === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
@@ -491,6 +533,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       onAsTaskChange={setAsTask}
       t={t}
       /> : <div />}
+      </>}
     </div>}
 
     {tab === 'feed' && panelThreadRef !== undefined && project !== undefined && <TeamProjectPanel
@@ -525,6 +568,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       onRead={handlePanelRead}
       onPromoted={handlePanelPromoted}
       onClose={handlePanelClose}
+      allMention={!mainStreamActive}
       t={t}
     />}
   </main>

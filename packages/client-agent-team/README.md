@@ -18,6 +18,7 @@ The Client uses these Host projections and mutations:
 - `resolveTaskRefs` resolves known branded Task refs to their display number and home Project/Thread for navigation.
 - `updateProject` commits a Project rename (name/description display facts).
 - `addProjectOwner` / `removeProjectOwner` edit a Project's Agent owners from the Project edit dialog; the section renders only when the Host `view` reports rules version 2 or later, and the Human is always listed as a fixed owner.
+- `postMainMessage` / `startThread` / `readMainStream` / `mainStreamHistory` drive the Project's Main stream; the Project page uses them only when the Host `view` reports rules version 2 or later (the first tab becomes the Main stream, and the composer's `讨论/任务` toggle starts discussions and Tasks).
 - `archiveProject` hides a Project from every surface with its facts kept (no restore entry point yet).
 - `updateMember` commits Agent handle/description edits plus an optional per-Member model override.
 - `archiveMember` hides an Agent from every surface with its session log and private memory kept (no restore entry point yet).

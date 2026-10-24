@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { ChangeEvent, ClipboardEvent, KeyboardEvent } from 'react'
+import type { ChangeEvent, ClipboardEvent, KeyboardEvent, ReactNode } from 'react'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { IconChecklistOutlineMedium, IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchoredMaxHeight, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
@@ -96,7 +96,7 @@ function deliverableRecipients(
   ])].sort()
 }
 
-export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, asTask, onAsTaskChange, t }: {
+export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, asTask, onAsTaskChange, allMention = true, toolbarExtra, t }: {
   readonly members: readonly AgentTeamClientMemberStatus[]
   /** Current Thread followers; the Thread surface passes them so they rank above other candidates. */
   readonly followerMemberIds?: ReadonlySet<AgentTeamMemberId>
@@ -120,6 +120,10 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   /** Project-only: create a real Task with the top-level Message. Default off. */
   readonly asTask?: boolean
   readonly onAsTaskChange?: (asTask: boolean) => void
+  /** Rules version 1 only: offer `@all` and expand it to a recipient snapshot. */
+  readonly allMention?: boolean
+  /** Extra controls after the attach button, for surfaces whose send has modes. */
+  readonly toolbarExtra?: ReactNode
   readonly t: TeamConversationProps['t']
 }) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -133,7 +137,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   const [mention, setMention] = useState<MentionMatch>()
   const [highlight, setHighlight] = useState(0)
   const memberCandidates = mention === undefined ? [] : rankMentionCandidates(mentionCandidates(members, mention.query), followerMemberIds, projectPeerMemberIds)
-  const options: readonly MentionOption[] = mention !== undefined && 'all'.startsWith(mention.query.toLocaleLowerCase())
+  const options: readonly MentionOption[] = mention !== undefined && allMention && 'all'.startsWith(mention.query.toLocaleLowerCase())
     ? [{ kind: 'all' }, ...memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))]
     : memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))
   const menuOpen = mention !== undefined && options.length > 0
@@ -189,7 +193,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   const pruneRecipients = (nextDraft: string): void => {
     // An @all marker stands for its expansion snapshot: the member handles it
     // stands for are not in the text, so text-based pruning must stand down.
-    if (containsAllMention(nextDraft)) return
+    if (allMention && containsAllMention(nextDraft)) return
     const next = new Set([...recipients].filter(memberId => {
       const handle = memberHandles.get(memberId)
       return handle !== undefined && containsMention(nextDraft, handle)
@@ -418,6 +422,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
             <span className={css.asTaskLabel}>{t('asTask')}</span>
           </button>
         )}
+        {toolbarExtra}
         <button
           type="submit"
           className={css.sendButton}

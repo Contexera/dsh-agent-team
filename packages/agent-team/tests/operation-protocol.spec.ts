@@ -48,6 +48,7 @@ import type {
   AgentTeamHostActor,
   AgentTeamHumanActor,
   AgentTeamInboxDelta,
+  AgentTeamMainActivity,
   AgentTeamMemberActor,
   AgentTeamMemberId,
   AgentTeamMessageRef,
@@ -506,18 +507,62 @@ const rulesVersionAdopted: Op<'team/rules-version-adopted'> = {
   data: { version: 2 },
 }
 
+const ownerActivity = (kind: 'owner-added' | 'owner-removed', sequence: number): AgentTeamMainActivity => ({
+  activityRef: `activity:protocol-${kind}` as AgentTeamActivityRef, projectRef, kind, memberId, actor: human.memberId, sequence, occurredAt: instant,
+})
+const ownerInbox = (activity: AgentTeamMainActivity): AgentTeamInboxDelta => ({
+  ...emptyInbox,
+  mainMarkers: { added: [{ memberId, projectRef, activityRef: activity.activityRef, sequence: activity.sequence }], removed: [] },
+})
+
 const projectOwnerAdded: Op<'team/project-owner-added'> = {
   ...opBase('operation:protocol-30', 'request:protocol-project-owner-added', 30),
   previousOperationId,
   kind: 'team/project-owner-added',
-  data: { workspaceId: alpha, projectRef, memberId },
+  data: { workspaceId: alpha, projectRef, memberId, activity: ownerActivity('owner-added', 30), inbox: ownerInbox(ownerActivity('owner-added', 30)) },
 }
 
 const projectOwnerRemoved: Op<'team/project-owner-removed'> = {
   ...opBase('operation:protocol-31', 'request:protocol-project-owner-removed', 31),
   previousOperationId,
   kind: 'team/project-owner-removed',
-  data: { workspaceId: alpha, projectRef, memberId },
+  data: { workspaceId: alpha, projectRef, memberId, activity: ownerActivity('owner-removed', 31), inbox: ownerInbox(ownerActivity('owner-removed', 31)) },
+}
+
+const mainMessagePosted: Op<'team/main-message-posted'> = {
+  ...opBase('operation:protocol-32', 'request:protocol-main-message-posted', 32),
+  previousOperationId,
+  kind: 'team/main-message-posted',
+  data: {
+    workspaceId: alpha,
+    mentions: [memberId],
+    message: { messageRef: 'message:protocol-main-1' as AgentTeamMessageRef, projectRef, scope: 'main', sender: human.memberId,
+      body: 'protocol fixture main message', sequence: 32, occurredAt: instant },
+    inbox: { ...emptyInbox, mainMarkers: { added: [{ memberId, projectRef, messageRef: 'message:protocol-main-1' as AgentTeamMessageRef, sequence: 32 }], removed: [] } },
+  },
+}
+
+const mainStreamRead: Op<'team/main-stream-read'> = {
+  ...opBase('operation:protocol-33', 'request:protocol-main-stream-read', 33),
+  previousOperationId,
+  kind: 'team/main-stream-read',
+  data: { workspaceId: alpha, projectRef, memberId: human.memberId, readThroughSequence: 3, inbox: emptyInbox },
+}
+
+const threadStarted: Op<'team/thread-started'> = {
+  ...opBase('operation:protocol-34', 'request:protocol-thread-started', 34),
+  previousOperationId,
+  kind: 'team/thread-started',
+  data: {
+    workspaceId: alpha,
+    projectRef,
+    kind: 'discussion',
+    mentions: [],
+    anchor: { messageRef: 'message:protocol-started-1' as AgentTeamMessageRef, projectRef, threadRef: 'thread:protocol-started' as AgentTeamThreadRef,
+      sender: human.memberId, body: 'protocol fixture started thread', topLevel: true, sequence: 34, occurredAt: instant },
+    thread: { threadRef: 'thread:protocol-started' as AgentTeamThreadRef, revision: 34 },
+    inbox: emptyInbox,
+  },
 }
 
 const dmSent: Op<'team/dm-sent'> = {
@@ -779,7 +824,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
       changed: () => ledger.addProjectOwner({ requestId: projectOwnerAdded.requestId, actor: human, ...projectOwnerAdded.data, memberId: AGENT_TEAM_HUMAN_MEMBER_ID }),
     },
     legacy: { normalize: 'none', repair: 'none' },
-    intent: { scopes: 'derived', inbox: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
   },
   'team/project-owner-removed': {
     stored: projectOwnerRemoved,
@@ -793,7 +838,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
       changed: () => ledger.removeProjectOwner({ requestId: projectOwnerRemoved.requestId, actor: human, ...projectOwnerRemoved.data, memberId: AGENT_TEAM_HUMAN_MEMBER_ID }),
     },
     legacy: { normalize: 'none', repair: 'none' },
-    intent: { scopes: 'derived', inbox: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
   },
   'team/project-updated': {
     stored: projectUpdated,
@@ -934,6 +979,88 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
       }),
     },
     legacy: { normalize: 'none', repair: 'project-inbox-legacy-scope' },
+    intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/main-message-posted': {
+    stored: mainMessagePosted,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.postMainMessage({
+          requestId: mainMessagePosted.requestId,
+          actor: human,
+          workspaceId: alpha,
+          projectRef,
+          body: mainMessagePosted.data.message.body,
+          recipients: [memberId],
+        })
+        expect(mappedCommitted(out.value).message.messageRef, 'the post mapper answers with the stored Message').toBe(mainMessagePosted.data.message.messageRef)
+        return out
+      },
+      changed: () => ledger.postMainMessage({
+        requestId: mainMessagePosted.requestId,
+        actor: human,
+        workspaceId: alpha,
+        projectRef,
+        body: 'a different body under the same request id',
+        recipients: [memberId],
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/main-stream-read': {
+    stored: mainStreamRead,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.readMainStream({
+          requestId: mainStreamRead.requestId,
+          actor: human,
+          workspaceId: alpha,
+          projectRef,
+          readThroughSequence: mainStreamRead.data.readThroughSequence,
+        })
+        expect(out.value.projectRef, 'the read mapping answers with the Project it derived').toBe(projectRef)
+        return out
+      },
+      changed: () => ledger.readMainStream({
+        requestId: mainStreamRead.requestId,
+        actor: human,
+        workspaceId: alpha,
+        projectRef,
+        readThroughSequence: 4,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'no-op', inbox: 'delta' },
+  },
+  'team/thread-started': {
+    stored: threadStarted,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.startThread({
+          requestId: threadStarted.requestId,
+          actor: human,
+          workspaceId: alpha,
+          projectRef,
+          kind: 'discussion',
+          body: threadStarted.data.anchor.body,
+        })
+        expect(mappedCommitted(out.value).message.messageRef, 'the start mapper answers with the stored anchor').toBe(threadStarted.data.anchor.messageRef)
+        return out
+      },
+      changed: () => ledger.startThread({
+        requestId: threadStarted.requestId,
+        actor: human,
+        workspaceId: alpha,
+        projectRef,
+        kind: 'task',
+        body: threadStarted.data.anchor.body,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'delta' },
   },
   'team/message-sent': {

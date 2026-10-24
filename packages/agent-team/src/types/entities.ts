@@ -199,17 +199,19 @@ export interface AgentTeamMessageReplyContext {
   readonly excerpt: string
 }
 
-/** Read one Message back verbatim, inside the Thread that carries it. */
+/** Read one Message back verbatim, inside the Thread that carries it, or (with `projectRef`) from the Project's Main stream. Exactly one of `threadRef` and `projectRef`. */
 export interface AgentTeamReadMessageRequest {
   readonly workspaceId: WorkspaceId
-  readonly threadRef: AgentTeamThreadRef
+  readonly threadRef?: AgentTeamThreadRef
+  readonly projectRef?: AgentTeamProjectRef
   readonly messageRef: AgentTeamMessageRef
 }
 
 /** One Message read back in full, body verbatim; the quote a Message renders is not this (see `AgentTeamResolvedMessageRef`). */
 export interface AgentTeamReadMessageResult {
   readonly messageRef: AgentTeamMessageRef
-  readonly threadRef: AgentTeamThreadRef
+  /** Absent for a Main stream Message. */
+  readonly threadRef?: AgentTeamThreadRef
   readonly projectRef: AgentTeamProjectRef
   readonly sender: AgentTeamMemberId
   readonly sequence: number
@@ -226,7 +228,8 @@ export interface AgentTeamResolveMessageRefsRequest {
 /** One resolved Message; refs the workspace cannot resolve are omitted. */
 export interface AgentTeamResolvedMessageRef {
   readonly messageRef: AgentTeamMessageRef
-  readonly threadRef: AgentTeamThreadRef
+  /** Absent for a Main stream Message, which belongs to no Thread. */
+  readonly threadRef?: AgentTeamThreadRef
   readonly sender: AgentTeamMemberId
   /** Body gist for the quote block: first line, trimmed, capped at 120 characters. */
   readonly excerpt: string
@@ -340,6 +343,51 @@ export interface AgentTeamActivityMarker {
   readonly sequence: number
 }
 
+/** One immutable Main stream Message: a Project-level conversation entry that belongs to no Thread. Rules version 2 and later only. */
+export interface AgentTeamMainMessage {
+  readonly messageRef: AgentTeamMessageRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly scope: 'main'
+  readonly sender: AgentTeamMemberId
+  readonly body: string
+  readonly attachments?: readonly AgentTeamMessageAttachment[] | undefined
+  /** The Main stream Message this one answers; a Thread Message is never a valid target. */
+  readonly replyToMessageRef?: AgentTeamMessageRef
+  readonly sequence: number
+  readonly occurredAt: string
+}
+
+/** Project-level change shown in the Main stream: a Human grant or withdrawal of Project ownership. Rules version 2 and later only. */
+export interface AgentTeamMainActivity {
+  readonly activityRef: AgentTeamActivityRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly kind: 'owner-added' | 'owner-removed'
+  /** The Agent Member whose ownership changed. */
+  readonly memberId: AgentTeamMemberId
+  readonly actor: AgentTeamMemberId
+  readonly sequence: number
+  readonly occurredAt: string
+}
+
+/** Sparse direct marker for one Main stream Message that mentions or answers a Member. Its own shape: the Thread marker requires a `threadRef`. */
+export interface AgentTeamMainMessageMarker {
+  readonly memberId: AgentTeamMemberId
+  readonly projectRef: AgentTeamProjectRef
+  readonly messageRef: AgentTeamMessageRef
+  readonly sequence: number
+}
+
+/** Sparse marker for one Main stream Activity that concerns a Member. */
+export interface AgentTeamMainActivityMarker {
+  readonly memberId: AgentTeamMemberId
+  readonly projectRef: AgentTeamProjectRef
+  readonly activityRef: AgentTeamActivityRef
+  readonly sequence: number
+}
+
+/** Main stream marker: what a non-owner's Main stream unread consists of, and what an owner keeps on top of the ordinary unread. */
+export type AgentTeamMainMarker = AgentTeamMainMessageMarker | AgentTeamMainActivityMarker
+
 /** Durable changes to private Member inbox state carried by one operation. */
 export interface AgentTeamInboxDelta {
   readonly attention: {
@@ -355,6 +403,11 @@ export interface AgentTeamInboxDelta {
   readonly activityMarkers: {
     readonly added: readonly AgentTeamActivityMarker[]
     readonly removed: readonly AgentTeamActivityMarker[]
+  }
+  /** Present only when it changes something, so every rules-version-1 delta keeps its stored bytes. */
+  readonly mainMarkers?: {
+    readonly added: readonly AgentTeamMainMarker[]
+    readonly removed: readonly AgentTeamMainMarker[]
   }
 }
 

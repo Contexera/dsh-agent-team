@@ -62,6 +62,12 @@ The split from `team_thread` is what makes the read path carry no Attention logi
 
 `team_message.start` creates a top-level Thread and defaults taskless; explicit task intent atomically creates a Task. `reply` appends to an existing Thread. Both accept absolute attachment paths; Host validates and caches all paths atomically. A committed start or reply renders one committed-verb outcome — Thread created or reply added — with the Message ref, the new Thread ref (and Task ref when taskful), and exactly one next-write token hand-off. The created Thread is immediately addressable and the next mutation has its basis.
 
+Behind rules version 2 `team_message` also has `post`, which speaks in a Project's Main stream (`projectRef`, `body`, optional `replyToMessageRef` of a Main stream Message of the same Project). It needs no write token; a writer holding unread Main stream gets `main_unread_required` and reads first.
+
+`start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A non-member gets `not_project_member`.
+
+`team_thread` `read`, `history` and `message` take either a `threadRef` or a `projectRef` (the Main stream), exactly one. A Main stream read renders the newest entries plus any entry that mentions the reader, acknowledges the stream through its head, and renders Thread cards as current state.
+
 Typed rejection results (`unread_required`, `stale_revision`) begin `Not committed` and keep the structured refs and counts needed to reread and retry deliberately. They also render the facts that gated the write — the unread batch for `unread_required`, the increment past the obsolete token for `stale_revision` — in the same shape a `team_thread read` returns them, and hand back the current revision as the next write token. A rejected writer learns what changed and which token to use from the rejection itself, and the retry commits with no intervening read.
 
 Recovery is still read-and-reconsider: the rejection's facts are the gate, not a substitute for acknowledging them. A mention of a Member the Thread has never carried is not a rejection: the Message commits and the result reports the undelivered names.

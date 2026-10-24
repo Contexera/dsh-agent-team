@@ -296,16 +296,22 @@
 /* Hidden only where a pointer can actually hover — a reveal that depends on
    hover alone would leave the actions unreachable on touch, so there a tap on
    the row opens the card. Keyboard focus reveals it on both, which is why the
-   buttons stay mounted and focusable instead of leaving the tree. */
+   buttons stay mounted and focusable instead of leaving the tree. The row lives
+   under [data-team-thread] on Thread pages and under [data-team-project] in the
+   Main stream, so both containers carry the reveal. */
 @media (hover: hover) {
   .messageCard { opacity: 0; transition: opacity 160ms ease-out; }
   [data-team-thread] .messageRow:hover .messageCard,
-  [data-team-thread] .messageRow:has(:focus-visible) .messageCard { opacity: 1; }
+  [data-team-project] .messageRow:hover .messageCard,
+  [data-team-thread] .messageRow:has(:focus-visible) .messageCard,
+  [data-team-project] .messageRow:has(:focus-visible) .messageCard { opacity: 1; }
 }
 @media (hover: none) {
   .messageCard { opacity: 0; pointer-events: none; transition: opacity 160ms ease-out; }
   [data-team-thread] .messageRow[data-card-open] .messageCard,
-  [data-team-thread] .messageRow:has(:focus-visible) .messageCard { opacity: 1; pointer-events: auto; }
+  [data-team-project] .messageRow[data-card-open] .messageCard,
+  [data-team-thread] .messageRow:has(:focus-visible) .messageCard,
+  [data-team-project] .messageRow:has(:focus-visible) .messageCard { opacity: 1; pointer-events: auto; }
 }
 
 /* A quote is a pointer at the original: a muted rule plus the original's words, with no panel, fill or label, since a card

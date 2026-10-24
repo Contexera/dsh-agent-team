@@ -83,6 +83,9 @@ interface EnvironmentSeed {
   readonly supportRange?: { readonly lower: string; readonly upper: string }
 }
 
+/** One Main stream entry as the Host projects it; the harness fills the flags a spec does not care about. */
+export type MainStreamSeedEntry = { readonly kind: 'message' | 'activity' | 'thread-card'; readonly sequence: number; readonly occurredAt: string; readonly unread?: boolean } & Record<string, unknown>
+
 interface SeededMessage {
   readonly body: string
   readonly occurredAt: string
@@ -90,7 +93,7 @@ interface SeededMessage {
   readonly mentions?: readonly string[]
 }
 
-export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; rulesVersion?: number; environment?: EnvironmentSeed; environmentFailure?: string }) {
+export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; rulesVersion?: number; mainStreamEntries?: readonly MainStreamSeedEntry[]; mainStreamUnread?: number; environment?: EnvironmentSeed; environmentFailure?: string }) {
   if (options?.mode !== undefined) {
     localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }))
   }
@@ -339,6 +342,42 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const message = { messageRef: `message:${sequence}`, projectRef: request.projectRef, threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), sender: 'member:human', body: request.body, ...(attachments.length === 0 ? {} : { attachments }), topLevel: true, sequence, occurredAt: '2026-08-21T10:00:00.000Z' }
     viewItems = [{ message, mentions: [], ...(task === undefined ? {} : { task, taskNumber: 1 }), thread, liveClaimOwners: [], messageCount: 1, lastActivityAt: message.occurredAt }]
     return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message, ...(task === undefined ? {} : { task }), thread, attention: [], directMarkers: [] } }
+  })
+  let mainEntries = [...(options?.mainStreamEntries ?? [])]
+  let mainUnread = options?.mainStreamUnread ?? 0
+  let mainUnreadRequiredOnce = false
+  const mainStanding = () => ({ owner: true, head: mainEntries.at(-1)?.sequence ?? 0, unreadCount: mainUnread, directCount: 0, markers: [] })
+  const mainStreamHistory = vi.fn(async (request: { beforeSequence?: number; limit?: number }) => {
+    const older = mainEntries.filter(entry => request.beforeSequence === undefined || entry.sequence < request.beforeSequence)
+    const page = older.slice(-(request.limit ?? 20))
+    return { ok: true as const, value: { projectRef: 'project:engineering', entries: page.map(entry => ({ direct: false, unread: false, ...entry })), cursor: page[0]?.sequence ?? 1, hasMore: older.length > page.length, standing: mainStanding() } }
+  })
+  const readMainStream = vi.fn(async () => {
+    mainUnread = 0
+    return { ok: true as const, value: { projectRef: 'project:engineering', readThroughSequence: mainEntries.at(-1)?.sequence ?? 0, entries: [], consumedMarkers: [], standing: mainStanding() } }
+  })
+  const requireMainRead = (): void => { mainUnreadRequiredOnce = true }
+  const appendMainMessage = (body: string, replyToMessageRef?: string) => {
+    const sequence = (mainEntries.at(-1)?.sequence ?? 0) + 1
+    const message = { messageRef: `message:main-${sequence}`, projectRef: 'project:engineering', scope: 'main', sender: 'member:human', body, ...(replyToMessageRef === undefined ? {} : { replyToMessageRef }), sequence, occurredAt: '2026-10-20T10:00:00.000Z' }
+    mainEntries = [...mainEntries, { kind: 'message', sequence, occurredAt: message.occurredAt, message, mentions: [] }]
+    return message
+  }
+  const postMainMessage = vi.fn(async (request: { requestId: string; body: string; replyToMessageRef?: string }) => {
+    if (mainUnreadRequiredOnce) {
+      mainUnreadRequiredOnce = false
+      mainUnread = 1
+      return { ok: true as const, value: { kind: 'main_unread_required' as const, projectRef: 'project:engineering', unreadCount: 1, directCount: 0, head: mainEntries.at(-1)?.sequence ?? 0, entries: [] } }
+    }
+    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message: appendMainMessage(request.body, request.replyToMessageRef), markers: [] } }
+  })
+  const startThread = vi.fn(async (request: { kind: 'discussion' | 'task'; body: string; projectRef: string }) => {
+    const sequence = (mainEntries.at(-1)?.sequence ?? 0) + 1
+    const asTask = request.kind === 'task'
+    const message = { messageRef: `message:thread-${sequence}`, projectRef: request.projectRef, threadRef: `thread:new-${sequence}`, sender: 'member:human', body: request.body, topLevel: true, sequence, occurredAt: '2026-10-20T10:00:00.000Z' }
+    const card = { threadRef: message.threadRef, anchor: { messageRef: message.messageRef, sender: 'member:human', preview: request.body, sequence, occurredAt: message.occurredAt }, ...(asTask ? { task: { taskRef: `task:new-${sequence}`, taskNumber: 2, status: 'todo', resolution: 'open', liveClaimOwners: [] } } : {}), replyCount: 0, participants: [], newestSequence: sequence, newestOccurredAt: message.occurredAt, newestActor: { memberId: 'member:human', name: 'human' } }
+    mainEntries = [...mainEntries, { kind: 'thread-card', sequence, occurredAt: message.occurredAt, card }]
+    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message, thread: { threadRef: message.threadRef, revision: sequence }, attention: [], directMarkers: [] } }
   })
   let changeVersion = 0
   let changeFailure: string | undefined
@@ -654,7 +693,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, sendMessage, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),
@@ -697,5 +736,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
-  return { runtime, team, view, panelInfo: runtime.panelInfo, teamConfigForm, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, sendMessage, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
+  return { runtime, team, view, panelInfo: runtime.panelInfo, teamConfigForm, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, sendMessage, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
 }

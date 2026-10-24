@@ -64,6 +64,8 @@ interface TeamProjectPanelProps {
   /** This Thread is a Task now — the Project closes the panel and walks the reader into it. */
   readonly onPromoted: (taskRef: AgentTeamTaskRef) => void
   readonly onClose: () => void
+  /** Rules version 1 only: `@all` is offered and expands to a recipient snapshot. */
+  readonly allMention: boolean
   readonly t: TeamConversationProps['t']
 }
 
@@ -75,7 +77,7 @@ type ReadProjection = Awaited<ReturnType<TeamProjectPanelProps['readThread']>> e
   : never
 
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
-export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
+export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, allMention, t }: TeamProjectPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
@@ -524,6 +526,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       onEdit={clearSendState}
       onSubmit={() => { void sendReply() }}
       placeholder={t('replyPlaceholder')}
+      allMention={allMention}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
       {...(replyTarget === undefined ? {} : {

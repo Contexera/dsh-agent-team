@@ -33,6 +33,7 @@
 - Member Session 输入面即 shipped composer 本身，不做任何修改。Team 不注册任何 Member Session 的 composer 表面：无接管、无 trigger sources、无 dock 提示条。键盘合同、命令与引用菜单、附件与普通会话完全一致。
 - 收件人提示行：通知集合非空时在草稿与工具栏之间渲染 quiet 提示行（`.notifyRow`，`composerNotify` 文案 + `{ids}` 句柄列表）。发送前即可看到"将通知谁"。集合是菜单选中的 recipients 与正文手打 `@Handle` 的并集。`mentionedMemberIds` 从草稿派生，与 Host 同一套大小写不敏感、Unicode 词边界的规则。`@all` 按菜单的展开口径列出全部可投递 Member。空集合不占位。派生集合只用于显示，不进发送 payload。Project 之外的名字在正文里只是散文，作为显式 recipients 会被拒绝。
 - 读者自己的 handle 是唯一一个必须「不读也能找到」的 mention chip，所以它是唯一离开 business 族的 chip。`[data-mention-human]` 用 success 档着色（error 与 warn 两族分别意味着失败与警示）。正文里写的是读者改名前的 handle 时，该 chip 同样被标记 —— 标记跟着身份走，不跟着拼写走。
+- `view.rulesVersion >= 2` 时 Project composer 发到 Main stream，工具区用 `讨论/任务` 取代「作为任务」pill。它是 pressed button；打开后出现原生复选框 `作为任务`。关闭时发 `postMainMessage`（引用 Main 消息时带 `replyToMessageRef`）；打开时发 `startThread`，勾选则建 Task，否则建讨论；Task 提交后页面切到 `看板` 页签并把焦点放上去。引用会关掉开关，打开开关会丢掉引用，因为新 Thread 没有引用目标。Host 返回 `main_unread_required` 时保留草稿，刷新并读取主对话，用状态行提示 Human 先看一下再发；重发是新的 operation。版本 2 的回复不再要求确认；Main stream 与 Thread composer 都不提供 `@all`，也不把它展开为 recipients，手打的 `@all` 就是普通文本。
 - 草稿缓存：draft/recipients 不在页面局部。它们按 `project:<projectRef>` / `thread:<threadRef>` 键存放。每 Client 上下文存一份 `TeamDraftStore`（`drafts.ts`）。它用单一 localStorage 键 `dsh.agent-team.drafts.v1`，写穿持久化，按 savedAt 淘汰最旧 ~50 条。切换视图或刷新后草稿与收件人原样恢复。发送提交成功即清除对应键，失败保留。Composer 挂载收敛会剔除不再匹配文本/已失效的收件人。Project 的「作为任务」意图不进入草稿缓存：默认关闭，成功提交后再次复位关闭。
 - taskless Thread 的「转为任务」是 Human-only durable mutation，不做乐观 overlay。成功后重新读取 Thread 与补充 Project/Member 投影；unread/stale fence 时保留 Host 返回错误并重新读取相关事实。
 

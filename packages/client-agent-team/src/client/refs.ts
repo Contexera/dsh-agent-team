@@ -29,7 +29,8 @@ export interface ResolvedThreadRef {
 /** Author and excerpt come from the Host, which holds the whole ledger, so a parent outside the loaded history window still resolves. */
 export interface ResolvedMessageRef {
   readonly messageRef: AgentTeamMessageRef
-  readonly threadRef: AgentTeamThreadRef
+  /** Absent for a Main stream Message. */
+  readonly threadRef?: AgentTeamThreadRef
   readonly sender: AgentTeamMemberId
   readonly excerpt: string
 }

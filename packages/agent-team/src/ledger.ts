@@ -8,6 +8,27 @@ import type {
   AgentTeamActivityMarker,
   AgentTeamActivityRef,
   AgentTeamAddMemberRequest,
+  AgentTeamMainActivity,
+  AgentTeamMainMarker,
+  AgentTeamMainMessage,
+  AgentTeamMainMessagePostedOperation,
+  AgentTeamMainMessageMarker,
+  AgentTeamMainActivityMarker,
+  AgentTeamMainStreamHistory,
+  AgentTeamMainStreamHistoryRequest,
+  AgentTeamMainStreamReadOperation,
+  AgentTeamMainStreamReadRequest,
+  AgentTeamMainStreamReadResult,
+  AgentTeamMainStreamStanding,
+  AgentTeamMainThreadCard,
+  AgentTeamMainTimelineEntry,
+  AgentTeamMainUnreadRequired,
+  AgentTeamPostMainMessageCommittedResult,
+  AgentTeamPostMainMessageRequest,
+  AgentTeamPostMainMessageResult,
+  AgentTeamStartThreadRequest,
+  AgentTeamStartThreadResult,
+  AgentTeamThreadStartedOperation,
   AgentTeamAttachmentId,
   AgentTeamAgentMember,
   AgentTeamActor,
@@ -239,6 +260,20 @@ export interface AgentTeamAuthorizedSendMessageRequest extends AgentTeamSendMess
   readonly resolvedAttachments?: readonly AgentTeamMessageAttachment[] | undefined
 }
 
+export interface AgentTeamAuthorizedPostMainMessageRequest extends AgentTeamPostMainMessageRequest {
+  readonly actor: AgentTeamHumanActor | AgentTeamMemberActor
+  readonly resolvedAttachments?: readonly AgentTeamMessageAttachment[] | undefined
+}
+
+export interface AgentTeamAuthorizedStartThreadRequest extends AgentTeamStartThreadRequest {
+  readonly actor: AgentTeamHumanActor | AgentTeamMemberActor
+  readonly resolvedAttachments?: readonly AgentTeamMessageAttachment[] | undefined
+}
+
+export interface AgentTeamAuthorizedMainStreamReadRequest extends AgentTeamMainStreamReadRequest {
+  readonly actor: AgentTeamHumanActor | AgentTeamMemberActor
+}
+
 export interface AgentTeamAuthorizedReplyRequest extends AgentTeamReplyRequest {
   readonly actor: AgentTeamHumanActor | AgentTeamMemberActor
   /** Metadata the Host resolved from the attachment cache before the append. */
@@ -254,7 +289,8 @@ export interface AgentTeamAuthorizedTaskRequest extends AgentTeamTaskRequest {
 }
 
 export interface AgentTeamAuthorizedPromoteThreadRequest extends AgentTeamPromoteThreadRequest {
-  readonly actor: AgentTeamHumanActor
+  /** A Member actor is judged against the rules version: only Project owners may promote from version 2, and nobody but the Human before. */
+  readonly actor: AgentTeamHumanActor | AgentTeamMemberActor
 }
 
 export interface AgentTeamAuthorizedThreadAttentionRequest extends AgentTeamThreadAttentionRequest {
@@ -425,7 +461,38 @@ interface Projection {
   readonly owners: Map<AgentTeamProjectRef, Map<AgentTeamMemberId, number>>
   /** Members named by a mention anywhere in each Project; one input to rules-version-2 Project membership. */
   readonly mentionedByProject: Map<AgentTeamProjectRef, Set<AgentTeamMemberId>>
+  /** Main stream entries per Project in ledger order: Messages, owner Activities, and one card source per Thread anchor. */
+  readonly mainSourcesByProject: Map<AgentTeamProjectRef, MainSource[]>
+  /** Main Messages and Activities by their ref, for marker validation and reply targets. */
+  readonly mainSourceByRef: Map<string, MainSource>
+  readonly mainMarkers: Map<string, AgentTeamMainMarker>
+  /** Main stream markers bucketed per recipient Member and Project, kept sorted by sequence. */
+  readonly mainMarkersByMember: Map<AgentTeamMemberId, Map<AgentTeamProjectRef, AgentTeamMainMarker[]>>
+  /** Owner read watermark per `member|project`; only owners hold one. */
+  readonly mainWatermarks: Map<string, number>
+  /** Sequence of the marker that adopted rules version 2 (0 before it): the earliest the Human's Main stream unread can start. */
+  humanOwnerFloor: number
 }
+
+/** Kinds a rules-version-1 segment rejects (owner operations carry their own check), and the one kind version 2 stops writing. */
+const V2_ONLY_KINDS: readonly string[] = ['team/main-message-posted', 'team/main-stream-read', 'team/thread-started']
+const REPLACED_AT_V2_KINDS: readonly string[] = ['team/message-sent']
+
+/** One entry of a reader's unread Main stream: why it is unread (ordinary owner unread, a marker, or both). */
+interface MainUnreadItem {
+  readonly source: MainSource
+  readonly ordinary: boolean
+  readonly direct: boolean
+}
+
+/** Entries a Main stream read answers with; the read still acknowledges everything through its sequence. */
+const MAIN_READ_PAGE_SIZE = 20
+
+/** One Main stream entry before projection into a timeline entry. A Thread source is a card; `unreadable` marks the v2 discussion anchors that count as unread. */
+type MainSource =
+  | { readonly kind: 'message'; readonly sequence: number; readonly message: AgentTeamMainMessage }
+  | { readonly kind: 'activity'; readonly sequence: number; readonly activity: AgentTeamMainActivity }
+  | { readonly kind: 'thread'; readonly sequence: number; readonly threadRef: AgentTeamThreadRef; readonly unreadable: boolean }
 
 /** Minimal replay-time Attention observation; the read projection adds the current Task ref. */
 interface AgentTeamAttentionObservation {
@@ -459,7 +526,8 @@ function emptyProjection(): Projection {
     attentionByThread: new Map(), sessionTransitions: new Map(),
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
-    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map() }
+    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
+    mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainWatermarks: new Map(), humanOwnerFloor: 0 }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -503,6 +571,15 @@ function isEmptyInboxDelta(delta: AgentTeamInboxDelta): boolean {
   return delta.attention.set.length === 0 && delta.attention.removed.length === 0
     && delta.directMarkers.added.length === 0 && delta.directMarkers.removed.length === 0
     && delta.activityMarkers.added.length === 0 && delta.activityMarkers.removed.length === 0
+    && (delta.mainMarkers === undefined || (delta.mainMarkers.added.length === 0 && delta.mainMarkers.removed.length === 0))
+}
+
+function mainMarkerKey(marker: AgentTeamMainMarker): string {
+  return `${marker.memberId}|${marker.projectRef}|${'messageRef' in marker ? marker.messageRef : marker.activityRef}`
+}
+
+function mainWatermarkKey(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): string {
+  return `${memberId}|${projectRef}`
 }
 
 export function isThreadReadSnapshot(data: AgentTeamThreadReadData): data is AgentTeamThreadReadSnapshot {
@@ -715,12 +792,18 @@ export class AgentTeamLedger {
         return this.resolved(this.projectOwnerResult(existing))
       }
       this.assertHumanActor(request.actor)
-      const data = Object.freeze({ workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId })
-      const problem = this.projectOwnerChangeProblem(this.state, kind, data)
+      const base = { workspaceId: request.workspaceId, projectRef: request.projectRef, memberId: request.memberId }
+      const problem = this.projectOwnerChangeProblem(this.state, kind, base)
       if (problem !== undefined) throw new Error(problem)
+      const sequence = this.nextSequence()
+      const envelope = this.operationBase(request, sequence)
+      const activity: AgentTeamMainActivity = Object.freeze({ activityRef: this.ref('activity'), projectRef: request.projectRef,
+        kind: kind === 'team/project-owner-added' ? 'owner-added' as const : 'owner-removed' as const,
+        memberId: request.memberId, actor: request.actor.memberId, sequence, occurredAt: envelope.occurredAt })
+      const data = Object.freeze({ ...base, activity, inbox: this.ownerActivityInboxDelta(activity) })
       const operation: AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation = Object.freeze({
-        ...this.operationBase(request, this.nextSequence()), kind, data,
-      })
+        ...envelope, kind, data,
+      }) as AgentTeamProjectOwnerAddedOperation | AgentTeamProjectOwnerRemovedOperation
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.projectOwnerResult(operation))
@@ -953,7 +1036,7 @@ export class AgentTeamLedger {
       const activities = this.releaseSummaries(releasedClaims, member.memberId, sequence)
       const threads = this.threadsForActivities(activities)
       const tasks = this.tasksForClaims(releasedClaims, projectedClaims)
-      const inbox = this.removeMemberThreadInbox(member.memberId, threadRefs)
+      const inbox = this.removeMemberThreadInbox(member.memberId, threadRefs, this.workspaceProjectRefsFrom(this.state, request.workspaceId))
       const operation: AgentTeamMemberWorkspaceLeftOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/member-workspace-left',
         data: Object.freeze({ workspaceId: request.workspaceId, memberId: member.memberId,
@@ -994,7 +1077,7 @@ export class AgentTeamLedger {
       const activities = Object.freeze(owners.flatMap(owner => this.releaseSummaries(releasedClaims.filter(claim => claim.owner === owner), owner, sequence)))
       const threads = this.threadsForActivities(activities)
       const tasks = this.tasksForClaims(releasedClaims, nextClaims)
-      const inbox = this.projectArchivalInbox(threadRefs)
+      const inbox = this.projectArchivalInbox(threadRefs, project.projectRef)
       const operation: AgentTeamProjectArchivedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/project-archived',
         data: Object.freeze({ workspaceId: request.workspaceId, project: nextProject,
@@ -1019,6 +1102,7 @@ export class AgentTeamLedger {
         this.assertSameMessage(existing, request, recipients)
         return this.resolved(this.messageResult(existing))
       }
+      if (this.state.rulesVersion >= 2) throw new Error('top-level sends are replaced by startThread from rules version 2')
       this.assertMentionTargets(project, recipients)
       // Top-level Task creation is open to every actor: mentioned Members join
       // the new Thread as followers. Only existing-Thread invitations stay
@@ -1056,23 +1140,26 @@ export class AgentTeamLedger {
     return this.enqueue(async () => {
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
       const { task, thread, projectRef } = this.threadContextForActor(actor, request.workspaceId, request)
+      const v2 = this.state.rulesVersion >= 2
+      if (v2) this.requireProjectMemberActor(actor, projectRef)
+      if (v2 && request.confirmationToken !== undefined) throw new Error('invitation confirmation does not exist at rules version 2: a mention delivers directly')
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
       const project = this.requireProject(request.workspaceId, projectRef)
       const parent = this.requireReplyParent(request, thread.threadRef)
       const explicit = this.normalizeRecipients(actor, request.recipients)
       // Answering a Member delivers to them the way a mention does: a reply the
-      // recipient never learns about is not a reply. The Human is skipped — they
-      // read the Thread directly and hold no session to deliver to — as is the
-      // author's own Message, which `normalizeRecipients` refuses outright.
-      const answered = parent === undefined || parent.sender === actor.memberId || parent.sender === AGENT_TEAM_HUMAN_MEMBER_ID
+      // recipient never learns about is not a reply. Before version 2 the Human
+      // is skipped — they read the Thread directly — as is the author's own
+      // Message, which `normalizeRecipients` refuses outright.
+      const answered = parent === undefined || parent.sender === actor.memberId || (!v2 && parent.sender === AGENT_TEAM_HUMAN_MEMBER_ID)
         ? explicit
         : [...new Set([...explicit, parent.sender])].sort()
       const recipients = this.mergeBodyMentions(actor.memberId, projectRef, body, answered)
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameReply(existing, request, recipients)
-        return this.resolved(this.replyResult(existing, this.undeliverableRecipients(actor, thread.threadRef, recipients)))
+        return this.resolved(this.replyResult(existing, v2 ? [] : this.undeliverableRecipients(actor, thread.threadRef, recipients)))
       }
       this.assertMentionTargets(project, recipients)
       const deferred = this.deferredThreadWrite(actor.memberId, task, thread, request.baseRevision)
@@ -1082,9 +1169,10 @@ export class AgentTeamLedger {
       // Thread has never carried is dropped and reported back rather than
       // failing the send. The Human keeps the confirmation step, which is what
       // actually grants the invitation.
-      const undelivered = this.undeliverableRecipients(actor, thread.threadRef, recipients)
+      const undelivered = v2 ? Object.freeze([] as AgentTeamMemberId[]) : this.undeliverableRecipients(actor, thread.threadRef, recipients)
       const delivered = undelivered.length === 0 ? recipients : recipients.filter(memberId => !undelivered.includes(memberId))
-      const unfollowedAgents = delivered.filter(memberId => this.state.members.has(memberId) && !this.isFollowing(thread.threadRef, memberId))
+      // Version 2: a mention or an answer delivers one direct marker and never starts or resumes Attention.
+      const unfollowedAgents = v2 ? [] : delivered.filter(memberId => this.state.members.has(memberId) && !this.isFollowing(thread.threadRef, memberId))
       // A Member that once took part in this Thread is delivered to directly:
       // re-joining a Thread it already belongs to is not an invitation.
       if (unfollowedAgents.length > 0 && actor.kind === 'human' && request.confirmationToken === undefined) {
@@ -1117,6 +1205,163 @@ export class AgentTeamLedger {
     })
   }
 
+  /**
+   * Post one Main stream Message: the Project-level conversation outside every Thread. Any Project member may write; a
+   * writer holding Main stream unread (an owner's ordinary unread, or any Member's markers) reads first.
+   */
+  postMainMessage(request: AgentTeamAuthorizedPostMainMessageRequest): Promise<AgentTeamLedgerResult<AgentTeamPostMainMessageResult>> {
+    return this.enqueue(async () => {
+      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+      const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+      const body = request.body.trim()
+      if (body === '') throw new Error('message body must not be empty')
+      const parent = this.requireMainReplyParent(request.replyToMessageRef, project.projectRef)
+      const explicit = this.normalizeRecipients(actor, request.recipients)
+      const answered = parent === undefined || parent.sender === actor.memberId ? explicit : [...new Set([...explicit, parent.sender])].sort()
+      const recipients = this.mergeBodyMentions(actor.memberId, project.projectRef, body, answered)
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameMainMessage(existing, request, recipients)
+        return this.resolved(this.mainPostResult(existing))
+      }
+      this.requireRulesVersion2('the Main stream')
+      this.requireProjectMemberActor(actor, project.projectRef)
+      this.assertMentionTargets(project, recipients)
+      const unread = this.mainUnreadFrom(this.state, actor.memberId, project.projectRef)
+      if (unread.length > 0) return this.resolved(this.mainUnreadRequired(project.projectRef, unread))
+      const sequence = this.nextSequence()
+      const base = this.operationBase(request, sequence)
+      const message: AgentTeamMainMessage = Object.freeze({
+        messageRef: this.ref('message'), projectRef: project.projectRef, scope: 'main', sender: actor.memberId, body,
+        ...(request.resolvedAttachments === undefined ? {} : { attachments: request.resolvedAttachments }),
+        ...(parent === undefined ? {} : { replyToMessageRef: parent.messageRef }), sequence, occurredAt: base.occurredAt,
+      })
+      const operation: AgentTeamMainMessagePostedOperation = Object.freeze({
+        ...base, kind: 'team/main-message-posted',
+        data: Object.freeze({ workspaceId: request.workspaceId, mentions: recipients, message,
+          inbox: this.mainMessageInboxDelta(message, recipients) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.mainPostResult(operation))
+    })
+  }
+
+  /**
+   * Acknowledge the Main stream through one sequence (default the head): an owner's watermark advances and the reader's
+   * markers up to it are consumed. A read that changes neither writes nothing, like a Thread read.
+   */
+  readMainStream(request: AgentTeamAuthorizedMainStreamReadRequest): Promise<AgentTeamLedgerResult<AgentTeamMainStreamReadResult>> {
+    return this.enqueue(async () => {
+      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+      const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameMainRead(existing, request, project.projectRef)
+        return this.resolved(this.mainReadResult(actor.memberId, project.projectRef, existing.data.readThroughSequence, [], this.receipt(existing)))
+      }
+      this.requireRulesVersion2('the Main stream')
+      this.requireProjectMemberActor(actor, project.projectRef)
+      const head = this.mainHeadFrom(this.state, project.projectRef)
+      // Without an explicit bound a read acknowledges only the first page of unread, so a backlog is read page by page, never skipped.
+      const backlog = request.readThroughSequence === undefined ? this.mainUnreadFrom(this.state, actor.memberId, project.projectRef) : []
+      const readThrough = request.readThroughSequence ?? (backlog.length > MAIN_READ_PAGE_SIZE ? backlog[MAIN_READ_PAGE_SIZE - 1]!.source.sequence : head)
+      if (!Number.isInteger(readThrough) || readThrough < 0 || readThrough > head) {
+        throw new Error(`readThroughSequence must be an integer from 0 to the Main stream head ${head}`)
+      }
+      const prepared = this.prepareMainReadFrom(this.state, actor.memberId, project.projectRef, readThrough)
+      if (!prepared.advances && isEmptyInboxDelta(prepared.inbox)) {
+        return this.resolved(this.mainReadResult(actor.memberId, project.projectRef, readThrough, []))
+      }
+      const operation: AgentTeamMainStreamReadOperation = Object.freeze({
+        ...this.operationBase(request, this.nextSequence()), kind: 'team/main-stream-read',
+        data: Object.freeze({ workspaceId: request.workspaceId, projectRef: project.projectRef, memberId: actor.memberId,
+          readThroughSequence: readThrough, inbox: prepared.inbox }),
+      })
+      // The picture shows what the reader saw before this read, so it is taken ahead of the commit.
+      const picture = this.mainReadPage(actor.memberId, project.projectRef, prepared.consumed, readThrough)
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(Object.freeze({ receipt: this.receipt(operation), projectRef: project.projectRef, readThroughSequence: readThrough,
+        entries: picture, consumedMarkers: prepared.consumed, standing: this.mainStandingFrom(this.state, actor.memberId, project.projectRef) }))
+    })
+  }
+
+  /** Start a discussion or Task Thread: a Project owner's act. Mentions deliver a direct marker only; the creator alone follows. */
+  startThread(request: AgentTeamAuthorizedStartThreadRequest): Promise<AgentTeamLedgerResult<AgentTeamStartThreadResult>> {
+    return this.enqueue(async () => {
+      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+      const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+      const body = request.body.trim()
+      if (body === '') throw new Error('message body must not be empty')
+      const recipients = this.mergeBodyMentions(actor.memberId, project.projectRef, body, this.normalizeRecipients(actor, request.recipients))
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameThreadStart(existing, request, recipients)
+        return this.resolved(this.startThreadResult(existing))
+      }
+      this.requireRulesVersion2('starting a Thread')
+      this.requireProjectMemberActor(actor, project.projectRef)
+      this.requireProjectOwnerActor(actor, project.projectRef)
+      this.assertMentionTargets(project, recipients)
+      const sequence = this.nextSequence()
+      const base = this.operationBase(request, sequence)
+      const threadRef = this.ref('thread')
+      const taskRef = request.kind === 'task' ? this.ref('task') : undefined
+      const task = taskRef === undefined ? undefined
+        : Object.freeze({ taskRef, projectRef: project.projectRef, threadRef, status: 'todo' as const, resolution: 'open' as const })
+      const thread: AgentTeamThread = Object.freeze({ threadRef, ...(taskRef === undefined ? {} : { taskRef }), revision: sequence })
+      const anchor: AgentTeamMessage = Object.freeze({
+        messageRef: this.ref('message'), projectRef: project.projectRef, threadRef, ...(taskRef === undefined ? {} : { taskRef }),
+        sender: actor.memberId, body,
+        ...(request.resolvedAttachments === undefined ? {} : { attachments: request.resolvedAttachments }),
+        topLevel: true, sequence, occurredAt: base.occurredAt,
+      })
+      const inbox = this.messageInboxDelta(anchor, actor.memberId, recipients, [this.startAttention(actor.memberId, threadRef, sequence)])
+      const operation: AgentTeamThreadStartedOperation = Object.freeze({
+        ...base, kind: 'team/thread-started',
+        data: Object.freeze({ workspaceId: request.workspaceId, projectRef: project.projectRef, kind: request.kind, mentions: recipients,
+          anchor, ...(task === undefined ? {} : { task }), thread, inbox }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.startThreadResult(operation))
+    })
+  }
+
+  /** One page of a Project's Main stream, oldest first, with the reader's own standing. Never writes. */
+  mainStreamHistory(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamMainStreamHistoryRequest): AgentTeamMainStreamHistory {
+    this.requireRulesVersion2('the Main stream')
+    const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
+    const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+    this.requireProjectMemberActor(authorized, project.projectRef)
+    const limit = request.limit ?? 20
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('history limit must be an integer between 1 and 100')
+    const sources = this.mainSourcesFrom(this.state, project.projectRef)
+    const before = request.beforeSequence ?? (sources.at(-1)?.sequence ?? 0) + 1
+    if (!Number.isInteger(before) || before < 1) throw new Error('beforeSequence must be a positive integer')
+    const older = sources.filter(source => source.sequence < before)
+    const page = older.slice(-limit)
+    const unread = this.mainUnreadFrom(this.state, authorized.memberId, project.projectRef)
+    return Object.freeze({ projectRef: project.projectRef, entries: this.mainEntries(page, unread),
+      cursor: page.length === 0 ? before : page[0]!.sequence, hasMore: older.length > page.length,
+      standing: this.mainStandingFrom(this.state, authorized.memberId, project.projectRef) })
+  }
+
+  /** What one Member's Main stream markers say, per Project, for the Host's wake: only direct entries, never ordinary owner unread. */
+  mainNotificationFacts(memberId: AgentTeamMemberId): readonly { readonly project: AgentTeamProject; readonly entries: readonly AgentTeamMainTimelineEntry[] }[] {
+    const buckets = this.state.mainMarkersByMember.get(memberId)
+    if (buckets === undefined) return []
+    const result: { project: AgentTeamProject; entries: readonly AgentTeamMainTimelineEntry[] }[] = []
+    for (const projectRef of buckets.keys()) {
+      const project = this.visibleProject(this.state.projects.get(projectRef))
+      if (project === undefined || !this.participatesIn(memberId, project.workspaceId)) continue
+      const direct = this.mainUnreadFrom(this.state, memberId, projectRef).filter(item => item.direct)
+      if (direct.length > 0) result.push({ project, entries: this.mainEntries(direct.map(item => item.source), direct) })
+    }
+    return Object.freeze(result)
+  }
+
   promoteThread(request: AgentTeamAuthorizedPromoteThreadRequest): Promise<AgentTeamLedgerResult<AgentTeamPromoteThreadResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
@@ -1124,8 +1369,11 @@ export class AgentTeamLedger {
         this.assertSamePromotion(existing, request)
         return this.resolved(this.promotionResult(existing))
       }
-      this.assertHumanActor(request.actor)
+      const v2 = this.state.rulesVersion >= 2
+      if (v2 && request.actor.kind === 'member') this.assertMemberActor(request.actor)
+      else this.assertHumanActor(request.actor)
       const { task: existingTask, thread, projectRef } = this.threadContextForActor(request.actor, request.workspaceId, request)
+      if (v2) this.requireProjectOwnerActor(request.actor, projectRef)
       if (existingTask !== undefined) throw new Error(`Thread '${thread.threadRef}' already has Task '${existingTask.taskRef}'`)
       const deferred = this.deferredThreadWrite(request.actor.memberId, undefined, thread, request.baseRevision)
       if (deferred !== undefined) return this.resolved(deferred)
@@ -1157,6 +1405,7 @@ export class AgentTeamLedger {
       }
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
       const { task, thread } = this.threadForActor(actor, request.workspaceId, request.taskRef)
+      if (this.state.rulesVersion >= 2 && request.action === 'claim') this.requireProjectMemberActor(actor, task.projectRef)
       const deferred = this.deferredThreadWrite(actor.memberId, task, thread, request.baseRevision)
       if (deferred !== undefined) return this.resolved(deferred)
       if (task.resolution !== 'open') throw new Error(`Task '${task.taskRef}' is ${task.status}; reopen it before changing Claims`)
@@ -1689,6 +1938,10 @@ export class AgentTeamLedger {
       if (fact.kind !== 'message') continue
       for (const attachment of fact.message.attachments ?? []) referenced.add(attachment.attachmentId)
     }
+    for (const source of this.state.mainSourceByRef.values()) {
+      if (source.kind !== 'message') continue
+      for (const attachment of source.message.attachments ?? []) referenced.add(attachment.attachmentId)
+    }
     return referenced
   }
 
@@ -1754,6 +2007,12 @@ export class AgentTeamLedger {
   resolveMessageRefs(workspaceId: WorkspaceId, messageRefs: readonly AgentTeamMessageRef[]): AgentTeamResolvedMessageRef[] {
     const resolved: AgentTeamResolvedMessageRef[] = []
     for (const messageRef of messageRefs) {
+      const main = this.state.mainSourceByRef.get(messageRef)
+      if (main?.kind === 'message') {
+        if (this.visibleProject(this.state.projects.get(main.message.projectRef))?.workspaceId !== workspaceId) continue
+        resolved.push(Object.freeze({ messageRef, sender: main.message.sender, excerpt: boundedOpeningLine(main.message.body, ONE_LINE_GIST_MAX_CHARACTERS) }))
+        continue
+      }
       const message = this.state.messagesByRef.get(messageRef)
       if (message === undefined) continue
       const project = this.state.projects.get(message.projectRef)
@@ -1783,9 +2042,11 @@ export class AgentTeamLedger {
    * answer it.
    */
   readMessage(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamReadMessageRequest): AgentTeamReadMessageResult {
+    if ((request.threadRef === undefined) === (request.projectRef === undefined)) throw new Error('readMessage needs exactly one of threadRef and projectRef')
+    if (request.projectRef !== undefined) return this.readMainMessage(actor, request.workspaceId, request.projectRef, request.messageRef)
     // Addressing the Thread is the authorization: unknown, foreign, and
     // archived all refuse here, and refuse distinguishably.
-    const context = this.threadContextForActor(actor, request.workspaceId, { threadRef: request.threadRef })
+    const context = this.threadContextForActor(actor, request.workspaceId, { threadRef: request.threadRef! })
     const message = this.state.messagesByRef.get(request.messageRef)
     if (message === undefined) throw new Error(`Message '${request.messageRef}' is not a recorded Message`)
     if (message.threadRef !== context.thread.threadRef) throw new Error(`Message '${request.messageRef}' belongs to another Thread`)
@@ -1798,6 +2059,19 @@ export class AgentTeamLedger {
       ...(message.occurredAt === undefined ? {} : { occurredAt: message.occurredAt }),
       body: message.body,
     })
+  }
+
+  /** A Main stream Message read back whole; the Main stream itself is the authorization. */
+  private readMainMessage(actor: AgentTeamHumanActor | AgentTeamMemberActor, workspaceId: WorkspaceId, projectRef: AgentTeamProjectRef, messageRef: AgentTeamMessageRef): AgentTeamReadMessageResult {
+    this.requireRulesVersion2('the Main stream')
+    const authorized = this.assertActorForWorkspace(actor, workspaceId)
+    const project = this.requireActiveProject(workspaceId, projectRef)
+    this.requireProjectMemberActor(authorized, project.projectRef)
+    const source = this.state.mainSourceByRef.get(messageRef)
+    if (source?.kind !== 'message') throw new Error(`Message '${messageRef}' is not a recorded Main stream Message`)
+    if (source.message.projectRef !== project.projectRef) throw new Error(`Message '${messageRef}' belongs to another Project`)
+    const { message } = source
+    return Object.freeze({ messageRef, projectRef: project.projectRef, sender: message.sender, sequence: message.sequence, occurredAt: message.occurredAt, body: message.body })
   }
 
   /** Navigation facts for message-body Task refs; unknown refs are omitted. */
@@ -2082,6 +2356,13 @@ export class AgentTeamLedger {
       case 'team/message-sent':
       case 'team/thread-replied':
         return [{ kind: 'project', projectRef: operation.data.message.projectRef }, { kind: 'thread', threadRef: operation.data.message.threadRef }]
+      case 'team/thread-started':
+        return [{ kind: 'project', projectRef: operation.data.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
+      case 'team/main-message-posted':
+        return [{ kind: 'project', projectRef: operation.data.message.projectRef }]
+      case 'team/main-stream-read':
+        // Private read progress, like a Thread read: nobody else has anything to refetch.
+        return []
       case 'team/thread-promoted':
         return [{ kind: 'project', projectRef: operation.data.task.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
       case 'team/claim-created':
@@ -2122,6 +2403,8 @@ export class AgentTeamLedger {
       for (const marker of delta.directMarkers.removed) members.add(marker.memberId)
       for (const marker of delta.activityMarkers.added) members.add(marker.memberId)
       for (const marker of delta.activityMarkers.removed) members.add(marker.memberId)
+      for (const marker of delta.mainMarkers?.added ?? []) members.add(marker.memberId)
+      for (const marker of delta.mainMarkers?.removed ?? []) members.add(marker.memberId)
     }
     for (const threadRef of this.touchedThreadRefs(operation)) {
       for (const follower of this.state.attentionByThread.get(threadRef) ?? []) members.add(follower)
@@ -2136,6 +2419,8 @@ export class AgentTeamLedger {
       case 'team/message-sent':
       case 'team/thread-replied':
         return [operation.data.message.threadRef]
+      case 'team/thread-started':
+        return [operation.data.anchor.threadRef]
       case 'team/thread-promoted':
         return [operation.data.activity.threadRef]
       case 'team/claim-created':
@@ -2165,6 +2450,8 @@ export class AgentTeamLedger {
       case 'team/member-updated':
       case 'team/project-member-added':
       case 'team/thread-read':
+      case 'team/main-message-posted':
+      case 'team/main-stream-read':
       case 'team/dm-sent':
       case 'team/rules-version-adopted':
       case 'team/project-owner-added':
@@ -2228,6 +2515,12 @@ export class AgentTeamLedger {
       return member
     }
     if (operation.kind === 'team/initialized') throw new Error('agent-team initialization must be first')
+    if (REPLACED_AT_V2_KINDS.includes(operation.kind) && projection.rulesVersion >= 2) {
+      throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) is not written under rules version ${projection.rulesVersion}`)
+    }
+    if (V2_ONLY_KINDS.includes(operation.kind) && projection.rulesVersion < 2) {
+      throw new Error(`agent-team operation ${operation.sequence} (${operation.kind}) needs rules version 2; its segment runs version ${projection.rulesVersion}`)
+    }
     if (operation.kind === 'team/project-created') {
       assertHuman()
       const { project, memberIds } = operation.data
@@ -2289,6 +2582,15 @@ export class AgentTeamLedger {
       assertHuman()
       const problem = this.projectOwnerChangeProblem(projection, operation.kind, operation.data)
       if (problem !== undefined) throw new Error(`agent-team operation ${operation.sequence}: ${problem}`)
+      const { activity } = operation.data
+      if (activity.projectRef !== operation.data.projectRef || activity.memberId !== operation.data.memberId
+        || activity.kind !== (operation.kind === 'team/project-owner-added' ? 'owner-added' : 'owner-removed')
+        || activity.actor !== actorMemberId() || activity.sequence !== operation.sequence || activity.occurredAt !== operation.occurredAt) {
+        throw new Error('invalid Project owner activity')
+      }
+      this.addRef(refs, activity.activityRef)
+      if (!isDeepStrictEqual(operation.data.inbox, this.ownerActivityInboxDelta(activity))) throw new Error('invalid Project owner inbox projection')
+      this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [], [activity])
       return
     }
     if (operation.kind === 'team/rules-version-adopted') {
@@ -2369,7 +2671,7 @@ export class AgentTeamLedger {
       if (project === undefined || member === undefined || operation.data.workspaceId !== project.workspaceId
         || !this.participatesInFrom(projection, member.memberId, project.workspaceId) || !projection.memberships.get(project.projectRef)?.has(member.memberId)) throw new Error('invalid Project membership removal')
       const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === project.projectRef))
-      this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs)
+      this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs, new Set([project.projectRef]))
       return
     }
     if (operation.kind === 'team/member-workspace-joined') {
@@ -2387,7 +2689,7 @@ export class AgentTeamLedger {
         || operation.data.workspaceId === member.workspaceId
         || !this.participatesInFrom(projection, member.memberId, operation.data.workspaceId)) throw new Error('invalid Workspace leave')
       const threadRefs = this.workspaceThreadRefsFrom(projection, operation.data.workspaceId)
-      this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs)
+      this.validateReleaseCleanup(operation.data, projection, member.memberId, threadRefs, operation.sequence, refs, this.workspaceProjectRefsFrom(projection, operation.data.workspaceId))
       return
     }
     if (operation.kind === 'team/project-archived') {
@@ -2398,7 +2700,7 @@ export class AgentTeamLedger {
         || operation.data.project.name !== prior.name || operation.data.project.description !== prior.description
         || operation.data.project.createdAtSequence !== prior.createdAtSequence) throw new Error('invalid Project archival')
       const threadRefs = new Set([...projection.threads.keys()].filter(threadRef => this.projectRefForThreadFrom(projection, threadRef) === prior.projectRef))
-      this.validateReleaseCleanup(operation.data, projection, undefined, threadRefs, operation.sequence, refs)
+      this.validateReleaseCleanup(operation.data, projection, undefined, threadRefs, operation.sequence, refs, new Set([prior.projectRef]))
       return
     }
     if (operation.kind === 'team/member-removed') {
@@ -2406,7 +2708,7 @@ export class AgentTeamLedger {
       const prior = projection.members.get(operation.data.member.memberId)
       if (prior === undefined || prior.state === 'inactive' || operation.data.member.state !== 'inactive' || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member removal')
       const threadRefs = new Set(projection.threads.keys())
-      this.validateReleaseCleanup(operation.data, projection, prior.memberId, threadRefs, operation.sequence, refs)
+      this.validateReleaseCleanup(operation.data, projection, prior.memberId, threadRefs, operation.sequence, refs, undefined)
       return
     }
     if (operation.kind === 'team/member-archived') {
@@ -2414,7 +2716,7 @@ export class AgentTeamLedger {
       const prior = projection.members.get(operation.data.member.memberId)
       if (prior === undefined || (prior.state !== 'enabled' && prior.state !== 'suspended') || operation.data.member.state !== 'archived' || !this.sameMemberIdentity(prior, operation.data.member)) throw new Error('invalid Member archival')
       const threadRefs = new Set(projection.threads.keys())
-      this.validateReleaseCleanup(operation.data, projection, prior.memberId, threadRefs, operation.sequence, refs)
+      this.validateReleaseCleanup(operation.data, projection, prior.memberId, threadRefs, operation.sequence, refs, undefined)
       return
     }
     if (operation.kind === 'team/thread-attention-changed') {
@@ -2450,7 +2752,7 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/thread-promoted') {
-      assertHuman()
+      const promoter = operation.actor.kind === 'member' && projection.rulesVersion >= 2 ? assertMember() : (assertHuman(), undefined)
       const { activity, task, thread } = operation.data
       const priorThread = projection.threads.get(thread.threadRef)
       const projectRef = priorThread === undefined ? undefined : this.projectRefForThreadFrom(projection, thread.threadRef)
@@ -2463,11 +2765,64 @@ export class AgentTeamLedger {
         || !this.sameThread(thread, { ...priorThread, taskRef: task.taskRef, revision: operation.sequence })
         || activity.kind !== 'promote' || activity.sequence !== operation.sequence || activity.actor !== actorMemberId()
         || activity.taskRef !== task.taskRef || activity.threadRef !== thread.threadRef) throw new Error('invalid Thread promotion')
+      if (promoter !== undefined && !this.isProjectOwnerFrom(projection, projectRef, promoter.memberId)) throw new Error('invalid Thread promotion: not a Project owner')
       this.addRef(refs, task.taskRef)
       this.addRef(refs, activity.activityRef)
       const expectedInbox = this.promoteThreadInboxFrom(projection, activity, thread.threadRef)
       if (!isDeepStrictEqual(operation.data.inbox, expectedInbox)) throw new Error('invalid Promotion inbox projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [activity])
+      return
+    }
+    if (operation.kind === 'team/thread-started') {
+      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
+      const { anchor, task, thread, projectRef, kind, mentions } = operation.data
+      const project = projection.projects.get(projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
+        || anchor.projectRef !== projectRef || anchor.sender !== actorMemberId() || !anchor.topLevel
+        || anchor.sequence !== operation.sequence || anchor.occurredAt !== operation.occurredAt
+        || thread.revision !== operation.sequence || anchor.threadRef !== thread.threadRef || projection.threads.has(thread.threadRef)
+        || (kind === 'task') !== (task !== undefined)
+        || (task === undefined ? anchor.taskRef !== undefined || thread.taskRef !== undefined
+          : anchor.taskRef !== task.taskRef || thread.taskRef !== task.taskRef || task.threadRef !== thread.threadRef
+            || task.projectRef !== projectRef || task.status !== 'todo' || task.resolution !== 'open' || projection.tasks.has(task.taskRef))) {
+        throw new Error('invalid Thread start')
+      }
+      if (actor !== undefined && !this.isProjectOwnerFrom(projection, projectRef, actor.memberId)) throw new Error('invalid Thread start: not a Project owner')
+      this.addRef(refs, thread.threadRef)
+      if (task !== undefined) this.addRef(refs, task.taskRef)
+      this.addRef(refs, anchor.messageRef)
+      this.validateMentions(mentions, anchor, projection)
+      const expected = this.messageInboxDelta(anchor, anchor.sender, mentions, [this.startAttention(anchor.sender, thread.threadRef, operation.sequence)])
+      if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Thread start inbox projection')
+      this.validateInboxDelta(operation.data.inbox, projection, refs, [thread.threadRef], [anchor])
+      return
+    }
+    if (operation.kind === 'team/main-message-posted') {
+      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
+      const { message, mentions } = operation.data
+      const project = projection.projects.get(message.projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
+        || message.sender !== actorMemberId() || message.sequence !== operation.sequence || message.occurredAt !== operation.occurredAt
+        || (actor !== undefined && !this.isProjectMemberFrom(projection, project.projectRef, actor.memberId))) throw new Error('invalid Main stream Message')
+      const parentSource = message.replyToMessageRef === undefined ? undefined : projection.mainSourceByRef.get(message.replyToMessageRef)
+      if (message.replyToMessageRef !== undefined && (parentSource?.kind !== 'message' || parentSource.message.projectRef !== project.projectRef
+        || (parentSource.message.sender !== message.sender && !mentions.includes(parentSource.message.sender)))) throw new Error('invalid Main stream reply target')
+      this.addRef(refs, message.messageRef)
+      this.validateMentions(mentions, message, projection)
+      if (!isDeepStrictEqual(operation.data.inbox, this.mainMessageInboxDelta(message, mentions))) throw new Error('invalid Main stream inbox projection')
+      this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [message])
+      return
+    }
+    if (operation.kind === 'team/main-stream-read') {
+      const actor = operation.actor.kind === 'member' ? assertMember() : (assertHuman(), undefined)
+      const { projectRef, memberId, readThroughSequence } = operation.data
+      const project = projection.projects.get(projectRef)
+      if (project === undefined || project.workspaceId !== operation.data.workspaceId || project.state === 'archived'
+        || memberId !== actorMemberId() || readThroughSequence > this.mainHeadFrom(projection, projectRef)
+        || (actor !== undefined && !this.isProjectMemberFrom(projection, projectRef, actor.memberId))) throw new Error('invalid Main stream read')
+      const expected = this.prepareMainReadFrom(projection, memberId, projectRef, readThroughSequence)
+      if (!isDeepStrictEqual(operation.data.inbox, expected.inbox)) throw new Error('invalid Main stream read receipt')
+      this.validateInboxDelta(operation.data.inbox, projection, refs)
       return
     }
     if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') {
@@ -2494,6 +2849,9 @@ export class AgentTeamLedger {
           || (task === undefined ? priorTask !== undefined : priorTask === undefined || !this.sameTask(priorTask, task))) {
           throw new Error('invalid Thread reply')
         }
+        if (projection.rulesVersion >= 2 && actor !== undefined && !this.isProjectMemberFrom(projection, project.projectRef, actor.memberId)) {
+          throw new Error('invalid Thread reply: not a Project member')
+        }
       }
       this.addRef(refs, message.messageRef)
       this.validateMentions(operation.data.mentions, message, projection)
@@ -2517,6 +2875,7 @@ export class AgentTeamLedger {
       if (operation.actor.kind !== 'member') throw new Error('invalid Claim authority')
       if ((creates && projection.claims.has(claim.claimRef))
         || (creates && claim.owner !== actorMemberId()) || (creates && claim.state !== 'active')) throw new Error('invalid Claim creation')
+      if (creates && projection.rulesVersion >= 2 && !this.isProjectMemberFrom(projection, task.projectRef, actorMemberId())) throw new Error('invalid Claim creation: not a Project member')
       const previousClaim = projection.claims.get(claim.claimRef)
       if (!creates && (previousClaim === undefined || previousClaim.state !== 'active' || !this.sameClaimIdentity(previousClaim, claim)
         || (operation.actor.kind === 'member' && previousClaim.owner !== operation.actor.memberId)
@@ -2627,6 +2986,8 @@ export class AgentTeamLedger {
     additionalThreadRefs: readonly AgentTeamThreadRef[] = [],
     additionalMessages: readonly AgentTeamMessage[] = [],
     additionalActivities: readonly AgentTeamActivity[] = [],
+    additionalMainMessages: readonly AgentTeamMainMessage[] = [],
+    additionalMainActivities: readonly AgentTeamMainActivity[] = [],
   ): void {
     const attentionKeys = new Set<string>()
     for (const attention of delta.attention.set) {
@@ -2680,6 +3041,22 @@ export class AgentTeamLedger {
       }
       activityMarkerKeys.add(key)
     }
+    const mainKeys = new Set<string>()
+    for (const marker of delta.mainMarkers?.added ?? []) {
+      const key = mainMarkerKey(marker)
+      // A Main stream marker always points at the Message or Activity its own record carries.
+      const target = 'messageRef' in marker
+        ? additionalMainMessages.find(candidate => candidate.messageRef === marker.messageRef)
+        : additionalMainActivities.find(candidate => candidate.activityRef === marker.activityRef)
+      if (mainKeys.has(key) || projection.mainMarkers.has(key) || target === undefined || target.projectRef !== marker.projectRef
+        || target.sequence !== marker.sequence || !this.validMentionTarget(projection, marker.projectRef, marker.memberId)) throw new Error('invalid Main stream marker addition')
+      mainKeys.add(key)
+    }
+    for (const marker of delta.mainMarkers?.removed ?? []) {
+      const key = mainMarkerKey(marker)
+      if (mainKeys.has(key) || !isDeepStrictEqual(projection.mainMarkers.get(key), marker)) throw new Error('invalid Main stream marker removal')
+      mainKeys.add(key)
+    }
   }
 
   /**
@@ -2706,6 +3083,7 @@ export class AgentTeamLedger {
     threadRefs: ReadonlySet<AgentTeamThreadRef>,
     sequence: number,
     refs: Set<string>,
+    projectRefs: ReadonlySet<AgentTeamProjectRef> | undefined,
   ): void {
     const releasedClaims = [...projection.claims.values()]
       .filter(claim => (memberId === undefined || claim.owner === memberId) && claim.state === 'active' && threadRefs.has(claim.threadRef))
@@ -2760,7 +3138,7 @@ export class AgentTeamLedger {
       .filter(marker => (memberId === undefined || marker.memberId === memberId) && threadRefs.has(marker.threadRef))
     const expectedActivityMarkers = [...projection.activityMarkers.values()]
       .filter(marker => (memberId === undefined || marker.memberId === memberId) && threadRefs.has(marker.threadRef))
-    const expectedInbox = this.inboxDelta([], expectedAttention, [], expectedMarkers, [], expectedActivityMarkers)
+    const expectedInbox = this.inboxDelta([], expectedAttention, [], expectedMarkers, [], expectedActivityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs))
     if (!isDeepStrictEqual(data.inbox, expectedInbox)) {
       throw new Error(memberId === undefined ? 'invalid Project archival inbox cleanup' : 'invalid Member inbox cleanup')
     }
@@ -2770,17 +3148,24 @@ export class AgentTeamLedger {
   private validateMessageInbox(operation: AgentTeamMessageSentOperation | AgentTeamThreadRepliedOperation, projection: Projection): void {
     const { message, mentions } = operation.data
     const mentionedAgents = mentions.filter(memberId => projection.members.has(memberId))
+    const v2 = projection.rulesVersion >= 2
     // Top-level mentions are open to every actor; only a Member reply may not
-    // pull an unfollowed Member into an existing Thread.
-    if (operation.actor.kind === 'member' && operation.kind === 'team/thread-replied'
+    // pull an unfollowed Member into an existing Thread. Version 2 has no such invitation rule.
+    if (!v2 && operation.actor.kind === 'member' && operation.kind === 'team/thread-replied'
       && mentionedAgents.some(memberId => !this.everParticipatedFrom(projection, message.threadRef, memberId))) {
       throw new Error('invalid Agent mention projection')
     }
-    const started = operation.kind === 'team/message-sent'
-      ? [this.startAttention(message.sender, message.threadRef, message.sequence),
-        ...mentionedAgents.map(memberId => this.startAttention(memberId, message.threadRef, message.sequence))]
-      : mentionedAgents.filter(memberId => !this.isFollowingFrom(projection, message.threadRef, memberId))
-        .map(memberId => this.startAttention(memberId, message.threadRef, message.sequence))
+    if (v2 && message.replyToMessageRef !== undefined) {
+      const parent = projection.messagesByRef.get(message.replyToMessageRef)
+      if (parent === undefined || parent.threadRef !== message.threadRef
+        || (parent.sender !== message.sender && !mentions.includes(parent.sender))) throw new Error('invalid Message reply target')
+    }
+    const started = v2 ? []
+      : operation.kind === 'team/message-sent'
+        ? [this.startAttention(message.sender, message.threadRef, message.sequence),
+          ...mentionedAgents.map(memberId => this.startAttention(memberId, message.threadRef, message.sequence))]
+        : mentionedAgents.filter(memberId => !this.isFollowingFrom(projection, message.threadRef, memberId))
+          .map(memberId => this.startAttention(memberId, message.threadRef, message.sequence))
     const markers = mentions.map(memberId => Object.freeze({ memberId, threadRef: message.threadRef,
       messageRef: message.messageRef, sequence: message.sequence }))
     const expected = this.inboxDelta(started, [], markers)
@@ -2789,7 +3174,7 @@ export class AgentTeamLedger {
 
   private validateMentions(
     mentions: readonly AgentTeamMemberId[],
-    message: AgentTeamMessage,
+    message: Pick<AgentTeamMessage, 'sender' | 'projectRef'>,
     projection: Projection,
   ): void {
     if (mentions.includes(message.sender) || !this.sameList(mentions, [...new Set(mentions)].sort())) throw new Error('invalid Message mentions')
@@ -2849,16 +3234,25 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/rules-version-adopted') {
       target.rulesVersion = operation.data.version
+      if (operation.data.version >= 2 && target.humanOwnerFloor === 0) target.humanOwnerFloor = operation.sequence
       return
     }
     if (operation.kind === 'team/project-owner-added') {
       const owners = target.owners.get(operation.data.projectRef) ?? new Map<AgentTeamMemberId, number>()
       owners.set(operation.data.memberId, operation.sequence)
       target.owners.set(operation.data.projectRef, owners)
+      this.recordNamed(target, operation.data.projectRef, [operation.data.memberId])
+      this.appendMainActivity(target, operation.data.activity)
+      this.applyInboxDelta(target, operation.data.inbox)
       return
     }
     if (operation.kind === 'team/project-owner-removed') {
       target.owners.get(operation.data.projectRef)?.delete(operation.data.memberId)
+      target.mainWatermarks.delete(mainWatermarkKey(operation.data.memberId, operation.data.projectRef))
+      // A removed owner was named in this Project's Main stream, so it stays a member.
+      this.recordNamed(target, operation.data.projectRef, [operation.data.memberId])
+      this.appendMainActivity(target, operation.data.activity)
+      this.applyInboxDelta(target, operation.data.inbox)
       return
     }
     if (operation.kind === 'team/member-session-recycled') {
@@ -2905,6 +3299,7 @@ export class AgentTeamLedger {
         if (project.workspaceId !== operation.data.workspaceId) continue
         target.memberships.get(project.projectRef)?.delete(operation.data.memberId)
         target.owners.get(project.projectRef)?.delete(operation.data.memberId)
+        target.mainWatermarks.delete(mainWatermarkKey(operation.data.memberId, project.projectRef))
       }
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
@@ -2921,6 +3316,7 @@ export class AgentTeamLedger {
       target.members.set(operation.data.member.memberId, operation.data.member)
       for (const membership of target.memberships.values()) membership.delete(operation.data.member.memberId)
       for (const owners of target.owners.values()) owners.delete(operation.data.member.memberId)
+      this.dropMainWatermarks(target, operation.data.member.memberId)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
@@ -2930,6 +3326,7 @@ export class AgentTeamLedger {
       // member state instead. Ownership is a responsibility, not membership: it ends here.
       target.members.set(operation.data.member.memberId, operation.data.member)
       for (const owners of target.owners.values()) owners.delete(operation.data.member.memberId)
+      this.dropMainWatermarks(target, operation.data.member.memberId)
       this.applyReleaseSnapshot(target, operation, operation.data, operation.occurredAt)
       return
     }
@@ -2944,12 +3341,7 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-replied') {
       const { message, mentions } = operation.data
-      target.mentionsByMessage.set(message.messageRef, Object.freeze([...mentions]))
-      if (mentions.length > 0) {
-        const mentioned = target.mentionedByProject.get(message.projectRef) ?? new Set<AgentTeamMemberId>()
-        for (const memberId of mentions) mentioned.add(memberId)
-        target.mentionedByProject.set(message.projectRef, mentioned)
-      }
+      this.recordMentions(target, message.messageRef, message.projectRef, mentions)
       this.appendMessageFact(target, message, mentions, message.occurredAt ?? operation.occurredAt)
       if (operation.data.task !== undefined) target.tasks.set(operation.data.task.taskRef, operation.data.task)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
@@ -2962,7 +3354,38 @@ export class AgentTeamLedger {
       // Only message-sent mints a Task ordinal; thread-replied may echo the
       // Task without renumbering it.
       if (operation.kind === 'team/message-sent' && operation.data.task !== undefined) this.recordTaskNumber(target, operation.data.task)
+      if (operation.kind === 'team/message-sent') this.appendMainSource(target, message.projectRef, { kind: 'thread', sequence: message.sequence, threadRef: message.threadRef, unreadable: false })
       this.recordAttentionObservations(target, operation, operation.data.inbox)
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+    if (operation.kind === 'team/thread-started') {
+      const { anchor, mentions, task, thread } = operation.data
+      this.recordMentions(target, anchor.messageRef, anchor.projectRef, mentions)
+      this.appendMessageFact(target, anchor, mentions, anchor.occurredAt ?? operation.occurredAt)
+      if (task !== undefined) {
+        target.tasks.set(task.taskRef, task)
+        this.recordTaskNumber(target, task)
+      }
+      target.threads.set(thread.threadRef, thread)
+      target.projectRefByThread.set(anchor.threadRef, anchor.projectRef)
+      target.anchorByThread.set(anchor.threadRef, anchor)
+      this.appendMainSource(target, anchor.projectRef, { kind: 'thread', sequence: anchor.sequence, threadRef: anchor.threadRef, unreadable: operation.data.kind === 'discussion' })
+      this.recordAttentionObservations(target, operation, operation.data.inbox)
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+    if (operation.kind === 'team/main-message-posted') {
+      const { message, mentions } = operation.data
+      this.recordMentions(target, message.messageRef, message.projectRef, mentions)
+      this.appendMainSource(target, message.projectRef, { kind: 'message', sequence: message.sequence, message })
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+    if (operation.kind === 'team/main-stream-read') {
+      const { memberId, projectRef, readThroughSequence } = operation.data
+      const key = mainWatermarkKey(memberId, projectRef)
+      if (this.isProjectOwnerFrom(target, projectRef, memberId)) target.mainWatermarks.set(key, Math.max(target.mainWatermarks.get(key) ?? 0, readThroughSequence))
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
@@ -3126,7 +3549,7 @@ export class AgentTeamLedger {
   ): void {
     for (const next of set) {
       const prior = retired.has(this.attentionKey(next.memberId, next.threadRef)) ? undefined : target.attention.get(this.attentionKey(next.memberId, next.threadRef))
-      if (operation.kind === 'team/message-sent' || (prior !== undefined && prior.startSequence === next.startSequence)) continue
+      if (operation.kind === 'team/message-sent' || operation.kind === 'team/thread-started' || (prior !== undefined && prior.startSequence === next.startSequence)) continue
       this.appendObservation(target, next.threadRef, { sequence: operation.sequence, memberId: next.memberId, action: 'follow' })
     }
   }
@@ -3176,16 +3599,53 @@ export class AgentTeamLedger {
       target.activityMarkers.set(this.activityMarkerKey(marker), marker)
       this.insertBucketedMarker(target.activityMarkersByMember, marker.memberId, marker.threadRef, marker)
     }
+    for (const marker of delta.mainMarkers?.removed ?? []) {
+      target.mainMarkers.delete(mainMarkerKey(marker))
+      this.removeBucketedMarker(target.mainMarkersByMember, marker.memberId, marker.projectRef, mainMarkerKey(marker), candidate => mainMarkerKey(candidate))
+    }
+    for (const marker of delta.mainMarkers?.added ?? []) {
+      target.mainMarkers.set(mainMarkerKey(marker), marker)
+      this.insertBucketedMarker(target.mainMarkersByMember, marker.memberId, marker.projectRef, marker)
+    }
+  }
+
+  /** Structured mentions per Message, and the Project-wide set that feeds rules-version-2 membership. */
+  private recordMentions(target: Projection, messageRef: AgentTeamMessageRef, projectRef: AgentTeamProjectRef, mentions: readonly AgentTeamMemberId[]): void {
+    target.mentionsByMessage.set(messageRef, Object.freeze([...mentions]))
+    this.recordNamed(target, projectRef, mentions)
+  }
+
+  private recordNamed(target: Projection, projectRef: AgentTeamProjectRef, memberIds: readonly AgentTeamMemberId[]): void {
+    if (memberIds.length === 0) return
+    const named = target.mentionedByProject.get(projectRef) ?? new Set<AgentTeamMemberId>()
+    for (const memberId of memberIds) named.add(memberId)
+    target.mentionedByProject.set(projectRef, named)
+  }
+
+  private appendMainSource(target: Projection, projectRef: AgentTeamProjectRef, source: MainSource): void {
+    const sources = target.mainSourcesByProject.get(projectRef) ?? []
+    sources.push(source)
+    target.mainSourcesByProject.set(projectRef, sources)
+    if (source.kind === 'message') target.mainSourceByRef.set(source.message.messageRef, source)
+    if (source.kind === 'activity') target.mainSourceByRef.set(source.activity.activityRef, source)
+  }
+
+  private appendMainActivity(target: Projection, activity: AgentTeamMainActivity): void {
+    this.appendMainSource(target, activity.projectRef, { kind: 'activity', sequence: activity.sequence, activity })
+  }
+
+  private dropMainWatermarks(target: Projection, memberId: AgentTeamMemberId): void {
+    for (const key of target.mainWatermarks.keys()) if (key.startsWith(`${memberId}|`)) target.mainWatermarks.delete(key)
   }
 
   /** Insert into the Member's Thread bucket keeping the sequence order the read path must see. */
-  private insertBucketedMarker<M extends { readonly sequence: number }>(
-    index: Map<AgentTeamMemberId, Map<AgentTeamThreadRef, M[]>>,
+  private insertBucketedMarker<K extends string, M extends { readonly sequence: number }>(
+    index: Map<AgentTeamMemberId, Map<K, M[]>>,
     memberId: AgentTeamMemberId,
-    threadRef: AgentTeamThreadRef,
+    threadRef: K,
     marker: M,
   ): void {
-    const threads = index.get(memberId) ?? new Map<AgentTeamThreadRef, M[]>()
+    const threads = index.get(memberId) ?? new Map<K, M[]>()
     index.set(memberId, threads)
     const bucket = threads.get(threadRef) ?? []
     threads.set(threadRef, bucket)
@@ -3194,10 +3654,10 @@ export class AgentTeamLedger {
     bucket.splice(position, 0, marker)
   }
 
-  private removeBucketedMarker<M>(
-    index: Map<AgentTeamMemberId, Map<AgentTeamThreadRef, M[]>>,
+  private removeBucketedMarker<K extends string, M>(
+    index: Map<AgentTeamMemberId, Map<K, M[]>>,
     memberId: AgentTeamMemberId,
-    threadRef: AgentTeamThreadRef,
+    threadRef: K,
     key: string,
     identityOf: (marker: M) => string,
   ): void {
@@ -3495,29 +3955,37 @@ export class AgentTeamLedger {
     return this.inboxDelta([], [], [], [], markers)
   }
 
-  private removeMemberThreadInbox(memberId: AgentTeamMemberId, threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
-    return this.removeMemberThreadInboxFrom(this.state, memberId, threadRefs)
+  /** `projectRefs` scopes the Main stream markers a departure clears; undefined means every Project. */
+  private removeMemberThreadInbox(memberId: AgentTeamMemberId, threadRefs: ReadonlySet<AgentTeamThreadRef>, projectRefs?: ReadonlySet<AgentTeamProjectRef>): AgentTeamInboxDelta {
+    return this.removeMemberThreadInboxFrom(this.state, memberId, threadRefs, projectRefs)
   }
 
-  private removeMemberThreadInboxFrom(projection: Projection, memberId: AgentTeamMemberId, threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
+  private removeMemberThreadInboxFrom(projection: Projection, memberId: AgentTeamMemberId, threadRefs: ReadonlySet<AgentTeamThreadRef>, projectRefs?: ReadonlySet<AgentTeamProjectRef>): AgentTeamInboxDelta {
     const removed = [...projection.attention.values()].filter(attention => attention.memberId === memberId && threadRefs.has(attention.threadRef))
       .map(attention => Object.freeze({ memberId, threadRef: attention.threadRef }))
     const markers = [...projection.directMarkers.values()].filter(marker => marker.memberId === memberId && threadRefs.has(marker.threadRef))
     const activityMarkers = [...projection.activityMarkers.values()].filter(marker => marker.memberId === memberId && threadRefs.has(marker.threadRef))
-    return this.inboxDelta([], removed, [], markers, [], activityMarkers)
+    return this.inboxDelta([], removed, [], markers, [], activityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs))
+  }
+
+  /** Live Main stream markers a departure clears, in sequence order so write and replay derive the same list. */
+  private mainMarkersToClear(projection: Projection, memberId: AgentTeamMemberId | undefined, projectRefs: ReadonlySet<AgentTeamProjectRef> | undefined): readonly AgentTeamMainMarker[] {
+    return [...projection.mainMarkers.values()]
+      .filter(marker => (memberId === undefined || marker.memberId === memberId) && (projectRefs === undefined || projectRefs.has(marker.projectRef)))
+      .sort((left, right) => left.sequence - right.sequence || mainMarkerKey(left).localeCompare(mainMarkerKey(right)))
   }
 
   /** Attention and marker cleanup for EVERY Member on the given Threads. */
-  private projectArchivalInbox(threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
-    return this.projectArchivalInboxFrom(this.state, threadRefs)
+  private projectArchivalInbox(threadRefs: ReadonlySet<AgentTeamThreadRef>, projectRef: AgentTeamProjectRef): AgentTeamInboxDelta {
+    return this.projectArchivalInboxFrom(this.state, threadRefs, projectRef)
   }
 
-  private projectArchivalInboxFrom(projection: Projection, threadRefs: ReadonlySet<AgentTeamThreadRef>): AgentTeamInboxDelta {
+  private projectArchivalInboxFrom(projection: Projection, threadRefs: ReadonlySet<AgentTeamThreadRef>, projectRef: AgentTeamProjectRef): AgentTeamInboxDelta {
     const removed = [...projection.attention.values()].filter(attention => threadRefs.has(attention.threadRef))
       .map(attention => Object.freeze({ memberId: attention.memberId, threadRef: attention.threadRef }))
     const markers = [...projection.directMarkers.values()].filter(marker => threadRefs.has(marker.threadRef))
     const activityMarkers = [...projection.activityMarkers.values()].filter(marker => threadRefs.has(marker.threadRef))
-    return this.inboxDelta([], removed, [], markers, [], activityMarkers)
+    return this.inboxDelta([], removed, [], markers, [], activityMarkers, [], this.mainMarkersToClear(projection, undefined, new Set([projectRef])))
   }
 
   private inboxDelta(
@@ -3527,11 +3995,16 @@ export class AgentTeamLedger {
     removedMarkers: readonly AgentTeamDirectMarker[] = [],
     addedActivityMarkers: readonly AgentTeamActivityMarker[] = [],
     removedActivityMarkers: readonly AgentTeamActivityMarker[] = [],
+    addedMainMarkers: readonly AgentTeamMainMarker[] = [],
+    removedMainMarkers: readonly AgentTeamMainMarker[] = [],
   ): AgentTeamInboxDelta {
     return Object.freeze({
       attention: Object.freeze({ set: Object.freeze(set), removed: Object.freeze(removed) }),
       directMarkers: Object.freeze({ added: Object.freeze(addedMarkers), removed: Object.freeze(removedMarkers) }),
       activityMarkers: Object.freeze({ added: Object.freeze(addedActivityMarkers), removed: Object.freeze(removedActivityMarkers) }),
+      // Absent unless it changes something: a rules-version-1 delta keeps its stored bytes.
+      ...(addedMainMarkers.length === 0 && removedMainMarkers.length === 0 ? {}
+        : { mainMarkers: Object.freeze({ added: Object.freeze(addedMainMarkers), removed: Object.freeze(removedMainMarkers) }) }),
     })
   }
 
@@ -3634,6 +4107,233 @@ export class AgentTeamLedger {
         throw new Error(`Agent Member '${memberId}' is not authorized for Project '${project.projectRef}'`)
       }
     }
+  }
+
+  private requireRulesVersion2(what: string): void {
+    if (this.state.rulesVersion < 2) throw new Error(`${what} needs rules version 2; this ledger runs version ${this.state.rulesVersion}`)
+  }
+
+  private requireProjectMemberActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+    if (actor.kind === 'member' && !this.isProjectMember(projectRef, actor.memberId)) {
+      throw new Error(`Agent Member '${actor.handle}' is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`)
+    }
+  }
+
+  private requireProjectOwnerActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+    if (actor.kind === 'member' && !this.isProjectOwnerFrom(this.state, projectRef, actor.memberId)) {
+      throw new Error(`Only a Project owner can do this in Project '${projectRef}' (project_owner_required) — ${recoveryFor('project_owner_required').sentence({ projectRef })}`)
+    }
+  }
+
+  /** The Human owns every Project; an Agent owns it from its grant until the grant ends. */
+  private isProjectOwnerFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return projection.projects.has(projectRef)
+    return projection.owners.get(projectRef)?.has(memberId) === true
+  }
+
+  /** Sequence from which an owner's ordinary Main stream unread counts; undefined for a non-owner. */
+  private ownerSinceFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): number | undefined {
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) {
+      const project = projection.projects.get(projectRef)
+      return project === undefined ? undefined : Math.max(project.createdAtSequence, projection.humanOwnerFloor)
+    }
+    return projection.owners.get(projectRef)?.get(memberId)
+  }
+
+  private mainSourcesFrom(projection: Projection, projectRef: AgentTeamProjectRef): readonly MainSource[] {
+    return projection.mainSourcesByProject.get(projectRef) ?? []
+  }
+
+  private mainHeadFrom(projection: Projection, projectRef: AgentTeamProjectRef): number {
+    return this.mainSourcesFrom(projection, projectRef).at(-1)?.sequence ?? 0
+  }
+
+  private mainProducerFrom(projection: Projection, source: MainSource): AgentTeamMemberId | undefined {
+    if (source.kind === 'message') return source.message.sender
+    if (source.kind === 'activity') return source.activity.actor
+    return projection.anchorByThread.get(source.threadRef)?.sender
+  }
+
+  /**
+   * One reader's unread Main stream, oldest first. An owner's ordinary unread is whatever the stream holds after the later
+   * of the owner's start and read watermark, minus what the reader produced; task cards and earlier-version Thread anchors
+   * are never unread. Markers add to it for owners and are all a non-owner has.
+   */
+  private mainUnreadFrom(projection: Projection, memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): readonly MainUnreadItem[] {
+    const found = new Map<number, MainUnreadItem>()
+    const since = this.ownerSinceFrom(projection, projectRef, memberId)
+    if (since !== undefined) {
+      const floor = Math.max(since, projection.mainWatermarks.get(mainWatermarkKey(memberId, projectRef)) ?? 0)
+      const sources = this.mainSourcesFrom(projection, projectRef)
+      for (let index = sources.length - 1; index >= 0 && sources[index]!.sequence > floor; index -= 1) {
+        const source = sources[index]!
+        if ((source.kind === 'thread' && !source.unreadable) || this.mainProducerFrom(projection, source) === memberId) continue
+        found.set(source.sequence, { source, ordinary: true, direct: false })
+      }
+    }
+    for (const marker of projection.mainMarkersByMember.get(memberId)?.get(projectRef) ?? []) {
+      const source = projection.mainSourceByRef.get('messageRef' in marker ? marker.messageRef : marker.activityRef)
+      if (source !== undefined) found.set(source.sequence, { source, ordinary: found.get(source.sequence)?.ordinary ?? false, direct: true })
+    }
+    return Object.freeze([...found.values()].sort((left, right) => left.source.sequence - right.source.sequence))
+  }
+
+  private mainStandingFrom(projection: Projection, memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): AgentTeamMainStreamStanding {
+    const unread = this.mainUnreadFrom(projection, memberId, projectRef)
+    return Object.freeze({ owner: this.ownerSinceFrom(projection, projectRef, memberId) !== undefined,
+      head: this.mainHeadFrom(projection, projectRef), unreadCount: unread.length,
+      directCount: unread.filter(item => item.direct).length,
+      markers: Object.freeze([...projection.mainMarkersByMember.get(memberId)?.get(projectRef) ?? []]) })
+  }
+
+  /**
+   * The only legal durable result of reading through `readThrough`: the markers it consumes, and whether an owner's
+   * watermark moves. The watermark itself is replayed from the operation, so the delta carries markers alone.
+   */
+  private prepareMainReadFrom(projection: Projection, memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, readThrough: number): {
+    readonly advances: boolean
+    readonly consumed: readonly AgentTeamMainMarker[]
+    readonly inbox: AgentTeamInboxDelta
+  } {
+    const unread = this.mainUnreadFrom(projection, memberId, projectRef)
+    const since = this.ownerSinceFrom(projection, projectRef, memberId)
+    const floor = since === undefined ? readThrough : Math.max(since, projection.mainWatermarks.get(mainWatermarkKey(memberId, projectRef)) ?? 0)
+    const advances = readThrough > floor && unread.some(item => item.ordinary && item.source.sequence <= readThrough)
+    const consumed = Object.freeze((projection.mainMarkersByMember.get(memberId)?.get(projectRef) ?? []).filter(marker => marker.sequence <= readThrough))
+    return Object.freeze({ advances, consumed, inbox: this.inboxDelta([], [], [], [], [], [], [], consumed) })
+  }
+
+  /** The newest page through `readThrough` a read answers with, plus any older entry whose marker the read consumes, so no marker is cleared unseen. */
+  private mainReadPage(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, consumed: readonly AgentTeamMainMarker[], readThrough: number): readonly AgentTeamMainTimelineEntry[] {
+    const sources = this.mainSourcesFrom(this.state, projectRef).filter(source => source.sequence <= readThrough)
+    const marked = new Set(consumed.map(marker => this.state.mainSourceByRef.get('messageRef' in marker ? marker.messageRef : marker.activityRef)?.sequence))
+    const page = sources.filter((source, index) => index >= sources.length - MAIN_READ_PAGE_SIZE || marked.has(source.sequence))
+    return this.mainEntries(page, this.mainUnreadFrom(this.state, memberId, projectRef))
+  }
+
+  private mainReadResult(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, readThrough: number,
+    consumed: readonly AgentTeamMainMarker[], receipt?: AgentTeamOperationReceipt): AgentTeamMainStreamReadResult {
+    return Object.freeze({ ...(receipt === undefined ? {} : { receipt }), projectRef, readThroughSequence: readThrough,
+      entries: this.mainReadPage(memberId, projectRef, consumed, readThrough), consumedMarkers: consumed,
+      standing: this.mainStandingFrom(this.state, memberId, projectRef) })
+  }
+
+  private mainEntries(sources: readonly MainSource[], unread: readonly MainUnreadItem[]): readonly AgentTeamMainTimelineEntry[] {
+    const flags = new Map(unread.map(item => [item.source.sequence, item.direct]))
+    return Object.freeze(sources.map(source => this.mainEntry(source, flags.has(source.sequence), flags.get(source.sequence) === true)))
+  }
+
+  private mainEntry(source: MainSource, unread: boolean, direct: boolean): AgentTeamMainTimelineEntry {
+    if (source.kind === 'activity') {
+      return Object.freeze({ kind: 'activity', sequence: source.sequence, occurredAt: source.activity.occurredAt, unread, direct, activity: source.activity })
+    }
+    if (source.kind === 'thread') {
+      const card = this.mainThreadCard(source.threadRef)
+      return Object.freeze({ kind: 'thread-card', sequence: source.sequence, occurredAt: card.anchor.occurredAt, unread, direct, card })
+    }
+    const parentRef = source.message.replyToMessageRef
+    const parent = parentRef === undefined ? undefined : this.state.mainSourceByRef.get(parentRef)
+    const replyTo = parent?.kind === 'message'
+      ? Object.freeze({ sender: this.printableSender(parent.message.sender), excerpt: boundedOpeningLine(parent.message.body, ONE_LINE_GIST_MAX_CHARACTERS) })
+      : undefined
+    return Object.freeze({ kind: 'message', sequence: source.sequence, occurredAt: source.message.occurredAt, unread, direct,
+      message: source.message, mentions: this.state.mentionsByMessage.get(source.message.messageRef) ?? [],
+      ...(replyTo === undefined ? {} : { replyTo }) })
+  }
+
+  /** A card is the current state of its Thread, rebuilt on every read; it keeps no copy of the Thread's progress. */
+  private mainThreadCard(threadRef: AgentTeamThreadRef): AgentTeamMainThreadCard {
+    const thread = this.state.threads.get(threadRef)!
+    const anchor = this.threadAnchor(threadRef)
+    const facts = this.threadFacts(threadRef)
+    const writers: AgentTeamMemberId[] = []
+    let replyCount = 0
+    for (const fact of facts) {
+      if (fact.kind !== 'message') continue
+      if (fact.message.messageRef !== anchor.messageRef) replyCount += 1
+      if (!writers.includes(fact.message.sender)) writers.push(fact.message.sender)
+    }
+    const newest = facts.at(-1)!
+    const task = thread.taskRef === undefined ? undefined : this.state.tasks.get(thread.taskRef)
+    return Object.freeze({
+      threadRef, anchor: Object.freeze({ messageRef: anchor.messageRef, sender: anchor.sender,
+        preview: boundedOpeningLine(anchor.body, ONE_LINE_GIST_MAX_CHARACTERS), sequence: anchor.sequence, occurredAt: anchor.occurredAt }),
+      ...(task === undefined ? {} : { task: Object.freeze({ taskRef: task.taskRef, taskNumber: this.state.taskNumberByTask.get(task.taskRef) ?? 0,
+        status: task.status, resolution: task.resolution, liveClaimOwners: this.liveClaimOwners(task) }) }),
+      replyCount, participants: Object.freeze(writers.map(memberId => this.memberActor(memberId))),
+      newestSequence: newest.sequence, newestOccurredAt: newest.occurredAt, newestActor: this.inboxActorFor(newest),
+    })
+  }
+
+  private printableSender(memberId: AgentTeamMemberId): string {
+    return memberId === AGENT_TEAM_HUMAN_MEMBER_ID ? AGENT_TEAM_HUMAN_HANDLE : this.state.members.get(memberId)?.handle ?? memberId
+  }
+
+  private mainUnreadRequired(projectRef: AgentTeamProjectRef, unread: readonly MainUnreadItem[]): AgentTeamMainUnreadRequired {
+    return Object.freeze({ kind: 'main_unread_required', projectRef, unreadCount: unread.length,
+      directCount: unread.filter(item => item.direct).length, head: this.mainHeadFrom(this.state, projectRef),
+      entries: this.mainEntries(unread.slice(-MAIN_READ_PAGE_SIZE).map(item => item.source), unread) })
+  }
+
+  /** The Agent whose ownership changed learns of it through a Main stream marker. */
+  private ownerActivityInboxDelta(activity: AgentTeamMainActivity): AgentTeamInboxDelta {
+    const marker: AgentTeamMainActivityMarker = Object.freeze({ memberId: activity.memberId, projectRef: activity.projectRef,
+      activityRef: activity.activityRef, sequence: activity.sequence })
+    return this.inboxDelta([], [], [], [], [], [], [marker])
+  }
+
+  private mainMessageInboxDelta(message: AgentTeamMainMessage, mentions: readonly AgentTeamMemberId[]): AgentTeamInboxDelta {
+    const markers: AgentTeamMainMessageMarker[] = mentions.map(memberId => Object.freeze({ memberId, projectRef: message.projectRef,
+      messageRef: message.messageRef, sequence: message.sequence }))
+    return this.inboxDelta([], [], [], [], [], [], markers)
+  }
+
+  /** A Main stream reply answers a Main stream Message of the same Project; a Thread Message is never a target. */
+  private requireMainReplyParent(ref: AgentTeamMessageRef | undefined, projectRef: AgentTeamProjectRef): AgentTeamMainMessage | undefined {
+    if (ref === undefined) return undefined
+    const source = this.state.mainSourceByRef.get(ref)
+    if (source?.kind === 'message') {
+      if (source.message.projectRef !== projectRef) throw new Error(`reply target '${ref}' belongs to another Project`)
+      return source.message
+    }
+    const reason = this.state.messagesByRef.has(ref) ? 'is a Thread Message, and the Main stream answers only Main stream Messages'
+      : `is not a recorded Message${this.unknownRefHint(ref, 'message', 'Message')}`
+    throw new Error(`reply target '${ref}' ${reason} — ${recoveryFor('reply_target_unknown').sentence({ refused: `'${ref}'` })}`)
+  }
+
+  private mainPostResult(operation: AgentTeamMainMessagePostedOperation): AgentTeamPostMainMessageCommittedResult {
+    return Object.freeze({ kind: 'committed', receipt: this.receipt(operation), message: operation.data.message,
+      markers: operation.data.inbox.mainMarkers?.added ?? [] })
+  }
+
+  private startThreadResult(operation: AgentTeamThreadStartedOperation): AgentTeamStartThreadResult {
+    return Object.freeze({ kind: 'committed', receipt: this.receipt(operation), message: operation.data.anchor,
+      ...(operation.data.task === undefined ? {} : { task: operation.data.task }), thread: operation.data.thread,
+      attention: operation.data.inbox.attention.set, directMarkers: operation.data.inbox.directMarkers.added })
+  }
+
+  private assertSameMainMessage(operation: AgentTeamOperation, request: AgentTeamAuthorizedPostMainMessageRequest, recipients: readonly AgentTeamMemberId[]): asserts operation is AgentTeamMainMessagePostedOperation {
+    if (operation.kind !== 'team/main-message-posted' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.message.projectRef !== request.projectRef
+      || operation.data.message.body !== request.body.trim() || !this.sameList(operation.data.mentions, recipients)
+      || operation.data.message.replyToMessageRef !== request.replyToMessageRef
+      || !this.sameList(operation.data.message.attachments?.map(attachment => attachment.attachmentId) ?? [],
+        request.resolvedAttachments?.map(attachment => attachment.attachmentId) ?? [])) this.throwRequestCollision(request.requestId)
+  }
+
+  private assertSameThreadStart(operation: AgentTeamOperation, request: AgentTeamAuthorizedStartThreadRequest, recipients: readonly AgentTeamMemberId[]): asserts operation is AgentTeamThreadStartedOperation {
+    if (operation.kind !== 'team/thread-started' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.projectRef !== request.projectRef
+      || operation.data.kind !== request.kind || operation.data.anchor.body !== request.body.trim()
+      || !this.sameList(operation.data.mentions, recipients)
+      || !this.sameList(operation.data.anchor.attachments?.map(attachment => attachment.attachmentId) ?? [],
+        request.resolvedAttachments?.map(attachment => attachment.attachmentId) ?? [])) this.throwRequestCollision(request.requestId)
+  }
+
+  private assertSameMainRead(operation: AgentTeamOperation, request: AgentTeamAuthorizedMainStreamReadRequest, projectRef: AgentTeamProjectRef): asserts operation is AgentTeamMainStreamReadOperation {
+    if (operation.kind !== 'team/main-stream-read' || !this.sameActor(operation.actor, request.actor)
+      || operation.data.workspaceId !== request.workspaceId || operation.data.projectRef !== projectRef
+      || (request.readThroughSequence !== undefined && operation.data.readThroughSequence !== request.readThroughSequence)) this.throwRequestCollision(request.requestId)
   }
 
   private unreadRequired(task: AgentTeamTask | undefined, thread: AgentTeamThread, unread: readonly AgentTeamThreadReadFact[]): AgentTeamUnreadRequired {
@@ -4170,6 +4870,10 @@ export class AgentTeamLedger {
     return this.workspaceThreadRefsFrom(this.state, workspaceId)
   }
 
+  private workspaceProjectRefsFrom(projection: Projection, workspaceId: WorkspaceId): Set<AgentTeamProjectRef> {
+    return new Set([...projection.projects.values()].filter(project => project.workspaceId === workspaceId).map(project => project.projectRef))
+  }
+
   private workspaceThreadRefsFrom(projection: Projection, workspaceId: WorkspaceId): Set<AgentTeamThreadRef> {
     return new Set([...projection.threads.keys()].filter(threadRef => {
       const projectRef = this.projectRefForThreadFrom(projection, threadRef)
@@ -4283,7 +4987,7 @@ export class AgentTeamLedger {
     // snapshotted into the recipient list, so a later roster change cannot
     // retroactively alter what this operation delivered. It expands to the
     // Project's own participants, not to every name the body could address.
-    const authored = resolution.all ? this.allRecipientsFor(projectRef) : resolution.memberIds
+    const authored = resolution.all && this.state.rulesVersion < 2 ? this.allRecipientsFor(projectRef) : resolution.memberIds
     const merged = new Set([...explicit, ...authored])
     merged.delete(sender)
     return Object.freeze([...merged].sort())
@@ -4761,18 +5465,18 @@ export class AgentTeamLedger {
   private repairLegacyProjectCleanup(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
     if (operation.kind === 'team/project-archived') {
       const projectRef = operation.data.project.projectRef
-      const expected = this.projectArchivalInboxFrom(projection, this.projectThreadRefsFrom(projection, projectRef))
+      const expected = this.projectArchivalInboxFrom(projection, this.projectThreadRefsFrom(projection, projectRef), projectRef)
       if (!isDeepStrictEqual(operation.data.inbox, expected)
-        && isDeepStrictEqual(operation.data.inbox, this.projectArchivalInboxFrom(projection, this.legacyProjectThreadRefs(projection, projectRef)))) {
+        && isDeepStrictEqual(operation.data.inbox, this.projectArchivalInboxFrom(projection, this.legacyProjectThreadRefs(projection, projectRef), projectRef))) {
         return { ...operation, data: { ...operation.data, inbox: expected } }
       }
       return operation
     }
     if (operation.kind === 'team/project-member-removed') {
       const { projectRef, memberId } = operation.data
-      const expected = this.removeMemberThreadInboxFrom(projection, memberId, this.projectThreadRefsFrom(projection, projectRef))
+      const expected = this.removeMemberThreadInboxFrom(projection, memberId, this.projectThreadRefsFrom(projection, projectRef), new Set([projectRef]))
       if (!isDeepStrictEqual(operation.data.inbox, expected)
-        && isDeepStrictEqual(operation.data.inbox, this.removeMemberThreadInboxFrom(projection, memberId, this.legacyProjectThreadRefs(projection, projectRef)))) {
+        && isDeepStrictEqual(operation.data.inbox, this.removeMemberThreadInboxFrom(projection, memberId, this.legacyProjectThreadRefs(projection, projectRef), new Set([projectRef])))) {
         return { ...operation, data: { ...operation.data, inbox: expected } }
       }
       return operation
