@@ -63,7 +63,7 @@ const createProject = (ledger: AgentTeamLedger, name: string) => ledger.createPr
 })
 
 describe('rules version markers', () => {
-  it('writes no marker while the build implements only rules version 1', async () => {
+  it('writes no marker while a ledger is held at rules version 1', async () => {
     const pool = new MemoryMediaPool()
     const ledger = new AgentTeamLedger(await openTable(pool), { rulesVersion: 1 })
     await ledger.initialize()
@@ -110,7 +110,7 @@ describe('rules version markers', () => {
     await new AgentTeamLedger(await openTable(pool), { rulesVersion: 3 }).initialize()
     await closeAll()
     const table = await openTable(pool)
-    expect(() => new AgentTeamLedger(table)).toThrow(/adopted rules version 3, but this build implements up to 2/)
+    expect(() => new AgentTeamLedger(table)).toThrow(/adopted rules version 3, but this build implements up to 2; open it with a newer release/)
   })
 
   it.each([
@@ -119,7 +119,7 @@ describe('rules version markers', () => {
     ['is not written by the Host', [marker(2, agentTeamHumanActor())], /invalid rules version authority/],
   ])('rejects a ledger whose marker %s', async (_label, markers, failure) => {
     const pool = new MemoryMediaPool()
-    await new AgentTeamLedger(await openTable(pool)).initialize()
+    await new AgentTeamLedger(await openTable(pool), { rulesVersion: 1 }).initialize()
     await closeAll()
     for (const record of markers) appendStored(pool, record)
     const table = await openTable(pool)

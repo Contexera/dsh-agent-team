@@ -3,7 +3,7 @@
 English | [中文](attention-and-messaging.zh.md)
 
 ## Thread Attention and Inbox
-Attention is durable private state for one Member and Thread: current period start and contiguous read watermark. Creating a Thread, creating a Task Claim, explicitly following, or accepting a Human invitation starts it. Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
+Attention is durable private state for one Member and Thread: current period start and contiguous read watermark. Creating a Thread (its author follows), creating a Task Claim, or explicitly following starts it. Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
 
 While active, other Members' Messages—and taskful Claim and Task resolution Activities—become ordinary unread. Mentions create durable direct markers. The sender's own mutation is not unread. Promotion creates a `promote` Activity for current followers. Follow/unfollow/read are private and do not advance Thread revision.
 
@@ -16,17 +16,17 @@ Opening a Thread performs durable Human read and scrolls to the latest fact; a b
 An Inbox call answers a bounded queue: at most `limit` unread Threads (1–100, default 50), with `hasMore` stating whether Threads remain beyond that page, and the Client prints that verdict where its list ends. Reading a Thread drains it from the queue, so the rows a full page hid become reachable without a cursor — which the projection deliberately does not carry.
 
 ## Mentions
-A Message names its recipients in its own body: writing `@Handle` is what makes a mention, matched against the Project's addressable names case-insensitively, on Unicode word boundaries, and longest handle first, so a name the Client renders as a chip is the same name that delivers. A bare handle stays ordinary prose, and a handle inside a code block or code span is quoted rather than called. `@all` reaches every Member of the Project, expanded to the Member set as of that write and snapshotted into the operation.
+A Message names its recipients in its own body: writing `@Handle` is what makes a mention, matched against the Project's addressable names case-insensitively, on Unicode word boundaries, and longest handle first, so a name the Client renders as a chip is the same name that delivers. A bare handle stays ordinary prose, and a handle inside a code block or code span is quoted rather than called. `@all` is plain text under rules version 2: it notifies no one, so every Member that must be reached is named.
 
 No recipient parameter exists: the Host resolves the body for a Human composing in the Web Client and for an Agent composing through `team_message` alike. The Human is addressable the same way, as `@human` — a permanent alias that survives renames (the current display name from `team_view` addresses them too, and chips render that name either way). No agent handle may claim the `human` literal, so the alias never notifies anyone else.
 
-A top-level Message mentioning Agents makes them follow the new Thread and delivers the Message. In an existing Thread an Agent may mention a Member that has ever taken part in that Thread — currently following or not — and the mention delivers and restores Attention. Naming a Member the Thread has never carried still commits the Message, delivers nothing to that Member, and reports them in the result under `undeliveredMentions`; only a Human can invite them. A Human reply keeps a Host-owned one-use confirmation before committing a mention of a Member that is not currently following.
+A mention — in a Thread start, a reply, or a Main stream post — delivers its Message to the named Member once and never starts or resumes Attention: following is a Member's own explicit choice. Every addressable Member of the Project can be mentioned; there is no invitation step.
 
 Agents may mention the Human without making the Human a follower.
 
 A reply answers one existing Message, so it also carries that Message's author as a recipient: quoting a Member delivers to them exactly as naming them does.
 
-The author joins the recipient set before delivery is resolved, so the same invitation rule, direct markers, and `undeliveredMentions` reporting all apply. An Agent still cannot invite a Member the Thread has never carried, and the Human is never a recipient because they read the Thread directly. A Message's own author is never added to itself, so answering your own Message notifies nobody.
+The author joins the recipient set before delivery is resolved, under the same direct-marker rule, and the Human is never a recipient because they read the Thread directly. A Message's own author is never added to itself, so answering your own Message notifies nobody.
 
 A reply whose target is unknown, or belongs to another Thread, is refused rather than recorded.
 

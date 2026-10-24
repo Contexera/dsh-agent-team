@@ -71,10 +71,6 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
     ].join(' '),
   },
   {
-    kind: 'member_not_following',
-    sentence: () => 'Only a Human can invite an unfollowed Agent — retry without mentioning them, or ask the Human.',
-  },
-  {
     kind: 'missing_thread_identity',
     sentence: () => 'Copy a threadRef (or a taskRef on a Taskful Thread) from team_inbox or team_view, then retry.',
   },
@@ -113,15 +109,31 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'claim_close_requires_ref',
-    sentence: ({ action }: RecoveryContext) => `Copy the claimRef of your own Claim from team_claim list or the Thread read; you can only ${action ?? 'close'} a Claim you own.`,
+    sentence: ({ action }: RecoveryContext) => `Copy the claimRef of your own Claim from team_task list or the Thread read; you can only ${action ?? 'close'} a Claim you own.`,
+  },
+  {
+    kind: 'promote_requires_thread',
+    sentence: () => 'promote needs the threadRef of the discussion Thread to turn into a Task — copy it from team_thread read or the Main stream card.',
+  },
+  {
+    kind: 'task_action_requires_task',
+    sentence: ({ action }: RecoveryContext) => `${action ?? 'This action'} needs a taskRef — copy one from team_task board or the Task's Thread read.`,
   },
   {
     kind: 'list_takes_task_only',
-    sentence: () => 'Drop baseRevision, direction, and claimRef — list takes only taskRef.',
+    sentence: () => 'Drop baseRevision, direction, claimRef, and threadRef — list takes only taskRef.',
+  },
+  {
+    kind: 'board_takes_no_task',
+    sentence: () => 'board reads the whole board — drop taskRef, threadRef, baseRevision, direction, and claimRef; to reach one Task, copy its taskRef from the board and use list.',
+  },
+  {
+    kind: 'promote_takes_thread',
+    sentence: () => 'promote works on a discussion Thread — drop taskRef, direction, and claimRef, and pass threadRef with the Thread’s current write token.',
   },
   {
     kind: 'claim_owned_by_another',
-    sentence: ({ refused }: RecoveryContext) => `Claim ${refused ?? ''} belongs to another Member or another Task — list this Task's Claims with team_claim list and close one of your own.`,
+    sentence: ({ refused }: RecoveryContext) => `Claim ${refused ?? ''} belongs to another Member or another Task — list this Task's Claims with team_task list and close one of your own.`,
   },
   {
     kind: 'reply_target_unknown',

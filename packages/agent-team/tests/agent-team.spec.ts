@@ -20,6 +20,7 @@ import { fabricateLegacyThreadReadSnapshot, counterfactualReceiptReadData } from
 import AgentTeam, { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
 import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
+import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import type { AgentTeamAgentMember, AgentTeamHostActor, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadReadData, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadRef } from '../src/types.ts'
 
@@ -37,6 +38,13 @@ const requestId = (value: string): AgentTeamRequestId => value as AgentTeamReque
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
+
+/** The in-progress and in-review rows of a Member's Task board, shaped like the address-book radar the board replaced. */
+function inFlight(ledger: AgentTeamLedger, workspaceId: WorkspaceId, memberId: AgentTeamAgentMember['memberId']) {
+  const actor = { kind: 'member' as const, memberId, handle: ledger.getMember(memberId)!.handle }
+  return ledger.taskBoard(actor, { workspaceId }).open.filter(item => item.task.status === 'in_progress' || item.task.status === 'in_review')
+    .map(item => ({ threadRef: item.threadRef, taskRef: item.task.taskRef, status: item.task.status, subject: item.subject, taskNumber: item.taskNumber, members: item.liveClaimOwners }))
+}
 
 async function harness(
   pool = new MemoryMediaPool(),
@@ -61,7 +69,7 @@ async function harness(
   ctx.provide('sessionPersistence', { list: async () => [] })
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1, ...config })
+  const fiber = config === undefined ? await ctx.plugin(AgentTeam) : await ctx.plugin(AgentTeam, config)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, fiber, facility }
 }
@@ -82,7 +90,7 @@ async function sqliteHarness(path: string): Promise<TeamHarness> {
   ctx.provide('sessionPersistence', { list: async () => [] })
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
+  const fiber = await ctx.plugin(AgentTeam)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll(); await backend.close() })
   return { ctx, fiber, facility }
 }
@@ -131,7 +139,7 @@ function withTask<T extends { readonly task?: AgentTeamTask }>(result: T): T & {
 }
 
 function ledgerAtBoot(test: TeamHarness): AgentTeamLedger {
-  return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
+  return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }
 
 async function addLedgerMember(
@@ -157,6 +165,11 @@ async function addLedgerMember(
   return { member, actor: { kind: 'member', memberId: member.memberId, handle: member.handle } }
 }
 
+/** Starting a Thread is a Project owner's act; the Human grants the standing. */
+const makeOwner = (ledger: AgentTeamLedger, projectRef: string, memberId: string, workspaceId: WorkspaceId = alpha) =>
+  ledger.addProjectOwner({ requestId: requestId(`owner:${workspaceId}:${projectRef}:${memberId}`), actor: agentTeamHumanActor(),
+    workspaceId, projectRef: projectRef as never, memberId: memberId as never })
+
 describe('AgentTeam durable Thread Attention ledger', () => {
   it('replays Workspace participation without moving the default Workspace or Session', async () => {
     const test = await harness(new MemoryMediaPool(), [alpha, beta])
@@ -175,8 +188,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     ])
     const project = (await ledger.createProject({ requestId: requestId('joined-project'), workspaceId: beta,
       name: 'joined', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('joined-message'), workspaceId: beta,
-      projectRef: project.projectRef, body: 'Working in beta', asTask: false, actor })).value)
+    await makeOwner(ledger, project.projectRef, member.memberId, beta)
+    const sent = committed((await ledger.startThread({ requestId: requestId('joined-message'), workspaceId: beta,
+      projectRef: project.projectRef, body: 'Working in beta', kind: 'discussion', actor })).value)
     expect(sent.message.sender).toBe(member.memberId)
     const replay = ledgerAtBoot(test)
     expect(replay.workspacesOf(member.memberId)).toEqual([alpha, beta])
@@ -194,8 +208,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     for (const workspaceId of [alpha, beta]) {
       const project = (await ledger.createProject({ requestId: requestId(`project-${workspaceId}`), workspaceId,
         name: 'work', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
-      const sent = withTask(committed((await ledger.sendMessage({ requestId: requestId(`message-${workspaceId}`), workspaceId,
-        projectRef: project.projectRef, body: 'Task', asTask: true, actor })).value))
+      await makeOwner(ledger, project.projectRef, member.memberId, workspaceId)
+      const sent = withTask(committed((await ledger.startThread({ requestId: requestId(`message-${workspaceId}`), workspaceId,
+        projectRef: project.projectRef, body: 'Task', kind: 'task', actor })).value))
       const claim = committed((await ledger.changeClaim({ requestId: requestId(`claim-${workspaceId}`), workspaceId,
         taskRef: sent.task.taskRef, baseRevision: sent.thread.revision, action: 'claim', direction: 'Implement', actor })).value)
       claims.push({ workspaceId, project, sent, claim })
@@ -244,14 +259,14 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     ledgerAtBoot(test).validate()
   })
 
-  it('boots a v1 empty Team and rejects old ledger media', async () => {
+  it('boots an empty Team on rules version 2 and rejects old ledger media', async () => {
     const pool = new MemoryMediaPool()
     const first = await harness(pool)
-    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 1, operationCount: 1, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, rulesVersion: 1 })
+    expect(first.ctx.agentTeam.status()).toEqual({ initialized: true, sequence: 2, operationCount: 2, projectCount: 0, agentMemberCount: 0, humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, rulesVersion: 2 })
     const records = [...pool.media.get('agent_team')!.tables.get('operations')!.values()]
     await first.fiber.dispose()
-    const replay = await first.ctx.plugin(AgentTeam, { rulesVersion: 1 })
-    expect(first.ctx.agentTeam.status()).toMatchObject({ sequence: 1 })
+    const replay = await first.ctx.plugin(AgentTeam)
+    expect(first.ctx.agentTeam.status()).toMatchObject({ sequence: 2 })
     expect([...pool.media.get('agent_team')!.tables.get('operations')!.values()]).toEqual(records)
     await replay.dispose()
     await expect(harness(storedPool([], 9))).rejects.toThrow(/stamped v9, descriptor wants v1/)
@@ -260,7 +275,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('creates a top-level Task, starts creator Attention, and returns no own unread work', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
+    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     expect(sent).toMatchObject({ message: { topLevel: true, sender: AGENT_TEAM_HUMAN_MEMBER_ID }, task: { status: 'todo' }, attention: [expect.objectContaining({ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, startSequence: sent.message.sequence, readThroughSequence: sent.message.sequence - 1 })] })
     // The creator's own Message is not unread for them, and the Thread they
     // started is already theirs to step back into: participation — writing a
@@ -279,7 +294,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('accepts a Task early and completes active Claims inside the same operation', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claimed = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -311,7 +326,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('accepts an unclaimed todo Task directly and stays honest about the empty Claim list', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     expect(started.task.status).toBe('todo')
     const ledger = ledgerAtBoot(test)
 
@@ -342,7 +357,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('notifies every done Claim owner on a normal accept and dedupes multi-claim owners into one marker', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:agent-ship', 'ship')
     const { actor: actorTwo } = await addLedgerMember(ledger, project.project.projectRef, 'member:agent-fix', 'fix')
@@ -399,7 +414,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const pool = new MemoryMediaPool()
     const test = await harness(pool)
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:agent-done', 'done-owner')
     const memberRead = (await ledger.readThread({ requestId: requestId('member-legacy-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor })).value
@@ -474,7 +489,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(after.claims).toHaveLength(before.claims.length)
     // No Inbox semantics: unread/direct counts stay untouched for both sides.
     expect(ledger.inbox(receiver.actor, { workspaceId: alpha })).toEqual(beforeInbox)
-    expect(ledger.inbox(sender.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(sender.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
 
     // Idempotent retry: same requestId resolves the same receipt, no second append.
     const retry = (await ledger.sendDm({ requestId: requestId('dm-1'), workspaceId: alpha,
@@ -523,7 +538,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('closes an unclaimed todo Task through the close path, not acceptance', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const closed = committed((await ledger.changeTask({ requestId: requestId('close'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'close', baseRevision: started.thread.revision, actor: agentTeamHumanActor() })).value)
@@ -537,8 +552,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('resolves branded Task refs to navigation facts and omits unknown refs', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const first = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'first task' })))
-    const second = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'second task' })))
+    const first = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'first task' })))
+    const second = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'second task' })))
     const resolved = test.ctx.agentTeam.resolveTaskRefs({ workspaceId: alpha, taskRefs: [first.task.taskRef, second.task.taskRef, 'task:00000000-0000-4000-8000-000000000000' as AgentTeamTaskRef] })
     expect(resolved.resolved).toEqual([
       { taskRef: first.task.taskRef, projectRef: project.project.projectRef, threadRef: first.thread.threadRef, taskNumber: 1 },
@@ -548,7 +563,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // resolves as #1 even though it is the workspace's third Task, and a
     // Project-less view (inbox renders) numbers it the same way.
     const other = await test.ctx.agentTeam.createProject({ requestId: requestId('other'), workspaceId: alpha, name: 'audit', description: 'Audit trail' })
-    const audit = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('audit'), workspaceId: alpha, projectRef: other.project.projectRef, body: 'audit task' })))
+    const audit = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('audit'), workspaceId: alpha, projectRef: other.project.projectRef, body: 'audit task' })))
     const crossProject = test.ctx.agentTeam.resolveTaskRefs({ workspaceId: alpha, taskRefs: [audit.task.taskRef, second.task.taskRef] })
     expect(crossProject.resolved).toEqual([
       { taskRef: audit.task.taskRef, projectRef: other.project.projectRef, threadRef: audit.thread.threadRef, taskNumber: 1 },
@@ -564,9 +579,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('resolves branded Thread refs to navigation facts and omits unknown refs', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('thread-refs-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const first = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-refs-first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'alpha discussion opens here' }))
-    const second = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-refs-second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'beta discussion opens here' }))
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('thread-refs-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'task work' })))
+    const first = committed(await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread-refs-first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'alpha discussion opens here' }))
+    const second = committed(await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread-refs-second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'beta discussion opens here' }))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('thread-refs-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'task work' })))
     // Taskless Threads resolve with their opening-line title and no Task
     // overlay; taskful Threads carry the Task home alongside the same title.
     // Unknown refs are omitted so message bodies render them as plain text.
@@ -594,13 +609,13 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('thread-title-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const exact = `x${'y'.repeat(38)}z`
-    const exactThread = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-title-exact'), workspaceId: alpha, projectRef: project.project.projectRef, body: exact }))
+    const exactThread = committed(await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread-title-exact'), workspaceId: alpha, projectRef: project.project.projectRef, body: exact }))
     // A 40-character opening line passes through untouched; anything longer
     // is cut to 39 characters plus the mark so chips share the line with prose.
     expect(test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [exactThread.thread.threadRef] }).resolved).toEqual([
       { threadRef: exactThread.thread.threadRef, projectRef: project.project.projectRef, title: exact },
     ])
-    const longThread = committed(await test.ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('thread-title-long'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'a'.repeat(100)}\nsecond line` }))
+    const longThread = committed(await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread-title-long'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'a'.repeat(100)}\nsecond line` }))
     expect(test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [longThread.thread.threadRef] }).resolved).toEqual([
       { threadRef: longThread.thread.threadRef, projectRef: project.project.projectRef, title: `${'a'.repeat(39)}…` },
     ])
@@ -636,17 +651,17 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(() => ledgerAtBoot(revived).validate()).not.toThrow()
   })
 
-  it('starts Agent Attention and direct Inbox delivery after a top-level mention without confirmation', async () => {
+  it('delivers a direct Inbox notice for a mention in a Thread start without making the Member follow it', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     const before = ledger.status().sequence
-    const sent = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('mention'), workspaceId: alpha, projectRef: project.project.projectRef,
+    const sent = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('mention'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'Please investigate this', recipients: [member.memberId], actor: agentTeamHumanActor() })).value))
     expect(ledger.status().sequence).toBe(before + 1)
-    expect(sent.attention).toEqual(expect.arrayContaining([expect.objectContaining({ memberId: member.memberId,
-      startSequence: sent.message.sequence, readThroughSequence: sent.message.sequence - 1 })]))
+    expect(sent.attention.map(attention => attention.memberId)).toEqual([AGENT_TEAM_HUMAN_MEMBER_ID])
+    expect(ledger.attentionStatus(actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeUndefined()
     expect(sent.directMarkers).toEqual([expect.objectContaining({ memberId: member.memberId, messageRef: sent.message.messageRef })])
     expect(ledger.inbox(actor, { workspaceId: alpha })).toMatchObject({ totalUnreadCount: 1, totalDirectCount: 1,
       items: [expect.objectContaining({ task: expect.objectContaining({ taskRef: sent.task.taskRef }), directCount: 1 })] })
@@ -661,7 +676,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const { member: builder, actor: builderActor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     const { actor: reviewerActor } = await addLedgerMember(ledger, project.project.projectRef, 'member:reviewer')
 
-    const sent = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('anchor'), workspaceId: alpha,
+    const sent = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('anchor'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'Please investigate this', recipients: [builder.memberId], actor: agentTeamHumanActor() })).value))
     // The anchor mentions the builder, so the unread fence stands until the
     // builder acknowledges it; an unread mutation would be refused.
@@ -704,9 +719,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
-    const first = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('first'), workspaceId: alpha,
+    const first = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('first'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'First thread', actor: agentTeamHumanActor() })).value))
-    const second = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('second'), workspaceId: alpha,
+    const second = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('second'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'Second thread', actor: agentTeamHumanActor() })).value))
 
     await expect(ledger.reply({ requestId: requestId('unknown-target'), workspaceId: alpha, taskRef: first.task.taskRef,
@@ -728,7 +743,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // A body whose summary cannot stand in for it: a short first line, a
     // mention, and more than the quote's 120-character bound behind it.
     const longBody = `Please investigate this\n第二行 @reviewer 提到别人\n${'x'.repeat(200)}`
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('anchor'), workspaceId: alpha,
+    const sent = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('anchor'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: longBody, actor: agentTeamHumanActor() })).value)
     const middle = committed((await ledger.reply({ requestId: requestId('middle'), workspaceId: alpha,
       threadRef: sent.thread.threadRef, baseRevision: sent.thread.revision, body: 'A middle message', actor: agentTeamHumanActor() })).value)
@@ -756,7 +771,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const longBody = `Please investigate this\n${'y'.repeat(200)}`
-    const sent = committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('remote-anchor'), workspaceId: alpha,
+    const sent = committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('remote-anchor'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: longBody }))
     const readBack = test.ctx.agentTeam.readMessage({ workspaceId: alpha, threadRef: sent.thread.threadRef, messageRef: sent.message.messageRef })
     expect(readBack.body).toBe(longBody)
@@ -768,9 +783,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
-    const first = committed((await ledger.sendMessage({ requestId: requestId('first'), workspaceId: alpha,
+    const first = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('first'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'First thread', actor: agentTeamHumanActor() })).value)
-    const second = committed((await ledger.sendMessage({ requestId: requestId('second'), workspaceId: alpha,
+    const second = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('second'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'Second thread', actor: agentTeamHumanActor() })).value)
 
     // Each refusal names its own cause, so a reader can tell a wrong ref from a
@@ -798,14 +813,14 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 
     // A followed Thread carrying BOTH an unread mention and ordinary follow
     // unread: one row, and the badge counts every unread fact on it.
-    const followed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('followed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Followed thread anchor', actor: agentTeamHumanActor() })).value))
+    const followed = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('followed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Followed thread anchor', actor: agentTeamHumanActor() })).value))
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: followed.task.taskRef, body: 'Decision needed on the rollout', baseRevision: followed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
     committed((await ledger.reply({ requestId: requestId('ordinary'), workspaceId: alpha, taskRef: followed.task.taskRef, body: 'Ordinary progress reply', baseRevision: mentioned.thread.revision, actor })).value)
 
     // An unfollowed Thread whose fresh mention must still surface: direct
     // markers never depended on Human follow. Its anchor's first line exceeds
     // the 120-character preview bound the Thread page applies to Task titles.
-    const unfollowed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('unfollowed'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'x'.repeat(130)}\nsecond line`, actor: agentTeamHumanActor() })).value))
+    const unfollowed = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('unfollowed'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'x'.repeat(130)}\nsecond line`, actor: agentTeamHumanActor() })).value))
     await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, action: 'unfollow', actor: agentTeamHumanActor() })
     committed((await ledger.reply({ requestId: requestId('ping'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, body: 'Blocking on your call', baseRevision: unfollowed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
 
@@ -845,7 +860,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     let lastTaskRef: AgentTeamTaskRef | undefined
     for (const [index, body] of ['First thread anchor', 'Second thread anchor'].entries()) {
-      const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`capped-${index}`), workspaceId: alpha, projectRef: project.project.projectRef, body, actor: agentTeamHumanActor() })).value))
+      const started = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId(`capped-${index}`), workspaceId: alpha, projectRef: project.project.projectRef, body, actor: agentTeamHumanActor() })).value))
       committed((await ledger.reply({ requestId: requestId(`capped-reply-${index}`), workspaceId: alpha, taskRef: started.task.taskRef, body: `Progress on thread ${index}`, baseRevision: started.thread.revision, actor })).value)
       lastTaskRef = started.task.taskRef
     }
@@ -869,7 +884,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // carries NO mentions parameter, so the only unread it produces is the
     // ordinary follow unread — which is exactly what the Inbox now admits,
     // with no mention marker behind it.
-    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Pure follow thread anchor', actor: agentTeamHumanActor() })).value))
+    const started = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Pure follow thread anchor', actor: agentTeamHumanActor() })).value))
     committed((await ledger.reply({ requestId: requestId('progress'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Ordinary progress, nobody mentioned', baseRevision: started.thread.revision, actor })).value)
 
     const inbox = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })
@@ -883,7 +898,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('keeps the later follow watermark when an older direct marker is consumed', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -899,11 +914,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(followed.attention).toMatchObject({ readThroughSequence: ordinary.message.sequence })
     expect(read.readThroughSequence).toBe(ordinary.message.sequence)
     expect(read.consumedDirectMarkers).toEqual([expect.objectContaining({ messageRef: mentioned.message.messageRef })])
-    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [],
+    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [],
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.task.threadRef }), unreadCount: 0, directCount: 0 })],
       hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
     const replay = ledgerAtBoot(test)
-    expect(replay.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [],
+    expect(replay.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [],
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.task.threadRef }), unreadCount: 0, directCount: 0 })],
       hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
   })
@@ -911,7 +926,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('moves a participated Thread from the unread queue into the Human recent slice once it is read', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Rollout plan' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Rollout plan' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'On it', baseRevision: started.thread.revision, actor })).value)
@@ -934,16 +949,17 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    await makeOwner(ledger, project.project.projectRef, actor.memberId)
     // Three Threads, three ways a Human reader meets one. Their own Thread with
     // nobody else in it is theirs from the start; somebody else's Thread they
     // replied to is theirs too, even though a reply does not follow a Thread —
     // that gap is exactly what reading Attention as the candidate set used to
     // hide; and a Thread they were told about but never wrote in stays out,
     // because participation, not arrival, is the admission rule.
-    const alone = committed((await ledger.sendMessage({ requestId: requestId('alone'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Notes to self', actor: agentTeamHumanActor() })).value)
-    const theirs = committed((await ledger.sendMessage({ requestId: requestId('theirs'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Agent thread', actor })).value)
+    const alone = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('alone'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Notes to self', actor: agentTeamHumanActor() })).value)
+    const theirs = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('theirs'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Agent thread', actor })).value)
     committed((await ledger.reply({ requestId: requestId('join'), workspaceId: alpha, threadRef: theirs.thread.threadRef, body: 'Looking now', baseRevision: theirs.thread.revision, actor: agentTeamHumanActor() })).value)
-    const told = committed((await ledger.sendMessage({ requestId: requestId('told'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Status only', recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
+    const told = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('told'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Status only', recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
     for (const [name, threadRef] of [['alone', alone.thread.threadRef], ['theirs', theirs.thread.threadRef], ['told', told.thread.threadRef]] as const) {
       await ledger.readThread({ requestId: requestId(`read-${name}`), workspaceId: alpha, threadRef, actor: agentTeamHumanActor() })
     }
@@ -972,7 +988,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     for (let index = 0; index < 11; index += 1) {
-      const started = committed((await ledger.sendMessage({ requestId: requestId(`start-${index}`), workspaceId: alpha, projectRef: project.project.projectRef, body: `Thread ${index}`, actor: agentTeamHumanActor() })).value)
+      const started = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId(`start-${index}`), workspaceId: alpha, projectRef: project.project.projectRef, body: `Thread ${index}`, actor: agentTeamHumanActor() })).value)
       committed((await ledger.reply({ requestId: requestId(`reply-${index}`), workspaceId: alpha, threadRef: started.thread.threadRef, body: 'Ack', baseRevision: started.thread.revision, actor })).value)
       await ledger.readThread({ requestId: requestId(`read-${index}`), workspaceId: alpha, threadRef: started.thread.threadRef, actor: agentTeamHumanActor() })
     }
@@ -990,15 +1006,15 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const { actor: bystander } = await addLedgerMember(ledger, project.project.projectRef, 'member:bystander', 'Bystander', 'Bystander')
     // A claimed Task (in_progress), a done Task still in review, and an untouched
     // Task with no Claim. The radar should carry the first two and drop the third.
-    const claimed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('claimed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Claimed work', actor: agentTeamHumanActor() })).value))
+    const claimed = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('claimed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Claimed work', actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: claimed.task.taskRef, action: 'claim', direction: 'building it', baseRevision: claimed.thread.revision, actor })).value)
-    const reviewed = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('reviewed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Reviewed work', actor: agentTeamHumanActor() })).value))
+    const reviewed = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('reviewed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Reviewed work', actor: agentTeamHumanActor() })).value))
     const reviewClaim = committed((await ledger.changeClaim({ requestId: requestId('review-claim'), workspaceId: alpha, taskRef: reviewed.task.taskRef, action: 'claim', direction: 'reviewing it', baseRevision: reviewed.thread.revision, actor })).value)
     committed((await ledger.changeClaim({ requestId: requestId('review-done'), workspaceId: alpha, taskRef: reviewed.task.taskRef, action: 'done', claimRef: reviewClaim.claim.claimRef, baseRevision: reviewClaim.thread.revision, actor })).value)
-    withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('idle'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Idle work', actor: agentTeamHumanActor() })).value))
+    withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('idle'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Idle work', actor: agentTeamHumanActor() })).value))
     // The bystander never wrote in either active Thread, yet the radar surfaces
     // both to them: admission is the Task being active, not participation.
-    const radar = ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true }, bystander.memberId).activeTaskThreads
+    const radar = inFlight(ledger, alpha, bystander.memberId)
     expect(radar.map(row => row.threadRef).sort()).toEqual([claimed.task.threadRef, reviewed.task.threadRef].sort())
     const claimedRow = radar.find(row => row.threadRef === claimed.task.threadRef)!
     expect(claimedRow).toMatchObject({ status: 'in_progress', subject: 'Claimed work', taskNumber: 1 })
@@ -1011,14 +1027,15 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    await makeOwner(ledger, project.project.projectRef, actor.memberId)
     const { actor: reader } = await addLedgerMember(ledger, project.project.projectRef, 'member:reader', 'Reader', 'Reader')
-    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Active task', recipients: [reader.memberId], actor })).value))
+    const started = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Active task', recipients: [reader.memberId], actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'claim', direction: 'on it', baseRevision: started.thread.revision, actor })).value)
     // The reader was mentioned and has an unread on this Thread — the unread
     // queue carries it, and so does the radar, independently.
     const inbox = ledger.inbox(reader, { workspaceId: alpha })
     expect(inbox.items.some(item => item.thread.threadRef === started.task.threadRef)).toBe(true)
-    const radar = ledger.view({ workspaceId: alpha, topLevelOnly: true, includeActivities: false, direction: 'before', includeCatalog: true }, reader.memberId).activeTaskThreads
+    const radar = inFlight(ledger, alpha, reader.memberId)
     expect(radar.map(row => row.threadRef)).toEqual([started.task.threadRef])
   })
 
@@ -1029,16 +1046,18 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await ledger.joinWorkspace({ requestId: requestId('join-beta'), workspaceId: beta, memberId: member.memberId, actor: agentTeamHumanActor() })
     const alphaProject = (await ledger.createProject({ requestId: requestId('alpha-ch'), workspaceId: alpha, name: 'alpha', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
     const betaProject = (await ledger.createProject({ requestId: requestId('beta-ch'), workspaceId: beta, name: 'beta', description: '', memberIds: [member.memberId], actor: agentTeamHumanActor() })).value.project
-    const betaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('beta-task'), workspaceId: beta, projectRef: betaProject.projectRef, body: 'Beta work', actor })).value))
+    await makeOwner(ledger, betaProject.projectRef, member.memberId, beta)
+    await makeOwner(ledger, alphaProject.projectRef, member.memberId)
+    const betaTask = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('beta-task'), workspaceId: beta, projectRef: betaProject.projectRef, body: 'Beta work', actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('beta-claim'), workspaceId: beta, taskRef: betaTask.task.taskRef, action: 'claim', direction: 'beta angle', baseRevision: betaTask.thread.revision, actor })).value)
     // Beta's active Task does not leak into the alpha radar.
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads).toEqual([])
+    expect(inFlight(ledger, alpha, member.memberId)).toEqual([])
     // An active Task whose Project is then archived leaves the radar.
-    const alphaTask = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('alpha-task'), workspaceId: alpha, projectRef: alphaProject.projectRef, body: 'Alpha work', actor })).value))
+    const alphaTask = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('alpha-task'), workspaceId: alpha, projectRef: alphaProject.projectRef, body: 'Alpha work', actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('alpha-claim'), workspaceId: alpha, taskRef: alphaTask.task.taskRef, action: 'claim', direction: 'alpha angle', baseRevision: alphaTask.thread.revision, actor })).value)
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads.map(row => row.threadRef)).toEqual([alphaTask.task.threadRef])
+    expect(inFlight(ledger, alpha, member.memberId).map(row => row.threadRef)).toEqual([alphaTask.task.threadRef])
     await ledger.archiveProject({ requestId: requestId('alpha-arch'), workspaceId: alpha, projectRef: alphaProject.projectRef, actor: agentTeamHumanActor() })
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, member.memberId).activeTaskThreads).toEqual([])
+    expect(inFlight(ledger, alpha, member.memberId)).toEqual([])
   })
 
   it('leaves the view radar empty when no Task has an active Claim', async () => {
@@ -1046,9 +1065,30 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    await makeOwner(ledger, project.project.projectRef, actor.memberId)
     // A taskful Thread with no Claim stays at todo and never enters the radar.
-    withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('todo'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Unclaimed task', actor })).value))
-    expect(ledger.view({ workspaceId: alpha, topLevelOnly: true, direction: 'before', includeCatalog: true }, actor.memberId).activeTaskThreads).toEqual([])
+    withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('todo'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Unclaimed task', actor })).value))
+    expect(inFlight(ledger, alpha, actor.memberId)).toEqual([])
+  })
+
+  it('boards an in-progress Task that has been untouched for longer than a read window', async () => {
+    const test = await harness()
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const ledger = ledgerAtBoot(test)
+    const { actor, member } = await addLedgerMember(ledger, project.project.projectRef)
+    const busy = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('busy'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Moving target', actor: agentTeamHumanActor() })).value))
+    const quiet = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('quiet'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Quiet task', actor: agentTeamHumanActor() })).value))
+    committed((await ledger.changeClaim({ requestId: requestId('quiet-claim'), workspaceId: alpha, taskRef: quiet.task.taskRef, action: 'claim', direction: 'on it', baseRevision: quiet.thread.revision, actor })).value)
+    // Forty later Messages push the claim far outside any bounded read window.
+    let revision = busy.thread.revision
+    for (let index = 0; index < 40; index += 1) {
+      const reply = committed((await ledger.reply({ requestId: requestId(`busy-${index}`), workspaceId: alpha, taskRef: busy.task.taskRef,
+        body: `Progress ${index}`, baseRevision: revision, actor: agentTeamHumanActor() })).value)
+      revision = reply.thread.revision
+    }
+    const board = ledger.taskBoard(actor, { workspaceId: alpha }).open.filter(item => item.task.taskRef === quiet.task.taskRef)
+    expect(board).toHaveLength(1)
+    expect(board[0]).toMatchObject({ task: { status: 'in_progress' }, liveClaimOwners: [expect.objectContaining({ memberId: member.memberId })] })
   })
 
   // State-requests 04: a bounded read returns the catalog of what it shows, not
@@ -1059,12 +1099,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
-    const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First task', actor: agentTeamHumanActor() })).value))
+    const started = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First task', actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'claim', direction: 'on it', baseRevision: started.thread.revision, actor })).value)
     // 39 more Tasks behind it: a newest-first page of one cannot cover them.
     let newest = started
     for (let index = 1; index < 40; index += 1) {
-      newest = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`task-${index}`), workspaceId: alpha,
+      newest = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId(`task-${index}`), workspaceId: alpha,
         projectRef: project.project.projectRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
       committed((await ledger.changeClaim({ requestId: requestId(`claim-${index}`), workspaceId: alpha, taskRef: newest.task.taskRef, action: 'claim',
         direction: `on ${index}`, baseRevision: newest.thread.revision, actor })).value)
@@ -1078,7 +1118,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(page.threads.map(thread => thread.threadRef)).toEqual([shown.thread.threadRef])
     expect(page.tasks.map(task => task.taskRef)).toEqual([shown.task!.taskRef])
     expect(page.taskNumbers).toEqual([{ taskRef: shown.task!.taskRef, taskNumber: shown.taskNumber }])
-    expect(page.activeTaskThreads.map(row => row.taskRef)).toEqual([shown.task!.taskRef])
     expect(page.claims.map(claim => claim.taskRef)).toEqual([shown.task!.taskRef])
     const named = ledger.view({ workspaceId: alpha, threadRef: started.thread.threadRef, limit: 1 })
     expect(named.threads.map(thread => thread.threadRef)).toEqual([started.thread.threadRef])
@@ -1090,7 +1129,6 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(catalog.threads).toHaveLength(40)
     expect(catalog.tasks).toHaveLength(40)
     expect(catalog.taskNumbers).toHaveLength(40)
-    expect(catalog.activeTaskThreads).toHaveLength(40)
     expect(catalog.claims).toHaveLength(40)
     expect(catalog.claims.every(claim => claim.owner === member.memberId)).toBe(true)
   })
@@ -1104,7 +1142,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     for (let index = 0; index < 6; index += 1) {
-      const started = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId(`task-${index}`), workspaceId: alpha,
+      const started = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId(`task-${index}`), workspaceId: alpha,
         projectRef: project.project.projectRef, body: `Task ${index}`, actor: agentTeamHumanActor() })).value))
       await ledger.reply({ requestId: requestId(`reply-${index}`), workspaceId: alpha, taskRef: started.task.taskRef,
         body: `Update ${index}`, baseRevision: started.thread.revision, actor })
@@ -1124,7 +1162,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('does not duplicate a direct marker when follow starts after the marker', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1143,7 +1181,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('returns Human-only follow observations without changing public Thread facts or Inbox state', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     await test.ctx.agentTeam.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'unfollow' })
     await test.ctx.agentTeam.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow' })
 
@@ -1165,34 +1203,17 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.task.threadRef }) })] })
   })
 
-  it('invites an unfollowed Agent only after Human confirmation and leaves old history background-only', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const member = await test.ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId: alpha, handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Old task' })))
-    const history = committed(await test.ctx.agentTeam.reply({ requestId: requestId('history'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Old discussion', baseRevision: started.thread.revision }))
-    const held = await test.ctx.agentTeam.reply({ requestId: requestId('invite'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Please review this', baseRevision: history.thread.revision, recipients: [member.status.member.memberId] })
-    expect(held).toMatchObject({ kind: 'confirmation_required', recipients: [member.status.member.memberId] })
-    expect(test.ctx.agentTeam.status().sequence).toBe(history.receipt.sequence)
-    if (held.kind !== 'confirmation_required') throw new Error('expected invitation confirmation')
-    const invite = committed(await test.ctx.agentTeam.reply({ requestId: requestId('invite-confirmed'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Please review this', baseRevision: history.thread.revision, recipients: [member.status.member.memberId], confirmationToken: held.confirmationToken }))
-    expect(invite.attention).toEqual([expect.objectContaining({ memberId: member.status.member.memberId, startSequence: invite.message.sequence })])
-    expect(invite.directMarkers).toEqual([expect.objectContaining({ memberId: member.status.member.memberId, messageRef: invite.message.messageRef })])
-    expect(test.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef }).items.map(item => item.message.body))
-      .toEqual(['Old task', 'Old discussion', 'Please review this'])
-  })
-
   it('reports how much of a Thread a bounded read left behind, so a returning reader can size what it has not read', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Thread anchor' })))
-    committed(await test.ctx.agentTeam.reply({ requestId: requestId('history'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Older discussion', baseRevision: started.thread.revision }))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Thread anchor' })))
+    const history = committed(await test.ctx.agentTeam.reply({ requestId: requestId('history'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Older discussion', baseRevision: started.thread.revision }))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:reviewer', 'Reviews changes', 'reviewer')
     // Joining takes the watermark to the tail, so the two facts already in the
     // Thread stay behind an Attention period this member has never read through.
     const joined = (await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })).value
-    expect(joined.attention).toMatchObject({ readThroughSequence: 4 })
+    expect(joined.attention).toMatchObject({ readThroughSequence: history.receipt.sequence })
 
     // The Thread moves on, and this member is answered with the background
     // window plus the new fact — while the count states the span behind both.
@@ -1208,7 +1229,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('a read that reached a Thread\'s first fact reports nothing left behind it', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Only task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Only task' })))
     // The Thread holds one fact and this read acknowledges it, so the span
     // before what it was shown is empty and the render stays silent about it.
     const read = await test.ctx.agentTeam.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef })
@@ -1218,7 +1239,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('gates existing Thread mutations on unread work before revision and makes reads idempotent', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const follow = await ledger.changeAttention({ requestId: requestId('agent-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
@@ -1252,7 +1273,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('a rejected write carries the facts it gated on and the token to retry with', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('agent-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
@@ -1299,7 +1320,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('makes a 21-update read continue explicit with a remaining unread count', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow-21'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
@@ -1333,8 +1354,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('counts remaining unread from the reader own marker state, not the whole ledger', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First task' })))
-    const other = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start-other'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Second task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First task' })))
+    const other = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start-other'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Second task' })))
     const ledger = ledgerAtBoot(test)
     const { actor: reader } = await addLedgerMember(ledger, project.project.projectRef)
     const { actor: bystander } = await addLedgerMember(ledger, project.project.projectRef)
@@ -1384,7 +1405,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('releases Claims and clears Attention on close without restoring it on reopen', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claim = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1416,7 +1437,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('reopen-project'), workspaceId: alpha,
       name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('reopen-start'), workspaceId: alpha,
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('reopen-start'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
@@ -1446,7 +1467,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('cleanup-team-project'), workspaceId: alpha,
       name: 'cleanup-team', description: 'Cleanup replay' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('cleanup-team-start'), workspaceId: alpha,
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('cleanup-team-start'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
@@ -1501,7 +1522,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('rejects a structurally valid Thread read receipt with a forged watermark during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha,
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'Task' })))
     const updated = committed(await test.ctx.agentTeam.reply({ requestId: requestId('update'), workspaceId: alpha,
       taskRef: started.task.taskRef, body: 'Unread update', baseRevision: started.thread.revision }))
@@ -1529,7 +1550,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('rejects a pre-receipt Thread read snapshot with a forged watermark during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha,
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'Task' })))
     const updated = committed(await test.ctx.agentTeam.reply({ requestId: requestId('update'), workspaceId: alpha,
       taskRef: started.task.taskRef, body: 'Unread update', baseRevision: started.thread.revision }))
@@ -1570,7 +1591,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('rejects a forged direct marker that does not match its Message during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
@@ -1589,7 +1610,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('rejects a direct marker that resolves only against a later record during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
@@ -1620,7 +1641,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const path = join(root, 'team.sqlite')
     const first = await sqliteHarness(path)
     const project = await first.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await first.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Persistent task' })))
+    const started = withTask(committed(await first.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Persistent task' })))
     const ledger = ledgerAtBoot(first)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
@@ -1631,7 +1652,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     await first.fiber.dispose(); await first.facility.closeAll()
     const second = await sqliteHarness(path)
     const replay = ledgerAtBoot(second)
-    expect(replay.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(replay.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
     expect(second.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef }).items.map(item => item.message.body)).toEqual(['Persistent task', 'Persistent update'])
     expect(replay.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toMatchObject({ readThroughSequence: update.thread.revision })
     replay.validate()
@@ -1639,9 +1660,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   }, 30_000)
 
   it('normalizes bare pre-occurredAt messages with the wrapping operation instant during replay', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Legacy' })))
+    const test = await harness(storedPool([...rulesV1Ledger.records]))
+    const started = { task: { taskRef: rulesV1Ledger.task.taskRef as AgentTeamTaskRef }, thread: { threadRef: rulesV1Ledger.task.threadRef as AgentTeamThreadRef } }
     const ledger = ledgerAtBoot(test)
     const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).value
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
@@ -1669,7 +1689,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       .find(operation => operation.kind === 'team/message-sent')!
     const revived = await harness(storedPool(records))
     const view = revived.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef })
-    expect(view.items.map(item => item.message.body)).toEqual(['Legacy'])
+    expect(view.items.map(item => item.message.body)).toEqual(['Investigate the regression'])
     expect(view.items[0]!.message.occurredAt).toBe(storedMessage.occurredAt)
     expect(() => ledgerAtBoot(revived).validate()).not.toThrow()
   })
@@ -1677,7 +1697,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('normalizes bare pre-occurredAt Activity facts with their committing operation instant during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Legacy task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Legacy task' })))
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     const claimed = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1771,7 +1791,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // only on a fresh one, so seed the storage to reach the case that matters.
     const seeded = await harness()
     const project = await seeded.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    await seeded.ctx.agentTeam.sendMessage({ requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })
+    await seeded.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })
     const records = [...seeded.facility.get('agent_team')!.table('operations').entries()]
     const test = await harness(storedPool(records as Array<[string, unknown]>))
     const entries = vi.spyOn(test.facility.get('agent_team')!.table('operations'), 'entries')
@@ -1800,7 +1820,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const table = test.facility.get('agent_team')!.table('operations')
     const [id, operation] = [...table.entries()].at(-1)!
     await table.put(id, { ...(operation as AgentTeamOperation), sequence: 9 })
-    expect(() => test.ctx.agentTeam.validateLedgerAtMount()).toThrow(/expected sequence 2, found 9/)
+    expect(() => test.ctx.agentTeam.validateLedgerAtMount()).toThrow(/expected sequence 3, found 9/)
   })
 
   it('keeps the mount adoption one-shot and every later validation a full replay', async () => {
@@ -1843,7 +1863,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness(pool, [alpha, beta])
     pool.injectedWriteFailuresRemaining = 1
     await expect(test.ctx.agentTeam.createProject({ requestId: requestId('failed'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })).rejects.toThrow(/injected write failure/)
-    expect(test.ctx.agentTeam.status()).toMatchObject({ projectCount: 0, sequence: 1 })
+    expect(test.ctx.agentTeam.status()).toMatchObject({ projectCount: 0, sequence: 2 })
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     expect(() => test.ctx.agentTeam.view({ workspaceId: beta, projectRef: project.project.projectRef })).toThrow(/does not belong to Workspace/)
   })
@@ -1851,7 +1871,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('explains a missing branded prefix when a Task ref lookup fails', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const bare = started.task.taskRef.replace(/^task:/, '') as AgentTeamTaskRef
     await expect(test.ctx.agentTeam.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: bare })).rejects.toThrow(/unknown Task ref '.+' A Task ref must start with 'task:'/)
     expect(() => test.ctx.agentTeam.threadHistory({ workspaceId: alpha, taskRef: bare })).toThrow(/must start with 'task:'/)
@@ -1868,7 +1888,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('resolves unambiguous UUID-prefix refs across ledger entry points', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const taskRef = started.task.taskRef
     const threadRef = started.thread.threadRef
     // Plain 6-hex prefix, a hyphenated truncated form, and the full ref all resolve.
@@ -1890,7 +1910,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('rejects refs that are too short, unknown, or from another Workspace', async () => {
     const test = await harness(undefined, [alpha, beta])
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const taskRef = started.task.taskRef
     const shortPrefix = `${taskRef.slice(0, 'task:'.length + 5)}` as never
     await expect(test.ctx.agentTeam.readThread({ requestId: requestId('read-short'), workspaceId: alpha, taskRef: shortPrefix }))
@@ -1909,8 +1929,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       ref: kind => `${kind}:aaaaaa${String(refs++).padStart(2, '0')}-0000-0000-0000-000000000000` as never,
     })
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    await ledger.sendMessage({ requestId: requestId('first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First', asTask: true, actor })
-    await ledger.sendMessage({ requestId: requestId('second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Second', asTask: true, actor })
+    await makeOwner(ledger, project.project.projectRef, actor.memberId)
+    await ledger.startThread({ requestId: requestId('first'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First', kind: 'task', actor })
+    await ledger.startThread({ requestId: requestId('second'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Second', kind: 'task', actor })
     await expect(ledger.readThread({ requestId: requestId('amb'), workspaceId: alpha, taskRef: 'task:aaaaaa' as never, actor }))
       .rejects.toThrow(/ambiguous Task ref 'task:aaaaaa' matches 'task:aaaaaa\d\d-0000-0000-0000-000000000000', 'task:aaaaaa\d\d-0000-0000-0000-000000000000'/)
     await expect(ledger.readThread({ requestId: requestId('amb-thread'), workspaceId: alpha, threadRef: 'thread:aaaaaa' as never, actor }))
@@ -1920,7 +1941,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   it('keeps archived Project Task and Thread refs unreachable under abbreviation', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     await ledger.archiveProject({ requestId: requestId('ch-arch'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
     const taskPrefix = `${started.task.taskRef.slice(0, 'task:'.length + 6)}` as never
@@ -1935,9 +1956,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    const sent = committed((await ledger.sendMessage({
+    const sent = committed((await ledger.startThread({
       requestId: requestId('chat'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId],
+      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId],
     })).value)
     expect(sent.task).toBeUndefined()
     expect(sent.thread.taskRef).toBeUndefined()
@@ -1947,9 +1968,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(inbox.totalDirectCount).toBe(1)
     expect(inbox.items[0]!.task).toBeUndefined()
     expect(inbox.items[0]!.thread.threadRef).toBe(sent.thread.threadRef)
+    // A mention delivers but does not follow, and only followers are notified of the promotion below.
+    await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, threadRef: sent.thread.threadRef, action: 'follow', actor })
     await expect(ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: 'task:missing' as AgentTeamTaskRef,
       action: 'claim', direction: 'work', baseRevision: sent.thread.revision, actor })).rejects.toThrow(/unknown Task/)
-    const later = withTask(committed((await ledger.sendMessage({ asTask: true, requestId: requestId('later-task'),
+    const later = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('later-task'),
       workspaceId: alpha, projectRef: project.project.projectRef, body: 'later Task', actor: agentTeamHumanActor() })).value))
     const promoted = committed((await ledger.promoteThread({
       requestId: requestId('promote'), workspaceId: alpha, threadRef: sent.thread.threadRef,
@@ -1986,7 +2009,7 @@ describe('AgentTeam Member archival ledger', () => {
   it('archives a Member: claims release, attention clears, view hides, removal still available', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -2012,7 +2035,7 @@ describe('AgentTeam Member archival ledger', () => {
     await expect(ledger.resumeMember({ requestId: requestId('archive-resume'), memberId: member.memberId, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
     await expect(ledger.updateMember({ requestId: requestId('archive-edit'), memberId: member.memberId, handle: member.handle, description: 'new', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and can no longer be edited/)
     const second = await addLedgerMember(ledger, project.project.projectRef, 'member:blocker')
-    await expect(ledger.sendMessage({ requestId: requestId('archive-mention'), workspaceId: alpha, projectRef: project.project.projectRef,
+    await expect(ledger.startThread({ kind: 'discussion', requestId: requestId('archive-mention'), workspaceId: alpha, projectRef: project.project.projectRef,
       body: 'ping', recipients: [member.memberId], actor: agentTeamHumanActor() })).rejects.toThrow(/not authorized for Project/)
     await expect(ledger.sendDm({ requestId: requestId('archive-dm'), workspaceId: alpha, recipientMemberId: member.memberId,
       body: 'still there?', actor: second.actor })).rejects.toThrow(/archived; DM delivery requires an enabled Member/)
@@ -2042,7 +2065,7 @@ describe('AgentTeam Member archival ledger', () => {
   it('rejects a forged archival release snapshot during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forge-archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('forge-archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('forge-archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('forge-archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -2062,10 +2085,10 @@ describe('AgentTeam Member archival ledger', () => {
     // One taskful Thread (for the Claim) and one taskless Thread the Member
     // follows: leaving must clear Attention on BOTH, not just taskful ones —
     // the replay validator scopes cleanup to every Thread.
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('taskless-archive-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('taskless-archive-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const plain = committed((await ledger.sendMessage({ requestId: requestId('taskless-archive-plain'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'Plain conversation', asTask: false, actor: agentTeamHumanActor() })).value)
+    const plain = committed((await ledger.startThread({ requestId: requestId('taskless-archive-plain'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: 'Plain conversation', kind: 'discussion', actor: agentTeamHumanActor() })).value)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('taskless-archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
@@ -2084,10 +2107,10 @@ describe('AgentTeam Member archival ledger', () => {
   it('rejects a forged Member departure inbox during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forge-member-inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('forge-member-inbox-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('forge-member-inbox-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const plain = committed((await ledger.sendMessage({ requestId: requestId('forge-member-inbox-plain'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'Plain conversation', asTask: false, actor: agentTeamHumanActor() })).value)
+    const plain = committed((await ledger.startThread({ requestId: requestId('forge-member-inbox-plain'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: 'Plain conversation', kind: 'discussion', actor: agentTeamHumanActor() })).value)
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('forge-member-inbox-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
@@ -2113,7 +2136,7 @@ describe('AgentTeam Project archival ledger', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const projectRef = project.project.projectRef
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-arch-start'), workspaceId: alpha, projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-arch-start'), workspaceId: alpha, projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const first = await addLedgerMember(ledger, projectRef, 'member:first')
     const second = await addLedgerMember(ledger, projectRef, 'member:second')
@@ -2145,7 +2168,7 @@ describe('AgentTeam Project archival ledger', () => {
     expect(again.receipt.operationId).toBe(archived.receipt.operationId)
     await expect(ledger.archiveProject({ requestId: requestId('ch-arch-2'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
     await expect(ledger.updateProject({ requestId: requestId('ch-arch-rename'), workspaceId: alpha, projectRef, name: 'renamed', description: '', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    await expect(ledger.sendMessage({ requestId: requestId('ch-arch-send'), workspaceId: alpha, projectRef, body: 'hello', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
+    await expect(ledger.startThread({ kind: 'discussion', requestId: requestId('ch-arch-send'), workspaceId: alpha, projectRef, body: 'hello', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
     // A brand-new Member cannot be created into the archived Project, and
     // existing Members (Memberships survive archival) cannot follow or
     // mutate its Tasks.
@@ -2160,7 +2183,7 @@ describe('AgentTeam Project archival ledger', () => {
   it('replays Project archival across a cold restart', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-replay-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-replay-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-replay-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('ch-replay-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -2176,7 +2199,7 @@ describe('AgentTeam Project archival ledger', () => {
   it('normalizes legacy project records without state to active on load', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-legacy-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-legacy-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' }))
+    committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-legacy-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' }))
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
       if (typed.kind !== 'team/project-created') return [id, typed] as [string, unknown]
@@ -2192,7 +2215,7 @@ describe('AgentTeam Project archival ledger', () => {
   it('rejects a forged Project archival snapshot during replay', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-forge-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('ch-forge-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-forge-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     committed((await ledger.changeClaim({ requestId: requestId('ch-forge-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -2213,11 +2236,11 @@ describe('AgentTeam Project archival ledger', () => {
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, projectRef)
     // A taskless Thread carries Human and Member Attention that archival must clear.
-    const chat = committed((await ledger.sendMessage({ requestId: requestId('taskless-arch-chat'), workspaceId: alpha, projectRef,
-      body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
+    const chat = committed((await ledger.startThread({ requestId: requestId('taskless-arch-chat'), workspaceId: alpha, projectRef,
+      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
     // A taskful Thread keeps the archival snapshot meaningful (claim release).
-    const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('taskless-arch-start'), workspaceId: alpha, projectRef,
-      body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value))
+    const started = withTask(committed((await ledger.startThread({ requestId: requestId('taskless-arch-start'), workspaceId: alpha, projectRef,
+      body: 'Task', kind: 'task', actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('taskless-arch-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
 
@@ -2239,8 +2262,8 @@ describe('AgentTeam Project archival ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('legacy-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    const chat = committed((await ledger.sendMessage({ requestId: requestId('legacy-arch-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
+    const chat = committed((await ledger.startThread({ requestId: requestId('legacy-arch-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
     const archived = (await ledger.archiveProject({ requestId: requestId('legacy-arch-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })).value
     // Rewrite the archive to the 0.1.7-0.1.9 shape: cleanup scoped to taskful Threads only.
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
@@ -2266,10 +2289,10 @@ describe('AgentTeam Project archival ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forged-inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'plain conversation', asTask: false, actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-    const started = withTask(committed((await ledger.sendMessage({ requestId: requestId('forged-inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value))
+    committed((await ledger.startThread({ requestId: requestId('forged-inbox-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
+    const started = withTask(committed((await ledger.startThread({ requestId: requestId('forged-inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: 'Task', kind: 'task', actor: agentTeamHumanActor() })).value))
     committed((await ledger.changeClaim({ requestId: requestId('forged-inbox-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
     await ledger.archiveProject({ requestId: requestId('forged-inbox-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
@@ -2290,7 +2313,7 @@ describe('AgentTeam archived read surfaces', () => {
   it('hides archived-Project Tasks from ref resolution and rejects direct thread reads', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('reads-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('reads-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('reads-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('reads-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
@@ -2327,7 +2350,7 @@ describe('AgentTeam archived read surfaces', () => {
   it('excludes archived-Project Threads from every Inbox slice', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.readThread({ requestId: requestId('inbox-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
@@ -2340,10 +2363,10 @@ describe('AgentTeam archived read surfaces', () => {
     // Archived Projects do not exist on Team API surfaces: neither the unread
     // queue nor the Human recent tail names their Threads, for the Human or
     // for a Member, and the picture survives a cold restart.
-    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledger.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledger.memberInbox(actor, {})).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledgerAtBoot(test).inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.memberInbox(actor, {})).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledgerAtBoot(test).inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
   })
 })
 
@@ -2571,7 +2594,7 @@ describe('AgentTeam durable Thread read progress', () => {
   async function committedHumanRead(): Promise<{ readonly test: TeamHarness; readonly read: AgentTeamThreadReadResult; readonly records: Array<[string, unknown]> }> {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
+    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(writer, project.project.projectRef)
     let revision = sent.thread.revision
@@ -2595,7 +2618,7 @@ describe('AgentTeam durable Thread read progress', () => {
   it('answers a Thread with nothing unread for its reader without writing a receipt', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
+    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const table = test.facility.get('agent_team')!.table('operations')
     const committedOperations = table.size
     const commits: unknown[] = []
@@ -2623,7 +2646,7 @@ describe('AgentTeam durable Thread read progress', () => {
   it('keeps the watermark a progress read advanced across a restart', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
+    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(writer, project.project.projectRef)
     committed((await writer.reply({ requestId: requestId('agent-reply'), workspaceId: alpha, taskRef: sent.task.taskRef, body: 'Working on it', baseRevision: sent.thread.revision, actor })).value)
@@ -2647,7 +2670,7 @@ describe('AgentTeam durable Thread read progress', () => {
   it('drains unread replies by remainingUnreadCount and stops writing once caught up', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
+    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(writer, project.project.projectRef)
     let revision = sent.thread.revision
@@ -2771,7 +2794,7 @@ describe('AgentTeam durable Thread read progress', () => {
   it('replays frozen snapshots and slim receipts into the same projections, mixed or uniform', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
+    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
     const writer = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(writer, project.project.projectRef)
     await writer.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: sent.task.taskRef, action: 'follow', actor })
@@ -2836,82 +2859,22 @@ describe('body-authored mentions', () => {
     addLedgerMember(ledger, projectRef, `member:${crypto.randomUUID()}`, 'Test Agent', handle)
 
   const start = async (ledger: AgentTeamLedger, projectRef: string, body: string) =>
-    withTask(committed((await ledger.sendMessage({ requestId: requestId(`start:${crypto.randomUUID()}`), actor: agentTeamHumanActor(),
-      asTask: true, workspaceId: alpha, projectRef: projectRef as never, body })).value))
+    withTask(committed((await ledger.startThread({ requestId: requestId(`start:${crypto.randomUUID()}`), actor: agentTeamHumanActor(),
+      kind: 'task', workspaceId: alpha, projectRef: projectRef as never, body })).value))
 
-  it('drops a body mention the Thread has never carried and reports it as undelivered', async () => {
+  it('delivers a reply mention to a Project Member the Thread never carried, without making them follow', async () => {
     const test = await harness()
     const { ledger, projectRef } = await projectOf(test)
     const sent = await start(ledger, projectRef, 'Investigate the regression')
     const author = await enroll(ledger, projectRef, 'author')
     const stranger = await enroll(ledger, projectRef, 'stranger')
 
-    // A text mention never fails the write. Inviting a Member into an existing
-    // Thread stays a Human decision, so the named Member is reported instead.
     const reply = committed((await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
       body: '@stranger, please look at this', baseRevision: sent.thread.revision, actor: author.actor })).value)
-    expect(reply.message.body).toBe('@stranger, please look at this')
-    expect(reply.undeliveredMentions).toEqual([stranger.member.memberId])
-    expect(reply.directMarkers).toEqual([])
-    expect(ledger.attentionStatus(stranger.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeUndefined()
-    expect(ledger.inbox(stranger.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-  })
-
-  it('delivers to a Member the Thread already carried, even after it unfollowed', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const peer = await enroll(ledger, projectRef, 'peer')
-    const author = await enroll(ledger, projectRef, 'author')
-
-    // A body mention on a new Thread enrolls the peer: they follow it.
-    const sent = await start(ledger, projectRef, '@peer, please join')
-    expect(ledger.attentionStatus(peer.actor, { workspaceId: alpha, taskRef: sent.task.taskRef }).attention).toBeDefined()
-    await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: sent.task.taskRef, action: 'unfollow', actor: peer.actor })
-    expect(ledger.attentionStatus(peer.actor, { workspaceId: alpha, taskRef: sent.task.taskRef }).attention).toBeUndefined()
-
-    // Having taken part once is what makes the mention deliverable: re-joining a
-    // Thread a Member already belonged to is not an invitation.
-    const reply = committed((await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@peer, back on this please', baseRevision: sent.thread.revision, actor: author.actor })).value)
     expect(reply.undeliveredMentions).toBeUndefined()
-    expect(reply.directMarkers).toEqual([expect.objectContaining({ memberId: peer.member.memberId })])
-    expect(ledger.attentionStatus(peer.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeDefined()
-    expect(ledger.inbox(peer.actor, { workspaceId: alpha })).toMatchObject({ totalUnreadCount: 1, totalDirectCount: 1 })
-  })
-
-  it('keeps the Human confirmation step for a body mention, then delivers once confirmed', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const sent = await start(ledger, projectRef, 'Investigate the regression')
-    const stranger = await enroll(ledger, projectRef, 'stranger')
-
-    const held = (await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@stranger, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor() })).value
-    if (held.kind !== 'confirmation_required') throw new Error(`expected confirmation, received ${held.kind}`)
-    // Nothing commits while the Human has not confirmed, and the Flow survives
-    // re-resolution of the same body.
+    expect(reply.directMarkers).toEqual([expect.objectContaining({ memberId: stranger.member.memberId })])
     expect(ledger.attentionStatus(stranger.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeUndefined()
-
-    const invited = committed((await ledger.reply({ requestId: requestId('reply-confirmed'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@stranger, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor(), confirmationToken: held.confirmationToken })).value)
-    expect(invited.directMarkers).toEqual([expect.objectContaining({ memberId: stranger.member.memberId })])
-    expect(ledger.attentionStatus(stranger.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeDefined()
-  })
-
-  it('expands @all to the roster as of that write', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const first = await enroll(ledger, projectRef, 'first')
-    const second = await enroll(ledger, projectRef, 'second')
-
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('all'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@all, standup in ten minutes' })).value)
-    const late = await enroll(ledger, projectRef, 'late')
-
-    // The expansion is snapshotted into the operation: a Member who joins the
-    // Project afterwards is not retroactively addressed by this write.
-    expect(sent.directMarkers.map(marker => marker.memberId).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
-    expect(ledger.inbox(late.actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
+    expect(ledger.inbox(stranger.actor, { workspaceId: alpha })).toMatchObject({ totalUnreadCount: 1, totalDirectCount: 1 })
   })
 
   it('names a Workspace participant who is not a Project Member', async () => {
@@ -2923,7 +2886,7 @@ describe('body-authored mentions', () => {
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
     expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).projects.map(project => project.projectRef)).toEqual([projectRef as never])
 
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('name-outsider'), actor: agentTeamHumanActor(), workspaceId: alpha,
+    const sent = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('name-outsider'), actor: agentTeamHumanActor(), workspaceId: alpha,
       projectRef: projectRef as never, body: '@outsider, please look at this' })).value)
     expect(sent.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
     // A Human naming someone is a pull-in, not a report: the write commits
@@ -2932,18 +2895,16 @@ describe('body-authored mentions', () => {
 
   })
 
-  it('keeps @all inside the Project while @Handle reaches the Workspace', async () => {
+  it('treats @all as plain text while @Handle reaches the Workspace', async () => {
     const test = await harness()
     const { ledger, projectRef } = await projectOf(test)
-    const insider = await enroll(ledger, projectRef, 'insider')
+    await enroll(ledger, projectRef, 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
 
-    const all = committed((await ledger.sendMessage({ requestId: requestId('all-stays-in-project'), actor: agentTeamHumanActor(), workspaceId: alpha,
+    const all = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('all-is-text'), actor: agentTeamHumanActor(), workspaceId: alpha,
       projectRef: projectRef as never, body: '@all, standup in ten minutes' })).value)
-    // `@all` is the Project's own roster, so the Workspace participant outside
-    // that Project is not addressed by it — while `@Handle` still reaches them.
-    expect(all.directMarkers.map(marker => marker.memberId).sort()).toEqual([insider.member.memberId].sort())
-    const named = committed((await ledger.sendMessage({ requestId: requestId('all-stays-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
+    expect(all.directMarkers).toEqual([])
+    const named = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('all-stays-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
       projectRef: projectRef as never, body: `@${outsider.member.handle}, named from the Workspace` })).value)
     expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
   })
@@ -2954,8 +2915,8 @@ describe('body-authored mentions', () => {
     const ledger = ledgerAtBoot(test)
     const insider = await addLedgerMember(ledger, project.project.projectRef, undefined, 'Test Agent', 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    committed((await ledger.sendMessage({ requestId: requestId('roster-msg'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: '@outsider, please look', asTask: false, actor: agentTeamHumanActor() })).value)
+    committed((await ledger.startThread({ requestId: requestId('roster-msg'), workspaceId: alpha, projectRef: project.project.projectRef,
+      body: '@outsider, please look', kind: 'discussion', actor: agentTeamHumanActor() })).value)
 
     // The roster a UI mention picker reads is derived the same way visibility
     // is: the Member the Host now lets you address must appear in it, or the
@@ -2976,54 +2937,22 @@ describe('body-authored mentions', () => {
     const insider = await enroll(ledger, projectRef, 'insider')
     const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
 
-    const historic = committed((await ledger.sendMessage({ requestId: requestId('historic-all'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@all and @insider, historic write' })).value)
-    const named = committed((await ledger.sendMessage({ requestId: requestId('historic-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
+    const historic = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('historic-all'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      projectRef: projectRef as never, body: '@insider, historic write' })).value)
+    const named = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('historic-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
       projectRef: projectRef as never, body: '@outsider, named from the Workspace' })).value)
     expect(historic.directMarkers.map(marker => marker.memberId).sort()).toEqual([insider.member.memberId].sort())
     expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
 
     // A fresh Ledger over the same persisted operations re-validates every
-    // record on load. Widening is replay-safe, so both the historic `@all`
-    // (Project Member) and the Workspace-only mention survive the re-check and
-    // the next commit still lands.
+    // record on load. Widening is replay-safe, so both the Project Member and
+    // the Workspace-only mention survive the re-check and the next commit still lands.
     const reopened = ledgerAtBoot(test)
     // Naming the Workspace-only Member again through the reloaded Ledger proves
     // the widened target check is live after a replay, not just on first write.
-    const again = committed((await reopened.sendMessage({ requestId: requestId('after-reload'), actor: agentTeamHumanActor(), workspaceId: alpha,
+    const again = committed((await reopened.startThread({ kind: 'discussion', requestId: requestId('after-reload'), actor: agentTeamHumanActor(), workspaceId: alpha,
       projectRef: projectRef as never, body: '@outsider, again after the reload' })).value)
     expect(again.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
-  })
-
-  it('lets a Workspace participant reply, claim and follow without joining the Project', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    await enroll(ledger, projectRef, 'insider')
-    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-
-    // The mention is what brings the Member onto the Thread: no Project join
-    // happens at any point below.
-    const sent = await start(ledger, projectRef, '@outsider, please take this')
-
-    // The unread fence stands for a Member too: the Thread has to be read
-    // before the reply, and reading it needs no Project membership either.
-    const read = await ledger.readThread({ requestId: requestId('outsider-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: outsider.actor })
-    const replied = committed((await ledger.reply({ requestId: requestId('outsider-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: 'Taking it', baseRevision: read.value?.thread.revision ?? sent.thread.revision, actor: outsider.actor })).value)
-    expect(replied.message.sender).toBe(outsider.member.memberId)
-
-    // The mention itself started Attention, so the round trip is unfollow then
-    // follow — both without any Project membership behind them.
-    const unfollowed = (await ledger.changeAttention({ requestId: requestId('outsider-unfollow'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      action: 'unfollow', actor: outsider.actor })).value
-    expect(unfollowed?.attention).toBeUndefined()
-    const followed = (await ledger.changeAttention({ requestId: requestId('outsider-follow'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      action: 'follow', actor: outsider.actor })).value
-    expect(followed?.attention).toBeDefined()
-
-    const claimed = committed((await ledger.changeClaim({ requestId: requestId('outsider-claim'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      action: 'claim', direction: 'Fix the regression', baseRevision: replied.thread.revision, actor: outsider.actor })).value)
-    expect(claimed.task.status).toBe('in_progress')
   })
 
   it('shows a Member the Project of a Thread they took part in', async () => {
@@ -3059,74 +2988,6 @@ describe('body-authored mentions', () => {
       .toEqual([legacyJoinLedger.projectRef as never])
   })
 
-  it('keeps every Project an Agent saw before adopting rules version 2 visible after it', async () => {
-    const test = await harness(storedPool(legacyJoinLedger.records))
-    const before = ledgerAtBoot(test)
-    // Beside the frozen hand enrolment: a writer, a Member the Human named, and a bystander who never took part.
-    const writer = await addLedgerMember(before, undefined, undefined, 'Test Agent', 'writer')
-    const named = await addLedgerMember(before, undefined, undefined, 'Test Agent', 'named')
-    const bystander = await addLedgerMember(before, undefined, undefined, 'Test Agent', 'bystander')
-    const projectRef = legacyJoinLedger.projectRef as never
-    committed((await before.sendMessage({ requestId: requestId('legacy-writer'), workspaceId: alpha, projectRef, body: 'Writer thread', asTask: false, actor: writer.actor })).value)
-    committed((await before.sendMessage({ requestId: requestId('legacy-named'), workspaceId: alpha, projectRef, body: 'Looping in @named', asTask: false, actor: agentTeamHumanActor() })).value)
-    const memberIds = [legacyJoinLedger.memberId as never, writer.member.memberId, named.member.memberId, bystander.member.memberId]
-    const visibleTo = (ledger: AgentTeamLedger) => Object.fromEntries(memberIds.map(memberId => [memberId,
-      ledger.view({ workspaceId: alpha }, memberId).projects.map(project => project.projectRef)]))
-    const v1 = visibleTo(ledgerAtBoot(test))
-
-    const table = test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
-    await new AgentTeamLedger(table, { rulesVersion: 2 }).initialize()
-    const v2 = visibleTo(new AgentTeamLedger(table, { rulesVersion: 2 }))
-    for (const memberId of memberIds) expect(v2[memberId], `${memberId} keeps what it saw`).toEqual(expect.arrayContaining(v1[memberId]!))
-    expect(v1[bystander.member.memberId]).toEqual([])
-    expect(v2[bystander.member.memberId]).toEqual([])
-  })
-
-  it('confirms the same way for an Agent outside the Project and one outside the Thread', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    // Case ②: in the Project, never in this Thread. Case ③: neither.
-    const insider = await enroll(ledger, projectRef, 'insider')
-    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    const sent = await start(ledger, projectRef, 'Investigate the regression')
-    // ② is enrolled in the Project but has never carried this Thread; ③ is
-    // neither. Both are confirmed, so the Agent cannot tell them apart.
-    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).projects.map(project => project.projectRef)).toEqual([projectRef as never])
-    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects).toEqual([])
-
-    const heldInsider = (await ledger.reply({ requestId: requestId('pull-insider'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@insider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor() })).value
-    if (heldInsider.kind !== 'confirmation_required') throw new Error(`expected confirmation, received ${heldInsider.kind}`)
-
-    const heldOutsider = (await ledger.reply({ requestId: requestId('pull-outsider'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@outsider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor() })).value
-    if (heldOutsider.kind !== 'confirmation_required') throw new Error(`expected confirmation, received ${heldOutsider.kind}`)
-
-    // The two cases collapse: the Agent's only signal is this Thread's own
-    // delivery, and the Project side is derived silently with no notice of its
-    // own. Confirming is what grants Attention on the Thread.
-    const pulled = committed((await ledger.reply({ requestId: requestId('pull-outsider'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@outsider, please look', baseRevision: sent.thread.revision, actor: agentTeamHumanActor(), confirmationToken: heldOutsider.confirmationToken })).value)
-    expect(pulled.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
-    expect(ledger.attentionStatus(outsider.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeDefined()
-    // Now a Project participant by derivation, the Thread reaches the Inbox.
-    expect(ledger.inbox(outsider.actor, { workspaceId: alpha })).toMatchObject({ totalDirectCount: 1 })
-  })
-
-  it('delivers without confirmation to an Agent already in the Thread', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const insider = await enroll(ledger, projectRef, 'insider')
-    const sent = await start(ledger, projectRef, '@insider, take this')
-    const read = await ledger.readThread({ requestId: requestId('insider-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: insider.actor })
-
-    // Already carrying the Thread: naming them again is a delivery, not an
-    // invitation, so no confirmation stands in the way.
-    const again = committed((await ledger.reply({ requestId: requestId('insider-again'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@insider, one more thing', baseRevision: read.value?.thread.revision ?? sent.thread.revision, actor: agentTeamHumanActor() })).value)
-    expect(again.directMarkers.map(marker => marker.memberId)).toEqual([insider.member.memberId])
-  })
-
   it('still refuses a Member who does not participate in the Workspace', async () => {
     const test = await harness(new MemoryMediaPool(), [alpha, beta])
     const { ledger, projectRef } = await projectOf(test)
@@ -3153,7 +3014,7 @@ describe('body-authored mentions', () => {
     const first = await enroll(ledger, projectRef, 'first')
     const second = await enroll(ledger, projectRef, 'second')
 
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('merge'), actor: agentTeamHumanActor(), workspaceId: alpha,
+    const sent = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('merge'), actor: agentTeamHumanActor(), workspaceId: alpha,
       projectRef: projectRef as never, body: '@first please look', recipients: [first.member.memberId, second.member.memberId] })).value)
     expect(sent.directMarkers.map(marker => marker.memberId).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
   })
@@ -3190,28 +3051,5 @@ describe('body-authored mentions', () => {
     ledger.setHumanDisplayHandle('YuCreate')
     await expect(enroll(ledger, projectRef, 'human')).rejects.toThrow('reserved human alias')
     await expect(enroll(ledger, projectRef, 'Human')).rejects.toThrow('reserved human alias')
-  })
-})
-
-describe('AgentTeam sendMessage asTask is explicit (issue #43 #9)', () => {
-  it('creates no Task when asTask is omitted', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('explicit-omit'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const ledger = ledgerAtBoot(test)
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-omit-send'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'plain conversation', actor: agentTeamHumanActor() })).value)
-    expect(sent.task).toBeUndefined()
-  })
-
-  it('creates a Task only when asTask is true', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('explicit-true'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const ledger = ledgerAtBoot(test)
-    const sent = committed((await ledger.sendMessage({ requestId: requestId('explicit-true-send'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'Task', asTask: true, actor: agentTeamHumanActor() })).value)
-    expect(sent.task?.taskRef).toBeTruthy()
-    const plain = committed((await ledger.sendMessage({ requestId: requestId('explicit-false-send'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'no task', asTask: false, actor: agentTeamHumanActor() })).value)
-    expect(plain.task).toBeUndefined()
   })
 })

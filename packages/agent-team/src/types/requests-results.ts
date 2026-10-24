@@ -23,7 +23,6 @@ import type {
   AgentTeamModelSelection,
   AgentTeamOperationId,
   AgentTeamRequestId,
-  AgentTeamLiveTaskStatus,
   AgentTeamTask,
   AgentTeamTaskActivity,
   AgentTeamTaskRef,
@@ -249,21 +248,6 @@ export interface AgentTeamJoinProjectResult {
   readonly memberId: AgentTeamMemberId
 }
 
-/** Intent to create one top-level Message and Thread, with an optional Task. */
-export interface AgentTeamSendMessageRequest {
-  readonly requestId: AgentTeamRequestId
-  readonly workspaceId: WorkspaceId
-  readonly projectRef: AgentTeamProjectRef
-  readonly body: string
-  readonly recipients?: readonly AgentTeamMemberId[]
-  /** Uploaded attachments to reference; the Host resolves and verifies each id. */
-  readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
-  /** Agent-supplied absolute file paths; the Host validates each, copies the bytes into the attachment cache, and produces the same metadata. */
-  readonly attachmentPaths?: readonly string[] | undefined
-  readonly confirmationToken?: AgentTeamConfirmationToken
-  readonly asTask?: boolean
-}
-
 /** Upload one composer attachment into the Team attachment cache. */
 export interface AgentTeamPutAttachmentRequest {
   readonly requestId: AgentTeamRequestId
@@ -397,9 +381,9 @@ export interface AgentTeamReplyRequest {
   readonly recipients?: readonly AgentTeamMemberId[]
   /** The Message this reply answers. The Host refuses an unknown ref or one from another Thread; the parent's author joins the recipients, so answering a Member reaches them. */
   readonly replyToMessageRef?: AgentTeamMessageRef
-  /** Agent-supplied absolute file paths, resolved like sendMessage's. */
+  /** Agent-supplied absolute file paths, resolved like startThread's. */
   readonly attachmentPaths?: readonly string[] | undefined
-  /** Attachment cache IDs from the Human picker, resolved like sendMessage's. */
+  /** Attachment cache IDs from the Human picker, resolved like startThread's. */
   readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
   readonly confirmationToken?: AgentTeamConfirmationToken
 }
@@ -451,7 +435,7 @@ export interface AgentTeamMemberNotFollowing {
   readonly revision?: number
 }
 
-export interface AgentTeamSendMessageCommittedResult {
+export interface AgentTeamStartThreadResult {
   readonly kind: 'committed'
   readonly receipt: AgentTeamOperationReceipt
   readonly message: AgentTeamMessage
@@ -460,11 +444,6 @@ export interface AgentTeamSendMessageCommittedResult {
   readonly attention: readonly AgentTeamThreadAttention[]
   readonly directMarkers: readonly AgentTeamDirectMarker[]
 }
-
-export type AgentTeamSendMessageResult =
-  | AgentTeamSendMessageCommittedResult
-  | AgentTeamConfirmationRequired
-  | AgentTeamMemberNotFollowing
 
 /** Which Thread a Main stream card stands for, and the current state it shows. A card is a projection of its Thread, never a stored fact: it changes as the Thread does. */
 export interface AgentTeamMainThreadCard {
@@ -609,7 +588,6 @@ export interface AgentTeamStartThreadRequest {
   readonly attachmentPaths?: readonly string[] | undefined
 }
 
-export type AgentTeamStartThreadResult = AgentTeamSendMessageCommittedResult
 
 export interface AgentTeamReplyCommittedResult {
   readonly kind: 'committed'
@@ -791,12 +769,29 @@ export interface AgentTeamInboxItem {
   readonly attention?: AgentTeamThreadAttention
 }
 
+/** One Project's Main stream while it holds unread for the reader: owners count ordinary unread, every reader counts their Main stream markers. */
+export interface AgentTeamMainInboxItem {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly projectName: string
+  readonly unreadCount: number
+  /** How many of them carry one of the reader's Main stream markers (a mention, a reply to the reader, an ownership change). */
+  readonly directCount: number
+  readonly previewText?: string
+  readonly newestSequence: number
+  readonly newestOccurredAt: string
+  readonly newestActor: AgentTeamInboxActor
+}
+
 export interface AgentTeamInbox {
   readonly humanMemberId: AgentTeamMemberId
   readonly items: readonly AgentTeamInboxItem[]
   readonly hasMore: boolean
+  /** Every Project whose Main stream holds unread for the reader, direct first, then newest first; never paged. */
+  readonly main: readonly AgentTeamMainInboxItem[]
   /** Human readers only: the 「最近活跃」 slice, Threads this reader took part in, newest activity first, at most ten, excluding Threads the unread queue carries. Agent readers get an empty slice, so the model-facing Inbox stays exactly the unread queue. */
   readonly recent: readonly AgentTeamInboxItem[]
+  /** Thread and Main stream unread together. */
   readonly totalUnreadCount: number
   readonly totalDirectCount: number
 }
@@ -889,20 +884,40 @@ export interface AgentTeamViewItem {
   readonly lastActivityAt: string
 }
 
-/** One in-flight Task Thread for the team_view「活跃 task thread」radar: claimed, moving work, so an unexpected edit or a Task a reader was about to pick up resolves to "someone is on this". Unlike the Inbox's 「最近活跃」 slice, admission is not participation: every active Task Thread in the reader's authorized Projects appears, including Threads still holding unread. */
-export interface AgentTeamActiveTaskThread {
-  readonly taskRef: AgentTeamTaskRef
-  readonly threadRef: AgentTeamThreadRef
+/** How the reader stands to one Task on the board. */
+export type AgentTeamTaskRelation = 'executor' | 'project-owner' | 'none'
+
+/** One Task on the board: its current state, never a fact, so it is never unread. */
+export interface AgentTeamTaskBoardItem {
+  readonly workspaceId: WorkspaceId
   readonly projectRef: AgentTeamProjectRef
-  /** The Task's ordinal inside its home Project. */
-  readonly taskNumber?: number
-  readonly status: AgentTeamLiveTaskStatus
-  /** The Thread's opening line, trimmed and capped at 120 characters — the same bound the Inbox row uses. */
+  readonly projectName: string
+  readonly task: AgentTeamTask
+  readonly taskNumber: number
+  readonly threadRef: AgentTeamThreadRef
+  /** The Thread's bounded opening line. */
   readonly subject: string
-  /** Owners of the Task's live Claims, in claim order, deduped — the same rule the Inbox row and Project feed use. */
-  readonly members: readonly AgentTeamInboxActor[]
-  /** Instant of the newest fact on this Thread. */
+  /** Owners of the Task's live Claims, in claim order, deduped (the Inbox row's rule); empty once done or closed. */
+  readonly liveClaimOwners: readonly AgentTeamInboxActor[]
+  readonly lastActivitySequence: number
   readonly lastActivityAt: string
+  /** `executor` while the reader holds a live Claim, else `project-owner` for an owner of the Project. */
+  readonly relation: AgentTeamTaskRelation
+}
+
+export interface AgentTeamTaskBoardRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef?: AgentTeamProjectRef
+  /** Only Tasks the reader executes. */
+  readonly mine?: boolean
+}
+
+/** The Task board of the Projects a reader can see; the Human Client and `team_task board` render this same projection. */
+export interface AgentTeamTaskBoard {
+  /** Every open Task (todo, in_progress, in_review), newest activity first. */
+  readonly open: readonly AgentTeamTaskBoardItem[]
+  /** Per Project, the newest finished (done or closed) Tasks, at most `TASK_BOARD_FINISHED_PER_PROJECT` each, newest activity first. */
+  readonly finished: readonly AgentTeamTaskBoardItem[]
 }
 
 export interface AgentTeamViewRequest {
@@ -930,13 +945,11 @@ export interface AgentTeamView {
   readonly owners: readonly AgentTeamProjectMembership[]
   /** Validation rules version the ledger has adopted; Project owners exist from version 2. */
   readonly rulesVersion: number
-  /** Catalog of the response's scope: visible Tasks, their Threads, ordinals, radar rows, and Claims. With `includeCatalog` this is the whole request scope; otherwise only the Tasks and Threads the fact page and named Thread carry. */
+  /** Catalog of the response's scope: visible Tasks, their Threads, ordinals, and Claims. With `includeCatalog` this is the whole request scope; otherwise only the Tasks and Threads the fact page and named Thread carry. */
   readonly tasks: readonly AgentTeamTask[]
   readonly threads: readonly AgentTeamThread[]
   readonly taskNumbers: readonly { readonly taskRef: AgentTeamTaskRef; readonly taskNumber: number }[]
   readonly items: readonly AgentTeamViewItem[]
-  /** The「活跃 task thread」radar: in_progress / in_review Task Threads of the response's scope, newest activity first. With `includeCatalog` that is every such Thread in the reader's authorized Projects of this Workspace; otherwise only those the catalog carries. Independent of participation and unread state, so re-entry and pre-claim checks do not mistake in-flight work for a conflict. */
-  readonly activeTaskThreads: readonly AgentTeamActiveTaskThread[]
   readonly claims: readonly AgentTeamClaim[]
   readonly activities: readonly AgentTeamActivity[]
   readonly cursor: number

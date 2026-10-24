@@ -15,7 +15,7 @@ describe('team_view renders one address book', () => {
         { projectRef: PROJECT, name: 'general', owners: ['human', 'Tars'], role: 'owner' },
         { projectRef: 'project:aaaa1111-0000-4000-8000-000000000002', name: 'ops', owners: ['human'], role: 'member' },
       ],
-      members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 1, hasMore: false,
+      members: [], threads: [], tasks: [], cursor: 1, hasMore: false,
     })
     expect(text).toContain(`${PROJECT} · general · owners @human, @Tars · you: owner`)
     expect(text).toContain('project:aaaa1111-0000-4000-8000-000000000002 · ops · owners @human · you: member')
@@ -31,7 +31,6 @@ describe('team_view renders one address book', () => {
         { threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, messageCount: 3, subject: 'Should Member descriptions change after the rename?' },
       ],
       tasks: [{ taskRef: TASK, threadRef: THREAD, projectRef: PROJECT, status: 'in_progress', revision: 8394 }],
-      activeTaskThreads: [{ taskRef: TASK, threadRef: THREAD, projectRef: PROJECT, status: 'in_progress', subject: 'Review the render contract', taskNumber: 7, lastActivityAt: '2026-09-27T10:00:00.000Z', members: [{ memberId: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', name: 'Tars' }] }],
       cursor: 8394, hasMore: true,
     })
     expect(text).toContain('Team directory')
@@ -43,11 +42,10 @@ describe('team_view renders one address book', () => {
     // Each Thread row carries its bounded subject and inline Task standing.
     expect(text).toContain(`${THREAD} · ${PROJECT} · ${TASK} (#7), in_progress — Review the render contract`)
     expect(text).toContain('thread:aaaa1111-0000-4000-8000-000000000001 · project:046dd831-c679-4279-b6aa-7813476cf12e · taskless — Should Member descriptions change after the rename?')
-    // The active-task-threads radar follows Members, carrying status, claim owner, and subject.
-    expect(text.indexOf('Members — current')).toBeLessThan(text.indexOf('Active task threads'))
-    expect(text).toContain(`${THREAD} · ${PROJECT} · in_progress · #7 · @Tars — Review the render contract`)
-    // No second Task index: the taskful Thread appears once in the Threads section (and once in the radar).
-    expect(occurrences(text, THREAD)).toBe(2)
+    // Work in flight lives on the Task board, not in the address book.
+    expect(text).toContain('team_task board')
+    // No second Task index: the taskful Thread appears once.
+    expect(occurrences(text, THREAD)).toBe(1)
     // No revision-labelled field, no message count, no write token.
     expect(text).not.toContain('revision')
     expect(text).not.toContain('message')
@@ -56,11 +54,11 @@ describe('team_view renders one address book', () => {
 
   it('the footer names the Thread cursor and whether older anchors remain', () => {
     const text = renderText(teamTools().get('team_view')!, {}, {
-      workspaces: WORKSPACES, projects: [], members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 0, hasMore: false,
+      workspaces: WORKSPACES, projects: [], members: [], threads: [], tasks: [], cursor: 0, hasMore: false,
     })
     expect(text).toContain('Thread cursor 0; hasMore=false — no older Threads remain.')
     const more = renderText(teamTools().get('team_view')!, {}, {
-      workspaces: WORKSPACES, projects: [], members: [], threads: [], tasks: [], activeTaskThreads: [], cursor: 8394, hasMore: true,
+      workspaces: WORKSPACES, projects: [], members: [], threads: [], tasks: [], cursor: 8394, hasMore: true,
     })
     expect(more).toContain('Thread cursor 8394; hasMore=true — older Thread anchors exist; page again with this cursor.')
   })
@@ -71,12 +69,12 @@ describe('team_view renders one address book', () => {
       projects: [{ projectRef: PROJECT, name: 'general' }],
       members: [{ memberId: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', kind: 'agent', handle: 'Tars', description: 'builder', presence: 'available' }],
       threads: [{ threadRef: THREAD, projectRef: PROJECT, revision: 8394, messageCount: 120, subject: 'Review the render contract' }],
-      tasks: [], activeTaskThreads: [], cursor: 100, hasMore: false, page: 'threads',
+      tasks: [], cursor: 100, hasMore: false, page: 'threads',
     })
     expect(text).toContain('Threads')
     expect(text).not.toContain('Projects — current')
     expect(text).not.toContain('Members — current')
-    expect(text).not.toContain('Active task threads')
+    expect(text).not.toContain('team_task board')
     expect(text).toContain('Thread cursor 100; hasMore=false')
   })
 
@@ -96,10 +94,26 @@ describe('team_view renders one address book', () => {
   })
 })
 
+describe('team_task board renders the board projection', () => {
+  const item = (status: string, extra: Record<string, unknown> = {}) => ({ workspaceId: 'ws1', projectRef: PROJECT, projectName: 'general', taskRef: TASK, taskNumber: 7,
+    threadRef: THREAD, status, subject: 'Review the render contract', members: [], lastActivityAt: '2026-09-27T10:00:00.000Z', relation: 'none', ...extra })
+
+  it('groups open Tasks by status, lists finished work, and carries no write token', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'board' }, {
+      kind: 'board', open: [item('in_progress', { members: ['Tars'], relation: 'executor' })], finished: [item('done')],
+    })
+    expect(text).toContain('To do (0)')
+    expect(text).toContain(`In progress (1)\n${TASK} (#7) · general ${PROJECT} · ${THREAD} · @Tars · you: executor — Review the render contract · last activity 2026-09-27T18:00:00+08:00`)
+    expect(text).toContain('In review (0)')
+    expect(text).toContain('Recently finished (1)')
+    expect(text).not.toContain('baseRevision')
+  })
+})
+
 describe('team_inbox renders triage, not a read', () => {
   it('header totals, both per-row counters (including zero direct), truncation conclusion, and a read route', () => {
     const text = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 9, totalDirectCount: 2, hasMore: false,
+      totalUnreadCount: 9, totalDirectCount: 2, hasMore: false, main: [],
       items: [
         { threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 2, taskNumber: 7 },
         { threadRef: 'thread:bbbb2222-0000-4000-8000-000000000002', projectRef: PROJECT, revision: 101, unreadCount: 3, directCount: 0 },
@@ -116,26 +130,36 @@ describe('team_inbox renders triage, not a read', () => {
     // The Host's own verdict drives the conclusion, not a comparison the model
     // would have to reconstruct from two differently-shaped numbers.
     const capped = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 12, totalDirectCount: 5, hasMore: true,
+      totalUnreadCount: 12, totalDirectCount: 5, hasMore: true, main: [],
       items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, unreadCount: 7, directCount: 3 }],
     })
     expect(capped).toContain('more Threads sit beyond this page')
     expect(capped).toContain('up to 100 rows')
     const complete = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 2, totalDirectCount: 0, hasMore: false,
+      totalUnreadCount: 2, totalDirectCount: 0, hasMore: false, main: [],
       items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, unreadCount: 2, directCount: 0 }],
     })
     expect(complete).not.toContain('beyond this page')
   })
 
   it('empty inbox states there is no unread Team work', () => {
-    const text = renderText(teamTools().get('team_inbox')!, {}, { totalUnreadCount: 0, totalDirectCount: 0, hasMore: false, items: [] })
+    const text = renderText(teamTools().get('team_inbox')!, {}, { totalUnreadCount: 0, totalDirectCount: 0, hasMore: false, main: [], items: [] })
     expect(text).toContain('Inbox empty — no unread Team work.')
+  })
+
+  it('lists a Main stream row with its Project and routes the read through projectRef', () => {
+    const text = renderText(teamTools().get('team_inbox')!, {}, {
+      totalUnreadCount: 3, totalDirectCount: 1, hasMore: false, items: [],
+      main: [{ workspaceId: 'ws1', projectRef: PROJECT, projectName: 'Payments', unreadCount: 3, directCount: 1, newestOccurredAt: '2026-09-08T08:58:41.000Z' }],
+    })
+    expect(text).toContain('across 1 Main stream(s) and 0 Thread(s) shown')
+    expect(text).toContain(`ws1 · ${PROJECT} Main stream (Payments) · 3 unread, 1 direct · newest 2026-09-08T16:58:41+08:00`)
+    expect(text).toContain('team_thread read (threadRef or projectRef)')
   })
 
   it('renders no subject, body, revision label, or write token', () => {
     const text = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 1, totalDirectCount: 1, hasMore: false,
+      totalUnreadCount: 1, totalDirectCount: 1, hasMore: false, main: [],
       items: [{ threadRef: 'thread:aaaa1111-0000-4000-8000-000000000001', projectRef: PROJECT, revision: 100, unreadCount: 1, directCount: 1 }],
     })
     expect(text).not.toContain('revision')
@@ -438,22 +462,21 @@ describe('team_message renders its outcome', () => {
     expect(copied).not.toContain('the increment')
     expect(copied).toContain('Next write — baseRevision: 8394')
 
-    const notFollowing = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8394, body: 'x' }, {
+    // member_not_following is a version-1 result the Host can no longer produce
+    // for a tool call: the fallback render names the kind and the Thread without
+    // inventing a recovery route for a state that cannot occur.
+    const legacyNotFollowing = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8394, body: 'x' }, {
       kind: 'member_not_following', memberIds: ['member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5'], threadRef: THREAD, revision: 8394,
-    })
-    expect(notFollowing).toContain('Not committed — member_not_following.')
-    expect(notFollowing).toContain('member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5 not following')
-    expect(notFollowing).toContain('Only a Human can invite an unfollowed Agent')
-    // An unfollowed write is gated on membership, not on facts or a token: it
-    // still carries neither, so the structured revision never renders here.
-    expect(notFollowing).not.toContain('8394')
-    expect(notFollowing).not.toContain('baseRevision')
+    } as never)
+    expect(legacyNotFollowing).toContain('Not committed — member_not_following.')
+    expect(legacyNotFollowing).toContain(THREAD)
+    expect(legacyNotFollowing).not.toContain('baseRevision')
   })
 })
 
-describe('team_claim renders the affected Claim', () => {
+describe('team_task renders the affected Claim', () => {
   it('list: active collision surface only, no token', () => {
-    const text = renderText(teamTools().get('team_claim')!, { action: 'list', taskRef: TASK }, {
+    const text = renderText(teamTools().get('team_task')!, { action: 'list', taskRef: TASK }, {
       kind: 'listed', taskRef: TASK, threadRef: THREAD, revision: 9024, status: 'in_progress',
       claims: [
         { claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' },
@@ -469,7 +492,7 @@ describe('team_claim renders the affected Claim', () => {
   })
 
   it('list with no active Claims states it', () => {
-    const text = renderText(teamTools().get('team_claim')!, { action: 'list', taskRef: TASK }, {
+    const text = renderText(teamTools().get('team_task')!, { action: 'list', taskRef: TASK }, {
       kind: 'listed', taskRef: TASK, threadRef: THREAD, revision: 9024, status: 'todo',
       claims: [{ claimRef: 'claim:done', direction: 'finished', state: 'done', owner: 'member:owner' }],
     })
@@ -477,7 +500,7 @@ describe('team_claim renders the affected Claim', () => {
   })
 
   it('claim/done/release name different actions, render the affected Claim first, and hand off exactly one token', () => {
-    const created = renderText(teamTools().get('team_claim')!, { action: 'claim', taskRef: TASK, baseRevision: 9024, direction: 'Audit the render recovery paths' }, {
+    const created = renderText(teamTools().get('team_task')!, { action: 'claim', taskRef: TASK, baseRevision: 9024, direction: 'Audit the render recovery paths' }, {
       kind: 'committed', action: 'claim', taskRef: TASK, threadRef: THREAD, revision: 9028, status: 'in_progress',
       claim: { claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' },
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
@@ -489,7 +512,7 @@ describe('team_claim renders the affected Claim', () => {
     // Structured claims stay real (compat), yet the render never appends the archive.
     expect(occurrences(created, 'claim:')).toBe(1)
 
-    const done = renderText(teamTools().get('team_claim')!, { action: 'done', taskRef: TASK, baseRevision: 9028, claimRef: CLAIM }, {
+    const done = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 9028, claimRef: CLAIM }, {
       kind: 'committed', action: 'done', taskRef: TASK, threadRef: THREAD, revision: 9024, status: 'in_review',
       claim: { claimRef: CLAIM, direction: 'd', state: 'done', owner: 'member:owner' },
       claims: [{ claimRef: CLAIM, direction: 'd', state: 'done', owner: 'member:owner' }],
@@ -497,7 +520,7 @@ describe('team_claim renders the affected Claim', () => {
     expect(done).toContain('Committed — Claim completed.')
     expect(done).toContain('in_review')
 
-    const released = renderText(teamTools().get('team_claim')!, { action: 'release', taskRef: TASK, baseRevision: 9028, claimRef: CLAIM }, {
+    const released = renderText(teamTools().get('team_task')!, { action: 'release', taskRef: TASK, baseRevision: 9028, claimRef: CLAIM }, {
       kind: 'committed', action: 'release', taskRef: TASK, threadRef: THREAD, revision: 9030, status: 'todo',
       claim: { claimRef: CLAIM, direction: 'd', state: 'released', owner: 'member:owner' },
       claims: [{ claimRef: CLAIM, direction: 'd', state: 'released', owner: 'member:owner' }],
@@ -511,7 +534,7 @@ describe('team_claim renders the affected Claim', () => {
   })
 
   it('claim rejections share the outcome-first form and hand back the current revision', () => {
-    const unread = renderText(teamTools().get('team_claim')!, { action: 'claim', taskRef: TASK, baseRevision: 8000, direction: 'd' }, {
+    const unread = renderText(teamTools().get('team_task')!, { action: 'claim', taskRef: TASK, baseRevision: 8000, direction: 'd' }, {
       kind: 'unread_required', taskRef: TASK, threadRef: THREAD, revision: 8394, status: 'in_progress', unreadCount: 2, directCount: 1,
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
       facts: [{ sequence: 8394, kind: 'message', body: 'the gated fact', sender: 'human', mentions: [], unread: true, direct: true }],
@@ -525,7 +548,7 @@ describe('team_claim renders the affected Claim', () => {
     // Claim and the facts are the decision surface, not the whole history.
     expect(unread).not.toContain('Active Claims')
 
-    const stale = renderText(teamTools().get('team_claim')!, { action: 'done', taskRef: TASK, baseRevision: 8387, claimRef: CLAIM }, {
+    const stale = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 8387, claimRef: CLAIM }, {
       kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 8387, revision: 8394, status: 'in_progress',
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
       facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
@@ -537,7 +560,7 @@ describe('team_claim renders the affected Claim', () => {
     // The copied-token refusal on the Claim side, because the Claim tool
     // renders its own rejections: a member that closes a Claim with a token
     // from another Thread gets the same correction, not the race sentence.
-    const copied = renderText(teamTools().get('team_claim')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
+    const copied = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
       kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', staleTokenKind: 'unrecognized',
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
       facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
@@ -552,7 +575,7 @@ describe('team_claim renders the affected Claim', () => {
 describe('descriptions state the cross-tool workflow', () => {
   it('baseRevision parameter descriptions say copy verbatim and never increment/derive', () => {
     const tools = teamTools()
-    for (const name of ['team_message', 'team_claim']) {
+    for (const name of ['team_message', 'team_task']) {
       const tool = tools.get(name)!
       const parameter = (tool.parameters as { properties?: Record<string, { description?: string }> }).properties?.baseRevision
       expect(parameter?.description).toContain('Copy the explicitly rendered value verbatim')
@@ -566,8 +589,8 @@ describe('descriptions state the cross-tool workflow', () => {
     expect(tools.get('team_thread')!.description).toContain('committed public mutations hand off the token as well')
     expect(tools.get('team_view')!.description).toContain('address book')
     expect(tools.get('team_inbox')!.description).toContain('without marking anything read')
-    expect(tools.get('team_claim')!.description).toContain('collision surface')
-    expect(tools.get('team_claim')!.description).toContain('or your own last committed mutation')
+    expect(tools.get('team_task')!.description).toContain('collision surface')
+    expect(tools.get('team_task')!.description).toContain('or your own last committed mutation')
   })
 })
 
@@ -627,14 +650,14 @@ describe('team tools render absolute event instants in UTC+8', () => {
 
   it('inbox rows carry the newest unread instant; view rows carry last activity', () => {
     const inbox = renderText(teamTools().get('team_inbox')!, {}, {
-      totalUnreadCount: 4, totalDirectCount: 1, hasMore: false,
+      totalUnreadCount: 4, totalDirectCount: 1, hasMore: false, main: [],
       items: [{ threadRef: THREAD, projectRef: PROJECT, taskRef: TASK, status: 'in_progress', revision: 100, unreadCount: 4, directCount: 1, taskNumber: 7, newestOccurredAt: '2026-09-08T08:58:41.000Z' }],
     })
     expect(inbox).toContain(`4 unread, 1 direct · newest 2026-09-08T16:58:41+08:00`)
     const view = renderText(teamTools().get('team_view')!, {}, {
       workspaces: WORKSPACES, projects: [], members: [],
       threads: [{ threadRef: THREAD, projectRef: PROJECT, revision: 1, messageCount: 3, subject: 'Investigate startup failure', lastActivityAt: '2026-08-21T01:30:44.000Z' }],
-      tasks: [], activeTaskThreads: [], cursor: 0, hasMore: false,
+      tasks: [], cursor: 0, hasMore: false,
     })
     expect(view).toContain('— Investigate startup failure · last activity 2026-08-21T09:30:44+08:00')
   })
@@ -644,7 +667,7 @@ describe('team tools render absolute event instants in UTC+8', () => {
       kind: 'committed', action: 'reply', messageRef: 'message:9a1d', threadRef: THREAD, revision: 8202, occurredAt: '2026-09-08T09:00:00.000Z',
     })
     expect(reply).toContain('Committed at 2026-09-08T17:00:00+08:00')
-    const claim = renderText(teamTools().get('team_claim')!, { action: 'claim', taskRef: TASK, baseRevision: 8201, direction: 'x' }, {
+    const claim = renderText(teamTools().get('team_task')!, { action: 'claim', taskRef: TASK, baseRevision: 8201, direction: 'x' }, {
       kind: 'committed', action: 'claim', taskRef: TASK, threadRef: THREAD, revision: 8202, status: 'in_progress',
       claim: { claimRef: CLAIM, direction: 'x', state: 'active', owner: 'member:me' }, claims: [], occurredAt: '2026-09-08T09:00:00.000Z',
     })

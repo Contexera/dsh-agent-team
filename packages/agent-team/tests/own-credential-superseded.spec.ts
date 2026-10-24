@@ -9,7 +9,7 @@ import { harness } from './helpers/surface-harness.ts'
 vi.setConfig({ testTimeout: 30_000 })
 
 function ledgerFor(facility: DomainFacility): AgentTeamLedger {
-  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
+  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, {})
 }
 
 function operationsOf(facility: DomainFacility): readonly AgentTeamOperation[] {
@@ -30,8 +30,8 @@ async function addLedgerMember(ledger: AgentTeamLedger, workspaceId: TeamWorkspa
 async function followedThread(ledger: AgentTeamLedger, workspaceId: TeamWorkspaceId, actor: AgentTeamMemberActor) {
   const project = (await ledger.createProject({ requestId: 'project' as AgentTeamRequestId, workspaceId,
     name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.project
-  const started = (await ledger.sendMessage({ requestId: 'start' as AgentTeamRequestId, workspaceId,
-    projectRef: project.projectRef, body: 'Thread anchor', asTask: true, actor: agentTeamHumanActor() })).value
+  const started = (await ledger.startThread({ requestId: 'start' as AgentTeamRequestId, workspaceId,
+    projectRef: project.projectRef, body: 'Thread anchor', kind: 'task', actor: agentTeamHumanActor() })).value
   if (started.kind !== 'committed' || started.task === undefined) throw new Error('setup failed')
   await ledger.changeAttention({ requestId: 'follow' as AgentTeamRequestId, workspaceId,
     taskRef: started.task.taskRef, action: 'follow', actor })
@@ -110,13 +110,13 @@ describe("a write whose credential was superseded by the writer's own previous w
     const { actor } = await addLedgerMember(ledger, test.workspaceId, 'writer')
     const project = (await ledger.createProject({ requestId: 'project' as AgentTeamRequestId, workspaceId: test.workspaceId,
       name: 'engineering', description: 'Engineering work', memberIds: [actor.memberId], actor: agentTeamHumanActor() })).value.project
-    const older = (await ledger.sendMessage({ requestId: 'older' as AgentTeamRequestId, workspaceId: test.workspaceId,
+    const older = (await ledger.startThread({ kind: 'discussion', requestId: 'older' as AgentTeamRequestId, workspaceId: test.workspaceId,
       projectRef: project.projectRef, body: 'An older Thread', actor: agentTeamHumanActor() }))
     if (older.value.kind !== 'committed') throw new Error('setup failed')
     const olderToken = older.value.thread.revision
 
-    const newer = (await ledger.sendMessage({ requestId: 'newer' as AgentTeamRequestId, workspaceId: test.workspaceId,
-      projectRef: project.projectRef, body: 'A newer Thread', asTask: true, actor: agentTeamHumanActor() }))
+    const newer = (await ledger.startThread({ requestId: 'newer' as AgentTeamRequestId, workspaceId: test.workspaceId,
+      projectRef: project.projectRef, body: 'A newer Thread', kind: 'task', actor: agentTeamHumanActor() }))
     if (newer.value.kind !== 'committed' || newer.value.task === undefined) throw new Error('setup failed')
     await ledger.changeAttention({ requestId: 'follow' as AgentTeamRequestId, workspaceId: test.workspaceId,
       taskRef: newer.value.task.taskRef, action: 'follow', actor })

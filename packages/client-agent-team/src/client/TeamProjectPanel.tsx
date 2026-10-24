@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type {
   AgentTeamProjectRef,
   AgentTeamClientMemberStatus,
-  AgentTeamConfirmationToken,
   AgentTeamMemberId,
   AgentTeamMessageRef,
   AgentTeamRequestId,
@@ -64,8 +63,6 @@ interface TeamProjectPanelProps {
   /** This Thread is a Task now — the Project closes the panel and walks the reader into it. */
   readonly onPromoted: (taskRef: AgentTeamTaskRef) => void
   readonly onClose: () => void
-  /** Rules version 1 only: `@all` is offered and expands to a recipient snapshot. */
-  readonly allMention: boolean
   readonly t: TeamConversationProps['t']
 }
 
@@ -77,7 +74,7 @@ type ReadProjection = Awaited<ReturnType<TeamProjectPanelProps['readThread']>> e
   : never
 
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
-export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, allMention, t }: TeamProjectPanelProps) {
+export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
@@ -92,8 +89,6 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
   // The Thread page's draft key, so a draft continues across both faces.
   const draftKey: TeamDraftKey = `thread:${threadRef}`
   const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
-  const [confirmation, setConfirmation] = useState<AgentTeamConfirmationToken>()
-  const [statusMessage, setStatusMessage] = useState<string>()
   const [pending, setPending] = useState(false)
   const [mutating, setMutating] = useState<'promote' | undefined>()
   const [loading, setLoading] = useState(true)
@@ -207,7 +202,6 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
     setHistoryHasMore(false)
     setAutoReadExhausted(false)
     setError(undefined)
-    setStatusMessage(undefined)
     const sequence = sequenceRef.current + 1
     sequenceRef.current = sequence
     setLoading(true)
@@ -422,9 +416,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
   }
 
   const clearSendState = useCallback((): void => {
-    setConfirmation(current => current === undefined ? current : undefined)
     setReplyRequestId(current => current === undefined ? current : undefined)
-    setStatusMessage(current => current === undefined ? current : undefined)
   }, [])
 
   const sendReply = async (): Promise<void> => {
@@ -442,7 +434,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
         return
       }
       const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
+      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }) })
       if (!result.ok) {
         setError(result.error.message)
         return
@@ -462,28 +454,14 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
         setReplyTarget(undefined)
         setPendingFiles([])
         setReplyRequestId(undefined)
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
-      } else if (result.value.kind === 'confirmation_required') {
-        setConfirmation(result.value.confirmationToken)
-        setStatusMessage(t('mentionConfirmation'))
       } else if (result.value.kind === 'unread_required') {
         setError(t('unreadRequired', { count: result.value.unreadCount }))
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
         setReplyRequestId(undefined)
         await refreshAfterFence()
       } else if (result.value.kind === 'stale_revision') {
         setError(t('staleRevision'))
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
         setReplyRequestId(undefined)
         await refreshPassiveFacts()
-      } else {
-        setError(t('memberNotFollowing', { ids: result.value.memberIds.map(memberId => `@${members.find(candidate => candidate.member.memberId === memberId)?.member.handle ?? memberId}`).join(', ') }))
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
-        setReplyRequestId(undefined)
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -521,12 +499,10 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}
-      {...(statusMessage === undefined ? {} : { confirmation: statusMessage })}
       {...(error === undefined ? {} : { error })}
       onEdit={clearSendState}
       onSubmit={() => { void sendReply() }}
       placeholder={t('replyPlaceholder')}
-      allMention={allMention}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
       {...(replyTarget === undefined ? {} : {

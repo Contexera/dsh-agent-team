@@ -19,7 +19,7 @@ describe('Team Project board', () => {
     expect(b.view.container.querySelector('[data-team-project]')).toBeTruthy()
     // The feed is the default reading: its tab is selected, and both the
     // timeline entry and the composer stand in the content seat.
-    const feedTab = b.view.getByRole('tab', { name: '项目' })
+    const feedTab = b.view.getByRole('tab', { name: '主对话' })
     const boardTab = b.view.getByRole('tab', { name: '看板' })
     expect(feedTab.getAttribute('aria-selected')).toBe('true')
     expect(boardTab.getAttribute('aria-selected')).toBe('false')
@@ -28,7 +28,7 @@ describe('Team Project board', () => {
     expect(feedTab.getAttribute('tabindex')).toBe('0')
     expect(boardTab.getAttribute('tabindex')).toBe('-1')
     expect(b.view.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe(feedTab.id)
-    expect(b.view.getByRole('button', { name: '打开 Task #1' })).toBeTruthy()
+    expect(b.view.getByRole('button', { name: /^打开 Task #1：/ })).toBeTruthy()
     expect(b.view.getByRole('textbox', { name: '消息内容' })).toBeTruthy()
 
     fireEvent.click(boardTab)
@@ -62,8 +62,8 @@ describe('Team Project board', () => {
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     // Returning remounts the page on its default reading; switching back to
     // the feed restores the timeline and the composer.
-    expect(b.view.getByRole('tab', { name: '项目' }).getAttribute('aria-selected')).toBe('true')
-    expect(b.view.getByRole('button', { name: '打开 Task #1' })).toBeTruthy()
+    expect(b.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true')
+    expect(b.view.getByRole('button', { name: /^打开 Task #1：/ })).toBeTruthy()
     expect(b.view.getByRole('textbox', { name: '消息内容' })).toBeTruthy()
     await b.runtime.dispose()
   })
@@ -73,7 +73,7 @@ describe('Team Project board', () => {
       { body: '实现 API 网关', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    const feedTab = await b.view.findByRole('tab', { name: '项目' })
+    const feedTab = await b.view.findByRole('tab', { name: '主对话' })
     const boardTab = b.view.getByRole('tab', { name: '看板' })
     feedTab.focus()
     // Right moves the selection and the focus together, so the reader never has
@@ -105,7 +105,7 @@ describe('Team Project board', () => {
         humanMemberId: 'member:human',
         projects: [{ projectRef: 'project:engineering', workspaceId: 'w1', name: 'engineering', description: 'Engineering work', createdAtSequence: 1 }],
         members: [],
-        owners: [], rulesVersion: 1,
+        owners: [], rulesVersion: 2,
         tasks: [{ taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' }],
         threads: [{ threadRef: 'thread:1', taskRef: 'task:1', revision: 2 }],
         taskNumbers: [{ taskRef: 'task:1', taskNumber: 1 }],
@@ -131,7 +131,7 @@ describe('Team Project board', () => {
     // Opening the board issues no read of its own: the tab is a second reading
     // of the window the feed already holds, not a reason to page the Project.
     const before = b.viewProjects.mock.calls.length
-    fireEvent.click(b.view.getByRole('tab', { name: '项目' }))
+    fireEvent.click(b.view.getByRole('tab', { name: '主对话' }))
     fireEvent.click(b.view.getByRole('tab', { name: '看板' }))
     await Promise.resolve()
     expect(b.viewProjects.mock.calls.length).toBe(before)

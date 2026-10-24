@@ -4,7 +4,7 @@ import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
-import { allMentionMembers, containsAllMention, bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatDateOnly, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
+import { bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -83,9 +83,6 @@ describe('Team presentation formatters', () => {
     expect(formatMessageTime('2026-02-01T08:30:00', now)).toBe('02-01 08:30')
     expect(formatMessageTime('2025-12-31T23:59:00', now)).toBe('2025-12-31 23:59')
     expect(formatMessageTime('not-a-date', now)).toBe('')
-    expect(formatDateOnly('2026-08-21T03:05:00.000Z', now)).toBe('08-21')
-    expect(formatDateOnly('2025-12-31T23:59:00', now)).toBe('2025-12-31')
-    expect(formatDateOnly('not-a-date', now)).toBe('')
   })
 
   it('states a clock time alone for the 28px seat, never a date', () => {
@@ -156,14 +153,13 @@ describe('Team presentation formatters', () => {
   it('chips and previews exactly what the shared Host scan delivers', () => {
     // The Host spec reads the same fixture through delivery resolution: every
     // nasty body must come back with the same handle set and marker on both sides.
-    for (const { body, handles, all } of MENTION_BODY_FIXTURE.cases) {
+    for (const { body, handles } of MENTION_BODY_FIXTURE.cases) {
       const chipped = splitMentionNames(body, MENTION_BODY_FIXTURE.roster).segments
         .filter(segment => segment.mention)
         .map(segment => segment.name ?? '')
     // Chips render per occurrence while delivery resolves a set: dedupe the
     // chip side before comparing with the Host's delivered handle set.
       expect([...new Set(chipped)].sort()).toEqual([...handles].sort())
-      expect(containsAllMention(body)).toBe(all)
     }
   })
 
@@ -272,14 +268,6 @@ describe('Team presentation formatters', () => {
     expect(containsMention('mail a@builder.com', 'builder')).toBe(false)
     expect(containsMention('builder please review', 'builder')).toBe(false)
     expect(containsMention('请 @Builder 看一下', 'builder')).toBe(true)
-    expect(containsAllMention('请评审 @all，今天截止')).toBe(true)
-    expect(containsAllMention('通知 all 成员')).toBe(false)
-    // A doubled marker is not the marker the Host expands.
-    expect(containsAllMention('ping @@all')).toBe(false)
-    // The marker is case-insensitive, and code never carries it — both match
-    // the Host expansion exactly.
-    expect(containsAllMention('@ALL 大家看一下')).toBe(true)
-    expect(containsAllMention('quote `@all` here')).toBe(false)
     expect(containsMention('`@builder` is quoted', 'builder')).toBe(false)
     expect(containsMention('@@builder is not a call', 'builder')).toBe(false)
   })
@@ -295,16 +283,13 @@ describe('Team presentation formatters', () => {
     expect(mentionedMemberIds('', members)).toEqual([])
   })
 
-  it('stands a typed @all for the eligible roster and a written handle for its Member', () => {
+  it('reads a typed @all as plain text and a written handle as its Member', () => {
     const members = [
       memberStatus('member:builder', 'builder'),
       memberStatus('member:offline', 'offline', { presence: 'unavailable' }),
       memberStatus('member:gone', 'gone', { state: 'archived' }),
     ]
-    // The marker stands for the menu's own expansion, so an offline Member is
-    // left out exactly as the picker leaves it out.
-    expect(mentionedMemberIds('通知 @all 一下', members)).toEqual(['member:builder'])
-    expect(allMentionMembers(members).map(status => status.member.memberId)).toEqual(['member:builder'])
+    expect(mentionedMemberIds('通知 @all 一下', members)).toEqual([])
     // A written handle is a direct call: presence does not gate it, because an
     // offline Member is notified and reads the Message later. State still does.
     expect(mentionedMemberIds('@offline 在吗', members)).toEqual(['member:offline'])

@@ -7,7 +7,7 @@ A top-level Project Message creates one Thread and anchor. New model-facing star
 
 Agents may read or mutate only Projects in Workspaces they participate in. Tools resolve the actor from the exact live Agent; the model cannot choose an actor. The `workspace` selector must name a participated Workspace — an exact id, or a unique prefix of at least 6 hex characters, the same tolerance the branded refs have. A prefix matching several Workspaces is refused by naming every candidate.
 
-The selector can be omitted for a single participation. With multiple participations it is required on `team_view`, `team_thread`, `team_message`, and `team_claim`, and rejection lists the available Workspace ids.
+The selector can be omitted for a single participation. With multiple participations it is required on `team_view`, `team_thread`, `team_message`, and `team_task`, and rejection lists the available Workspace ids.
 
 `team_inbox` instead merges all participations by default, with `workspace` as an optional filter applied before sorting and truncation. Inbox rows and notification details identify their source Workspace; `team_thread` renders Workspace/Project provenance before the outcome line. Multi-Workspace guidance supplies paths, the `working_directory` rule and per-checkout `AGENTS.md` pointers.
 
@@ -23,7 +23,7 @@ The fixed offset has no daylight-saving component, so the same stored instant re
 - `team_view` Thread rows carry `lastActivityAt`, projected from the Thread's tail fact.
 - Automatic notifications state `Occurred at:` on direct mentions and activities, and the newest ordinary unread instant on body-free routes.
 - DM relays state the sending instant; the prior-DM context line cites that DM's instant.
-- Committed mutations (`team_message` start/reply/dm, `team_claim`) render `Committed at:` from the operation receipt; optimistic Client merges read the same receipt instant.
+- Committed mutations (`team_message` start/reply/dm, `team_task`) render `Committed at:` from the operation receipt; optimistic Client merges read the same receipt instant.
 - Ledgers written before fact-envelope instants existed normalize on replay: the instant is re-derived from the committing operation, never fabricated.
 
 Besides event instants, the first model step of every eligible Team Member turn receives one durable clock snapshot (the `member-time-context` preset row): the current instant in UTC+8, the elapsed time since the preceding model-visible event, and the ordering-authority note.

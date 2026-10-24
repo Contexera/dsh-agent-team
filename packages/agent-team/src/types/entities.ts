@@ -301,9 +301,6 @@ export interface AgentTeamTask {
 
 export type AgentTeamTaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done' | 'closed'
 
-/** The two statuses a live Claim keeps a Task in — the only ones a live-work surface lists. */
-export type AgentTeamLiveTaskStatus = Extract<AgentTeamTaskStatus, 'in_progress' | 'in_review'>
-
 /** Current projection of one collaboration Thread. */
 export interface AgentTeamThread {
   readonly threadRef: AgentTeamThreadRef

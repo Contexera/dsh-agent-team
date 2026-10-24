@@ -1,5 +1,5 @@
 import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
-import { hasAllMarker, resolveBodyMentions, scanBodyHandles } from '@contexera/dsh-agent-team/mentions'
+import { resolveBodyMentions, scanBodyHandles } from '@contexera/dsh-agent-team/mentions'
 import type { TeamKey } from './locales.ts'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamStateDotState } from './TeamStateDot.tsx'
@@ -212,22 +212,12 @@ export function containsMention(body: string, handle: string): boolean {
   return scanBodyHandles(body, [handle]).length > 0
 }
 
-export function containsAllMention(body: string): boolean {
-  return hasAllMarker(body)
-}
-
-/** Members `@all` stands for: the same filter the per-handle menu rows apply. */
-export function allMentionMembers(members: readonly AgentTeamClientMemberStatus[]): readonly AgentTeamClientMemberStatus[] {
-  return members.filter(status => status.presence !== 'unavailable' && status.member.state !== 'inactive' && status.member.state !== 'archived')
-}
-
 /**
 * Member ids a draft notifies by text alone, previewing the Host's body mention resolution.
 * A written handle counts whenever its Member can still take a Message (offline included).
 * Preview-only: only picked recipients travel as explicit recipients.
 */
 export function mentionedMemberIds(body: string, members: readonly AgentTeamClientMemberStatus[]): readonly AgentTeamMemberId[] {
-  if (hasAllMarker(body)) return allMentionMembers(members).map(status => status.member.memberId)
   const candidates = members
     .filter(status => status.member.state !== 'inactive' && status.member.state !== 'archived')
     .map(status => ({ memberId: status.member.memberId, handle: status.member.handle }))
@@ -325,14 +315,6 @@ export function formatInboxTime(occurredAt: string, t: TeamConversationProps['t'
   if (days === 0) return `${pad(at.getHours())}:${pad(at.getMinutes())}`
   if (days === 1) return `${t('inboxTimeYesterday')} ${pad(at.getHours())}:${pad(at.getMinutes())}`
   return formatMessageTime(occurredAt, now)
-}
-
-/** Date-only label: a clock time would claim precision a resolved-Task day does not carry. */
-export function formatDateOnly(occurredAt: string, now = new Date()): string {
-  const at = new Date(occurredAt)
-  if (Number.isNaN(at.getTime())) return ''
-  const date = formatAbsoluteTime(occurredAt).slice(0, 10)
-  return at.getFullYear() === now.getFullYear() ? date.slice(5) : date
 }
 
 export function formatActivity(activity: AgentTeamActivity, options: {

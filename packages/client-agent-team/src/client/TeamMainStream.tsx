@@ -235,10 +235,10 @@ export function TeamMainStream({
   return <>
     <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
-        {stream.loading && entries.length === 0 && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
-        {!stream.loading && entries.length === 0 && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void stream.refresh() }}>{t('retry')}</Button></div>}
+        {stream.loading && entries.length === 0 && stream.error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
+        {!stream.loading && entries.length === 0 && stream.error !== undefined && <div className={css.errorState} role="alert"><span>{stream.error}</span><Button size="sm" variant="outline" onClick={() => { void stream.refresh() }}>{t('retry')}</Button></div>}
         {stream.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={stream.loadingOlder} onClick={() => { void stream.loadOlder() }}>{t('loadOlder')}</Button></div>}
-        {!stream.loading && entries.length === 0 && error === undefined && <div className={css.emptySurface}>
+        {!stream.loading && entries.length === 0 && stream.error === undefined && <div className={css.emptySurface}>
           <div className={css.emptyState}>
             <strong>{t('mainEmpty')}</strong>
             <span>{t('mainEmptyHint')}</span>
@@ -258,9 +258,8 @@ export function TeamMainStream({
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}
-      allMention={false}
       placeholder={startingThread ? t(asTask ? 'startTaskPlaceholder' : 'startThreadPlaceholder') : t('messagePlaceholder')}
-      {...(notice === undefined ? {} : { confirmation: notice })}
+      {...(notice === undefined ? {} : { notice })}
       {...(error === undefined ? {} : { error })}
       onEdit={clearNotice}
       onSubmit={() => { void send() }}

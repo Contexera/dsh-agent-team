@@ -17,9 +17,15 @@ beforeEach(() => { localStorage.clear() })
  */
 describe('Team Project discussion panel switching', () => {
   it('reads the discussion the reader opened, not the one before it', async () => {
+    const card = (threadRef: string, sequence: number, preview: string) => ({
+      kind: 'thread-card' as const, sequence, occurredAt: '2026-10-14T09:00:00.000Z', card: {
+        threadRef, anchor: { messageRef: `message:seed-${sequence - 1}`, sender: 'member:human', preview, sequence, occurredAt: '2026-10-14T09:00:00.000Z' },
+        replyCount: 0, participants: [], newestSequence: sequence, newestOccurredAt: '2026-10-14T09:00:00.000Z', newestActor: { memberId: 'member:human', name: 'human' },
+      },
+    })
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seededMessages: [
       { body: '第一条讨论', occurredAt: '2026-10-14T09:00:00.000Z' },
-    ] })
+    ], mainStreamEntries: [card('thread:1', 1, '第一条讨论'), card('thread:2', 2, '第二条讨论')] })
     const bodies: Record<string, string> = { 'thread:1': '第一条讨论', 'thread:2': '第二条讨论' }
     const base = b.viewProjects.getMockImplementation()!
     b.viewProjects.mockImplementation(async (request: { threadRef?: string; topLevelOnly?: boolean }) => {
@@ -55,14 +61,14 @@ describe('Team Project discussion panel switching', () => {
       } }
     })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    await waitFor(() => expect(b.view.container.querySelectorAll('[data-thread-entry] button').length).toBe(2))
-    const doors = b.view.container.querySelectorAll<HTMLElement>('[data-thread-entry] button')
+    await waitFor(() => expect(b.view.container.querySelectorAll('[data-main-card]').length).toBe(2))
+    const doors = b.view.container.querySelectorAll<HTMLElement>('[data-main-card]')
     fireEvent.click(doors[0]!)
     const panel = await b.view.findByRole('complementary', { name: '讨论' })
     expect(await within(panel).findByText('第一条讨论')).toBeTruthy()
     // The other discussion replaces it in place, and the panel is the same
     // element: this is a swap, not a remount.
-    fireEvent.click(b.view.container.querySelectorAll<HTMLElement>('[data-thread-entry] button')[1]!)
+    fireEvent.click(doors[1]!)
     expect(await within(panel).findByText('第二条讨论')).toBeTruthy()
     expect(within(panel).queryByText('第一条讨论')).toBeNull()
     // The read travelled with the panel: the second discussion was read on the

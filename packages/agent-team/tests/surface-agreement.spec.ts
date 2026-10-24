@@ -51,7 +51,7 @@ async function harness(): Promise<{ readonly ctx: Context }> {
   ctx.provide('sessionPersistence', { list: async () => [] })
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
+  const fiber = await ctx.plugin(AgentTeam)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx }
 }
@@ -87,7 +87,7 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
 
     // A real commit that names the Member, which is what makes the fact direct.
     const body = 'please review this before the release'
-    const sent = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('direct'), workspaceId: alpha,
+    const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('direct'), workspaceId: alpha,
       projectRef: project.project.projectRef, body, recipients: [member.memberId] })
     expect(sent.kind).toBe('committed')
     if (sent.kind !== 'committed') return
@@ -115,14 +115,14 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
 
     // A commit that does not name the Member. An ordinary update only reaches a
-    // Member who follows the Thread, so the anchor is sent with the Member
-    // named once to enrol them, and the update is ordinary.
-    const anchor = await ctx.agentTeam.sendMessage({ asTask: false, requestId: requestId('anchor'), workspaceId: alpha,
+    // Member who follows the Thread, so the Member is named once in the anchor
+    // and then follows explicitly, and the update is ordinary.
+    const anchor = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('anchor'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: 'anchor for the ordinary case', recipients: [member.memberId] })
     expect(anchor.kind).toBe('committed')
     if (anchor.kind !== 'committed') return
-    // Being named in the anchor already follows the Thread for this Member, so
-    // the following update is an ordinary one for a follower.
+    await ctx.agentTeam['ledger']!.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, threadRef: anchor.thread.threadRef,
+      action: 'follow', actor: { kind: 'member', memberId: member.memberId, handle: member.handle } })
     state.calls.length = 0
     // The update is an ordinary reply: it names nobody, so the notice's only
     // account of it is a count.

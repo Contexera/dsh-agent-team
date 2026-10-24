@@ -242,7 +242,6 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
                   members={members}
                   joinedIds={joined}
                   ownerIds={ownership.get(project.projectRef) ?? new Set<AgentTeamMemberId>()}
-                  ownersEditable={view !== undefined && view.rulesVersion >= 2}
                   addProjectOwner={props.addProjectOwner}
                   removeProjectOwner={props.removeProjectOwner}
                   humanIdentity={props.humanIdentity}
@@ -263,12 +262,11 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
   )
 }
 
-function ProjectRow({ project, members, joinedIds, ownerIds, ownersEditable, addProjectOwner, removeProjectOwner, humanIdentity, selected, updateProject, archiveProject, onCommitted, selectProject, t }: {
+function ProjectRow({ project, members, joinedIds, ownerIds, addProjectOwner, removeProjectOwner, humanIdentity, selected, updateProject, archiveProject, onCommitted, selectProject, t }: {
   readonly project: AgentTeamProject
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly joinedIds: ReadonlySet<AgentTeamMemberId>
   readonly ownerIds: ReadonlySet<AgentTeamMemberId>
-  readonly ownersEditable: boolean
   readonly addProjectOwner: TeamSidebarProps['addProjectOwner']
   readonly removeProjectOwner: TeamSidebarProps['removeProjectOwner']
   readonly humanIdentity: TeamSidebarProps['humanIdentity']
@@ -341,7 +339,6 @@ function ProjectRow({ project, members, joinedIds, ownerIds, ownersEditable, add
           members={members}
           joinedIds={joinedIds}
           ownerIds={ownerIds}
-          ownersEditable={ownersEditable}
           addProjectOwner={addProjectOwner}
           removeProjectOwner={removeProjectOwner}
           humanIdentity={humanIdentity}
@@ -356,12 +353,11 @@ function ProjectRow({ project, members, joinedIds, ownerIds, ownersEditable, add
 }
 
 /** Name and description commit through one durable update; membership keeps its own immediate add/remove flow. */
-function ProjectEditorDialog({ project, members, ownerIds, ownersEditable, addProjectOwner, removeProjectOwner, humanIdentity, updateProject, onCommitted, onClose, t }: {
+function ProjectEditorDialog({ project, members, ownerIds, addProjectOwner, removeProjectOwner, humanIdentity, updateProject, onCommitted, onClose, t }: {
   readonly project: AgentTeamProject
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly joinedIds: ReadonlySet<AgentTeamMemberId>
   readonly ownerIds: ReadonlySet<AgentTeamMemberId>
-  readonly ownersEditable: boolean
   readonly addProjectOwner: TeamSidebarProps['addProjectOwner']
   readonly removeProjectOwner: TeamSidebarProps['removeProjectOwner']
   readonly humanIdentity: TeamSidebarProps['humanIdentity']
@@ -415,18 +411,16 @@ function ProjectEditorDialog({ project, members, ownerIds, ownersEditable, addPr
         </label>
         {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
       </form>
-      {ownersEditable && (
-        <TeamProjectOwners
-          project={project}
-          members={members}
-          ownerIds={ownerIds}
-          addProjectOwner={addProjectOwner}
-          removeProjectOwner={removeProjectOwner}
-          humanIdentity={humanIdentity}
-          onCommitted={onCommitted}
-          t={t}
-        />
-      )}
+      <TeamProjectOwners
+        project={project}
+        members={members}
+        ownerIds={ownerIds}
+        addProjectOwner={addProjectOwner}
+        removeProjectOwner={removeProjectOwner}
+        humanIdentity={humanIdentity}
+        onCommitted={onCommitted}
+        t={t}
+      />
     </Modal>
   )
 }

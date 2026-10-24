@@ -109,8 +109,8 @@ describe('stale_revision renders the increment it rejected against', () => {
 })
 
 describe('the claim mutation shares the same rejection shape', () => {
-  it('unread_required on team_claim renders the bodies and the token too', () => {
-    const text = renderText(teamTools().get('team_claim')!, { action: 'claim', taskRef: TASK, baseRevision: 8000, direction: 'd' }, {
+  it('unread_required on team_task renders the bodies and the token too', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'claim', taskRef: TASK, baseRevision: 8000, direction: 'd' }, {
       kind: 'unread_required', taskRef: TASK, threadRef: THREAD, revision: 8394, unreadCount: 1, directCount: 0,
       facts: [messageFact(8394, 'Discussion to read first')],
     })
@@ -119,8 +119,8 @@ describe('the claim mutation shares the same rejection shape', () => {
     expect(text).toContain('Next write — baseRevision: 8394')
   })
 
-  it('stale_revision on team_claim renders the increment and the token', () => {
-    const text = renderText(teamTools().get('team_claim')!, { action: 'done', taskRef: TASK, baseRevision: 8387, claimRef: CLAIM }, {
+  it('stale_revision on team_task renders the increment and the token', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 8387, claimRef: CLAIM }, {
       kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 8387, revision: 8394,
       facts: [messageFact(8394, 'New fact in the way')],
     })

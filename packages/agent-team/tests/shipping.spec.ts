@@ -146,7 +146,7 @@ describe('Agent Team shipping contract', () => {
     // volatile node, so a write lands without a remount and the settings
     // service can derive it at all.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
-    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'rulesVersion', 'wakeRecycle'])
+    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'wakeRecycle'])
     expect(rowFields.wakeRecycle?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.wakeRecycle?.dict ?? {}).sort()).toEqual(['enabled', 'idleMs', 'minContextTokens'])
     expect(Object.values(rowFields.wakeRecycle?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
@@ -204,7 +204,7 @@ describe('Agent Team shipping contract', () => {
     expect([...dshPeerRanges(bundleManifest)]).toEqual(['>=0.2.1-rc.2 <0.2.2'])
     expect(preset).toContain('compaction: true')
     expect(preset).toContain('toolResultPruner: true')
-    expect(preset).toContain('team_inbox, team_thread, team_attention, team_message, team_dm, team_claim, and team_view')
+    expect(preset).toContain('team_inbox, team_thread, team_attention, team_message, team_dm, team_task, and team_view')
     // The one token story has exactly two legal surfaces: a fully drained
     // read hands off the next-write token, and a committed public mutation's
     // returned token may serve as the basis for the next deliberate mutation.
@@ -239,12 +239,12 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('the Member whose function owns the area decides and the work continues')
     expect(preset).toContain('A gap in your own verification is yours to close')
     // One mention rule, and it is body-authored: the `@` is what makes a
-    // mention, `@all` notifies no one under version 2, and a Member an
-    // existing Thread has never carried is reported back rather than
-    // silently enrolled or refused.
+    // mention, it delivers the one Message and never the Thread, and `@all`
+    // carries no special meaning any more.
     expect(preset).toContain('Mention a Member by writing `@Handle` in the Message body')
-    expect(preset).toContain('`@all` is plain text under version 2')
-    expect(preset).toContain('never carried still commits your message, but delivers nothing to that Member')
+    expect(preset).toContain('A mention delivers that one Message to that Member and never the Thread')
+    expect(preset).not.toContain('@all')
+    expect(preset).not.toContain('undeliveredMentions')
     expect(preset).not.toContain('pass structured Member refs in the mentions parameter')
     expect(preset).toContain('use the injected absolute paths')
     expect(preset).toContain('formal deliverables')
@@ -259,7 +259,7 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('the bundled `member-memory-manager` skill')
     const toolSource = await readFile(resolve(root, 'packages/tool-agent-team/src/index.ts'), 'utf8')
     expect([...toolSource.matchAll(/name: '(team_[a-z]+)'/g)].map(match => match[1])).toEqual([
-      'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_claim', 'team_view',
+      'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view',
     ])    // Validation errors teach the same two token surfaces as the descriptions,
     expect(toolSource).toContain("from '@contexera/dsh-agent-team/recovery-hints'")
     const recoverySource = await readFile(resolve(root, 'packages/agent-team/src/recovery-hints.ts'), 'utf8')
@@ -508,7 +508,7 @@ describe('Agent Team Member persona', () => {
     const persona = personaInstructionText(preset)
     for (const rule of [
       // The Team tool family, named in prose so a Member knows the surface exists.
-      'team_view', 'team_inbox', 'team_thread', 'team_message', 'team_claim',
+      'team_view', 'team_inbox', 'team_thread', 'team_message', 'team_task',
       // Branded refs are written with exactly one colon.
       'never a double colon',
       // Work on a Task is announced with a Claimed direction before it starts.

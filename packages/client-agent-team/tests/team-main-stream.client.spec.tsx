@@ -29,7 +29,7 @@ const seedEntries: readonly MainStreamSeedEntry[] = [
 ]
 
 async function openProject(options?: Parameters<typeof runtimeWithTeam>[0]) {
-  const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, rulesVersion: 2, mainStreamEntries: seedEntries, ...options })
+  const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, mainStreamEntries: seedEntries, ...options })
   fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
   await b.view.findByRole('tab', { name: '主对话' })
   return b
@@ -39,7 +39,7 @@ const typeDraft = (b: Awaited<ReturnType<typeof openProject>>, text: string) => 
   fireEvent.change(b.view.getByRole('textbox', { name: '消息内容' }), { target: { value: text } })
 }
 
-describe('Team Main stream (rules version 2)', () => {
+describe('Team Main stream', () => {
   it('renders messages, owner activity and both card kinds from the Host history, and opens the cards', async () => {
     const b = await openProject()
     expect(await b.view.findByText('配色要不要跟设置页统一？')).toBeTruthy()
@@ -100,7 +100,7 @@ describe('Team Main stream (rules version 2)', () => {
     await waitFor(() => { expect(b.postMainMessage).toHaveBeenCalledTimes(1) })
     expect(b.postMainMessage).toHaveBeenCalledWith(expect.objectContaining({ body: '统一', replyToMessageRef: 'message:main-1', projectRef: 'project:engineering' }))
     expect(b.startThread).not.toHaveBeenCalled()
-    expect(b.sendMessage).not.toHaveBeenCalled()
+    expect(b.startThread).not.toHaveBeenCalled()
     expect(await b.view.findByText('统一')).toBeTruthy()
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('')
     await b.runtime.dispose()
@@ -146,16 +146,6 @@ describe('Team Main stream (rules version 2)', () => {
     await waitFor(() => { expect(b.postMainMessage).toHaveBeenCalledTimes(2) })
     expect(b.postMainMessage.mock.calls[1]![0]).toEqual(expect.objectContaining({ body: '先说一句' }))
     expect(b.postMainMessage.mock.calls[1]![0].requestId).not.toBe(b.postMainMessage.mock.calls[0]![0].requestId)
-    await b.runtime.dispose()
-  })
-
-  it('keeps the Project feed, its tab name and its composer at rules version 1', async () => {
-    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, rulesVersion: 1 })
-    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    expect(await b.view.findByRole('tab', { name: '项目' })).toBeTruthy()
-    expect(b.view.getByRole('button', { name: '作为任务' })).toBeTruthy()
-    expect(b.view.queryByRole('button', { name: '讨论/任务' })).toBeNull()
-    expect(b.mainStreamHistory).not.toHaveBeenCalled()
     await b.runtime.dispose()
   })
 })

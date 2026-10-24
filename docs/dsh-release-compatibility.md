@@ -137,7 +137,7 @@ The Harness ships an experimental Agent Teams feature as its own profile bundles
 
 It is a competing Team implementation, not an extension point this bundle builds on. It registers its own model-facing tool family (`spawn_teammate`, `send_message`, `list_agents`, `wait_agent`, `interrupt_agent`, `team_task_*`), disables the shipped global subagent rows in its profile patch to free those names, and carries its own members, tasks, store, and client panel.
 
-This bundle's seven tools are `team_view`, `team_inbox`, `team_thread`, `team_attention`, `team_message`, `team_dm`, and `team_claim`, registered only inside its `team-member` preset.
+This bundle's seven tools are `team_view`, `team_inbox`, `team_thread`, `team_message`, `team_task`, `team_attention`, and `team_dm`, registered only inside its `team-member` preset.
 
 Certification covers profiles that do not mount the experimental packages, and mounting both at once is **unsupported**: two Team authorities, two tool families, and two UI surfaces would be live with no shared authority or naming rule between them.
 

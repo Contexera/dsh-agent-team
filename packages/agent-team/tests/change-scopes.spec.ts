@@ -42,13 +42,13 @@ async function harness(): Promise<{ readonly ctx: Context; readonly facility: Do
   provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
+  const fiber = await ctx.plugin(AgentTeam)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, facility }
 }
 
 function ledgerAtBoot(facility: DomainFacility): AgentTeamLedger {
-  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, { rulesVersion: 1 })
+  return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
 }
 
 async function commitMemberRecordDirectlyOnLedger(ledger: AgentTeamLedger, projectRef: AgentTeamProjectRef): Promise<AgentTeamMemberActor> {
@@ -88,7 +88,7 @@ async function restartHarness(pool: MemoryMediaPool): Promise<{ readonly ctx: Co
   provideQuietTokenMeter(ctx)
   await ctx.plugin(agentTeamInvariant)
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam, { rulesVersion: 1 })
+  const fiber = await ctx.plugin(AgentTeam)
   cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
   return { ctx, facility, fiber }
 }
@@ -103,7 +103,7 @@ async function staysPendingAcrossMacrotask(promise: Promise<unknown>, ms = 15): 
 
 async function startThread(ctx: Context, label: string): Promise<{ readonly threadRef: AgentTeamThreadRef; readonly taskRef: AgentTeamTaskRef; readonly projectRef: AgentTeamProjectRef; readonly revision: number }> {
   const project = await ctx.agentTeam.createProject({ requestId: requestId(`project-${label}`), workspaceId: alpha, name: label, description: `${label} work` })
-  const started = await ctx.agentTeam.sendMessage({ asTask: true, requestId: requestId(`start-${label}`), workspaceId: alpha, projectRef: project.project.projectRef, body: `Task ${label}` })
+  const started = await ctx.agentTeam.startThread({ kind: 'task', requestId: requestId(`start-${label}`), workspaceId: alpha, projectRef: project.project.projectRef, body: `Task ${label}` })
   if (started.kind !== 'committed') throw new Error(`expected committed start, received ${started.kind}`)
   return { threadRef: started.thread.threadRef, taskRef: started.task!.taskRef, projectRef: project.project.projectRef, revision: started.thread.revision }
 }
@@ -354,14 +354,14 @@ describe('ledger change scope and affected member derivation', () => {
     ctx.provide('storageDomain', facility)
     cleanups.push(async () => { await facility.closeAll() })
     const domain = await ctx.storageDomain.open(agentTeamDomainSpec)
-    const ledger = new AgentTeamLedger(domain.table('operations'), { rulesVersion: 1 })
+    const ledger = new AgentTeamLedger(domain.table('operations'))
     await ledger.initialize()
 
     const created = (await ledger.createProject({
       requestId: requestId('iso-project'), workspaceId: alpha, name: 'isolated', description: 'Isolated work',
       memberIds: [], actor: agentTeamHumanActor(),
     })).value
-    const started = (await ledger.sendMessage({ asTask: true,
+    const started = (await ledger.startThread({ kind: 'task',
       requestId: requestId('iso-start'), workspaceId: alpha, projectRef: created.project.projectRef, body: 'Task', actor: agentTeamHumanActor(),
     }))
     if (started.value.kind !== 'committed') throw new Error('expected committed start')

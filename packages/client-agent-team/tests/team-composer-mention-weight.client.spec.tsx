@@ -108,19 +108,4 @@ describe('mention row weight', () => {
     expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-inside')).toBe('true')
     expect(rowOf(ui, 'stranger').getAttribute('data-mention-inside')).toBe('false')
   })
-
-  it('states no consequence on a row, on either surface', () => {
-    // Weight is the whole of the row's distinction: the Host's confirmation is
-    // announced by the status line after the send, so no row carries words of
-    // its own. This is the decision, not an accident — the note that used to sit
-    // beside the description must not come back on any tier of either surface.
-    for (const draftKey of ['thread:thread:one', 'project:project:one']) {
-      const ui = renderComposer(draftKey)
-      openMenu(ui, '@')
-      for (const row of rows(ui)) {
-        expect(row.textContent).not.toContain(zh.mentionConfirmation)
-        expect(row.textContent).not.toContain('需确认')
-      }
-    }
-  })
 })

@@ -12,6 +12,7 @@ beforeEach(() => { localStorage.clear() })
 async function openSeededProject(options?: Parameters<typeof runtimeWithTeam>[0]) {
   const b = await runtimeWithTeam({
     initialProjects: true,
+    seedsAsMainMessages: true,
     seededMessages: [{ body: 'human note', occurredAt: '2026-08-21T10:00:00.000Z', sender: 'human' }],
     ...options,
   })
@@ -56,7 +57,7 @@ describe('Human identity in the Team surfaces', () => {
     expect(page.querySelector('img')).toBeNull()
   })
 
-  it('keeps the uploaded avatar off Agent rows in the project feed', async () => {
+  it('keeps the uploaded avatar off Agent rows in the Main stream', async () => {
     const { page } = await openSeededProject({
       humanProfile: { name: 'Ada', avatarRef: 'avatar:1' },
       seededMessages: [

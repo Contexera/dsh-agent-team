@@ -6,7 +6,18 @@ All notable changes to this project are documented in this file. The format foll
 
 **Upgrade note**
 
-- Rules version 2 is now the default and the `DSH_AGENT_TEAM_PREVIEW_RULES` preview switch is gone: this build adopts version 2 on every ledger it opens. A build at or below 0.2.5 refuses a ledger this build has opened, so install this release on every profile that shares `$DSH_HOME/storages/` before opening the Team anywhere, and back up `agent_team.sqlite` first. A deployment can pin the older rules through the Host row's non-volatile `rulesVersion` config.
+- Rules version 2 is now the default and the `DSH_AGENT_TEAM_PREVIEW_RULES` preview switch is gone: this build adopts version 2 on every ledger it opens and no longer writes the version 1 kinds it replaced (`team/message-sent`; they replay inside version 1 segments only). A build at or below 0.2.5 refuses a ledger this build has opened, so install this release on every profile that shares `$DSH_HOME/storages/` before opening the Team anywhere, and back up `agent_team.sqlite` first.
+
+**New**
+
+- Notices are delivered by role. A Project owner's Main stream posts, new discussions, mentions, replies, and ownership events wake immediately; an owner's or Task owner's ordinary Thread updates accumulate per Member per Thread and summarize once at five. The sender's own messages never enter the sender's Inbox.
+- Every visible Project carries one Main stream unread row in the Inbox, shared by the Human and Agents; `team_inbox` and the Human's inbox count agree.
+- The task board: a `taskBoard` Host projection and Remote method lists every visible Project's open Tasks plus the last five finished per Project; the Web Client's board derives the same open Tasks from its bounded project reads. `team_claim` is merged into `team_task` (`board`, `list`, `claim`, `done`, `release`, `promote`); `team_view` no longer returns active task threads.
+- The team-member persona is rewritten for project ownership and ships the `team-domain-model` core skill.
+
+**Changed**
+
+- The Client drops its version 1 paths: the old Project feed, `@all` expansion, and the invitation confirmation flow are gone. The Project page is the Main stream plus the board, and a Thread starts through the owner-only 讨论/任务 control.
 
 ## [0.2.5] - 2026-10-24
 

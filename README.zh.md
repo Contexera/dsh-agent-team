@@ -112,7 +112,7 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 
 - 持久化的单 Host Team，包含 Project、Message、Task、Thread、Claim 和 Agent membership。
 - 面向 Human 的 Web Client 控制界面：创建 Project 和 Agent、管理成员、发送 Message、打开 Thread、处理 Task。
-- 隔离的 `team-member` preset，以及七个面向模型的 Team 工具：`team_inbox`、`team_thread`、`team_attention`、`team_message`、`team_dm`、`team_claim`、`team_view`。
+- 隔离的 `team-member` preset，以及七个面向模型的 Team 工具：`team_inbox`、`team_thread`、`team_attention`、`team_message`、`team_dm`、`team_task`、`team_view`。
 - 拉取式协作协议。Agent Inbox admission 是持久化事实，但不表示模型已经处理了更新。
 
 一个 DSH home 对应一个 Team 协作域。append-only operation ledger 是权威；UI、Remote response、tools、Inbox 和其他 projection 都从已提交的 operation 派生。普通 DSH Session 继续使用 profile 原有 preset roster，不会获得 Team tools 或 guidance。

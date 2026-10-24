@@ -1,9 +1,10 @@
 import { RemoteStream, RemoteStreamCarrierError } from '@deepseek-ai/dsh-api-gateway/client'
 import type { AgentTeamChangesRequest } from '@contexera/dsh-agent-team/types'
 import { afterEach, expect, vi } from 'vitest'
+import { fireEvent, type RenderResult } from '@testing-library/react'
 import { useState } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import type { AgentTeamAddMemberRequest, AgentTeamCreateProjectRequest, AgentTeamMemberDiagnostic, AgentTeamReplyRequest, AgentTeamSendMessageRequest, AgentTeamTask } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamAddMemberRequest, AgentTeamCreateProjectRequest, AgentTeamMemberDiagnostic, AgentTeamReplyRequest, AgentTeamTask } from '@contexera/dsh-agent-team/types'
 import { COMMON_NS, LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { en as commonEn, zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/index.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -83,6 +84,19 @@ interface EnvironmentSeed {
   readonly supportRange?: { readonly lower: string; readonly upper: string }
 }
 
+type TeamView = Pick<RenderResult, 'getByRole'>
+
+/** Opens the composer's thread-start mode; the next send creates a Thread instead of a Main stream message. */
+export function pressStartThread(view: TeamView): void {
+  fireEvent.click(view.getByRole('button', { name: '讨论/任务' }))
+}
+
+/** Thread-start mode with the Task box checked: the next send creates a Task. */
+export function pressStartTask(view: TeamView): void {
+  pressStartThread(view)
+  fireEvent.click(view.getByRole('checkbox', { name: '作为任务' }))
+}
+
 /** One Main stream entry as the Host projects it; the harness fills the flags a spec does not care about. */
 export type MainStreamSeedEntry = { readonly kind: 'message' | 'activity' | 'thread-card'; readonly sequence: number; readonly occurredAt: string; readonly unread?: boolean } & Record<string, unknown>
 
@@ -93,7 +107,7 @@ interface SeededMessage {
   readonly mentions?: readonly string[]
 }
 
-export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; rulesVersion?: number; mainStreamEntries?: readonly MainStreamSeedEntry[]; mainStreamUnread?: number; environment?: EnvironmentSeed; environmentFailure?: string }) {
+export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedsAsMainMessages?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; mainStreamEntries?: readonly MainStreamSeedEntry[]; mainStreamUnread?: number; environment?: EnvironmentSeed; environmentFailure?: string }) {
   if (options?.mode !== undefined) {
     localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }))
   }
@@ -258,7 +272,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   let viewClaims: Array<Record<string, unknown>> = []
   let viewActivities: Array<Record<string, unknown>> = []
   const viewProjects = vi.fn(async (request: { threadRef?: string; topLevelOnly?: boolean }) => ({ ok: true, value: {
-    humanMemberId: 'member:human', projects, members: memberships, owners, rulesVersion: options?.rulesVersion ?? 1,
+    humanMemberId: 'member:human', projects, members: memberships, owners, rulesVersion: 2,
     tasks: viewItems.flatMap(item => item.task === undefined ? [] : [item.task]), threads: viewItems.length === 0 ? [] : [viewItems[0]!.thread],
     taskNumbers: viewItems.flatMap(item => item.task === undefined || item.taskNumber === undefined ? [] : [{ taskRef: (item.task as { taskRef: string }).taskRef, taskNumber: item.taskNumber }]),
     items: request.threadRef !== undefined || !request.topLevelOnly ? viewItems : viewItems.filter(item => (item.message as { topLevel?: boolean }).topLevel), claims: viewClaims, activities: request.topLevelOnly ? [] : viewActivities, cursor: 0, hasMore: false,
@@ -331,53 +345,66 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     if (request.attachmentId === 'attachment:2') return { ok: false as const, error: new Error('no longer cached') }
     return { ok: true as const, value: { name: 'x', mediaType: 'image/png', byteSize: 8, bytesBase64: 'aGVsbG8=' } }
   })
-  let sentMessageCount = 0
-  const sendMessage = vi.fn(async (request: AgentTeamSendMessageRequest) => {
-    sentMessageCount += 1
-    const sequence = 1 + sentMessageCount
-    const asTask = request.asTask === true
-    const task = asTask ? { taskRef: 'task:1', projectRef: request.projectRef, threadRef: 'thread:1', status: 'todo', resolution: 'open' } : undefined
-    const thread = { threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), revision: sequence }
-    const attachments = request.attachments === undefined ? [] : request.attachments.map(id => ({ attachmentId: id, name: `file-${id}.png`, byteSize: 8, mediaType: 'image/png' }))
-    const message = { messageRef: `message:${sequence}`, projectRef: request.projectRef, threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), sender: 'member:human', body: request.body, ...(attachments.length === 0 ? {} : { attachments }), topLevel: true, sequence, occurredAt: '2026-08-21T10:00:00.000Z' }
-    viewItems = [{ message, mentions: [], ...(task === undefined ? {} : { task, taskNumber: 1 }), thread, liveClaimOwners: [], messageCount: 1, lastActivityAt: message.occurredAt }]
-    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message, ...(task === undefined ? {} : { task }), thread, attention: [], directMarkers: [] } }
+  // Seeded Threads reach the Main stream as the cards the Host would draw for them, so a spec that seeds a Thread reads it from the stream.
+  const seededCards: MainStreamSeedEntry[] = viewItems.map(item => {
+    const message = item.message as { messageRef: string; sender: string; body: string; sequence: number; occurredAt: string }
+    return { kind: 'thread-card', sequence: message.sequence, occurredAt: message.occurredAt, card: {
+      threadRef: seedThreadRef,
+      anchor: { messageRef: message.messageRef, sender: message.sender, preview: message.body, sequence: message.sequence, occurredAt: message.occurredAt },
+      ...(taskless ? {} : { task: { taskRef: seedTaskRef, taskNumber: 1, status: options?.seedTaskStatus ?? 'todo', resolution: 'open', liveClaimOwners: [] } }),
+      replyCount: 0, participants: [], newestSequence: message.sequence, newestOccurredAt: message.occurredAt,
+      newestActor: { memberId: message.sender, name: message.sender === 'member:builder' ? 'builder' : 'human' },
+    } }
   })
-  let mainEntries = [...(options?.mainStreamEntries ?? [])]
+  const seededMessageEntries: MainStreamSeedEntry[] = (options?.seededMessages ?? []).map((seed, index) => ({
+    kind: 'message', sequence: index + 1, occurredAt: seed.occurredAt,
+    message: { messageRef: `message:main-seed-${index}`, projectRef: 'project:engineering', scope: 'main', sender: seed.sender === 'agent' ? 'member:builder' : 'member:human', body: seed.body, sequence: index + 1, occurredAt: seed.occurredAt },
+    mentions: seed.mentions ?? [],
+  }))
+  let mainEntries = [...(options?.mainStreamEntries ?? (options?.seedsAsMainMessages === true ? seededMessageEntries : seededCards))]
+  // A card is unread while its Thread's Inbox row is, as the Host derives it.
+  const threadHoldsUnread = (threadRef: string): boolean => inboxRows.some(row => ((row.item as { thread?: { threadRef?: string }; unreadCount?: number }).thread?.threadRef === threadRef) && ((row.item as { unreadCount?: number }).unreadCount ?? 0) > 0)
   let mainUnread = options?.mainStreamUnread ?? 0
   let mainUnreadRequiredOnce = false
   const mainStanding = () => ({ owner: true, head: mainEntries.at(-1)?.sequence ?? 0, unreadCount: mainUnread, directCount: 0, markers: [] })
   const mainStreamHistory = vi.fn(async (request: { beforeSequence?: number; limit?: number }) => {
     const older = mainEntries.filter(entry => request.beforeSequence === undefined || entry.sequence < request.beforeSequence)
     const page = older.slice(-(request.limit ?? 20))
-    return { ok: true as const, value: { projectRef: 'project:engineering', entries: page.map(entry => ({ direct: false, unread: false, ...entry })), cursor: page[0]?.sequence ?? 1, hasMore: older.length > page.length, standing: mainStanding() } }
+    return { ok: true as const, value: { projectRef: 'project:engineering', entries: page.map(entry => ({ direct: false, unread: entry.kind === 'thread-card' && threadHoldsUnread((entry.card as { threadRef: string }).threadRef), ...entry })), cursor: page[0]?.sequence ?? 1, hasMore: older.length > page.length, standing: mainStanding() } }
   })
   const readMainStream = vi.fn(async () => {
     mainUnread = 0
     return { ok: true as const, value: { projectRef: 'project:engineering', readThroughSequence: mainEntries.at(-1)?.sequence ?? 0, entries: [], consumedMarkers: [], standing: mainStanding() } }
   })
   const requireMainRead = (): void => { mainUnreadRequiredOnce = true }
-  const appendMainMessage = (body: string, replyToMessageRef?: string) => {
+  const appendMainMessage = (body: string, replyToMessageRef?: string, attachmentIds: readonly string[] = []) => {
     const sequence = (mainEntries.at(-1)?.sequence ?? 0) + 1
-    const message = { messageRef: `message:main-${sequence}`, projectRef: 'project:engineering', scope: 'main', sender: 'member:human', body, ...(replyToMessageRef === undefined ? {} : { replyToMessageRef }), sequence, occurredAt: '2026-10-20T10:00:00.000Z' }
+    const attachments = attachmentIds.map(id => ({ attachmentId: id, name: `file-${id}.png`, byteSize: 8, mediaType: 'image/png' }))
+    const message = { messageRef: `message:main-${sequence}`, projectRef: 'project:engineering', scope: 'main', sender: 'member:human', body, ...(replyToMessageRef === undefined ? {} : { replyToMessageRef }), ...(attachments.length === 0 ? {} : { attachments }), sequence, occurredAt: '2026-10-20T10:00:00.000Z' }
     mainEntries = [...mainEntries, { kind: 'message', sequence, occurredAt: message.occurredAt, message, mentions: [] }]
     return message
   }
-  const postMainMessage = vi.fn(async (request: { requestId: string; body: string; replyToMessageRef?: string }) => {
+  const postMainMessage = vi.fn(async (request: { requestId: string; body: string; replyToMessageRef?: string; attachments?: readonly string[] }) => {
     if (mainUnreadRequiredOnce) {
       mainUnreadRequiredOnce = false
       mainUnread = 1
       return { ok: true as const, value: { kind: 'main_unread_required' as const, projectRef: 'project:engineering', unreadCount: 1, directCount: 0, head: mainEntries.at(-1)?.sequence ?? 0, entries: [] } }
     }
-    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message: appendMainMessage(request.body, request.replyToMessageRef), markers: [] } }
+    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message: appendMainMessage(request.body, request.replyToMessageRef, request.attachments), markers: [] } }
   })
-  const startThread = vi.fn(async (request: { kind: 'discussion' | 'task'; body: string; projectRef: string }) => {
+  let startedThreadCount = 0
+  const startThread = vi.fn(async (request: { requestId: string; kind: 'discussion' | 'task'; body: string; projectRef: string; attachments?: readonly string[] }) => {
+    startedThreadCount += 1
     const sequence = (mainEntries.at(-1)?.sequence ?? 0) + 1
     const asTask = request.kind === 'task'
-    const message = { messageRef: `message:thread-${sequence}`, projectRef: request.projectRef, threadRef: `thread:new-${sequence}`, sender: 'member:human', body: request.body, topLevel: true, sequence, occurredAt: '2026-10-20T10:00:00.000Z' }
-    const card = { threadRef: message.threadRef, anchor: { messageRef: message.messageRef, sender: 'member:human', preview: request.body, sequence, occurredAt: message.occurredAt }, ...(asTask ? { task: { taskRef: `task:new-${sequence}`, taskNumber: 2, status: 'todo', resolution: 'open', liveClaimOwners: [] } } : {}), replyCount: 0, participants: [], newestSequence: sequence, newestOccurredAt: message.occurredAt, newestActor: { memberId: 'member:human', name: 'human' } }
+    const attachments = (request.attachments ?? []).map(id => ({ attachmentId: id, name: `file-${id}.png`, byteSize: 8, mediaType: 'image/png' }))
+    const message = { messageRef: `message:${1 + startedThreadCount}`, projectRef: request.projectRef, threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), sender: 'member:human', body: request.body, ...(attachments.length === 0 ? {} : { attachments }), topLevel: true, sequence, occurredAt: '2026-08-21T10:00:00.000Z' }
+    const task = asTask ? { taskRef: 'task:1', projectRef: request.projectRef, threadRef: 'thread:1', status: 'todo', resolution: 'open' } : undefined
+    const thread = { threadRef: 'thread:1', ...(asTask ? { taskRef: 'task:1' } : {}), revision: sequence }
+    viewItems = [{ message, mentions: [], ...(task === undefined ? {} : { task, taskNumber: 1 }), thread, liveClaimOwners: [], messageCount: 1, lastActivityAt: message.occurredAt }]
+    const card = { threadRef: 'thread:1', anchor: { messageRef: message.messageRef, sender: 'member:human', preview: request.body, sequence, occurredAt: message.occurredAt }, ...(task === undefined ? {} : { task: { taskRef: 'task:1', taskNumber: 1, status: 'todo', resolution: 'open', liveClaimOwners: [] } }), replyCount: 0, participants: [], newestSequence: sequence, newestOccurredAt: message.occurredAt, newestActor: { memberId: 'member:human', name: 'human' } }
     mainEntries = [...mainEntries, { kind: 'thread-card', sequence, occurredAt: message.occurredAt, card }]
-    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message, thread: { threadRef: message.threadRef, revision: sequence }, attention: [], directMarkers: [] } }
+    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, message, ...(task === undefined ? {} : { task }), thread, attention: [], directMarkers: [] } }
   })
   let changeVersion = 0
   let changeFailure: string | undefined
@@ -444,6 +471,10 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const activity = { activityRef: 'activity:promoted', kind: 'promote' as const, taskRef: task.taskRef, threadRef: request.threadRef, actor: 'member:human', sequence: request.baseRevision + 1 }
     // A promoted Task is brand-new with no Claims, so the Host projects no owners.
     viewItems = viewItems.map(item => ({ ...item, task, thread, taskNumber: 1, liveClaimOwners: [] }))
+    mainEntries = mainEntries.map(entry => entry.kind === 'thread-card' && (entry.card as { threadRef: string }).threadRef === request.threadRef
+      ? { ...entry, card: { ...(entry.card as object), task: { taskRef: task.taskRef, taskNumber: 1, status: 'todo', resolution: 'open', liveClaimOwners: [] } } }
+      : entry)
+    wakeAll()
     return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, activity, task, thread } }
   })
   const changeTask = vi.fn(async (request: { action: 'accept' | 'close' | 'reopen' }) => {
@@ -543,18 +574,24 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // The Host's own verdict on the bounded unread queue; specs flip it to prove
   // the page discloses a capped page instead of reading as the whole queue.
   let inboxHasMore = false
+  let mainInboxRows: Array<Record<string, unknown> & { readonly workspaceId: string }> = []
   const inbox = vi.fn(async ({ workspaceId }: { workspaceId: string }) => {
     const scoped = inboxRows.filter(row => row.workspaceId === workspaceId)
     const holdsUnread = (row: { readonly item: Record<string, unknown> }): boolean => ((row.item as { unreadCount?: number }).unreadCount ?? 0) > 0
     const items = scoped.filter(holdsUnread).map(row => row.item)
     const recent = scoped.filter(row => !holdsUnread(row)).map(row => row.item)
-    const unread = items.reduce((sum, item) => sum + ((item as { unreadCount?: number }).unreadCount ?? 0), 0)
-    const direct = items.reduce((sum, item) => sum + ((item as { directCount?: number }).directCount ?? 0), 0)
-    return { ok: true as const, value: { humanMemberId: 'member:human', items, recent, hasMore: inboxHasMore, totalUnreadCount: unread, totalDirectCount: direct } }
+    const main = mainInboxRows.filter(row => row.workspaceId === workspaceId)
+    const unread = [...items, ...main].reduce((sum, item) => sum + ((item as { unreadCount?: number }).unreadCount ?? 0), 0)
+    const direct = [...items, ...main].reduce((sum, item) => sum + ((item as { directCount?: number }).directCount ?? 0), 0)
+    return { ok: true as const, value: { humanMemberId: 'member:human', items, main, recent, hasMore: inboxHasMore, totalUnreadCount: unread, totalDirectCount: direct } }
   })
   const seedInbox = (rows: ReadonlyArray<{ readonly workspaceId: string } & Record<string, unknown>>, options?: { readonly hasMore?: boolean }): void => {
     inboxRows = rows.map(row => ({ workspaceId: row.workspaceId, item: row as Record<string, unknown> }))
     inboxHasMore = options?.hasMore ?? false
+    wakeAll()
+  }
+  const seedMainInbox = (rows: ReadonlyArray<Record<string, unknown> & { readonly workspaceId: string }>): void => {
+    mainInboxRows = [...rows]
     wakeAll()
   }
   const changesStream = async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
@@ -693,7 +730,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, sendMessage, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),
@@ -736,5 +773,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
-  return { runtime, team, view, panelInfo: runtime.panelInfo, teamConfigForm, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, sendMessage, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
+  return { runtime, team, view, seedMainInbox, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
 }

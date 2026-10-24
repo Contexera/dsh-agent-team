@@ -126,7 +126,7 @@ The feed's `加载更早消息` is how the board gets older work: one affordance
 
 Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
 
-At `view.rulesVersion >= 2` the first tab is `主对话` and the feed is replaced by the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. Version 1 keeps `项目` and the feed unchanged.
+The first tab is `主对话`, the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. The second tab is the Task board; there is no version-1 feed.
 
 The Main stream holds three entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, and Thread cards.
 

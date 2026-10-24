@@ -9,8 +9,8 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 ## Ledger 权威与提交
 - mutation 进入 Host authority，并提交一条 durable operation。
 - 重放会重算每条记录应有的 Inbox delta 并逐项比较，所以改变既有 kind 校验规则的版本要先写一条 `team/rules-version-adopted`（Host actor，`{ version }`）。每条记录按它之前最新的标记校验；没有标记的 ledger 为版本 1。标记由 `initialize` 在它自己排队的提交里追加，因此早于之后的所有写入，包括启动恢复。标记只升不降，每个版本至多一条；ledger 采用的版本高于本构建实现的版本时拒绝打开。
-- 当前构建实现版本 2，对它打开的每个 ledger 都采用版本 2；`DSH_AGENT_TEAM_PREVIEW_RULES` 开关已移除。部署可以通过 Host 行的非 volatile `rulesVersion` 配置钉在旧版本，设置表单不写这个字段。
-- 规则版本 2 起，Host 提交 `team/main-message-posted`、`team/main-stream-read` 和 `team/thread-started`，它们在版本 1 的记录段内会被拒绝，而 `team/message-sent` 在版本 2 的记录段内被拒绝。
+- 当前构建实现版本 2：挂载时若 ledger 的最新标记低于它，就追加版本 2 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记。
+- 规则版本 2 起，Host 还会提交 `team/main-message-posted`、`team/main-stream-read` 和 `team/thread-started`，它们在版本 1 的记录段内会被拒绝，而 `team/message-sent` 在版本 2 的记录段内被拒绝。Host 不再写 `team/message-sent`（开 Thread 用 `startThread`），它只在版本 1 的记录段内重放。
 - inbox delta 可带可选的 `mainMarkers` 列表，使用独立的 marker 形状（`projectRef` 加 `messageRef` 或 `activityRef`）。它只在确有变化时出现，所以版本 1 的记录保持存储字节不变；离开的 Member 的 Main stream marker 随同一 operation 与其他 inbox 状态一起清除。
 - Agent 通过与 Thread marker 相同的 direct 通知路径被 Main stream marker 唤醒；owner 的普通 Main stream 未读暂不投递。
 - 回复把被回答的 Message 记为自身 Message 上的 `replyToMessageRef`，Host 在提交前用 ledger 解析这个 ref：未知的 ref、或属于别的 Thread 的 ref 一律拒绝，不会被存下。父消息作者在提交时加入收件人，邀请规则、direct markers 与 `undeliveredMentions` 报告与 mention 完全一致。被引用的画面 —— 父消息作者与其正文一行 —— 是读取期派生（`replyTo`），绝不是第二份存储副本。因此它不可能与父消息不一致，父消息不在本次读取这一页里时也照样填得上。ref 不再可解析时只留裸 ref。引用不是可选项：这个参数属于回复契约的一部分，携带 ref 的回复只按 ref 本身被接受或拒绝。
@@ -58,7 +58,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 - Member clock baseline 经 `session-event-cursor.ts` 只消费追加事件。Session 身份、继承前缀、日志长度或锚点事件变化时从头重折。守卫依赖日志只追加的契约；同一 sequence、同一事件类型的就地替换不在检测范围内。
 - 读取投影按用途定界。`view` 只回答它自己那一页 fact 加上请求点名的 Thread：catalog 字段带的是这一页的 Task、Thread、显示序号与 Claim。只有 `includeCatalog` 才返回整个请求 scope 的 Task/Thread/Claim catalog，也就是模型侧 `team_view` 渲染的 address book 投影。
 - 一页读取沿 fact ledger 走到超出 limit 的第一个匹配为止。catalog 读取再多一次对 scope 内 Thread 的目录过滤，以及每个 Task 行一次活 Claim 查询。这些分量必须分开报告，不合并成一个总数：只报返回行数看不出这次读取走过了什么。
-- Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、`active task threads` 雷达）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
+- Claim 按 Task 分桶，由重放派生的索引支撑，所以按 Task 的读取（Claim 列表、Thread 画面、Inbox 行、Task board）绝不走账本的全部 Claim。这里每个索引都由重放重建，绝不是第二份 durable 权威。
 
 ## Session 持久化与重放
 - Bundle 目标为 DSH `0.2.1-rc.2`。Bundle 的 Session persistence 使用当前 DSH schema。随附的 JSONL backend 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4），旧格式 Session 数据无需手动处置。这个 DSH Session-schema 策略不会抹掉 Team operation history。Team 有意保留针对旧版、Message-level `occurredAt` 之前 records 的窄 replay normalization。

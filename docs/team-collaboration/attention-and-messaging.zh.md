@@ -3,7 +3,7 @@
 [English](attention-and-messaging.md) | 中文
 
 ## Thread Attention 与 Inbox
-Thread Attention 是一个 Member 对一个 Thread 的 durable private state。它记录当前 attention period 的开始位置和连续 read watermark。创建顶层 Thread、在 taskful Thread 上创建 Claim、显式 follow 或接受 Human invitation 都会开始 Attention。
+Thread Attention 是一个 Member 对一个 Thread 的 durable private state。它记录当前 attention period 的开始位置和连续 read watermark。创建顶层 Thread（作者随之关注）、在 taskful Thread 上创建 Claim 或显式 follow 都会开始 Attention。
 
 taskless Thread 可以直接 unfollow。taskful Thread 只有在 Agent 的 Task overlay 没有 active Claim 时才能 unfollow。Unfollow 结束当前 Attention period，并丢弃这个 period 的 unread work。之后再次 follow 会从当前 Thread tail 开始，放弃的 history 不会重新变成 unread。
 
@@ -20,13 +20,13 @@ Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默
 History paging 永远不确认新 work。Thread 打开期间到达的 updates 无论读者滚动位置一律自动确认。滚离底部的读者只会看到无读取语义的纯跳转提示。
 
 ## Mentions
-Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention。匹配按 Project 内可寻址的名字，做大小写不敏感、Unicode 词边界、长名优先。因此 Client 渲染成 chip 的那个名字正是送达的那个名字。裸 handle 仍是普通散文，代码块或行内代码里的 handle 是引用而非呼叫。`@all` 触达 Project 内每个 Member，在该次写入时展开成当时的 Member 集合并快照进 operation。不存在收件人参数。无论 Human 在 Web Client 撰写还是 Agent 通过 `team_message` 撰写，Host 都解析正文。Human 也以同样方式寻址，即 `@human`。这是跨改名永久有效的别名。`team_view` 中的当前显示名同样可寻址，chip 两种写法都渲染当前显示名。任何 agent handle 不得占用 `human` 字面，因此这个别名永远不会通知到别人。
+Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention。匹配按 Project 内可寻址的名字，做大小写不敏感、Unicode 词边界、长名优先。因此 Client 渲染成 chip 的那个名字正是送达的那个名字。裸 handle 仍是普通散文，代码块或行内代码里的 handle 是引用而非呼叫。`@all` 在规则版本 2 下是普通文本：不通知任何人，需要触达的 Member 都要逐一点名。不存在收件人参数。无论 Human 在 Web Client 撰写还是 Agent 通过 `team_message` 撰写，Host 都解析正文。Human 也以同样方式寻址，即 `@human`。这是跨改名永久有效的别名。`team_view` 中的当前显示名同样可寻址，chip 两种写法都渲染当前显示名。任何 agent handle 不得占用 `human` 字面，因此这个别名永远不会通知到别人。
 
-顶层 Message 可以直接 mention Agents。被提及的 Members 会开始 follow 新 Thread 并接收 Message。在既有 Thread 中，Agent 可以 mention 任何**曾经参与过**该 Thread 的 Member。无论当前是否仍在 follow，mention 会送达，并恢复这个 Member 的 Attention。mention 一个既有 Thread 从未承载过的 Member 时，Message 照常提交。Message 不向这个 Member 送达，结果在 `undeliveredMentions` 中报告。只有 Human 能邀请这个 Member。Human reply mention 一个当前未 follow 的 Member 时，仍先走 Host-owned one-use confirmation flow 再提交。Agent 可以 mention Human，但不会因此让 Human 成为 follower。
+mention——在开 Thread、回复或 Main stream 发言中——只把这条 Message 送达被点名的 Member 一次，绝不开始或恢复 Attention：是否 follow 是 Member 自己的显式决定。Project 内每个可寻址的 Member 都可以被点名，不存在邀请环节。Agent 可以 mention Human，但不会因此让 Human 成为 follower。
 
 回复是回答一条已存在的 Message，因此也把那条 Message 的作者带成收件人：引用一个 Member，与点名他一样会送达。
 
-作者在投递集合解析之前就加入，因此同一条邀请规则、direct markers 与 `undeliveredMentions` 报告全部照旧适用。Agent 仍然无法邀请该 Thread 从未承载过的 Member；Human 永远不是收件人，因为他们直接读 Thread。Message 的作者绝不会被加给自己，所以回答自己的 Message 不通知任何人。
+作者在投递集合解析之前就加入，适用同一条 direct-marker 规则；Human 永远不是收件人，因为他们直接读 Thread。Message 的作者绝不会被加给自己，所以回答自己的 Message 不通知任何人。
 
 回复的目标未知、或属于别的 Thread 时，这条回复被拒绝，而不是被记录。
 

@@ -107,11 +107,11 @@ beforeAll(async () => {
   })
   const projectRef = project.project.projectRef
 
-  const opener = await team.sendMessage({
+  const opener = await team.startThread({
     requestId: 'ui-preview-opener' as never,
     workspaceId: workspace.id,
     projectRef,
-    asTask: false,
+    kind: 'discussion',
     body: '预览样本 Thread：气泡两侧、同人分组、有人@我、引用回复、长文折叠都在这一条里。',
   })
   if (opener.kind !== 'committed') throw new Error(`preview opener was rejected: ${opener.kind}`)
@@ -175,13 +175,12 @@ beforeAll(async () => {
   // A Task thread: its entry row in the Project feed carries the state cluster
   // and the owner stack this preview is meant to show, and the claims land as
   // activity rows inside the Thread.
-  const taskStart = await team.sendMessageForAgent(agentFor('aster')!, {
+  const taskStart = await team.startThread({
     requestId: 'ui-preview-task' as never,
     workspaceId: workspace.id,
     projectRef,
-    asTask: true,
+    kind: 'task',
     body: '叠放校验：这条 Task 用来验证 feed 条目行的状态列与所有者叠放。',
-    recipients: [humanMemberId],
   })
   if (taskStart.kind !== 'committed') throw new Error(`preview Task was rejected: ${taskStart.kind}`)
   const taskRef = taskStart.task!.taskRef

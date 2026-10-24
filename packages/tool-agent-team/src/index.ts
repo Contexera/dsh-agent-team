@@ -10,6 +10,7 @@ import type {
   AgentTeamMessageRef,
   AgentTeamProjectRef,
   AgentTeamTaskRef,
+  AgentTeamTaskBoardItem,
   AgentTeamThreadFact,
   AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
@@ -167,7 +168,7 @@ type RejectedFact = {
   readonly direct?: boolean
 }
 
-/** The typed-rejection renderer shared by team_message and team_claim: outcome, action-local recovery facts, the facts that gated the write, and the single recovery route. The current revision is written back as the next write token, so a rejected writer needs no separate read round-trip. */
+/** The typed-rejection renderer shared by team_message and team_task: outcome, action-local recovery facts, the facts that gated the write, and the single recovery route. The current revision is written back as the next write token, so a rejected writer needs no separate read round-trip. */
 function rejectionLines(
   value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly staleTokenKind?: 'unknown' | 'unrecognized'; readonly facts?: readonly RejectedFact[] },
 ): string[] {
@@ -200,9 +201,8 @@ function rejectionLines(
     ]
   }
   return [
-    'Not committed — member_not_following.',
-    `${(value.memberIds ?? []).join(', ')} not following${value.threadRef === undefined ? '' : ` ${value.threadRef}`}${value.taskRef === undefined ? '' : ` (${value.taskRef})`}; no message was added.`,
-    recoveryFor('member_not_following').sentence({}),
+    `Not committed — ${value.kind}.`,
+    identity === '' ? 'No message was added.' : `${identity} — no message was added.`,
   ]
 }
 
@@ -214,7 +214,7 @@ function rejectedFactLines(facts: readonly RejectedFact[]): string[] {
 
 const teamInbox = defineTool({
   name: 'team_inbox',
-  description: 'List your bounded Team Inbox across all joined Workspaces for triage: unread Thread summaries with counts, without message bodies and without marking anything read. Read a selected Thread with team_thread read; the inbox itself authorizes no mutation. This is your own unread queue; to see work others have in flight (whether or not you have unread on it), use the active-task-threads section of team_view.',
+  description: 'List your bounded Team Inbox across all joined Workspaces for triage: unread Thread summaries and one row per Project Main stream with unread for you, with counts, without message bodies and without marking anything read. Read a selected Thread with team_thread read; the inbox itself authorizes no mutation. This is your own unread queue; to see work in flight (whether or not you have unread on it), use team_task board.',
   parameters: { limit: { type: 'number' }, workspace: workspaceParam },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
@@ -225,10 +225,14 @@ const teamInbox = defineTool({
         taskRef: { type: 'string' }, status: { type: 'string' }, revision: { type: 'number', required: true }, unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true },
         taskNumber: { type: 'number' }, newestOccurredAt: { type: 'string' },
       } } },
+      main: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
+        workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, projectName: { type: 'string', required: true },
+        unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true }, newestOccurredAt: { type: 'string', required: true },
+      } } },
     } },
         // Triage surface only: totals, both counters per row (direct renders even when zero), a bounded-list conclusion so truncation never reads as drained, and one route to the tool that acknowledges work. No subject, body, revision label, or write token: the required current read supplies the write basis.
     render: (_args, value) => {
-      if (value.items.length === 0) {
+      if (value.items.length === 0 && value.main.length === 0) {
         return [{ type: 'text', text: value.totalUnreadCount > 0
           ? `Inbox — ${value.totalUnreadCount} unread update(s) on Threads beyond this bounded page — read these Threads to drain the queue.`
           : 'Inbox empty — no unread Team work.' }]
@@ -237,9 +241,10 @@ const teamInbox = defineTool({
         ? '; the unread queue is bounded and more Threads sit beyond this page — read these to drain it, or ask for up to 100 rows.'
         : '.'
       return [{ type: 'text', text: [
-        `Inbox — ${value.totalUnreadCount} unread update(s) total, ${value.totalDirectCount} direct, across ${value.items.length} Thread(s) shown${more}`,
+        `Inbox — ${value.totalUnreadCount} unread update(s) total, ${value.totalDirectCount} direct, across ${value.main.length === 0 ? '' : `${value.main.length} Main stream(s) and `}${value.items.length} Thread(s) shown${more}`,
+        ...value.main.map(row => `${row.workspaceId} · ${row.projectRef} Main stream (${row.projectName}) · ${row.unreadCount} unread, ${row.directCount} direct · newest ${formatTeamTimestamp(row.newestOccurredAt)}`),
         ...value.items.map(item => `${item.workspaceId} · ${item.threadRef}${item.projectRef === undefined ? '' : ` · ${item.projectRef}`}${item.taskRef === undefined ? '' : ` · ${taskStanding(item)}`} · ${item.unreadCount} unread, ${item.directCount} direct${item.newestOccurredAt === undefined ? '' : ` · newest ${formatTeamTimestamp(item.newestOccurredAt)}`}`),
-        'Read a selected Thread with team_thread read. Listing changes no read state and supplies no write token.',
+        `Read a selected ${value.main.length === 0 ? 'Thread with team_thread read' : 'Thread or Main stream with team_thread read (threadRef or projectRef)'}. Listing changes no read state and supplies no write token.`,
       ].join('\n') }]
     },
   },
@@ -250,6 +255,8 @@ const teamInbox = defineTool({
     const inbox = host.inboxForAgent(agent, { ...(args.workspace === undefined ? {} : { workspaceId: workspaceOf(args, agent) }), ...(args.limit === undefined ? {} : { limit: args.limit }) })
     return {
       totalUnreadCount: inbox.totalUnreadCount, totalDirectCount: inbox.totalDirectCount, hasMore: inbox.hasMore,
+      main: inbox.main.map(row => ({ workspaceId: row.workspaceId, projectRef: row.projectRef, projectName: row.projectName,
+        unreadCount: row.unreadCount, directCount: row.directCount, newestOccurredAt: row.newestOccurredAt })),
       items: inbox.items.map(item => {
         const taskNumber = item.taskNumber
         return { workspaceId: item.workspaceId, threadRef: item.thread.threadRef, projectRef: item.projectRef,
@@ -641,7 +648,7 @@ const teamDm = defineTool({
 
 const teamMessage = markAgentTeamPreset(defineTool({
   name: 'team_message',
-  description: 'Post to a Project\'s Main stream, start a Thread, or reply to one. post speaks in the Project\'s Main stream — the conversation outside every Thread — and any Project member may: pass projectRef and body, mention with `@Handle`, and optionally replyToMessageRef (a Main stream Message of the same Project, whose author is delivered to). An owner holding unread Main stream, or any Member holding a mention, reads it first (team_thread read with projectRef); post has no write token. start opens a discussion or a Task (kind) and only a Project owner may — a Thread starts from a standing question or piece of work, not from conversation. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message and restores Attention, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start takes kind discussion (default) or task. Under version 2 of the Team rules a mention in a start or a reply delivers its Message to that Member once and never makes them follow; before it, only a Human could invite a Member into an existing Thread. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` is plain text under version 2 — it delivers to no one, so name each Member you need to reach. Naming a Member this Thread has never carried still commits, delivers nothing to that Member, and reports them under undeliveredMentions: ask the Human to invite them, or reach them with a team_dm. A private note to one Member is team_dm, not a reply.',
+  description: 'Post to a Project\'s Main stream, start a Thread, or reply to one. post speaks in the Project\'s Main stream — the conversation outside every Thread — and any Project member may: pass projectRef and body, mention with `@Handle`, and optionally replyToMessageRef (a Main stream Message of the same Project, whose author is delivered to). An owner holding unread Main stream, or any Member holding a mention, reads it first (team_thread read with projectRef); post has no write token. start opens a discussion or a Task (kind) and only a Project owner may — a Thread starts from a standing question or piece of work, not from conversation. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start takes kind discussion (default) or task. A mention in a start or a reply delivers its Message to that Member once and never makes them follow. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` is plain text under version 2 — it delivers to no one, so name each Member you need to reach. A private note to one Member is team_dm, not a reply.',
   parameters: {
     action: { type: 'string', required: true, enum: ['start', 'reply', 'post'] },
     projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves. Required by start and post." },
@@ -721,7 +728,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
       if ((args as { readonly asTask?: unknown }).asTask !== undefined) throw new Error(`start does not accept asTask — pass kind: 'task' instead — ${recoveryFor('action_only_arguments').sentence({ action: 'start', parameter: 'asTask', owner: 'start' })}`)
       const kind = args.kind === 'task' ? 'task' : 'discussion'
       const request = { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent), projectRef: projectRefOf(args.projectRef) as never, body: args.body, ...paths }
-      const result = host.ledgerRulesVersion() >= 2 ? await host.startThreadForAgent(agent, { ...request, kind }) : await host.sendMessageForAgent(agent, { ...request, asTask: kind === 'task' })
+      const result = await host.startThreadForAgent(agent, { ...request, kind })
       return messageOutcome(result, 'start')
     }
     const baseRevision = args.baseRevision
@@ -737,7 +744,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
   },
 }))
 
-function messageOutcome(result: Awaited<ReturnType<AgentTeam['sendMessageForAgent']>> | Awaited<ReturnType<AgentTeam['replyForAgent']>>, action: 'start' | 'reply') {
+function messageOutcome(result: Awaited<ReturnType<AgentTeam['startThreadForAgent']>> | Awaited<ReturnType<AgentTeam['replyForAgent']>>, action: 'start' | 'reply') {
   if (result.kind === 'committed') {
         // A start always delivers to the Members it names (they begin following the new Thread), so only a reply can report names the Thread has never carried.
     const undelivered = 'undeliveredMentions' in result ? result.undeliveredMentions : undefined
@@ -746,8 +753,6 @@ function messageOutcome(result: Awaited<ReturnType<AgentTeam['sendMessageForAgen
       revision: result.thread.revision, messageRef: result.message.messageRef, occurredAt: result.receipt.occurredAt,
       ...(undelivered === undefined || undelivered.length === 0 ? {} : { undeliveredMentions: [...undelivered] }) }
   }
-  if (result.kind === 'member_not_following') return { kind: result.kind, memberIds: [...result.memberIds],
-    ...(result.taskRef === undefined ? {} : { taskRef: result.taskRef }), ...(result.threadRef === undefined ? {} : { threadRef: result.threadRef, revision: result.revision }) }
   if (result.kind === 'unread_required') return { kind: result.kind, ...(result.taskRef === undefined ? {} : { taskRef: result.taskRef }), threadRef: result.threadRef,
     revision: result.revision, unreadCount: result.unreadCount, directCount: result.directCount,
     ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
@@ -758,31 +763,83 @@ function messageOutcome(result: Awaited<ReturnType<AgentTeam['sendMessageForAgen
   throw new Error('Agents cannot receive invitation confirmations')
 }
 
-const teamClaim = defineTool({
-  name: 'team_claim',
-  description: 'List or mutate your Direction Claims. A Claim is your one-sentence direction statement on a Task — "the angle I am taking" — so others can spot collisions and track progress: Tasks define scope (owned by Humans), Claims declare the angle (owned by you). Good direction: "Unify the four form dialogs on shared field components before wiring submits." Bad direction: a multi-paragraph plan with step order, file lists, or acceptance criteria — those belong in Thread messages, not the Claim. Mutations require the current next-write token from a fully drained team_thread read (or your own last committed mutation); list refreshes the collision surface only and authorizes no mutation.',
+const BOARD_ITEM_SCHEMA = { type: 'object', additionalProperties: false, properties: {
+  workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, projectName: { type: 'string', required: true },
+  taskRef: { type: 'string', required: true }, taskNumber: { type: 'number', required: true }, threadRef: { type: 'string', required: true },
+  status: { type: 'string', required: true }, subject: { type: 'string', required: true }, members: { type: 'array', required: true, items: { type: 'string' } },
+  lastActivityAt: { type: 'string', required: true }, relation: { type: 'string', required: true },
+} } as const
+
+interface BoardItemView {
+  readonly workspaceId: string
+  readonly projectRef: string
+  readonly projectName: string
+  readonly taskRef: string
+  readonly taskNumber: number
+  readonly threadRef: string
+  readonly status: string
+  readonly subject: string
+  readonly members: string[]
+  readonly lastActivityAt: string
+  readonly relation: string
+}
+
+function boardItemView(item: AgentTeamTaskBoardItem): BoardItemView {
+  return { workspaceId: item.workspaceId, projectRef: item.projectRef, projectName: item.projectName, taskRef: item.task.taskRef, taskNumber: item.taskNumber,
+    threadRef: item.threadRef, status: item.task.status, subject: item.subject, members: item.liveClaimOwners.map(owner => owner.name),
+    lastActivityAt: item.lastActivityAt, relation: item.relation }
+}
+
+function boardLines(open: readonly BoardItemView[], finished: readonly BoardItemView[]): string[] {
+  const line = (item: BoardItemView) => `${item.taskRef} (#${item.taskNumber}) · ${item.projectName} ${item.projectRef} · ${item.threadRef}${item.members.length === 0 ? '' : ` · ${item.members.map(name => `@${name}`).join(', ')}`}${item.relation === 'none' ? '' : ` · you: ${item.relation}`} — ${item.subject} · last activity ${formatTeamTimestamp(item.lastActivityAt)}`
+  const column = (title: string, status: string) => {
+    const items = open.filter(item => item.status === status)
+    return [`${title} (${items.length})`, ...(items.length === 0 ? ['—'] : items.map(line))]
+  }
+  return ['Task board — current state; reading it changes no read state and supplies no write token.',
+    ...column('To do', 'todo'), ...column('In progress', 'in_progress'), ...column('In review', 'in_review'),
+    `Recently finished (${finished.length})`, ...(finished.length === 0 ? ['—'] : finished.map(item => `${line(item)} · ${item.status}`)),
+    'Read a Task\'s Thread with team_thread read before you claim or reply.']
+}
+
+const teamTask = defineTool({
+  name: 'team_task',
+  description: 'Work with Tasks. board lists the Task board of the Projects you can see — every open Task with its status and the Members on it, plus each Project\'s newest finished Tasks — filtered by projectRef or to your own Claims with mine; it is current state, not unread, so check it before you claim or when a Workspace change surprises you. promote turns a discussion Thread into a Task (Project owners only). list, claim, done and release manage your Direction Claims. A Claim is your one-sentence direction statement on a Task — "the angle I am taking" — so others can spot collisions and track progress: Tasks define scope (owned by Humans), Claims declare the angle (owned by you). Good direction: "Unify the four form dialogs on shared field components before wiring submits." Bad direction: a multi-paragraph plan with step order, file lists, or acceptance criteria — those belong in Thread messages, not the Claim. Mutations require the current next-write token from a fully drained team_thread read (or your own last committed mutation); list refreshes the collision surface only and authorizes no mutation.',
   parameters: {
-    action: { type: 'string', required: true, enum: ['list', 'claim', 'done', 'release'] },
-    taskRef: { type: 'string', required: true, description: "Full branded Task ref exactly as returned by Team tools, including the 'task:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    action: { type: 'string', required: true, enum: ['board', 'list', 'claim', 'done', 'release', 'promote'] },
+    projectRef: { type: 'string', description: 'board only: limit the board to one Project.' },
+    mine: { type: 'boolean', description: 'board only: only Tasks you hold a live Claim on.' },
+    threadRef: { type: 'string', description: 'promote only: the discussion Thread to turn into a Task.' },
+    taskRef: { type: 'string', description: "Full branded Task ref exactly as returned by Team tools, including the 'task:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Task's Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Task." }, direction: { type: 'string' },
-    claimRef: { type: 'string', description: "Full branded Claim ref exactly as returned by team_claim, including the 'claim:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    claimRef: { type: 'string', description: "Full branded Claim ref exactly as returned by team_task, including the 'claim:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     workspace: workspaceParam,
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
-      kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true },
-      revision: { type: 'number', required: true }, expectedRevision: { type: 'number' }, status: { type: 'string', required: true },
+      kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' },
+      revision: { type: 'number' }, expectedRevision: { type: 'number' }, status: { type: 'string' },
+      open: { type: 'array', items: BOARD_ITEM_SCHEMA }, finished: { type: 'array', items: BOARD_ITEM_SCHEMA },
       unreadCount: { type: 'number' }, directCount: { type: 'number' }, occurredAt: { type: 'string' },
       claim: { type: 'object', additionalProperties: false, properties: {
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
       } },
-      claims: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true } } } },
+      claims: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true } } } },
       facts: { type: 'array', items: FACT_SCHEMA }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
     } },
         // A committed mutation renders the authoritative affected Claim first; the full archive is never appended. list renders the collision surface and no write token (a current Thread read remains the mutation basis). Rejections share the outcome-first recovery form and carry the gating facts plus the current revision as the next write token.
     render: (_args, value) => {
+      if (value.kind === 'board') return [{ type: 'text', text: boardLines(value.open ?? [], value.finished ?? []).join('\n') }]
+      if (value.kind === 'committed' && value.action === 'promote') {
+        return [{ type: 'text', text: [
+          `Committed — Thread promoted to Task ${value.taskRef} (${value.status}).`,
+          `${value.threadRef} · ${value.taskRef}`,
+          ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
+          nextWriteLine(value.revision!),
+        ].join('\n') }]
+      }
       if (value.kind === 'listed') {
-        const active = value.claims.filter(claim => claim.state === 'active')
+        const active = (value.claims ?? []).filter(claim => claim.state === 'active')
         return [{ type: 'text', text: [
           `Claims for ${value.taskRef} · ${value.threadRef} · ${value.status}`,
           'Active Claims',
@@ -795,23 +852,46 @@ const teamClaim = defineTool({
           `${value.claim.claimRef} · ${value.claim.state} — ${value.claim.owner}: ${value.claim.direction}`,
           `${value.threadRef} · ${value.taskRef} · ${value.status}`,
           ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
-          nextWriteLine(value.revision),
+          nextWriteLine(value.revision!),
         ].join('\n') }]
       }
-      return [{ type: 'text', text: rejectionLines(value).join('\n') }]
+      return [{ type: 'text', text: rejectionLines(value as Parameters<typeof rejectionLines>[0]).join('\n') }]
     },
   },
   async execute(args, exec) {
     const agent = exec.agent
-    if (agent === undefined) throw new Error('team_claim requires an Agent session')
+    if (agent === undefined) throw new Error('team_task requires an Agent session')
     const host = service(agent)
+    if (args.action === 'board') {
+      if (args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('board_takes_no_task').sentence({}))
+      const board = host.taskBoardForAgent(agent, { ...(args.workspace === undefined ? {} : { workspaceId: workspaceOf(args, agent) }),
+        ...(args.projectRef === undefined ? {} : { projectRef: projectRefOf(args.projectRef) as AgentTeamProjectRef }), ...(args.mine === true ? { mine: true } : {}) })
+      return { kind: 'board', open: board.open.map(boardItemView), finished: board.finished.map(boardItemView) }
+    }
+    if (args.action === 'promote') {
+      if (args.taskRef !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('promote_takes_thread').sentence({}))
+      if (args.threadRef === undefined) throw new Error(recoveryFor('promote_requires_thread').sentence({}))
+      const baseRevision = args.baseRevision
+      if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) throw new Error(recoveryFor('missing_write_token').sentence({}))
+      const result = await host.promoteThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
+        threadRef: args.threadRef as AgentTeamThreadRef, baseRevision })
+      if (result.kind === 'committed') return { kind: result.kind, action: 'promote', taskRef: result.task.taskRef, threadRef: result.thread.threadRef,
+        revision: result.thread.revision, status: result.task.status, occurredAt: result.receipt.occurredAt }
+      if (result.kind === 'unread_required') return { kind: result.kind, threadRef: result.threadRef, revision: result.revision,
+        unreadCount: result.unreadCount, directCount: result.directCount, ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
+      return { kind: result.kind, threadRef: result.threadRef, expectedRevision: result.expectedRevision, revision: result.revision,
+        ...(result.staleTokenKind === undefined ? {} : { staleTokenKind: result.staleTokenKind }),
+        ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
+    }
+    if (args.taskRef === undefined) throw new Error(recoveryFor('task_action_requires_task').sentence({ action: args.action }))
     const base = { workspaceId: workspaceOf(args, agent), taskRef: args.taskRef as AgentTeamTaskRef }
     if (args.action === 'list') {
-      if (args.baseRevision !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('list_takes_task_only').sentence({}))
+      if (args.baseRevision !== undefined || args.direction !== undefined || args.claimRef !== undefined || args.threadRef !== undefined) throw new Error(recoveryFor('list_takes_task_only').sentence({}))
       const listed = host.listClaimsForAgent(agent, base)
       return { kind: 'listed', taskRef: listed.task.taskRef, threadRef: listed.thread.threadRef, revision: listed.thread.revision, status: listed.task.status,
         claims: listed.claims.map(claimView) }
     }
+    if (args.threadRef !== undefined || args.projectRef !== undefined) throw new Error(recoveryFor('task_action_requires_task').sentence({ action: args.action }))
     const baseRevision = args.baseRevision
     if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) throw new Error(recoveryFor('missing_write_token').sentence({}))
     if (args.action === 'claim' && (args.direction === undefined || args.claimRef !== undefined)) throw new Error(recoveryFor('claim_requires_direction').sentence({}))
@@ -835,7 +915,7 @@ const teamClaim = defineTool({
 
 const teamView = defineTool({
   name: 'team_view',
-  description: 'Discover your authorized Team addresses: current Projects, a newest-first page of top-level Threads (each with its bounded anchor subject; Task standing inline on taskful rows), current Members, and an「active task threads」section listing the work in flight right now — every in_progress / in_review Task Thread in your Projects, with its subject and the Members already on it. This is an address book, not a work queue: unread work lives in team_inbox, and a Thread is read with team_thread read. Consult the active-task-threads section when a Workspace change surprises you, or before you claim or commit, to tell in-flight work from a real conflict and avoid riding onto someone else\'s unpushed work — it is independent of your own unread. The cursor pages Thread rows only.',
+  description: 'Discover your authorized Team addresses: current Projects (with their owners and your role), a newest-first page of top-level Threads (each with its bounded anchor subject; Task standing inline on taskful rows), and current Members. This is an address book, not a work queue: unread work lives in team_inbox, work in flight on team_task board, and a Thread is read with team_thread read. The cursor pages Thread rows only.',
   parameters: {
     projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     limit: { type: 'number' }, cursor: { type: 'number' }, workspace: workspaceParam,
@@ -855,11 +935,6 @@ const teamView = defineTool({
       threads: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, revision: { type: 'number', required: true }, messageCount: { type: 'number', required: true }, subject: { type: 'string', required: true },
         taskRef: { type: 'string' }, status: { type: 'string' }, taskNumber: { type: 'number' }, lastActivityAt: { type: 'string' },
-      } } },
-      activeTaskThreads: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
-        taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, status: { type: 'string', required: true }, subject: { type: 'string', required: true },
-        taskNumber: { type: 'number' }, lastActivityAt: { type: 'string', required: true },
-        members: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { memberId: { type: 'string', required: true }, name: { type: 'string', required: true } } } },
       } } },
       tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, status: { type: 'string', required: true }, revision: { type: 'number' } } } },
       cursor: { type: 'number', required: true }, hasMore: { type: 'boolean', required: true }, page: { type: 'string' },
@@ -886,10 +961,7 @@ const teamView = defineTool({
         lines.push('', 'Members — current')
         if (value.members.length === 0) lines.push('No visible Members.')
         else lines.push(...value.members.map(m => `${m.memberId} · @${m.handle} (${m.kind}, ${m.presence})${m.description === '' ? '' : ` — ${m.description}`}`))
-        lines.push('', 'Active task threads — work in flight right now')
-        if (value.activeTaskThreads.length === 0) lines.push('No task thread is in flight in this Workspace.')
-        else lines.push(...value.activeTaskThreads.map(t => `${t.threadRef} · ${t.projectRef} · ${t.status}${t.taskNumber === undefined ? '' : ` · #${t.taskNumber}`}${t.members.length === 0 ? '' : ` · ${t.members.map(m => `@${m.name}`).join(', ')}`} — ${t.subject} · last activity ${formatTeamTimestamp(t.lastActivityAt)}`))
-        lines.push('Use this when a Workspace change surprises you, or before you claim or commit — to see who is already on a Task rather than riding onto their in-flight work. It is not the unread queue; unread work still lives in team_inbox.')
+        lines.push('', 'Work in flight lives on the Task board: team_task board.')
       }
       return [{ type: 'text', text: lines.join('\n') }]
     },
@@ -934,10 +1006,6 @@ const teamView = defineTool({
         return { taskRef: task.taskRef, threadRef: task.threadRef, projectRef: task.projectRef, status: task.status,
           ...(revision === undefined ? {} : { revision }) }
       }),
-      activeTaskThreads: view.activeTaskThreads.map(t => ({ taskRef: t.taskRef, threadRef: t.threadRef, projectRef: t.projectRef,
-        status: t.status, subject: t.subject, lastActivityAt: t.lastActivityAt,
-        ...(t.taskNumber === undefined ? {} : { taskNumber: t.taskNumber }),
-        members: t.members.map(m => ({ memberId: m.memberId, name: m.name })) })),
       cursor: view.cursor, hasMore: view.hasMore,
       ...(args.cursor === undefined ? {} : { page: 'threads' as const }),
     }
@@ -950,6 +1018,6 @@ export function apply(ctx: Context): void {
   ctx.tools.register(teamAttention)
   ctx.tools.register(teamMessage)
   ctx.tools.register(teamDm)
-  ctx.tools.register(teamClaim)
+  ctx.tools.register(teamTask)
   ctx.tools.register(teamView)
 }

@@ -10,15 +10,13 @@
 
 ledger 有 Project owner 之后（规则版本 2），每个 Project 行还列出 owners（`@human` 在前）和读者的角色（`owner` 或 `member`）。
 
-首页 Members 之后跟一个 `active task threads` 段。本 Workspace 内读者获授权 Project 中所有 in_progress / in_review 的 Task Thread，按最新活动排序。每行携带 threadRef、Project ref、status、Task 编号。live Claims 上的 Members、bounded anchor subject 与最新活动时刻也在行内。
-
-纳入条件只看 Task 是否活跃，不看读者是否参与。读者未读的 Thread 也不排除。这段独立于 unread 队列，回答「谁已经在做什么」。工具引导在读者遇到 Workspace 意外改动、或准备 claim/commit 之前指向此段，让在途工作被识别为在途而非冲突。这段不是 unread 队列。未读工作仍归 `team_inbox`。
+在途工作不属于地址簿：首页末尾指向 `team_task board`。
 
 cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达全部获授权的顶层 Threads，含 taskless 与不在首页的 taskful。页脚把 cursor 称为 Thread cursor，说明是否还有更旧的 Thread anchors。
 
 ## `team_inbox`
 
-`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Project ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看他人在途的工作（无论是否有未读），用 `team_view` 的 active-task-threads 段。页脚把正文阅读与确认指向 `team_thread read`。渲染不携带 revision 与写令牌。当前 read 才是必需的变更基础，并提供令牌。
+`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries，另为每个对读者有 Main stream 未读的 Project 列一行（owner 的普通未读与每个读者的 Main stream marker）。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Project ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看在途的工作（无论是否有未读），用 `team_task board`。页脚把正文阅读与确认指向 `team_thread read`。渲染不携带 revision 与写令牌。当前 read 才是必需的变更基础，并提供令牌。
 
 ## `team_thread`
 
@@ -74,8 +72,18 @@ DM 是纯送达。ledger 追加一个 audit-only 的 `team/dm-sent` operation，
 
 DM 只用于快速澄清与状态同步。任务工作、决策和任何需要团队可见或可追溯的内容一律走 Thread。同一对象往来超过约 3 轮应转 Thread，因为每条 DM 消耗收件人一次完整 agent turn。
 
-## `team_claim`
+## `team_task`
 
-`team_claim` 列出 Claims，并允许 Agent 仅在真实 Task 上创建、完成或 release 自己的 Direction Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，因为当前 `team_thread read` 仍是必需的变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
+`team_task` 的动作为 `board`、`list`、`claim`、`done`、`release`、`promote`。
+
+`board` 渲染 Host 的 Task board 投影：读者可见 Project 的全部 open Task，按待处理、进行中、待验收分组、按最新活动排序；再列每个 Project 最近完成的 5 个 Task。每行携带 Task ref 与编号、Project、Thread ref、live Claim 上的 Members、读者与它的关系（`executor` 或 `project-owner`）、有界主题与最新活动时刻。
+
+`projectRef` 限定一个 Project；`mine` 只保留读者持有 live Claim 的 Task。
+
+看板是当前状态，不是未读：读取不改变 read state，也不带写令牌。工具引导在读者遇到 Workspace 意外改动、或准备 claim 之前指向这里，让在途工作被识别为在途而非冲突。
+
+`promote` 把讨论 Thread 转为 Task，需要 `threadRef` 与该 Thread 的 `baseRevision`，只有 Project owner 可以执行（否则 `project_owner_required`）。
+
+`list`、`claim`、`done`、`release` 只管理 Agent 自己在真实 Task 上的 Direction Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，因为当前 `team_thread read` 仍是必需的变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
 
 拒绝结果（`unread_required`、`stale_revision`）与 message 拒绝共享同一形式：`Not committed`、本地 refs/计数、挡住这次写入的事实、先读后重试的恢复路径，以及当前 revision 作为下次写入的写令牌。

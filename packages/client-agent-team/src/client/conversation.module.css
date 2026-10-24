@@ -381,59 +381,6 @@
   font-size: 11px;
   line-height: 20px;
 }
-/* One entry's state leads the entry row at the same x on every entry, rather than trailing the identity line where a
-   continuation row (no identity of its own) would leave it floating. Shipped rows lead with state the same way. */
-.stateCluster {
-  align-items: center;
-  display: inline-flex;
-  flex: none;
-  gap: 6px;
-}
-.statusWord {
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  line-height: 18px;
-}
-/* State first, then the door. The state sits outside the button, because a labeled button prunes its descendants from the
-   accessibility tree and the owner stack would lose the roster it names. A 390 column can wrap the door under the state. */
-.entryLine {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 4px 0 0;
-  max-width: 100%;
-}
-/* The line sits outside the body column and a short Message hugs its content, so the line takes the whole column back: the
-   state must open the entry at the column's left edge. */
-.messageRow .entryLine {
-  align-self: stretch;
-}
-.entryRow {
-  align-items: center;
-  background: none;
-  border: 0;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: 12px;
-  gap: 6px;
-  line-height: 18px;
-  padding: 2px 0;
-}
-.entryRow:hover,
-.entryRow:focus-visible { color: var(--dsw-alias-label-primary); }
-.entryRow:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: 2px;
-}
-.entryArrow {
-  align-items: center;
-  display: inline-flex;
-  transition: transform 120ms ease;
-}
-.entryRow:hover .entryArrow,
-.entryRow:focus-visible .entryArrow { transform: translateX(2px); }
 /* Literal human text: the shared MessageText primitive or segmented mention spans need the same pre-wrap metrics. Vertical
    rhythm comes from row padding and column gaps, so block margins collapse to first/last-child edges only. */
 .messageText {
@@ -604,9 +551,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .loadingMark { animation: none; }
-  .entryArrow { transition: none; }
-  .entryRow:hover .entryArrow,
-  .entryRow:focus-visible .entryArrow { transform: none; }
 }
 
 /* One run is one same-sender reply turn: a pure grouping block with no hover border or fill (boundaries come from the turn
@@ -614,24 +558,6 @@
 .messageRun {
   margin: 2px 0;
   padding: 3px 0;
-}
-
-/* Consecutive messages in a run that carry their own Thread entry get a hairline; plain continuations stay seamless. The entry
-   is identified by its own data attribute, not a button, so neither the expand control nor a Task ref link in a body reads as
-   an entry boundary. The line hugs the text column (identity seat + 10px gap, past the hidden avatar) because it separates
-   entries inside a run; structural boundaries stay full-width. */
-.messageRow[data-grouped]:has([data-thread-entry]) {
-  margin-top: 3px;
-  padding-top: 7px;
-  position: relative;
-}
-
-.messageRow[data-grouped]:has([data-thread-entry])::before {
-  background: var(--dsw-alias-border-l2);
-  content: '';
-  height: 1px;
-  inset: 0 0 auto calc(var(--team-identity-seat, 34px) + 10px);
-  position: absolute;
 }
 
 /* Turn divider: same-sender messages separated by a real waiting gap (isRunGap) are separate turns, so the hairline restores
@@ -643,13 +569,6 @@
   border-top: 1px solid var(--dsw-alias-border-l2);
   /* Hugs the text column and states no instant of its own: the row it separates states its time under the pointer. */
   margin: 2px 0 0 calc(var(--team-identity-seat, 34px) + 10px);
-}
-.runDivider + .messageRow[data-grouped]:has([data-thread-entry]) {
-  margin-top: 0;
-}
-
-.runDivider + .messageRow[data-grouped]:has([data-thread-entry])::before {
-  content: none;
 }
 
 /* Mention chip for @Member references in Human literal messages and the structured mention fallback row. */

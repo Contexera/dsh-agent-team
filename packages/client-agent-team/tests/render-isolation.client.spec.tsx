@@ -105,7 +105,7 @@ async function openThread(b: Runtime): Promise<void> {
   fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
   // Every seeded message is its own top-level Task entry, so the footer label
   // repeats once per row; the first one is the Thread page under test.
-  const [link] = await b.view.findAllByRole('button', { name: '打开 Task #1' })
+  const [link] = await b.view.findAllByRole('button', { name: /^打开 Task #1：/ })
   fireEvent.click(link!)
   await waitFor(() => expect(b.view.getByRole('textbox', { name: '消息内容' })).toBeTruthy())
 }

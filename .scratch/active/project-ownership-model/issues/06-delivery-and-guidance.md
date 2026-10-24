@@ -4,11 +4,13 @@
 
 **Blocked by:** 05
 
-**Status:** pending
+**Status:** complete（等待 Human 在 dev profile 用真实 ledger 试用并按 spec §11 复盘）
 
-- [ ] 投递等级按 spec §7 运行时计算，threshold 按“每 Member × 每 Thread”计数；一组测试固定“不打断”的边界
-- [ ] Inbox 主对话行；Human 收件箱蓝白点；`team_inbox` 同样计数
-- [ ] Inbox notice 带 delivery、cause、scope、scoped role、source ref 与读取入口
-- [ ] persona 整体改写；新增 core skill `team-domain-model`
-- [ ] 挂载时写入规则版本 2 标记；旧记录照旧 replay
-- [ ] 试用期内只调运行时参数（5 条阈值等）；需要改变已写入记录的校验规则时开新版本
+- [x] 投递等级按 spec §7 运行时计算，threshold 按“每 Member × 每 Thread”计数；一组测试固定“不打断”的边界
+- [x] Inbox 主对话行；Human 收件箱蓝白点；`team_inbox` 同样计数
+- [x] Inbox notice 带 delivery、cause、scope、scoped role、source ref 与读取入口
+- [x] persona 整体改写；新增 core skill `team-domain-model`
+- [x] 挂载时写入规则版本 2 标记；旧记录照旧 replay
+- [x] 试用期内只调运行时参数（5 条阈值等）；需要改变已写入记录的校验规则时开新版本
+
+交付于本地 master `908cf97`（与 07 合并为一个提交），预览开关已删除。审查时补上普通 Main stream 消息与新讨论对其他 owner 的唤醒，并让通知摘要只消费实际渲染线程的 threshold；v1 写路径仅为 replay 一致性测试保留。验证：`npm test` 90 个文件、1212 个测试通过，`npm run test:browser` 8/8 通过，typecheck 与 build 通过。

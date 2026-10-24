@@ -27,7 +27,7 @@ Workspace 概览是当前页时，概览携带 `aria-current='page'`。与原先
 
 项目编辑器（`编辑项目`）：名称/说明输入框。保存钮无改动即禁用，这是 dirty 门。提交走 `updateProject` Remote，幂等 request 同载荷复用。成功后由投影刷新回填行文案，不做乐观行内改名。成员增删入口已撤销——Project 参与由 Thread 参与派生。
 
-项目编辑器的负责人区块（`负责人`，`TeamProjectOwners`）仅在 `view.rulesVersion >= 2` 时渲染：首行是固定的 Human（无移除钮），其后是 Agent 负责人（移除钮名为「移除负责人 @handle」），再列出该 Workspace 内尚非负责人的 enabled/suspended Agent（添加钮）。写入走 `addProjectOwner`/`removeProjectOwner`，非乐观，提交后随投影刷新出现；Host 报错显示在区块内的 alert。
+项目编辑器的负责人区块（`负责人`，`TeamProjectOwners`）始终渲染：首行是固定的 Human（无移除钮），其后是 Agent 负责人（移除钮名为「移除负责人 @handle」），再列出该 Workspace 内尚非负责人的 enabled/suspended Agent（添加钮）。写入走 `addProjectOwner`/`removeProjectOwner`，非乐观，提交后随投影刷新出现；Host 报错显示在区块内的 alert。
 
 Agent 编辑器（`编辑 Agent`）：名称/说明输入框 + 模型选择。模型选择复用公共 `Menu` 原语。触发钮呈 Input 形态：当前值 + 旋转 chevron。选项首行「跟随全局默认」，其后按 provider 分组标题 + 模型行，选中尾勾。目录经宿主级 `llm.models` 取得，不依赖任何活跃会话。提交走 `updateMember` Remote。缺省模型即清除覆盖，回到 Host 默认继承。改模型对活跃 Member 原地更新 live model selection，保持 Agent 与 Session 身份不变。后续请求使用新选择。纯展示编辑不重启。
 

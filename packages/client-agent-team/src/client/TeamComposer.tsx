@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent, ReactNode } from 'react'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
-import { IconChecklistOutlineMedium, IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchoredMaxHeight, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchoredMaxHeight, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { mentionSurfaceOf, mentionTierIsParticipant } from './mention-presentation.ts'
-import { allMentionMembers, containsAllMention, containsMention, HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
+import { containsMention, HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
 
@@ -20,8 +20,6 @@ interface MentionMatch {
 export type MentionTier = 'thread-follower' | 'project-peer' | 'workspace'
 
 const MENTION_TIER_RANK = { 'thread-follower': 0, 'project-peer': 1, workspace: 2 } as const satisfies Record<MentionTier, number>
-
-type MentionOption = { readonly kind: 'all' } | { readonly kind: 'member'; readonly status: AgentTeamClientMemberStatus; readonly tier: MentionTier }
 
 function findMention(draft: string, caret: number): MentionMatch | undefined {
   const beforeCaret = draft.slice(0, caret)
@@ -42,7 +40,7 @@ function mentionCandidates(members: readonly AgentTeamClientMemberStatus[], quer
     && status.member.handle.toLocaleLowerCase().startsWith(normalized))
 }
 
-/** A hint for the picker only: every tier stays eligible, but a lower tier means the Host may ask the Human to confirm before pulling the Member in. */
+/** A hint for the picker only: every tier stays eligible, but a lower tier only ranks lower. */
 function mentionTier(status: AgentTeamClientMemberStatus, followers: ReadonlySet<AgentTeamMemberId> | undefined,
   projectPeers: ReadonlySet<AgentTeamMemberId> | undefined): MentionTier {
   if (followers?.has(status.member.memberId) === true) return 'thread-follower'
@@ -96,7 +94,7 @@ function deliverableRecipients(
   ])].sort()
 }
 
-export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds, drafts, draftKey, pending, confirmation, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, asTask, onAsTaskChange, allMention = true, toolbarExtra, t }: {
+export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds, drafts, draftKey, pending, notice, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, toolbarExtra, t }: {
   readonly members: readonly AgentTeamClientMemberStatus[]
   /** Current Thread followers; the Thread surface passes them so they rank above other candidates. */
   readonly followerMemberIds?: ReadonlySet<AgentTeamMemberId>
@@ -106,7 +104,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   readonly drafts: TeamDraftStore
   readonly draftKey: TeamDraftKey
   readonly pending: boolean
-  readonly confirmation?: string
+  readonly notice?: string
   readonly error?: string
   /** The Human edited the draft: the hosting page drops its one-shot send state. */
   readonly onEdit?: () => void
@@ -117,11 +115,6 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   readonly onFilesChange?: (files: readonly File[]) => void
   readonly replyTo?: ReplyTarget | undefined
   readonly onCancelReply?: (() => void) | undefined
-  /** Project-only: create a real Task with the top-level Message. Default off. */
-  readonly asTask?: boolean
-  readonly onAsTaskChange?: (asTask: boolean) => void
-  /** Rules version 1 only: offer `@all` and expand it to a recipient snapshot. */
-  readonly allMention?: boolean
   /** Extra controls after the attach button, for surfaces whose send has modes. */
   readonly toolbarExtra?: ReactNode
   readonly t: TeamConversationProps['t']
@@ -137,16 +130,9 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   const [mention, setMention] = useState<MentionMatch>()
   const [highlight, setHighlight] = useState(0)
   const memberCandidates = mention === undefined ? [] : rankMentionCandidates(mentionCandidates(members, mention.query), followerMemberIds, projectPeerMemberIds)
-  const options: readonly MentionOption[] = mention !== undefined && allMention && 'all'.startsWith(mention.query.toLocaleLowerCase())
-    ? [{ kind: 'all' }, ...memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))]
-    : memberCandidates.map(status => ({ kind: 'member' as const, status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))
+  const options = memberCandidates.map(status => ({ status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))
   const menuOpen = mention !== undefined && options.length > 0
   const activeOption = options[highlight]
-  const activeOptionKey = activeOption === undefined ? undefined : activeOption.kind === 'all' ? 'all' : activeOption.status.member.memberId
-  // `@all` stands for the Project's own participants, not every name the body
-  // could address — the same split the Host's allRecipientsFor makes.
-  const allMembers = projectPeerMemberIds === undefined ? members : members.filter(status => projectPeerMemberIds.has(status.member.memberId))
-  const allCount = allMentionMembers(allMembers).length
   const mentionSurface = mentionSurfaceOf(draftKey)
   const listId = 'team-mention-suggestions'
   const menuMaxHeight = useAnchoredMaxHeight(menuRef, 320, menuOpen ? draft : null)
@@ -173,7 +159,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     if (!menuOpen) return
     // Optional call: jsdom renders the menu without a layout engine.
     activeOptionRef.current?.scrollIntoView?.({ block: 'nearest' })
-  }, [menuOpen, highlight, activeOptionKey])
+  }, [menuOpen, highlight, activeOption?.status.member.memberId])
 
   // Team data can load after navigation, so another control may already own focus; do not steal it.
   useEffect(() => {
@@ -182,18 +168,15 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     inputRef.current?.focus({ preventScroll: true })
   }, [])
 
-  // Confirmation settles after a read-only submission span; restore focus so the second Enter confirms immediately.
+  // A notice settles after a read-only submission span; restore focus so the Human can keep typing.
   useEffect(() => {
-    if (confirmation === undefined || pending) return
+    if (notice === undefined || pending) return
     inputRef.current?.focus({ preventScroll: true })
-  }, [confirmation, pending])
+  }, [notice, pending])
 
   const memberHandles = new Map(members.map(status => [status.member.memberId, status.member.handle]))
 
   const pruneRecipients = (nextDraft: string): void => {
-    // An @all marker stands for its expansion snapshot: the member handles it
-    // stands for are not in the text, so text-based pruning must stand down.
-    if (allMention && containsAllMention(nextDraft)) return
     const next = new Set([...recipients].filter(memberId => {
       const handle = memberHandles.get(memberId)
       return handle !== undefined && containsMention(nextDraft, handle)
@@ -238,18 +221,8 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     })
   }
 
-  const selectOption = (option: MentionOption): void => {
+  const selectOption = (option: (typeof options)[number]): void => {
     if (mention === undefined) return
-    if (option.kind === 'all') {
-      // Expand at pick time: the recipients snapshot is every eligible member
-      // a handle pick could reach at this moment.
-      const nextDraft = `${draft.slice(0, mention.start)}@all ${draft.slice(mention.end)}`
-      const nextCaret = mention.start + '@all '.length
-      const nextRecipients = new Set(recipients)
-      for (const status of allMentionMembers(allMembers)) nextRecipients.add(status.member.memberId)
-      commitMention(nextDraft, nextCaret, nextRecipients)
-      return
-    }
     const member = option.status
     const inserted = `@${member.member.handle} `
     const nextDraft = `${draft.slice(0, mention.start)}${inserted}${draft.slice(mention.end)}`
@@ -306,7 +279,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     if (!pending && draft.trim() !== '') onSubmit()
   }}>
     <div className={css.card} data-team-composer>
-      {confirmation !== undefined && <p className={css.confirmation} role="status">{confirmation}</p>}
+      {notice !== undefined && <p className={css.notice} role="status">{notice}</p>}
       {replyTo !== undefined && <div className={css.replyBanner} data-reply-banner="">
         <span className={css.replyBannerBody}>
           <span className={css.replyBannerAuthor}>{t('replyingTo', { name: replyTo.senderName })}</span>
@@ -318,41 +291,24 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
       <div className={css.inputArea}>
         {menuOpen && <div id={listId} ref={menuRef} className={css.mentionMenu} role="listbox" aria-label={t('mentionSuggestions')} style={{ maxHeight: menuMaxHeight }}>
           {options.map((option, index) => {
-            const optionId = option.kind === 'all' ? `${listId}-all` : `${listId}-${option.status.member.memberId}`
             const selected = index === highlight
-            return option.kind === 'all'
-              ? <button
-                  key="all"
-                  id={optionId}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  className={css.mentionOption}
-                  ref={selected ? activeOptionRef : undefined}
-                  onMouseDown={event => { event.preventDefault() }}
-                  onClick={() => { selectOption(option) }}
-                >
-                  <span className={css.mentionAllDot} aria-hidden="true" />
-                  <span className={css.mentionName}>@all</span>
-                  <span className={css.mentionDescription}>{t('mentionAll', { count: allCount })}</span>
-                </button>
-              : <button
-                  key={option.status.member.memberId}
-                  id={optionId}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  className={css.mentionOption}
-                  ref={selected ? activeOptionRef : undefined}
-                  onMouseDown={event => { event.preventDefault() }}
-                  onClick={() => { selectOption(option) }}
-                  data-mention-tier={MENTION_TIER_RANK[option.tier]}
-                  data-mention-inside={String(mentionTierIsParticipant(option.tier, mentionSurface))}
-                >
-                  <TeamPresenceDot status={option.status} t={t} />
-                  <span className={css.mentionName}>@{option.status.member.handle}</span>
-                  <span className={css.mentionDescription}>{option.status.member.description}</span>
-                </button>
+            return <button
+              key={option.status.member.memberId}
+              id={`${listId}-${option.status.member.memberId}`}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              className={css.mentionOption}
+              ref={selected ? activeOptionRef : undefined}
+              onMouseDown={event => { event.preventDefault() }}
+              onClick={() => { selectOption(option) }}
+              data-mention-tier={MENTION_TIER_RANK[option.tier]}
+              data-mention-inside={String(mentionTierIsParticipant(option.tier, mentionSurface))}
+            >
+              <TeamPresenceDot status={option.status} t={t} />
+              <span className={css.mentionName}>@{option.status.member.handle}</span>
+              <span className={css.mentionDescription}>{option.status.member.description}</span>
+            </button>
           })}
         </div>}
         <textarea
@@ -360,7 +316,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
           aria-label={t('messageDraft')}
           aria-autocomplete="list"
           aria-controls={menuOpen ? listId : undefined}
-          aria-activedescendant={menuOpen && activeOption !== undefined ? activeOption.kind === 'all' ? `${listId}-all` : `${listId}-${activeOption.status.member.memberId}` : undefined}
+          aria-activedescendant={menuOpen && activeOption !== undefined ? `${listId}-${activeOption.status.member.memberId}` : undefined}
           aria-expanded={menuOpen}
           value={draft}
           readOnly={pending}
@@ -407,20 +363,6 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
               </button>
             </Tooltip>
           </>
-        )}
-        {onAsTaskChange !== undefined && (
-          <button
-            type="button"
-            className={asTask === true ? `${css.asTaskPill} ${css.asTaskPillOn}` : css.asTaskPill}
-            aria-label={t('asTask')}
-            aria-pressed={asTask === true}
-            title={t('asTask')}
-            disabled={pending}
-            onClick={() => { onAsTaskChange(asTask !== true) }}
-          >
-            <IconChecklistOutlineMedium size={14} />
-            <span className={css.asTaskLabel}>{t('asTask')}</span>
-          </button>
         )}
         {toolbarExtra}
         <button

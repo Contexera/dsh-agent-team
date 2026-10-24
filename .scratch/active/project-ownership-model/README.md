@@ -2,9 +2,9 @@
 
 > 本工作项是 Channel → Project 的重设计容器：把“参与派生注意力”改成“责任派生注意力”。它不定义当前产品行为——行为以 `packages/` 源码、测试与 `docs/` 双语对为准。
 
-**状态**：设计已收敛，按九张工单实施中（01–05 已交付）。
+**状态**：设计已收敛，按九张工单实施中（01–06 完成；07 部分交付，08–09 未开始）。
 
-**最后核对日期**：2026-10-23
+**最后核对日期**：2026-10-24
 
 ## 入口
 
@@ -18,8 +18,10 @@
 - 原四张工单拆为九张（原文保留在 `materials/superseded-issues/`）。拆分原因：稳定 profile 与开发 profile 共用 `$DSH_HOME/storages/agent_team.sqlite`，改名必须先发布一个“读得懂 Project 写法”的版本；原 02 范围过大，拆为规则版本机制、owner、主对话、投递四步，规则版本 2 的标记在 06 完成前不写入真实 ledger。
 - 01 已完成（`feat: read the project spelling of stored channel records`），等待发布到稳定 profile。
 - 02 已完成（`refactor: rename channel to project across the bundle`），等待 Human 在本地 dev profile 用真实 `agent_team.sqlite` 副本验收。发布顺序：先发布含 01、不含 02 的版本并装到稳定 profile，再让开发 profile 使用 02。
-- 03 已完成（`feat: record rules version adoption in the team ledger`）。04 已完成（`feat: add project owners to the team ledger behind rules version 2`）。05 已完成（`feat: add the main stream and owner-only thread start behind rules version 2` 及 Client 的 `feat: show the project main stream with thread cards behind rules version 2`）。06 进行中；预览开关已移除，`AGENT_TEAM_RULES_VERSION` 升到 2，本构建打开的每个 ledger 都采用版本 2，测试用 Host 行的非 volatile `rulesVersion` 配置钉住版本 1 路径。
-- 05 的 Client 把版本 2 的主对话放在独立组件里（`TeamMainStream` 等）；06 删除 Client 的版本 1 路径（旧 feed、`@all`、邀请确认），Host 的版本 1 写入路径一并移除，只保留 replay 校验。
+- 03 已完成（`feat: record rules version adoption in the team ledger`）。04 已完成（`feat: add project owners to the team ledger behind rules version 2`）。05 已完成（`feat: add the main stream and owner-only thread start behind rules version 2` 及 Client 的 `feat: show the project main stream with thread cards behind rules version 2`）。06 可以开始；04–05 的规则按版本 2 编写，但 `AGENT_TEAM_RULES_VERSION` 在 06 完成前保持 1，真实 ledger 不会采用版本 2。
+- 06 已完成：通知按角色投递（owner 的 Main stream 消息与新讨论立即通知其他 owners；owner 的普通 Thread 消息按每 Member × 每 Thread 累计 5 条汇总，其余 follower 的普通消息立即通知）、Inbox 的 Main stream 行、persona 与 `team-domain-model` skill，`AGENT_TEAM_RULES_VERSION` 升到 2，Client 删除版本 1 的旧 feed、`@all` 与邀请确认；Host 侧版本 1 写路径仅为 replay 校验保留。预览开关 `DSH_AGENT_TEAM_PREVIEW_RULES` 一并删除。等待 Human 在 dev profile 用真实 ledger 试用一周并按 spec §11 复盘。
+- 07 部分交付：`taskBoard` 投影与 Remote 方法、`team_task` board 读取、`team_claim` 并入 `team_task`、`team_view` 不再返回 active task threads，Human 项目看板已有界面。待收尾：Human 项目看板改接 Host `taskBoard`，并实现全局看板；目前 Human 从有界 project 读取推导 open Tasks，finished 窗口受滚动加载影响。08 可并行开始，不要求等待 07 的 Client 收尾。
+- 当前本地 master 为 `908cf97`，尚未推送或发布。06/07 已验证：1212 个单测、浏览器 8/8、typecheck 与 build 通过。真实 `agent_team.sqlite` 被新构建打开后带版本 2 标记，≤0.2.5 的 profile 会拒绝打开；共用 `$DSH_HOME/storages/` 前必须备份并同步升级。
 - `spec.md` §13 三项探针：DM 的 Workspace 边界已在 Host `sendDm` 校验；旧 accept 缺 `acceptedClaimRefs` 时已有回退，03 补测试；规则标记与启动恢复的写入顺序已在 03 查清并由 `initialize()` 保证。
 - 版本 2 的规则在 04–06 间逐步落地；预览开关 `DSH_AGENT_TEAM_PREVIEW_RULES` 已移除，版本 2 是默认规则，无需任何环境变量。
 - 无需要 Human 拍板的未决产品问题。
@@ -31,8 +33,8 @@
 - [x] 03 规则版本机制
 - [x] 04 Agent owner 与 Project member 派生
 - [x] 05 项目主对话与开 Thread 权限
-- [ ] 06 按责任投递、Inbox 与 Agent 指引；规则版本 2 已随移除预览开关启用；完成后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续
-- [ ] 07 Task board 投影与 `team_task`
+- [x] 06 按责任投递、Inbox 与 Agent 指引；启用规则版本 2（交付后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续）
+- [ ] 07 Task board 投影与 `team_task`（Host/Agent 已交付；Human 项目看板接 Host 投影与全局看板待做）
 - [ ] 08 Task 负责人、转交与验收限制；启用规则版本 3
 - [ ] 09 待验收积压与停滞提醒
 - [ ] durable 结论进入正式文档双语对与 `CHANGELOG.md`

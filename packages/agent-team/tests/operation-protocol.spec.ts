@@ -1066,28 +1066,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
   'team/message-sent': {
     stored: messageSent,
     legacyShapes: [],
-    retry: {
-      same: async () => {
-        const out = await ledger.sendMessage({
-          requestId: messageSent.requestId,
-          actor: human,
-          workspaceId: messageSent.data.workspaceId,
-          projectRef: messageSent.data.message.projectRef,
-          body: messageSent.data.message.body,
-          asTask: false,
-        })
-        expect(mappedCommitted(out.value).message.messageRef, 'the send mapper answers with the stored Message').toBe(messageSent.data.message.messageRef)
-        return out
-      },
-      changed: () => ledger.sendMessage({
-        requestId: messageSent.requestId,
-        actor: human,
-        workspaceId: messageSent.data.workspaceId,
-        projectRef: messageSent.data.message.projectRef,
-        body: 'a different body under the same request id',
-        asTask: false,
-      }),
-    },
+    retry: { replayOnly: 'retired request path: rules version 1 wrote top-level sends and startThread replaced them, so only old-ledger replay reads it' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'delta' },
   },
@@ -1327,7 +1306,6 @@ async function seedLedger(): Promise<void> {
   const table = domain.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
   const refCounts = new Map<string, number>()
   ledger = new AgentTeamLedger(table, {
-    rulesVersion: 1,
     ref: kind => {
       const next = (refCounts.get(kind) ?? 0) + 1
       refCounts.set(kind, next)
@@ -1354,13 +1332,13 @@ async function seedLedger(): Promise<void> {
     memberIds: [memberId],
   }))
   expect(created.project.projectRef, 'seed Project must take the deterministic ref the fixtures pin').toBe(projectRef)
-  const fromHuman = committedValue(await ledger.sendMessage({
-    requestId: requestId('seed:human-message'), actor: human, workspaceId: alpha, projectRef, body: 'seed human thread', asTask: false,
+  const fromHuman = committedValue(await ledger.startThread({
+    requestId: requestId('seed:human-message'), actor: human, workspaceId: alpha, projectRef, body: 'seed human thread', kind: 'discussion',
   }))
   if (fromHuman.kind !== 'committed') throw new Error(`seed message committed as '${fromHuman.kind}'`)
   expect(fromHuman.thread.threadRef, 'seed Thread must take the deterministic ref the fixtures pin').toBe(humanThread)
-  const fromMember = committedValue(await ledger.sendMessage({
-    requestId: requestId('seed:member-message'), actor: memberActor, workspaceId: alpha, projectRef, body: 'seed member thread', asTask: false,
+  const fromMember = committedValue(await ledger.startThread({
+    requestId: requestId('seed:member-message'), actor: human, workspaceId: alpha, projectRef, body: 'seed member thread', kind: 'discussion',
   }))
   if (fromMember.kind !== 'committed') throw new Error(`seed message committed as '${fromMember.kind}'`)
   expect(fromMember.thread.threadRef, 'seed Thread must take the deterministic ref the fixtures pin').toBe(memberThread)

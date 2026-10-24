@@ -178,8 +178,8 @@ describe('Agent Team real composition', () => {
     const workspaceId = 'workspace:00000000-0000-4000-8000-0000000000aa' as WorkspaceId
     const first = await load(pool)
     const project = await first.agentTeam.createProject({ requestId: requestId('project'), workspaceId, name: 'engineering', description: 'Engineering work' })
-    const anchor = committed(await first.agentTeam.startThread({ requestId: requestId('anchor'), workspaceId,
-      projectRef: project.project.projectRef, kind: 'discussion', body: 'Please investigate this' }))
+    const anchor = committed(await first.agentTeam.startThread({ kind: 'discussion', requestId: requestId('anchor'), workspaceId,
+      projectRef: project.project.projectRef, body: 'Please investigate this' }))
     const reply = committed(await first.agentTeam.reply({ requestId: requestId('reply'), workspaceId,
       threadRef: anchor.thread.threadRef, baseRevision: anchor.thread.revision, body: 'Looking now',
       replyToMessageRef: anchor.message.messageRef }))

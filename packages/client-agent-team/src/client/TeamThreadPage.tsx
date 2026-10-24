@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import type {
   AgentTeamClientMemberStatus,
   AgentTeamProjectRef,
-  AgentTeamConfirmationToken,
   AgentTeamMemberId,
   AgentTeamMessageRef,
   AgentTeamRequestId,
@@ -91,8 +90,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const [projection, setProjection] = useState<ReadProjection>()
   const [projectView, setProjectView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
-  // Current Thread followers; the composer ranks them first because a mention
-  // to a follower delivers directly instead of entering the invite detour.
+  // Current Thread followers; the composer ranks them first because they are already in the conversation.
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
   const [currentFacts, setCurrentFacts] = useState<readonly AgentTeamThreadFact[]>([])
   const [olderFacts, setOlderFacts] = useState<readonly AgentTeamThreadFact[]>([])
@@ -119,8 +117,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // The Message this opening lands on, held until its row exists: the jump is
   // decided from the first read, and rows render a paint later.
   const [pendingJump, setPendingJump] = useState<AgentTeamMessageRef>()
-  const [confirmation, setConfirmation] = useState<AgentTeamConfirmationToken>()
-  const [statusMessage, setStatusMessage] = useState<string>()
   const [pending, setPending] = useState(false)
   // Label source for the promote/accept buttons only: a reply send also raises
   // the shared `pending` gate, and must not retitle those buttons.
@@ -299,7 +295,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     setPendingJump(undefined)
     setOpenCard(undefined)
     setError(undefined)
-    setStatusMessage(undefined)
     const sequence = sequenceRef.current + 1
     sequenceRef.current = sequence
     setLoading(true)
@@ -689,11 +684,9 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   }
 
   // Every setter returns the same state when there is nothing to clear, so a keystroke does not re-render the timeline.
-  // Editing invalidates the confirmation token, the retained requestId, and the status line.
+  // Editing invalidates the retained requestId.
   const clearSendState = useCallback((): void => {
-    setConfirmation(current => current === undefined ? current : undefined)
     setReplyRequestId(current => current === undefined ? current : undefined)
-    setStatusMessage(current => current === undefined ? current : undefined)
   }, [])
 
   const sendReply = async (): Promise<void> => {
@@ -711,7 +704,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         return
       }
       const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }), ...(confirmation === undefined ? {} : { confirmationToken: confirmation }) })
+      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }) })
       if (!result.ok) {
         setError(result.error.message)
         return
@@ -730,29 +723,15 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         setReplyTarget(undefined)
         setPendingFiles([])
         setReplyRequestId(undefined)
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
         await refreshSupplemental()
-      } else if (result.value.kind === 'confirmation_required') {
-        setConfirmation(result.value.confirmationToken)
-        setStatusMessage(t('mentionConfirmation'))
       } else if (result.value.kind === 'unread_required') {
         setError(t('unreadRequired', { count: result.value.unreadCount }))
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
         setReplyRequestId(undefined)
         await refreshAfterFence()
       } else if (result.value.kind === 'stale_revision') {
         setError(t('staleRevision'))
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
         setReplyRequestId(undefined)
         await refreshPassiveFacts()
-      } else {
-        setError(t('memberNotFollowing', { ids: result.value.memberIds.map(memberId => `@${members.find(candidate => candidate.member.memberId === memberId)?.member.handle ?? memberId}`).join(', ') }))
-        setConfirmation(undefined)
-        setStatusMessage(undefined)
-        setReplyRequestId(undefined)
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -874,12 +853,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}
-      {...(statusMessage === undefined ? {} : { confirmation: statusMessage })}
       {...(error === undefined ? {} : { error })}
       onEdit={clearSendState}
       onSubmit={() => { void sendReply() }}
       placeholder={t('replyPlaceholder')}
-      allMention={(projectView?.rulesVersion ?? 1) < 2}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
       {...(replyTarget === undefined ? {} : {

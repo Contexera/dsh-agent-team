@@ -260,18 +260,8 @@ describe('Team agent surfaces', () => {
     return b.view.getByRole('dialog', { name: '编辑项目' })
   }
 
-  it('hides the Project owners editor while the Host runs rules version 1', async () => {
-    const b = await runtimeWithTeam({ initialProjects: true })
-    const editor = await openProjectEditor(b)
-    await waitFor(() => { expect(b.viewProjects).toHaveBeenCalled() })
-    expect(within(editor).queryByRole('group', { name: '负责人' })).toBeNull()
-    expect(within(editor).queryByRole('button', { name: /负责人/ })).toBeNull()
-    fireEvent.keyDown(document, { key: 'Escape' })
-    await b.runtime.dispose()
-  })
-
   it('grants and withdraws Agent owners non-optimistically beside the fixed Human owner', async () => {
-    const b = await runtimeWithTeam({ initialProjects: true, rulesVersion: 2 })
+    const b = await runtimeWithTeam({ initialProjects: true })
     const editor = await openProjectEditor(b)
     const owners = await within(editor).findByRole('group', { name: '负责人' })
     // The Human always owns the Project: named, marked, and without a remove control.
@@ -306,12 +296,12 @@ describe('Team agent surfaces', () => {
   })
 
   it('keeps a Host owner error visible and leaves the owners unchanged', async () => {
-    const b = await runtimeWithTeam({ initialProjects: true, rulesVersion: 2 })
+    const b = await runtimeWithTeam({ initialProjects: true })
     const editor = await openProjectEditor(b)
     const owners = await within(editor).findByRole('group', { name: '负责人' })
-    b.failProjectOwnerWrite('Project owners need rules version 2')
+    b.failProjectOwnerWrite('Project owner write refused')
     fireEvent.click(within(owners).getByRole('button', { name: '添加负责人 @builder' }))
-    expect((await within(owners).findByRole('alert')).textContent).toBe('Project owners need rules version 2')
+    expect((await within(owners).findByRole('alert')).textContent).toBe('Project owner write refused')
     expect(within(owners).queryByRole('button', { name: '移除负责人 @builder' })).toBeNull()
     expect((within(owners).getByRole('button', { name: '添加负责人 @builder' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.keyDown(document, { key: 'Escape' })

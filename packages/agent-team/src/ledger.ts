@@ -59,7 +59,6 @@ import type {
   AgentTeamCreateProjectResult,
   AgentTeamDirectMarker,
   AgentTeamDmRequest,
-  AgentTeamActiveTaskThread,
   AgentTeamDmResult,
   AgentTeamDmSentOperation,
   AgentTeamHostActor,
@@ -69,6 +68,10 @@ import type {
   AgentTeamInboxRequest,
   AgentTeamInboxDelta,
   AgentTeamInboxItem,
+  AgentTeamMainInboxItem,
+  AgentTeamTaskBoard,
+  AgentTeamTaskBoardItem,
+  AgentTeamTaskBoardRequest,
   AgentTeamInitializedOperation,
   AgentTeamJoinProjectRequest,
   AgentTeamJoinProjectResult,
@@ -110,8 +113,6 @@ import type {
   AgentTeamResolvedTaskRef,
   AgentTeamResolvedThreadRef,
   AgentTeamMessageAttachment,
-  AgentTeamSendMessageRequest,
-  AgentTeamSendMessageResult,
   AgentTeamSetMemberStateRequest,
   AgentTeamStaleRevision,
   AgentTeamStatus,
@@ -187,6 +188,9 @@ export function agentTeamHumanActor(): AgentTeamHumanActor {
 
 const HOST_ACTOR: AgentTeamHostActor = Object.freeze({ kind: 'host', handle: 'agent-team' })
 
+/** Finished Tasks the board keeps per Project. */
+export const TASK_BOARD_FINISHED_PER_PROJECT = 5
+
 /** Highest validation-rules version this build implements; a ledger segment without a marker is version 1. */
 export const AGENT_TEAM_RULES_VERSION = 2
 
@@ -245,12 +249,6 @@ export interface AgentTeamAuthorizedJoinWorkspaceRequest extends AgentTeamJoinWo
 
 export interface AgentTeamAuthorizedLeaveWorkspaceRequest extends AgentTeamLeaveWorkspaceRequest {
   readonly actor: AgentTeamHumanActor
-}
-
-export interface AgentTeamAuthorizedSendMessageRequest extends AgentTeamSendMessageRequest {
-  readonly actor: AgentTeamHumanActor | AgentTeamMemberActor
-  /** Metadata the Host resolved from the attachment cache before the append. */
-  readonly resolvedAttachments?: readonly AgentTeamMessageAttachment[] | undefined
 }
 
 export interface AgentTeamAuthorizedPostMainMessageRequest extends AgentTeamPostMainMessageRequest {
@@ -1082,53 +1080,6 @@ export class AgentTeamLedger {
     })
   }
 
-  sendMessage(request: AgentTeamAuthorizedSendMessageRequest): Promise<AgentTeamLedgerResult<AgentTeamSendMessageResult>> {
-    return this.enqueue(async () => {
-      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
-      const project = this.requireActiveProject(request.workspaceId, request.projectRef)
-      if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), project.projectRef)
-      const body = request.body.trim()
-      if (body === '') throw new Error('message body must not be empty')
-      const recipients = this.mergeBodyMentions(actor.memberId, project.projectRef, body, this.normalizeRecipients(request.actor, request.recipients))
-      const existing = this.state.byRequest.get(request.requestId)
-      if (existing !== undefined) {
-        this.assertSameMessage(existing, request, recipients)
-        return this.resolved(this.messageResult(existing))
-      }
-      if (this.state.rulesVersion >= 2) throw new Error('top-level sends are replaced by startThread from rules version 2')
-      this.assertMentionTargets(project, recipients)
-      // Top-level Task creation is open to every actor: mentioned Members join
-      // the new Thread as followers. Only existing-Thread invitations stay
-      // Human-gated (reply path).
-      const sequence = this.nextSequence()
-      const base = this.operationBase(request, sequence)
-      const asTask = request.asTask === true
-      const threadRef = this.ref('thread')
-      const taskRef = asTask ? this.ref('task') : undefined
-      const task = taskRef === undefined ? undefined
-        : Object.freeze({ taskRef, projectRef: project.projectRef, threadRef, status: 'todo' as const, resolution: 'open' as const })
-      const thread: AgentTeamThread = Object.freeze({ threadRef, ...(taskRef === undefined ? {} : { taskRef }), revision: sequence })
-      const message: AgentTeamMessage = Object.freeze({
-        messageRef: this.ref('message'), projectRef: project.projectRef, threadRef, ...(taskRef === undefined ? {} : { taskRef }),
-        sender: request.actor.memberId, body,
-        ...(request.resolvedAttachments === undefined ? {} : { attachments: request.resolvedAttachments }),
-        topLevel: true, sequence, occurredAt: base.occurredAt,
-      })
-      const started = [this.startAttention(request.actor.memberId, threadRef, sequence),
-        ...recipients.filter(memberId => this.state.members.has(memberId))
-          .map(memberId => this.startAttention(memberId, threadRef, sequence))]
-      const inbox = this.messageInboxDelta(message, request.actor.memberId, recipients, started)
-      const operation: AgentTeamMessageSentOperation = Object.freeze({
-        ...base, kind: 'team/message-sent',
-        data: Object.freeze({ workspaceId: request.workspaceId, mentions: recipients, message,
-          ...(task === undefined ? {} : { task }), thread, inbox }),
-      })
-      await this.table.put(operation.operationId, operation)
-      this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.messageResult(operation))
-    })
-  }
-
   reply(request: AgentTeamAuthorizedReplyRequest): Promise<AgentTeamLedgerResult<AgentTeamReplyResult>> {
     return this.enqueue(async () => {
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
@@ -1341,16 +1292,13 @@ export class AgentTeamLedger {
       standing: this.mainStandingFrom(this.state, authorized.memberId, project.projectRef) })
   }
 
-  /** What one Member's Main stream markers say, per Project, for the Host's wake: only direct entries, never ordinary owner unread. */
+  /** One Member's unread Main stream entries, per Project, for the Host's wake: an owner's ordinary unread and every reader's markers. */
   mainNotificationFacts(memberId: AgentTeamMemberId): readonly { readonly project: AgentTeamProject; readonly entries: readonly AgentTeamMainTimelineEntry[] }[] {
-    const buckets = this.state.mainMarkersByMember.get(memberId)
-    if (buckets === undefined) return []
     const result: { project: AgentTeamProject; entries: readonly AgentTeamMainTimelineEntry[] }[] = []
-    for (const projectRef of buckets.keys()) {
-      const project = this.visibleProject(this.state.projects.get(projectRef))
-      if (project === undefined || !this.participatesIn(memberId, project.workspaceId)) continue
-      const direct = this.mainUnreadFrom(this.state, memberId, projectRef).filter(item => item.direct)
-      if (direct.length > 0) result.push({ project, entries: this.mainEntries(direct.map(item => item.source), direct) })
+    for (const project of this.state.projects.values()) {
+      if (this.visibleProject(project) === undefined || !this.participatesIn(memberId, project.workspaceId)) continue
+      const unread = this.mainUnreadFrom(this.state, memberId, project.projectRef)
+      if (unread.length > 0) result.push({ project, entries: this.mainEntries(unread.map(item => item.source), unread) })
     }
     return Object.freeze(result)
   }
@@ -1765,10 +1713,80 @@ export class AgentTeamLedger {
     const recent = authorized.kind === 'human'
       ? this.recentInboxItems(authorized.memberId, workspaceIds[0]!, unreadThreads, taskNumbers)
       : Object.freeze([] as AgentTeamInboxItem[])
+    const main = this.mainInboxItems(authorized.memberId, workspaceIds)
     return Object.freeze({ humanMemberId: this.initialization().data.humanMemberId,
-      items: Object.freeze(selected), hasMore: candidates.length > selected.length, recent,
-      totalUnreadCount: candidates.reduce((sum, item) => sum + item.unreadCount, 0),
-      totalDirectCount: candidates.reduce((sum, item) => sum + item.directCount, 0) })
+      items: Object.freeze(selected), hasMore: candidates.length > selected.length, main, recent,
+      totalUnreadCount: [...candidates, ...main].reduce((sum, item) => sum + item.unreadCount, 0),
+      totalDirectCount: [...candidates, ...main].reduce((sum, item) => sum + item.directCount, 0) })
+  }
+
+  taskBoard(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamTaskBoardRequest): AgentTeamTaskBoard {
+    const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
+    return this.taskBoardFor(authorized, [request.workspaceId], request)
+  }
+
+  memberTaskBoard(actor: AgentTeamMemberActor, request: Omit<AgentTeamTaskBoardRequest, 'workspaceId'>): AgentTeamTaskBoard {
+    const workspaces = this.workspacesOf(actor.memberId)
+    for (const workspaceId of workspaces) this.assertActorForWorkspace(actor, workspaceId)
+    return this.taskBoardFor(actor, workspaces, request)
+  }
+
+  private taskBoardFor(authorized: AgentTeamHumanActor | AgentTeamMemberActor, workspaceIds: readonly WorkspaceId[],
+    request: Omit<AgentTeamTaskBoardRequest, 'workspaceId'>): AgentTeamTaskBoard {
+    const memberId = authorized.memberId
+    if (request.projectRef !== undefined) {
+      const project = this.state.projects.get(request.projectRef)
+      if (project === undefined || !workspaceIds.includes(project.workspaceId)) throw new Error(`unknown Project ref '${request.projectRef}'`)
+      this.requireActiveProject(project.workspaceId, request.projectRef)
+      if (authorized.kind === 'member' && !this.isProjectMember(request.projectRef, memberId)) throw new Error(`Agent Member '${memberId}' is not authorized for Project '${request.projectRef}'`)
+    }
+    const taskNumbers = new Map(workspaceIds.flatMap(workspaceId => [...this.taskNumbers(workspaceId)]))
+    const open: AgentTeamTaskBoardItem[] = []
+    const finishedByProject = new Map<AgentTeamProjectRef, AgentTeamTaskBoardItem[]>()
+    for (const task of this.state.tasks.values()) {
+      if (request.projectRef !== undefined && task.projectRef !== request.projectRef) continue
+      const project = this.visibleProject(this.state.projects.get(task.projectRef))
+      if (project === undefined || !workspaceIds.includes(project.workspaceId)) continue
+      if (authorized.kind === 'member' && !this.isProjectMember(task.projectRef, memberId)) continue
+      const executor = this.hasActiveClaim(memberId, task.taskRef)
+      if (request.mine === true && !executor) continue
+      const newest = (this.state.factsByThread.get(task.threadRef) ?? []).at(-1)
+      if (newest === undefined) continue
+      const item: AgentTeamTaskBoardItem = Object.freeze({ workspaceId: project.workspaceId, projectRef: project.projectRef, projectName: project.name,
+        task, taskNumber: taskNumbers.get(task.taskRef) ?? 0, threadRef: task.threadRef,
+        subject: boundedOpeningLine(this.threadAnchor(task.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
+        liveClaimOwners: this.liveClaimOwners(task), lastActivitySequence: newest.sequence, lastActivityAt: newest.occurredAt,
+        relation: executor ? 'executor' : authorized.kind === 'human' || this.ownerSinceFrom(this.state, task.projectRef, memberId) !== undefined ? 'project-owner' : 'none' })
+      if (task.status === 'done' || task.status === 'closed') {
+        const finished = finishedByProject.get(task.projectRef) ?? []
+        finished.push(item)
+        finishedByProject.set(task.projectRef, finished)
+      } else {
+        open.push(item)
+      }
+    }
+    const newestFirst = (left: AgentTeamTaskBoardItem, right: AgentTeamTaskBoardItem) => right.lastActivitySequence - left.lastActivitySequence
+    const finished = [...finishedByProject.values()].flatMap(items => items.sort(newestFirst).slice(0, TASK_BOARD_FINISHED_PER_PROJECT)).sort(newestFirst)
+    return Object.freeze({ open: Object.freeze(open.sort(newestFirst)), finished: Object.freeze(finished) })
+  }
+
+  private mainInboxItems(memberId: AgentTeamMemberId, workspaceIds: readonly WorkspaceId[]): readonly AgentTeamMainInboxItem[] {
+    const rows: AgentTeamMainInboxItem[] = []
+    for (const project of this.state.projects.values()) {
+      if (!workspaceIds.includes(project.workspaceId) || this.visibleProject(project) === undefined) continue
+      const unread = this.mainUnreadFrom(this.state, memberId, project.projectRef)
+      if (unread.length === 0) continue
+      const newest = unread.at(-1)!
+      const entry = this.mainEntry(newest.source, true, newest.direct)
+      const previewText = entry.kind === 'message' ? boundedOpeningLine(entry.message.body, ONE_LINE_GIST_MAX_CHARACTERS)
+        : entry.kind === 'thread-card' ? entry.card.anchor.preview : undefined
+      rows.push(Object.freeze({ workspaceId: project.workspaceId, projectRef: project.projectRef, projectName: project.name,
+        unreadCount: unread.length, directCount: unread.filter(item => item.direct).length,
+        ...(previewText === undefined ? {} : { previewText }), newestSequence: newest.source.sequence, newestOccurredAt: entry.occurredAt,
+        newestActor: this.memberActor(this.mainProducerFrom(this.state, newest.source) ?? this.initialization().data.humanMemberId) }))
+    }
+    rows.sort((left, right) => right.directCount - left.directCount || right.newestSequence - left.newestSequence)
+    return Object.freeze(rows)
   }
 
   private inboxActorFor(fact: AgentTeamThreadFact): AgentTeamInboxActor {
@@ -2207,7 +2225,6 @@ export class AgentTeamLedger {
       threads: Object.freeze(catalogThreads),
       taskNumbers: Object.freeze(catalogTasks.map(task => Object.freeze({ taskRef: task.taskRef, taskNumber: taskNumbers.get(task.taskRef) ?? 0 }))),
       items: Object.freeze(items),
-      activeTaskThreads: this.activeTaskThreads(catalogTasks, taskNumbers),
       claims: this.claimsForVisibleTasks(catalogTasks),
       activities: Object.freeze(selected.filter((fact): fact is Extract<AgentTeamThreadFact, { kind: 'activity' }> => fact.kind === 'activity').map(fact => fact.activity)),
       cursor: nextCursor,
@@ -2403,6 +2420,17 @@ export class AgentTeamLedger {
       for (const follower of this.state.attentionByThread.get(threadRef) ?? []) members.add(follower)
     }
     if (operation.kind === 'team/member-workspace-joined' || operation.kind === 'team/member-workspace-left') members.add(operation.data.memberId)
+    // An owner's ordinary Main stream post and a new discussion wake the other
+    // owners immediately; a new Task does not — the other owners read it off the
+    // board. Without this the wake only follows inbox deltas, so an owner's
+    // derived unread grows with no commit ever notifying them.
+    if (operation.kind === 'team/main-message-posted' || (operation.kind === 'team/thread-started' && operation.data.task === undefined)) {
+      const sender = operation.actor.kind === 'host' ? undefined : operation.actor.memberId
+      const projectRef = operation.kind === 'team/main-message-posted' ? operation.data.message.projectRef : operation.data.projectRef
+      for (const owner of this.projectOwnerIds(projectRef)) {
+        if (sender === undefined || owner !== sender) members.add(owner)
+      }
+    }
     if (operation.actor.kind === 'member') members.add(operation.actor.memberId)
     return [...members]
   }
@@ -4414,39 +4442,6 @@ export class AgentTeamLedger {
     return Object.freeze(tasks.flatMap(task => [...(this.state.claimsByTask.get(task.taskRef) ?? [])]))
   }
 
-  /**
-   * The team_view「活跃 task thread」radar for a Workspace: every visible Task
-   * still in flight — in_progress or in_review, the two states a live Claim
-   * keeps a Task in — newest activity first. Unlike `recentInboxItems`, this is
-   * not a participation slice: admission is the Task being active in a Project
-   * the reader can see, whether or not the reader wrote in it, and a Thread
-   * still holding the reader's unread is not excluded. Rows carry the same
-   * `liveClaimOwners`口径 the Inbox and Project feed already use, so 「谁在这个
-   * Task 上」 never gains a second definition. Archived Projects are already
-   * absent from `visibleTasks`, so their Tasks never reach here.
-   */
-  private activeTaskThreads(visibleTasks: readonly AgentTeamTask[],
-    taskNumbers: ReadonlyMap<AgentTeamTaskRef, number>): readonly AgentTeamActiveTaskThread[] {
-    const rows: { row: AgentTeamActiveTaskThread; sequence: number }[] = []
-    for (const task of visibleTasks) {
-      if (task.status !== 'in_progress' && task.status !== 'in_review') continue
-      const thread = this.state.threads.get(task.threadRef)
-      if (thread === undefined) continue
-      const newest = (this.state.factsByThread.get(thread.threadRef) ?? []).at(-1)
-      if (newest === undefined) continue
-      const taskNumber = taskNumbers.get(task.taskRef)
-      rows.push({
-        row: Object.freeze({ taskRef: task.taskRef, threadRef: thread.threadRef, projectRef: task.projectRef,
-          ...(taskNumber === undefined ? {} : { taskNumber }), status: task.status,
-          subject: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
-          members: this.liveClaimOwners(task), lastActivityAt: newest.occurredAt }),
-        sequence: newest.sequence,
-      })
-    }
-    rows.sort((left, right) => right.sequence - left.sequence || left.row.threadRef.localeCompare(right.row.threadRef))
-    return Object.freeze(rows.map(entry => entry.row))
-  }
-
   private tasksForClaims(claims: readonly AgentTeamClaim[], projected: ReadonlyMap<AgentTeamClaimRef, AgentTeamClaim>): readonly AgentTeamTask[] {
     return Object.freeze([...new Set(claims.map(claim => claim.taskRef))].map(taskRef => {
       const task = this.state.tasks.get(taskRef)!
@@ -4494,7 +4489,7 @@ export class AgentTeamLedger {
   }
 
   /** Commit projections shared by the Message-sent and Thread-replied results. */
-  private committedMessageResult(operation: AgentTeamMessageSentOperation | AgentTeamThreadRepliedOperation, undelivered: readonly AgentTeamMemberId[] = []) {
+  private committedMessageResult(operation: AgentTeamThreadRepliedOperation, undelivered: readonly AgentTeamMemberId[] = []) {
     return { kind: 'committed' as const, receipt: this.receipt(operation), message: operation.data.message,
       ...(operation.data.task === undefined ? {} : { task: operation.data.task }), thread: operation.data.thread, attention: operation.data.inbox.attention.set,
       directMarkers: operation.data.inbox.directMarkers.added,
@@ -5165,15 +5160,6 @@ export class AgentTeamLedger {
     return Object.freeze({ receipt: this.receipt(operation), recipient: this.requireMember(operation.data.recipientMemberId) })
   }
 
-  private assertSameMessage(operation: AgentTeamOperation, request: AgentTeamAuthorizedSendMessageRequest, recipients: readonly AgentTeamMemberId[]): asserts operation is AgentTeamMessageSentOperation {
-    if (operation.kind !== 'team/message-sent' || !this.sameActor(operation.actor, request.actor)
-      || operation.data.workspaceId !== request.workspaceId || operation.data.message.projectRef !== request.projectRef
-      || operation.data.message.body !== request.body.trim() || !this.sameList(operation.data.mentions, recipients)
-      || !this.sameList(operation.data.message.attachments?.map(attachment => attachment.attachmentId) ?? [],
-        request.resolvedAttachments?.map(attachment => attachment.attachmentId) ?? [])
-      || (request.asTask === true) !== (operation.data.task !== undefined)) this.throwRequestCollision(request.requestId)
-  }
-
   private assertSameReply(operation: AgentTeamOperation, request: AgentTeamAuthorizedReplyRequest, recipients: readonly AgentTeamMemberId[]): asserts operation is AgentTeamThreadRepliedOperation {
     if (operation.kind !== 'team/thread-replied' || !this.sameActor(operation.actor, request.actor)
       || operation.data.workspaceId !== request.workspaceId
@@ -5342,10 +5328,6 @@ export class AgentTeamLedger {
   private projectArchivalResult(operation: AgentTeamProjectArchivedOperation): AgentTeamArchiveProjectResult {
     return Object.freeze({ receipt: this.receipt(operation), project: operation.data.project,
       releasedClaims: operation.data.claims })
-  }
-
-  private messageResult(operation: AgentTeamMessageSentOperation): Extract<AgentTeamSendMessageResult, { kind: 'committed' }> {
-    return Object.freeze(this.committedMessageResult(operation))
   }
 
   private replyResult(operation: AgentTeamThreadRepliedOperation, undelivered: readonly AgentTeamMemberId[] = []): Extract<AgentTeamReplyResult, { kind: 'committed' }> {

@@ -1,31 +1,24 @@
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { AgentTeamClientMemberStatus, AgentTeamProjectRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamSendMessageRequest, AgentTeamTask, AgentTeamView, AgentTeamViewItem,
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import type { AgentTeamClientMemberStatus, AgentTeamProjectRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamTask, AgentTeamView, AgentTeamViewItem,
   AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-import { Button, IconChevronRightOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
-import { mintRequestId, uploadComposerFiles } from './requests.ts'
-import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
-import { TeamComposer } from './TeamComposer.tsx'
+import type { TeamDraftStore } from './drafts.ts'
 import { TeamMainStream } from './TeamMainStream.tsx'
 import { TeamProjectPanel } from './TeamProjectPanel.tsx'
 import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
-import { TeamMessage } from './TeamMessage.tsx'
-import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman, type TeamAvatarOwner } from './TeamAvatarStack.tsx'
+import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
-import { TeamRunDivider } from './TeamRunDivider.tsx'
-import { claimersLabel, formatAbsoluteTime, formatDateOnly, formatInboxTime, formatTaskStatus, formatTaskTitle, taskStatusDot, mentionNamesOf } from './team-formatters.ts'
+import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskTitle, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
-import { useTimelineScroll } from './timeline-scroll.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
 import { rosterProjectName, rosterMember } from './refs.ts'
-import { chunkRunsWithDays, isRunGap } from './team-separators.ts'
 import projectCss from './project.module.css'
 import css from './conversation.module.css'
-import threadCss from './thread.module.css'
 
 interface TeamProjectPageProps {
   readonly workspaceId: WorkspaceId
@@ -40,7 +33,6 @@ interface TeamProjectPageProps {
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
-  readonly sendMessage: TeamConversationProps['sendMessage']
   readonly postMainMessage: TeamConversationProps['postMainMessage']
   readonly startThread: TeamConversationProps['startThread']
   readonly readMainStream: TeamConversationProps['readMainStream']
@@ -78,18 +70,6 @@ function hasOlderBeyondFreshWindow(current: AgentTeamView, fresh: AgentTeamView)
   return current.cursor < fresh.cursor
 }
 
-/** Latest fact instant, or nothing when the entry's own Message is the newest on its Thread. */
-function newerActivityAt(item: AgentTeamViewItem): string | undefined {
-  const lastActivityAt: string | undefined = item.lastActivityAt
-  return lastActivityAt === undefined || lastActivityAt === item.message.occurredAt ? undefined : lastActivityAt
-}
-
-/** Resolved Tasks print their resolution day instead (see `ThreadEntryRow`), so recency is omitted for them. */
-function unresolvedFollowUpAt(item: AgentTeamViewItem): string | undefined {
-  const status = item.task?.status
-  return status === 'done' || status === 'closed' ? undefined : newerActivityAt(item)
-}
-
 /** Zero unread is the absence of a badge. A failed read keeps the previous counts rather than rendering as "everything was consumed". */
 function applyInboxRead(
   previous: ReadonlyMap<AgentTeamThreadRef, number>,
@@ -99,37 +79,30 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, sendMessage, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
   const [actionError, setError] = useState<string>()
   const [loadError, setLoadError] = useState<string>()
   const error = actionError ?? loadError
-  const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
-  const [statusMessage, setStatusMessage] = useState<string>()
   const [loading, setLoading] = useState(true)
-  const [pending, setPending] = useState(false)
-  const [asTask, setAsTask] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
-  const [tab, setTab] = useState<'feed' | 'board'>('feed')
+  const [tab, setTab] = useState<'main' | 'board'>('main')
   const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
   // The surface owns the panel-width variable; a drag writes it there so this page never re-renders.
   const [panelSurface, setPanelSurface] = useState<HTMLElement | null>(null)
-  // The draft cache outlives this page across view switches; the composer owns the subscription so typing never re-renders the timeline.
-  const draftKey: TeamDraftKey = `project:${projectRef}`
   const mountedRef = useRef(false)
   // True after the first load; later refreshes keep the rendered timeline.
   const loadedRef = useRef(false)
   const refreshSequenceRef = useRef(0)
-  const projectLastItem = view?.items[view.items.length - 1]
   const tabIdPrefix = useId()
-  const feedTabRef = useRef<HTMLButtonElement>(null)
+  const mainTabRef = useRef<HTMLButtonElement>(null)
   const boardTabRef = useRef<HTMLButtonElement>(null)
   // Enter and Space need no branch: the button's own activation fires click.
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
-    const order: readonly { readonly value: 'feed' | 'board'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
-      { value: 'feed', ref: feedTabRef },
+    const order: readonly { readonly value: 'main' | 'board'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
+      { value: 'main', ref: mainTabRef },
       { value: 'board', ref: boardTabRef },
     ]
     const current = order.findIndex(entry => entry.value === tab)
@@ -217,14 +190,12 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     ? undefined
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
 
-  // The window is the feed's: walking the Project's remaining history would defeat the feed's pagination.
+  // The loaded window is all the board shows: walking the Project's remaining history would defeat its pagination.
   const boardColumns = useMemo(() => {
     const taskful = (view?.items ?? []).filter((item): item is AgentTeamViewItem & { readonly task: AgentTeamTask } => item.task !== undefined)
     const byNumber = (left: AgentTeamViewItem, right: AgentTeamViewItem): number => (right.taskNumber ?? 0) - (left.taskNumber ?? 0)
     return BOARD_COLUMNS.map(column => ({ ...column, items: taskful.filter(item => column.match(item.task.status)).sort(byNumber) }))
   }, [view])
-
-  const timeline = useTimelineScroll(`${view?.items.length ?? 0}:${projectLastItem?.message.messageRef ?? ''}`)
 
   // The surface is laid out after this effect first runs, so the seat follows its box; a dragged choice is re-clamped, never re-derived.
   useEffect(() => {
@@ -240,21 +211,14 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     return () => { observer.disconnect() }
   }, [panelSurface, panelThreadRef])
   const project = view?.projects.find(item => item.projectRef === projectRef)
-  // Rules version 2 reads the Main stream; version 1 keeps the Project feed.
-  const mainStreamActive = view !== undefined && view.rulesVersion >= 2 && project !== undefined
   const projectMemberIds = new Set(view?.members.filter(item => item.projectRef === projectRef).map(item => item.memberId) ?? [])
-  const messageSender = (item: AgentTeamViewItem): AgentTeamMemberId => item.message.sender
-  const handleByMember = new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')]))
 
   const refresh = async (clearError = false) => {
     if (!mountedRef.current) return false
     const sequence = refreshSequenceRef.current + 1
     refreshSequenceRef.current = sequence
     if (!loadedRef.current) setLoading(true)
-    if (clearError) {
-      setLoadError(undefined)
-      setStatusMessage(undefined)
-    }
+    if (clearError) setLoadError(undefined)
     try {
       const [loaded, loadedMembers, loadedInbox] = await Promise.all([
         loadProjects({ workspaceId, projectRef, direction: 'before', topLevelOnly: true, includeActivities: false, limit: 20 }),
@@ -292,7 +256,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     mountedRef.current = true
     loadedRef.current = false
     setView(undefined)
-    setTab('feed')
+    setTab('main')
     setPanelThreadRef(undefined)
     setLoadError(undefined)
     setLoading(true)
@@ -336,59 +300,6 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     }
   }
 
-  // Retained across transport failures so a replayed send dedupes on the Host.
-  const pendingSendId = useRef<AgentTeamSendMessageRequest['requestId']>()
-
-  // The setter returns the same state when nothing is set, so keystrokes do not re-render the timeline.
-  const clearSendState = useCallback((): void => {
-    setStatusMessage(current => current === undefined ? current : undefined)
-  }, [])
-
-  const send = async () => {
-    // Read at send time: this page does not subscribe to the draft.
-    const { draft, recipients } = drafts.getSnapshot(draftKey)
-    if (pending || draft.trim() === '') return
-    const recipientIds = [...recipients].sort()
-    const requestId = pendingSendId.current ?? mintRequestId()
-    pendingSendId.current = requestId
-    setPending(true); setError(undefined); setStatusMessage(undefined)
-    try {
-      const upload = await uploadComposerFiles(putAttachment, workspaceId, pendingFiles)
-      if (!upload.ok) {
-        pendingSendId.current = undefined
-        setError(upload.error)
-        return
-      }
-      const attachmentIds = upload.attachmentIds
-      const request: AgentTeamSendMessageRequest = {
-        requestId, workspaceId,
-        projectRef, body: draft.trim(), recipients: recipientIds,
-        asTask,
-        ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }),
-      }
-      const result = await sendMessage(request)
-      if (!result.ok) {
-        pendingSendId.current = undefined
-        setError(result.error.message)
-      } else if (result.value.kind === 'committed') {
-        pendingSendId.current = undefined
-        setAsTask(false)
-        await refresh()
-        drafts.clear(draftKey)
-        setPendingFiles([])
-        setStatusMessage(undefined)
-      } else if (result.value.kind === 'confirmation_required') {
-        // Same-requestId resend continues the pending operation.
-        setStatusMessage(t('mentionConfirmation'))
-      } else {
-        // Rejections are final for this draft; editing it must mint a new operation.
-        pendingSendId.current = undefined
-        setError(t('memberNotFollowing', { ids: result.value.memberIds.map(memberId => `@${members.find(candidate => candidate.member.memberId === memberId)?.member.handle ?? memberId}`).join(', ') }))
-      }
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
-    finally { setPending(false) }
-  }
-
   return <main className={css.surface} data-team-project={projectRef} ref={setPanelSurface}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderWithTabs}`}>
       <header className={css.headerRow}>
@@ -400,14 +311,16 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         </div>
       </header>
       <nav className={projectCss.tabs} role="tablist" aria-label={project === undefined ? '# …' : `# ${project.name}`} onKeyDown={onTabKeyDown}>
-        <button ref={feedTabRef} id={`${tabIdPrefix}-feed`} type="button" role="tab" aria-selected={tab === 'feed'} aria-controls={`${tabIdPrefix}-feed-panel`} tabIndex={tab === 'feed' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('feed') }}>{t(mainStreamActive ? 'projectTabMain' : 'projectTabFeed')}</button>
+        <button ref={mainTabRef} id={`${tabIdPrefix}-main`} type="button" role="tab" aria-selected={tab === 'main'} aria-controls={`${tabIdPrefix}-main-panel`} tabIndex={tab === 'main' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('main') }}>{t('projectTabMain')}</button>
         <button ref={boardTabRef} id={`${tabIdPrefix}-board`} type="button" role="tab" aria-selected={tab === 'board'} aria-controls={`${tabIdPrefix}-board-panel`} tabIndex={tab === 'board' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('board') }}>{t('projectTabBoard')}</button>
       </nav>
     </div>
 
     {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
       {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
-      {boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
+      {error !== undefined && <p className={css.error} role="alert">{error}</p>}
+      {error === undefined && view === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardLoading')}</p></div>}
+      {error === undefined && view !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
       {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
         {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>
           <div className={projectCss.boardColumnHead}>{t(column.labelKey)}<span className={projectCss.boardColumnCount}>{column.items.length}</span></div>
@@ -423,8 +336,8 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       </div>}
     </section>}
 
-    {tab === 'feed' && <div id={`${tabIdPrefix}-feed-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-feed`} className={projectCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
-      {mainStreamActive ? <TeamMainStream
+    {tab === 'main' && <div id={`${tabIdPrefix}-main-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-main`} className={projectCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
+      {project !== undefined && view !== undefined ? <TeamMainStream
         workspaceId={workspaceId}
         projectRef={projectRef}
         humanName={humanName}
@@ -450,93 +363,16 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         onOpenTask={(threadRef, taskRef, taskNumber) => { selectThread(threadRef, projectRef, taskRef, taskNumber) }}
         onTaskStarted={handleTaskStarted}
         t={t}
-      /> : <>
-      <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
-      <div className={css.timelineContent}>
-        {loading && project === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
-        {!loading && project === undefined && error === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('emptyProjects')}</p></div>}
-        {!loading && project === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void refresh(true) }}>{t('retry')}</Button></div>}
-        {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
-        {project !== undefined && view?.items.length === 0 && <div className={css.emptySurface}>
-          <div className={css.emptyState}>
-            <strong>{t('emptyMessages')}</strong>
-            <span>{t('emptyMessagesHint')}</span>
-          </div>
-        </div>}
-        {(view?.items.length ?? 0) > 0 && chunkRunsWithDays(view!.items, messageSender, item => item.message.occurredAt).map((block, blockIndex) => block.kind === 'day'
-          ? <p className={threadCss.daySeparator} key={`day-${blockIndex}-${block.label}`}><span>{block.label}</span></p>
-          : <div className={css.messageRun} key={`run-${block.items[0]!.message.messageRef}`}>
-          {block.items.map((item, index) => {
-            const senderStatus = members.find(member => member.member.memberId === item.message.sender)
-            const human = item.message.sender === view!.humanMemberId
-            const sender = human ? humanName : senderStatus?.member.handle ?? item.message.sender
-            const turnGap = isRunGap(index > 0 ? block.items[index - 1]!.message.occurredAt : undefined, item.message.occurredAt)
-            // A reply inside a Thread carries no entry state; the Thread page owns that.
-            const unread = unreadByThread.get(item.thread.threadRef) ?? 0
-            // A turn boundary keeps its hairline but never the instant: every row states its own time.
-            return <Fragment key={item.message.messageRef}>
-              {turnGap && <TeamRunDivider />}
-              <TeamMessage
-                senderName={sender}
-                memberId={item.message.sender}
-                human={human}
-                readerName={humanName}
-                {...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl })}
-                body={item.message.body}
-                attachments={item.message.attachments}
-                loadAttachment={getAttachment}
-                t={t}
-                occurredAt={item.message.occurredAt}
-                mentionNames={mentionNamesOf(item.mentions, handleByMember, humanName)}
-                onOpenRef={openRef}
-                onResolveTaskRefs={lookupTaskRefs}
-                onResolveThreadRefs={lookupThreadRefs}
-                projectNameOf={projectNameOf}
-                memberOf={memberOf}
-                onOpenMemberSession={openMemberSession}
-                grouped={index > 0}
-                showGroupedTime={item.message.topLevel === true}
-                {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
-              >
-                {item.message.topLevel && <ThreadEntryRow
-                  item={item}
-                  owners={item.liveClaimOwners}
-                  unread={unread}
-                  human={humanIdentity}
-                  t={t}
-                  onOpen={() => {
-                    if (item.task === undefined) setPanelThreadRef(item.thread.threadRef)
-                    else selectThread(item.thread.threadRef, projectRef, item.task.taskRef, item.taskNumber)
-                  }}
-                />}
-              </TeamMessage>
-            </Fragment>
-          })}
-        </div>)}
-      </div>
-      </section>
-
-      {project !== undefined ? <TeamComposer
-      key={draftKey}
-      members={members}
-      projectPeerMemberIds={projectMemberIds}
-      drafts={drafts}
-      draftKey={draftKey}
-      pending={pending}
-      {...(statusMessage === undefined ? {} : { confirmation: statusMessage })}
-      {...(error === undefined ? {} : { error })}
-      onEdit={clearSendState}
-      onSubmit={() => { void send() }}
-      pendingFiles={pendingFiles}
-      onFilesChange={setPendingFiles}
-      asTask={asTask}
-      onAsTaskChange={setAsTask}
-      t={t}
-      /> : <div />}
-      </>}
+      /> : <section className={css.timeline} aria-label={t('timelineLabel')}>
+        <div className={css.timelineContent}>
+          {loading && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
+          {!loading && error === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('emptyProjects')}</p></div>}
+          {!loading && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void refresh(true) }}>{t('retry')}</Button></div>}
+        </div>
+      </section>}
     </div>}
 
-    {tab === 'feed' && panelThreadRef !== undefined && project !== undefined && <TeamProjectPanel
+    {tab === 'main' && panelThreadRef !== undefined && project !== undefined && <TeamProjectPanel
       surface={panelSurface}
       workspaceId={workspaceId}
       projectRef={projectRef}
@@ -568,73 +404,9 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       onRead={handlePanelRead}
       onPromoted={handlePanelPromoted}
       onClose={handlePanelClose}
-      allMention={!mainStreamActive}
       t={t}
     />}
   </main>
-}
-
-/** State leads the entry's line. The unread capsule is the only part a taskless discussion can carry. */
-function ThreadStateCluster({ task, owners, unread, human, t }: {
-  readonly task: AgentTeamTask | undefined
-  readonly owners: readonly TeamAvatarOwner[]
-  readonly unread: number
-  readonly human: TeamAvatarHuman | undefined
-  readonly t: TeamConversationProps['t']
-}) {
-  if (task === undefined && unread === 0) return null
-  const namedOwners = namedAvatarOwners(owners, human)
-  return <span className={css.stateCluster}>
-    {task !== undefined && <TeamAvatarStack owners={namedOwners} label={claimersLabel(namedOwners, t)} human={human} />}
-    {task !== undefined && <TeamStateDot size={8} state={taskStatusDot(task.status)} />}
-    {task !== undefined && <span className={css.statusWord}>{formatTaskStatus(task.status, t)}</span>}
-    {/* The capsule is decoration inside the control whose label already carries
-        the count, so the number is never pixels-only — the same shared capsule
-        the Inbox entry and the Inbox queue's own rows wear. */}
-    <TeamCountBadge count={unread} />
-  </span>
-}
-
-/**
- * The single row that opens an entry's Thread. A Task entry keeps its number so the status word stays attached;
- * the instant uses the Inbox's 今天/昨天 form, with the precise local time in the title.
- */
-function ThreadEntryRow({ item, owners, unread, human, t, onOpen }: {
-  readonly item: AgentTeamViewItem
-  readonly owners: readonly TeamAvatarOwner[]
-  readonly unread: number
-  readonly human: TeamAvatarHuman | undefined
-  readonly t: TeamConversationProps['t']
-  readonly onOpen: () => void
-}) {
-  const taskNumber = item.taskNumber
-  const followUp = newerActivityAt(item)
-  const printedActivity = unresolvedFollowUpAt(item)
-  // A resolved Task slims to a footnote; unread still counts because a resolved Thread can be answered.
-  const resolved = item.task?.status === 'done' || item.task?.status === 'closed'
-  const label = taskNumber !== undefined
-    ? t('taskLabel', { number: taskNumber })
-    : followUp === undefined ? t('replyAction') : t('threadLabel')
-  const text = resolved && item.task !== undefined
-    ? `${label} · ${formatTaskStatus(item.task.status, t)} · ${formatDateOnly(item.lastActivityAt)}`
-    : printedActivity === undefined ? label : `${label} · ${t('recentActivity', { time: formatInboxTime(printedActivity, t) })}`
-  const openLabel = taskNumber === undefined
-    ? unread > 0 ? t('openThreadUnread', { count: unread }) : t('openThread')
-    : unread > 0 ? t('openTaskUnread', { number: taskNumber, count: unread }) : t('openTask', { number: taskNumber })
-  // Outside the button so the owner stack keeps its accessible name: a labeled button prunes its descendants from the accessibility tree.
-  return <span className={css.entryLine} data-thread-entry="" data-thread-entry-door={taskNumber ?? 'thread'}>
-    {resolved ? <TeamCountBadge count={unread} /> : <ThreadStateCluster task={item.task} owners={owners} unread={unread} human={human} t={t} />}
-    <button
-      type="button"
-      className={css.entryRow}
-      aria-label={openLabel}
-      {...(followUp === undefined ? {} : { title: formatAbsoluteTime(followUp) })}
-      onClick={onOpen}
-    >
-      <span>{text}</span>
-      <span className={css.entryArrow} aria-hidden="true"><IconChevronRightOutlineRegular size={12} /></span>
-    </button>
-  </span>
 }
 
 const BOARD_COLUMNS = [

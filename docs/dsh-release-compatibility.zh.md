@@ -183,7 +183,7 @@ Harness 随附一套 experimental Agent Teams，以独立 profile bundle 形式�
 
 它是与本 bundle 竞争的另一套 Team 实现，不是本 bundle 依赖的扩展点。它注册自己的 model-facing 工具族（`spawn_teammate`、`send_message`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_*`）。它在自己的 profile patch 里禁掉随附的全局 subagent 行，腾出这些名字。它自带成员、任务、store 与 client 面板。
 
-本 bundle 的七个工具是 `team_view`、`team_inbox`、`team_thread`、`team_attention`、`team_message`、`team_dm`、`team_claim`，只在 `team-member` preset 内注册。
+本 bundle 的七个工具是 `team_view`、`team_inbox`、`team_thread`、`team_message`、`team_task`、`team_attention`、`team_dm`，只在 `team-member` preset 内注册。
 
 认证覆盖的是未挂载这些 experimental 包的 profile。同时挂载两者属于不支持的组合。会出现两套 Team authority、两个工具族、两块 UI surface。它们之间既无共享权威也无命名规则。
 

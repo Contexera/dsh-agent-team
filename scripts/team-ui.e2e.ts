@@ -95,17 +95,15 @@ async function settleLayout(page: Page): Promise<void> {
  * `data-thread-entry-door` marker (the Task number, or `thread`) rather than
  * the localized accessible name.
  */
+/** The board card is its own control: the unread and plain spellings both match exactly one card number. */
+/** One Task's board card, matched by its exact accessible name in both the unread and plain spellings. */
 function taskEntryLineSelector(taskNumber: number): string {
-  return `[data-team-project] [data-thread-entry-door="${taskNumber}"]`
+  return `[data-team-project] button[class*="boardCard"]:is([aria-label^="打开 Task #${taskNumber}（"], [aria-label="打开 Task #${taskNumber}"])`
 }
 
-function taskEntrySelector(taskNumber: number): string {
-  return `${taskEntryLineSelector(taskNumber)} > button`
-}
-
-/** One Task's Thread door: the locator form of {@link taskEntrySelector}. */
+/** One Task's board card: the locator form of {@link taskEntryLineSelector}. */
 function taskEntryRow(page: Page, taskNumber: number) {
-  return page.locator(taskEntrySelector(taskNumber))
+  return page.locator(taskEntryLineSelector(taskNumber))
 }
 
 /**
@@ -171,9 +169,9 @@ async function maxHorizontalScroll(page: Page, selector: string): Promise<number
 async function taskEntryClusterLefts(page: Page): Promise<readonly number[]> {
   return page.evaluate(() => {
     const edges: number[] = []
-    for (const line of document.querySelectorAll('[data-team-project] [data-thread-entry]')) {
-      const cluster = line.firstElementChild
-      if (cluster !== null) edges.push(Math.round(cluster.getBoundingClientRect().left))
+    for (const card of document.querySelectorAll('[data-team-project] button[class*="boardCard"]')) {
+      const cluster = card.querySelector('[class*="boardCardNum"]')
+      if (cluster !== null) edges.push(Math.round(cluster.getBoundingClientRect().left - card.getBoundingClientRect().left))
     }
     return edges
   })
@@ -243,16 +241,6 @@ async function entryUnreadCapsule(page: Page, lineSelector: string): Promise<Ret
  * profile package. Only the first case of a run clears the artifacts
  * directory (`clearArtifacts`).
  */
-/** Pin the staged bundle's Host row to an older rules version: the v1-era journeys still cover the v1 Client paths and invitation flow that ticket 06 deletes. */
-async function pinRulesVersion(version: 1 | 2): Promise<void> {
-  if (version === 2) return
-  const patch = join(STAGED_BUNDLE, 'cordis.patch.yml')
-  const text = await readFile(patch, 'utf8')
-  const host = "        - id: wowyuarm-agent-team-host\n          name: '@contexera/dsh-agent-team/host'\n"
-  if (!text.includes(host)) throw new Error('host row not found in the staged patch')
-  await writeFile(patch, text.replace(host, `${host}          config:\n            rulesVersion: ${version}\n`))
-}
-
 async function installLocalBundle(clearArtifacts = true): Promise<void> {
   await rm(HOME, { recursive: true, force: true })
   if (clearArtifacts) await rm(BROWSER_ARTIFACTS, { recursive: true, force: true })
@@ -329,7 +317,6 @@ it('toggles the complete bundle without restarting the session controller', asyn
 
 it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await installLocalBundle()
-  await pinRulesVersion(1)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -479,7 +466,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('menuitem', { name: '编辑项目' }).click()
   const joinEditor = page.getByRole('dialog', { name: '编辑项目' })
   await joinEditor.waitFor()
-  await expect.poll(async () => await joinEditor.locator('[data-team-member-row]').count()).toBe(0)
+  // Rules version 2 replaces the v1 join editor with Project owners: the Human
+  // owns it outright and both Agents wait as addable candidates.
+  await joinEditor.getByRole('button', { name: '添加负责人 @builder' }).waitFor()
+  await joinEditor.getByRole('button', { name: '添加负责人 @reviewer' }).waitFor()
+  expect(await joinEditor.locator('[data-team-project-owner-human]').count()).toBe(1)
   await joinEditor.getByRole('button', { name: '关闭', exact: true }).click()
   // The 390 breakpoint unmounts sidebar panels (dialog state included), so reopen
   // the dialog from the narrow-expanded sidebar after the collapse settles.
@@ -546,7 +537,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 1440, height: 960 })
   await page.getByRole('button', { name: '# delivery' }).click()
-  await page.getByText('还没有消息', { exact: true }).waitFor()
+  await page.getByText('主对话还没有内容', { exact: true }).waitFor()
   await page.screenshot({ path: join(UI02_SHOTS, 'sidebar-projects.png'), fullPage: true })
 
   // Whole-row native drag: a before/after insertion marker and one commit per
@@ -633,7 +624,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('menuitem', { name: '编辑项目' }).click()
   const projectEditor = page.getByRole('dialog', { name: '编辑项目' })
   await projectEditor.waitFor()
-  expect(await projectEditor.locator('[data-team-member-row]').count()).toBe(0)
+  expect(await projectEditor.locator('[data-team-project-owner-human]').count()).toBe(1)
   const projectSave = projectEditor.getByRole('button', { name: '保存' })
   await expect.poll(async () => await projectSave.isDisabled()).toBe(true)
   await projectEditor.getByLabel('说明').fill('Platform delivery work')
@@ -789,7 +780,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   await expect.poll(() => page.locator('[data-team-project]').count()).toBe(1)
-  await page.getByText('还没有消息', { exact: true }).waitFor()
+  await page.getByText('主对话还没有内容', { exact: true }).waitFor()
   await page.screenshot({ path: join(UI02_SHOTS, 'sidebar-projects.png'), fullPage: true })
   await page.screenshot({ path: join(UI01_SHOTS, 'empty-project.png'), fullPage: true })
   const projectComposer = page.getByRole('textbox', { name: '消息内容' })
@@ -841,24 +832,24 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect([...new Set(projectMentionRows.map(row => row.inside))]).toEqual(['true'])
   await page.getByRole('option', { name: /@builder/ }).click()
   await page.screenshot({ path: join(UI04_SHOTS, 'mention-menu-selected.png'), fullPage: true })
-  const asTaskToggle = page.getByRole('button', { name: '作为任务' })
-  await expect.poll(() => asTaskToggle.getAttribute('aria-pressed')).toBe('false')
-  await asTaskToggle.focus()
+  const startToggle = page.getByRole('button', { name: '讨论/任务' })
+  await expect.poll(() => startToggle.getAttribute('aria-pressed')).toBe('false')
+  await startToggle.focus()
   await page.keyboard.press('Space')
-  await expect.poll(() => asTaskToggle.getAttribute('aria-pressed')).toBe('true')
+  await expect.poll(() => startToggle.getAttribute('aria-pressed')).toBe('true')
   // The pressed state must be visible on its own: primary fill, unchanged by hover.
-  const pressedFill = await asTaskToggle.evaluate(element => getComputedStyle(element).backgroundColor)
-  await asTaskToggle.hover()
-  expect(await asTaskToggle.evaluate(element => getComputedStyle(element).backgroundColor)).toBe(pressedFill)
-  await page.screenshot({ path: join(UI04_SHOTS, 'as-task-pressed.png'), fullPage: true })
+  const pressedFill = await startToggle.evaluate(element => getComputedStyle(element).backgroundColor)
+  await startToggle.hover()
+  expect(await startToggle.evaluate(element => getComputedStyle(element).backgroundColor)).toBe(pressedFill)
+  await page.screenshot({ path: join(UI04_SHOTS, 'thread-start-pressed.png'), fullPage: true })
   // The label stays at every width; the narrow branch tightens the toolbar gaps.
   // Runs in the settled collapsed layout.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()
   await expect.poll(async () => (await page.locator('[data-team-project]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
-  expect(await asTaskToggle.getAttribute('aria-label')).toBe('作为任务')
-  expect(await asTaskToggle.getAttribute('title')).toBe('作为任务')
-  expect(await asTaskToggle.getAttribute('aria-pressed')).toBe('true')
+  // The pill's accessible name is its label text, which the role locator above
+  // already resolves; the pressed state is what must stay explicit.
+  expect(await startToggle.getAttribute('aria-pressed')).toBe('true')
   const modeLabel = (element: Element) => {
     const label = element.querySelector('[class*="asTaskLabel"]')
     const toolbar = element.closest('[class*="toolbar"]')
@@ -867,21 +858,25 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       gap: toolbar === null ? 'missing' : getComputedStyle(toolbar).gap,
     }
   }
-  const narrow = await asTaskToggle.evaluate(modeLabel)
+  const narrow = await startToggle.evaluate(modeLabel)
   expect(narrow.display).not.toBe('none')
   expect(narrow.display).not.toBe('missing')
   expect(narrow.gap).toBe('8px')
   await page.setViewportSize({ width: 1440, height: 960 })
-  const wide = await asTaskToggle.evaluate(modeLabel)
+  const wide = await startToggle.evaluate(modeLabel)
   expect(wide.display).not.toBe('none')
   expect(wide.display).not.toBe('missing')
   expect(wide.gap).toBe('12px')
+  // The checked 作为任务 turns the send into a Task; the mention rides along.
+  await page.getByRole('checkbox', { name: '作为任务' }).check()
   await page.getByRole('button', { name: '发送' }).click()
-  const committedMessage = page.locator('[data-team-project] article').filter({ hasText: '请协作完成验收' })
-  await committedMessage.waitFor()
-  await expect.poll(() => asTaskToggle.getAttribute('aria-pressed')).toBe('false')
+  await page.getByRole('tab', { name: '看板' }).waitFor()
+  await expect.poll(() => page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
+  const committedTask = page.getByRole('button', { name: '打开 Task #1', exact: true })
+  await committedTask.waitFor()
+  await page.getByRole('tab', { name: '主对话' }).click()
+  await expect.poll(() => startToggle.getAttribute('aria-pressed')).toBe('false')
   await expect.poll(() => page.getByRole('textbox', { name: '消息内容' }).inputValue()).toBe('')
-  await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('消息内容')
   await page.getByRole('button', { name: '发送', exact: true }).waitFor()
 
   // A hand-typed handle is delivered like a menu pick, so the notify row reports
@@ -892,42 +887,21 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await projectComposer.fill('')
   await expect.poll(() => page.getByText(/将通知/).count()).toBe(0)
 
-  // @all: typing a prefix of "all" surfaces the fixed row on top; the keyboard
-  // highlights it and Tab accepts. The expansion snapshot covers every eligible
-  // delivery member at pick time and later edits must not prune it.
+  // The composer picks no @all at version 2: the menu is proven live by a real
+  // handle's row, and '@a' — which prefixes "all" and no handle here — then
+  // matches nothing.
+  await projectComposer.fill('全员同步 @r')
+  await page.getByRole('option', { name: /@reviewer/ }).waitFor()
   await projectComposer.fill('全员同步 @a')
-  const allOption = page.getByRole('option', { name: /@all/ })
-  await allOption.waitFor()
-  // 'a' prefixes "all" but no handle here, so the fixed row is the only, default-
-  // highlighted candidate.
-  expect(await page.getByRole('option').count()).toBe(1)
-  await expect.poll(() => allOption.getAttribute('aria-selected')).toBe('true')
-  await page.screenshot({ path: join(UI04_SHOTS, 'all-mention-menu.png'), fullPage: true })
-  await page.keyboard.press('Tab')
-  await expect.poll(() => projectComposer.inputValue()).toBe('全员同步 @all ')
-  const notifyRow = page.getByText(/将通知/)
-  await expect.poll(() => notifyRow.textContent()).toContain('@builder')
-  expect(await notifyRow.textContent()).toContain('@reviewer')
-  await projectComposer.fill('全员同步 @all，今天截止')
-  await expect.poll(() => notifyRow.textContent()).toContain('@reviewer')
+  await expect.poll(() => page.getByRole('option').count()).toBe(0)
+  await projectComposer.fill('')
+  // A plain post with the same words stays a Main stream message: no Thread is
+  // opened, so the stream article carries it without a card.
+  await projectComposer.fill('全员同步，今天截止')
   await page.getByRole('button', { name: '发送' }).click()
   const allMessage = page.locator('[data-team-project] article').filter({ hasText: '全员同步' })
   await allMessage.waitFor()
-  expect((await allMessage.textContent())?.includes('@all，今天截止')).toBe(true)
-  // Both agents read the taskless Thread so later inbox assertions count only the
-  // @builder flow. Members are re-fetched through their current live bindings.
-  const allWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
-  const allProjection = scaffold.ctx.agentTeam.view({ workspaceId: allWorkspace.id })
-  const allThread = allProjection.threads
-    .filter((thread: { taskRef?: string }) => thread.taskRef === undefined)
-    .reduce((latest: { revision: number } | undefined, thread: { revision: number }) => latest === undefined || thread.revision > latest.revision ? thread : latest, undefined)!
-  for (const handle of ['builder', 'reviewer']) {
-    const status = scaffold.ctx.agentTeam.members({ workspaceId: allWorkspace.id }).find((entry: { member: { handle: string } }) => entry.member.handle === handle)!
-    const reader = scaffold.ctx.agents.get(status.member.sessionId)!
-    await scaffold.ctx.agentTeam.readThreadForAgent(reader, {
-      requestId: `m2-all-read-${handle}` as never, workspaceId: allWorkspace.id, threadRef: allThread.threadRef,
-    })
-  }
+  expect((await allMessage.textContent())?.includes('全员同步，今天截止')).toBe(true)
 
   // Only refs the Host resolves become links; unknown UUID-shaped task refs and
   // non-UUID `project:` prose stay literal.
@@ -1006,7 +980,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(projectColumns.columns.length).toBe(1)
   expect(projectColumns.sides).toBe(0)
-  expect(projectColumns.cards).toBe(0)
+  // The Main stream shows each row's actions card unconditionally, so the
+  // invariant is one card per row, never more.
+  expect(projectColumns.cards).toBe(await projectRows.count())
   expect(projectColumns.seats).toBe(0)
   const feedRow = projectRows.filter({ hasText: '这是一条超长验收消息' }).first()
   await feedRow.hover()
@@ -1071,7 +1047,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       pane: root === null || root === undefined ? null : round(root.getBoundingClientRect().x),
       header: box(root?.querySelector('header')),
       tabs: box(root?.querySelector('[role="tablist"]')),
-      entry: box(root?.querySelector('[data-thread-entry]')),
+      entry: box(root?.querySelector('article [class*="messageBody"]')),
     }
   })
   expect(projectColumnEdges.header).not.toBeNull()
@@ -1139,17 +1115,17 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'narrow-project.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
 
+  await startToggle.click()
   await projectComposer.fill('这是一条不作为任务的讨论')
-  await expect.poll(() => asTaskToggle.getAttribute('aria-pressed')).toBe('false')
   await page.getByRole('button', { name: '发送' }).click()
-  const tasklessMessage = page.locator('[data-team-project] article').filter({ hasText: '这是一条不作为任务的讨论' })
-  await tasklessMessage.waitFor()
+  const tasklessCard = page.getByRole('button', { name: /^打开讨论：这是一条不作为任务的讨论/ })
+  await tasklessCard.waitFor()
   await page.setViewportSize({ width: 390, height: 844 })
   const tasklessProjectFrame = page.locator('[data-sidebar-collapsed="true"]')
   await tasklessProjectFrame.waitFor()
   await expect.poll(async () => (await tasklessProjectFrame.locator(':scope > div').first().boundingBox())?.width ?? 999).toBeLessThanOrEqual(56)
   await expect.poll(async () => (await page.locator('[data-team-project]').boundingBox())?.width ?? 0).toBeGreaterThanOrEqual(330)
-  await tasklessMessage.getByRole('button', { name: '打开讨论' }).click()
+  await tasklessCard.click()
   // A taskless discussion opens beside its feed; the Project page, timeline, and
   // the discussion's door stay.
   const panel = page.locator('[data-team-panel]')
@@ -1251,8 +1227,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(Math.abs(storedWidth - dragged.panel)).toBeLessThanOrEqual(1)
   await page.reload()
   await page.locator('[data-team-project]').first().waitFor()
-  const reopened = page.locator('[data-team-project] article').filter({ hasText: '这是一条不作为任务的讨论' })
-  await reopened.getByRole('button', { name: '打开讨论' }).click()
+  const reopened = page.getByRole('button', { name: /^打开讨论：这是一条不作为任务的讨论/ })
+  await reopened.click()
   await page.locator('[data-team-panel]').waitFor()
   await expect.poll(async () => (await seam()).panel).toBe(dragged.panel)
   await page.locator('[data-team-panel-handle]').focus()
@@ -1297,7 +1273,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
 
   // The Project's two readings form one tab stop; arrow keys move selection with
   // focus.
-  const feedTab = page.getByRole('tab', { name: '项目' })
+  const feedTab = page.getByRole('tab', { name: '主对话' })
   const boardTab = page.getByRole('tab', { name: '看板' })
   await feedTab.waitFor()
   expect(await feedTab.getAttribute('aria-selected')).toBe('true')
@@ -1387,6 +1363,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     items: [expect.objectContaining({ task: expect.objectContaining({ taskRef: task.taskRef }), directCount: 1 })],
   })
 
+  // A v2 mention delivers a marker, not a following: attention is an explicit
+  // choice, so builder follows the Thread through the Host before the menu
+  // below ranks it in the follower tier.
+  const builderFollow = await scaffold.ctx.agentTeam.changeAttentionForAgent(agent, {
+    requestId: 'm2-05-builder-follow' as never, action: 'follow', workspaceId: workspace.id, taskRef: task.taskRef,
+  })
+  expect(builderFollow.attention?.memberId).toBe(builder.member.memberId)
   await page.getByRole('button', { name: /Task #1/ }).click()
   const invitationComposer = page.getByRole('textbox', { name: '消息内容' })
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('消息内容')
@@ -1410,8 +1393,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
         descriptionDisplay: description === null ? 'missing' : getComputedStyle(description).display,
       }
     })
+  // Follower ranking arrives with the page's observation read, so the menu may
+  // open before the ranking lands; poll until both weights exist.
+  await expect.poll(() => invitationMenu.evaluate((element: Element) => [...element.querySelectorAll('[role="option"][data-mention-tier]')].some(row => row.getAttribute('data-mention-tier') === '0')
+    && [...element.querySelectorAll('[role="option"][data-mention-tier]')].some(row => row.getAttribute('data-mention-tier') !== '0')), { timeout: 10_000 }).toBe(true)
   const invitationRows = await invitationMenu.evaluate(invitationRowState)
-  expect(invitationRows.some(row => row.tier === '0')).toBe(true)
+
   expect(invitationRows.some(row => row.tier !== '0')).toBe(true)
   const invitationSecondary = await resolveAliasColor(page, '--dsw-alias-label-secondary')
   const invitationPrimary = await resolveAliasColor(page, '--dsw-alias-label-primary')
@@ -1438,10 +1425,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await invitationMenu.waitFor()
   await page.getByRole('option', { name: /@reviewer/ }).click()
   await invitationComposer.fill(`${await invitationComposer.inputValue()}加入这个已有 Thread 并回复 Human @reviewer `)
+  // Version 2 delivers a mention directly: one Enter commits, no confirmation
+  // step, and the composer keeps focus for the next reply.
   await invitationComposer.press('Enter')
-  await page.getByRole('status').filter({ hasText: '再次发送' }).waitFor()
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('消息内容')
-  await invitationComposer.press('Enter')
   await page.locator('[data-team-thread] article').filter({ hasText: '请 @reviewer 加入这个已有 Thread 并回复 Human @reviewer' }).waitFor()
   const reviewerInbox = scaffold.ctx.agentTeam.inboxForAgent(reviewerAgent, { workspaceId: workspace.id })
   expect(reviewerInbox).toMatchObject({ totalDirectCount: 1, items: [expect.objectContaining({
@@ -1684,6 +1671,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     if (backlogReply.kind !== 'committed') throw new Error(`backlog reply rejected: ${backlogReply.kind}`)
   }
   for (const label of ['一', '二', '三']) await backlogBatch(label)
+  await page.getByRole('tab', { name: '看板' }).click()
   const preOpenInbox = scaffold.ctx.agentTeam.inbox({ workspaceId: workspace.id })
   const preOpenThread = preOpenInbox.items.find(item => item.task?.taskRef === task.taskRef)
   expect(preOpenThread?.unreadCount ?? 0).toBeGreaterThanOrEqual(3)
@@ -1697,9 +1685,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     .toBe(`打开 Task #1（${unreadTotal} 条新动态）`)
   await expect.poll(async () => (await entryUnreadCapsule(page, unreadLineSelector))?.text ?? 'missing', { timeout: 10_000 })
     .toBe(unreadTotal > 99 ? '99+' : String(unreadTotal))
-  // A live Task's door reports when work last moved, which the feed order (by
+  // A live Task's card reports when work last moved, which the stream order (by
   // anchor Message) cannot say.
-  await expect.poll(async () => (await unreadEntryRow.textContent())?.trim() ?? '').toContain('最近活动')
+  await expect.poll(async () => await unreadEntryRow.locator('[class*="boardCardFoot"] time').count()).toBeGreaterThan(0)
   const unreadCapsule = await entryUnreadCapsule(page, unreadLineSelector)
   // The capsule is decoration inside a labeled control, and it is a capsule:
   // a filled 18px pill whose radius covers its own height.
@@ -1707,24 +1695,24 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(unreadCapsule?.shape.height).toBe('18px')
   expect(unreadCapsule?.background).not.toBe('rgba(0, 0, 0, 0)')
   expect(Number.parseFloat(unreadCapsule?.shape.radius ?? '0')).toBeGreaterThanOrEqual(9)
-  // The state opens each entry row on one x, instead of trailing the line.
+  // The number cluster opens every card at the same inset from the card's own
+  // left edge, instead of trailing variable content.
   const clusterEdges = await entryClusterEdges(page, unreadLineSelector)
   expect(clusterEdges).not.toBeNull()
-  expect(clusterEdges!.cluster).toBe(clusterEdges!.row)
-  expect(clusterEdges!.cluster).toBe(clusterEdges!.column)
+  expect(clusterEdges!.cluster - clusterEdges!.row).toBe(11)
   const stateColumn = await taskEntryClusterLefts(page)
   expect(stateColumn.length).toBeGreaterThanOrEqual(2)
   expect(new Set(stateColumn).size).toBe(1)
   await unreadEntryRow.scrollIntoViewIfNeeded()
   await settleAnimations(page)
-  await page.screenshot({ path: join(UI05_SHOTS, 'thread-entry-unread.png'), fullPage: true })
+  await page.screenshot({ path: join(UI05_SHOTS, 'board-card-unread.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await unreadEntryRow.scrollIntoViewIfNeeded()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   await unreadEntryRow.focus()
   await settleAnimations(page)
-  await page.screenshot({ path: join(UI05_SHOTS, 'thread-entry-unread-narrow.png'), fullPage: true })
+  await page.screenshot({ path: join(UI05_SHOTS, 'board-card-unread-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
   // The focus ring is the only chrome the entry grows. Tab first: a script
@@ -1734,11 +1722,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await unreadEntryRow.focus()
   await unreadEntryRow.scrollIntoViewIfNeeded()
   await settleAnimations(page)
-  const ring = await focusRing(page, taskEntrySelector(1))
+  const ring = await focusRing(page, taskEntryLineSelector(1))
   expect(ring?.focusVisible).toBe(true)
   expect(ring?.outlineStyle).toBe('solid')
   expect(ring?.outlineWidth).toBe('2px')
-  await page.screenshot({ path: join(UI05_SHOTS, 'thread-entry-unread-focus.png'), fullPage: true })
+  await page.screenshot({ path: join(UI05_SHOTS, 'board-card-unread-focus.png'), fullPage: true })
   await page.keyboard.press('Enter')
   await page.getByRole('heading', { name: /Task #1/ }).waitFor()
   await page.getByText('离线期间的批量更新 三', { exact: true }).waitFor()
@@ -1889,7 +1877,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const pageNow = await page.evaluate(() => Date.now())
   await page.clock.setFixedTime(pageNow + 86_400_000)
   await page.getByRole('button', { name: '返回项目' }).click()
-  await page.getByRole('button', { name: /Task #1/ }).waitFor()
+  await page.getByRole('tab', { name: '看板' }).click()
   await taskEntryRow(page, 1).click()
   const agedRow = page.locator('article').filter({ hasText: '离线期间的批量更新 二' })
   await agedRow.waitFor()
@@ -1926,7 +1914,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(agedHead).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}$/)
   await page.clock.setFixedTime(pageNow)
   await page.getByRole('button', { name: '返回项目' }).click()
-  await page.getByRole('button', { name: /Task #1/ }).waitFor()
+  await page.getByRole('tab', { name: '看板' }).click()
   await taskEntryRow(page, 1).click()
   await page.getByText('离线期间的批量更新 二', { exact: false }).first().waitFor()
 
@@ -2057,6 +2045,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     })
     if (afterReply.kind !== 'committed') throw new Error(`trailing reply rejected: ${afterReply.kind}`)
   }
+  await page.getByRole('tab', { name: '看板' }).click()
   await taskEntryRow(page, 1).click()
   const addressedRow = page.locator('article').filter({ hasText: '需要你拍板' })
   await addressedRow.waitFor()
@@ -2113,9 +2102,16 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
 
   await page.getByRole('button', { name: '返回项目' }).click()
   await page.getByRole('button', { name: '# delivery' }).click()
-  // The durable read clears the unread: the entry row drops the capsule.
+  await page.getByRole('tab', { name: '看板' }).click()
+  // The durable read clears the unread: the card drops the capsule.
   await expect.poll(async () => await taskEntryRow(page, 1).getAttribute('aria-label'), { timeout: 10_000 }).toBe('打开 Task #1')
   await expect.poll(async () => await entryUnreadCapsule(page, unreadLineSelector), { timeout: 10_000 }).toBeNull()
+  // reviewer has been replying through the Host without following; the menu
+  // below asserts the all-followers shape, so reviewer follows first.
+  const reviewerFollow = await scaffold.ctx.agentTeam.changeAttentionForAgent(reviewerAgent, {
+    requestId: 'm2-06-reviewer-follow' as never, action: 'follow', workspaceId: workspace.id, taskRef: task.taskRef,
+  })
+  expect(reviewerFollow.attention?.memberId).toBe(reviewer.member.memberId)
   await taskEntryRow(page, 1).click()
   const agentRead = await scaffold.ctx.agentTeam.readThreadForAgent(agent, {
     requestId: 'm2-06-agent-read' as never, workspaceId: workspace.id, taskRef: task.taskRef,
@@ -2281,23 +2277,22 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   await expect.poll(() => page.getByText('Human 已检查 Thread', { exact: true }).count()).toBe(0)
   await expect.poll(() => page.getByText('验收后继续讨论', { exact: true }).count()).toBe(0)
+  await page.getByRole('tab', { name: '看板' }).click()
   const closedEntry = taskEntryRow(page, 1)
-  // A resolved Task's door slims to the number, status word, and day: no owner
-  // stack or recency clause, which would only repeat the resolution moment. The
-  // precise instant stays on the control's title.
-  await expect.poll(async () => (await closedEntry.textContent())?.trim() ?? '').toMatch(/^Task #1 · 已(完成|关闭) · \d{2}-\d{2}$/)
-  await expect.poll(async () => (await closedEntry.textContent())?.trim() ?? '').not.toContain('最近活动')
-  await expect.poll(async () => await closedEntry.getAttribute('title') ?? '').toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+  // A resolved Task dims on the board so moving work stays loudest; the foot's
+  // time is the resolution moment, precise on the time element's title.
+  await expect.poll(async () => await closedEntry.getAttribute('data-resolved')).toBe('')
+  await expect.poll(async () => await closedEntry.locator('[class*="boardCardFoot"] time').getAttribute('title') ?? '').toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
   await closedEntry.scrollIntoViewIfNeeded()
   await settleAnimations(page)
-  await page.screenshot({ path: join(UI05_SHOTS, 'resolved-task-entry.png'), fullPage: true })
+  await page.screenshot({ path: join(UI05_SHOTS, 'resolved-board-card.png'), fullPage: true })
   // The shorter door leaves the narrow column less to wrap: it must still fit
   // without a horizontal scrollbar.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await closedEntry.scrollIntoViewIfNeeded()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-  await page.screenshot({ path: join(UI05_SHOTS, 'narrow-resolved-task-entry.png'), fullPage: true })
+  await page.screenshot({ path: join(UI05_SHOTS, 'narrow-resolved-board-card.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
   await settleLayout(page)
   // The shot covers the sidebar column so the exit row can be reviewed against
@@ -2447,9 +2442,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   const inboxComposer = page.getByRole('textbox', { name: '消息内容' })
+  await page.getByRole('button', { name: '讨论/任务' }).click()
   await inboxComposer.fill('请 Human 决策的讨论')
   await page.getByRole('button', { name: '发送' }).click()
-  await page.locator('[data-team-project] article').filter({ hasText: '请 Human 决策的讨论' }).waitFor()
+  await page.getByRole('button', { name: /^打开讨论：请 Human 决策的讨论/ }).waitFor()
   const inboxProjects = scaffold.ctx.agentTeam.view({ workspaceId: inboxWorkspace.id }).projects
   const deliveryProject = inboxProjects.find((project: { name: string }) => project.name === 'delivery')!
   // 'after' is the oldest window; the fresh opener is the newest top-level fact.
@@ -2497,9 +2493,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // A second Thread the Human follows whose only unread fact is an Agent reply
   // naming nobody: the queue mixes a row that named the reader with one that
   // merely moved.
+  await page.getByRole('button', { name: '讨论/任务' }).click()
   await inboxComposer.fill('工程侧同步，无需决策')
   await page.getByRole('button', { name: '发送' }).click()
-  await page.locator('[data-team-project] article').filter({ hasText: '工程侧同步，无需决策' }).waitFor()
+  await page.getByRole('button', { name: /^打开讨论：工程侧同步，无需决策/ }).waitFor()
   const plainView = scaffold.ctx.agentTeam.view({ workspaceId: inboxWorkspace.id, projectRef: deliveryProject.projectRef, topLevelOnly: true, includeActivities: false, direction: 'before', limit: 50 })
   const plainThreadRef = (plainView.items.find((item: { message: { body: string } }) => item.message.body === '工程侧同步，无需决策').thread as { threadRef: string }).threadRef
   const plainRead = await scaffold.ctx.agentTeam.readThreadForAgent(inboxAgent, {
@@ -2818,9 +2815,11 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Inbox, and `agentTeam.addMember` mounts no `team-member` preset in this lane,
   // so the live roster count is asserted rather than assumed. The multi-face
   // shape is pinned in the Client component spec and the Host's claim-owner spec.
-  const stackStarted = await scaffold.ctx.agentTeam.sendMessageForAgent(inboxAgent, {
+  await scaffold.ctx.agentTeam.addProjectOwner({ requestId: 'm2-09-stack-owner' as never, workspaceId: inboxWorkspace.id,
+    projectRef: deliveryProject.projectRef, memberId: inboxReviewer.member.memberId })
+  const stackStarted = await scaffold.ctx.agentTeam.startThreadForAgent(inboxAgent, {
     requestId: 'm2-09-stack-task' as never, workspaceId: inboxWorkspace.id, projectRef: deliveryProject.projectRef,
-    asTask: true, body: '叠放校验：谁在这个 Task 上', recipients: [scaffold.ctx.agentTeam.status().humanMemberId],
+    kind: 'task', body: '叠放校验：谁在这个 Task 上', recipients: [scaffold.ctx.agentTeam.status().humanMemberId],
   })
   if (stackStarted.kind !== 'committed') throw new Error(`stack fixture was rejected: ${stackStarted.kind}`)
   const stackTaskRef = stackStarted.task!.taskRef
@@ -2951,18 +2950,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   await page.screenshot({ path: join(UI08_SHOTS, 'sidebar-recovered-online.png'), fullPage: true })
 
-  // Several Messages in a row from one member: each is its own Thread entry and
-  // Task, kept readable without repeating the identity line.
+  // Several Messages in a row from one member in the Main stream, kept readable
+  // without repeating the identity line.
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
   for (const body of ['连续消息之一', '连续消息之二', '连续消息之三']) {
-    await asTaskToggle.focus()
-    await page.keyboard.press('Space')
-    await expect.poll(() => asTaskToggle.getAttribute('aria-pressed')).toBe('true')
     await projectComposer.fill(body)
     await page.getByRole('button', { name: '发送' }).click()
     await page.locator('[data-team-project] article').filter({ hasText: body }).waitFor()
-    await expect.poll(() => asTaskToggle.getAttribute('aria-pressed')).toBe('false')
   }
   await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'consecutive-entries.png'), fullPage: true })
@@ -2971,21 +2966,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const consecutive = await page.evaluate(() => [...document.querySelectorAll('[data-team-project] article')]
     .filter(article => /连续消息之[一二三]/.test(article.textContent ?? ''))
     .map(article => {
-      const body = article.lastElementChild
-      const entry = [...(body?.children ?? [])].find(child => child.hasAttribute('data-thread-entry'))
-      // The identity line is the body box's opening unless the entry line opens:
-      // grouped rows render none.
-      const opening = body?.firstElementChild
-      const nameRow = opening !== null && opening !== undefined && !opening.hasAttribute('data-thread-entry') ? opening : null
+      const identity = article.querySelector('[data-avatar], [data-gutter-time]')
+      const body = article.querySelector('[class*="messageBody"]')
       const left = (element: Element | null | undefined): number => element === null || element === undefined ? -1 : Math.round(element.getBoundingClientRect().left)
       return {
         grouped: article.getAttribute('data-grouped') === 'true',
-        identityLine: nameRow?.textContent ?? '',
-        entryText: entry?.textContent ?? '',
         series: /连续消息之([一二三])/.exec(article.textContent ?? '')?.[1] ?? '',
-        stateLeft: left(entry?.firstElementChild),
-        entryLeft: left(entry),
-        columnLeft: left(body),
+        seatLeft: left(identity),
+        bodyLeft: left(body),
       }
     }))
   // Chinese numerals do not collate in counting order; send order is the key.
@@ -2994,15 +2982,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(consecutive.map(row => row.series)).toEqual(seriesOrder)
   expect(consecutive.some(row => row.grouped)).toBe(true)
   for (const row of consecutive) {
-    // The status word is not on the identity line, so no continuation row shows a
-    // lone status where a sender would be.
-    expect(row.identityLine).not.toContain('待处理')
-    expect(row.entryText).toContain('待处理')
-    expect(row.stateLeft).toBe(row.entryLeft)
-    expect(row.stateLeft).toBe(row.columnLeft)
+    // The avatar seat holds every row's alignment: the group head's identity
+    // face and the continuation rows' gutter time share one left edge.
+    expect(row.seatLeft).toBeGreaterThanOrEqual(0)
   }
-  // One state column for the whole feed, not one per message length.
-  expect(new Set(consecutive.map(row => row.stateLeft)).size).toBe(1)
+  // One inset for every board card, not one per title length.
+  expect(new Set(consecutive.map(row => row.seatLeft)).size).toBe(1)
 
   await page.getByRole('button', { name: '# delivery' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
@@ -3039,7 +3024,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await projectKeyboard.focus()
   await projectKeyboard.press('Space')
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
-  const taskKeyboard = page.getByRole('button', { name: '打开 Task #1' })
+  const taskKeyboard = page.getByRole('button', { name: /^打开 Task #1/ })
   await taskKeyboard.focus()
   await taskKeyboard.press('Space')
   await page.getByRole('heading', { name: 'Task #1' }).waitFor()
@@ -3131,18 +3116,15 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await page.getByRole('button', { name: '# ref-repro', exact: true }).click()
   await page.getByRole('heading', { name: '# ref-repro', exact: true }).waitFor()
   const projectComposer = page.getByRole('textbox', { name: '消息内容' })
-  // At rules version 2 a plain send posts to the Main stream, so the cited Thread
-  // comes from the 讨论 toggle instead of a top-level send.
-  await page.getByRole('button', { name: '讨论/任务' }).click()
-  await projectComposer.fill('ALPHA-ROOT-MARKER alpha discussion opens here')
-  await page.getByRole('button', { name: '发送', exact: true }).click()
-  await page.locator('[data-main-card="discussion"]').filter({ hasText: 'ALPHA-ROOT-MARKER' }).waitFor()
+  const workspaceId = scaffold.ctx.workspaceRegistry.list()[0]!.id
+  const refProject = scaffold.ctx.agentTeam.view({ workspaceId }).projects.find((entry: { name: string }) => entry.name === 'ref-repro')!
+  // Rules version 2 has no top-level send: the Project page's composer posts to
+  // the Main stream, so the cited Thread is started through the Host.
+  const started = await scaffold.ctx.agentTeam.startThread({ requestId: 'e2e-thread-ref' as never, workspaceId,
+    projectRef: refProject.projectRef, kind: 'discussion', body: 'ALPHA-ROOT-MARKER alpha discussion opens here' })
+  const alphaRef = (started as { thread: { threadRef: string } }).thread.threadRef
   // The abbreviated 8-hex spelling: resolution, not spelling, decides
   // linkability.
-  const workspaceId = scaffold.ctx.workspaceRegistry.list()[0]!.id
-  const projection = scaffold.ctx.agentTeam.view({ workspaceId })
-  const alphaThread = projection.threads.find((thread: { taskRef?: string }) => thread.taskRef === undefined)!
-  const alphaRef = alphaThread.threadRef as string
   const alphaShort = `thread:${(alphaRef.slice('thread:'.length) as string).replaceAll('-', '').slice(0, 8).toLowerCase()}`
   await projectComposer.fill(`BETA-ROOT-MARKER citing ${alphaShort} for the chip`)
   await page.getByRole('button', { name: '发送', exact: true }).click()
@@ -3183,7 +3165,6 @@ const ONE_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42
  */
 it('configures the Team page identity from Settings in real Web', async () => {
   await installLocalBundle(false)
-  await pinRulesVersion(1)
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -3357,6 +3338,12 @@ it('configures the Team page identity from Settings in real Web', async () => {
   await page.getByRole('button', { name: '发送', exact: true }).click()
   const row = page.locator('[data-team-project] article').filter({ hasText: 'PROFILE-NAME-MARKER' })
   await row.waitFor()
+  // A recent Inbox row admits Threads the reader wrote in; the Main stream post
+  // above belongs to no Thread, so the Human's own discussion provides the row.
+  const profileWorkspaceId = scaffold!.ctx.workspaceRegistry.list()[0]!.id
+  const profileProject = scaffold!.ctx.agentTeam.view({ workspaceId: profileWorkspaceId }).projects.find((entry: { name: string }) => entry.name === 'profile-check')!
+  await scaffold!.ctx.agentTeam.startThread({ requestId: 'e2e-profile-thread' as never, workspaceId: profileWorkspaceId,
+    projectRef: profileProject.projectRef, kind: 'discussion', body: 'PROFILE-NAME-MARKER hello from the renamed human' })
   await expect.poll(async () => await row.textContent()).toContain('Ada')
   expect(await row.textContent()).not.toContain('Human')
   // The picture lands on the Human's own message row; the Agent row keeping its
@@ -3445,172 +3432,168 @@ it('states the local environment check on the Team page', async () => {
 
 it('edits Project owners from the Project dialog under rules version 2 in real Web', async () => {
   await installLocalBundle(false)
-  {
-    scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
-    browser = await chromium.launch({ headless: true, executablePath: CHROME })
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
-    const consoleWatch = watchConsole(page)
-    await page.goto(scaffold.authenticatedUrl)
-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
-    await page.getByRole('button', { name: '团队', exact: true }).click()
+  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
+  browser = await chromium.launch({ headless: true, executablePath: CHROME })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+  const consoleWatch = watchConsole(page)
+  await page.goto(scaffold.authenticatedUrl)
+  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
+  await page.getByRole('button', { name: '团队', exact: true }).click()
 
-    await page.getByRole('button', { name: '新建项目' }).click()
-    const createProject = page.getByRole('dialog', { name: '新建项目' })
-    await createProject.getByLabel('名称').fill('owners-web')
-    await createProject.getByRole('button', { name: '创建项目' }).click()
-    await page.getByRole('button', { name: '# owners-web', exact: true }).waitFor()
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const createProject = page.getByRole('dialog', { name: '新建项目' })
+  await createProject.getByLabel('名称').fill('owners-web')
+  await createProject.getByRole('button', { name: '创建项目' }).click()
+  await page.getByRole('button', { name: '# owners-web', exact: true }).waitFor()
 
-    await page.getByRole('button', { name: '添加 Agent' }).click()
-    const createAgent = page.getByRole('dialog', { name: '添加 Agent' })
-    await createAgent.getByLabel('名称').fill('steward')
-    await createAgent.getByLabel('说明').fill('负责交付')
-    await createAgent.getByRole('button', { name: '创建 Agent' }).click()
-    await page.getByText('steward', { exact: true }).waitFor({ timeout: 20_000 })
+  await page.getByRole('button', { name: '添加 Agent' }).click()
+  const createAgent = page.getByRole('dialog', { name: '添加 Agent' })
+  await createAgent.getByLabel('名称').fill('steward')
+  await createAgent.getByLabel('说明').fill('负责交付')
+  await createAgent.getByRole('button', { name: '创建 Agent' }).click()
+  await page.getByText('steward', { exact: true }).waitFor({ timeout: 20_000 })
 
-    const openEditor = async () => {
-      // The row menu button only takes pointer events while its row is hovered.
-      await page.getByRole('button', { name: '# owners-web', exact: true }).hover()
-      await page.getByRole('button', { name: 'owners-web 的操作' }).click()
-      await page.getByRole('menuitem', { name: '编辑项目' }).click()
-      const editor = page.getByRole('dialog', { name: '编辑项目' })
-      await editor.waitFor()
-      return editor
-    }
-    const editor = await openEditor()
-    const owners = editor.getByRole('group', { name: '负责人' })
-    await owners.waitFor()
-    await owners.getByText('始终是负责人').waitFor()
-    expect(await owners.getByRole('button', { name: /^移除负责人/ }).count()).toBe(0)
-
-    await owners.getByRole('button', { name: '添加负责人 @steward' }).click()
-    const remove = owners.getByRole('button', { name: '移除负责人 @steward' })
-    await remove.waitFor()
-    expect(await owners.getByRole('button', { name: '添加负责人 @steward' }).count()).toBe(0)
-    const workspaceId = scaffold.ctx.workspaceRegistry.list()[0]!.id
-    expect(scaffold.ctx.agentTeam.view({ workspaceId }).owners).toHaveLength(1)
-    await page.screenshot({ path: join(UI04_SHOTS, 'project-owners-desktop.png'), fullPage: true })
-    await editor.getByRole('button', { name: '关闭', exact: true }).click()
-
-    // The 390 breakpoint unmounts sidebar panels, so reopen the dialog from the narrow-expanded sidebar.
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.locator('[data-sidebar-collapsed="true"]').waitFor()
-    await page.getByRole('button', { name: '打开侧边栏' }).click()
-    const narrowEditor = await openEditor()
-    const narrowOwners = narrowEditor.getByRole('group', { name: '负责人' })
-    await narrowOwners.getByRole('button', { name: '移除负责人 @steward' }).waitFor()
-    await settleLayout(page)
-    await page.screenshot({ path: join(UI04_SHOTS, 'project-owners-mobile.png'), fullPage: true })
-
-    await narrowOwners.getByRole('button', { name: '移除负责人 @steward' }).click()
-    await narrowOwners.getByRole('button', { name: '添加负责人 @steward' }).waitFor()
-    expect(scaffold.ctx.agentTeam.view({ workspaceId }).owners).toHaveLength(0)
-    expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
+  const openEditor = async () => {
+    // The row menu button only takes pointer events while its row is hovered.
+    await page.getByRole('button', { name: '# owners-web', exact: true }).hover()
+    await page.getByRole('button', { name: 'owners-web 的操作' }).click()
+    await page.getByRole('menuitem', { name: '编辑项目' }).click()
+    const editor = page.getByRole('dialog', { name: '编辑项目' })
+    await editor.waitFor()
+    return editor
   }
+  const editor = await openEditor()
+  const owners = editor.getByRole('group', { name: '负责人' })
+  await owners.waitFor()
+  await owners.getByText('始终是负责人').waitFor()
+  expect(await owners.getByRole('button', { name: /^移除负责人/ }).count()).toBe(0)
+
+  await owners.getByRole('button', { name: '添加负责人 @steward' }).click()
+  const remove = owners.getByRole('button', { name: '移除负责人 @steward' })
+  await remove.waitFor()
+  expect(await owners.getByRole('button', { name: '添加负责人 @steward' }).count()).toBe(0)
+  const workspaceId = scaffold.ctx.workspaceRegistry.list()[0]!.id
+  expect(scaffold.ctx.agentTeam.view({ workspaceId }).owners).toHaveLength(1)
+  await page.screenshot({ path: join(UI04_SHOTS, 'project-owners-desktop.png'), fullPage: true })
+  await editor.getByRole('button', { name: '关闭', exact: true }).click()
+
+  // The 390 breakpoint unmounts sidebar panels, so reopen the dialog from the narrow-expanded sidebar.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.locator('[data-sidebar-collapsed="true"]').waitFor()
+  await page.getByRole('button', { name: '打开侧边栏' }).click()
+  const narrowEditor = await openEditor()
+  const narrowOwners = narrowEditor.getByRole('group', { name: '负责人' })
+  await narrowOwners.getByRole('button', { name: '移除负责人 @steward' }).waitFor()
+  await settleLayout(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'project-owners-mobile.png'), fullPage: true })
+
+  await narrowOwners.getByRole('button', { name: '移除负责人 @steward' }).click()
+  await narrowOwners.getByRole('button', { name: '添加负责人 @steward' }).waitFor()
+  expect(scaffold.ctx.agentTeam.view({ workspaceId }).owners).toHaveLength(0)
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
 
 it('posts, starts a discussion and a Task, and opens cards in the Main stream under rules version 2 in real Web', async () => {
   await installLocalBundle(false)
-  {
-    scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
-    browser = await chromium.launch({ headless: true, executablePath: CHROME })
-    const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
-    const consoleWatch = watchConsole(page)
-    await page.goto(scaffold.authenticatedUrl)
-    await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
-    await page.getByRole('button', { name: '团队', exact: true }).click()
+  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
+  browser = await chromium.launch({ headless: true, executablePath: CHROME })
+  const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
+  const consoleWatch = watchConsole(page)
+  await page.goto(scaffold.authenticatedUrl)
+  await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
+  await page.getByRole('button', { name: '团队', exact: true }).click()
 
-    await page.getByRole('button', { name: '新建项目' }).click()
-    const createProject = page.getByRole('dialog', { name: '新建项目' })
-    await createProject.getByLabel('名称').fill('stream-web')
-    await createProject.getByRole('button', { name: '创建项目' }).click()
-    await page.getByRole('button', { name: '# stream-web', exact: true }).click()
+  await page.getByRole('button', { name: '新建项目' }).click()
+  const createProject = page.getByRole('dialog', { name: '新建项目' })
+  await createProject.getByLabel('名称').fill('stream-web')
+  await createProject.getByRole('button', { name: '创建项目' }).click()
+  await page.getByRole('button', { name: '# stream-web', exact: true }).click()
 
-    const mainTab = page.getByRole('tab', { name: '主对话' })
-    await mainTab.waitFor()
-    expect(await mainTab.getAttribute('aria-selected')).toBe('true')
-    const composer = page.getByRole('textbox', { name: '消息内容' })
-    const send = page.getByRole('button', { name: '发送' })
-    await page.getByText('主对话还没有内容').waitFor()
-    await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'empty-desktop.png'), fullPage: true })
+  const mainTab = page.getByRole('tab', { name: '主对话' })
+  await mainTab.waitFor()
+  expect(await mainTab.getAttribute('aria-selected')).toBe('true')
+  const composer = page.getByRole('textbox', { name: '消息内容' })
+  const send = page.getByRole('button', { name: '发送' })
+  await page.getByText('主对话还没有内容').waitFor()
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'empty-desktop.png'), fullPage: true })
 
-    await composer.fill('配色要不要跟设置页统一？')
-    await send.click()
-    await page.getByText('配色要不要跟设置页统一？', { exact: true }).waitFor()
-    await expect.poll(() => composer.inputValue()).toBe('')
+  await composer.fill('配色要不要跟设置页统一？')
+  await send.click()
+  await page.getByText('配色要不要跟设置页统一？', { exact: true }).waitFor()
+  await expect.poll(() => composer.inputValue()).toBe('')
 
-    // Discussion: the toggle turns the send into a new Thread whose card lands in the stream.
-    const toggle = page.getByRole('button', { name: '讨论/任务' })
-    await toggle.click()
-    expect(await toggle.getAttribute('aria-pressed')).toBe('true')
-    await composer.fill('登录页改版')
-    await send.click()
-    const discussionCard = page.getByRole('button', { name: /^打开讨论：登录页改版/ })
-    await discussionCard.waitFor()
-    expect(await toggle.getAttribute('aria-pressed')).toBe('false')
-    expect(await page.getByRole('checkbox', { name: '作为任务' }).count()).toBe(0)
+  // Discussion: the toggle turns the send into a new Thread whose card lands in the stream.
+  const toggle = page.getByRole('button', { name: '讨论/任务' })
+  await toggle.click()
+  expect(await toggle.getAttribute('aria-pressed')).toBe('true')
+  await composer.fill('登录页改版')
+  await send.click()
+  const discussionCard = page.getByRole('button', { name: /^打开讨论：登录页改版/ })
+  await discussionCard.waitFor()
+  expect(await toggle.getAttribute('aria-pressed')).toBe('false')
+  expect(await page.getByRole('checkbox', { name: '作为任务' }).count()).toBe(0)
 
-    // Task: checking 作为任务 sends a Task and moves to the board.
-    await toggle.click()
-    await page.getByRole('checkbox', { name: '作为任务' }).check()
-    await composer.fill('实现 API 网关')
-    await send.click()
-    await page.getByRole('tab', { name: '看板' }).waitFor()
-    await expect.poll(() => page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
-    await page.getByRole('button', { name: '打开 Task #1' }).waitFor()
-    expect(await page.getByRole('button', { name: '加载更早消息' }).count()).toBe(0)
-    await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'board-desktop.png'), fullPage: true })
+  // Task: checking 作为任务 sends a Task and moves to the board.
+  await toggle.click()
+  await page.getByRole('checkbox', { name: '作为任务' }).check()
+  await composer.fill('实现 API 网关')
+  await send.click()
+  await page.getByRole('tab', { name: '看板' }).waitFor()
+  await expect.poll(() => page.getByRole('tab', { name: '看板' }).getAttribute('aria-selected')).toBe('true')
+  await page.getByRole('button', { name: '打开 Task #1', exact: true }).waitFor()
+  expect(await page.getByRole('button', { name: '加载更早消息' }).count()).toBe(0)
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'board-desktop.png'), fullPage: true })
 
-    await mainTab.click()
-    const taskCard = page.getByRole('button', { name: /^打开 Task #1：实现 API 网关/ })
-    await taskCard.waitFor()
-    expect(await discussionCard.getAttribute('data-main-card')).toBe('discussion')
-    await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-desktop.png'), fullPage: true })
+  await mainTab.click()
+  const taskCard = page.getByRole('button', { name: /^打开 Task #1：实现 API 网关/ })
+  await taskCard.waitFor()
+  expect(await discussionCard.getAttribute('data-main-card')).toBe('discussion')
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-desktop.png'), fullPage: true })
 
-    // Keyboard: a card is a real button that opens the Thread side panel from Enter.
-    await page.keyboard.press('Tab')
-    await discussionCard.focus()
-    const ring = await focusRing(page, '[data-main-card="discussion"]')
-    expect(ring?.focusVisible).toBe(true)
-    expect(ring?.outlineStyle).not.toBe('none')
-    await page.keyboard.press('Enter')
-    await page.getByRole('button', { name: '关闭讨论' }).waitFor()
-    await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'panel-desktop.png'), fullPage: true })
-    await page.getByRole('button', { name: '关闭讨论' }).click()
+  // Keyboard: a card is a real button that opens the Thread side panel from Enter.
+  await page.keyboard.press('Tab')
+  await discussionCard.focus()
+  const ring = await focusRing(page, '[data-main-card="discussion"]')
+  expect(ring?.focusVisible).toBe(true)
+  expect(ring?.outlineStyle).not.toBe('none')
+  await page.keyboard.press('Enter')
+  await page.getByRole('button', { name: '关闭讨论' }).waitFor()
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'panel-desktop.png'), fullPage: true })
+  await page.getByRole('button', { name: '关闭讨论' }).click()
 
-    // An owner grant is a Main stream activity row.
-    await page.getByRole('button', { name: '添加 Agent' }).click()
-    const createAgent = page.getByRole('dialog', { name: '添加 Agent' })
-    await createAgent.getByLabel('名称').fill('steward')
-    await createAgent.getByLabel('说明').fill('负责交付')
-    await createAgent.getByRole('button', { name: '创建 Agent' }).click()
-    await page.getByText('steward', { exact: true }).waitFor({ timeout: 20_000 })
-    await page.getByRole('button', { name: '# stream-web', exact: true }).hover()
-    await page.getByRole('button', { name: 'stream-web 的操作' }).click()
-    await page.getByRole('menuitem', { name: '编辑项目' }).click()
-    const editor = page.getByRole('dialog', { name: '编辑项目' })
-    await editor.getByRole('button', { name: '添加负责人 @steward' }).click()
-    await editor.getByRole('button', { name: '移除负责人 @steward' }).waitFor()
-    await editor.getByRole('button', { name: '关闭', exact: true }).click()
-    await page.getByText('human 指定 @steward 为项目负责人').waitFor()
-    await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-owner-desktop.png'), fullPage: true })
+  // An owner grant is a Main stream activity row.
+  await page.getByRole('button', { name: '添加 Agent' }).click()
+  const createAgent = page.getByRole('dialog', { name: '添加 Agent' })
+  await createAgent.getByLabel('名称').fill('steward')
+  await createAgent.getByLabel('说明').fill('负责交付')
+  await createAgent.getByRole('button', { name: '创建 Agent' }).click()
+  await page.getByText('steward', { exact: true }).waitFor({ timeout: 20_000 })
+  await page.getByRole('button', { name: '# stream-web', exact: true }).hover()
+  await page.getByRole('button', { name: 'stream-web 的操作' }).click()
+  await page.getByRole('menuitem', { name: '编辑项目' }).click()
+  const editor = page.getByRole('dialog', { name: '编辑项目' })
+  await editor.getByRole('button', { name: '添加负责人 @steward' }).click()
+  await editor.getByRole('button', { name: '移除负责人 @steward' }).waitFor()
+  await editor.getByRole('button', { name: '关闭', exact: true }).click()
+  await page.getByText('human 指定 @steward 为项目负责人').waitFor()
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-owner-desktop.png'), fullPage: true })
 
-    // The composer picks no @all at version 2.
-    await composer.fill('@')
-    expect(await page.getByRole('option', { name: /通知所有成员/ }).count()).toBe(0)
-    await composer.fill('')
+  // The composer picks no @all at version 2.
+  await composer.fill('@')
+  expect(await page.getByRole('option', { name: /通知所有成员/ }).count()).toBe(0)
+  await composer.fill('')
 
-    expect(await maxHorizontalScroll(page, '[data-team-project]')).toBe(0)
-    await page.setViewportSize({ width: 390, height: 844 })
-    await settleLayout(page)
-    await taskCard.waitFor()
-    await toggle.click()
-    await page.getByRole('checkbox', { name: '作为任务' }).check()
-    await composer.fill('在手机宽度下写一条比较长的任务描述，检查控制行换行与卡片不溢出')
-    await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-mobile.png'), fullPage: true })
-    expect(await maxHorizontalScroll(page, '[data-team-project]')).toBe(0)
-    const overflowing = await page.evaluate(() => [...document.querySelectorAll('[data-main-card], [data-team-composer]')]
-      .filter(element => element.getBoundingClientRect().right > window.innerWidth + 0.5).length)
-    expect(overflowing).toBe(0)
-    expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
-  }
+  expect(await maxHorizontalScroll(page, '[data-team-project]')).toBe(0)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await taskCard.waitFor()
+  await toggle.click()
+  await page.getByRole('checkbox', { name: '作为任务' }).check()
+  await composer.fill('在手机宽度下写一条比较长的任务描述，检查控制行换行与卡片不溢出')
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-mobile.png'), fullPage: true })
+  expect(await maxHorizontalScroll(page, '[data-team-project]')).toBe(0)
+  const overflowing = await page.evaluate(() => [...document.querySelectorAll('[data-main-card], [data-team-composer]')]
+    .filter(element => element.getBoundingClientRect().right > window.innerWidth + 0.5).length)
+  expect(overflowing).toBe(0)
+  expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)

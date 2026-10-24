@@ -125,16 +125,6 @@
   color: var(--dsw-alias-label-secondary);
 }
 
-/* Icon-sized stand-in for the presence dot on the @all row. */
-.mentionAllDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  corner-shape: round;
-  background: var(--dsw-alias-label-primary);
-  justify-self: center;
-}
-
 .mentionDescription {
   min-width: 0;
   overflow: hidden;
@@ -332,7 +322,7 @@
   opacity: 0.4;
 }
 
-.confirmation {
+.notice {
   align-self: stretch;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;

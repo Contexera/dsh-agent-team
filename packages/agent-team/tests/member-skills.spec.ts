@@ -79,7 +79,7 @@ describe('Agent Team member-private skills', () => {
     // Default catalog = the plugin's bundled core skills (the two meta
     // skills); no project/user/global roots leak in. Ordinary sessions see
     // nothing.
-    expect(await catalogNames(ctx, agent)).toEqual(['member-memory-manager', 'member-skill-manager'])
+    expect(await catalogNames(ctx, agent)).toEqual(['member-memory-manager', 'member-skill-manager', 'team-domain-model'])
     const ordinary = await ctx.agents.create({ sessionId: SessionId('ordinary-skills') })
     cleanups.push(async () => { await ordinary.dispose() })
     expect(await catalogNames(ctx, ordinary.agent)).toEqual([])
@@ -90,14 +90,14 @@ describe('Agent Team member-private skills', () => {
     // discovery rather than racing it.
     await writeFile(join(member.privateMemoryPath, 'skills', 'code-review.md'), SKILL_MD('code-review', 'Review changes', 'Review the diff carefully.'))
     await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['code-review', 'member-memory-manager', 'member-skill-manager'])
+      expect(await catalogNames(ctx, agent)).toEqual(['code-review', 'member-memory-manager', 'member-skill-manager', 'team-domain-model'])
     })
 
     // A sibling Member keeps exactly the bundled set — neither the private
     // skill nor the directory is shared.
     const sibling = await addMember(ctx, workspaceId, 'sibling')
     const siblingAgent = liveAgent(ctx, sibling.sessionId)
-    expect(await catalogNames(ctx, siblingAgent)).toEqual(['member-memory-manager', 'member-skill-manager'])
+    expect(await catalogNames(ctx, siblingAgent)).toEqual(['member-memory-manager', 'member-skill-manager', 'team-domain-model'])
 
     // The installed skill loads with its full body for the owner alone.
     const loaded = await ctx.skills.get('code-review', { scope: agent as never })
@@ -150,6 +150,20 @@ describe('Agent Team member-private skills', () => {
     expect(loaded?.content).toContain('Demote, do not delete')
   })
 
+  it('ships the bundled team-domain-model as stable rules without current state', async () => {
+    const { ctx, workspaceId } = await memberSkillsHarness()
+    const member = await addMember(ctx, workspaceId, 'domain-reader')
+    const agent = liveAgent(ctx, member.sessionId)
+    const skills = await ctx.skills.list({ scope: agent as never })
+    const domain = skills.find(skill => skill.name === 'team-domain-model')
+    expect(domain).toBeDefined()
+    // The description routes by the questions a Member is actually unsure about.
+    expect(domain?.description).toContain('project_owner_required')
+    expect(domain?.description).toContain('never current state')
+    const loaded = await ctx.skills.get('team-domain-model', { scope: agent as never })
+    expect(loaded?.content).toContain('## Rejections and recovery')
+  })
+
   it('filters an explicit selection and live-applies selection edits', async () => {
     const { ctx, workspaceId } = await memberSkillsHarness()
     // auto Member: two skills installed, no selection.
@@ -158,7 +172,7 @@ describe('Agent Team member-private skills', () => {
     await writeFile(join(member.privateMemoryPath, 'skills', 'alpha.md'), SKILL_MD('alpha', 'Alpha skill', 'Alpha body.'))
     await writeFile(join(member.privateMemoryPath, 'skills', 'beta.md'), SKILL_MD('beta', 'Beta skill', 'Beta body.'))
     await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager'])
+      expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager', 'team-domain-model'])
     })
 
     // Explicit selection: only the listed name is listed or loadable. The
@@ -185,7 +199,7 @@ describe('Agent Team member-private skills', () => {
       requestId: requestId('select-auto'), memberId: member.memberId, handle: 'picky', description: 'Skills member',
       capabilities: null,
     })
-    expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager'])
+    expect(await catalogNames(ctx, agent)).toEqual(['alpha', 'beta', 'member-memory-manager', 'member-skill-manager', 'team-domain-model'])
   })
 
   it('provisions skills/ on activation and removes it with the Member', async () => {
@@ -195,7 +209,7 @@ describe('Agent Team member-private skills', () => {
     await writeFile(join(skillsDir, 'ephemeral.md'), SKILL_MD('ephemeral', 'Ephemeral', 'Gone with the Member.'))
     const agent = liveAgent(ctx, member.sessionId)
     await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['ephemeral', 'member-memory-manager', 'member-skill-manager'])
+      expect(await catalogNames(ctx, agent)).toEqual(['ephemeral', 'member-memory-manager', 'member-skill-manager', 'team-domain-model'])
     })
 
     // Removal deletes the whole private namespace, skills included.
@@ -209,19 +223,19 @@ describe('Agent Team member-private skills', () => {
     await writeFile(join(member.privateMemoryPath, 'skills', 'keeper.md'), SKILL_MD('keeper', 'Keeper', 'Survives restarts.'))
     const agent = liveAgent(ctx, member.sessionId)
     await vi.waitFor(async () => {
-      expect(await catalogNames(ctx, agent)).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager'])
+      expect(await catalogNames(ctx, agent)).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager', 'team-domain-model'])
     })
 
     await ctx.agentTeam.suspendMember({ requestId: requestId('suspend'), memberId: member.memberId })
     const resumed = await ctx.agentTeam.resumeMember({ requestId: requestId('resume'), memberId: member.memberId })
     expect(resumed.status.availability).toBe('active')
-    expect(await catalogNames(ctx, liveAgent(ctx, member.sessionId))).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager'])
+    expect(await catalogNames(ctx, liveAgent(ctx, member.sessionId))).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager', 'team-domain-model'])
 
     // Host restart: the provider remounts at activation and re-discovers.
     await teamFiber.dispose()
     await ctx.plugin(AgentTeam)
     const restored = ctx.agentTeam.membersForClient({ workspaceId }).find(item => item.member.memberId === member.memberId)
     expect(restored?.availability).toBe('active')
-    expect(await catalogNames(ctx, liveAgent(ctx, member.sessionId))).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager'])
+    expect(await catalogNames(ctx, liveAgent(ctx, member.sessionId))).toEqual(['keeper', 'member-memory-manager', 'member-skill-manager', 'team-domain-model'])
   })
 })

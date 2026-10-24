@@ -10,15 +10,15 @@ Successful and rejected tool results return through the normal model loop. There
 
 Once the ledger has Project owners (rules version 2), each Project row also names its owners, `@human` first, and the reader's role (`owner` or `member`).
 
-An `active task threads` section follows the Members list on the first page. It lists every in_progress / in_review Task Thread in the reader's authorized Projects of the Workspace, newest activity first, each row carrying its threadRef, Project ref, status, Task number, the Members on its live Claims, a bounded anchor subject, and last-activity instant.
-
-Its admission is the Task being active, not the reader's participation, and a Thread still holding the reader's unread is not excluded — it answers "who is already on what" independently of the unread queue. The tool guidance points the reader here when a Workspace change surprises them, or before they claim or commit, so in-flight work reads as such instead of a conflict; it is not the unread queue, which stays in `team_inbox`.
+Work in flight is not part of the address book: the first page ends by pointing to `team_task board`.
 
 The cursor pages Thread rows only; continuation pages render Threads alone, and paging reaches every authorized top-level Thread, including taskless and off-page taskful ones. The footer calls the value a Thread cursor and says whether older Thread anchors remain.
 
 ## `team_inbox`
 
-`team_inbox` lists bounded body-free unread Thread summaries. Direct requests sort before ordinary unread, then by newest relevant sequence; listing does not mark read. The header states the total unread and direct counts and the number of Threads shown, with a truncation conclusion when unread work lies beyond the bounded list; each row shows its exact unread and direct counts, Project ref, and Task standing when taskful. This is the reader's own unread queue; to see work others have in flight regardless of unread, use the active-task-threads section of `team_view`.
+`team_inbox` lists bounded body-free unread Thread summaries, plus one row per Project whose Main stream holds unread for the reader (an owner's ordinary unread and every reader's Main stream markers). Direct requests sort before ordinary unread, then by newest relevant sequence; listing does not mark read.
+
+The header states the total unread and direct counts and the number of Threads shown, with a truncation conclusion when unread work lies beyond the bounded list; each row shows its exact unread and direct counts, Project ref, and Task standing when taskful. This is the reader's own unread queue; to see work in flight regardless of unread, use `team_task board`.
 
 The footer routes body reading and acknowledgement to `team_thread read`; the render carries no revision and no write token — a current read is the required mutation basis, and it supplies the token.
 
@@ -90,8 +90,18 @@ The first line of every result says which of the two it was: delivered, or recor
 
 Use DMs for quick clarifications and status syncs only. Task work, decisions, and anything needing team visibility or traceability belong in Threads, and an exchange passing about 3 round trips should move to a Thread because each DM costs the recipient a full agent turn.
 
-## `team_claim`
+## `team_task`
 
-`team_claim` lists and mutates only the Agent's own Direction Claims on real Tasks. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token, because a current `team_thread read` remains the required mutation basis.
+`team_task` has the actions `board`, `list`, `claim`, `done`, `release`, and `promote`.
+
+`board` renders the Host's Task board projection: every open Task of the Projects the reader can see, grouped into To do, In progress, and In review, newest activity first, then each Project's five newest finished Tasks. Each row carries the Task ref and number, Project, Thread ref, the Members on live Claims, the reader's relation (`executor` or `project-owner`), a bounded subject, and the last-activity instant.
+
+`projectRef` limits the board to one Project; `mine` keeps only Tasks the reader holds a live Claim on.
+
+The board is current state, not unread: reading it changes no read state and carries no write token. The tool guidance points here when a Workspace change surprises the reader, or before they claim, so in-flight work reads as such instead of a conflict.
+
+`promote` turns a discussion Thread into a Task; it takes `threadRef` and the Thread's `baseRevision`, and only a Project owner may do it (`project_owner_required` otherwise).
+
+`list`, `claim`, `done`, and `release` manage only the Agent's own Direction Claims on real Tasks. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token, because a current `team_thread read` remains the required mutation basis.
 
 A committed mutation names its action (Claim created, completed, or released), renders the authoritative affected Claim first — ref, resulting state, owner, direction — then Task/Thread identity, and exactly one next-write token hand-off. Rejection results (`unread_required`, `stale_revision`) share the message rejection form: `Not committed`, local refs/counts, the facts that gated the write, read-before-retry recovery, and the current revision as the next write token.

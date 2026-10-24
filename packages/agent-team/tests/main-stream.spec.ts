@@ -8,6 +8,7 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
+import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 import type {
   AgentTeamAgentMember, AgentTeamMainTimelineEntry, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamMessageRef, AgentTeamOperation,
   AgentTeamOperationId, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamThreadRef,
@@ -48,6 +49,10 @@ function appendStored(pool: MemoryMediaPool, record: AgentTeamOperation): void {
   const sequence = head.sequence + 1
   const operationId = `operation:appended-${sequence}` as AgentTeamOperationId
   pool.media.get('agent_team')!.tables.get('operations')!.set(operationId, { ...record, sequence, operationId, previousOperationId: head.operationId })
+}
+
+function storedV1Records(): AgentTeamOperation[] {
+  return rulesV1Ledger.records.map(([, record]) => record as AgentTeamOperation)
 }
 
 const actorOf = (memberId: AgentTeamMemberId, handle: string): AgentTeamMemberActor => ({ kind: 'member', memberId, handle })
@@ -114,9 +119,7 @@ describe('rules version gating of the Main stream kinds', () => {
       expect(() => new AgentTeamLedger(table), record.kind).toThrow(/needs rules version 2/)
     }
 
-    const old = await seed(1)
-    await old.ledger.sendMessage({ requestId: requestId('send'), actor: human, workspaceId: alpha, projectRef: old.projectRef, body: 'top level' })
-    const sent = storedRecords(old.pool).find(record => record.kind === 'team/message-sent')!
+    const sent = storedV1Records().find(record => record.kind === 'team/message-sent')!
     const pool = new MemoryMediaPool()
     await new AgentTeamLedger(await openTable(pool), { rulesVersion: 2 }).initialize()
     appendStored(pool, sent)
@@ -130,16 +133,10 @@ describe('rules version gating of the Main stream kinds', () => {
     await expect(readMain(team, human)).rejects.toThrow(/rules version 2/)
     await expect(start(team, human, 'discussion', 'topic')).rejects.toThrow(/rules version 2/)
     expect(() => page(team, human)).toThrow(/rules version 2/)
-    await team.ledger.sendMessage({ requestId: requestId('send'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'hi @writer', recipients: [team.writer.memberId] })
-    const sent = storedRecords(team.pool).find(record => record.kind === 'team/message-sent')!
+    const sent = storedV1Records().find(record => record.kind === 'team/message-sent')!
     expect(Object.keys((sent.data as { inbox: object }).inbox)).toEqual(['attention', 'directMarkers', 'activityMarkers'])
   })
 
-  it('refuses the top-level send once the ledger runs version 2', async () => {
-    const team = await seed(2)
-    await expect(team.ledger.sendMessage({ requestId: requestId('send'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'top level' }))
-      .rejects.toThrow(/replaced by startThread/)
-  })
 })
 
 describe('Main stream posting and the unread gate', () => {
@@ -298,6 +295,25 @@ describe('Thread replies at rules version 2', () => {
   })
 })
 
+describe('Main stream rows in the Inbox', () => {
+  it('gives owners one row per Project with ordinary and direct counts, and a non-owner only the entries that name it', async () => {
+    const team = await seed()
+    await readMain(team, team.owner.actor)
+    committedMessage(await post(team, team.writer.actor, 'status update'))
+    committedMessage(await post(team, team.writer.actor, '@owner can you look?'))
+    await start(team, human, 'discussion', 'open question')
+    const [ownerRow] = team.ledger.memberInbox(team.owner.actor, {}).main
+    expect(ownerRow).toMatchObject({ projectRef: team.projectRef, projectName: 'alpha', unreadCount: 3, directCount: 1, previewText: 'open question' })
+    expect(team.ledger.inbox(human, { workspaceId: alpha })).toMatchObject({ main: [{ unreadCount: 2, directCount: 0 }], totalUnreadCount: 2, totalDirectCount: 0 })
+    expect(team.ledger.memberInbox(team.writer.actor, {}).main).toEqual([])
+    await readMain(team, team.owner.actor)
+    committedMessage(await post(team, team.owner.actor, '@writer yes'))
+    expect(team.ledger.memberInbox(team.writer.actor, {}).main).toMatchObject([{ unreadCount: 1, directCount: 1, newestActor: { name: 'owner' } }])
+    await readMain(team, team.writer.actor)
+    expect(team.ledger.memberInbox(team.writer.actor, {})).toMatchObject({ main: [], totalUnreadCount: 0 })
+  })
+})
+
 describe('owner changes in the Main stream', () => {
   it('gives the new owner a marker, and starts its ordinary unread at the grant', async () => {
     const team = await seed(2)
@@ -325,19 +341,16 @@ describe('owner changes in the Main stream', () => {
 describe('earlier-version Threads and replay', () => {
   it('shows version-1 top-level Threads as cards that are not unread, and reproduces every projection on replay', async () => {
     const pool = new MemoryMediaPool()
+    pool.versions.set('agent_team', agentTeamDomainSpec.version)
+    pool.media.set('agent_team', { tables: new Map([['operations', new Map(rulesV1Ledger.records)]]), global: null })
     const table = await openTable(pool)
-    const legacy = new AgentTeamLedger(table, { rulesVersion: 1 })
-    await legacy.initialize()
-    const projectRef = (await legacy.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha, name: 'alpha', description: '', memberIds: [] })).value.project.projectRef
-    const sent = await legacy.sendMessage({ requestId: requestId('send'), actor: human, workspaceId: alpha, projectRef, body: 'old task', asTask: true })
-    if (sent.value.kind !== 'committed') throw new Error('send did not commit')
-
+    const projectRef = rulesV1Ledger.projectRef as AgentTeamProjectRef
     const upgraded = new AgentTeamLedger(table, { rulesVersion: 2 })
     await upgraded.initialize()
     const writer = await addAgent(upgraded, 'writer', [projectRef])
     await upgraded.addProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef, memberId: writer.memberId })
     const team: Seeded = { pool, table, ledger: upgraded, projectRef, owner: writer, writer, outsider: writer }
-    const card = cardOf(page(team, human).entries, sent.value.thread.threadRef)
+    const card = cardOf(page(team, human).entries, rulesV1Ledger.task.threadRef as AgentTeamThreadRef)
     expect(card).toMatchObject({ unread: false, card: { task: { taskNumber: 1, status: 'todo' }, replyCount: 0 } })
     // The older card is not unread for the Human or the new owner; the new owner only holds its grant marker.
     expect(page(team, human).standing.unreadCount).toBe(0)

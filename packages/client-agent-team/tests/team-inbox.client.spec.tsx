@@ -33,6 +33,22 @@ function inboxRow(workspaceId: string, threadRef: string, overrides: Record<stri
   }
 }
 
+/** One Main stream Inbox row as the Host emits it. */
+function mainInboxRow(workspaceId: string, overrides: Record<string, unknown> = {}): { readonly workspaceId: string } & Record<string, unknown> {
+  return {
+    workspaceId,
+    projectRef: 'project:engineering',
+    projectName: 'engineering',
+    unreadCount: 3,
+    directCount: 0,
+    previewText: 'Anyone seen the build?',
+    newestSequence: 15,
+    newestOccurredAt: '2026-09-13T04:00:00.000Z',
+    newestActor: { memberId: 'member:iris', name: 'iris' },
+    ...overrides,
+  }
+}
+
 /** The one count capsule a queue row may hold, by the attribute every capsule carries. */
 function capsuleOf(row: HTMLElement): HTMLElement | null {
   return row.querySelector('[data-team-count-badge]')
@@ -232,6 +248,57 @@ describe('Team Inbox surfaces', () => {
     await b.runtime.dispose()
   })
 
+  it('lists a Project Main stream as one row among the Thread rows, ordered with them and inked by the same rule', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
+    const card = await b.view.findByRole('button', { name: '收件箱' })
+    await b.changeSubscriptionsReady()
+    b.seedInbox([
+      inboxRow('w1', 'thread:ambient', { projectName: 'delivery', previewText: 'ambient row', task: undefined, taskNumber: undefined, directCount: 0, unreadCount: 4, newestSequence: 12 }),
+    ])
+    b.seedMainInbox([
+      mainInboxRow('w1', { projectRef: 'project:engineering', projectName: 'engineering', unreadCount: 5, directCount: 2, previewText: '@human 晚上发版吗', newestSequence: 20 }),
+      mainInboxRow('w1', { projectRef: 'project:ops', projectName: 'ops', unreadCount: 3, directCount: 0, previewText: '日志已经归档', newestSequence: 30 }),
+    ])
+    // The sidebar total counts the Main streams with the Thread rows.
+    await waitFor(() => expect(card.getAttribute('aria-label')).toBe('收件箱，12 条未读'))
+    fireEvent.click(card)
+    const named = await b.view.findByRole('button', { name: /#engineering · 主对话/ })
+    const ambientMain = await b.view.findByRole('button', { name: /#ops · 主对话/ })
+    const thread = await b.view.findByRole('button', { name: /#delivery/ })
+    // A row that names the reader leads; the rest follow by newest activity, whichever kind they are.
+    const order = [...b.view.container.querySelectorAll('button[data-named], button[class*="row"]')].filter(node => [named, ambientMain, thread].includes(node as HTMLElement))
+    expect(order).toEqual([named, ambientMain, thread])
+    expect(named.hasAttribute('data-named')).toBe(true)
+    expect(ambientMain.hasAttribute('data-named')).toBe(false)
+    expect(capsuleOf(named)?.getAttribute('data-team-count-badge')).toBe('solid')
+    expect(capsuleOf(named)?.getAttribute('aria-label')).toBe('5 条未读，其中 2 条提及')
+    expect(capsuleOf(ambientMain)?.getAttribute('data-team-count-badge')).toBe('hairline')
+    expect(capsuleOf(ambientMain)?.getAttribute('aria-label')).toBe('3 条未读')
+    expect(named.textContent).toContain('@human 晚上发版吗')
+    expect(named.querySelector('time')?.getAttribute('dateTime')).toBe('2026-09-13T04:00:00.000Z')
+    expect(actorOf(named)?.textContent).toBeTruthy()
+    expect(b.view.getByText('1 个 Thread')).toBeTruthy()
+    expect(b.view.getByText('2 个主对话')).toBeTruthy()
+    expect(b.view.getByText('12 条未读')).toBeTruthy()
+    await b.runtime.dispose()
+  })
+
+  it('opens the Project page on its Main stream from a Main stream row', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true })
+    const card = await b.view.findByRole('button', { name: '收件箱' })
+    await b.changeSubscriptionsReady()
+    b.seedMainInbox([mainInboxRow('w1', { projectRef: 'project:engineering', projectName: 'engineering' })])
+    await waitFor(() => expect(card.getAttribute('aria-label')).toBe('收件箱，3 条未读'))
+    fireEvent.click(card)
+    const row = await b.view.findByRole('button', { name: /#engineering · 主对话/ })
+    // Showing the queue acknowledges nothing; only the Main stream itself, once read, does.
+    expect(b.readMainStream).not.toHaveBeenCalled()
+    fireEvent.click(row)
+    expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
+    expect(b.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true')
+    await b.runtime.dispose()
+  })
+
   it('leads a row with the Task\'s live owners in the Project feed\'s own words, and with its newest actor when there are none', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })
@@ -364,7 +431,7 @@ describe('Team Inbox surfaces', () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     fireEvent.click(await b.view.findByRole('button', { name: '收件箱' }))
     expect(await b.view.findByText('收件箱是空的')).toBeTruthy()
-    expect(b.view.getByText('你参与的 Thread 有新活动、或有人提到你时，会出现在这里')).toBeTruthy()
+    expect(b.view.getByText('你参与的 Thread 或项目主对话有新活动、或有人提到你时，会出现在这里')).toBeTruthy()
     await b.runtime.dispose()
   })
 

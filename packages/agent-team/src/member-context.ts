@@ -92,7 +92,7 @@ export function renderMemberWorkspaces(workspaces: readonly { readonly workspace
       : `${JSON.stringify(workspace.path)}; instructions: ${JSON.stringify(join(workspace.path, 'AGENTS.md'))}`}`),
     'Your Session, Team participation, Claims, and write permissions stay bound to your creation Workspace. Your working directory does not: enter a joined Workspace with working_directory({cd: <path>}) and work there, then leave the same way.',
     'Work where the work is. Relative paths, glob and grep, new shells, run_code, AGENTS.md discovery, and skill discovery all resolve from the current directory, so editing another checkout through absolute paths leaves its instructions unloaded.',
-    'Pass workspace explicitly to team_view, team_thread, team_attention, team_message, team_dm and team_claim. team_inbox is the cross-Workspace triage entry point.',
+    'Pass workspace explicitly to team_view, team_thread, team_attention, team_message, team_dm and team_task. team_inbox is the cross-Workspace triage entry point.',
     'If an instruction is ambiguous about which Workspace it concerns, ask @human before acting. Participation does not itself join Projects.',
   ].join('\n')
 }

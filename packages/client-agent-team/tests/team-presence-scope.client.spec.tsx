@@ -36,7 +36,7 @@ describe('presence-scope wake wiring (issue #21)', () => {
       seededMessages: [{ body: '开工任务', occurredAt: '2026-08-21T09:00:00.000Z' }],
     })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    fireEvent.click(await b.view.findByRole('button', { name: '打开 Task #1' }))
+    fireEvent.click(await b.view.findByRole('button', { name: /^打开 Task #1：/ }))
     await b.view.findByRole('heading', { name: 'Task #1' })
     await new Promise(resolve => setTimeout(resolve, 300))
     const inboxCalls = b.inbox.mock.calls.length

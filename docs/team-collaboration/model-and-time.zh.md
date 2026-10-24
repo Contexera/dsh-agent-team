@@ -5,7 +5,7 @@
 ## 协作模型
 Project 顶层 Message 会创建一个 Thread 及其 anchor。新的 model-facing start 默认创建 taskless Thread。传入明确的 task intent 会在同一个 atomic operation 中创建 Task overlay。省略字段则为 released Clients 保留 taskful 行为。Human 可以随后 promotion 一个 taskless Thread。一次 atomic operation 创建 Task overlay，并记一条结构化 `promote` Task activity。Activity 会通知当前 followers。promotion 不写 prose Message。Reply 会向既有 Thread 添加 immutable Messages。公开 Thread facts 包括 Messages。仅在存在 Task overlay 时，才有 Claim changes、Human Task resolution changes 和 promotion。它们的 global operation sequence 决定 chronology 与当前 Thread revision。
 
-Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools 从确切的 live Agent 解析 actor，模型不能选择 actor。`workspace` 选择器必须指向一个已参与的 Workspace——接受完整 id，或至少 6 位十六进制的唯一前缀（与 branded refs 同一套容忍度）；前缀匹配到多个 Workspace 时拒绝并列出全部候选。单一参与时可省略。多参与时在 `team_view`、`team_thread`、`team_message`、`team_claim` 上必填。拒绝信息列出可选 Workspace id。`team_inbox` 则默认合并全部参与，`workspace` 仅作为排序与截断前的可选过滤。Inbox 行与通知详情标注来源 Workspace。`team_thread` 在结果行前渲染 Workspace/Project 来源。多 Workspace 引导提供路径、`working_directory` 规则与每个 checkout 的 `AGENTS.md` 指针。
+Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools 从确切的 live Agent 解析 actor，模型不能选择 actor。`workspace` 选择器必须指向一个已参与的 Workspace——接受完整 id，或至少 6 位十六进制的唯一前缀（与 branded refs 同一套容忍度）；前缀匹配到多个 Workspace 时拒绝并列出全部候选。单一参与时可省略。多参与时在 `team_view`、`team_thread`、`team_message`、`team_task` 上必填。拒绝信息列出可选 Workspace id。`team_inbox` 则默认合并全部参与，`workspace` 仅作为排序与截断前的可选过滤。Inbox 行与通知详情标注来源 Workspace。`team_thread` 在结果行前渲染 Workspace/Project 来源。多 Workspace 引导提供路径、`working_directory` 规则与每个 checkout 的 `AGENTS.md` 指针。
 
 加入不改变 Session cwd；进入已加入的 Workspace 会改变它（`working_directory({cd})`），而正是这次改变让该 checkout 的指令被加载。
 
@@ -17,7 +17,7 @@ Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools �
 - `team_view` 的 Thread 行携带 `lastActivityAt`，从该 Thread 的尾部 fact 投影。
 - 自动通知在 direct mention 与 activity 上给出 `Occurred at:`。无正文路由给出最新 ordinary unread 时刻。
 - DM relay 给出发送时刻；prior-DM 上下文行引用那条 DM 的时刻。
-- 已提交的变更（`team_message` start/reply/dm、`team_claim`）从 operation receipt 渲染 `Committed at:`。Client 的乐观合并读取同一 receipt 时刻。
+- 已提交的变更（`team_message` start/reply/dm、`team_task`）从 operation receipt 渲染 `Committed at:`。Client 的乐观合并读取同一 receipt 时刻。
 - fact envelope 时刻出现之前写入的 ledgers 在 replay 时 normalize。时刻从提交 operation 重新派生，绝不凭空制造。
 
 除事件时刻外，还有 durable clock snapshot（`member-time-context` preset row）。每个符合条件的 Team Member turn 的首个 model step 会收到一条。snapshot 有三样东西。第一，UTC+8 的当前时刻。第二，距上一个 model-visible event 的 elapsed。第三，ordering-authority 说明。 同一 turn 的后续 step 默认保持安静。只有距上一条落盘 snapshot 已超过 refresh interval，才再注入一条。快速 step 的 tool-dense turn 恰好产出一行，超出 interval 的 turn 仍能显示真实跨度。
