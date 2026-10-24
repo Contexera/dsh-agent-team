@@ -146,18 +146,26 @@ describe('Agent Team real composition', () => {
   it('boots, reports status, disposes, and replays through Loader rows', async () => {
     const pool = new MemoryMediaPool()
     const first = await load(pool)
-    expect(first.agentTeam.status()).toEqual(expect.objectContaining({
-      sequence: 1,
-      operationCount: 1,
-      projectCount: 0,
-      agentMemberCount: 0,
-    }))
+    const previous = process.env.DSH_HOME
+    process.env.DSH_HOME = roots[0]
+    try {
+      expect(first.agentTeam.status()).toEqual(expect.objectContaining({
+        sequence: 1,
+        operationCount: 1,
+        projectCount: 0,
+        agentMemberCount: 0,
+      }))
+    } finally {
+      if (previous === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = previous
+    }
     await first.fiber.dispose()
     expect(first.get('agentTeam')).toBeUndefined()
 
     const second = await load(pool)
     expect(second.agentTeam.status()).toEqual(expect.objectContaining({ sequence: 1, operationCount: 1 }))
-    expect(pool.media.get('agent_team')!.tables.get('operations')!.size).toBe(1)
+    expect(second.get('storageDomain').get('agent_team')).toBeUndefined()
+    expect(pool.media.size).toBe(0)
   })
 
   it('reopens a domain holding a reply, so a stored link cannot outgrow its record', async () => {

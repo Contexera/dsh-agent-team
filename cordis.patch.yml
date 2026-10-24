@@ -205,26 +205,3 @@
     # the companion no longer depends on it (packages/agent-team/src/invariant.ts).
     - id: wowyuarm-agent-team-invariant
       name: '@contexera/dsh-agent-team/invariant'
-    # Team ledger medium backend. Vendored under our own package name (see
-    # packages/agent-team/src/vendor/storage-sqlite/): DSH Desktop generation
-    # installers strip `@deepseek-ai/*` copies and resolve them from the host
-    # closure, which ships no sqlite backend — a loader row naming that
-    # package blocks boot (GitHub issue #28). Mounted here as an ordinary
-    # storage provider row beside the shipped JSON backend.
-    - id: storage-sqlite
-      name: '@contexera/dsh-agent-team/sqlite-backend'
-      config:
-        path: !!js dshHomePath('storages', 'agent_team.sqlite')
-
-# Only the agent_team domain routes to SQLite; every other domain keeps the
-# JSON default. This row is a top-level override, NOT an insert-list entry:
-# insert lists append new rows, so a colliding id here would duplicate the
-# shipped storage-domain row and fail the boot sweep. A patch replaces the
-# targeted row's whole config, so `backend: json` must be restated and this
-# override follows the shipped row's keys — update it when upstream adds one.
-- id: storage-domain
-  name: '@deepseek-ai/dsh-storage-domain'
-  config:
-    backend: json
-    routes:
-      agent_team: sqlite

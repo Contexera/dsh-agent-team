@@ -94,18 +94,13 @@ describe('Agent Team shipping contract', () => {
     // validates the ledger from its own fiber (src/invariant.ts).
     expect(patch).not.toContain("name: '@deepseek-ai/dsh-invariants'")
     expect(patch).toContain("name: '@contexera/dsh-agent-team/invariant'")
-    // The Team ledger medium: only agent_team routes to SQLite through the
-    // public per-domain route table. The backend is vendored under our own
-    // package name (see packages/agent-team/src/vendor/storage-sqlite/):
-    // DSH Desktop generation installers strip `@deepseek-ai/*` copies, so a
-    // loader row naming that package blocks boot (GitHub issue #28).
-    // Simulate the real layer stack (the shipped Web bundle patch, then this
-    // bundle's) because insert blocks append rather than override: a
-    // colliding id inside an insert list would duplicate the shipped row and
-    // fail the boot sweep.
-    expect(patch).toContain("name: '@contexera/dsh-agent-team/sqlite-backend'")
-    // The old host-package row must stay gone: re-adding it reintroduces the
-    // Desktop boot block this vendoring exists to fix (GitHub issue #28).
+    // Team owns its SQLite backend and DomainFacility instead of changing
+    // the Host's global storage-domain route. Bundle toggling must not
+    // rebuild unrelated storage consumers.
+    // Simulate the real layer stack because insert blocks append rather than
+    // override; duplicate shipped ids would fail the boot sweep.
+    expect(patch).not.toContain('sqlite-backend')
+    expect(patch).not.toContain('storageDomain:')
     expect(patch).not.toContain('@deepseek-ai/dsh-storage-sqlite')
     const composed = applyEntryPatches([], [
       // rc.1 moved the storage rows from web-app into the base bundle; the
@@ -118,10 +113,7 @@ describe('Agent Team shipping contract', () => {
     ], () => {})
     const ids = composed.map(entry => entry.id)
     expect(new Set(ids).size).toBe(ids.length)
-    expect(composed.find(entry => entry.id === 'storage-domain')?.config).toMatchObject({
-      backend: 'json',
-      routes: { agent_team: 'sqlite' },
-    })
+    expect(composed.find(entry => entry.id === 'storage-domain')?.config).toEqual({ backend: 'json' })
     expect(patch).not.toContain('dsh-tool-agent-team')
     // The Human profile rides the Host row's own Config, and the settings
     // namespace IS that row's id: a form, a write, and the profile-document

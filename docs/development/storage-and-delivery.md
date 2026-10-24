@@ -3,7 +3,7 @@
 English | [中文](storage-and-delivery.zh.md)
 
 ## Team ledger storage routing
-The `agent_team` domain is routed to SQLite through the public composition in `cordis.patch.yml`, using `$DSH_HOME/storages/agent_team.sqlite`; other domains retain the JSON default. The override must be a top-level row, not an insert item.
+The Team Host owns a private SQLite backend and `DomainFacility` for `agent_team`, using `$DSH_HOME/storages/agent_team.sqlite`; other domains retain the Host's JSON default. This is deliberately not a `storage-domain` route override: changing that global row while toggling the bundle rebuilds unrelated storage consumers and can restart the Session controller twice, producing a duplicate file-upload resolver registration.
 
 The backend is a vendored fork under our own package name (`@contexera/dsh-agent-team/sqlite-backend`, MIT, source `dsh-storage-sqlite` 0.1.5-rc.2, see `packages/agent-team/src/vendor/storage-sqlite/`): DSH Desktop generation installers strip `@deepseek-ai/*` copies and no shipped host closure provides the upstream package, so a loader row naming it blocks boot (GitHub issue #28). The fork keeps the upstream `sqlite` backend name and config shape, so existing media open without migration; the upstream package stays a devDependency only as the byte-compatibility fixture.
 

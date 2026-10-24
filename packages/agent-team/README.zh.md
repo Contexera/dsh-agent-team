@@ -6,7 +6,7 @@
 
 ## Service 约定
 
-Service 使用 `ctx.storageDomain`、`ctx.workspaceRegistry`、`ctx.agents`、`ctx.agentDefaultModel`、`ctx.agentPresets`、`ctx.tools`、`ctx.tokenMeter`、`ctx.sessionProjections` 和 `ctx.sessionPersistence`，并在 Cordis 发布 `ctx.agentTeam` 前打开带版本的 `agent_team` Domain。首次启动为稳定 Human Member 追加一条 `team/initialized` operation；后续启动重放同一 operation，不追加新记录。
+Service 自己持有 SQLite-backed DomainFacility，并使用 `ctx.workspaceRegistry`、`ctx.agents`、`ctx.agentDefaultModel`、`ctx.agentPresets`、`ctx.tools`、`ctx.tokenMeter`、`ctx.sessionProjections` 和 `ctx.sessionPersistence`，并在 Cordis 发布 `ctx.agentTeam` 前打开带版本的 `agent_team` Domain。首次启动为稳定 Human Member 追加一条 `team/initialized` operation；后续启动重放同一 operation，不追加新记录。
 
 `status()` 返回当前持久 sequence、operation 数量、project 数量、Agent Member 数量和 Human Member ref。它不发起模型请求，也不写 storage。`validateLedger()` 对照持久 operation table 检查包内 projection。invariant companion 在挂载时完整重导该表——重放不通过的账本会让启动失败——但当这期间没有任何提交落地时，它会复用账本构造期已经跑过的那次记录级重放：该复用只能用一次，并受三项同一性检查把关（记录条数、末条 sequence、末条 operation id），而这三项只有 operations 表的唯一写者——账本的 commit 路径——能改变。期间任何一次提交、以及此后的每次校验，都会重新重放持久记录。此后每批提交只跑一次，且安排在这次提交调用返回**之后**执行，所以打开 Thread 不会等待 O(账本) 的重放。漂移由这次延后重放记录日志，并在随后每次提交上重新抛出，直到某次重放干净为止。
 
@@ -40,7 +40,7 @@ M1 支持单个 Host writer。Ledger 永久保留，不提供 snapshot 或 compa
 
 ## Composition
 
-Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默认模型选择、`tools`、`fs`、`sandboxPolicy`、Session store/persistence、Workspace registry 或 storage 的替代实现。Host services 只挂载一次，再挂载本 Service 及 invariant companion。`/team` 等 Human control 是独立 Consumer。
+Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默认模型选择、`tools`、`fs`、`sandboxPolicy`、Session store/persistence、或 Workspace registry 的替代实现。私有 SQLite DomainFacility 不替换 Host 的全局 storage service，因此开关 bundle 不会重建无关的 storage consumers。Host services 只挂载一次，再挂载本 Service 及 invariant companion。`/team` 等 Human control 是独立 Consumer。
 
 Team-enabled preset 在自身 Agent scope 注册七个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
 

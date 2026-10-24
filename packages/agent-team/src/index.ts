@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, Service, type Volatile } from '@deepseek-ai/cordis'
+import Storage from '@deepseek-ai/dsh-storage'
 import { installModelSelection, type Agent, type AgentHandle, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -28,7 +29,7 @@ import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typer
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { SettingsPathOp } from '@deepseek-ai/dsh-settings'
-import type { Domain } from '@deepseek-ai/dsh-storage-domain'
+import { DomainFacility, type Domain } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeRequestScopedAttachment } from './attachments.ts'
 import { reportEnvironment } from './environment-check.ts'
@@ -50,6 +51,7 @@ import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName,
 import { classifyRecoverableError, failureDetail, RecoveryCoordinator, type RecoveryFact } from './recovery.ts'
 import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type StoredSessionInspection } from './stored-session-reader.ts'
 import { agentTeamDomainSpec } from './spec.ts'
+import { SqliteStorageBackend } from './vendor/storage-sqlite/index.ts'
 import { formatTeamTimestamp } from './time-format.ts'
 import type {
   AgentTeamAddMemberRequest,
@@ -317,6 +319,7 @@ export default class AgentTeam extends TypertRemoteService {
     'sessionProjections',
   ]
 
+  private backend?: SqliteStorageBackend
   private domain?: Domain<typeof agentTeamDomainSpec>
   private ledger?: AgentTeamLedger
   private readonly handles = new Map<AgentTeamMemberId, AgentHandle>()
@@ -423,6 +426,18 @@ export default class AgentTeam extends TypertRemoteService {
     this.ctx.on('loader/volatile-update', () => {
       this.syncHumanHandle()
     })
+  }
+
+  private openTeamStorage(): DomainFacility {
+    if (this.ctx.fiber.entry === undefined) return this.ctx.storageDomain
+    // Bundle toggling must not replace the Host's global DomainFacility.
+    const storageCtx = this.ctx.isolate('storage')
+    const storage = new Storage(storageCtx)
+    this.backend = new SqliteStorageBackend({ path: dshHomePath('storages', 'agent_team.sqlite'), journalMode: 'wal' })
+    storage.backend.register('sqlite', this.backend)
+    const facility = new DomainFacility(storageCtx, { backend: 'sqlite', routes: {} })
+    storage.mount('domain', facility)
+    return facility
   }
 
   private printableSender(memberId: AgentTeamMemberId): string {
@@ -699,7 +714,8 @@ export default class AgentTeam extends TypertRemoteService {
       this.setPreTurnCancellation(member.memberId, pending.sessionId)
       this.emitMemberPresenceChanged(member)
     })
-    const domain = await this.ctx.storageDomain.open(agentTeamDomainSpec)
+    const storageDomain = this.openTeamStorage()
+    const domain = await storageDomain.open(agentTeamDomainSpec)
     this.ctx.effect(() => async () => {
       this.accepting = false
       // Host shutdown must not depend on a turn that may never end: release
@@ -723,6 +739,7 @@ export default class AgentTeam extends TypertRemoteService {
       this.memberRuntime.disposeAll()
       this.runningAgents.clear()
       await domain.close()
+      await this.backend?.close()
     }, 'agentTeam.dispose')
     this.domain = domain
     const ledger = new AgentTeamLedger(domain.table('operations'), {
