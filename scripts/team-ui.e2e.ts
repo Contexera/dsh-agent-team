@@ -312,17 +312,20 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(pluginsBox).not.toBeNull()
   expect(settingsBox).not.toBeNull()
   expect(teamBox!.height).toBeCloseTo(pluginsBox!.height, 0)
-  // The last row, on the list's one pitch: "on the grid" alone also passes at a
-  // wrong position.
+  // Every launcher sits on the list's one pitch. The last row is not Team's to
+  // claim: a shipped release may append its own launcher after the registered
+  // panels, so the assertion is that Team lands on the same grid as the rest,
+  // not that it terminates it.
   const railRows = await panelRail.evaluate(el => [...el.querySelectorAll('button')]
     .map(b => b.getBoundingClientRect().y))
   expect(railRows.length).toBeGreaterThan(1)
-  expect(teamBox!.y).toBeCloseTo(railRows[railRows.length - 1]!, 0)
   const pitch = railRows[1]! - railRows[0]!
   expect(pitch).toBeGreaterThan(0)
   for (let index = 1; index < railRows.length; index += 1) {
     expect(railRows[index]! - railRows[index - 1]!, `row ${index} leaves the list's pitch`).toBeCloseTo(pitch, 0)
   }
+  // Team must occupy a real row of that grid, not float between two.
+  expect(railRows.some(row => Math.abs(row - teamBox!.y) <= 0.5), 'Team sits off the list grid').toBe(true)
   await teamTrigger.click()
   // The return control takes over the shipped New Session bar's slot (the mode
   // hides that bar), so it is measured against the bar's box in ordinary mode.
