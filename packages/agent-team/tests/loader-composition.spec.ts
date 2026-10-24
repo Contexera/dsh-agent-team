@@ -163,8 +163,12 @@ describe('Agent Team real composition', () => {
     expect(first.get('agentTeam')).toBeUndefined()
 
     const second = await load(pool)
-    expect(second.agentTeam.status()).toEqual(expect.objectContaining({ sequence: 1, operationCount: 1 }))
-    expect(second.get('storageDomain').get('agent_team')).toBeUndefined()
+    // The reopened Host must still expose the services the assertions below read; a missing one is a test bug, not a runtime state.
+    const reopened = second.agentTeam
+    const storageDomain = second.get('storageDomain')
+    if (reopened === undefined || storageDomain === undefined) throw new Error('the reopened composition lost a service under test')
+    expect(reopened.status()).toEqual(expect.objectContaining({ sequence: 1, operationCount: 1 }))
+    expect(storageDomain.get('agent_team')).toBeUndefined()
     expect(pool.media.size).toBe(0)
   })
 
