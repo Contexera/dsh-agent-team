@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
-  AgentTeamMainStreamHistory, AgentTeamMainStreamStanding, AgentTeamMainTimelineEntry, AgentTeamProjectRef,
+  AgentTeamMainStreamHistory, AgentTeamMainStreamReadResult, AgentTeamMainStreamStanding, AgentTeamMainTimelineEntry, AgentTeamProjectRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamConversationProps } from './slots.ts'
@@ -41,6 +41,21 @@ export function mergeMainStream(current: MainStreamSnapshot | undefined, fresh: 
     hasMore: fresh.hasMore || reachedOlder,
     standing: fresh.standing,
   }
+}
+
+/**
+ * A read's answer is authoritative for the entries it carries, flagged as the reader saw them before the read. Unlike a history page it is not
+ * contiguous — it adds any older entry whose marker the read consumes — so entries overlay by key instead of replacing a range.
+ */
+export function mergeMainRead(current: MainStreamSnapshot, read: AgentTeamMainStreamReadResult): MainStreamSnapshot {
+  const wasUnread = new Set(current.entries.filter(entry => entry.unread).map(mainEntryKey))
+  const merged = new Map(current.entries.map(entry => [mainEntryKey(entry), entry]))
+  for (const entry of read.entries) {
+    const keepUnread = entry.unread || wasUnread.has(mainEntryKey(entry))
+    merged.set(mainEntryKey(entry), keepUnread ? { ...entry, unread: true } : entry)
+  }
+  const entries = [...merged.values()].sort((left, right) => left.sequence - right.sequence)
+  return { ...current, entries, standing: read.standing }
 }
 
 interface UseMainStreamOptions {
@@ -128,7 +143,7 @@ export function useMainStream({ workspaceId, projectRef, mainStreamHistory, read
       const result = await readMainStream({ requestId: mintRequestId(), workspaceId, projectRef, readThroughSequence: through })
       if (!mountedRef.current) return
       if (!result.ok) { setError(result.error.message); return }
-      apply(latest => ({ ...(latest ?? current), standing: result.value.standing }))
+      apply(latest => mergeMainRead(latest ?? current, result.value))
     } catch (cause) {
       if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause))
     }
