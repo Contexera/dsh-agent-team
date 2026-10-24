@@ -437,4 +437,3 @@
 - `pendingJump` + its `useLayoutEffect` (T:175, 567-576) — extract `useOpeningJump`, whose name owns "pending until the pulse releases".
 - duplicated `activeClaims` (T:920, 942) — one derived `activeClaims` (useMemo) consumed by both the header and the accept dialog.
 - `waitActivated` tests (member-lifecycle.spec.ts:2652,:2704,:2758) — extract one `waitForActiveGeneration(memberId)` helper; the ordering comments disappear with it.
-
