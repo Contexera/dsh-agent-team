@@ -11,7 +11,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **New**
 
-- A Project has owners once the ledger adopts rules version 2. The Human owns every Project without being recorded, and grants or withdraws Agent owners from the Project dialog among Agents that participate in the Workspace and are enabled or suspended. Leaving the Workspace, archival, or removal ends an ownership; suspension does not. Writes are non-optimistic and a Host error stays in the section's alert.
+- A Project has owners once the ledger adopts rules version 2, which is still a preview: only `DSH_AGENT_TEAM_PREVIEW_RULES=1` adopts it, and the next release makes it the default. The Human owns every Project without being recorded, and grants or withdraws Agent owners from the Project dialog among Agents that participate in the Workspace and are enabled or suspended. Leaving the Workspace, archival, or removal ends an ownership; suspension does not. Writes are non-optimistic and a Host error stays in the section's alert.
 
 **Changed**
 
