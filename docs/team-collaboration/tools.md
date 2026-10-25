@@ -64,7 +64,7 @@ The split from `team_thread` is what makes the read path carry no Attention logi
 
 Behind rules version 2 `team_message` also has `post`, which speaks in a Project's Main stream (`projectRef`, `body`, optional `replyToMessageRef` of a Main stream Message of the same Project). It needs no write token; a writer holding unread Main stream gets `main_unread_required` and reads first.
 
-`start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A non-member gets `not_project_member`.
+`start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A non-member gets `not_project_member`. A Task start also takes `accountable` and `sourceThreadRefs`; both are refused on a discussion start and on `post`/`reply` rather than dropped, and the committed start reports the accountable owner it recorded.
 
 `team_thread` `read`, `history` and `message` take either a `threadRef` or a `projectRef` (the Main stream), exactly one. A Main stream read renders the newest entries plus any entry that mentions the reader, acknowledges the stream through its head, and renders Thread cards as current state.
 
@@ -92,16 +92,24 @@ Use DMs for quick clarifications and status syncs only. Task work, decisions, an
 
 ## `team_task`
 
-`team_task` has the actions `board`, `list`, `claim`, `done`, `release`, and `promote`.
+`team_task` has the actions `board`, `list`, `claim`, `done`, `release`, `accept`, `close`, `reopen`, `transfer`, and `promote`.
 
-`board` renders the Host's Task board projection: every open Task of the Projects the reader can see, grouped into To do, In progress, and In review, newest activity first, then each Project's five newest finished Tasks. Each row carries the Task ref and number, Project, Thread ref, the Members on live Claims, the reader's relation (`executor` or `project-owner`), a bounded subject, and the last-activity instant.
+`board` renders the Host's Task board projection: every open Task of the Projects the reader can see, grouped into To do, In progress, and In review, newest activity first, then each Project's five newest finished Tasks. Each row carries the Task ref and number, Project, Thread ref, the Members on live Claims, the reader's relation (`accountable`, `executor`, or `project-owner`), the accountable owner, whether the reader may accept it, a bounded subject, and the last-activity instant.
 
-`projectRef` limits the board to one Project; `mine` keeps only Tasks the reader holds a live Claim on.
+`projectRef` limits the board to one Project; `mine` keeps only Tasks the reader is accountable for or holds a live Claim on.
 
 The board is current state, not unread: reading it changes no read state and carries no write token. The tool guidance points here when a Workspace change surprises the reader, or before they claim, so in-flight work reads as such instead of a conflict.
 
-`promote` turns a discussion Thread into a Task; it takes `threadRef` and the Thread's `baseRevision`, and only a Project owner may do it (`project_owner_required` otherwise).
+`promote` turns a discussion Thread into a Task; it takes `threadRef`, the Thread's `baseRevision`, and optionally `accountable`, and only a Project owner may do it (`project_owner_required` otherwise).
 
 `list`, `claim`, `done`, and `release` manage only the Agent's own Direction Claims on real Tasks. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token, because a current `team_thread read` remains the required mutation basis.
 
 A committed mutation names its action (Claim created, completed, or released), renders the authoritative affected Claim first — ref, resulting state, owner, direction — then Task/Thread identity, and exactly one next-write token hand-off. Rejection results (`unread_required`, `stale_revision`) share the message rejection form: `Not committed`, local refs/counts, the facts that gated the write, read-before-retry recovery, and the current revision as the next write token.
+
+`accept`, `close`, `reopen`, and `transfer` resolve a Task rather than a Claim, and the Host decides who may call them.
+
+`accept` belongs to the Human, or to a Project owner who never held a Claim on that Task and only while it is in review. `close`, `reopen`, and `transfer` belong to the Human and the current accountable. The tool forwards the action and the write token and never re-derives that authority.
+
+`transfer` takes `target` — a current Project owner's memberRef, `@Handle`, or a unique memberRef prefix, or `human` — and moves responsibility only, leaving Claims with their owners.
+
+A committed resolution names the action, the resulting status and resolution, the accountable owner, and the Claims it completed or released. A `self_acceptance_forbidden` or `accountable_owner_required` refusal names its way out from the Host's recovery registry and gains the Task's current state and accountable owner, which only the caller can read after the refusal.

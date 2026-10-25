@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { AgentTeamClientMemberStatus, AgentTeamProjectRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamTask, AgentTeamView, AgentTeamViewItem,
+import type { AgentTeamClientMemberStatus, AgentTeamProjectRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamTask, AgentTeamView,
   AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamTaskBoard, AgentTeamTaskBoardItem,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -12,7 +12,7 @@ import { TeamProjectPanel } from './TeamProjectPanel.tsx'
 import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskTitle, taskStatusDot } from './team-formatters.ts'
+import { claimersLabel, formatAbsoluteTime, formatInboxTime, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread } from './refs.ts'
@@ -30,7 +30,7 @@ interface TeamProjectPageProps {
   readonly loadMembers: TeamConversationProps['loadMembers']
   /** The Human's own unread per Thread: the Host's three-class judgement, never a Client guess. */
   readonly loadInbox: TeamConversationProps['loadInbox']
-  readonly loadTaskBoard?: TeamConversationProps['loadTaskBoard']
+  readonly loadTaskBoard: TeamConversationProps['loadTaskBoard']
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -192,13 +192,11 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     ? undefined
     : { memberId: humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
 
-  // The loaded window is all the board shows: walking the Project's remaining history would defeat its pagination.
+  // Every board row comes from the same Host projection the Agent tool reads.
   const boardColumns = useMemo(() => {
-    const items = taskBoard === undefined
-      ? (view?.items ?? []).flatMap(item => item.task === undefined ? [] : [{ workspaceId, projectRef, projectName: view?.projects.find(entry => entry.projectRef === projectRef)?.name ?? '', task: item.task, taskNumber: item.taskNumber ?? 0, threadRef: item.thread.threadRef, subject: formatTaskTitle(item.message.body), liveClaimOwners: item.liveClaimOwners, lastActivitySequence: item.message.sequence, lastActivityAt: item.lastActivityAt, relation: 'none' as const }])
-      : [...taskBoard.open, ...taskBoard.finished]
+    const items = [...taskBoard?.open ?? [], ...taskBoard?.finished ?? []]
     return BOARD_COLUMNS.map(column => ({ ...column, items: items.filter(item => column.match(item.task.status)) }))
-  }, [projectRef, taskBoard, view, workspaceId])
+  }, [taskBoard])
 
   // The surface is laid out after this effect first runs, so the seat follows its box; a dragged choice is re-clamped, never re-derived.
   useEffect(() => {
@@ -225,14 +223,14 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     try {
       const [loaded, loadedTaskBoard, loadedMembers, loadedInbox] = await Promise.all([
         loadProjects({ workspaceId, projectRef, direction: 'before', topLevelOnly: true, includeActivities: false, limit: 20 }),
-        loadTaskBoard?.({ workspaceId, projectRef }) ?? Promise.resolve({ ok: true as const, value: { open: [], finished: [] } }),
+        loadTaskBoard({ workspaceId, projectRef }),
         loadMembers({ workspaceId }),
         // The Host Inbox is the authority for unread; never re-derive it from message mentions.
         loadInbox({ workspaceId, limit: 100 }),
       ])
       if (!mountedRef.current || sequence !== refreshSequenceRef.current) return false
       if (loaded.ok) { setView(current => current === undefined ? loaded.value : mergeProjectView(current, loaded.value)); loadedRef.current = true } else setLoadError(loaded.error.message)
-      if (loadTaskBoard !== undefined) { if (loadedTaskBoard.ok) setTaskBoard(loadedTaskBoard.value); else setLoadError(loadedTaskBoard.error.message) }
+      if (loadedTaskBoard.ok) setTaskBoard(loadedTaskBoard.value); else setLoadError(loadedTaskBoard.error.message)
       if (loadedMembers.ok) setMembers(loadedMembers.value); else setLoadError(loadedMembers.error.message)
       if (!loadedInbox.ok) setLoadError(loadedInbox.error.message)
       setUnreadByThread(current => applyInboxRead(current, loadedInbox))
@@ -324,8 +322,8 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
       {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
-      {error === undefined && view === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardLoading')}</p></div>}
-      {error === undefined && view !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
+      {error === undefined && taskBoard === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardLoading')}</p></div>}
+      {error === undefined && taskBoard !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
       {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
         {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>
           <div className={projectCss.boardColumnHead}>{t(column.labelKey)}<span className={projectCss.boardColumnCount}>{column.items.length}</span></div>

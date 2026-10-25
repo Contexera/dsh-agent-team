@@ -148,6 +148,8 @@ import type {
   AgentTeamTaskBoardRequest,
   AgentTeamTaskRequest,
   AgentTeamTaskResult,
+  AgentTeamTransferTaskRequest,
+  AgentTeamTransferTaskResult,
   AgentTeamThreadAttentionRequest,
   AgentTeamThreadAttentionResult,
   AgentTeamThreadAttentionStatus,
@@ -1751,6 +1753,22 @@ export default class AgentTeam extends TypertRemoteService {
   async promoteThreadForAgent(agent: Agent, request: AgentTeamPromoteThreadRequest): Promise<AgentTeamPromoteThreadResult> {
     const actor = this.memberCall(agent, request.workspaceId)
     const result = await this.requireLedger().promoteThread({ ...request, actor })
+    this.emitCommittedOutcome(result)
+    return result.value
+  }
+
+  /** Agent-only Task resolution: accept (in_review, never self-executed), close, reopen. */
+  async changeTaskForAgent(agent: Agent, request: AgentTeamTaskRequest): Promise<AgentTeamTaskResult> {
+    const actor = this.memberCall(agent, request.workspaceId)
+    const result = await this.requireLedger().changeTask({ ...request, actor })
+    this.emitCommittedOutcome(result)
+    return result.value
+  }
+
+  /** Agent-only accountability transfer to another Project owner or the Human. */
+  async transferTaskForAgent(agent: Agent, request: AgentTeamTransferTaskRequest): Promise<AgentTeamTransferTaskResult> {
+    const actor = this.memberCall(agent, request.workspaceId)
+    const result = await this.requireLedger().transferTask({ ...request, actor })
     this.emitCommittedOutcome(result)
     return result.value
   }

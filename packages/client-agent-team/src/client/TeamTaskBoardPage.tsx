@@ -17,7 +17,6 @@ export function TeamTaskBoardPage({ useWorkspaces, loadTaskBoard, subscribeChang
   const [items, setItems] = useState<readonly AgentTeamTaskBoardItem[]>()
   const [error, setError] = useState<string>()
   const refresh = useCallback(async () => {
-    if (loadTaskBoard === undefined) { setItems([]); return }
     const results = await Promise.all(workspaces.map(async workspace => loadTaskBoard({ workspaceId: workspace.workspaceId })))
     const failed = results.find(result => !result.ok)
     setError(failed?.ok === false ? failed.error.message : undefined)

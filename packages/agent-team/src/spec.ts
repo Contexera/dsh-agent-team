@@ -153,6 +153,9 @@ const taskSchema = z.object({
   threadRef: threadRefSchema,
   status: z.union([z.literal('todo'), z.literal('in_progress'), z.literal('in_review'), z.literal('done'), z.literal('closed')]),
   resolution: z.union([z.literal('open'), z.literal('accepted'), z.literal('closed')]),
+  // Records written before accountability default to the Human and no source.
+  accountable: memberIdSchema.default('member:human' as AgentTeamMemberId),
+  sourceThreadRefs: z.array(threadRefSchema).default([]),
 }).strict()
 
 const threadSchema = z.object({
@@ -259,7 +262,9 @@ const claimActivitySchema = z.object({
 
 const taskActivitySchema = z.object({
   ...activityBase,
-  kind: z.union([z.literal('promote'), z.literal('accept'), z.literal('close'), z.literal('reopen')]),
+  kind: z.union([z.literal('promote'), z.literal('accept'), z.literal('close'), z.literal('reopen'), z.literal('transfer')]),
+  from: memberIdSchema.optional(),
+  to: memberIdSchema.optional(),
   releasedClaimRefs: z.array(claimRefSchema).min(1).optional(),
   completedClaimRefs: z.array(claimRefSchema).min(1).optional(),
   acceptedClaimRefs: z.array(claimRefSchema).optional(),
@@ -305,6 +310,7 @@ const claimOperation = (kind: 'team/claim-created' | 'team/claim-done' | 'team/c
 const releaseSnapshotSchema = {
   claims: z.array(claimSchema),
   activities: z.array(claimsReleasedActivitySchema),
+  transfers: z.array(taskActivitySchema).default([]),
   tasks: z.array(taskSchema),
   threads: z.array(threadSchema),
   inbox: inboxDeltaSchema,
@@ -444,7 +450,8 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/project-owner-removed'),
     data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, memberId: memberIdSchema,
-      activity: mainActivitySchema, inbox: inboxDeltaSchema }).strict(),
+      activity: mainActivitySchema, inbox: inboxDeltaSchema,
+      transfers: z.array(taskActivitySchema).default([]), tasks: z.array(taskSchema).default([]), threads: z.array(threadSchema).default([]) }).strict(),
   }).strict(),
   z.object({
     ...operationBase,
@@ -565,6 +572,7 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       mentions: z.array(memberIdSchema),
       anchor: messageSchema,
       task: taskSchema.optional(),
+      activity: taskActivitySchema.optional(),
       thread: threadSchema,
       inbox: inboxDeltaSchema,
     }).strict().transform(omitUndefined),
@@ -596,6 +604,19 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       task: taskSchema,
       thread: threadSchema,
       claims: z.array(claimSchema),
+      inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/task-accountable-changed'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      baseRevision: z.number().int().positive(),
+      activity: taskActivitySchema,
+      task: taskSchema,
+      thread: threadSchema,
       inbox: inboxDeltaSchema,
     }).strict(),
   }).strict(),

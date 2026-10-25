@@ -345,7 +345,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(accepted.activity.acceptedClaimRefs).toEqual([])
 
     const view = ledger.view({ workspaceId: alpha })
-    expect(view.activities).toEqual([expect.objectContaining({ kind: 'accept', taskRef: started.task.taskRef })])
+    // Task creation itself is a public fact now: the promote activity names
+    // the accountable the Task was created with, ahead of its later history.
+    expect(view.activities).toEqual([expect.objectContaining({ kind: 'promote', taskRef: started.task.taskRef }),
+      expect.objectContaining({ kind: 'accept', taskRef: started.task.taskRef })])
     expect(view.tasks.find(task => task.taskRef === started.task.taskRef)).toMatchObject({ status: 'done', resolution: 'accepted' })
     expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toMatchObject({ items: [], totalUnreadCount: 0, totalDirectCount: 0,
       recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.task.threadRef }) })] })
@@ -1195,7 +1198,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       // Both transitions fit the default window, so nothing older is hidden.
       hasMore: false,
     })
-    expect(test.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef }).activities).toEqual([])
+    expect(test.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef }).activities)
+      .toEqual([expect.objectContaining({ kind: 'promote', taskRef: started.task.taskRef })])
     // Observations are Inbox-invisible: they change who gets notified, never
     // which Threads a reader took part in, so the Thread the Human started is
     // still the tail's only row after the unfollow/follow pair.
@@ -1220,10 +1224,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const moved = committed((await ledger.reply({ requestId: requestId('moved-on'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Two days later', baseRevision: joined.thread.revision, actor: agentTeamHumanActor() })).value)
     const returning = (await ledger.readThread({ requestId: requestId('returning-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor })).value
     expect(returning.facts.filter(entry => entry.unread).map(entry => entry.fact.sequence)).toEqual([moved.receipt.sequence])
-    // Two facts exist before that batch; both are inside the response's own
+    // Three facts exist before that batch — the creation's promote activity,
+    // the anchor, and the older reply — all inside the response's own
     // background window, which is why the count is measured from what the
     // response starts at rather than from the watermark it advances to.
-    expect(returning.earlierFactCount).toBe(2)
+    expect(returning.earlierFactCount).toBe(3)
   })
 
   it('a read that reached a Thread\'s first fact reports nothing left behind it', async () => {

@@ -2,14 +2,15 @@
 
 > 本工作项是 Channel → Project 的重设计容器：把“参与派生注意力”改成“责任派生注意力”。它不定义当前产品行为——行为以 `packages/` 源码、测试与 `docs/` 双语对为准。
 
-**状态**：设计已收敛，按九张工单实施中（01–07 完成；08–09 未开始）。
+**状态**：设计已收敛，按九张工单实施中（01–08 完成；09 未开始）。
 
-**最后核对日期**：2026-10-24
+**最后核对日期**：2026-10-25
 
 ## 入口
 
 - [`spec.md`](spec.md)：最终决策快照，唯一的设计入口。
-- [`materials/2026-10-22-durable-contract.md`](materials/2026-10-22-durable-contract.md)：operation kinds、规则版本标记、投影、Remote 与 tool 形状、replay 不变量。
+- [`materials/2026-10-25-final-v2-decisions.md`](materials/2026-10-25-final-v2-decisions.md)：08/09 实施前补充决定；最终只有规则版本 2，不保留中间 v3/v4。
+- [`materials/2026-10-22-durable-contract.md`](materials/2026-10-22-durable-contract.md)：operation kinds、投影、Remote 与 tool 形状、replay 不变量；其 v3/v4 分批表述由上面的补充决定取代。
 - [`materials/2026-10-22-convergence-agenda.md`](materials/2026-10-22-convergence-agenda.md)：四轮讨论的逐项结论与理由。
 - 其余 `materials/` 与 [`review-notes.md`](review-notes.md) 是历史过程材料，与 `spec.md` 冲突时以 `spec.md` 为准。
 
@@ -24,7 +25,8 @@
 - 当前本地 master 为 `908cf97`，尚未推送或发布。06/07 已验证：1212 个单测、浏览器 8/8、typecheck 与 build 通过。真实 `agent_team.sqlite` 被新构建打开后带版本 2 标记，≤0.2.5 的 profile 会拒绝打开；共用 `$DSH_HOME/storages/` 前必须备份并同步升级。
 - `spec.md` §13 三项探针：DM 的 Workspace 边界已在 Host `sendDm` 校验；旧 accept 缺 `acceptedClaimRefs` 时已有回退，03 补测试；规则标记与启动恢复的写入顺序已在 03 查清并由 `initialize()` 保证。
 - 版本 2 的规则在 04–06 间逐步落地；预览开关 `DSH_AGENT_TEAM_PREVIEW_RULES` 已移除，版本 2 是默认规则，无需任何环境变量。
-- 无需要 Human 拍板的未决产品问题。
+- 08 已完成：Task 带 `accountable` 与不可变 `sourceThreadRefs`（仅同 Project 无 Task 讨论）；Agent 仅可验收 `in_review` 且从未持有该 Task 任何 Claim（含 released），执行过的 accountable 只能 close/reopen/transfer；close/reopen/transfer 限 Human 或当前 accountable，已结束 Task 仅 Human 可转交；owner 撤销/离开/归档/删除在同一 operation 把 open Task 原子转回 Human 并记公开 transfer 活动（Project 归档对全部 owner 生效，suspend 保留）；责任事件按角色进 Inbox direct 级（activity marker 计入 direct，投递一律 immediate）；看板带 `relation: 'accountable'` 与 `needsAcceptance`；来源 Task 不进 Main stream，来源讨论以只读卡片投影显示（不改 revision、不产生未读）；`team_task` 增加 accept/close/reopen/transfer，`team_message.start` 支持 accountable 与来源；persona 与 skill 同步。遗留：suspend 的「负责人已暂停」界面提示归入 09。
+- 08/09 的补充决定：Agent 仅在 `in_review` 验收；已结束 Task 不在 owner 失效时批量转交，reopen 前必须显式修正失效 accountable；同一事项已有未读责任通知时不追加超时提醒。最终只有 v2，开发中间 v2 账本不承担公开迁移承诺。
 
 ## 完成条件
 
@@ -35,7 +37,7 @@
 - [x] 05 项目主对话与开 Thread 权限
 - [x] 06 按责任投递、Inbox 与 Agent 指引；启用规则版本 2（交付后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续）
 - [x] 07 Task board 投影与 `team_task`
-- [ ] 08 Task 负责人、转交与验收限制；启用规则版本 3
+- [x] 08 Task 负责人、转交与验收限制（属于最终规则版本 2；suspend 的界面提示归入 09）
 - [ ] 09 待验收积压与停滞提醒
 - [ ] durable 结论进入正式文档双语对与 `CHANGELOG.md`
 - [ ] 面向外部使用者的升级说明：升级后所有项目只有 Human owner，需重新指定 Agent owner；先备份 `agent_team.sqlite`；不承诺降级

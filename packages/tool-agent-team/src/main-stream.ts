@@ -23,6 +23,7 @@ export interface MainEntryView {
   readonly taskNumber?: number
   readonly status?: string
   readonly resolution?: string
+  readonly accountable?: string
   readonly replyCount?: number
   readonly participants?: string[]
   readonly liveClaimOwners?: string[]
@@ -37,7 +38,7 @@ export const MAIN_ENTRY_SCHEMA = {
     replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } },
     activity: { type: 'string' }, actor: { type: 'string' }, memberId: { type: 'string' },
     threadRef: { type: 'string' }, preview: { type: 'string' }, taskRef: { type: 'string' }, taskNumber: { type: 'number' },
-    status: { type: 'string' }, resolution: { type: 'string' }, replyCount: { type: 'number' },
+    status: { type: 'string' }, resolution: { type: 'string' }, accountable: { type: 'string' }, replyCount: { type: 'number' },
     participants: { type: 'array', items: { type: 'string' } }, liveClaimOwners: { type: 'array', items: { type: 'string' } },
   },
 } as const
@@ -64,7 +65,7 @@ export function mainEntryView(entry: AgentTeamMainTimelineEntry): MainEntryView 
   return { ...flags, kind: 'thread-card', threadRef: card.threadRef, preview: card.anchor.preview, sender: card.anchor.sender,
     replyCount: card.replyCount, participants: card.participants.map(actor => actor.name),
     ...(card.task === undefined ? {} : { taskRef: card.task.taskRef, taskNumber: card.task.taskNumber, status: card.task.status,
-      resolution: card.task.resolution, liveClaimOwners: card.task.liveClaimOwners.map(actor => actor.name) }) }
+      resolution: card.task.resolution, accountable: card.task.accountable, liveClaimOwners: card.task.liveClaimOwners.map(actor => actor.name) }) }
 }
 
 export function standingView(standing: AgentTeamMainStreamStanding): { owner: boolean; head: number; unreadCount: number; directCount: number } {
@@ -88,6 +89,6 @@ export function mainEntryLine(entry: MainEntryView): string {
   }
   const subject = entry.taskRef === undefined
     ? `Discussion ${entry.threadRef}`
-    : `Task ${entry.taskRef} (#${entry.taskNumber}), ${entry.status}/${entry.resolution}${entry.liveClaimOwners === undefined || entry.liveClaimOwners.length === 0 ? '' : ` — working: ${entry.liveClaimOwners.join(', ')}`}`
+    : `Task ${entry.taskRef} (#${entry.taskNumber}), ${entry.status}/${entry.resolution}${entry.accountable === undefined ? '' : `, accountable ${entry.accountable}`}${entry.liveClaimOwners === undefined || entry.liveClaimOwners.length === 0 ? '' : ` — working: ${entry.liveClaimOwners.join(', ')}`}`
   return `${entry.sequence}${at} [thread card]${markers(entry)} ${subject} — ${entry.preview} · ${entry.threadRef} · ${entry.replyCount} repl${entry.replyCount === 1 ? 'y' : 'ies'} · by ${(entry.participants ?? []).join(', ')}`
 }

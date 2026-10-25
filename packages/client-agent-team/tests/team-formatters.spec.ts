@@ -64,15 +64,20 @@ describe('Team presentation formatters', () => {
       ['accept', 'builder 验收了此 Task'],
       ['close', 'builder 关闭了此 Task'],
       ['reopen', 'builder 重新打开了此 Task'],
+      ['transfer', 'builder 把负责人从 builder 转交给 builder'],
     ] as const
     for (const [kind, text] of expected) {
       const claimFields = kind === 'claim' || kind === 'done' || kind === 'release' ? { claimRef: claim.claimRef }
-        : kind === 'claims_released' ? { claimRefs: [claim.claimRef] } : {}
+        : kind === 'claims_released' ? { claimRefs: [claim.claimRef] }
+          : kind === 'transfer' ? { from: HUMAN_MEMBER_ID, to: HUMAN_MEMBER_ID } : {}
       const rendered = formatActivity(activity({ kind, ...claimFields }), { t, actorName: () => 'builder', claims: [claim] })
       expect(rendered).toBe(text)
       expect(rendered).not.toContain('member:')
       expect(rendered).not.toContain('claim:')
     }
+    const moved = formatActivity(activity({ kind: 'transfer', from: HUMAN_MEMBER_ID, to: HUMAN_MEMBER_ID }),
+      { t, actorName: memberId => (memberId === HUMAN_MEMBER_ID ? 'human' : 'builder'), claims: [claim] })
+    expect(moved).toBe('builder 把负责人从 human 转交给 human')
   })
 
   it('renders message time as clock time today, date+time within the year, full date otherwise', () => {

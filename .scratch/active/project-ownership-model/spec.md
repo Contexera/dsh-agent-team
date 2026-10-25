@@ -172,7 +172,7 @@ Inbox 记录事实，投递决定是否打断 Agent。投递等级由当前角�
 
 ## 10. 迁移与兼容
 
-- **规则版本**：replay 会精确重算每条记录的通知结果，因此每个改变既有记录校验规则的批次都在首次挂载时追加一条 `team/rules-version-adopted`（第 2 批为版本 2，第 3 批为版本 3）。每条记录按它之前最近的版本校验；旧版本规则集中为 replay-only validator。
+- **规则版本**：replay 会精确重算每条记录的通知结果，因此每个改变既有记录校验规则的批次都在首次挂载时追加一条 `team/rules-version-adopted`（第 2 批为版本 2，第 3 批为版本 3）。每条记录按它之前最近的版本校验；旧版本规则集中为 replay-only validator。（2026-10-25 修订：批次 3、4 一并归入版本 2，不发布中间 v3/v4；开发中的中间 v2 账本可重建，不承担公开迁移承诺。详见 [`materials/2026-10-25-final-v2-decisions.md`](materials/2026-10-25-final-v2-decisions.md)。）
 - **改名**：代码、Remote、tool 文案、新 operation 全部改为 Project；新 ref 为 `project:<uuid>`。旧 `channel:` ref 与 `channelRef` 字段在解码时归一化，ref 解析永久接受 `channel:` 输入，历史正文中的 ref 仍可点击。存储字节不改写。
 - **升级后的项目**：所有 Channel 成为 Project，owner 只有 Human；需要由 Human 重新指定 Agent owner。旧 Task 的 accountable 读为 Human，Claims 照常继续；旧 Task 的 `sourceThreadRefs` 为空。
 - **升级后的可见性**：按 §2 的派生规则，Agent 能看到的项目不减少。

@@ -462,6 +462,7 @@ export interface AgentTeamMainThreadCard {
     readonly taskNumber: number
     readonly status: AgentTeamTask['status']
     readonly resolution: AgentTeamTask['resolution']
+    readonly accountable: AgentTeamMemberId
     readonly liveClaimOwners: readonly AgentTeamInboxActor[]
   }
   /** Messages after the anchor. */
@@ -584,6 +585,9 @@ export interface AgentTeamStartThreadRequest {
   readonly kind: 'discussion' | 'task'
   readonly body: string
   readonly recipients?: readonly AgentTeamMemberId[]
+  readonly sourceThreadRefs?: readonly AgentTeamThreadRef[]
+  /** Task accountable; absent means the Agent owner creator, or Human for a Human creator. */
+  readonly accountable?: AgentTeamMemberId
   readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
   readonly attachmentPaths?: readonly string[] | undefined
 }
@@ -607,7 +611,7 @@ export type AgentTeamReplyResult =
   | AgentTeamStaleRevision
   | AgentTeamMemberNotFollowing
 
-/** Human Task resolution intent. */
+/** Human or accountable Task resolution intent. */
 export interface AgentTeamTaskRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
@@ -630,12 +634,33 @@ export type AgentTeamTaskResult =
   | AgentTeamUnreadRequired
   | AgentTeamStaleRevision
 
+/** Human or current-accountable Task responsibility transfer. */
+export interface AgentTeamTransferTaskRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly taskRef: AgentTeamTaskRef
+  readonly target: AgentTeamMemberId
+  readonly baseRevision: number
+}
+
+export interface AgentTeamTransferTaskCommittedResult {
+  readonly kind: 'committed'
+  readonly receipt: AgentTeamOperationReceipt
+  readonly activity: AgentTeamTaskActivity
+  readonly task: AgentTeamTask
+  readonly thread: AgentTeamThread
+}
+
+export type AgentTeamTransferTaskResult = AgentTeamTransferTaskCommittedResult | AgentTeamUnreadRequired | AgentTeamStaleRevision
+
 /** Human intent to attach a real Task overlay to a taskless Thread. */
 export interface AgentTeamPromoteThreadRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId
   readonly threadRef: AgentTeamThreadRef
   readonly baseRevision: number
+  /** Task accountable; absent means the Agent owner promoter, or Human for a Human promoter. */
+  readonly accountable?: AgentTeamMemberId
 }
 
 export interface AgentTeamPromoteThreadCommittedResult {
@@ -831,6 +856,20 @@ export interface AgentTeamThreadHistoryRequest {
   readonly limit?: number
 }
 
+/** A Task derived from this discussion, projected as a card at its creation point. Not a fact: it changes as the Task does and never counts as unread. */
+export interface AgentTeamThreadTaskCard {
+  readonly taskRef: AgentTeamTaskRef
+  readonly taskNumber: number
+  readonly threadRef: AgentTeamThreadRef
+  /** The Task's own anchor Message, at whose sequence the card sits in this discussion. */
+  readonly sequence: number
+  readonly occurredAt: string
+  readonly subject: string
+  readonly status: AgentTeamTask['status']
+  readonly resolution: AgentTeamTask['resolution']
+  readonly accountable: AgentTeamMemberId
+}
+
 export interface AgentTeamThreadHistory {
   readonly task?: AgentTeamTask
   readonly thread: AgentTeamThread
@@ -840,6 +879,8 @@ export interface AgentTeamThreadHistory {
   readonly anchorMentions: readonly AgentTeamMemberId[]
   readonly claims: readonly AgentTeamClaim[]
   readonly facts: readonly AgentTeamThreadFact[]
+  /** Tasks whose immutable `sourceThreadRefs` name this discussion; absent for a Task Thread, which has no cards of its own. */
+  readonly taskCards?: readonly AgentTeamThreadTaskCard[]
   readonly cursor: number
   readonly hasMore: boolean
 }
@@ -885,7 +926,7 @@ export interface AgentTeamViewItem {
 }
 
 /** How the reader stands to one Task on the board. */
-export type AgentTeamTaskRelation = 'executor' | 'project-owner' | 'none'
+export type AgentTeamTaskRelation = 'accountable' | 'executor' | 'project-owner' | 'none'
 
 /** One Task on the board: its current state, never a fact, so it is never unread. */
 export interface AgentTeamTaskBoardItem {
@@ -903,12 +944,14 @@ export interface AgentTeamTaskBoardItem {
   readonly lastActivityAt: string
   /** `executor` while the reader holds a live Claim, else `project-owner` for an owner of the Project. */
   readonly relation: AgentTeamTaskRelation
+  /** The reader may accept this in_review Task and has not executed it. */
+  readonly needsAcceptance: boolean
 }
 
 export interface AgentTeamTaskBoardRequest {
   readonly workspaceId: WorkspaceId
   readonly projectRef?: AgentTeamProjectRef
-  /** Only Tasks the reader executes. */
+  /** Only Tasks the reader is accountable for or actively executes. */
   readonly mine?: boolean
 }
 

@@ -48,7 +48,7 @@ Attention 不是 reading。这三个 action 都不渲染 Thread 的 facts、不�
 
 规则版本 2 起，`team_message` 还有 `post`，在 Project 的 Main stream 发言（`projectRef`、`body`，可选 `replyToMessageRef`，须为同一 Project 的 Main stream Message）。它不需要写入 token；持有未读 Main stream 的写入者得到 `main_unread_required`，须先读。
 
-`start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；非 member 得到 `not_project_member`。
+`start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；非 member 得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
 
 `team_thread` 的 `read`、`history`、`message` 接受 `threadRef` 或 `projectRef`（Main stream），二选一。Main stream 的 read 渲染最新条目及点名读者的条目，确认整条流直到头部，并把 Thread 卡片渲染为当前状态。
 
@@ -74,16 +74,18 @@ DM 只用于快速澄清与状态同步。任务工作、决策和任何需要�
 
 ## `team_task`
 
-`team_task` 的动作为 `board`、`list`、`claim`、`done`、`release`、`promote`。
+`team_task` 的动作为 `board`、`list`、`claim`、`done`、`release`、`accept`、`close`、`reopen`、`transfer`、`promote`。
 
-`board` 渲染 Host 的 Task board 投影：读者可见 Project 的全部 open Task，按待处理、进行中、待验收分组、按最新活动排序；再列每个 Project 最近完成的 5 个 Task。每行携带 Task ref 与编号、Project、Thread ref、live Claim 上的 Members、读者与它的关系（`executor` 或 `project-owner`）、有界主题与最新活动时刻。
+`board` 渲染 Host 的 Task board 投影：读者可见 Project 的全部 open Task，按待处理、进行中、待验收分组、按最新活动排序；再列每个 Project 最近完成的 5 个 Task。每行携带 Task ref 与编号、Project、Thread ref、live Claim 上的 Members、读者与它的关系（`accountable`、`executor` 或 `project-owner`）、负责人、读者是否可验收、有界主题与最新活动时刻。
 
-`projectRef` 限定一个 Project；`mine` 只保留读者持有 live Claim 的 Task。
+`projectRef` 限定一个 Project；`mine` 只保留读者负责或持有 live Claim 的 Task。
 
 看板是当前状态，不是未读：读取不改变 read state，也不带写令牌。工具引导在读者遇到 Workspace 意外改动、或准备 claim 之前指向这里，让在途工作被识别为在途而非冲突。
 
-`promote` 把讨论 Thread 转为 Task，需要 `threadRef` 与该 Thread 的 `baseRevision`，只有 Project owner 可以执行（否则 `project_owner_required`）。
+`promote` 把讨论 Thread 转为 Task，需要 `threadRef` 与该 Thread 的 `baseRevision`，可选 `accountable`，只有 Project owner 可以执行（否则 `project_owner_required`）。
 
 `list`、`claim`、`done`、`release` 只管理 Agent 自己在真实 Task 上的 Direction Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，因为当前 `team_thread read` 仍是必需的变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
 
 拒绝结果（`unread_required`、`stale_revision`）与 message 拒绝共享同一形式：`Not committed`、本地 refs/计数、挡住这次写入的事实、先读后重试的恢复路径，以及当前 revision 作为下次写入的写令牌。
+
+`accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 属于 Human，或从未在该 Task 上持有过 Claim 的 Project owner，且仅在 in_review 时；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。`transfer` 取 `target`——当前 Project owner 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。

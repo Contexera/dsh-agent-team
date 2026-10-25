@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type {
   AgentTeamClientMemberStatus,
+  AgentTeamThreadTaskCard,
   AgentTeamProjectRef,
   AgentTeamMemberId,
   AgentTeamMessageRef,
@@ -93,6 +94,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // Current Thread followers; the composer ranks them first because they are already in the conversation.
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
   const [currentFacts, setCurrentFacts] = useState<readonly AgentTeamThreadFact[]>([])
+  // Tasks derived from this discussion; projection rows, never facts or unread.
+  const [taskCards, setTaskCards] = useState<readonly AgentTeamThreadTaskCard[]>([])
   const [olderFacts, setOlderFacts] = useState<readonly AgentTeamThreadFact[]>([])
   const [readFacts, setReadFacts] = useState<readonly AgentTeamThreadReadFact[]>([])
   const [historyCursor, setHistoryCursor] = useState<number>()
@@ -236,6 +239,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     try {
       const result = await loadThreadHistory({ workspaceId, ...threadRequest, limit: 100 })
       if (!mountedRef.current || !result.ok) return
+      setTaskCards(result.value.taskCards ?? [])
       const incoming = result.value.facts
       const shown = currentFactsRef.current
       if (shown.length === 0) return
@@ -285,6 +289,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     setMembers([])
     setFollowerIds(new Set())
     setCurrentFacts([])
+    setTaskCards([])
     currentFactsRef.current = []
     setOlderFacts([])
     setReadFacts([])
@@ -305,6 +310,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         threadObservations({ workspaceId, ...threadRequest }).catch(() => undefined),
       ])
       if (!mountedRef.current || sequence !== sequenceRef.current) return
+      if (history !== undefined && history.ok) setTaskCards(history.value.taskCards ?? [])
       if (!read.ok) {
         setError(read.error.message)
         setLoading(false)
@@ -556,11 +562,24 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return <p className={threadCss.activityRow} key={factKey(fact)}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{formatActivity(fact.activity, { t, actorName: memberName, claims: taskClaims })}</span></p>
   }
 
-  /** One run = one same-sender reply turn; activities, the unread boundary, and day changes break runs. */
-  const renderFactBlocks = (facts: readonly AgentTeamThreadFact[], boundaryIndex: number | undefined): ReactNode[] => {
+  /** One derived Task card: the discussion's own projection of work it spawned, jumping to the Task Thread. */
+  const renderTaskCard = (card: AgentTeamThreadTaskCard): ReactNode => {
+    const accountableName = memberName(card.accountable)
+    return <button type="button" key={`task-card-${card.taskRef}`} className={threadCss.derivedTaskCard}
+      onClick={() => selectThread(card.threadRef, projectRef, card.taskRef, card.taskNumber)}>
+      <TeamStateDot size={8} state={taskStatusDot(card.status)} />
+      <span className={threadCss.derivedTaskCardTitle}>{t('derivedTaskCard', { number: card.taskNumber })}</span>
+      <span className={threadCss.derivedTaskCardSubject} title={card.subject}>{card.subject}</span>
+      <span className={threadCss.derivedTaskCardMeta}>{formatTaskStatus(card.status, t)} · {accountableName}</span>
+    </button>
+  }
+
+  /** One run = one same-sender reply turn; activities, derived Task cards, the unread boundary, and day changes break runs. */
+  const renderFactBlocks = (facts: readonly AgentTeamThreadFact[], boundaryIndex: number | undefined, cards: readonly AgentTeamThreadTaskCard[] = []): ReactNode[] => {
     const nodes: ReactNode[] = []
     let run: AgentTeamThreadFact[] = []
     let lastDay: string | undefined
+    let nextCard = 0
     const flushRun = () => {
       if (run.length > 0) {
         nodes.push(
@@ -583,6 +602,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         }
         lastDay = day
       }
+      while (nextCard < cards.length && cards[nextCard]!.sequence < fact.sequence) {
+        flushRun()
+        nodes.push(renderTaskCard(cards[nextCard]!))
+        nextCard += 1
+      }
       const sender = messageSender(fact)
       if (sender !== undefined && run.length > 0 && sender === messageSender(run[run.length - 1]!)) {
         run.push(fact)
@@ -593,6 +617,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       if (sender !== undefined) run.push(fact)
       else nodes.push(<Fragment key={factKey(fact)}>{renderFact(fact)}</Fragment>)
     })
+    while (nextCard < cards.length) {
+      flushRun()
+      nodes.push(renderTaskCard(cards[nextCard]!))
+      nextCard += 1
+    }
     flushRun()
     return nodes
   }
@@ -821,10 +850,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       <div className={css.timelineContent}>
         {loading && projection === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingThread')}</p></div>}
         {projection === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void readCurrent() }}>{t('retry')}</Button></div>}
-        {olderFacts.length > 0 && <section className={threadCss.historySection} aria-label={t('olderHistory')}><h2>{t('olderHistory')}</h2>{renderFactBlocks(olderFacts, undefined)}</section>}
+        {olderFacts.length > 0 && <section className={threadCss.historySection} aria-label={t('olderHistory')}><h2>{t('olderHistory')}</h2>{renderFactBlocks(olderFacts, undefined, taskCards.filter(card => card.sequence < (currentFactsWithAnchor[0]?.sequence ?? Number.POSITIVE_INFINITY)))}</section>}
         {historyHasMore && <div className={css.timelineAction}><Button size="sm" onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
         {currentFactsWithAnchor.length > 0 && <section className={threadCss.publicSection}>
-          {renderFactBlocks(currentFactsWithAnchor, unreadBoundary)}
+          {renderFactBlocks(currentFactsWithAnchor, unreadBoundary, taskCards.filter(card => card.sequence >= (currentFactsWithAnchor[0]?.sequence ?? 0)))}
         </section>}
         {autoReadExhausted && <div className={css.timelineAction} role="alert">
           <span>{t('autoReadIncomplete')}</span>

@@ -71,6 +71,8 @@ export interface AgentTeamReleaseSnapshot {
   readonly claims: readonly AgentTeamClaim[]
   /** Public release summaries for the affected Threads. */
   readonly activities: readonly AgentTeamClaimsReleasedActivity[]
+  /** Open Tasks whose former accountable returned to the Human. */
+  readonly transfers: readonly AgentTeamTaskActivity[]
   readonly tasks: readonly AgentTeamTask[]
   readonly threads: readonly AgentTeamThread[]
   readonly inbox: AgentTeamInboxDelta
@@ -165,6 +167,9 @@ export interface AgentTeamProjectOwnerRemovedOperation extends AgentTeamOperatio
     readonly memberId: AgentTeamMemberId
     readonly activity: AgentTeamMainActivity
     readonly inbox: AgentTeamInboxDelta
+    readonly transfers: readonly AgentTeamTaskActivity[]
+    readonly tasks: readonly AgentTeamTask[]
+    readonly threads: readonly AgentTeamThread[]
   }
 }
 
@@ -303,6 +308,7 @@ export interface AgentTeamThreadStartedOperation extends AgentTeamOperationBase 
     readonly mentions: readonly AgentTeamMemberId[]
     readonly anchor: AgentTeamMessage
     readonly task?: AgentTeamTask
+    readonly activity?: AgentTeamTaskActivity
     readonly thread: AgentTeamThread
     readonly inbox: AgentTeamInboxDelta
   }
@@ -348,6 +354,19 @@ export interface AgentTeamTaskChangedOperation extends AgentTeamOperationBase {
     readonly task: AgentTeamTask
     readonly thread: AgentTeamThread
     readonly claims: readonly AgentTeamClaim[]
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/** Durable transfer of Task responsibility; execution Claims are unchanged. */
+export interface AgentTeamTaskAccountableChangedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/task-accountable-changed'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly baseRevision: number
+    readonly activity: AgentTeamTaskActivity
+    readonly task: AgentTeamTask
+    readonly thread: AgentTeamThread
     readonly inbox: AgentTeamInboxDelta
   }
 }
@@ -450,6 +469,7 @@ export type AgentTeamOperation =
   | AgentTeamClaimDoneOperation
   | AgentTeamClaimReleasedOperation
   | AgentTeamTaskChangedOperation
+  | AgentTeamTaskAccountableChangedOperation
   | AgentTeamThreadAttentionChangedOperation
   | AgentTeamThreadReadOperation
   | AgentTeamMemberRemovedOperation

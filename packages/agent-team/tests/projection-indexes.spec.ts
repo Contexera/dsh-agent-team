@@ -198,12 +198,18 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       if (paged[index] !== projectAFacts[index]) console.log('DIFF at', index, paged[index], projectAFacts[index])
     }
     expect(paged).toEqual(projectAFacts)
-    expect(ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: 66 }).hasMore).toBe(false)
-    expect(ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: 65 }).hasMore).toBe(true)
+    // hasMore counts facts, not only the Messages the items carry: every Task
+    // Thread creation also appends its promote activity to the same timeline.
+    const projectAFactCount = projectAFacts.length + threads.filter(thread => thread.projectRef === projectA.projectRef).length
+    expect(ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: projectAFactCount }).hasMore).toBe(false)
+    expect(ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, limit: projectAFactCount - 1 }).hasMore).toBe(true)
     // Reading backwards from the live tail returns the newest window, then
     // walks to the empty head where hasMore finally falls.
     const latest = ledger.view({ workspaceId: alpha, projectRef: projectA.projectRef, direction: 'before', limit: 20 })
-    expect(latest.items.map(item => item.message.messageRef)).toEqual(projectAFacts.slice(-20))
+    // A page never splits a same-sequence run, so it may exceed the limit by
+    // the boundary run's remainder; the newest edge itself stays exact.
+    expect(latest.items.length).toBeGreaterThanOrEqual(20)
+    expect(latest.items.map(item => item.message.messageRef)).toEqual(projectAFacts.slice(-latest.items.length))
     expect(latest.hasMore).toBe(true)
     const backwards: string[] = latest.items.map(item => item.message.messageRef)
     cursor = latest.cursor

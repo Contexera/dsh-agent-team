@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import AgentTeam, { AgentTeamDmDeliveryError, markAgentTeamPreset } from '@contexera/dsh-agent-team/host'
+import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
 import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
@@ -129,10 +129,10 @@ function nextWriteLine(revision: number): string {
   return `Next write — baseRevision: ${revision} (copy exactly; never derive or cite).`
 }
 
-/** Task standing inline on a Thread identity line; absent on taskless Threads. */
-function taskStanding(value: { taskRef?: string; status?: string; resolution?: string; taskNumber?: number }): string {
+/** Task standing inline on a Thread identity line; absent on taskless Threads. Accountability rides along whenever the result carries it, because who is responsible for the Task changes what the reader may do next. */
+function taskStanding(value: { taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string }): string {
   if (value.taskRef === undefined) return ''
-  return `${value.taskRef}${value.taskNumber === undefined ? '' : ` (#${value.taskNumber})`}${value.status === undefined ? '' : `, ${value.status}${value.resolution === undefined ? '' : `/${value.resolution}`}`}`
+  return `${value.taskRef}${value.taskNumber === undefined ? '' : ` (#${value.taskNumber})`}${value.status === undefined ? '' : `, ${value.status}${value.resolution === undefined ? '' : `/${value.resolution}`}`}${value.accountable === undefined ? '' : ` · accountable ${value.accountable}`}`
 }
 
 /** The one model-facing schema for a Thread fact, shared by the read result and by the facts a rejected write carries back. */
@@ -222,7 +222,7 @@ const teamInbox = defineTool({
       hasMore: { type: 'boolean', required: true },
       items: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         workspaceId: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
-        taskRef: { type: 'string' }, status: { type: 'string' }, revision: { type: 'number', required: true }, unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true },
+        taskRef: { type: 'string' }, status: { type: 'string' }, accountable: { type: 'string' }, revision: { type: 'number', required: true }, unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true },
         taskNumber: { type: 'number' }, newestOccurredAt: { type: 'string' },
       } } },
       main: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
@@ -260,7 +260,7 @@ const teamInbox = defineTool({
       items: inbox.items.map(item => {
         const taskNumber = item.taskNumber
         return { workspaceId: item.workspaceId, threadRef: item.thread.threadRef, projectRef: item.projectRef,
-          ...(item.task === undefined ? {} : { taskRef: item.task.taskRef, status: item.task.status }),
+          ...(item.task === undefined ? {} : { taskRef: item.task.taskRef, status: item.task.status, accountable: item.task.accountable }),
           revision: item.thread.revision, unreadCount: item.unreadCount, directCount: item.directCount, newestOccurredAt: item.newestOccurredAt,
           ...(taskNumber === undefined ? {} : { taskNumber }) }
       }),
@@ -282,7 +282,7 @@ const teamAttention = defineTool({
     schema: { type: 'object', additionalProperties: false, properties: {
       workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
       kind: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, taskRef: { type: 'string' },
-      revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
+      revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' }, accountable: { type: 'string' },
       following: { type: 'boolean', required: true },
     } },
         // Renders are the only channel a tool result reaches the model through. One outcome line plus the Attention state; a yes/no on one Thread needs no orientation, facts, or write token (a status read authorizes no mutation).
@@ -323,12 +323,12 @@ function attentionResult(
   workspaceId: string,
   snapshot: ReturnType<AgentTeam['threadHistoryForAgent']>,
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
-  task: { taskNumber?: number },
-): { workspaceId: string; projectRef: string; kind: string; threadRef: string; revision: number; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number } {
+  task: { taskNumber?: number; accountable?: string },
+): { workspaceId: string; projectRef: string; kind: string; threadRef: string; revision: number; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string } {
   return {
     workspaceId, projectRef: snapshot.anchor.projectRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
-    ...(snapshot.task === undefined ? {} : { taskRef: snapshot.task.taskRef, status: snapshot.task.status, resolution: snapshot.task.resolution }),
+    ...(snapshot.task === undefined ? {} : { taskRef: snapshot.task.taskRef, status: snapshot.task.status, resolution: snapshot.task.resolution, accountable: snapshot.task.accountable }),
     ...(task.taskNumber === undefined ? {} : { taskNumber: task.taskNumber }),
     following: attention !== undefined,
   }
@@ -353,7 +353,7 @@ const teamThread = defineTool({
       message: { type: 'object', additionalProperties: false, properties: {
         messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' }, body: { type: 'string', required: true },
       } },
-      revision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' },
+      revision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' }, accountable: { type: 'string' },
       following: { type: 'boolean' }, readThroughSequence: { type: 'number' }, remainingUnreadCount: { type: 'number' }, earlierFactCount: { type: 'number' }, cursor: { type: 'number' }, hasMore: { type: 'boolean' },
       anchor: { type: 'object', additionalProperties: false, properties: {
         messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, body: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' },
@@ -586,11 +586,11 @@ function threadResult(
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
   facts: FactView[],
   extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; taskNumber?: number; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string } } = {},
-): { workspaceId: string; projectRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; claims: ClaimView[]; facts: FactView[] } {
+): { workspaceId: string; projectRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; claims: ClaimView[]; facts: FactView[] } {
   return {
     workspaceId, projectRef: snapshot.anchor.projectRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
-    ...(snapshot.task === undefined ? {} : { taskRef: snapshot.task.taskRef, status: snapshot.task.status, resolution: snapshot.task.resolution }),
+    ...(snapshot.task === undefined ? {} : { taskRef: snapshot.task.taskRef, status: snapshot.task.status, resolution: snapshot.task.resolution, accountable: snapshot.task.accountable }),
     ...(extra.taskNumber === undefined ? {} : { taskNumber: extra.taskNumber }),
     following: attention !== undefined,
     ...extra,
@@ -653,6 +653,8 @@ const teamMessage = markAgentTeamPreset(defineTool({
     action: { type: 'string', required: true, enum: ['start', 'reply', 'post'] },
     projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves. Required by start and post." },
     kind: { type: 'string', enum: ['discussion', 'task'], description: 'start only: discussion (default) opens a Thread to talk something through; task opens a Thread that carries a Task.' },
+    accountable: { type: 'string', description: "start with kind task only: who becomes accountable for the new Task — a current Project owner's memberRef or @Handle, or 'human'. Omit it and the Agent owner who starts the Task is accountable, or the Human when the Human starts it. It does not change who may start a Task." },
+    sourceThreadRefs: { type: 'array', items: { type: 'string' }, description: 'start with kind task only: the discussion Threads this Task derives from, as full branded threadRefs of the same Project. Each becomes a source of the new Task, which the card renders there instead of in the Main stream; a Task may name several. Task Threads and other Projects are refused, and a source is fixed at creation — promoting a discussion in place records no source.' },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for reply on a Taskful Thread. Prefer threadRef; an unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     replyToMessageRef: { type: 'string', description: "Optional: the full branded Message ref you are answering (for post: a Main stream Message of the same Project) (as rendered by team_thread or an inbox notice). Reply on the Thread you are already replying to; the Message must be one this Thread recorded. The Host links the reply to it, and its author is then delivered to like a mention, so answering a peer reaches them without typing their handle. Use it when the link is the point — the reader needs to know which Message you are answering. A Message that only continues the Thread's conversation needs neither this nor a mention: the Thread already delivers to the Members on it, so the link would announce a delivery that was going to happen anyway." },
@@ -662,7 +664,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
-      kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, revision: { type: 'number' },
+      kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' }, revision: { type: 'number' }, accountable: { type: 'string' }, sourceThreadRefs: { type: 'array', items: { type: 'string' } },
       expectedRevision: { type: 'number' }, messageRef: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } }, unreadCount: { type: 'number' }, directCount: { type: 'number' },
       projectRef: { type: 'string' }, entries: { type: 'array', items: MAIN_ENTRY_SCHEMA },
       facts: { type: 'array', items: FACT_SCHEMA },
@@ -689,6 +691,8 @@ const teamMessage = markAgentTeamPreset(defineTool({
         return [{ type: 'text', text: [
           value.action === 'start' ? 'Committed — Thread created.' : 'Committed — reply added.',
           [value.messageRef, value.threadRef, ...(value.taskRef === undefined ? [] : [value.taskRef])].join(' · '),
+          ...(value.accountable === undefined ? [] : [`Accountable for ${value.taskRef}: ${value.accountable}.`]),
+          ...(value.sourceThreadRefs === undefined || value.sourceThreadRefs.length === 0 ? [] : [`Derived from ${value.sourceThreadRefs.join(', ')} — its card renders there, not in the Main stream.`]),
           ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
           ...(value.undeliveredMentions === undefined || value.undeliveredMentions.length === 0 ? [] : [
             `Mention not delivered — ${value.undeliveredMentions.join(', ')} never took part in this Thread, so nothing reached them. Only a Human can invite a Member: reach them with a dm, or ask the Human.`,
@@ -713,6 +717,8 @@ const teamMessage = markAgentTeamPreset(defineTool({
     if (args.action === 'post') {
       if (args.projectRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined
         || args.kind !== undefined) throw new Error(`post requires projectRef and does not accept threadRef, taskRef, baseRevision, or kind — ${recoveryFor('post_requires_project').sentence({})}`)
+      if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'post', parameter: 'accountable', owner: 'start' }))
+      if (args.sourceThreadRefs !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'post', parameter: 'sourceThreadRefs', owner: 'start' }))
       const result = await host.postMainMessageForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
         projectRef: projectRefOf(args.projectRef) as never,
         ...(args.replyToMessageRef === undefined ? {} : { replyToMessageRef: args.replyToMessageRef as AgentTeamMessageRef }), body: args.body, ...paths })
@@ -727,14 +733,20 @@ const teamMessage = markAgentTeamPreset(defineTool({
       // start would commit as a discussion — the model must learn it was not heard.
       if ((args as { readonly asTask?: unknown }).asTask !== undefined) throw new Error(`start does not accept asTask — pass kind: 'task' instead — ${recoveryFor('action_only_arguments').sentence({ action: 'start', parameter: 'asTask', owner: 'start' })}`)
       const kind = args.kind === 'task' ? 'task' : 'discussion'
+      if (kind === 'discussion' && args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'start (discussion)', parameter: 'accountable', owner: 'start' }))
+      if (kind === 'discussion' && args.sourceThreadRefs !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'start (discussion)', parameter: 'sourceThreadRefs', owner: 'start' }))
       const request = { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent), projectRef: projectRefOf(args.projectRef) as never, body: args.body, ...paths }
-      const result = await host.startThreadForAgent(agent, { ...request, kind })
+      const result = await host.startThreadForAgent(agent, { ...request, kind,
+        ...(args.accountable === undefined ? {} : { accountable: accountableTarget(host, args.accountable) }),
+        ...(args.sourceThreadRefs === undefined ? {} : { sourceThreadRefs: args.sourceThreadRefs.map(ref => ref as AgentTeamThreadRef) }) })
       return messageOutcome(result, 'start')
     }
     const baseRevision = args.baseRevision
     if ((args.threadRef === undefined && args.taskRef === undefined) || args.projectRef !== undefined || args.kind !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
       throw new Error(`reply requires threadRef and a positive baseRevision — ${recoveryFor('missing_write_token').sentence({})}`)
     }
+    if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'reply', parameter: 'accountable', owner: 'start' }))
+    if (args.sourceThreadRefs !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'reply', parameter: 'sourceThreadRefs', owner: 'start' }))
     const result = await host.replyForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
       ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }),
       ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }),
@@ -749,7 +761,8 @@ function messageOutcome(result: Awaited<ReturnType<AgentTeam['startThreadForAgen
         // A start always delivers to the Members it names (they begin following the new Thread), so only a reply can report names the Thread has never carried.
     const undelivered = 'undeliveredMentions' in result ? result.undeliveredMentions : undefined
     return { kind: result.kind, action, threadRef: result.thread.threadRef,
-      ...(result.task === undefined ? {} : { taskRef: result.task.taskRef }),
+      ...(result.task === undefined ? {} : { taskRef: result.task.taskRef, accountable: result.task.accountable }),
+      ...(result.task === undefined || result.task.sourceThreadRefs.length === 0 ? {} : { sourceThreadRefs: [...result.task.sourceThreadRefs] }),
       revision: result.thread.revision, messageRef: result.message.messageRef, occurredAt: result.receipt.occurredAt,
       ...(undelivered === undefined || undelivered.length === 0 ? {} : { undeliveredMentions: [...undelivered] }) }
   }
@@ -768,6 +781,7 @@ const BOARD_ITEM_SCHEMA = { type: 'object', additionalProperties: false, propert
   taskRef: { type: 'string', required: true }, taskNumber: { type: 'number', required: true }, threadRef: { type: 'string', required: true },
   status: { type: 'string', required: true }, subject: { type: 'string', required: true }, members: { type: 'array', required: true, items: { type: 'string' } },
   lastActivityAt: { type: 'string', required: true }, relation: { type: 'string', required: true },
+  accountable: { type: 'string', required: true }, needsAcceptance: { type: 'boolean', required: true },
 } } as const
 
 interface BoardItemView {
@@ -782,16 +796,23 @@ interface BoardItemView {
   readonly members: string[]
   readonly lastActivityAt: string
   readonly relation: string
+  readonly accountable: string
+  readonly needsAcceptance: boolean
 }
 
 function boardItemView(item: AgentTeamTaskBoardItem): BoardItemView {
   return { workspaceId: item.workspaceId, projectRef: item.projectRef, projectName: item.projectName, taskRef: item.task.taskRef, taskNumber: item.taskNumber,
     threadRef: item.threadRef, status: item.task.status, subject: item.subject, members: item.liveClaimOwners.map(owner => owner.name),
-    lastActivityAt: item.lastActivityAt, relation: item.relation }
+    lastActivityAt: item.lastActivityAt, relation: item.relation, accountable: item.task.accountable, needsAcceptance: item.needsAcceptance }
 }
 
 function boardLines(open: readonly BoardItemView[], finished: readonly BoardItemView[]): string[] {
-  const line = (item: BoardItemView) => `${item.taskRef} (#${item.taskNumber}) · ${item.projectName} ${item.projectRef} · ${item.threadRef}${item.members.length === 0 ? '' : ` · ${item.members.map(name => `@${name}`).join(', ')}`}${item.relation === 'none' ? '' : ` · you: ${item.relation}`} — ${item.subject} · last activity ${formatTeamTimestamp(item.lastActivityAt)}`
+  const line = (item: BoardItemView) => [`${item.taskRef} (#${item.taskNumber})`, `${item.projectName} ${item.projectRef}`, item.threadRef,
+    ...(item.members.length === 0 ? [] : [item.members.map(name => `@${name}`).join(', ')]),
+    ...(item.relation === 'none' ? [] : [`you: ${item.relation}`]),
+    `accountable ${item.accountable}`,
+    ...(item.needsAcceptance ? ['needs your acceptance'] : []),
+  ].join(' · ') + ` — ${item.subject} · last activity ${formatTeamTimestamp(item.lastActivityAt)}`
   const column = (title: string, status: string) => {
     const items = open.filter(item => item.status === status)
     return [`${title} (${items.length})`, ...(items.length === 0 ? ['—'] : items.map(line))]
@@ -802,23 +823,64 @@ function boardLines(open: readonly BoardItemView[], finished: readonly BoardItem
     'Read a Task\'s Thread with team_thread read before you claim or reply.']
 }
 
+/** Who a Task refusal should name: the Human by their role, an Agent by its stable ref, so the reader can address a transfer. */
+function accountableLabel(host: AgentTeam, memberId: string): string {
+  if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return 'the Human'
+  const handle = host.members().find(status => status.member.memberId === memberId)?.member.handle
+  return handle === undefined ? memberId : `@${handle} (${memberId})`
+}
+
+/**
+ * The ledger names the refusal and its way out, but it cannot say what the Task looks like now: only the caller can read the projection after the refusal. So a Task-authority refusal gains one sentence naming the current state and who holds responsibility.
+ */
+function withTaskAuthorityHint(error: unknown, host: AgentTeam, agent: Parameters<typeof service>[0], base: { readonly workspaceId: Parameters<AgentTeam['listClaimsForAgent']>[1]['workspaceId']; readonly taskRef: AgentTeamTaskRef }): unknown {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!/\((?:self_acceptance_forbidden|accountable_owner_required)\)/u.test(message)) return error
+  let listed: ReturnType<AgentTeam['listClaimsForAgent']>
+  try {
+    listed = host.listClaimsForAgent(agent, base)
+  } catch {
+    return error
+  }
+  return new Error(`${message} Currently ${base.taskRef} is ${listed.task.status}${listed.task.resolution === 'open' ? '' : ` (${listed.task.resolution})`}, accountable to ${accountableLabel(host, listed.task.accountable)}.`)
+}
+
+/**
+ * The Human is addressable by role — by the configured handle or the literal `human` — because `member:human` is the one id no roster lists.
+ * A bare Agent handle resolves too: a model reading a board row or a message body has handles in front of it, and the ledger only resolves refs.
+ */
+function accountableTarget(host: AgentTeam, raw: string): AgentTeamMemberId {
+  const trimmed = raw.trim()
+  const lower = trimmed.replace(/^@/u, '').toLowerCase()
+  if (trimmed === AGENT_TEAM_HUMAN_MEMBER_ID || lower === 'human' || lower === host.humanHandle().toLowerCase()) return AGENT_TEAM_HUMAN_MEMBER_ID
+  const member = host.members().find(status => status.member.handle.toLowerCase() === lower)
+  if (member === undefined && !trimmed.startsWith('member:')) {
+    throw new Error(recoveryFor('unknown_ref').sentence({ refused: trimmed }))
+  }
+  return member === undefined ? trimmed as AgentTeamMemberId : member.member.memberId
+}
+
 const teamTask = defineTool({
   name: 'team_task',
-  description: 'Work with Tasks. board lists the Task board of the Projects you can see — every open Task with its status and the Members on it, plus each Project\'s newest finished Tasks — filtered by projectRef or to your own Claims with mine; it is current state, not unread, so check it before you claim or when a Workspace change surprises you. promote turns a discussion Thread into a Task (Project owners only). list, claim, done and release manage your Direction Claims. A Claim is your one-sentence direction statement on a Task — "the angle I am taking" — so others can spot collisions and track progress: Tasks define scope (owned by Humans), Claims declare the angle (owned by you). Good direction: "Unify the four form dialogs on shared field components before wiring submits." Bad direction: a multi-paragraph plan with step order, file lists, or acceptance criteria — those belong in Thread messages, not the Claim. Mutations require the current next-write token from a fully drained team_thread read (or your own last committed mutation); list refreshes the collision surface only and authorizes no mutation.',
+  description: 'Work with Tasks. board lists the Task board of the Projects you can see — every open Task with its status, who is accountable for it, and the Members on it, plus each Project\'s newest finished Tasks — filtered by projectRef or to your own responsibility with mine; it is current state, not unread, so check it before you claim or when a Workspace change surprises you. promote turns a discussion Thread into a Task (Project owners only) and takes accountable to name the owner responsible for it; a Task started with team_message start takes the same field. list, claim, done and release manage your Direction Claims. A Claim is your one-sentence direction statement on a Task — "the angle I am taking" — so others can spot collisions and track progress: Tasks define scope, Claims declare the angle (owned by you). Good direction: "Unify the four form dialogs on shared field components before wiring submits." Bad direction: a multi-paragraph plan with step order, file lists, or acceptance criteria — those belong in Thread messages, not the Claim. Every Task has one accountable owner: the Human, or an Agent Project owner. accept finishes a Task as verified work; close ends it without acceptance; reopen returns it to open work; transfer hands accountability to another Project owner or back to the Human. Who may do which is the Host\'s call, not yours to reason around: accept belongs to the Human or to a Project owner who never held a Claim on this Task (an Agent may accept only an in_review Task), while close, reopen and transfer belong to the Human or the current accountable. Acceptance, closing, and reopening are three separate decisions: finishing your own Claim is not acceptance, and an Agent that executed a Task cannot verify it. transfer moves responsibility only — Claims and their owners stay where they are. Mutations require the current next-write token from a fully drained team_thread read (or your own last committed mutation); list refreshes the collision surface only and authorizes no mutation.',
   parameters: {
-    action: { type: 'string', required: true, enum: ['board', 'list', 'claim', 'done', 'release', 'promote'] },
+    action: { type: 'string', required: true, enum: ['board', 'list', 'claim', 'done', 'release', 'promote', 'accept', 'close', 'reopen', 'transfer'] },
     projectRef: { type: 'string', description: 'board only: limit the board to one Project.' },
-    mine: { type: 'boolean', description: 'board only: only Tasks you hold a live Claim on.' },
+    mine: { type: 'boolean', description: 'board only: only Tasks you are accountable for or hold a live Claim on.' },
     threadRef: { type: 'string', description: 'promote only: the discussion Thread to turn into a Task.' },
     taskRef: { type: 'string', description: "Full branded Task ref exactly as returned by Team tools, including the 'task:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Task's Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Task." }, direction: { type: 'string' },
     claimRef: { type: 'string', description: "Full branded Claim ref exactly as returned by team_task, including the 'claim:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
+    accountable: { type: 'string', description: "promote only: the Member who becomes accountable for the new Task — a current Project owner's memberRef or @Handle, or 'human'. Omit it and the promoting owner is accountable, or the Human when the Human promotes." },
+    target: { type: 'string', description: "transfer only: the Member who becomes accountable — a current Project owner of this Task's Project, as a memberRef, @Handle, or a unique 6+ hex prefix, or 'human' to return responsibility to the Human." },
     workspace: workspaceParam,
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
       kind: { type: 'string', required: true }, action: { type: 'string' }, taskRef: { type: 'string' }, threadRef: { type: 'string' },
-      revision: { type: 'number' }, expectedRevision: { type: 'number' }, status: { type: 'string' },
+      revision: { type: 'number' }, expectedRevision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' },
+      accountable: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' },
+      releasedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } },
       open: { type: 'array', items: BOARD_ITEM_SCHEMA }, finished: { type: 'array', items: BOARD_ITEM_SCHEMA },
       unreadCount: { type: 'number' }, directCount: { type: 'number' }, occurredAt: { type: 'string' },
       claim: { type: 'object', additionalProperties: false, properties: {
@@ -833,7 +895,7 @@ const teamTask = defineTool({
       if (value.kind === 'committed' && value.action === 'promote') {
         return [{ type: 'text', text: [
           `Committed — Thread promoted to Task ${value.taskRef} (${value.status}).`,
-          `${value.threadRef} · ${value.taskRef}`,
+          `${value.threadRef} · ${value.taskRef}${value.accountable === undefined ? '' : ` · accountable ${value.accountable}`}`,
           ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
           nextWriteLine(value.revision!),
         ].join('\n') }]
@@ -841,7 +903,7 @@ const teamTask = defineTool({
       if (value.kind === 'listed') {
         const active = (value.claims ?? []).filter(claim => claim.state === 'active')
         return [{ type: 'text', text: [
-          `Claims for ${value.taskRef} · ${value.threadRef} · ${value.status}`,
+          `Claims for ${value.taskRef} · ${value.threadRef} · ${value.status}${value.accountable === undefined ? '' : ` · accountable ${value.accountable}`}`,
           'Active Claims',
           ...(active.length === 0 ? ['No active Claims.'] : active.map(claim => claimLine(claim))),
         ].join('\n') }]
@@ -850,7 +912,26 @@ const teamTask = defineTool({
         return [{ type: 'text', text: [
           `Committed — Claim ${value.action === 'claim' ? 'created' : value.action === 'done' ? 'completed' : 'released'}.`,
           `${value.claim.claimRef} · ${value.claim.state} — ${value.claim.owner}: ${value.claim.direction}`,
-          `${value.threadRef} · ${value.taskRef} · ${value.status}`,
+          `${value.threadRef} · ${value.taskRef} · ${value.status}${value.accountable === undefined ? '' : ` · accountable ${value.accountable}`}`,
+          ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
+          nextWriteLine(value.revision!),
+        ].join('\n') }]
+      }
+      if (value.kind === 'committed' && (value.action === 'accept' || value.action === 'close' || value.action === 'reopen')) {
+        return [{ type: 'text', text: [
+          `Committed — Task ${value.action === 'accept' ? 'accepted' : value.action === 'close' ? 'closed' : 'reopened'}.`,
+          `${value.threadRef} · ${value.taskRef} · ${value.status}${value.resolution === undefined ? '' : `/${value.resolution}`}${value.accountable === undefined ? '' : ` · accountable ${value.accountable}`}`,
+          ...(value.acceptedClaimRefs === undefined || value.acceptedClaimRefs.length === 0 ? [] : [`accepted claims ${value.acceptedClaimRefs.join(', ')}`]),
+          ...(value.releasedClaimRefs === undefined || value.releasedClaimRefs.length === 0 ? [] : [`released claims ${value.releasedClaimRefs.join(', ')}`]),
+          ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
+          nextWriteLine(value.revision!),
+        ].join('\n') }]
+      }
+      if (value.kind === 'committed' && value.action === 'transfer') {
+        return [{ type: 'text', text: [
+          'Committed — Task transferred.',
+          `${value.threadRef} · ${value.taskRef} · ${value.status}${value.accountable === undefined ? '' : ` · accountable ${value.accountable}`}`,
+          ...(value.from === undefined || value.to === undefined ? [] : [`responsibility ${value.from} → ${value.to}; Claims stay with their owners.`]),
           ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
           nextWriteLine(value.revision!),
         ].join('\n') }]
@@ -864,19 +945,23 @@ const teamTask = defineTool({
     const host = service(agent)
     if (args.action === 'board') {
       if (args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('board_takes_no_task').sentence({}))
+      if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'board', parameter: 'accountable', owner: 'promote' }))
+      if (args.target !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'board', parameter: 'target', owner: 'transfer' }))
       const board = host.taskBoardForAgent(agent, { ...(args.workspace === undefined ? {} : { workspaceId: workspaceOf(args, agent) }),
         ...(args.projectRef === undefined ? {} : { projectRef: projectRefOf(args.projectRef) as AgentTeamProjectRef }), ...(args.mine === true ? { mine: true } : {}) })
       return { kind: 'board', open: board.open.map(boardItemView), finished: board.finished.map(boardItemView) }
     }
     if (args.action === 'promote') {
       if (args.taskRef !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('promote_takes_thread').sentence({}))
+      if (args.target !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'promote', parameter: 'target', owner: 'transfer' }))
       if (args.threadRef === undefined) throw new Error(recoveryFor('promote_requires_thread').sentence({}))
       const baseRevision = args.baseRevision
       if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) throw new Error(recoveryFor('missing_write_token').sentence({}))
       const result = await host.promoteThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
-        threadRef: args.threadRef as AgentTeamThreadRef, baseRevision })
+        threadRef: args.threadRef as AgentTeamThreadRef, baseRevision,
+        ...(args.accountable === undefined ? {} : { accountable: accountableTarget(host, args.accountable) }) })
       if (result.kind === 'committed') return { kind: result.kind, action: 'promote', taskRef: result.task.taskRef, threadRef: result.thread.threadRef,
-        revision: result.thread.revision, status: result.task.status, occurredAt: result.receipt.occurredAt }
+        revision: result.thread.revision, status: result.task.status, accountable: result.task.accountable, occurredAt: result.receipt.occurredAt }
       if (result.kind === 'unread_required') return { kind: result.kind, threadRef: result.threadRef, revision: result.revision,
         unreadCount: result.unreadCount, directCount: result.directCount, ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
       return { kind: result.kind, threadRef: result.threadRef, expectedRevision: result.expectedRevision, revision: result.revision,
@@ -887,13 +972,52 @@ const teamTask = defineTool({
     const base = { workspaceId: workspaceOf(args, agent), taskRef: args.taskRef as AgentTeamTaskRef }
     if (args.action === 'list') {
       if (args.baseRevision !== undefined || args.direction !== undefined || args.claimRef !== undefined || args.threadRef !== undefined) throw new Error(recoveryFor('list_takes_task_only').sentence({}))
+      if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'list', parameter: 'accountable', owner: 'promote' }))
+      if (args.target !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'list', parameter: 'target', owner: 'transfer' }))
       const listed = host.listClaimsForAgent(agent, base)
       return { kind: 'listed', taskRef: listed.task.taskRef, threadRef: listed.thread.threadRef, revision: listed.thread.revision, status: listed.task.status,
-        claims: listed.claims.map(claimView) }
+        accountable: listed.task.accountable, claims: listed.claims.map(claimView) }
     }
     if (args.threadRef !== undefined || args.projectRef !== undefined) throw new Error(recoveryFor('task_action_requires_task').sentence({ action: args.action }))
+    if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: args.action, parameter: 'accountable', owner: 'promote' }))
+    if (args.target !== undefined && args.action !== 'transfer') throw new Error(recoveryFor('action_only_arguments').sentence({ action: args.action, parameter: 'target', owner: 'transfer' }))
     const baseRevision = args.baseRevision
     if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) throw new Error(recoveryFor('missing_write_token').sentence({}))
+    if (args.action === 'transfer') {
+      if (args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'transfer', parameter: args.direction === undefined ? 'claimRef' : 'direction', owner: args.direction === undefined ? 'done' : 'claim' }))
+      if (args.target === undefined || args.target.trim() === '') throw new Error('transfer needs target — the Project owner who becomes accountable for this Task, or human.')
+      const target = accountableTarget(host, args.target)
+      let transferred: Awaited<ReturnType<AgentTeam['transferTaskForAgent']>>
+      try {
+        transferred = await host.transferTaskForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, target, baseRevision })
+      } catch (error) {
+        throw withTaskAuthorityHint(error, host, agent, base)
+      }
+      const listed = host.listClaimsForAgent(agent, base)
+      if (transferred.kind === 'committed') return { kind: transferred.kind, action: 'transfer', taskRef: transferred.task.taskRef,
+        threadRef: transferred.thread.threadRef, revision: transferred.thread.revision, status: transferred.task.status,
+        resolution: transferred.task.resolution, accountable: transferred.task.accountable,
+        ...(transferred.activity.from === undefined ? {} : { from: transferred.activity.from }),
+        ...(transferred.activity.to === undefined ? {} : { to: transferred.activity.to }), occurredAt: transferred.receipt.occurredAt }
+      return taskRejection(transferred, listed)
+    }
+    if (args.action === 'accept' || args.action === 'close' || args.action === 'reopen') {
+      if (args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: args.action, parameter: args.direction === undefined ? 'claimRef' : 'direction', owner: args.direction === undefined ? 'done' : 'claim' }))
+      let resolved: Awaited<ReturnType<AgentTeam['changeTaskForAgent']>>
+      try {
+        resolved = await host.changeTaskForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action, baseRevision })
+      } catch (error) {
+        throw withTaskAuthorityHint(error, host, agent, base)
+      }
+      const listed = host.listClaimsForAgent(agent, base)
+      if (resolved.kind === 'committed') return { kind: resolved.kind, action: args.action, taskRef: resolved.task.taskRef,
+        threadRef: resolved.thread.threadRef, revision: resolved.thread.revision, status: resolved.task.status,
+        resolution: resolved.task.resolution, accountable: resolved.task.accountable,
+        ...(resolved.activity.acceptedClaimRefs === undefined ? {} : { acceptedClaimRefs: [...resolved.activity.acceptedClaimRefs] }),
+        ...(resolved.activity.releasedClaimRefs === undefined ? {} : { releasedClaimRefs: [...resolved.activity.releasedClaimRefs] }),
+        occurredAt: resolved.receipt.occurredAt }
+      return taskRejection(resolved, listed)
+    }
     if (args.action === 'claim' && (args.direction === undefined || args.claimRef !== undefined)) throw new Error(recoveryFor('claim_requires_direction').sentence({}))
     if ((args.action === 'done' || args.action === 'release') && (args.claimRef === undefined || args.direction !== undefined)) throw new Error(recoveryFor('claim_close_requires_ref').sentence({ action: args.action }))
     const result = await host.changeClaimForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action,
@@ -902,16 +1026,29 @@ const teamTask = defineTool({
     const listed = host.listClaimsForAgent(agent, base)
     const claims = listed.claims.map(claimView)
     if (result.kind === 'committed') return { kind: result.kind, action: args.action, taskRef: result.task.taskRef, threadRef: result.thread.threadRef,
-      revision: result.thread.revision, status: result.task.status, claim: claimView(result.claim), claims, occurredAt: result.receipt.occurredAt }
-    if (result.kind === 'unread_required') return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef,
-      revision: result.revision, status: listed.task.status, unreadCount: result.unreadCount, directCount: result.directCount, claims,
-      ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
-    return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef, expectedRevision: result.expectedRevision,
-      revision: result.revision, status: listed.task.status, claims,
-      ...(result.kind === 'stale_revision' && result.staleTokenKind !== undefined ? { staleTokenKind: result.staleTokenKind } : {}),
-      ...(result.kind === 'stale_revision' && result.facts !== undefined ? { facts: result.facts.map(entry => readFactView(entry)) } : {}) }
+      revision: result.thread.revision, status: result.task.status, accountable: result.task.accountable, claim: claimView(result.claim), claims, occurredAt: result.receipt.occurredAt }
+    return taskRejection(result, listed)
   },
 })
+
+/** The two typed Task rejections, in the shared outcome-first form: gating facts, the affected Task's standing, and the current revision as the next write token. */
+function taskRejection(
+  result: { readonly kind: 'unread_required' | 'stale_revision'; readonly threadRef: AgentTeamThreadRef; readonly revision: number
+    readonly unreadCount?: number; readonly directCount?: number; readonly expectedRevision?: number
+    readonly staleTokenKind?: 'unknown' | 'unrecognized'
+    readonly facts?: readonly { readonly fact: AgentTeamThreadFact; readonly unread: boolean; readonly direct: boolean }[] },
+  listed: ReturnType<AgentTeam['listClaimsForAgent']>,
+) {
+  const claims = listed.claims.map(claimView)
+  const facts = result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }
+  if (result.kind === 'unread_required') return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef,
+    revision: result.revision, status: listed.task.status, accountable: listed.task.accountable,
+    unreadCount: result.unreadCount ?? 0, directCount: result.directCount ?? 0, claims, ...facts }
+  return { kind: result.kind, taskRef: listed.task.taskRef, threadRef: result.threadRef,
+    ...(result.expectedRevision === undefined ? {} : { expectedRevision: result.expectedRevision }),
+    revision: result.revision, status: listed.task.status, accountable: listed.task.accountable, claims,
+    ...(result.staleTokenKind === undefined ? {} : { staleTokenKind: result.staleTokenKind }), ...facts }
+}
 
 const teamView = defineTool({
   name: 'team_view',
@@ -934,7 +1071,7 @@ const teamView = defineTool({
       } } },
       threads: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, revision: { type: 'number', required: true }, messageCount: { type: 'number', required: true }, subject: { type: 'string', required: true },
-        taskRef: { type: 'string' }, status: { type: 'string' }, taskNumber: { type: 'number' }, lastActivityAt: { type: 'string' },
+        taskRef: { type: 'string' }, status: { type: 'string' }, taskNumber: { type: 'number' }, accountable: { type: 'string' }, lastActivityAt: { type: 'string' },
       } } },
       tasks: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: { taskRef: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, status: { type: 'string', required: true }, revision: { type: 'number' } } } },
       cursor: { type: 'number', required: true }, hasMore: { type: 'boolean', required: true }, page: { type: 'string' },
@@ -998,7 +1135,7 @@ const teamView = defineTool({
         const task = item.task
         return { threadRef: thread.threadRef, projectRef: item.message.projectRef, revision: thread.revision, messageCount: item.messageCount,
           subject: boundedSubject(item.message.body), lastActivityAt: item.lastActivityAt,
-          ...(task === undefined ? {} : { taskRef: task.taskRef, status: task.status, ...(item.taskNumber === undefined ? {} : { taskNumber: item.taskNumber }) }) }
+          ...(task === undefined ? {} : { taskRef: task.taskRef, status: task.status, accountable: task.accountable, ...(item.taskNumber === undefined ? {} : { taskNumber: item.taskNumber }) }) }
       }),
             // A Task's revision is its Thread's; omitted rather than reported as `0` when the Thread is outside this page's scope, since `0` would read as "never written".
       tasks: view.tasks.map(task => {

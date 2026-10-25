@@ -96,17 +96,33 @@ describe('team_view renders one address book', () => {
 
 describe('team_task board renders the board projection', () => {
   const item = (status: string, extra: Record<string, unknown> = {}) => ({ workspaceId: 'ws1', projectRef: PROJECT, projectName: 'general', taskRef: TASK, taskNumber: 7,
-    threadRef: THREAD, status, subject: 'Review the render contract', members: [], lastActivityAt: '2026-09-27T10:00:00.000Z', relation: 'none', ...extra })
+    threadRef: THREAD, status, subject: 'Review the render contract', members: [], lastActivityAt: '2026-09-27T10:00:00.000Z', relation: 'none',
+    accountable: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', needsAcceptance: false, ...extra })
 
   it('groups open Tasks by status, lists finished work, and carries no write token', () => {
     const text = renderText(teamTools().get('team_task')!, { action: 'board' }, {
       kind: 'board', open: [item('in_progress', { members: ['Tars'], relation: 'executor' })], finished: [item('done')],
     })
     expect(text).toContain('To do (0)')
-    expect(text).toContain(`In progress (1)\n${TASK} (#7) · general ${PROJECT} · ${THREAD} · @Tars · you: executor — Review the render contract · last activity 2026-09-27T18:00:00+08:00`)
+    expect(text).toContain(`In progress (1)\n${TASK} (#7) · general ${PROJECT} · ${THREAD} · @Tars · you: executor · accountable member:6e8a5b10-df16-4ec0-943a-63738010953f — Review the render contract · last activity 2026-09-27T18:00:00+08:00`)
     expect(text).toContain('In review (0)')
     expect(text).toContain('Recently finished (1)')
     expect(text).not.toContain('baseRevision')
+  })
+
+  it('names the accountable owner, and says so when the reader owes the acceptance', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'board' }, {
+      kind: 'board', open: [item('in_review', { relation: 'project-owner', needsAcceptance: true, accountable: 'member:human' })], finished: [],
+    })
+    expect(text).toContain('· you: project-owner · accountable member:human · needs your acceptance — Review the render contract')
+  })
+
+  it('a Task nobody is accountable to the reader for renders no acceptance claim', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'board' }, {
+      kind: 'board', open: [item('in_review', { accountable: 'member:other' })], finished: [],
+    })
+    expect(text).toContain('· accountable member:other —')
+    expect(text).not.toContain('needs your acceptance')
   })
 })
 
@@ -373,6 +389,26 @@ describe('team_message renders its outcome', () => {
     expect(text).toContain('Next write — baseRevision: 8201 (copy exactly; never derive or cite).')
   })
 
+  it('a Task start states its accountable owner and where its card renders', () => {
+    const source = 'thread:aaaa1111-0000-4000-8000-000000000001'
+    const text = renderText(teamTools().get('team_message')!, { action: 'start', kind: 'task', projectRef: PROJECT, body: 'x' }, {
+      kind: 'committed', action: 'start', messageRef: 'message:9a1c', threadRef: THREAD, taskRef: TASK, revision: 8201,
+      accountable: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5', sourceThreadRefs: [source],
+    })
+    expect(text).toContain(`Accountable for ${TASK}: member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5.`)
+    expect(text).toContain(`Derived from ${source} — its card renders there, not in the Main stream.`)
+    // Accountability is an annotation, never a second token.
+    expect(occurrences(text, 'baseRevision')).toBe(1)
+  })
+
+  it('a discussion start renders neither line, because it carries no Task', () => {
+    const text = renderText(teamTools().get('team_message')!, { action: 'start', projectRef: PROJECT, body: 'x' }, {
+      kind: 'committed', action: 'start', messageRef: 'message:9a1c', threadRef: THREAD, revision: 8201,
+    })
+    expect(text).not.toContain('Accountable for')
+    expect(text).not.toContain('Derived from')
+  })
+
   it('reply: Committed — reply added with a different identity line', () => {
     const text = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8201, body: 'x' }, {
       kind: 'committed', action: 'reply', messageRef: 'message:9a1d', threadRef: THREAD, revision: 8202,
@@ -572,6 +608,61 @@ describe('team_task renders the affected Claim', () => {
   })
 })
 
+describe('team_task renders Task resolutions and transfers', () => {
+  const accountable = 'member:6e8a5b10-df16-4ec0-943a-63738010953f'
+
+  it('accept names the conclusion, the standing, and the Claims it completed, with one token', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'accept', taskRef: TASK, baseRevision: 9024 }, {
+      kind: 'committed', action: 'accept', taskRef: TASK, threadRef: THREAD, revision: 9030, status: 'done', resolution: 'accepted',
+      accountable, acceptedClaimRefs: [CLAIM], claims: [{ claimRef: CLAIM, direction: 'd', state: 'done', owner: 'member:owner' }],
+    })
+    expect(text).toContain('Committed — Task accepted.')
+    expect(text).toContain(`${THREAD} · ${TASK} · done/accepted · accountable ${accountable}`)
+    expect(text).toContain(`accepted claims ${CLAIM}`)
+    expect(occurrences(text, 'baseRevision')).toBe(1)
+    // A Task resolution is not a Claim mutation: no Claim is rendered as "the affected" one.
+    expect(text).not.toContain('Committed — Claim')
+  })
+
+  it('close and reopen are separate outcomes and name the Claims each concluded', () => {
+    const closed = renderText(teamTools().get('team_task')!, { action: 'close', taskRef: TASK, baseRevision: 9024 }, {
+      kind: 'committed', action: 'close', taskRef: TASK, threadRef: THREAD, revision: 9030, status: 'closed', resolution: 'closed',
+      accountable, releasedClaimRefs: [CLAIM],
+    })
+    expect(closed).toContain('Committed — Task closed.')
+    expect(closed).toContain('closed/closed')
+    expect(closed).toContain(`released claims ${CLAIM}`)
+    expect(closed).not.toContain('accepted claims')
+    const reopened = renderText(teamTools().get('team_task')!, { action: 'reopen', taskRef: TASK, baseRevision: 9024 }, {
+      kind: 'committed', action: 'reopen', taskRef: TASK, threadRef: THREAD, revision: 9031, status: 'todo', resolution: 'open', accountable,
+    })
+    expect(reopened).toContain('Committed — Task reopened.')
+    expect(reopened).toContain('todo/open')
+    expect(reopened).not.toContain('claims')
+  })
+
+  it('transfer renders who handed responsibility to whom, and says Claims did not move', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'transfer', taskRef: TASK, baseRevision: 9024, target: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5' }, {
+      kind: 'committed', action: 'transfer', taskRef: TASK, threadRef: THREAD, revision: 9032, status: 'in_review', resolution: 'open',
+      accountable: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5', from: accountable, to: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5',
+    })
+    expect(text).toContain('Committed — Task transferred.')
+    expect(text).toContain(`responsibility ${accountable} → member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5; Claims stay with their owners.`)
+    expect(occurrences(text, 'baseRevision')).toBe(1)
+  })
+
+  it('a rejection on a resolution keeps the shared form and the Task standing', () => {
+    const text = renderText(teamTools().get('team_task')!, { action: 'accept', taskRef: TASK, baseRevision: 8000 }, {
+      kind: 'unread_required', taskRef: TASK, threadRef: THREAD, revision: 8394, status: 'in_review', accountable,
+      unreadCount: 1, directCount: 1,
+      facts: [{ sequence: 8394, kind: 'message', body: 'the work is ready for review', sender: 'human', mentions: [], unread: true, direct: true }],
+    })
+    expect(text).toContain('Not committed — unread_required.')
+    expect(text).toContain('the work is ready for review')
+    expect(text).toContain('Next write — baseRevision: 8394')
+  })
+})
+
 describe('descriptions state the cross-tool workflow', () => {
   it('baseRevision parameter descriptions say copy verbatim and never increment/derive', () => {
     const tools = teamTools()
@@ -692,7 +783,8 @@ describe('the Main stream through team_thread and team_message', () => {
     { sequence: 5, kind: 'message', occurredAt: '2026-09-08T09:00:00.000Z', unread: true, direct: true, sender: 'member:human', messageRef: 'message:main-1',
       body: 'Ship the draft today', mentions: ['member:me'] },
     { sequence: 6, kind: 'thread-card', occurredAt: '2026-09-08T09:05:00.000Z', unread: false, direct: false, sender: 'member:human', threadRef: THREAD,
-      preview: 'Fix the importer', replyCount: 2, participants: ['human', 'Tars'], taskRef: TASK, taskNumber: 3, status: 'in_progress', resolution: 'open', liveClaimOwners: ['Tars'] },
+      preview: 'Fix the importer', replyCount: 2, participants: ['human', 'Tars'], taskRef: TASK, taskNumber: 3, status: 'in_progress', resolution: 'open',
+      accountable: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', liveClaimOwners: ['Tars'] },
   ]
 
   it('renders a Main stream read with markers on entries and cards as current state, with no write token', () => {
@@ -701,7 +793,7 @@ describe('the Main stream through team_thread and team_message', () => {
     })
     expect(text).toContain('Read committed — acknowledged 1 unread update(s) on the Main stream')
     expect(text).toContain('5 2026-09-08T17:00:00+08:00 [member:human] [direct]')
-    expect(text).toContain(`[thread card] Task ${TASK} (#3), in_progress/open — working: Tars — Fix the importer · ${THREAD} · 2 replies`)
+    expect(text).toContain(`[thread card] Task ${TASK} (#3), in_progress/open, accountable member:6e8a5b10-df16-4ec0-943a-63738010953f — working: Tars — Fix the importer · ${THREAD} · 2 replies`)
     expect(text).not.toContain('baseRevision')
   })
 

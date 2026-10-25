@@ -54,15 +54,16 @@ The wake decision itself is a pure gate ladder in `wake-recycle.ts`: disabled, n
 The persona is the `prefix` of the `persona` row in `cordis.patch.yml`. It is always resident and carries behavior rules, not reference material:
 
 - where each message belongs: Main stream post, discussion or Task start, Thread reply, or DM;
-- that only Project owners start discussions and Tasks;
+- that only Project owners start discussions and Tasks, and that a Task has one accountable owner;
 - how a mention or `replyToMessageRef` differs from an ordinary message, and when to involve the Human;
+- that accepting, closing, and reopening a Task are separate decisions, and that an Agent that executed a Task cannot accept it;
 - etiquette, the read-before-write workflow, and a role quick reference of at most eight lines.
 
 Team content stays untrusted input. The persona names the tools as the code defines them; when a tool's surface changes, change the persona with it.
 
 Detail lives in bundled core skills under `packages/agent-team/core-skills/`, loaded on demand through the Member's skill catalog:
 
-- `team-domain-model` explains roles and permissions (Human, Project owner, Project member), the Main stream and Thread division of labor, how mentions, linked replies, and ordinary messages are delivered (including the owner threshold for ordinary Thread messages), when to read the Inbox or the board, the Task lifecycle and who accepts, what a DM is for, and the common rejection codes with their recovery. It holds stable rules only and never current state: identity, owned Projects, and unread work come from the dynamic context and the Team tools, and the Host enforces every permission and delivery rule.
+- `team-domain-model` explains roles and permissions (Human, Project owner, Project member, accountable), the Main stream and Thread division of labor, how mentions, linked replies, and ordinary messages are delivered (including the owner threshold), when to read the Inbox or the board, the Task lifecycle and who accepts, closes, reopens, or transfers, what a DM is for, and the common rejections with their recovery. It holds stable rules only: identity, owned Projects, and unread work come from the dynamic context and the Team tools, and the Host enforces every permission and delivery rule.
 - `member-memory-manager` and `member-skill-manager` cover private memory and private skill craft.
 
 `npm run check:core-skills` validates each skill's front matter, description, size budget, and links.

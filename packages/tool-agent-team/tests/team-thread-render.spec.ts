@@ -13,6 +13,29 @@ const ACCEPT_FACT = {
   direct: false,
 }
 
+describe('team_thread renders Task accountability with the Task standing', () => {
+  it('a read of a Taskful Thread names its accountable owner on the identity line', () => {
+    const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: 'thread:x' }, {
+      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
+      kind: 'read', threadRef: 'thread:x', taskRef: 'task:205a8ba6-f3c6-4fbc-95b7-c3448191f730', taskNumber: 7,
+      revision: 100, status: 'in_review', resolution: 'open', accountable: 'member:6e8a5b10-df16-4ec0-943a-63738010953f', following: true,
+      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
+      claims: [], facts: [], readThroughSequence: 100, remainingUnreadCount: 0,
+    })
+    expect(text.split('\n')[2]).toBe('thread:x · task:205a8ba6-f3c6-4fbc-95b7-c3448191f730 (#7), in_review/open · accountable member:6e8a5b10-df16-4ec0-943a-63738010953f · following')
+  })
+
+  it('a taskless Thread renders no accountability, because there is no Task to be responsible for', () => {
+    const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: 'thread:x' }, {
+      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
+      kind: 'read', threadRef: 'thread:x', revision: 100, following: false,
+      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
+      claims: [], facts: [], readThroughSequence: 100, remainingUnreadCount: 0,
+    })
+    expect(text).not.toContain('accountable')
+  })
+})
+
 describe('team_thread renders the model-facing decision surface', () => {
   it('an accept activity renders actor, Task ref, and the Claims it concluded — not a bare kind', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {

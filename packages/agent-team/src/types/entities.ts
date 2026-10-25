@@ -290,13 +290,17 @@ export interface AgentTeamMessage {
   readonly occurredAt: string
 }
 
-/** Task overlay created by an atomic start or Human promotion. */
+/** Task overlay created by an atomic start or owner promotion. */
 export interface AgentTeamTask {
   readonly taskRef: AgentTeamTaskRef
   readonly projectRef: AgentTeamProjectRef
   readonly threadRef: AgentTeamThreadRef
   readonly status: AgentTeamTaskStatus
   readonly resolution: 'open' | 'accepted' | 'closed'
+  /** The current Project owner or Human responsible for progress; defaults to Human on records written before accountability. */
+  readonly accountable: AgentTeamMemberId
+  /** Immutable discussion Threads from which this Task was derived. In-place promotion has none. */
+  readonly sourceThreadRefs: readonly AgentTeamThreadRef[]
 }
 
 export type AgentTeamTaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done' | 'closed'
@@ -433,7 +437,9 @@ export interface AgentTeamClaimActivity extends AgentTeamActivityBase {
 }
 
 export interface AgentTeamTaskActivity extends AgentTeamActivityBase {
-  readonly kind: 'promote' | 'accept' | 'close' | 'reopen'
+  readonly kind: 'promote' | 'accept' | 'close' | 'reopen' | 'transfer'
+  readonly from?: AgentTeamMemberId
+  readonly to?: AgentTeamMemberId
   /** Claims atomically released by close; absent for other Task transitions. */
   readonly releasedClaimRefs?: readonly AgentTeamClaimRef[] | undefined
   /** Active claims the Human acceptance completed alongside the Task; absent when none were active. */

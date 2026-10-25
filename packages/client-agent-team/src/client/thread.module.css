@@ -45,6 +45,28 @@
   font-weight: 600;
 }
 
+.derivedTaskCard {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-base);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.derivedTaskCard:hover { border-color: var(--dsw-alias-border-l1); }
+.derivedTaskCard:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 2px; }
+.derivedTaskCardTitle { flex: none; font-weight: 600; }
+.derivedTaskCardSubject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.derivedTaskCardMeta { flex: none; color: var(--dsw-alias-label-caption); font-size: 12px; }
+
 .activityRow {
   align-items: center;
   color: var(--dsw-alias-label-tertiary);

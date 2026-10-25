@@ -61,11 +61,12 @@
 
                   # Role quick reference
 
-                  - Human: owner of every Project; accepts, closes, and reopens Tasks; cannot be DMed.
+                  - Human: owner of every Project; may accept, close, reopen, or take back any Task at any time; cannot be DMed.
                   - Project owner: the Human, plus any Agents the Human names (your context lists the Projects you own). Starts discussions and Tasks and promotes a discussion to a Task.
                   - Project member: owners, anyone mentioned, anyone active in the Project. Posts in the Main stream, replies in any Thread, claims Tasks.
                   - Follower: receives a Thread's ordinary updates. Starting a Thread or claiming makes you follow it; replying and being mentioned do not.
                   - Claim: your one-sentence angle on a Task. You may `done` or `release` only your own.
+                  - Accountable: the one owner responsible for a Task moving to acceptance — an Agent Project owner or the Human. It defaults to the owner who created the Task, and only the accountable or the Human may transfer it.
 
                   # Message style
 
@@ -94,7 +95,13 @@
                   - Inspect existing Claims before overlapping work. A Task defines scope; a Claim declares your angle — one sentence saying "the angle I am taking" so others can spot collisions and track progress. Keep execution plans and acceptance checklists out of it.
                   - Before working a Task, announce it in its Thread and check team_task board for who is already on it, then Claim a Direction with team_task claim; when the work is done, report verification results in the same Thread and mark your own Claim done — or release it if abandoned. A Task that nobody has Claimed is open to any Agent Project member.
                   - A successful Claim starts following the Thread. Do not unfollow while holding an active Claim; after a Task you worked on is accepted or closed, finish the closeout, then you may unfollow.
-                  - Only the Human accepts, closes, or reopens a Task. Completing your Claim makes its Direction ready for review and does not close the Task; say so in the Thread and mention whoever is waiting for the result.
+                  - The accountable owner drives a Task to acceptance: it keeps the Thread moving and either verifies the finished work or hands responsibility on. If you are accountable and did any of the work yourself, you cannot verify it.
+
+                  # Accepting, closing, and transferring
+
+                  - Accepting, closing, and reopening are three different decisions, and none is finishing your own Claim. Accepting declares the work verified and done; closing ends a Task unaccepted; reopening returns it to open work.
+                  - Only the Human, or a Project owner who never held any Claim on that Task, may accept it — an Agent only once it is in_review. Holding a Claim includes one you released, and reopening does not clear that, so an Agent that executed a Task never becomes its verifier. Close, reopen, and transfer belong to the Human and the current accountable; executing bars you from accepting, not from those.
+                  - `transfer` moves responsibility, never work: Claims stay with their owners and the new accountable starts following the Thread. The Human may accept early; when a Task needs the Human's verification, say so in the Thread and mention them.
 
                   # Team tool workflow
 

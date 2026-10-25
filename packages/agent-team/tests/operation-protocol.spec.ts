@@ -117,6 +117,8 @@ const fixtureTask: AgentTeamTask = {
   threadRef: humanThread,
   status: 'in_progress',
   resolution: 'open',
+  accountable: AGENT_TEAM_HUMAN_MEMBER_ID,
+  sourceThreadRefs: [],
 }
 const taskfulThread: AgentTeamThread = { threadRef: humanThread, taskRef: fixtureTask.taskRef, revision: 6 }
 const plainThread: AgentTeamThread = { threadRef: humanThread, revision: 6 }
@@ -175,6 +177,7 @@ const memberArchived: Op<'team/member-archived'> = {
     member: { ...fixtureMember, state: 'archived' },
     claims: [],
     activities: [],
+    transfers: [],
     tasks: [],
     threads: [],
     inbox: emptyInbox,
@@ -257,6 +260,7 @@ const projectMemberRemoved: Op<'team/project-member-removed'> = {
     memberId,
     claims: [],
     activities: [],
+    transfers: [],
     tasks: [],
     threads: [],
     inbox: emptyInbox,
@@ -279,6 +283,7 @@ const memberWorkspaceLeft: Op<'team/member-workspace-left'> = {
     memberId,
     claims: [],
     activities: [],
+    transfers: [],
     tasks: [],
     threads: [],
     inbox: emptyInbox,
@@ -294,6 +299,7 @@ const projectArchived: Op<'team/project-archived'> = {
     project: { ...fixtureProject, state: 'archived' },
     claims: [],
     activities: [],
+    transfers: [],
     tasks: [],
     threads: [],
     inbox: emptyInbox,
@@ -432,6 +438,24 @@ const taskChanged: Op<'team/task-changed'> = {
   },
 }
 
+const taskAccountableChanged: Op<'team/task-accountable-changed'> = {
+  ...opBase('operation:protocol-35', 'request:protocol-task-accountable-changed', 35),
+  previousOperationId,
+  kind: 'team/task-accountable-changed',
+  data: {
+    workspaceId: alpha,
+    baseRevision: 4,
+    activity: {
+      activityRef: 'activity:protocol-task-transfer' as AgentTeamActivityRef,
+      kind: 'transfer', taskRef: fixtureTask.taskRef, threadRef: humanThread, actor: human.memberId,
+      from: memberId, to: AGENT_TEAM_HUMAN_MEMBER_ID, sequence: 35,
+    },
+    task: fixtureTask,
+    thread: taskfulThread,
+    inbox: emptyInbox,
+  },
+}
+
 const threadAttentionChanged: Op<'team/thread-attention-changed'> = {
   ...opBase('operation:protocol-25', 'request:protocol-thread-attention-changed', 25),
   previousOperationId,
@@ -494,6 +518,7 @@ const memberRemoved: Op<'team/member-removed'> = {
     member: { ...fixtureMember, state: 'inactive' },
     claims: [],
     activities: [],
+    transfers: [],
     tasks: [],
     threads: [],
     inbox: emptyInbox,
@@ -526,7 +551,8 @@ const projectOwnerRemoved: Op<'team/project-owner-removed'> = {
   ...opBase('operation:protocol-31', 'request:protocol-project-owner-removed', 31),
   previousOperationId,
   kind: 'team/project-owner-removed',
-  data: { workspaceId: alpha, projectRef, memberId, activity: ownerActivity('owner-removed', 31), inbox: ownerInbox(ownerActivity('owner-removed', 31)) },
+  data: { workspaceId: alpha, projectRef, memberId, activity: ownerActivity('owner-removed', 31), inbox: ownerInbox(ownerActivity('owner-removed', 31)),
+    transfers: [], tasks: [], threads: [] },
 }
 
 const mainMessagePosted: Op<'team/main-message-posted'> = {
@@ -1168,6 +1194,26 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         taskRef: taskChanged.data.task.taskRef,
         action: taskChanged.data.activity.kind === 'close' ? 'accept' : 'close',
         baseRevision: taskChanged.data.baseRevision,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/task-accountable-changed': {
+    stored: taskAccountableChanged,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.transferTask({
+          requestId: taskAccountableChanged.requestId, actor: human, workspaceId: alpha,
+          taskRef: fixtureTask.taskRef, target: AGENT_TEAM_HUMAN_MEMBER_ID, baseRevision: 4,
+        })
+        expect(mappedCommitted(out.value).activity.kind).toBe('transfer')
+        return out
+      },
+      changed: () => ledger.transferTask({
+        requestId: taskAccountableChanged.requestId, actor: human, workspaceId: alpha,
+        taskRef: fixtureTask.taskRef, target: memberId, baseRevision: 4,
       }),
     },
     legacy: { normalize: 'none', repair: 'none' },
