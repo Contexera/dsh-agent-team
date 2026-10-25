@@ -192,7 +192,7 @@
   border-radius: 999px;
   corner-shape: round;
   background: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary-foreground);
   font-size: 12px;
   line-height: 18px;
 }

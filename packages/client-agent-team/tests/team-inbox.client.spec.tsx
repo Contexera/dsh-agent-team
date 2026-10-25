@@ -499,8 +499,9 @@ describe('Team Inbox surfaces', () => {
     })
     const labels = [...rail.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))
     // The mode's way back to the conversation leads the rail, above the
-    // destinations: an exit is not a page inside the mode.
-    expect(labels).toEqual(['对话', '收件箱', '项目', 'Agents'])
+    // destinations: an exit is not a page inside the mode. The Task board is
+    // the Inbox's sibling cross-Workspace destination and sits right after it.
+    expect(labels).toEqual(['对话', '收件箱', '任务看板', '项目', 'Agents'])
     await b.changeSubscriptionsReady()
     b.seedInbox([inboxRow('w1', 'thread:w1')])
     const inboxButton = within(rail).getByRole('button', { name: '收件箱' })

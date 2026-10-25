@@ -16,7 +16,9 @@ The trigger takes `aria-current="page"` while the Workspace overview is the page
 
 Persistent Projects/Agents sections use native button headers with `aria-expanded`, default expanded. Collapse state is a per-browser preference, not a Team fact: both panels are keyed per workspace, and `sidebar-sections.ts` persists them to one localStorage key (`dsh.agent-team.sidebar-sections`) with a read-through cache and an in-memory fallback when storage is unavailable. The Workspace selector is a field rather than a section, so it keeps no preference of its own. Rows remain quiet: Projects keep `#`; Agent rows use avatars and presence.
 
-Only the active leaf row has `aria-current="page"`. The embedded Member Session is the one overlay that can stand over a Team face the reader is still on — an Inbox page, or a Project or Thread they opened the Agent from — and it takes the marker for its own Agent card. The face underneath keeps its place without the marker, and takes it back when the overlay closes (the Inbox entry included, which is otherwise the marked row while its page stands).
+Only the active leaf row has `aria-current="page"`, and exactly one row carries it at a time: the open Project, the Workspace overview while it stands, or the one global face (Inbox, Task board) the reader is on. A global face never leaves the marker on the Workspace selector, because no Workspace overview stands underneath it.
+
+The embedded Member Session is the one overlay that can stand over a Team face the reader is still on — an Inbox or Task board page, or a Project or Thread they opened the Agent from — and it takes the marker for its own Agent card. The face underneath keeps its place without the marker, and takes it back when the overlay closes (the Inbox and Task board entries included, either of which is otherwise the marked row while its page stands).
 
 Row ellipsis menus use public `Menu`, are visible on hover/focus/menu-open, and pin the row background while open.
 
@@ -24,9 +26,9 @@ Project and Agent editors use public Remote mutations and Host projections rathe
 
 The Project editor's Owners section renders the Human first as a fixed owner with no remove control, then Agent owners with a remove button each, then the Workspace's enabled or suspended Agents not yet owners, each with an add button. Writes go through `addProjectOwner` / `removeProjectOwner`, non-optimistically; a Host error stays in the section's alert.
 
-When a Member's generation is swapped, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view. No surface offers to reset a Member's context. The narrow rail's three icon buttons read top-down Inbox (`IconQueueOutlineRegular`) → Projects (`IconListPenOutlineRegular`) → Agents (`IconAgentPresetOutlineRegular`), all at 16px; none reuse the checklist (Task) or member icons.
+When a Member's generation is swapped, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view. No surface offers to reset a Member's context. The narrow rail's four icon buttons read top-down Inbox (`IconQueueOutlineRegular`) → Task board (`IconChecklistOutlineRegular`) → Projects (`IconListPenOutlineRegular`) → Agents (`IconAgentPresetOutlineRegular`), all at 16px; the member icon stays unused by the rail.
 
-The Inbox icon is a destination: clicking it opens the Inbox page and expands the sidebar; the Projects/Agents icons expand the sidebar and focus their section header. Agent creation carries no Project page and the Agent editor carries no membership section. Project participation is derived from taking part in a Thread, so no surface manages it: the create dialog still seeds initial members and a Project-less Member stays reachable through its DM view.
+The Inbox and Task board icons are destinations: clicking one opens its page and expands the sidebar; the Projects/Agents icons expand the sidebar and focus their section header. Agent creation carries no Project page and the Agent editor carries no membership section. Project participation is derived from taking part in a Thread, so no surface manages it: the create dialog still seeds initial members and a Project-less Member stays reachable through its DM view.
 
 The create dialog is also the one import entry: a single disclosure button toggles between creating a new Member and bringing an existing one in from another Workspace. The import view reuses the shared `TeamMemberRow` roster and offers only Members that exist globally and do not yet participate here (suspended Members included — joining does not depend on availability). Confirming routes the durable `joinWorkspace` and the row appears through the workspace refetch, with retry reusing the exact failed request.
 
@@ -71,7 +73,13 @@ The number lives in the control's accessible name on both rails (`收件箱，6 
 
 While the Inbox page stands, the card/icon carries `aria-current="page"` — and the rail icon wears the card's own current-page fill, because the icon-only rail has no label and the fill is the only thing that can say where the reader is.
 
-`TeamConversation` renders a fourth face: Thread | Project | Inbox | welcome. Selecting Inbox clears the Project/Thread faces; selecting a Workspace, Project, or Thread clears the Inbox. From an Inbox row, Back lands on that row's Project — the Inbox is never pushed onto the back path; re-enter it through the card or the rail icon.
+`TeamConversation` renders a fifth face: Thread | Project | Inbox | Task board | welcome. Selecting Inbox or the Task board clears the Project/Thread faces and each other; selecting a Workspace, Project, or Thread clears both. From an Inbox row, Back lands on that row's Project — the Inbox is never pushed onto the back path; re-enter it through the card or the rail icon.
+
+## Task board (任务看板)
+
+The Task board entry is the Inbox entry's sibling: one card on the wide rail above the Workspace selector, its own checklist glyph at the same tertiary ink, and the rail's second icon. It opens the one cross-Workspace board (`TeamTaskBoardPage`), which groups every visible Workspace's open Tasks into the three open-status columns and carries the Project board's card language — dot, number, subject, accountable owner, and the 待你验收 badge — without the Project board's unread badges, which stay per-Thread facts on the Project face.
+
+The page answers to the same empty rule as the Project board: when no Task is open, the empty message stands alone and no column head renders beside it. Its cards open the Task's Thread level, and while the page stands its sidebar row carries `aria-current="page"` — never the Workspace selector under it.
 
 ### Page frame and header
 

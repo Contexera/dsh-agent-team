@@ -79,9 +79,10 @@
 本块用 `data-environment` 携带自己的判定。验收 journey 因此等待一个状态，而不是一段文案。
 
 ## Project 页与讨论面板（project page / discussion panel）
-- Project 页把同一条时间线读成两种视图。头部下方一条页签行在两者之间切换：`项目` 是 feed，`看板` 是按 Task 状态投影的四列看板。看板是第二种**读法**，不是第二个表面。它重排同一份投影，所以一个 Task 的状态、所有者、标题不会在两个视图之间出现分歧，也不会有哪个视图去拉另一个没拉过的东西。
-- 看板只读 feed 已经加载的那一段窗口，不读 Project 的全部历史。为了填满四列而一直翻到 `hasMore` 为假，等于把每一条 top-level Message 都并进时间线，为了四列而废掉 feed 自己的分页；同时会把「打开一个页签」变成一次无界读取。看板拿更早工作的方式就是 feed 的 `加载更早消息`：一个入口、一个页大小，两个视图永远描述同一批事实。
-- 四列是 `待处理` / `进行中` / `待验收` / `已完成`。五个 Task 状态里 `done` 与 `closed` 合进「已完成」一列。已了结的卡片降透明度而不是隐藏。看板的职责是让在动的工作最响，同时让已完的仍可找到。空列只在列头写自己的 `0`，不画占位行：在计数已经说清的列里再放一行占位，是把同一件事说两遍。
+- Project 页把同一条时间线读成两种视图。头部下方一条页签行在两者之间切换：`项目` 是 feed，`看板` 是按 Task 状态投影的四列看板。看板是第二种**读法**，不是第二个表面：一个 Task 的状态、所有者、标题不会在两个视图之间出现分歧。
+- 看板读 Host 的 `taskBoard` 投影——与 Agent `team_task board` 工具读到的是同一批行——不读 feed 已加载的窗口。单一出处意味着看板永远不会为填满四列把时间线的 Message 并进来，open Task 无需分页即完整，「已完成」列只保留 Host 已限定的每个 Project 最新几条。feed 仍是唯一分页的表面。
+- 四列是 `待处理` / `进行中` / `待验收` / `已完成`。五个 Task 状态里 `done` 与 `closed` 合进「已完成」一列。已了结的卡片降透明度而不是隐藏。看板的职责是让在动的工作最响，同时让已完的仍可找到。空列只在列头写自己的 `0`，不画占位行：在计数已经说清的列里再放一行占位，是把同一件事说两遍。卡片写明 Task 的负责人——读者本人经 board 值的 `humanMemberId` 解析为「你负责」——并在读者可验收时带「待你验收」徽标。
+- 同一卡片家族也服务唯一的跨 Workspace 看板（`TeamTaskBoardPage`，从侧栏「任务看板」入口进入，见 [sidebar-browser.zh.md](sidebar-browser.zh.md)）：所有可见 Workspace 的 open Task 摆进三个未完结状态列，每张卡带 Project 名前缀，空态同一条规则（空态文案独站，列头不并立），不带未读徽标——那仍是 Project 面上按 Thread 计的未读事实。
 - 第一个页签是 `主对话`，即 Project 的 Main stream（`TeamMainStream`）：从 `mainStreamHistory` 先读最新一页，更早的页用 `beforeSequence`。时间线按 ledger 顺序有三类条目：Main 消息（同一个 `TeamMessage` 行，保留悬停引用与复制）、owner 增删的活动行、Thread 卡片。卡片是一个按钮，展示 Thread 的当前状态，不按状态跃迁逐条追加：讨论卡片显示首行、回复数与参与人数；Task 卡片显示编号、状态与现有 Claim 持有者。讨论卡片打开 Thread 侧面板；Task 卡片打开该 Task 的 Thread 页。页签挂载期间，standing 里有未读或 marker 就通过 `readMainStream` 确认已读；进入时未读的条目在本次访问内保留一条细色条。第二个页签是 Task 看板；版本 1 的 feed 已删除。
 - 看板是唯一被允许超出 880px 阅读列的 Client 表面，上限 1240px。四个状态列是扫描型表面，压到阅读列宽度会让每一列都失去卡片宽度。四列等宽（`flex: 1` 配 `min-width: 0`），所以某一列标题更长也换不来更多宽度；底色用 `--dsw-alias-bg-module-platform`（shipped 给分组模块的凹陷底色），卡片自身的底层色因此读起来是浮起的。
 - 页签行是复合控件：`role="tablist"` 加两个 `role="tab"` 按钮，整组只有一个 tab stop（未选中那个 `tabIndex` 为 -1），每个页签通过 `aria-controls`/`aria-labelledby` 指明自己控制的 panel，Left/Right/Home/End 同时移动选中与焦点。它取 shipped 会话页自己那套页签语言：13px/16px、weight 500、36px 间距、`--dsw-alias-state-business-primary` 的 2px 下划线。下划线走伪元素并伸出盒底 1px，正好压在页头收口线上，两者读成同一条边（shipped 同款做法）。未选中页签取 tertiary，选中页取 business blue 而非墨色，因为 `--dsw-alias-brand-primary` 在这张 token 表里解析成中性黑；shipped 在自己那条页签上也陈述了同样的理由。

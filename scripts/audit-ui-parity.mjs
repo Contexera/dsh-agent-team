@@ -298,8 +298,9 @@ const GEOMETRY = [
   ['sidebar.module.css', '.error', [['padding', '4px 8px 6px']], 'a Panel\'s failure line lands its text on the row labels, so it takes the row\'s own 8px leading inset and nothing else — the list between them carries no padding of its own. The browser test measures this line\'s inset against the label it sits under, because the two are only in step while both are stated here'],
   ['sidebar.module.css', '.projectRow', [['border-radius', 'var(--dsw-radius-md, 12px)']], 'list row radius is the md tier; the shipped rail put .panelRow on its .newSession bar\'s 12px in the 0.1.6 line (harness c6b81a75, 2026-09-15), and 0.1.7-rc.2 kept that tier while moving it onto `--dsw-radius-md`'],
   ['sidebar.module.css', '.agentRow', [['border-radius', 'var(--dsw-radius-md, 12px)']], 'list row radius is the md tier, the same tier as .projectRow above'],
-  ['sidebar.module.css', '.workspaceTrigger', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['min-height', '34px'], ['border', '1px solid var(--dsw-alias-border-l2)']], 'the Workspace selector keeps the sidebar row geometry: the md tier, 34px line, and its neutral separator written as 1px because that is what shipped\'s 0.5px declaration actually renders as'],
-  ['sidebar.module.css', '.inboxCard', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['height', '34px']], 'the Inbox entry is a sidebar row: the md tier, 34px height'],
+  ['sidebar.module.css', '.workspaceTrigger', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['min-height', '34px'], ['border', '1px solid var(--dsw-alias-border-l2)'], ['margin', '2px 0 0']], 'the Workspace selector keeps the sidebar row geometry: the md tier, 34px line, and its neutral separator written as 1px because that is what shipped\'s 0.5px declaration actually renders as. Its only margin is the stack\'s own 2px top step, so the two cross-Workspace cards and the selector read as one unit'],
+  ['sidebar.module.css', '.inboxCard', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['height', '34px'], ['margin', '4px 0 0']], 'the Inbox entry is a sidebar row: the md tier, 34px height. Its 4px top is the unit\'s own step off the exit slab above it; every later gap in the stack is another control\'s 2px top, never this row\'s bottom'],
+  ['sidebar.module.css', '.taskBoardCard', [['border-radius', 'var(--dsw-radius-md, 12px)'], ['height', '34px'], ['margin', '2px 0 0']], 'the Task board entry is the Inbox entry\'s sibling cross-Workspace row: the same md tier, 34px height, and 2px top step'],
   ['sidebar.module.css', '.leaveCard', [['height', '38px'], ['border-radius', 'var(--dsw-radius-md, 12px)'], ['box-sizing', 'border-box'], ['background', 'var(--dsw-alias-button-elevated-fill)'], ['border', '1px solid var(--dsw-alias-border-l3)'], ['padding', '8px 12px'], ['margin', '0 2px 12px']], 'the mode\'s exit takes over the shipped New Session bar: the same 38px elevated slab, the same 8px/12px inset and a centred label in the same vertical slot, its l3 separator written as 1px because that is what shipped\'s 0.5px declaration actually renders as. It also stands on the shipped bar\'s own box — 14px to 266px in the 280px sidebar, measured equal in one render by the e2e parity block. The 2px horizontal margin is the shipped bar\'s own, and it must stay stated: shipped declares no width, so the slab is a stretched flex item that the margin pulls in, while a `width: 100%` here would add to the margin and push the slab 4px past the column. The browsing region keeps its own 12px trailing inset so this row and the rows below it share one right edge'],
   ['sidebar.module.css', '.leaveCardGlyph', [['position', 'absolute'], ['right', 'calc(100% + 6px)']], 'the exit centres its label, not the group: the chevron hangs off the label\'s leading edge out of flow, because centring the group depends on the air inside each glyph\'s box, which differs between CJK and Latin glyphs and across platform font stacks — a compensation measured on one stack walks the ink off the middle on another'],
   ['sidebar.module.css', '.iconButton', [['height', '28px'], ['width', '28px'], ['border-radius', 'var(--dsw-radius-sm, 8px)'], ['flex', 'none']], 'the section header\'s action is the shipped header action: a 28px square on the small tier, not the round 24px control it used to be, and `flex: none` keeps a long section label from squeezing it. Its focus ring is inset (`outline-offset: -2px` on the focus-visible rule) because this header does not clip its own overflow the way the shipped one does, so an outset ring would add 2px to a line the row grid already measures'],
@@ -434,20 +435,23 @@ if (shippedTokens.size === 0) {
 }
 
 // as-task is a mode (it changes what Send means), so it keeps a visible word label at every width;
-// a bare glyph or hover tooltip is not a label on touch. The base composer narrows control gaps
-// to 8px below 560px, which is the branch this check requires.
+// a bare glyph or hover tooltip is not a label on touch. Under rules version 2 the mode control
+// moved out of TeamComposer into the thread-start controls the Main stream composer hosts
+// (TeamThreadStartControls.tsx, via the composer's toolbarExtra); the composer itself renders no pill.
+// The base composer narrows control gaps to 8px below 560px, which is the branch this check requires.
 
 const MODE_NARROW_WIDTH = 560
+const threadStartControls = readFileSync(join(clientDir, 'TeamThreadStartControls.tsx'), 'utf8')
 const composerCss = readFileSync(join(clientDir, 'composer.module.css'), 'utf8')
-const asTaskPill = composer.match(/css\.asTaskPill[\s\S]{0,600}?<\/button>/)?.[0] ?? ''
+const asTaskPill = threadStartControls.match(/(?:css|composerCss)\.asTaskPill\b[\s\S]{0,600}?<\/button>/)?.[0] ?? ''
 if (asTaskPill === '') {
-  note('error', 'TeamComposer.tsx', 'the as-task mode control is not rendered as css.asTaskPill — a mode is not an icon action')
+  note('error', 'TeamThreadStartControls.tsx', 'the as-task mode control is not rendered as css.asTaskPill — a mode is not an icon action')
 } else {
-  if (!/aria-pressed=\{asTask === true\}/.test(asTaskPill)) {
-    note('error', 'TeamComposer.tsx', 'the as-task mode pill declares no aria-pressed state')
+  if (!/aria-pressed=\{open\}/.test(asTaskPill)) {
+    note('error', 'TeamThreadStartControls.tsx', 'the as-task mode pill declares no aria-pressed state')
   }
-  if (!/css\.asTaskLabel/.test(asTaskPill) || !/t\('asTask'\)/.test(asTaskPill)) {
-    note('error', 'TeamComposer.tsx', "the as-task mode pill lost its visible word label (css.asTaskLabel + t('asTask'))")
+  if (!/(?:css|composerCss)\.asTaskLabel/.test(asTaskPill) || !/t\('startThread'\)/.test(asTaskPill)) {
+    note('error', 'TeamThreadStartControls.tsx', "the as-task mode pill lost its visible word label (css.asTaskLabel + t('startThread'))")
   }
 }
 

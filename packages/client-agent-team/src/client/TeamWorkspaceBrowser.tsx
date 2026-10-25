@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { IconAgentPresetOutlineRegular, IconChevronLeftOutlineMedium, IconChevronLeftOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconAgentPresetOutlineRegular, IconChecklistOutlineRegular, IconChevronLeftOutlineMedium, IconChevronLeftOutlineRegular, IconListPenOutlineRegular, IconQueueOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { AgentTeamAddMemberRequest, AgentTeamInbox } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { TeamSidebarProps } from './slots.ts'
@@ -40,9 +40,9 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   const selectedExists = selected !== undefined && workspaces.some(workspace => workspace.workspaceId === selected)
   const selectedId = selectedExists ? selected : workspaces[0]?.workspaceId
   // Exactly one sidebar row carries aria-current='page': the open Project, else the selected Agent card while a Member Session
-  // view is open, else the Workspace overview. The Inbox card takes the marker while the Inbox page stands, but not while an
-  // embedded Member Session covers it (the Inbox stays the remembered face underneath).
-  const overviewIsCurrent = navigationState.projectRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true
+  // view is open, else the Workspace overview. The Inbox and Task board cards take the marker while their global page stands,
+  // but not while an embedded Member Session covers it (the face stays the remembered one underneath).
+  const overviewIsCurrent = navigationState.projectRef === undefined && navigationState.memberSessionId === undefined && navigationState.inbox !== true && navigationState.board !== true
   const inboxIsCurrent = navigationState.inbox === true && navigationState.memberSessionId === undefined
   const boardIsCurrent = navigationState.board === true && navigationState.memberSessionId === undefined
   const [creatingAgents, setCreatingAgents] = useState<readonly AgentTeamAddMemberRequest[]>([])
@@ -88,13 +88,13 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
   }, [loadInbox, subscribeChanges, subscribeReads, workspaces])
 
   useEffect(() => {
-    // The Inbox page is global and needs no selected Workspace, so the
+    // The Inbox and Task board pages are global and need no selected Workspace, so the
     // auto-select must not yank the seat back to a Workspace overview.
-    if (navigationState.inbox === true) return
+    if (navigationState.inbox === true || navigationState.board === true) return
     if (navigationState.mode === 'team' && selectedId !== undefined && selectedId !== selected) {
       selectWorkspace(selectedId)
     }
-  }, [navigationState.inbox, navigationState.mode, selected, selectedId, selectWorkspace])
+  }, [navigationState.inbox, navigationState.board, navigationState.mode, selected, selectedId, selectWorkspace])
 
   useEffect(() => {
     if (!wide || pendingSection === undefined) return
@@ -113,6 +113,11 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
       <Tooltip label={inboxLabel} side="right">
         <button type="button" className={css.railButton} aria-label={inboxLabel} aria-current={inboxIsCurrent ? 'page' : undefined} onClick={() => { selectInbox(); expandSidebar() }}>
           <InboxMark unread={inboxTotal} />
+        </button>
+      </Tooltip>
+      <Tooltip label={t('taskBoard')} side="right">
+        <button type="button" className={css.railButton} aria-label={t('taskBoard')} aria-current={boardIsCurrent ? 'page' : undefined} onClick={() => { selectBoard(); expandSidebar() }}>
+          <IconChecklistOutlineRegular size={16} />
         </button>
       </Tooltip>
       <Tooltip label={t('projects')} side="right">
@@ -141,7 +146,8 @@ export function TeamWorkspaceBrowser({ wide, expandSidebar, navigation, selectWo
       <InboxMark unread={inboxTotal} />
       <span className={css.inboxCardLabel}>{t('inboxTitle')}</span>
     </button>
-    <button type="button" className={css.taskBoardCard} aria-label={t('taskBoard')} aria-current={boardIsCurrent ? 'page' : undefined} onClick={selectBoard}><InboxMark unread={0} /><span className={css.inboxCardLabel}>{t('taskBoard')}</span></button>
+    {/* The Task board crosses Workspaces like the Inbox, so it stands beside it above the selector rather than inside its scope. */}
+    <button type="button" className={css.taskBoardCard} aria-label={t('taskBoard')} aria-current={boardIsCurrent ? 'page' : undefined} onClick={selectBoard}><span className={css.taskBoardGlyph}><IconChecklistOutlineRegular size={16} /></span><span className={css.inboxCardLabel}>{t('taskBoard')}</span></button>
     <TeamWorkspaceSelector workspaces={workspaces} selectedId={selectedId} current={overviewIsCurrent} onSelect={selectWorkspace} t={t} />
     {selectedId !== undefined && <div className={css.workspaceSection}>
       <div ref={projectsRef}>

@@ -973,6 +973,8 @@ export interface AgentTeamTaskBoardRequest {
 
 /** The Task board of the Projects a reader can see; the Human Client and `team_task board` render this same projection. */
 export interface AgentTeamTaskBoard {
+  /** The reader the projection is relative to, so a card can say 「你负责」 the way the Inbox names its rows. */
+  readonly humanMemberId: AgentTeamMemberId
   /** Every open Task (todo, in_progress, in_review), newest activity first. */
   readonly open: readonly AgentTeamTaskBoardItem[]
   /** Per Project, the newest finished (done or closed) Tasks, at most `TASK_BOARD_FINISHED_PER_PROJECT` each, newest activity first. */

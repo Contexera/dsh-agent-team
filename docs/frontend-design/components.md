@@ -118,13 +118,15 @@ Two versions a reader could reasonably confuse are therefore kept apart: the run
 The block carries `data-environment` with its verdict, so an acceptance journey waits on a state rather than on prose.
 
 ## Project page and discussion panel
-The Project page reads one timeline two ways. A tab strip under the header switches between them: `项目` is the feed, `看板` is a four-column board of the Task-status projection. The board is a second **reading**, not a second surface — it re-sorts the same projection, so a Task's state, owners, and title cannot disagree between the two views, and neither view fetches anything the other has not.
+The Project page reads one timeline two ways. A tab strip under the header switches between them: `项目` is the feed, `看板` is a four-column board of the Task-status projection. The board is a second **reading**, not a second surface — a Task's state, owners, and title cannot disagree between the two views.
 
-The board reads the window the feed has already loaded, not the Project's whole history. A board that paged the Project until `hasMore` was false would merge every top-level Message into the timeline, defeating the feed's own pagination to fill four columns, and it would make opening a tab an unbounded read.
-
-The feed's `加载更早消息` is how the board gets older work: one affordance, one page size, and the two views always describe the same set of facts.
+The board reads the Host's `taskBoard` projection — the same rows the Agent `team_task board` tool reads — not the feed's loaded window. One source means the board never merges the timeline's Messages to fill its columns, open Tasks are complete without paging, and the finished column keeps the newest few per Project the Host already bounds. The feed stays the only paged surface.
 
 Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
+
+A card names the Task's accountable owner — the reader as `你负责`, resolved from the board value's `humanMemberId` — and carries a `待你验收` badge when the reader may accept the work.
+
+The same card family serves the one cross-Workspace board (`TeamTaskBoardPage`, reached from the sidebar's 任务看板 entry — see [sidebar-browser.md](sidebar-browser.md)): three open-status columns over every visible Workspace, each card prefixed with its Project name. It answers to the same empty rule — the empty message stands alone, no column heads beside it — and carries no unread badges, which stay per-Thread facts on the Project face.
 
 The first tab is `主对话`, the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. The second tab is the Task board; there is no version-1 feed.
 

@@ -1947,7 +1947,7 @@ export class AgentTeamLedger {
     }
     const newestFirst = (left: AgentTeamTaskBoardItem, right: AgentTeamTaskBoardItem) => right.lastActivitySequence - left.lastActivitySequence
     const finished = [...finishedByProject.values()].flatMap(items => items.sort(newestFirst).slice(0, TASK_BOARD_FINISHED_PER_PROJECT)).sort(newestFirst)
-    return Object.freeze({ open: Object.freeze(open.sort(newestFirst)), finished: Object.freeze(finished) })
+    return Object.freeze({ humanMemberId: this.initialization().data.humanMemberId, open: Object.freeze(open.sort(newestFirst)), finished: Object.freeze(finished) })
   }
 
   private mainInboxItems(memberId: AgentTeamMemberId, workspaceIds: readonly WorkspaceId[]): readonly AgentTeamMainInboxItem[] {

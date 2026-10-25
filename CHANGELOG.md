@@ -17,7 +17,7 @@ All notable changes to this project are documented in this file. The format foll
 - `team_task` gains `accept`, `close`, `reopen`, and `transfer`; `team_message.start` accepts an accountable owner and source discussions for Tasks. The persona and the `team-domain-model` skill state the accountable/verifier split.
 - Notices are delivered by role. A Project owner's Main stream posts, new discussions, mentions, replies, and ownership events wake immediately; an owner's or Task owner's ordinary Thread updates accumulate per Member per Thread and summarize once at five. The sender's own messages never enter the sender's Inbox.
 - Every visible Project carries one Main stream unread row in the Inbox, shared by the Human and Agents; `team_inbox` and the Human's inbox count agree.
-- The task board: a `taskBoard` Host projection and Remote method lists every visible Project's open Tasks plus the last five finished per Project; the Web Client's board derives the same open Tasks from its bounded project reads. `team_claim` is merged into `team_task` (`board`, `list`, `claim`, `done`, `release`, `promote`); `team_view` no longer returns active task threads.
+- The task board: a `taskBoard` Host projection and Remote method lists every visible Project's open Tasks plus the last five finished per Project, and names the reader its `humanMemberId`. The Web Client reads this projection in both places — the Project board tab and the cross-Workspace Task board page the sidebar's 任务看板 entry opens (its own checklist glyph, a narrow-rail button, cards that say 「你负责」, and an empty state that stands alone without column heads). `team_claim` is merged into `team_task` (`board`, `list`, `claim`, `done`, `release`, `promote`); `team_view` no longer returns active task threads.
 - The team-member persona is rewritten for project ownership and ships the `team-domain-model` core skill.
 - Event-evaluated Task reminders cover review backlog and stalled work. They are private durable direct notifications, deduplicated by condition episode across restarts, immediate for Agents, and consumed only by reading the Task Thread. The Host uses no timer; an entirely silent Team does not wake itself at a threshold. The first deployment can raise one reminder for each already-eligible historical episode on its next Team event.
 - Agent `team_thread` renders a discussion's derived Task cards with current status and accountable owner. Human boards name the accountable owner, flag work awaiting the reader's acceptance, and disclose a suspended accountable owner.
@@ -25,6 +25,7 @@ All notable changes to this project are documented in this file. The format foll
 **Changed**
 
 - The Client drops its version 1 paths: the old Project feed, `@all` expansion, and the invitation confirmation flow are gone. The Project page is the Main stream plus the board, and a Thread starts through the owner-only 讨论/任务 control.
+- Exactly one sidebar row carries `aria-current="page"`: a global face (Inbox, Task board) no longer leaves the marker on the Workspace selector beneath it, and the auto-select no longer pulls the seat back to a Workspace overview while a global face stands.
 
 ## [0.2.5] - 2026-10-24
 

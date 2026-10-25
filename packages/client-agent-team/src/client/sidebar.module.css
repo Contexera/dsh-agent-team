@@ -52,7 +52,7 @@
   font-size: 14px;
   gap: 6px;
   line-height: 22px;
-  margin: 0 0 2px;
+  margin: 2px 0 0;
   min-height: 34px;
   padding: 4px 8px;
   text-align: left;
@@ -193,7 +193,7 @@
   flex: 0 0 auto;
   gap: 6px;
   height: 34px;
-  margin: 4px 0 2px;
+  margin: 4px 0 0;
   padding: 0 8px;
   text-align: left;
   width: 100%;
@@ -231,7 +231,7 @@
   flex: 0 0 auto;
   gap: 6px;
   height: 34px;
-  margin: 2px 0;
+  margin: 2px 0 0;
   padding: 0 8px;
   text-align: left;
   width: 100%;
@@ -240,6 +240,15 @@
 .taskBoardCard:focus-visible,
 .taskBoardCard[aria-current='page'] { background: var(--dsw-alias-interactive-bg-hover); }
 .taskBoardCard:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: -2px; }
+/* The board's own checklist glyph sits where the Inbox mark sits and reads at the same tertiary ink, so the two
+   cross-Workspace rows above the selector stay one control family. */
+.taskBoardGlyph {
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
+  display: inline-flex;
+  flex: 0 0 16px;
+  justify-content: center;
+}
 
 /* Anchored to the glyph rather than the control, so the wide card and the 36px rail button put the same dot on the same corner. Zero renders no mark. */
 .inboxMark {

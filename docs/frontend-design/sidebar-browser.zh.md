@@ -18,9 +18,9 @@ Workspace 概览是当前页时，概览携带 `aria-current='page'`。与原先
 
 刻意保持安静。折叠头无 hover 底色，仅 chevron 变色反馈。不展示分区计数。行形态有两样。项目行保留 `#` 标识。Agent 行复用头像语言并叠加 presence 角标。行内元数据（成员计数、presence 文字）已移除，保持列表简洁。
 
-定位高亮单一化，对齐宿主会话树「父静叶亮」的惯例。任一时刻侧栏只有一行携带 `aria-current='page'` 与 hover 底色。打开 Project/Thread 时是项目行。Member Session 视图打开时，是被选 Agent 卡片（`.agentSelect[aria-current='page']`）。否则是工作区选择器：选择器的概览为当前页时。
+定位高亮单一化，对齐宿主会话树「父静叶亮」的惯例。任一时刻侧栏只有一行携带 `aria-current='page'` 与 hover 底色。打开 Project/Thread 时是项目行。Member Session 视图打开时，是被选 Agent 卡片（`.agentSelect[aria-current='page']`）。否则：全局面（Inbox、任务看板）在屏时是它自己的入口行，工作区概览在屏时才是选择器。全局面绝不把高亮留给其下的工作区选择器——它下面没有站着的概览。
 
-嵌入的 Member Session 是唯一能压在「读者仍身处的 Team 面」之上的覆盖层。那可能是 Inbox 页，也可能是读者打开这个 Agent 时所处的 Project/Thread。此时高亮归嵌入 Session 自己的 Agent 卡片。下层那个面保留原位，但不携带高亮。覆盖层关闭后原样取回。Inbox 入口同样如此：入口页面在屏上时才是被标记的那一行。
+嵌入的 Member Session 是唯一能压在「读者仍身处的 Team 面」之上的覆盖层。那可能是 Inbox 页、任务看板页，也可能是读者打开这个 Agent 时所处的 Project/Thread。此时高亮归嵌入 Session 自己的 Agent 卡片。下层那个面保留原位，但不携带高亮。覆盖层关闭后原样取回。Inbox 与任务看板入口同样如此：入口页面在屏上时才是被标记的那一行。
 
 行级 ⋯ 菜单是 `TeamRowMenu`，复用公共 `Menu`。`Menu` 用 `portal` + `closeOnPointerLeave`，锚为裸 ellipsis 图标按钮。hover、focus-within、菜单开启三种状态下可见。菜单开启时该行钉住 hover 底色（`data-menu-open`）。菜单含「编辑」入口，打开对应编辑器。
 - error 态成员额外出现「恢复」项，走 `recoverMember` Remote。Host 向这个成员的活跃会话 steer 续作 prompt。这是运行时动作，不落 ledger。没有任何界面提供重置 Member 上下文的入口；换代由 Host 在唤醒边界决定。
@@ -36,7 +36,7 @@ Agent 卡片会话视图里，Agent 行的头像与文案整体是选择按钮�
 
 Member 换代时，Agents 面板观察这个 Member 的旧→新 Session 绑定。Agents 面板仅在嵌入页正是被观察的旧 live Session id 时恰好跟随一次。归档视图不跳转。
 
-窄屏 rail 三个图标按钮自上而下：收件箱（`IconQueueOutlineRegular`）→ 项目（`IconListPenOutlineRegular`）→ Agents（`IconAgentPresetOutlineRegular`），均为 16px。不复用 checklist（任务）或 user（成员）图标。收件箱图标是目的地。点击打开 Inbox 页并请求展开侧栏。项目/Agents 图标点击请求展开侧栏，并聚焦对应分区头部。
+窄屏 rail 四个图标按钮自上而下：收件箱（`IconQueueOutlineRegular`）→ 任务看板（`IconChecklistOutlineRegular`）→ 项目（`IconListPenOutlineRegular`）→ Agents（`IconAgentPresetOutlineRegular`），均为 16px。成员图标 rail 不用。收件箱与任务看板图标是目的地。点击打开各自页面并请求展开侧栏。项目/Agents 图标点击请求展开侧栏，并聚焦对应分区头部。
 
 Agent 创建流程没有项目选择页，Agent 编辑器没有成员区块。Project 成员只在 Project 侧管理（创建对话框初始 Member、项目编辑器成员行、成员管理对话框）。未入 Project 的 Member 仍可经 DM 触达。
 
@@ -78,7 +78,13 @@ Team 模式让 rail 与 shipped 新建会话按钮一同让位。两者指向的
 
 Inbox 页作为屏上面孔时卡片/图标携带 `aria-current='page'`。窄轨那枚图标还带上卡片同款当前页底色。rail 没有文字，底色是 rail 唯一能说「你在这」的东西。被嵌入的 Member Session 覆盖期间，入口只是被记住的位置，不携带高亮。
 
-`TeamConversation` 第四个面：Thread | Project | Inbox | welcome。选 Inbox 清掉 Project/Thread 面。选 Workspace、Project 或 Thread 清掉 Inbox。从 Inbox 行进入 Thread 后，Back 落在该行 Thread 的 Project。Inbox 不进返回栈。再进 Inbox 走左侧卡片或窄轨图标。
+`TeamConversation` 第五个面：Thread | Project | Inbox | 任务看板 | welcome。选 Inbox 或任务看板清掉 Project/Thread 面与彼此。选 Workspace、Project 或 Thread 把两者都清掉。从 Inbox 行进入 Thread 后，Back 落在该行 Thread 的 Project。Inbox 不进返回栈。再进 Inbox 走左侧卡片或窄轨图标。
+
+## 任务看板（Task board）
+
+「任务看板」入口是收件箱入口的兄弟：宽栏上是工作区选择器之上的一张卡片，自带 checklist 图形，墨色与收件箱同档（tertiary），窄轨上是第二枚图标。它打开唯一的跨 Workspace 看板（`TeamTaskBoardPage`），把所有可见 Workspace 的 open Task 分进三个未完结状态列，卡片沿用 Project 看板的语言——状态点、编号、主题、负责人、待你验收徽标——但不带 Project 看板的未读徽标，那仍是 Project 面上按 Thread 计的未读事实。
+
+空态规则与 Project 看板同一条：没有 open Task 时只留空态文案，列头不与之并立。卡片打开 Task 的 Thread 层；页面在屏时它的侧栏行携带 `aria-current='page'`——其下的工作区选择器绝不携带。
 
 ### 页面框架与页头
 

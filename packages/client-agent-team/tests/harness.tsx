@@ -517,6 +517,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   })
   /** Sticky history-read failure: every read fails with this message until a spec clears it by passing undefined. */
   let threadHistoryFailure: string | undefined
+  let taskBoardFailure: string | undefined
   // The Human author follows every seeded Thread; tests override the set to
   // drive the mention-candidate ranking.
   const threadFollowers = [...(options?.seedFollowers ?? ['member:human'])]
@@ -594,10 +595,15 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     mainInboxRows = [...rows]
     wakeAll()
   }
-  const loadTaskBoard = vi.fn(async ({ projectRef }: { projectRef: string }) => {
+  const loadTaskBoard = vi.fn(async ({ workspaceId, projectRef }: { workspaceId: string; projectRef?: string }) => {
     // One card per Task, like the Host projection: a feed window may hold
     // several Messages of the same Task Thread, and the board keeps the
     // newest. The subject is the anchor's first line, as the Host bounds it.
+    // The seeded facts live in w1 only, so the other Workspaces project no
+    // rows — the global board reads every Workspace and must not double-count
+    // one Workspace's Task into another's.
+    if (taskBoardFailure !== undefined) return { ok: false as const, error: { message: taskBoardFailure } }
+    if (workspaceId !== 'w1') return { ok: true as const, value: { humanMemberId: 'member:human', open: [], finished: [] } }
     const byTask = new Map<string, Record<string, unknown>>()
     for (const item of viewItems) {
       const task = item.task as { taskRef: string; status: string } | undefined
@@ -613,7 +619,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       })
     }
     const items = [...byTask.values()] as Array<{ readonly task: { readonly status: string } }>
-    return { ok: true as const, value: { open: items.filter(item => !['done', 'closed'].includes(item.task.status)),
+    return { ok: true as const, value: { humanMemberId: 'member:human', open: items.filter(item => !['done', 'closed'].includes(item.task.status)),
       finished: items.filter(item => ['done', 'closed'].includes(item.task.status)) } }
   })
   const changesStream = async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
@@ -795,5 +801,6 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const team = await runtime.mount({ inject: [...inject], apply })
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
-  return { runtime, team, view, seedMainInbox, loadTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
+  const failTaskBoard = (message?: string): void => { taskBoardFailure = message }
+  return { runtime, team, view, seedMainInbox, loadTaskBoard, failTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
 }

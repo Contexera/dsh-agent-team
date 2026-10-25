@@ -2513,14 +2513,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(scaffold.ctx.agentTeam.inbox({ workspaceId: inboxWorkspace.id }).totalUnreadCount).toBe(baseUnread + 3)
   await expectSidebarUnread(String(baseUnread + 3))
 
-  // Narrow rail: 对话 → 收件箱 → Projects → Agents. The Inbox icon marks unread and is
+  // Narrow rail: 对话 → 收件箱 → 任务看板 → Projects → Agents. The Inbox icon marks unread and is
   // a destination that opens the Inbox and expands the sidebar. The exit leads
-  // the rail as it leads the wide column.
+  // the rail as it leads the wide column, and the Task board is the Inbox's
+  // sibling cross-Workspace destination right after it.
   await page.setViewportSize({ width: 390, height: 844 })
   const inboxRail = page.locator('nav[class*="railWorkspace"]')
   await inboxRail.waitFor()
   const railLabels = await inboxRail.locator('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
-  expect(railLabels).toEqual(['对话', `收件箱，${baseUnread + 3} 条未读`, '项目', 'Agents'])
+  expect(railLabels).toEqual(['对话', `收件箱，${baseUnread + 3} 条未读`, '任务看板', '项目', 'Agents'])
   await expectSidebarUnread(String(baseUnread + 3))
   // The dot replaced the number, so the rail's hover hint is where the quantity
   // shows (the same name the control carries); the assertion above reads it
@@ -3595,5 +3596,44 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   const overflowing = await page.evaluate(() => [...document.querySelectorAll('[data-main-card], [data-team-composer]')]
     .filter(element => element.getBoundingClientRect().right > window.innerWidth + 0.5).length)
   expect(overflowing).toBe(0)
+
+  // The global Task board: the cross-Workspace face the sidebar's board row
+  // opens. Exactly one sidebar row carries aria-current — the board itself,
+  // never the Workspace selector, because no Workspace overview stands under a
+  // global face (the collapsed states the Human screenshotted).
+  await page.setViewportSize({ width: 1440, height: 960 })
+  await settleLayout(page)
+  const boardRow = page.getByRole('button', { name: '任务看板' })
+  await boardRow.click()
+  const boardPage = page.locator('[data-team-task-board]')
+  await boardPage.waitFor()
+  await expect.poll(async () => await boardRow.getAttribute('aria-current')).toBe('page')
+  expect(await page.locator('[data-team-workspace-trigger]').getAttribute('aria-current')).toBeNull()
+  const globalCard = boardPage.getByRole('button', { name: /Task #1/ })
+  await globalCard.waitFor()
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'task-board-page.png'), fullPage: true })
+  // The two cross-Workspace cards and the Workspace selector stand as one
+  // stack: every gap between them is some control's 2px top step, so the
+  // two top-to-top distances must measure equal in this one render.
+  const stackSteps = await page.evaluate(() => {
+    const tops = ['button[aria-label="收件箱"]', 'button[aria-label="任务看板"]', '[data-team-workspace-trigger]']
+      .map(selector => document.querySelector(selector)?.getBoundingClientRect().top)
+    return [tops[1]! - tops[0]!, tops[2]! - tops[1]!]
+  })
+  expect(stackSteps[0]).toBe(stackSteps[1])
+  // A card opens the Task's own Thread level, and the sidebar marker follows
+  // it off the board row: the board is a face, not a standing selection.
+  await globalCard.click()
+  await page.getByRole('heading', { name: /Task #1/ }).waitFor()
+  await expect.poll(async () => await boardRow.getAttribute('aria-current')).toBe(null)
+  // Back to the board face, then the narrow width keeps the page itself free
+  // of horizontal overflow: the columns become the Project board's own sideways
+  // strip, so the containment that must hold is the document's, not the strip's.
+  await boardRow.click()
+  await boardPage.waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await settleLayout(page)
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'task-board-page-narrow.png'), fullPage: true })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBe(0)
   expect(consoleWatch).toEqual({ warnings: [], pageErrors: [] })
 }, 180_000)
