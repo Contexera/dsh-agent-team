@@ -469,6 +469,53 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(upgraded.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
   })
 
+  it('cold-replays a legacy Thread read snapshot whose activity facts were flagged by the mention-only rule', async () => {
+    // The pre-receipt read record stored its whole picture, `direct` flags
+    // included. Those flags were computed when only a mention marked a fact
+    // direct, so a close that woke a follower reads `direct: false` in every
+    // stored snapshot — responsibility events did not exist yet. Replay must
+    // judge those flags by the era's rule; judging them by today's would
+    // refuse the ledger of every release before the change.
+    const pool = new MemoryMediaPool()
+    const test = await harness(pool)
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
+    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
+    const ledger = ledgerAtBoot(test)
+    const { member, actor: follower } = await addLedgerMember(ledger, project.project.projectRef, 'member:follower', 'follower')
+    await ledger.changeAttention({ requestId: requestId('legacy-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor: follower })
+    const humanRead = (await ledger.readThread({ requestId: requestId('legacy-close-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).value
+    committed((await ledger.changeTask({ requestId: requestId('legacy-close'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'close', baseRevision: humanRead.thread.revision, actor: agentTeamHumanActor() })).value)
+    const read = (await ledger.readThread({ requestId: requestId('legacy-snapshot-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: follower })).value
+    expect(read.facts.some(entry => entry.fact.kind === 'activity' && entry.fact.activity.kind === 'close' && entry.unread)).toBe(true)
+
+    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
+    await test.fiber.dispose()
+    cleanups.pop()
+    const legacy = records.map(([key, operation]) => {
+      const changed = operation as AgentTeamOperation
+      if (changed.kind !== 'team/thread-read') return [key, operation] as [string, unknown]
+      const receipt = changed.data as { readonly inbox: unknown }
+      return [key, { ...changed, data: {
+        workspaceId: alpha,
+        memberId: member.memberId,
+        task: read.task,
+        thread: read.thread,
+        claims: read.claims,
+        anchor: read.anchor,
+        anchorMentions: read.anchorMentions,
+        facts: read.facts.map(entry => entry.fact.kind === 'activity' ? { ...entry, direct: false } : entry),
+        readThroughSequence: read.readThroughSequence,
+        remainingUnreadCount: read.remainingUnreadCount,
+        inbox: receipt.inbox,
+      } }] as [string, unknown]
+    })
+    const revived = await harness(storedPool(legacy))
+    const revivedLedger = ledgerAtBoot(revived)
+    expect(() => revivedLedger.validate()).not.toThrow()
+    expect(revivedLedger.inbox(follower, { workspaceId: alpha }).totalUnreadCount).toBe(0)
+  })
+
   it('records DMs as audit-only operations with idempotent retries and unchanged projections', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })

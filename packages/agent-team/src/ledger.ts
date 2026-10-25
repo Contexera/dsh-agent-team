@@ -4170,7 +4170,14 @@ export class AgentTeamLedger {
       anchorMentions: expected.anchorMentions, facts: expected.facts,
       readThroughSequence: expected.readThroughSequence, remainingUnreadCount: expected.remainingUnreadCount,
       ...(expected.attention === undefined ? {} : { attention: expected.attention }), inbox: expected.inbox })
-    if (!isDeepStrictEqual(data, expectedData)) throw new Error('invalid Thread read projection')
+    // Snapshot reads predate responsibility events, so their activity facts
+    // were flagged direct by the mention-only rule of the era that wrote them;
+    // replay judges those flags by that rule, not by today's.
+    const eraDirect = <T extends { readonly fact: { readonly kind: string }; readonly direct: boolean }>(facts: readonly T[]): readonly T[] =>
+      facts.map(entry => (entry.fact.kind === 'activity' && entry.direct ? { ...entry, direct: false } : entry))
+    if (!isDeepStrictEqual({ ...data, facts: eraDirect(data.facts) }, { ...expectedData, facts: eraDirect(expectedData.facts) })) {
+      throw new Error('invalid Thread read projection')
+    }
   }
 
   private occurredAtForFactFrom(projection: Projection, sequence: number, fallback?: string | undefined): string {
