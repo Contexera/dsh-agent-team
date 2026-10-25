@@ -81,6 +81,8 @@ The Task board entry is the Inbox entry's sibling: one card on the wide rail abo
 
 The page answers to the same empty rule as the Project board: when no Task is open, the empty message stands alone and no column head renders beside it. Its cards open the Task's Thread level, and while the page stands its sidebar row carries `aria-current="page"` — never the Workspace selector under it.
 
+The two cards and the Workspace selector read as one stack: every gap between them is that control's own 2px top step (the shipped list's within-group step), never the previous row's bottom, and the selector keeps its field chrome inside the same rhythm — the same unit, in the selector's own form. The Inbox card's 4px top is the stack's step off the exit slab above it, not part of the stack's internal rhythm.
+
 ### Page frame and header
 
 The page rides the shared conversation seat — the same header band, 880px centered reading column, `clamp(18px, 3vw, 36px)` gutters, and stable scrollbar gutter Project and Thread use. Its header carries the page h1 plus one count line built as segments rather than a sentence: the Thread count, the whole-unread total the page is about in primary 600 ink while its neighbours stay secondary, and the mention total only while the queue actually holds one.
