@@ -1085,7 +1085,6 @@ export class AgentTeamLedger {
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
       const { task, thread, projectRef } = this.threadContextForActor(actor, request.workspaceId, request)
       const v2 = this.state.rulesVersion >= 2
-      if (v2) this.requireProjectMemberActor(actor, projectRef)
       if (v2 && request.confirmationToken !== undefined) throw new Error('invitation confirmation does not exist at rules version 2: a mention delivers directly')
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
@@ -1346,7 +1345,6 @@ export class AgentTeamLedger {
       }
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
       const { task, thread } = this.threadForActor(actor, request.workspaceId, request.taskRef)
-      if (this.state.rulesVersion >= 2 && request.action === 'claim') this.requireProjectMemberActor(actor, task.projectRef)
       const deferred = this.deferredThreadWrite(actor.memberId, task, thread, request.baseRevision)
       if (deferred !== undefined) return this.resolved(deferred)
       if (task.resolution !== 'open') throw new Error(`Task '${task.taskRef}' is ${task.status}; reopen it before changing Claims`)
@@ -3711,6 +3709,8 @@ export class AgentTeamLedger {
       if (member === undefined || !this.participatesInProjectWorkspaceFrom(projection, projectRef, member.memberId)) {
         throw new Error(`Agent Member '${memberId}' is not authorized for Project '${projectRef}'`)
       }
+      // Version-1 read receipts predate Project membership as a read gate.
+      if (projection.rulesVersion >= 2) this.requireProjectMemberActorFrom(projection, { kind: 'member', memberId, handle: member.handle }, projectRef)
     }
     const attention = this.attentionForFrom(projection, memberId, thread.threadRef)
     const unread = this.unreadForFrom(projection, memberId, thread.threadRef)
@@ -4134,7 +4134,11 @@ export class AgentTeamLedger {
   }
 
   private requireProjectMemberActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
-    if (actor.kind === 'member' && !this.isProjectMember(projectRef, actor.memberId)) {
+    this.requireProjectMemberActorFrom(this.state, actor, projectRef)
+  }
+
+  private requireProjectMemberActorFrom(projection: Projection, actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+    if (actor.kind === 'member' && !this.isProjectMemberFrom(projection, projectRef, actor.memberId)) {
       throw new Error(`Agent Member '${actor.handle}' is not a member of Project '${projectRef}' (not_project_member) — ${recoveryFor('not_project_member').sentence({ projectRef })}`)
     }
   }
@@ -4454,7 +4458,8 @@ export class AgentTeamLedger {
     const task = this.requireTask(workspaceId, taskRef)
     const thread = this.requireThread(task.threadRef)
     this.assertThreadProjectActive(task.projectRef)
-    if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), task.projectRef)
+    if (this.state.rulesVersion >= 2) this.requireProjectMemberActor(actor, task.projectRef)
+    else if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), task.projectRef)
     return { task, thread }
   }
 
@@ -4682,7 +4687,10 @@ export class AgentTeamLedger {
     request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined },
   ): { readonly task?: AgentTeamTask; readonly thread: AgentTeamThread; readonly projectRef: AgentTeamProjectRef } {
     const resolved = this.threadContextFrom(this.state, workspaceId, request)
-    if (actor.kind === 'member') this.requireMemberProject(this.requireMember(actor.memberId), resolved.projectRef)
+    if (actor.kind === 'member') {
+      if (this.state.rulesVersion >= 2) this.requireProjectMemberActor(actor, resolved.projectRef)
+      else this.requireMemberProject(this.requireMember(actor.memberId), resolved.projectRef)
+    }
     return resolved
   }
 

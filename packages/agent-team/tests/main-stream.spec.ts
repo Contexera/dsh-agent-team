@@ -259,6 +259,25 @@ describe('Thread start permission', () => {
 })
 
 describe('Thread replies at rules version 2', () => {
+  it('refuses a stranger every Thread read and follow path even with a known ref', async () => {
+    const team = await seed()
+    const started = await start(team, human, 'task', 'private Project work')
+    if (started.value.kind !== 'committed') throw new Error('start did not commit')
+    const { threadRef } = started.value.thread
+    const taskRef = started.value.task!.taskRef
+    const address = { workspaceId: alpha, threadRef }
+    const outsider = team.outsider.actor
+
+    await expect(team.ledger.readThread({ requestId: requestId('outsider-read'), actor: outsider, ...address })).rejects.toThrow(/not_project_member/)
+    expect(() => team.ledger.threadHistory(outsider, address)).toThrow(/not_project_member/)
+    expect(() => team.ledger.readMessage(outsider, { ...address, messageRef: started.value.message.messageRef })).toThrow(/not_project_member/)
+    expect(() => team.ledger.attentionStatus(outsider, address)).toThrow(/not_project_member/)
+    expect(() => team.ledger.listClaims(outsider, { workspaceId: alpha, taskRef })).toThrow(/not_project_member/)
+    await expect(team.ledger.changeAttention({ requestId: requestId('outsider-follow'), actor: outsider, ...address, action: 'follow' })).rejects.toThrow(/not_project_member/)
+    await expect(team.ledger.readThread({ requestId: requestId('outsider-task-read'), actor: outsider, workspaceId: alpha, taskRef })).rejects.toThrow(/not_project_member/)
+    await expect(start(team, outsider, 'discussion', 'still not a member')).rejects.toThrow(/not_project_member/)
+  })
+
   it('lets a Project member who never took part reply, delivers a mention as one direct marker, and never confirms', async () => {
     const team = await seed()
     const started = await start(team, human, 'discussion', 'open question')
