@@ -184,6 +184,18 @@
 }
 
 .boardCardFoot time { margin-left: auto; }
+.boardCardOwner { flex: none; color: var(--dsw-alias-label-caption); }
+.boardAcceptBadge {
+  flex: none;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-bg-base);
+  font-size: 12px;
+  line-height: 18px;
+}
 
 /* The panel reserves its width here only while open; an always-on reservation would waste 360px on an empty band. */
 .feedStage {

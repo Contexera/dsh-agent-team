@@ -47,6 +47,8 @@ describe('Team Project board', () => {
     expect(card.textContent).toContain('实现 API 网关')
     expect(card.textContent).not.toContain('细节在 Thread 里')
     expect(card.textContent).toContain('未指派')
+    // The card names who owns the Task's outcome; the Human sees itself.
+    expect(card.textContent).toContain('你负责')
     expect(card.querySelector('time')?.getAttribute('dateTime')).toBe('2026-10-14T09:00:00.000Z')
     // An empty column still states its heading and its own zero; it does not
     // print a second placeholder row inside a column the count already closed.

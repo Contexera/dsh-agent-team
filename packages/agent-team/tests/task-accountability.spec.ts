@@ -73,7 +73,8 @@ describe('Task accountability in final rules version 2', () => {
     expect(team.ledger.threadHistory(human, { workspaceId: alpha, taskRef: started.task.taskRef }).facts
       .map(fact => fact.kind === 'message' ? 'message' : fact.activity.kind))
       .toEqual(['message', 'promote'])
-    expect(team.ledger.taskBoard(team.owner.actor, { workspaceId: alpha, mine: true }).open[0]).toMatchObject({ relation: 'accountable', needsAcceptance: false })
+    expect(team.ledger.taskBoard(team.owner.actor, { workspaceId: alpha, mine: true }).open[0])
+      .toMatchObject({ relation: 'accountable', needsAcceptance: false, accountableOwner: { memberId: team.owner.memberId, name: 'owner' } })
 
     await expect(team.ledger.changeTask({ requestId: requestId('early-agent-accept'), actor: team.owner.actor, workspaceId: alpha,
       taskRef: started.task.taskRef, action: 'accept', baseRevision: started.thread.revision })).rejects.toThrow(/only an in_review/)

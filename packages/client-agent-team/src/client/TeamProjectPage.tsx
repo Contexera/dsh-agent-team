@@ -332,6 +332,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
             item={item}
             unread={unreadByThread.get(item.threadRef) ?? 0}
             human={humanIdentity}
+            humanMemberId={humanMemberId}
             t={t}
             onOpen={() => { selectThread(item.threadRef, projectRef, item.task.taskRef, item.taskNumber) }}
           />)}
@@ -420,16 +421,18 @@ const BOARD_COLUMNS = [
 ] as const
 
 /** One Task on the board; resolved work dims so moving work stays loudest. */
-function ProjectionBoardCard({ item, unread, human, t, onOpen }: {
+function ProjectionBoardCard({ item, unread, human, humanMemberId, t, onOpen }: {
   readonly item: AgentTeamTaskBoardItem
   readonly unread: number
   readonly human: TeamAvatarHuman | undefined
+  readonly humanMemberId: AgentTeamMemberId | undefined
   readonly t: TeamConversationProps['t']
   readonly onOpen: () => void
 }) {
   const task = item.task
   const taskNumber = item.taskNumber ?? 0
   const resolved = task.status === 'done' || task.status === 'closed'
+  const ownerLabel = task.accountable === humanMemberId ? t('boardAccountableYou') : t('boardAccountable', { name: item.accountableOwner?.name ?? task.accountable })
   // For resolved work the newest fact is the resolution itself.
   const activityAt = item.lastActivityAt
   const namedOwners = namedAvatarOwners(item.liveClaimOwners, human)
@@ -437,16 +440,18 @@ function ProjectionBoardCard({ item, unread, human, t, onOpen }: {
     type="button"
     className={projectCss.boardCard}
     {...(resolved ? { 'data-resolved': '' } : {})}
-    aria-label={unread > 0 ? t('openTaskUnread', { number: taskNumber, count: unread }) : t('openTask', { number: taskNumber })}
+    aria-label={`${unread > 0 ? t('openTaskUnread', { number: taskNumber, count: unread }) : t('openTask', { number: taskNumber })}${item.needsAcceptance ? ` · ${t('boardNeedsAcceptance')}` : ''}`}
     onClick={onOpen}
   >
     <span className={projectCss.boardCardNum}>
       <TeamStateDot size={8} state={taskStatusDot(task.status)} />
       {t('taskLabel', { number: taskNumber })}
+      {item.needsAcceptance && <span className={projectCss.boardAcceptBadge}>{t('boardNeedsAcceptance')}</span>}
       <TeamCountBadge count={unread} />
     </span>
     <span className={projectCss.boardCardTitle}>{item.subject}</span>
     <span className={projectCss.boardCardFoot}>
+      <span className={projectCss.boardCardOwner}>{ownerLabel}</span>
       {namedOwners.length === 0
         ? <span>{t('boardUnassigned')}</span>
         : <TeamAvatarStack owners={namedOwners} label={claimersLabel(namedOwners, t)} human={human} />}

@@ -942,6 +942,8 @@ export interface AgentTeamTaskBoardItem {
   readonly liveClaimOwners: readonly AgentTeamInboxActor[]
   readonly lastActivitySequence: number
   readonly lastActivityAt: string
+  /** The accountable owner resolved for display; the Human entry carries the configured handle. */
+  readonly accountableOwner: AgentTeamInboxActor
   /** `executor` while the reader holds a live Claim, else `project-owner` for an owner of the Project. */
   readonly relation: AgentTeamTaskRelation
   /** The reader may accept this in_review Task and has not executed it. */

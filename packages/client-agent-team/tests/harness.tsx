@@ -260,7 +260,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     message: { messageRef: `message:seed-${index}`, projectRef: 'project:engineering', threadRef: seedThreadRef, ...(taskless ? {} : { taskRef: seedTaskRef }), sender: seed.sender === 'agent' ? 'member:builder' : 'member:human', body: seed.body, topLevel: true, sequence: index + 1, occurredAt: seed.occurredAt },
     mentions: seed.mentions ?? [],
     ...(taskless ? {} : { task: { taskRef: seedTaskRef, projectRef: 'project:engineering', threadRef: seedThreadRef,
-      status: options?.seedTaskStatus ?? 'todo', resolution: 'open' }, taskNumber: 1 }),
+      status: options?.seedTaskStatus ?? 'todo', resolution: 'open', accountable: 'member:human', sourceThreadRefs: [] }, taskNumber: 1 }),
     thread: { threadRef: seedThreadRef, ...(taskless ? {} : { taskRef: seedTaskRef }), revision: 2 },
     // A seed carries no Claims, so the Host would project no owners either.
     liveClaimOwners: [],
@@ -607,6 +607,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       byTask.set(task.taskRef, {
         workspaceId: 'w1', projectRef, projectName: 'engineering', task, taskNumber: item.taskNumber ?? 1,
         threadRef: thread.threadRef, subject: message.body.split('\n')[0]!.slice(0, 120), liveClaimOwners: item.liveClaimOwners,
+        accountableOwner: { memberId: 'member:human', name: 'human' },
         lastActivitySequence: message.sequence, lastActivityAt: item.lastActivityAt,
         relation: 'project-owner', needsAcceptance: task.status === 'in_review',
       })

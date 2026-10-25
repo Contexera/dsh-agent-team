@@ -1837,7 +1837,8 @@ export class AgentTeamLedger {
       const item: AgentTeamTaskBoardItem = Object.freeze({ workspaceId: project.workspaceId, projectRef: project.projectRef, projectName: project.name,
         task, taskNumber: taskNumbers.get(task.taskRef) ?? 0, threadRef: task.threadRef,
         subject: boundedOpeningLine(this.threadAnchor(task.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
-        liveClaimOwners: this.liveClaimOwners(task), lastActivitySequence: newest.sequence, lastActivityAt: newest.occurredAt,
+        liveClaimOwners: this.liveClaimOwners(task), accountableOwner: this.memberActor(task.accountable),
+        lastActivitySequence: newest.sequence, lastActivityAt: newest.occurredAt,
         relation: accountable ? 'accountable' : executor ? 'executor' : authorized.kind === 'human' || this.ownerSinceFrom(this.state, task.projectRef, memberId) !== undefined ? 'project-owner' : 'none',
         needsAcceptance: task.status === 'in_review' && (authorized.kind === 'human' || this.isProjectOwnerFrom(this.state, task.projectRef, memberId)) && !this.heldTaskClaimFrom(this.state, task.taskRef, memberId) })
       if (task.status === 'done' || task.status === 'closed') {
