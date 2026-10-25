@@ -214,6 +214,59 @@ describe('Task accountability in final rules version 2', () => {
       projectRef: team.projectRef, kind: 'task', body: 'Invalid source', sourceThreadRefs: [committedTask.thread.threadRef] })).rejects.toThrow(/must be a discussion/)
   })
 
+  it('replays the 06/07 dev shapes: a Task start without its creation activity and a Claim release without responsibility markers', async () => {
+    // Before the creation activity and the responsibility markers existed,
+    // the unreleased dev builds of this train wrote these exact records; a
+    // dev ledger carrying them must open on the final build, replayed as
+    // written rather than re-judged by rules those builds never ran.
+    const team = await seed()
+    // The reviewer is accountable and never touches a Claim, so the recorded
+    // release carries the new responsibility marker the rewrite strips.
+    const started = await startTask(team, human, team.reviewer.memberId)
+    const released = await claim(team, started.task, team.owner.actor, 'released')
+    expect(team.ledger.getTask(started.task.taskRef)).toMatchObject({ status: 'todo', accountable: team.reviewer.memberId })
+
+    const emptyDelta = { attention: { set: [], removed: [] }, directMarkers: { added: [], removed: [] }, activityMarkers: { added: [], removed: [] } }
+    const records = [...team.pool.media.get('agent_team')!.tables.get('operations')!.entries()].map(([key, operation]) => {
+      const changed = operation as AgentTeamOperation
+      if (changed.kind === 'team/thread-started' && changed.data.activity !== undefined) {
+        const { activity: _stripped, ...data } = changed.data
+        return [key, { ...changed, data: { ...data, inbox: {
+          attention: { set: [{ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, threadRef: changed.data.thread.threadRef,
+            startSequence: changed.sequence, readThroughSequence: changed.sequence - 1 }], removed: [] },
+          directMarkers: { added: [], removed: [] }, activityMarkers: { added: [], removed: [] },
+        } } }] as [string, unknown]
+      }
+      if (changed.kind === 'team/claim-released' && changed.data.inbox.activityMarkers.added.length > 0) {
+        const ownAttention = changed.data.inbox.attention.set.length > 0 ? changed.data.inbox.attention : emptyDelta.attention
+        return [key, { ...changed, data: { ...changed.data, inbox: { attention: ownAttention,
+          directMarkers: { added: [], removed: [] }, activityMarkers: { added: [], removed: [] } } } }] as [string, unknown]
+      }
+      return [key, operation] as [string, unknown]
+    })
+    const revivedPool = new MemoryMediaPool()
+    revivedPool.versions.set('agent_team', agentTeamDomainSpec.version)
+    revivedPool.media.set('agent_team', { tables: new Map([['operations', new Map(records)]]), global: null })
+    const revivedTable = await (await (async () => {
+      const ctx = new Context()
+      await ctx.plugin(Storage)
+      ctx.storage.backend.register('memory', new MemoryStorageBackend(revivedPool))
+      const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
+      ctx.storage.mount('domain', facility)
+      ctx.provide('storageDomain', facility)
+      cleanups.push(async () => { await facility.closeAll() })
+      return ctx.storageDomain.open(agentTeamDomainSpec)
+    })()).table('operations') as unknown as Table
+    const revived = new AgentTeamLedger(revivedTable, { rulesVersion: 2 })
+    expect(() => revived.validate()).not.toThrow()
+    expect(revived.getTask(started.task.taskRef)).toMatchObject({ status: 'todo', accountable: team.reviewer.memberId })
+    // The reviewer keeps only its owner-grant marker; neither stripped shape
+    // leaves a Task row behind.
+    const reviewerInbox = revived.inbox(team.reviewer.actor, { workspaceId: alpha })
+    expect(reviewerInbox.items.find(row => row.thread.threadRef === started.task.threadRef)).toBeUndefined()
+    expect(reviewerInbox.totalUnreadCount).toBe(1)
+  })
+
   it('refuses source Threads from another Project', async () => {
     const team = await seed()
     const otherRef = (await team.ledger.createProject({ requestId: requestId('other'), actor: human, workspaceId: alpha,

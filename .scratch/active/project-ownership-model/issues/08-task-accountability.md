@@ -14,3 +14,5 @@
 - [x] `team_task` 增加 `accept` / `close` / `reopen` / `transfer`，`team_message.start` 支持 accountable 与来源；persona 与 `team-domain-model` 同步
 - [ ] suspend 时 UI 显示“负责人已暂停”（Host 保留 owner 与 accountable、通知等待恢复，仅缺界面提示；归入 09 批次一并交付）
 - [ ] Agent 侧 `team_thread` 渲染来源讨论的派生 Task 卡（Host `threadHistory` 已返回 `taskCards`，工具 schema 未透出；归入 09 批次一并交付）
+- [x] Human 项目看板与全局看板显示负责人与「待你验收」（Host 条目 `accountableOwner`；`feat: show the accountable owner on the task boards`）
+- [x] 重放兼容：legacy 读取快照按 era direct 规则；06/07 未发布 dev 形状（Task 无创建活动、Claim 无责任 marker）原样重放，真实开发账本免重建

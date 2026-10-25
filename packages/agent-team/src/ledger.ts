@@ -2961,20 +2961,25 @@ export class AgentTeamLedger {
         const source = projection.threads.get(threadRef)
         return source === undefined || source.taskRef !== undefined || this.projectRefForThreadFrom(projection, threadRef) !== projectRef
       }) || new Set(task.sourceThreadRefs).size !== task.sourceThreadRefs.length)) throw new Error('invalid Task source Threads')
+      // The unreleased 06/07 dev builds of this train started Tasks without
+      // the creation activity and with the discussion's plain inbox; a Task
+      // without an activity is exactly that shape, replayed as it was written.
+      const legacyTaskStart = task !== undefined && storedActivity === undefined
       // An Agent Task creator is the accountable; the Human may name an enabled Project owner or itself.
-      if (task !== undefined) {
+      if (task !== undefined && !legacyTaskStart) {
         const validAccountable = actor !== undefined
           ? task.accountable === actorMemberId()
           : task.accountable === AGENT_TEAM_HUMAN_MEMBER_ID
             || (projection.members.get(task.accountable)?.state === 'enabled' && this.isProjectOwnerFrom(projection, projectRef, task.accountable))
         if (!validAccountable) throw new Error('invalid Task accountable')
-      }
+      } else if (task !== undefined && task.accountable !== AGENT_TEAM_HUMAN_MEMBER_ID
+        && !this.isProjectOwnerFrom(projection, projectRef, task.accountable)) throw new Error('invalid Task accountable')
       this.addRef(refs, thread.threadRef)
       if (task !== undefined) this.addRef(refs, task.taskRef)
       this.addRef(refs, anchor.messageRef)
       this.validateMentions(mentions, anchor, projection)
       const taskActivity = storedActivity
-      if ((task === undefined) !== (taskActivity === undefined)) throw new Error('invalid Task creation activity')
+      if (!legacyTaskStart && (task === undefined) !== (taskActivity === undefined)) throw new Error('invalid Task creation activity')
       if (taskActivity !== undefined && (task === undefined || taskActivity.kind !== 'promote' || taskActivity.taskRef !== task.taskRef
         || taskActivity.threadRef !== thread.threadRef || taskActivity.sequence !== operation.sequence || taskActivity.actor !== actorMemberId())) throw new Error('invalid Task creation activity')
       const expected = taskActivity === undefined
@@ -3078,7 +3083,12 @@ export class AgentTeamLedger {
         ? this.inboxDelta(expectedInbox.attention.set, [], [], [], this.responsibilityActivityRecipientsFrom(projection, projectedTask, actorMemberId())
           .map(memberId => Object.freeze({ memberId, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence: operation.sequence })))
         : expectedInbox
-      if (!isDeepStrictEqual(operation.data.inbox, withResponsibility)) throw new Error('invalid Claim inbox projection')
+      // The unreleased 06/07 dev builds recorded claim transitions without
+      // the responsibility markers; either inbox is the one that era could
+      // have written, so replay accepts both.
+      if (!isDeepStrictEqual(operation.data.inbox, withResponsibility) && !isDeepStrictEqual(operation.data.inbox, expectedInbox)) {
+        throw new Error('invalid Claim inbox projection')
+      }
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [activity])
       return
     }

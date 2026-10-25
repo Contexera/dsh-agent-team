@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Upgrade note**
 
-- Rules version 2 is now the default and the `DSH_AGENT_TEAM_PREVIEW_RULES` preview switch is gone: this build adopts version 2 on every ledger it opens and no longer writes the version 1 kinds it replaced (`team/message-sent`; they replay inside version 1 segments only). A build at or below 0.2.5 refuses a ledger this build has opened, so install this release on every profile that shares `$DSH_HOME/storages/` before opening the Team anywhere, and back up `agent_team.sqlite` first. A ledger written by an intermediate dev build of this train may also fail validation on open (Task creation now records its activity), so rebuild dev data rather than carrying it across.
+- Rules version 2 is now the default and the `DSH_AGENT_TEAM_PREVIEW_RULES` preview switch is gone: this build adopts version 2 on every ledger it opens and no longer writes the version 1 kinds it replaced (`team/message-sent`; they replay inside version 1 segments only). A build at or below 0.2.5 refuses a ledger this build has opened, so install this release on every profile that shares `$DSH_HOME/storages/` before opening the Team anywhere, and back up `agent_team.sqlite` first. A ledger written by the unreleased 06/07 dev builds of this train still opens: their Task starts without a creation activity and their Claim transitions without responsibility markers replay exactly as those builds wrote them.
 
 **New**
 
