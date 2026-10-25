@@ -5,6 +5,7 @@ import { projectRefOf, service, workspaceOf, workspaceParam } from './host-acces
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 import type {
   AgentTeamClaimRef,
+  AgentTeamInboxReminder,
   AgentTeamMemberId,
   AgentTeamRequestId,
   AgentTeamMessageRef,
@@ -13,6 +14,7 @@ import type {
   AgentTeamTaskBoardItem,
   AgentTeamThreadFact,
   AgentTeamThreadRef,
+  AgentTeamThreadTaskCard,
 } from '@contexera/dsh-agent-team/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { MAIN_ENTRY_SCHEMA, MAIN_STANDING_SCHEMA, mainEntryLine, mainEntryView, standingView } from './main-stream.ts'
@@ -135,6 +137,49 @@ function taskStanding(value: { taskRef?: string; status?: string; resolution?: s
   return `${value.taskRef}${value.taskNumber === undefined ? '' : ` (#${value.taskNumber})`}${value.status === undefined ? '' : `, ${value.status}${value.resolution === undefined ? '' : `/${value.resolution}`}`}${value.accountable === undefined ? '' : ` · accountable ${value.accountable}`}`
 }
 
+/** One Task a discussion spawned, as the card its Thread renders at the creation point: current state, never a fact, never unread. */
+interface TaskCardView {
+  readonly taskRef: string
+  readonly taskNumber: number
+  readonly threadRef: string
+  readonly sequence: number
+  readonly occurredAt: string
+  readonly subject: string
+  readonly status: string
+  readonly resolution: string
+  readonly accountable: string
+}
+
+const TASK_CARD_SCHEMA = {
+  type: 'object', additionalProperties: false, properties: {
+    taskRef: { type: 'string', required: true }, taskNumber: { type: 'number', required: true }, threadRef: { type: 'string', required: true },
+    sequence: { type: 'number', required: true }, occurredAt: { type: 'string', required: true }, subject: { type: 'string', required: true },
+    status: { type: 'string', required: true }, resolution: { type: 'string', required: true }, accountable: { type: 'string', required: true },
+  },
+} as const
+
+function taskCardView(card: AgentTeamThreadTaskCard): TaskCardView {
+  return { taskRef: card.taskRef, taskNumber: card.taskNumber, threadRef: card.threadRef, sequence: card.sequence, occurredAt: card.occurredAt,
+    subject: card.subject, status: card.status, resolution: card.resolution, accountable: card.accountable }
+}
+
+/** One card line, marked as a projection so it never reads as a fact: where the Task was created, its current state, and the Thread to open it on. */
+function taskCardLine(card: TaskCardView): string {
+  return `${card.sequence} ${formatTeamTimestamp(card.occurredAt)} [task card] Task ${card.taskRef} (#${card.taskNumber}), ${card.status}/${card.resolution} · accountable ${card.accountable} — ${card.subject} · ${card.threadRef}`
+}
+
+/** Facts and the cards their discussion spawned in one chronological order: a card sits at its creation sequence and breaks a fact run, the way the Client timeline draws it. */
+function factTimelineLines(facts: readonly FactView[], cards: readonly TaskCardView[]): string[] {
+  const lines: string[] = []
+  let next = 0
+  for (const fact of facts) {
+    while (next < cards.length && cards[next]!.sequence < fact.sequence) lines.push(taskCardLine(cards[next++]!))
+    lines.push(factLine(fact))
+  }
+  while (next < cards.length) lines.push(taskCardLine(cards[next++]!))
+  return lines
+}
+
 /** The one model-facing schema for a Thread fact, shared by the read result and by the facts a rejected write carries back. */
 const FACT_SCHEMA = {
   type: 'object', additionalProperties: false, properties: {
@@ -212,6 +257,11 @@ function rejectedFactLines(facts: readonly RejectedFact[]): string[] {
   return ['', `${facts.length} new fact(s) since your last write:`, ...facts.map(fact => factLine(fact as FactView))]
 }
 
+const REMINDER_SCHEMA = { type: 'object', additionalProperties: false, properties: {
+  taskRef: { type: 'string', required: true }, kind: { type: 'string', required: true }, recipient: { type: 'string', required: true },
+  baselineSequence: { type: 'number', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string', required: true },
+} } as const
+
 const teamInbox = defineTool({
   name: 'team_inbox',
   description: 'List your bounded Team Inbox across all joined Workspaces for triage: unread Thread summaries and one row per Project Main stream with unread for you, with counts, without message bodies and without marking anything read. Read a selected Thread with team_thread read; the inbox itself authorizes no mutation. This is your own unread queue; to see work in flight (whether or not you have unread on it), use team_task board.',
@@ -223,7 +273,7 @@ const teamInbox = defineTool({
       items: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         workspaceId: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
         taskRef: { type: 'string' }, status: { type: 'string' }, accountable: { type: 'string' }, revision: { type: 'number', required: true }, unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true },
-        taskNumber: { type: 'number' }, newestOccurredAt: { type: 'string' },
+        taskNumber: { type: 'number' }, newestOccurredAt: { type: 'string' }, reminders: { type: 'array', items: REMINDER_SCHEMA },
       } } },
       main: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
         workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true }, projectName: { type: 'string', required: true },
@@ -243,7 +293,7 @@ const teamInbox = defineTool({
       return [{ type: 'text', text: [
         `Inbox — ${value.totalUnreadCount} unread update(s) total, ${value.totalDirectCount} direct, across ${value.main.length === 0 ? '' : `${value.main.length} Main stream(s) and `}${value.items.length} Thread(s) shown${more}`,
         ...value.main.map(row => `${row.workspaceId} · ${row.projectRef} Main stream (${row.projectName}) · ${row.unreadCount} unread, ${row.directCount} direct · newest ${formatTeamTimestamp(row.newestOccurredAt)}`),
-        ...value.items.map(item => `${item.workspaceId} · ${item.threadRef}${item.projectRef === undefined ? '' : ` · ${item.projectRef}`}${item.taskRef === undefined ? '' : ` · ${taskStanding(item)}`} · ${item.unreadCount} unread, ${item.directCount} direct${item.newestOccurredAt === undefined ? '' : ` · newest ${formatTeamTimestamp(item.newestOccurredAt)}`}`),
+        ...value.items.map(item => `${item.workspaceId} · ${item.threadRef}${item.projectRef === undefined ? '' : ` · ${item.projectRef}`}${item.taskRef === undefined ? '' : ` · ${taskStanding(item)}`} · ${item.unreadCount} unread, ${item.directCount} direct${(item.reminders?.length ?? 0) > 0 ? ` · reminder ${(item.reminders ?? []).map(reminder => reminder.kind).join(', ')}` : ''}${item.newestOccurredAt === undefined ? '' : ` · newest ${formatTeamTimestamp(item.newestOccurredAt)}`}`),
         `Read a selected ${value.main.length === 0 ? 'Thread with team_thread read' : 'Thread or Main stream with team_thread read (threadRef or projectRef)'}. Listing changes no read state and supplies no write token.`,
       ].join('\n') }]
     },
@@ -262,7 +312,7 @@ const teamInbox = defineTool({
         return { workspaceId: item.workspaceId, threadRef: item.thread.threadRef, projectRef: item.projectRef,
           ...(item.task === undefined ? {} : { taskRef: item.task.taskRef, status: item.task.status, accountable: item.task.accountable }),
           revision: item.thread.revision, unreadCount: item.unreadCount, directCount: item.directCount, newestOccurredAt: item.newestOccurredAt,
-          ...(taskNumber === undefined ? {} : { taskNumber }) }
+          ...(taskNumber === undefined ? {} : { taskNumber }), reminders: [...(item.reminders ?? [])] }
       }),
     }
   },
@@ -355,6 +405,8 @@ const teamThread = defineTool({
       } },
       revision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' }, accountable: { type: 'string' },
       following: { type: 'boolean' }, readThroughSequence: { type: 'number' }, remainingUnreadCount: { type: 'number' }, earlierFactCount: { type: 'number' }, cursor: { type: 'number' }, hasMore: { type: 'boolean' },
+      taskCards: { type: 'array', items: TASK_CARD_SCHEMA },
+      reminders: { type: 'array', items: REMINDER_SCHEMA },
       anchor: { type: 'object', additionalProperties: false, properties: {
         messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, body: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' },
         replyToMessageRef: { type: 'string' },
@@ -393,13 +445,17 @@ const teamThread = defineTool({
         }
         lines.push('', 'Facts')
         if (facts.length === 0) lines.push('No facts before this cursor.')
-        else lines.push(...facts.map(fact => factLine(fact)))
+        // A card belongs to the page whose sequence window holds its creation point, so paging never repeats one.
+        const windowStart = facts[0]?.sequence ?? Number.POSITIVE_INFINITY
+        const windowEnd = args.beforeSequence ?? Number.POSITIVE_INFINITY
+        lines.push(...factTimelineLines(facts, (value.taskCards ?? []).filter(card => card.sequence >= windowStart && card.sequence < windowEnd)))
         lines.push('', `History cursor ${value.cursor}; hasMore=${value.hasMore ? 'true' : 'false'}${value.hasMore ? ' — older facts exist; page again with beforeSequence set to the cursor.' : ' — no older facts remain.'}`)
         return [{ type: 'text', text: lines.join('\n') }]
       }
             // kind === 'read': outcome → context → orientation → collision surface → facts → watermark → token (iff nothing unread remains).
       const facts = value.facts as FactView[]
-      const acknowledged = facts.filter(fact => fact.unread === true).length
+      const reminders = value.reminders ?? []
+      const acknowledged = facts.filter(fact => fact.unread === true).length + reminders.length
       const remaining = value.remainingUnreadCount ?? 0
             // A read with nothing unread writes no durable operation, so the opening line claims a commit only when unread facts were acknowledged.
       const lines = [
@@ -419,9 +475,14 @@ const teamThread = defineTool({
         lines.push('', 'Active Claims')
         for (const claim of activeClaims) lines.push(claimLine(claim))
       }
+      if (reminders.length > 0) {
+        lines.push('', 'Acknowledged Task reminders')
+        for (const reminder of reminders) lines.push(`${reminder.kind === 'review-backlog' ? 'Review backlog' : 'Stalled Task'} · ${reminder.taskRef} · baseline ${reminder.baselineSequence} · raised ${formatTeamTimestamp(reminder.occurredAt)}`)
+      }
       lines.push('', 'Facts')
       if (facts.length === 0) lines.push('No new facts to acknowledge.')
-      else lines.push(...facts.map(fact => factLine(fact)))
+      // Read orients on current derived Tasks; cards are projections, never unread facts.
+      lines.push(...factTimelineLines(facts, value.taskCards ?? []))
       lines.push('', `Read through sequence ${value.readThroughSequence}; ${remaining} unread update(s) remaining${remaining > 0 ? ` — ${recoveryFor('unread_remaining').sentence({})}` : '.'}`)
             // The bounded read answered with the newest batch; the span before the watermark is orientation it did not supply, and rendering its count shows the returning reader the size of that span.
       const earlier = value.earlierFactCount ?? 0
@@ -451,7 +512,7 @@ const teamThread = defineTool({
       const status = host.attentionStatusForAgent(agent, base)
       return threadResult('history', base.workspaceId, history, status.attention, history.facts.map(fact => fact.kind === 'message'
           ? { sequence: fact.sequence, kind: 'message', body: fact.message.body, sender: fact.message.sender, mentions: [...fact.mentions], ...(fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: fact.message.replyToMessageRef }), ...(fact.replyTo === undefined ? {} : { replyTo: fact.replyTo }), occurredAt: fact.occurredAt }
-          : activityFactView(fact.sequence, fact.activity, undefined, fact.occurredAt)), { cursor: history.cursor, hasMore: history.hasMore, ...taskNumberOf(history.task) })
+          : activityFactView(fact.sequence, fact.activity, undefined, fact.occurredAt)), { cursor: history.cursor, hasMore: history.hasMore, taskCards: (history.taskCards ?? []).map(taskCardView), ...taskNumberOf(history.task) })
     }
     if (args.action === 'message') {
       if (args.messageRef === undefined) throw new Error(recoveryFor('missing_message_ref').sentence({ refused: 'for action message' }))
@@ -473,7 +534,11 @@ const teamThread = defineTool({
     }
     if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'read' }))
     const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base })
-    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), ...taskNumberOf(read.task) })
+    // Only a discussion needs the extra history projection for its derived cards.
+    const cards = read.task === undefined
+      ? (host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 }).taskCards ?? []).map(taskCardView)
+      : []
+    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, reminders: [...read.reminders], ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), taskCards: cards, ...taskNumberOf(read.task) })
   },
 })
 
@@ -585,8 +650,8 @@ function threadResult(
   snapshot: Awaited<ReturnType<AgentTeam['readThreadForAgent']>> | ReturnType<AgentTeam['threadHistoryForAgent']>,
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
   facts: FactView[],
-  extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; taskNumber?: number; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string } } = {},
-): { workspaceId: string; projectRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; claims: ClaimView[]; facts: FactView[] } {
+  extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; taskNumber?: number; taskCards?: TaskCardView[]; reminders?: AgentTeamInboxReminder[]; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string } } = {},
+): { workspaceId: string; projectRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; taskCards?: TaskCardView[]; reminders?: AgentTeamInboxReminder[]; claims: ClaimView[]; facts: FactView[] } {
   return {
     workspaceId, projectRef: snapshot.anchor.projectRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,

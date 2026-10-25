@@ -424,6 +424,64 @@ describe('Agent Team Member lifecycle', () => {
     expect(unknown.error.message).toContain(homeId)
   })
 
+  it('wakes an idle accountable once for a private review reminder and consumes it on the Task read', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-10-25T08:00:00Z'))
+      const adapter = new ScriptedAdapter()
+      const { ctx, workspaceId } = await realHarness(adapter)
+      const project = await ctx.agentTeam.createProject({ requestId: requestId('reminder-project'), workspaceId, name: 'engineering', description: '' })
+      const projectRef = project.project.projectRef
+      const added = await ctx.agentTeam.addMember({ requestId: requestId('reminder-add'), workspaceId, handle: 'builder', description: '', presetId: 'team-member', projectRefs: [projectRef] })
+      const memberId = added.status.member.memberId
+      const agent = ctx.agents.get(added.status.member.sessionId)!
+      const executor = await ctx.agentTeam.addMember({ requestId: requestId('reminder-executor-add'), workspaceId, handle: 'executor', description: '', presetId: 'team-member', projectRefs: [projectRef] })
+      const executorAgent = ctx.agents.get(executor.status.member.sessionId)!
+      await ctx.agentTeam.addProjectOwner({ requestId: requestId('reminder-owner'), workspaceId, projectRef, memberId })
+      const started = await ctx.agentTeam.startThread({ requestId: requestId('reminder-task'), workspaceId, projectRef, kind: 'task', body: 'Review this work', accountable: memberId })
+      if (started.kind !== 'committed' || started.task === undefined) throw new Error('Task did not start')
+      const read = await ctx.agentTeam.readThreadForAgent(executorAgent, { requestId: requestId('reminder-claim-read'), workspaceId, taskRef: started.task.taskRef })
+      const claimed = await ctx.agentTeam.changeClaimForAgent(executorAgent, { requestId: requestId('reminder-claim'), workspaceId, taskRef: started.task.taskRef,
+        action: 'claim', direction: 'implementation', baseRevision: read.thread.revision })
+      if (claimed.kind !== 'committed') throw new Error('Claim did not start')
+      const doneRead = await ctx.agentTeam.readThreadForAgent(executorAgent, { requestId: requestId('reminder-done-read'), workspaceId, taskRef: started.task.taskRef })
+      const done = await ctx.agentTeam.changeClaimForAgent(executorAgent, { requestId: requestId('reminder-done'), workspaceId, taskRef: started.task.taskRef,
+        action: 'done', claimRef: claimed.claim.claimRef, baseRevision: doneRead.thread.revision })
+      if (done.kind !== 'committed') throw new Error('Claim did not finish')
+      await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('reminder-owner-responsibility'), workspaceId, taskRef: started.task.taskRef })
+      await agent.whenIdle()
+      await vi.advanceTimersByTimeAsync(31 * 60_000)
+      expect(Date.now() - Date.parse(done.receipt.occurredAt)).toBeGreaterThanOrEqual(31 * 60_000)
+      adapter.enqueue(textResponse('Reviewed the reminder.'))
+      await ctx.agentTeam.inboxForAgent(agent, { workspaceId })
+      const reminderOperation = await vi.waitFor(() => {
+        const found = ctx.agentTeam['ledger']!['state'].ordered.find(operation => operation.kind === 'team/reminder-raised')
+        if (found === undefined) throw new Error('the event evaluation has not committed the reminder')
+        return found
+      }, { timeout: 10_000 })
+      expect(reminderOperation.kind).toBe('team/reminder-raised')
+      const request = await vi.waitFor(() => {
+        const found = adapter.requests.find(candidate => JSON.stringify(candidate.messages).includes('Team Task reminder'))
+        if (found === undefined) throw new Error('the private reminder did not wake the accountable Agent')
+        return found
+      }, { timeout: 10_000 })
+      expect(JSON.stringify(request.messages)).toContain('waiting for acceptance')
+      expect(JSON.stringify(request.messages)).toContain(started.task.taskRef)
+      await agent.whenIdle()
+      const inbox = ctx.agentTeam.inboxForAgent(agent, { workspaceId })
+      expect(inbox.items.find(item => item.task?.taskRef === started.task!.taskRef)?.reminders).toHaveLength(1)
+      const before = ctx.agentTeam.threadHistory({ workspaceId, taskRef: started.task.taskRef })
+      const consumed = await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('reminder-consume'), workspaceId, taskRef: started.task.taskRef })
+      expect(consumed.reminders).toHaveLength(1)
+      expect(ctx.agentTeam.threadHistory({ workspaceId, taskRef: started.task.taskRef }).facts).toEqual(before.facts)
+      expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId }).items.find(item => item.task?.taskRef === started.task!.taskRef)?.reminders ?? []).toEqual([])
+      await ctx.agentTeam.inboxForAgent(agent, { workspaceId })
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(ctx.agentTeam.inboxForAgent(agent, { workspaceId }).items.find(item => item.task?.taskRef === started.task!.taskRef)?.reminders ?? []).toEqual([])
+      ctx.agentTeam.validateLedger()
+    } finally { vi.useRealTimers() }
+  })
+
   it('every argument-shape rejection names the next action', async () => {
     const { ctx, workspaceId } = await realHarness()
     const project = await ctx.agentTeam.createProject({ requestId: requestId('shape-project'), workspaceId, name: 'engineering', description: 'Engineering work' })

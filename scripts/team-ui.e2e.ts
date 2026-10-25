@@ -2560,7 +2560,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const queueMentions = queue.items.reduce((sum, item) => sum + item.directCount, 0)
   await expect.poll(async () => await inboxPage.getByText(`${queue.items.length} 个 Thread`, { exact: true }).count()).toBe(1)
   await expect.poll(async () => await inboxPage.getByText(`${queueUnread} 条未读`, { exact: true }).count()).toBe(1)
-  await expect.poll(async () => await inboxPage.getByText(`${queueMentions} 条提及`, { exact: true }).count()).toBe(1)
+  await expect.poll(async () => await inboxPage.getByText(`${queueMentions} 条直接通知`, { exact: true }).count()).toBe(1)
   // The row time is the newest unread fact's instant: the ordinary reply advances
   // it past the mention.
   await expect.poll(async () => await inboxRow.locator('time').count()).toBe(1)
@@ -2573,9 +2573,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // to assistive tech; the row's visible text stays the Thread itself.
   const namedCapsule = inboxRow.locator('[data-team-count-badge]')
   const plainCapsule = plainRow.locator('[data-team-count-badge]')
-  await expect.poll(async () => await namedCapsule.getAttribute('aria-label')).toBe('2 条未读，其中 1 条提及')
+  await expect.poll(async () => await namedCapsule.getAttribute('aria-label')).toBe('2 条未读，其中 1 条直接通知')
   await expect.poll(async () => await plainCapsule.getAttribute('aria-label')).toBe('1 条未读')
-  expect(await namedCapsule.getAttribute('title')).toBe('2 条未读，其中 1 条提及')
+  expect(await namedCapsule.getAttribute('title')).toBe('2 条未读，其中 1 条直接通知')
   expect(await namedCapsule.textContent()).toBe('2')
   expect(await plainCapsule.textContent()).toBe('1')
   // A squeezed seat: provenance ellipsizes instead of folding to three lines,

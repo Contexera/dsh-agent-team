@@ -28,7 +28,7 @@ function inboxRow(workspaceId: string, threadRef: string, overrides: Record<stri
     newestActor: { memberId: 'member:iris', name: 'iris' },
     // Nor a roster to draw a Task's live owners: the Host resolves those too, and
     // an Inbox row leads with them the same way the Project feed's entry does.
-    liveClaimOwners: [],
+    liveClaimOwners: [], reminders: [],
     ...overrides,
   }
 }
@@ -119,8 +119,8 @@ describe('Team Inbox surfaces', () => {
     expect(actorOf(row)?.getAttribute('aria-label')).toBe('最新来自 @iris')
     const capsule = capsuleOf(row)!
     expect(capsule.textContent).toBe('1')
-    expect(capsule.getAttribute('aria-label')).toBe('1 条未读，其中 1 条提及')
-    expect(capsule.getAttribute('title')).toBe('1 条未读，其中 1 条提及')
+    expect(capsule.getAttribute('aria-label')).toBe('1 条未读，其中 1 条直接通知')
+    expect(capsule.getAttribute('title')).toBe('1 条未读，其中 1 条直接通知')
     expect(row.textContent).not.toContain('提及')
     expect(row.textContent).not.toContain('@1')
     expect(b.view.container.querySelector('[data-team-inbox] time')?.getAttribute('dateTime')).toBe('2026-09-13T04:00:00.000Z')
@@ -131,8 +131,26 @@ describe('Team Inbox surfaces', () => {
     expect(b.view.getByRole('heading', { name: '收件箱' })).toBeTruthy()
     expect(b.view.getByText('1 个 Thread')).toBeTruthy()
     expect(b.view.getByText('1 条未读')).toBeTruthy()
-    expect(b.view.getByText('1 条提及')).toBeTruthy()
+    expect(b.view.getByText('1 条直接通知')).toBeTruthy()
     await waitFor(() => expect(card.getAttribute('aria-current')).toBe('page'))
+    await b.runtime.dispose()
+  })
+
+  it('shows a private Task reminder as a direct notification without calling it a mention', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
+    const card = await b.view.findByRole('button', { name: '收件箱' })
+    await b.changeSubscriptionsReady()
+    b.seedInbox([inboxRow('w1', 'thread:reminder', {
+      reminders: [{ taskRef: 'task:1', kind: 'review-backlog', recipient: 'member:human', baselineSequence: 8, sequence: 9, occurredAt: '2026-09-13T04:00:00.000Z' }],
+    })])
+    await waitForEntryUnread(card, 1)
+    fireEvent.click(card)
+    const row = await b.view.findByRole('button', { name: /待验收提醒/ })
+    expect(row.textContent).toContain('请验收结果或说明还需修改的内容')
+    expect(row.textContent).not.toContain('Decision needed on the rollout')
+    expect(row.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Team 提醒')
+    expect(capsuleOf(row)?.getAttribute('aria-label')).toBe('1 条未读，其中 1 条直接通知')
+    expect(b.view.getByText('1 条直接通知')).toBeTruthy()
     await b.runtime.dispose()
   })
 
@@ -234,17 +252,17 @@ describe('Team Inbox surfaces', () => {
     // speak, and the row that merely moved keeps a hairline in the same geometry.
     expect(named.hasAttribute('data-named')).toBe(true)
     expect(ambient.hasAttribute('data-named')).toBe(false)
-    expect(capsuleOf(named)?.getAttribute('aria-label')).toBe('1 条未读，其中 1 条提及')
+    expect(capsuleOf(named)?.getAttribute('aria-label')).toBe('1 条未读，其中 1 条直接通知')
     expect(capsuleOf(ambient)?.getAttribute('aria-label')).toBe('4 条未读')
     expect(ambient.textContent).not.toContain('提及')
     // A queue's counts are unbounded; the capsule is not.
     expect(capsuleOf(capped)?.textContent).toBe('99+')
-    expect(capsuleOf(capped)?.getAttribute('aria-label')).toBe('150 条未读，其中 3 条提及')
+    expect(capsuleOf(capped)?.getAttribute('aria-label')).toBe('150 条未读，其中 3 条直接通知')
     // The header counts the whole slice and drops the mention segment when the
     // queue holds no mention at all.
     expect(b.view.getByText('3 个 Thread')).toBeTruthy()
     expect(b.view.getByText('155 条未读')).toBeTruthy()
-    expect(b.view.getByText('4 条提及')).toBeTruthy()
+    expect(b.view.getByText('4 条直接通知')).toBeTruthy()
     await b.runtime.dispose()
   })
 
@@ -271,7 +289,7 @@ describe('Team Inbox surfaces', () => {
     expect(named.hasAttribute('data-named')).toBe(true)
     expect(ambientMain.hasAttribute('data-named')).toBe(false)
     expect(capsuleOf(named)?.getAttribute('data-team-count-badge')).toBe('solid')
-    expect(capsuleOf(named)?.getAttribute('aria-label')).toBe('5 条未读，其中 2 条提及')
+    expect(capsuleOf(named)?.getAttribute('aria-label')).toBe('5 条未读，其中 2 条直接通知')
     expect(capsuleOf(ambientMain)?.getAttribute('data-team-count-badge')).toBe('hairline')
     expect(capsuleOf(ambientMain)?.getAttribute('aria-label')).toBe('3 条未读')
     expect(named.textContent).toContain('@human 晚上发版吗')
@@ -342,7 +360,7 @@ describe('Team Inbox surfaces', () => {
     fireEvent.click(card)
     expect(await b.view.findByText('1 个 Thread')).toBeTruthy()
     expect(b.view.getByText('2 条未读')).toBeTruthy()
-    expect(b.view.queryByText(/条提及/)).toBeNull()
+    expect(b.view.queryByText(/条直接通知/)).toBeNull()
     await b.runtime.dispose()
   })
 

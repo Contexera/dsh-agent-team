@@ -565,12 +565,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   /** One derived Task card: the discussion's own projection of work it spawned, jumping to the Task Thread. */
   const renderTaskCard = (card: AgentTeamThreadTaskCard): ReactNode => {
     const accountableName = memberName(card.accountable)
+    const accountableSuspended = members.some(status => status.member.memberId === card.accountable && status.member.state === 'suspended')
     return <button type="button" key={`task-card-${card.taskRef}`} className={threadCss.derivedTaskCard}
       onClick={() => selectThread(card.threadRef, projectRef, card.taskRef, card.taskNumber)}>
       <TeamStateDot size={8} state={taskStatusDot(card.status)} />
       <span className={threadCss.derivedTaskCardTitle}>{t('derivedTaskCard', { number: card.taskNumber })}</span>
       <span className={threadCss.derivedTaskCardSubject} title={card.subject}>{card.subject}</span>
-      <span className={threadCss.derivedTaskCardMeta}>{formatTaskStatus(card.status, t)} · {accountableName}</span>
+      <span className={threadCss.derivedTaskCardMeta}>{formatTaskStatus(card.status, t)} · {accountableName}{accountableSuspended ? ` · ${t('boardAccountableSuspended')}` : ''}</span>
     </button>
   }
 

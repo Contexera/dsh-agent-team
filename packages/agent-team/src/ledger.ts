@@ -107,6 +107,8 @@ import type {
   AgentTeamReplyRequest,
   AgentTeamReplyResult,
   AgentTeamRequestId,
+  AgentTeamReminderMarker,
+  AgentTeamReminderRaisedOperation,
   AgentTeamResolvedMessageRef,
   AgentTeamReadMessageRequest,
   AgentTeamReadMessageResult,
@@ -164,6 +166,7 @@ import type {
 import { formatTeamTimestamp } from './time-format.ts'
 import { resolveBodyMentions } from './mentions.ts'
 import { recoveryFor } from './recovery-hints.ts'
+import { planTaskReminders } from './task-reminders.ts'
 import type { AgentTeamBodyMentionCandidate } from './mentions.ts'
 
 /** Stable Human Member identity shared by every replay of one dshHome Team. */
@@ -392,6 +395,7 @@ interface PreparedReadReceipt {
   readonly task?: AgentTeamTask | undefined
   readonly thread: AgentTeamThread
   readonly unread: readonly AgentTeamThreadReadFact[]
+  readonly reminders: readonly import('./types/requests-results.ts').AgentTeamInboxReminder[]
   readonly attentionBefore?: AgentTeamThreadAttention | undefined
   readonly readThroughSequence: number
   readonly attention?: AgentTeamThreadAttention | undefined
@@ -425,10 +429,16 @@ interface Projection {
   readonly attention: Map<string, AgentTeamThreadAttention>
   readonly directMarkers: Map<string, AgentTeamDirectMarker>
   readonly activityMarkers: Map<string, AgentTeamActivityMarker>
+  readonly reminderMarkers: Map<string, AgentTeamReminderMarker>
+  /** Complete reminder episodes, including consumed markers, for durable deduplication. */
+  readonly reminderEpisodes: Map<string, AgentTeamReminderRaisedOperation>
+  /** Current Task status and the operation that entered it; ordinary replies do not move this baseline. */
+  readonly taskStatusBaselines: Map<AgentTeamTaskRef, { readonly status: AgentTeamTask['status']; readonly sequence: number }>
   /** Derived read indexes; rebuilt by replay, never a second durable authority. */
   readonly orderedFacts: AgentTeamThreadFact[]
   /** Claims per Task, in the order `claims` first took them: the bucket that keeps a per-Task read from walking every Claim. */
   readonly claimsByTask: Map<AgentTeamTaskRef, AgentTeamClaim[]>
+  readonly claimCreatedSequenceByRef: Map<AgentTeamClaimRef, number>
   readonly factsByThread: Map<AgentTeamThreadRef, AgentTeamThreadFact[]>
   /** Owning Project of each Thread, established by the anchor Message and immutable afterwards. */
   readonly projectRefByThread: Map<AgentTeamThreadRef, AgentTeamProjectRef>
@@ -452,6 +462,7 @@ interface Projection {
   readonly directMarkersByMember: Map<AgentTeamMemberId, Map<AgentTeamThreadRef, AgentTeamDirectMarker[]>>
   /** Activity markers bucketed per recipient Member and Thread, kept sorted by sequence. */
   readonly activityMarkersByMember: Map<AgentTeamMemberId, Map<AgentTeamThreadRef, AgentTeamActivityMarker[]>>
+  readonly reminderMarkersByMember: Map<AgentTeamMemberId, Map<AgentTeamThreadRef, AgentTeamReminderMarker[]>>
   /** Replay-order Attention observations per Thread, appended by committed Inbox deltas only. */
   readonly observationsByThread: Map<AgentTeamThreadRef, AgentTeamAttentionObservation[]>
   /** Rules version the next record is validated under: the newest marker replayed so far, else 1. */
@@ -474,7 +485,7 @@ interface Projection {
 }
 
 /** Kinds a rules-version-1 segment rejects (owner operations carry their own check), and the one kind version 2 stops writing. */
-const V2_ONLY_KINDS: readonly string[] = ['team/main-message-posted', 'team/main-stream-read', 'team/thread-started', 'team/task-accountable-changed']
+const V2_ONLY_KINDS: readonly string[] = ['team/main-message-posted', 'team/main-stream-read', 'team/thread-started', 'team/task-accountable-changed', 'team/reminder-raised']
 const REPLACED_AT_V2_KINDS: readonly string[] = ['team/message-sent']
 
 /** One entry of a reader's unread Main stream: why it is unread (ordinary owner unread, a marker, or both). */
@@ -520,12 +531,12 @@ function isAuditOnlyOperation(operation: AgentTeamOperation): operation is Extra
 function emptyProjection(): Projection {
   return { byRequest: new Map(), byOperation: new Map(), ordered: [], occurredAtBySequence: new Map(), projects: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
     claims: new Map(), tasks: new Map(), threads: new Map(), attention: new Map(), directMarkers: new Map(), activityMarkers: new Map(),
-    orderedFacts: [], claimsByTask: new Map(), factsByThread: new Map(), projectRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
+    reminderMarkers: new Map(), reminderEpisodes: new Map(), taskStatusBaselines: new Map(), orderedFacts: [], claimsByTask: new Map(), claimCreatedSequenceByRef: new Map(), factsByThread: new Map(), projectRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
     messagesByRef: new Map(),
     attentionByThread: new Map(), sessionTransitions: new Map(),
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
-    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
+    directMarkersByMember: new Map(), activityMarkersByMember: new Map(), reminderMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
     mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainWatermarks: new Map(), humanOwnerFloor: 0 }
 }
 
@@ -570,7 +581,16 @@ function isEmptyInboxDelta(delta: AgentTeamInboxDelta): boolean {
   return delta.attention.set.length === 0 && delta.attention.removed.length === 0
     && delta.directMarkers.added.length === 0 && delta.directMarkers.removed.length === 0
     && delta.activityMarkers.added.length === 0 && delta.activityMarkers.removed.length === 0
+    && (delta.reminderMarkers === undefined || (delta.reminderMarkers.added.length === 0 && delta.reminderMarkers.removed.length === 0))
     && (delta.mainMarkers === undefined || (delta.mainMarkers.added.length === 0 && delta.mainMarkers.removed.length === 0))
+}
+
+function reminderMarkerKey(marker: AgentTeamReminderMarker): string {
+  return `${marker.memberId}|${marker.taskRef}|${marker.kind}|${marker.baselineSequence}`
+}
+
+function reminderEpisodeKey(taskRef: AgentTeamTaskRef, kind: AgentTeamReminderMarker['kind'], recipient: AgentTeamMemberId, baselineSequence: number): string {
+  return `${taskRef}|${kind}|${recipient}|${baselineSequence}`
 }
 
 function mainMarkerKey(marker: AgentTeamMainMarker): string {
@@ -664,6 +684,72 @@ export class AgentTeamLedger {
   /** Current human display name for @ matching and uniqueness checks. */
   humanDisplayHandle(): string {
     return this.humanHandle
+  }
+
+  /** Read-only inputs for one event-evaluated reminder pass. */
+  reminderFacts(): readonly import('./task-reminders.ts').ReminderTaskFacts[] {
+    return Object.freeze([...this.state.tasks.values()].filter(task => task.resolution === 'open').map(task => {
+      const latest = this.state.factsByThread.get(task.threadRef)?.at(-1)
+      const statusBaseline = this.state.taskStatusBaselines.get(task.taskRef)
+      if (latest === undefined || statusBaseline === undefined) throw new Error('invalid Task reminder baseline')
+      return Object.freeze({ task, projectActive: this.state.projects.get(task.projectRef)?.state === 'active',
+        statusBaselineSequence: statusBaseline.sequence,
+        statusBaselineOccurredAt: this.state.occurredAtBySequence.get(statusBaseline.sequence) ?? '',
+        latestPublicSequence: latest.sequence,
+        latestPublicOccurredAt: latest.occurredAt,
+        claims: Object.freeze((this.state.claimsByTask.get(task.taskRef) ?? []).map(claim => Object.freeze({ claim,
+          createdSequence: this.state.claimCreatedSequenceByRef.get(claim.claimRef) ?? latest.sequence }))),
+      })
+    }))
+  }
+
+  heldTaskClaim(taskRef: AgentTeamTaskRef, memberId: AgentTeamMemberId): boolean {
+    return this.heldTaskClaimFrom(this.state, taskRef, memberId)
+  }
+
+  reminderEpisodeExists(taskRef: AgentTeamTaskRef, kind: import('./task-reminders.ts').ReminderKind,
+    recipient: AgentTeamMemberId, baselineSequence: number): boolean {
+    return this.state.reminderEpisodes.has(reminderEpisodeKey(taskRef, kind, recipient, baselineSequence))
+  }
+
+  hasUnreadResponsibility(taskRef: AgentTeamTaskRef, recipient: AgentTeamMemberId): boolean {
+    const threadRef = this.state.tasks.get(taskRef)?.threadRef
+    return threadRef !== undefined && this.activityMarkersForFrom(this.state, recipient, threadRef).length > 0
+  }
+
+  planReminders(nowMs: number, idleMs: (memberId: AgentTeamMemberId) => number | undefined,
+    taskRef?: AgentTeamTaskRef): readonly import('./task-reminders.ts').ReminderCandidate[] {
+    return planTaskReminders({ nowMs, tasks: this.reminderFacts().filter(facts => taskRef === undefined || facts.task.taskRef === taskRef),
+      isOwner: (projectRef, memberId) => memberId === AGENT_TEAM_HUMAN_MEMBER_ID || this.projectOwnerIds(projectRef).includes(memberId),
+      isAvailable: memberId => memberId === AGENT_TEAM_HUMAN_MEMBER_ID || this.getMember(memberId)?.state === 'enabled',
+      idleMs, heldEver: (taskRef, memberId) => this.heldTaskClaim(taskRef, memberId),
+      episodeExists: (taskRef, kind, recipient, baselineSequence) => this.reminderEpisodeExists(taskRef, kind, recipient, baselineSequence),
+      hasUnreadResponsibility: (taskRef, recipient) => this.hasUnreadResponsibility(taskRef, recipient) })
+  }
+
+  /** Recheck the whole condition after earlier writes in the queue; a stale baseline or recipient is not committable. */
+  raiseReminder(candidate: import('./task-reminders.ts').ReminderCandidate, nowMs: number,
+    idleMs: (memberId: AgentTeamMemberId) => number | undefined): Promise<AgentTeamOperationReceipt | undefined> {
+    return this.enqueue(async () => {
+      const { taskRef, kind, recipient, baselineSequence } = candidate
+      const candidateKey = reminderEpisodeKey(taskRef, kind, recipient, baselineSequence)
+      if (!this.planReminders(nowMs, idleMs, taskRef).some(current => reminderEpisodeKey(current.taskRef, current.kind, current.recipient, current.baselineSequence) === candidateKey)) return undefined
+      const task = this.state.tasks.get(taskRef)
+      const project = task === undefined ? undefined : this.state.projects.get(task.projectRef)
+      if (task === undefined || project === undefined || project.state !== 'active'
+        || (kind === 'review-backlog' ? task.status !== 'in_review' : task.status !== 'in_progress')) return undefined
+      const sequence = this.nextSequence()
+      const marker: AgentTeamReminderMarker = Object.freeze({ memberId: recipient, threadRef: task.threadRef, taskRef, kind, baselineSequence, sequence })
+      const requestId = `agent-team:reminder:${taskRef}:${kind}:${recipient}:${baselineSequence}` as AgentTeamRequestId
+      const operation: AgentTeamReminderRaisedOperation = Object.freeze({
+        ...this.operationBase({ requestId, actor: HOST_ACTOR }, sequence), kind: 'team/reminder-raised',
+        data: Object.freeze({ workspaceId: project.workspaceId, taskRef, kind, recipient, baselineSequence,
+          inbox: this.inboxDelta([], [], [], [], [], [], [], [], [marker]) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.receipt(operation)
+    })
   }
 
   /**
@@ -1042,7 +1128,7 @@ export class AgentTeamLedger {
       const { tasks, threads } = this.mergeResponsibilityReturn(this.tasksForClaims(releasedClaims, projectedClaims), this.threadsForActivities(activities), returned)
       const cleanup = this.removeMemberThreadInbox(member.memberId, threadRefs, this.workspaceProjectRefsFrom(this.state, request.workspaceId))
       const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [])
+        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
       const operation: AgentTeamMemberWorkspaceLeftOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/member-workspace-left',
         data: Object.freeze({ workspaceId: request.workspaceId, memberId: member.memberId,
@@ -1085,7 +1171,7 @@ export class AgentTeamLedger {
       const { tasks, threads } = this.mergeResponsibilityReturn(this.tasksForClaims(releasedClaims, nextClaims), this.threadsForActivities(activities), returned)
       const cleanup = this.projectArchivalInbox(threadRefs, project.projectRef)
       const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [])
+        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
       const operation: AgentTeamProjectArchivedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/project-archived',
         data: Object.freeze({ workspaceId: request.workspaceId, project: nextProject,
@@ -1538,7 +1624,7 @@ export class AgentTeamLedger {
         ? this.closeThreadInbox(activity, thread.threadRef)
         : request.action === 'reopen'
           ? this.reopenThreadInbox(activity, thread.threadRef)
-          : this.acceptThreadInbox(activity, thread.threadRef, acceptedClaims.map(claim => claim.owner))
+          : this.withReminderCleanup(this.acceptThreadInbox(activity, thread.threadRef, acceptedClaims.map(claim => claim.owner)), this.state, thread.threadRef)
       const operation: AgentTeamTaskChangedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/task-changed',
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision,
@@ -1572,7 +1658,7 @@ export class AgentTeamLedger {
       const threadRefs = new Set(this.state.threads.keys())
       const cleanup = this.removeMemberThreadInbox(member.memberId, threadRefs)
       const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [])
+        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
       const operation: AgentTeamMemberRemovedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/member-removed',
         data: Object.freeze({ member: nextMember, claims: Object.freeze(releasedClaims), activities, transfers: returned.transfers, tasks, threads, inbox }),
@@ -1613,7 +1699,7 @@ export class AgentTeamLedger {
       const threadRefs = new Set(this.state.threads.keys())
       const cleanup = this.removeMemberThreadInbox(member.memberId, threadRefs)
       const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [])
+        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
       const operation: AgentTeamMemberArchivedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/member-archived',
         data: Object.freeze({ member: nextMember, claims: Object.freeze(releasedClaims), activities, transfers: returned.transfers, tasks, threads, inbox }),
@@ -1754,7 +1840,9 @@ export class AgentTeamLedger {
     // this response returns.
     type Candidate = { readonly workspaceId: WorkspaceId; readonly projectRef: AgentTeamProjectRef; readonly projectName: string
       readonly task?: AgentTeamTask; readonly taskNumber?: number; readonly thread: AgentTeamThread
-      readonly unreadCount: number; readonly directCount: number; readonly newest: AgentTeamThreadFact
+      readonly unreadCount: number; readonly directCount: number
+      readonly newestSequence: number; readonly newestOccurredAt: string; readonly newestActor: AgentTeamInboxActor
+      readonly reminders: readonly import('./types/requests-results.ts').AgentTeamInboxReminder[]
       readonly attention?: AgentTeamThreadAttention }
     const candidates: Candidate[] = []
     for (const threadRef of this.inboxCandidateThreads(authorized.memberId)) {
@@ -1768,28 +1856,33 @@ export class AgentTeamLedger {
       const workspaceId = project.workspaceId
       if (authorized.kind === 'member' && !this.isProjectMember(projectRef, authorized.memberId)) continue
       const unread = this.unreadFor(authorized.memberId, thread.threadRef)
-      if (unread.length === 0) continue
+      const reminders = this.remindersFor(authorized.memberId, thread.threadRef)
+      if (unread.length === 0 && reminders.length === 0) continue
       unreadThreads.add(thread.threadRef)
       const task = thread.taskRef === undefined ? undefined : this.state.tasks.get(thread.taskRef)
-      const directCount = unread.filter(item => item.direct).length
+      const directCount = unread.filter(item => item.direct).length + reminders.length
       const attention = this.attentionFor(authorized.memberId, thread.threadRef)
-      // Same snapshot, same source as newestSequence: the instant hangs off
-      // the newest unread fact itself, never a second lookup that could
-      // observe a different commit between the two reads.
-      const newest = unread.at(-1)!.fact
+      const newest = unread.at(-1)?.fact
+      const latestReminder = reminders.at(-1)
+      const reminderIsNewest = latestReminder !== undefined && latestReminder.sequence > (newest?.sequence ?? 0)
+      const newestSequence = reminderIsNewest ? latestReminder.sequence : newest?.sequence ?? latestReminder?.sequence ?? 0
+      const newestOccurredAt = reminderIsNewest ? latestReminder.occurredAt : newest?.occurredAt ?? latestReminder?.occurredAt ?? ''
+      const newestActor = reminderIsNewest || newest === undefined
+        ? Object.freeze({ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, name: 'Agent Team' }) : this.inboxActorFor(newest)
       const taskNumber = task === undefined ? undefined : taskNumbers.get(task.taskRef)
       candidates.push({ workspaceId, projectRef, projectName: project.name,
         ...(task === undefined ? {} : { task }), ...(taskNumber === undefined ? {} : { taskNumber }), thread,
-        unreadCount: unread.length, directCount, newest, ...(attention === undefined ? {} : { attention }) })
+        unreadCount: unread.length + reminders.length, directCount, newestSequence, newestOccurredAt, newestActor, reminders,
+        ...(attention === undefined ? {} : { attention }) })
     }
-    candidates.sort((left, right) => right.directCount - left.directCount || right.newest.sequence - left.newest.sequence || left.thread.threadRef.localeCompare(right.thread.threadRef))
+    candidates.sort((left, right) => right.directCount - left.directCount || right.newestSequence - left.newestSequence || left.thread.threadRef.localeCompare(right.thread.threadRef))
     const selected = candidates.slice(0, limit).map(candidate => Object.freeze({ workspaceId: candidate.workspaceId, projectRef: candidate.projectRef,
       projectName: candidate.projectName, ...(candidate.task === undefined ? {} : { task: candidate.task }),
       ...(candidate.taskNumber === undefined ? {} : { taskNumber: candidate.taskNumber }), thread: candidate.thread,
-      unreadCount: candidate.unreadCount, directCount: candidate.directCount,
+      unreadCount: candidate.unreadCount, directCount: candidate.directCount, reminders: candidate.reminders,
       previewText: boundedOpeningLine(this.threadAnchor(candidate.thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
-      newestSequence: candidate.newest.sequence, newestOccurredAt: candidate.newest.occurredAt,
-      newestActor: this.inboxActorFor(candidate.newest), liveClaimOwners: this.liveClaimOwners(candidate.task),
+      newestSequence: candidate.newestSequence, newestOccurredAt: candidate.newestOccurredAt,
+      newestActor: candidate.newestActor, liveClaimOwners: this.liveClaimOwners(candidate.task),
       ...(candidate.attention === undefined ? {} : { attention: candidate.attention }) }))
     const recent = authorized.kind === 'human'
       ? this.recentInboxItems(authorized.memberId, workspaceIds[0]!, unreadThreads, taskNumbers)
@@ -1837,7 +1930,10 @@ export class AgentTeamLedger {
       const item: AgentTeamTaskBoardItem = Object.freeze({ workspaceId: project.workspaceId, projectRef: project.projectRef, projectName: project.name,
         task, taskNumber: taskNumbers.get(task.taskRef) ?? 0, threadRef: task.threadRef,
         subject: boundedOpeningLine(this.threadAnchor(task.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
-        liveClaimOwners: this.liveClaimOwners(task), accountableOwner: this.memberActor(task.accountable),
+        liveClaimOwners: this.liveClaimOwners(task), accountableOwner: {
+          ...this.memberActor(task.accountable),
+          ...(this.state.members.get(task.accountable)?.state === undefined ? {} : { state: this.state.members.get(task.accountable)!.state }),
+        },
         lastActivitySequence: newest.sequence, lastActivityAt: newest.occurredAt,
         relation: accountable ? 'accountable' : executor ? 'executor' : authorized.kind === 'human' || this.ownerSinceFrom(this.state, task.projectRef, memberId) !== undefined ? 'project-owner' : 'none',
         needsAcceptance: task.status === 'in_review' && (authorized.kind === 'human' || this.isProjectOwnerFrom(this.state, task.projectRef, memberId)) && !this.heldTaskClaimFrom(this.state, task.taskRef, memberId) })
@@ -1941,7 +2037,7 @@ export class AgentTeamLedger {
         unreadCount: 0, directCount: 0,
         previewText: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
         newestSequence: newest.sequence, newestOccurredAt: newest.occurredAt,
-        newestActor: this.inboxActorFor(newest), liveClaimOwners: this.liveClaimOwners(task) }))
+        newestActor: this.inboxActorFor(newest), liveClaimOwners: this.liveClaimOwners(task), reminders: [] }))
     }
     recent.sort((left, right) => right.newestSequence - left.newestSequence || left.thread.threadRef.localeCompare(right.thread.threadRef))
     return Object.freeze(recent.slice(0, RECENT_INBOX_LIMIT))
@@ -1955,7 +2051,7 @@ export class AgentTeamLedger {
    */
   private inboxCandidateThreads(memberId: AgentTeamMemberId): Iterable<AgentTeamThreadRef> {
     const refs = new Set<AgentTeamThreadRef>()
-    for (const source of [this.state.attentionThreadsByMember.get(memberId), this.state.directMarkersByMember.get(memberId), this.state.activityMarkersByMember.get(memberId)]) {
+    for (const source of [this.state.attentionThreadsByMember.get(memberId), this.state.directMarkersByMember.get(memberId), this.state.activityMarkersByMember.get(memberId), this.state.reminderMarkersByMember.get(memberId)]) {
       for (const threadRef of source?.keys() ?? []) refs.add(threadRef)
     }
     return refs
@@ -1965,13 +2061,14 @@ export class AgentTeamLedger {
   notificationFacts(memberId: AgentTeamMemberId, request?: AgentTeamInboxRequest): readonly {
     readonly item: AgentTeamInboxItem
     readonly facts: readonly AgentTeamThreadReadFact[]
+    readonly reminders: readonly import('./types/requests-results.ts').AgentTeamInboxReminder[]
   }[] {
     const member = this.requireMember(memberId)
     if (request !== undefined && !this.participatesIn(memberId, request.workspaceId)) throw new Error('Member cannot inspect another Workspace')
     const actor = { kind: 'member' as const, memberId, handle: member.handle }
     const inbox = request === undefined ? this.memberInbox(actor, {}) : this.inbox(actor, request)
     return Object.freeze(inbox.items.map(item => Object.freeze({ item,
-      facts: this.unreadFor(memberId, item.thread.threadRef) })))
+      facts: this.unreadFor(memberId, item.thread.threadRef), reminders: item.reminders })))
   }
 
   readThread(request: AgentTeamAuthorizedThreadReadRequest): Promise<AgentTeamThreadReadOutcome> {
@@ -2509,6 +2606,10 @@ export class AgentTeamLedger {
         return [{ kind: 'project', projectRef: operation.data.task.projectRef }, { kind: 'thread', threadRef: operation.data.thread.threadRef }]
       case 'team/thread-attention-changed':
         return [{ kind: 'thread', threadRef: operation.data.thread.threadRef }]
+      case 'team/reminder-raised': {
+        const task = this.state.tasks.get(operation.data.taskRef)
+        return task === undefined ? [] : [{ kind: 'thread', threadRef: task.threadRef }]
+      }
       case 'team/thread-read':
         // A read advances only the reader's private watermark; no projection
         // visible to other participants changes, so nobody is woken.
@@ -2547,6 +2648,8 @@ export class AgentTeamLedger {
       for (const marker of delta.directMarkers.removed) members.add(marker.memberId)
       for (const marker of delta.activityMarkers.added) members.add(marker.memberId)
       for (const marker of delta.activityMarkers.removed) members.add(marker.memberId)
+      for (const marker of delta.reminderMarkers?.added ?? []) members.add(marker.memberId)
+      for (const marker of delta.reminderMarkers?.removed ?? []) members.add(marker.memberId)
       for (const marker of delta.mainMarkers?.added ?? []) members.add(marker.memberId)
       for (const marker of delta.mainMarkers?.removed ?? []) members.add(marker.memberId)
     }
@@ -2606,6 +2709,7 @@ export class AgentTeamLedger {
       case 'team/member-updated':
       case 'team/project-member-added':
       case 'team/thread-read':
+      case 'team/reminder-raised':
       case 'team/main-message-posted':
       case 'team/main-stream-read':
       case 'team/dm-sent':
@@ -3175,13 +3279,36 @@ export class AgentTeamLedger {
         ? this.closeThreadInboxFrom(projection, activity, thread.threadRef)
         : activity.kind === 'reopen'
           ? this.reopenThreadInboxFrom(projection, activity, thread.threadRef)
-          // Presence of the discriminator picks the wake rule: new accepts
-          // wake every done owner; legacy records keep the completed-only
-          // delta exactly as recorded.
-          : this.acceptThreadInboxFrom(projection, activity, thread.threadRef,
-            activity.acceptedClaimRefs !== undefined ? activity.acceptedClaimRefs : expectedCompletedClaimRefs)
+          : this.withReminderCleanup(this.acceptThreadInboxFrom(projection, activity, thread.threadRef,
+            activity.acceptedClaimRefs !== undefined ? activity.acceptedClaimRefs : expectedCompletedClaimRefs), projection, thread.threadRef)
       if (!isDeepStrictEqual(operation.data.inbox, expectedInbox)) throw new Error('invalid Task inbox projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [activity])
+      return
+    }
+    if (operation.kind === 'team/reminder-raised') {
+      if (operation.actor.kind !== 'host') throw new Error('invalid Task reminder authority')
+      const { taskRef, kind, recipient, baselineSequence, inbox } = operation.data
+      const task = projection.tasks.get(taskRef)
+      const thread = task === undefined ? undefined : projection.threads.get(task.threadRef)
+      const project = task === undefined ? undefined : projection.projects.get(task.projectRef)
+      const marker = inbox.reminderMarkers?.added[0]
+      const key = reminderEpisodeKey(taskRef, kind, recipient, baselineSequence)
+      if (task === undefined || thread === undefined || project === undefined || project.workspaceId !== operation.data.workspaceId
+        || (kind === 'review-backlog' ? task.status !== 'in_review' : task.status !== 'in_progress')
+        || projection.reminderEpisodes.has(key) || baselineSequence >= operation.sequence
+        || !projection.occurredAtBySequence.has(baselineSequence)
+        || (kind === 'review-backlog'
+          ? projection.taskStatusBaselines.get(taskRef)?.sequence !== baselineSequence
+          : baselineSequence !== Math.max(projection.factsByThread.get(task.threadRef)?.at(-1)?.sequence ?? 0,
+            ...(projection.claimsByTask.get(taskRef) ?? []).filter(claim => claim.state === 'active')
+              .map(claim => projection.claimCreatedSequenceByRef.get(claim.claimRef) ?? 0)))
+        || (recipient !== humanMemberId && (projection.members.get(recipient)?.state === undefined || !this.participatesInFrom(projection, recipient, project.workspaceId)))
+        || marker === undefined || inbox.reminderMarkers?.added.length !== 1 || inbox.reminderMarkers.removed.length !== 0
+        || !isDeepStrictEqual(marker, { memberId: recipient, threadRef: task.threadRef, taskRef, kind, baselineSequence, sequence: operation.sequence })
+        || !isDeepStrictEqual(inbox, this.inboxDelta([], [], [], [], [], [], [], [], [marker]))) {
+        throw new Error('invalid Task reminder projection')
+      }
+      this.validateInboxDelta(inbox, projection, refs)
       return
     }
     if (operation.kind === 'team/dm-sent') {
@@ -3273,6 +3400,17 @@ export class AgentTeamLedger {
         throw new Error('invalid activity marker removal')
       }
       activityMarkerKeys.add(key)
+    }
+    const reminderKeys = new Set<string>()
+    for (const marker of delta.reminderMarkers?.added ?? []) {
+      const key = reminderMarkerKey(marker)
+      if (reminderKeys.has(key) || projection.reminderMarkers.has(key)) throw new Error('invalid Task reminder marker addition')
+      reminderKeys.add(key)
+    }
+    for (const marker of delta.reminderMarkers?.removed ?? []) {
+      const key = reminderMarkerKey(marker)
+      if (reminderKeys.has(key) || !isDeepStrictEqual(projection.reminderMarkers.get(key), marker)) throw new Error('invalid Task reminder marker removal')
+      reminderKeys.add(key)
     }
     const mainKeys = new Set<string>()
     for (const marker of delta.mainMarkers?.added ?? []) {
@@ -3371,8 +3509,10 @@ export class AgentTeamLedger {
       .filter(marker => (memberId === undefined || marker.memberId === memberId) && threadRefs.has(marker.threadRef))
     const expectedActivityMarkers = [...projection.activityMarkers.values()]
       .filter(marker => (memberId === undefined || marker.memberId === memberId) && threadRefs.has(marker.threadRef))
+    const expectedReminderMarkers = [...projection.reminderMarkers.values()]
+      .filter(marker => (memberId === undefined || marker.memberId === memberId) && threadRefs.has(marker.threadRef))
     if (projection.rulesVersion < 2) {
-      const expectedInbox = this.inboxDelta([], expectedAttention, [], expectedMarkers, [], expectedActivityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs))
+      const expectedInbox = this.inboxDelta([], expectedAttention, [], expectedMarkers, [], expectedActivityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs), [], [])
       if (!isDeepStrictEqual(data.inbox, expectedInbox)) throw new Error('invalid Member inbox cleanup')
       this.validateInboxDelta(data.inbox, projection, refs)
       return
@@ -3382,7 +3522,7 @@ export class AgentTeamLedger {
     if (!isDeepStrictEqual(data.tasks, mergedTasks) || !isDeepStrictEqual(data.threads, mergedThreads)) throw new Error('invalid released Claim Task or Thread projection')
     this.validateAccountabilityReturns(data, returned, projection, refs)
     const expectedInbox = this.inboxDelta([], expectedAttention, [], expectedMarkers,
-      returned.markers, expectedActivityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs))
+      returned.markers, expectedActivityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs), [], expectedReminderMarkers)
     if (!this.sameInboxDelta(data.inbox, expectedInbox, data.transfers)) {
       throw new Error(memberId === undefined ? 'invalid Project archival inbox cleanup' : 'invalid Member inbox cleanup')
     }
@@ -3628,7 +3768,7 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/thread-promoted') {
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
-      target.tasks.set(operation.data.task.taskRef, operation.data.task)
+      this.recordTaskSnapshot(target, operation.data.task.taskRef, operation.data.task, operation.sequence)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
       this.recordTaskNumber(target, operation.data.task)
       this.recordAttentionObservations(target, operation, operation.data.inbox)
@@ -3639,7 +3779,7 @@ export class AgentTeamLedger {
       const { message, mentions } = operation.data
       this.recordMentions(target, message.messageRef, message.projectRef, mentions)
       this.appendMessageFact(target, message, mentions, message.occurredAt ?? operation.occurredAt)
-      if (operation.data.task !== undefined) target.tasks.set(operation.data.task.taskRef, operation.data.task)
+      if (operation.data.task !== undefined) this.recordTaskSnapshot(target, operation.data.task.taskRef, operation.data.task, operation.sequence)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
       if (message.topLevel) {
         target.projectRefByThread.set(message.threadRef, message.projectRef)
@@ -3661,7 +3801,7 @@ export class AgentTeamLedger {
       this.appendMessageFact(target, anchor, mentions, anchor.occurredAt ?? operation.occurredAt)
       if (operation.data.activity !== undefined) this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
       if (task !== undefined) {
-        target.tasks.set(task.taskRef, task)
+        this.recordTaskSnapshot(target, task.taskRef, task, operation.sequence)
         this.recordTaskNumber(target, task)
       }
       target.threads.set(thread.threadRef, thread)
@@ -3688,9 +3828,10 @@ export class AgentTeamLedger {
       return
     }
     if (operation.kind === 'team/claim-created' || operation.kind === 'team/claim-done' || operation.kind === 'team/claim-released') {
+      if (operation.kind === 'team/claim-created') target.claimCreatedSequenceByRef.set(operation.data.claim.claimRef, operation.sequence)
       this.upsertClaimKeepingPosition(target, operation.data.claim)
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
-      target.tasks.set(operation.data.task.taskRef, operation.data.task)
+      this.recordTaskSnapshot(target, operation.data.task.taskRef, operation.data.task, operation.sequence)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
       this.recordAttentionObservations(target, operation, operation.data.inbox)
       this.applyInboxDelta(target, operation.data.inbox)
@@ -3699,9 +3840,15 @@ export class AgentTeamLedger {
     if (operation.kind === 'team/task-changed' || operation.kind === 'team/task-accountable-changed') {
       if (operation.kind === 'team/task-changed') for (const claim of operation.data.claims) this.upsertClaimKeepingPosition(target, claim)
       this.appendActivityFact(target, operation.data.activity, operation.occurredAt)
-      target.tasks.set(operation.data.task.taskRef, operation.data.task)
+      this.recordTaskSnapshot(target, operation.data.task.taskRef, operation.data.task, operation.sequence)
       target.threads.set(operation.data.thread.threadRef, operation.data.thread)
       this.recordAttentionObservations(target, operation, operation.data.inbox)
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+    if (operation.kind === 'team/reminder-raised') {
+      const key = reminderEpisodeKey(operation.data.taskRef, operation.data.kind, operation.data.recipient, operation.data.baselineSequence)
+      target.reminderEpisodes.set(key, operation)
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
@@ -3727,7 +3874,7 @@ export class AgentTeamLedger {
   ): void {
     this.applyReleasedClaims(target, data.claims)
     this.applyReleasedActivities(target, [...data.activities, ...data.transfers], occurredAt)
-    this.applyReleasedTargets(target, data.tasks, data.threads)
+    this.applyReleasedTargets(target, data.tasks, data.threads, operation.sequence)
     this.applyReleasedInbox(target, operation, data.inbox)
   }
 
@@ -3739,8 +3886,8 @@ export class AgentTeamLedger {
     for (const activity of activities) this.appendActivityFact(target, activity, occurredAt)
   }
 
-  private applyReleasedTargets(target: Projection, tasks: readonly AgentTeamTask[], threads: readonly AgentTeamThread[]): void {
-    for (const task of tasks) target.tasks.set(task.taskRef, task)
+  private applyReleasedTargets(target: Projection, tasks: readonly AgentTeamTask[], threads: readonly AgentTeamThread[], sequence: number): void {
+    for (const task of tasks) this.recordTaskSnapshot(target, task.taskRef, task, sequence)
     for (const thread of threads) target.threads.set(thread.threadRef, thread)
   }
 
@@ -3897,6 +4044,14 @@ export class AgentTeamLedger {
       target.activityMarkers.set(this.activityMarkerKey(marker), marker)
       this.insertBucketedMarker(target.activityMarkersByMember, marker.memberId, marker.threadRef, marker)
     }
+    for (const marker of delta.reminderMarkers?.removed ?? []) {
+      target.reminderMarkers.delete(reminderMarkerKey(marker))
+      this.removeBucketedMarker(target.reminderMarkersByMember, marker.memberId, marker.threadRef, reminderMarkerKey(marker), reminderMarkerKey)
+    }
+    for (const marker of delta.reminderMarkers?.added ?? []) {
+      target.reminderMarkers.set(reminderMarkerKey(marker), marker)
+      this.insertBucketedMarker(target.reminderMarkersByMember, marker.memberId, marker.threadRef, marker)
+    }
     for (const marker of delta.mainMarkers?.removed ?? []) {
       target.mainMarkers.delete(mainMarkerKey(marker))
       this.removeBucketedMarker(target.mainMarkersByMember, marker.memberId, marker.projectRef, mainMarkerKey(marker), candidate => mainMarkerKey(candidate))
@@ -3918,6 +4073,12 @@ export class AgentTeamLedger {
     const named = target.mentionedByProject.get(projectRef) ?? new Set<AgentTeamMemberId>()
     for (const memberId of memberIds) named.add(memberId)
     target.mentionedByProject.set(projectRef, named)
+  }
+
+  private recordTaskSnapshot(target: Projection, taskRef: AgentTeamTaskRef, task: AgentTeamTask, sequence: number): void {
+    const previous = target.tasks.get(taskRef)
+    target.tasks.set(taskRef, task)
+    if (previous?.status !== task.status) target.taskStatusBaselines.set(taskRef, { status: task.status, sequence })
   }
 
   private appendMainSource(target: Projection, projectRef: AgentTeamProjectRef, source: MainSource): void {
@@ -4009,8 +4170,10 @@ export class AgentTeamLedger {
       .filter(marker => consumedDirectMarkers.has(this.directMarkerKey(marker)))
     const activityMarkers = this.activityMarkersForFrom(projection, memberId, thread.threadRef)
       .filter(marker => unreadFacts.some(item => item.fact.kind === 'activity' && item.fact.activity.activityRef === marker.activityRef))
-    const inbox = this.inboxDelta(nextAttention, [], [], consumed, [], activityMarkers)
+    const reminderMarkers = this.reminderMarkersForFrom(projection, memberId, thread.threadRef)
+    const inbox = this.inboxDelta(nextAttention, [], [], consumed, [], activityMarkers, [], [], [], reminderMarkers)
     return Object.freeze({ ...(task === undefined ? {} : { task }), thread, unread,
+      reminders: this.remindersFor(memberId, thread.threadRef),
       ...(attention === undefined ? {} : { attentionBefore: attention }), readThroughSequence,
       ...(attention === undefined ? {} : { attention: nextAttention[0] ?? attention }),
       consumedDirectMarkers: Object.freeze(consumed), inbox })
@@ -4124,7 +4287,11 @@ export class AgentTeamLedger {
     const activityKeys = new Set(this.activityMarkersForFrom(projection, memberId, threadRef).map(marker => this.activityMarkerKey(marker)))
     for (const marker of receipt.inbox.activityMarkers.removed) activityKeys.delete(this.activityMarkerKey(marker))
     for (const marker of receipt.inbox.activityMarkers.added) activityKeys.add(this.activityMarkerKey(marker))
-    let count = 0
+    let count = this.reminderMarkersForFrom(projection, memberId, threadRef)
+      .filter(marker => !receipt.inbox.reminderMarkers?.removed.some(removed => reminderMarkerKey(removed) === reminderMarkerKey(marker))).length
+    for (const marker of receipt.inbox.reminderMarkers?.added ?? []) {
+      if (!this.reminderMarkersForFrom(projection, memberId, threadRef).some(current => reminderMarkerKey(current) === reminderMarkerKey(marker))) count += 1
+    }
     for (const fact of this.threadFactsFrom(projection, threadRef)) {
       if (this.isUnreadFact(fact, memberId, threadRef, receipt.attention, directKeys, activityKeys)) count += 1
     }
@@ -4220,7 +4387,13 @@ export class AgentTeamLedger {
     const activityMarkers = [...recipients].map(memberId => Object.freeze({ memberId, threadRef,
       activityRef: activity.activityRef, sequence: activity.sequence }))
     return this.inboxDelta([], removed, [], activity.kind === 'close' ? [...projection.directMarkers.values()].filter(marker => marker.threadRef === threadRef) : [],
-      activityMarkers, activity.kind === 'close' ? [...projection.activityMarkers.values()].filter(marker => marker.threadRef === threadRef) : [])
+      activityMarkers, activity.kind === 'close' ? [...projection.activityMarkers.values()].filter(marker => marker.threadRef === threadRef) : [],
+      [], [], [], activity.kind === 'close' ? [...projection.reminderMarkers.values()].filter(marker => marker.threadRef === threadRef) : [])
+  }
+
+  private withReminderCleanup(delta: AgentTeamInboxDelta, projection: Projection, threadRef: AgentTeamThreadRef): AgentTeamInboxDelta {
+    const removed = [...projection.reminderMarkers.values()].filter(marker => marker.threadRef === threadRef)
+    return removed.length === 0 ? delta : Object.freeze({ ...delta, reminderMarkers: Object.freeze({ added: Object.freeze([]), removed: Object.freeze(removed) }) })
   }
 
   /**
@@ -4284,7 +4457,8 @@ export class AgentTeamLedger {
       .map(attention => Object.freeze({ memberId, threadRef: attention.threadRef }))
     const markers = [...projection.directMarkers.values()].filter(marker => marker.memberId === memberId && threadRefs.has(marker.threadRef))
     const activityMarkers = [...projection.activityMarkers.values()].filter(marker => marker.memberId === memberId && threadRefs.has(marker.threadRef))
-    return this.inboxDelta([], removed, [], markers, [], activityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs))
+    const reminders = [...projection.reminderMarkers.values()].filter(marker => marker.memberId === memberId && threadRefs.has(marker.threadRef))
+    return this.inboxDelta([], removed, [], markers, [], activityMarkers, [], this.mainMarkersToClear(projection, memberId, projectRefs), [], reminders)
   }
 
   /** Live Main stream markers a departure clears, in sequence order so write and replay derive the same list. */
@@ -4304,7 +4478,8 @@ export class AgentTeamLedger {
       .map(attention => Object.freeze({ memberId: attention.memberId, threadRef: attention.threadRef }))
     const markers = [...projection.directMarkers.values()].filter(marker => threadRefs.has(marker.threadRef))
     const activityMarkers = [...projection.activityMarkers.values()].filter(marker => threadRefs.has(marker.threadRef))
-    return this.inboxDelta([], removed, [], markers, [], activityMarkers, [], this.mainMarkersToClear(projection, undefined, new Set([projectRef])))
+    const reminders = [...projection.reminderMarkers.values()].filter(marker => threadRefs.has(marker.threadRef))
+    return this.inboxDelta([], removed, [], markers, [], activityMarkers, [], this.mainMarkersToClear(projection, undefined, new Set([projectRef])), [], reminders)
   }
 
   private inboxDelta(
@@ -4316,11 +4491,15 @@ export class AgentTeamLedger {
     removedActivityMarkers: readonly AgentTeamActivityMarker[] = [],
     addedMainMarkers: readonly AgentTeamMainMarker[] = [],
     removedMainMarkers: readonly AgentTeamMainMarker[] = [],
+    addedReminderMarkers: readonly AgentTeamReminderMarker[] = [],
+    removedReminderMarkers: readonly AgentTeamReminderMarker[] = [],
   ): AgentTeamInboxDelta {
     return Object.freeze({
       attention: Object.freeze({ set: Object.freeze(set), removed: Object.freeze(removed) }),
       directMarkers: Object.freeze({ added: Object.freeze(addedMarkers), removed: Object.freeze(removedMarkers) }),
       activityMarkers: Object.freeze({ added: Object.freeze(addedActivityMarkers), removed: Object.freeze(removedActivityMarkers) }),
+      ...(addedReminderMarkers.length === 0 && removedReminderMarkers.length === 0 ? {}
+        : { reminderMarkers: Object.freeze({ added: Object.freeze(addedReminderMarkers), removed: Object.freeze(removedReminderMarkers) }) }),
       // Absent unless it changes something: a rules-version-1 delta keeps its stored bytes.
       ...(addedMainMarkers.length === 0 && removedMainMarkers.length === 0 ? {}
         : { mainMarkers: Object.freeze({ added: Object.freeze(addedMainMarkers), removed: Object.freeze(removedMainMarkers) }) }),
@@ -4368,6 +4547,18 @@ export class AgentTeamLedger {
   private frozenMarkerSnapshot(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamDirectMarker[] {
     const markers = projection.directMarkersByMember.get(memberId)?.get(threadRef)
     return markers === undefined ? [] : Object.freeze([...markers])
+  }
+
+  private reminderMarkersForFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamReminderMarker[] {
+    const markers = projection.reminderMarkersByMember.get(memberId)?.get(threadRef)
+    return markers === undefined ? [] : Object.freeze([...markers])
+  }
+
+  private remindersFor(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly import('./types/requests-results.ts').AgentTeamInboxReminder[] {
+    return Object.freeze(this.reminderMarkersForFrom(this.state, memberId, threadRef).map(marker => Object.freeze({
+      taskRef: marker.taskRef, kind: marker.kind, recipient: marker.memberId, baselineSequence: marker.baselineSequence,
+      sequence: marker.sequence, occurredAt: this.state.occurredAtBySequence.get(marker.sequence) ?? '',
+    })))
   }
 
   private activityMarkersForFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamActivityMarker[] {
@@ -5779,7 +5970,7 @@ export class AgentTeamLedger {
       readThroughSequence: prepared.readThroughSequence, remainingUnreadCount: prepared.remainingUnreadCount,
       earlierFactCount: prepared.earlierFactCount,
       ...(prepared.attention === undefined ? {} : { attention: prepared.attention }),
-      consumedDirectMarkers: prepared.inbox.directMarkers.removed })
+      consumedDirectMarkers: prepared.inbox.directMarkers.removed, reminders: prepared.reminders })
   }
 
   private receipt(operation: AgentTeamOperation): AgentTeamOperationReceipt {

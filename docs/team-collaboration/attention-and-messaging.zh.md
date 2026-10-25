@@ -11,7 +11,7 @@ Attention active 时，三类事实会成为 ordinary unread facts。第一，�
 
 一个 Attention period 的首次 read 返回 Thread anchor、可选的 current Task 与 Claim snapshot。外加有限的 recent background 和有界 unread batch。Background 只用于定位，并标记为已读。`team_thread.history` 是唯一用于翻页查看更旧 Thread facts 的 tool。重新进入一个自己读过的 Thread 的 Member 拿不到 background。Member 在那里的定位只有 anchor 加本次 batch。中间那些 facts 要靠自己往回翻。
 
-Human Client 默认打开 Projects workspace。Human navigation 沿 Workspace → Project → Thread 进行。Task 是 taskful Thread 上的 card/header overlay，不是独立的 navigation level。Inbox（收件箱）是 Team 内的一个全局页。由侧栏卡片/窄轨图标进入，合并各 Workspace 的 Inbox 调用。读者看到整片未读，mention 只在其中计数。打开 Inbox 页不执行 Thread read。只有打开 Thread 才推进水位，并清 mention marker。打开 Thread 会执行 durable Human Thread read 并滚动到最后一条。有界 read 后若仍有 unread facts，Client 自动续读清零。不存在显式的 continue-reading action。
+Human Client 默认打开 Projects workspace。Human navigation 沿 Workspace → Project → Thread 进行。Task 是 taskful Thread 上的 card/header overlay，不是独立的 navigation level。Inbox（收件箱）是 Team 内的一个全局页。由侧栏卡片/窄轨图标进入，合并各 Workspace 的 Inbox 调用。读者看到整片未读，mention 只在其中计数。打开 Inbox 页不执行 Thread read。只有打开 Thread 才推进水位，并清除 direct marker 与私有 reminder marker。私有 Task 提醒是直接通知，不是 mention 或公开 Activity；查看 Inbox 或看板不会消费它。打开 Thread 会执行 durable Human Thread read 并滚动到最后一条。有界 read 后若仍有 unread facts，Client 自动续读清零。不存在显式的 continue-reading action。
 
 Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默认 50），`hasMore` 说明该页之外是否还有 Thread。Client 在列表结尾把这一判断渲染出来。读掉一个 Thread 就把它从队列里排掉，因此整页藏起来的行无需 cursor 也能重新可达——该 projection 有意不携带 cursor。
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.setConfig({ testTimeout: 30_000 })
-import { cleanup, fireEvent, within } from '@testing-library/react'
+import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
 
@@ -67,6 +67,22 @@ describe('Team Project board', () => {
     expect(b.view.getByRole('tab', { name: '主对话' }).getAttribute('aria-selected')).toBe('true')
     expect(b.view.getByRole('button', { name: /^打开 Task #1：/ })).toBeTruthy()
     expect(b.view.getByRole('textbox', { name: '消息内容' })).toBeTruthy()
+    await b.runtime.dispose()
+  })
+
+  it('discloses a suspended accountable owner instead of presenting the Task as normally staffed', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true,
+      seededMessages: [{ sender: 'human', body: '实现 API 网关', occurredAt: '2026-10-14T09:00:00.000Z' }] })
+    b.loadTaskBoard.mockImplementation(async () => ({ ok: true, value: { open: [{
+      workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering',
+      task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open', accountable: 'member:iris', sourceThreadRefs: [] },
+      taskNumber: 1, threadRef: 'thread:1', subject: '实现 API 网关', liveClaimOwners: [],
+      accountableOwner: { memberId: 'member:iris', name: 'Iris', state: 'suspended' },
+      lastActivitySequence: 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
+    }], finished: [] } }))
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.findByRole('tab', { name: '看板' }))
+    await waitFor(() => expect(b.view.getByText('负责人已暂停')).toBeTruthy())
     await b.runtime.dispose()
   })
 

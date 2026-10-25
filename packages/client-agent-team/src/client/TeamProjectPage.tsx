@@ -432,7 +432,9 @@ function ProjectionBoardCard({ item, unread, human, humanMemberId, t, onOpen }: 
   const task = item.task
   const taskNumber = item.taskNumber ?? 0
   const resolved = task.status === 'done' || task.status === 'closed'
-  const ownerLabel = task.accountable === humanMemberId ? t('boardAccountableYou') : t('boardAccountable', { name: item.accountableOwner?.name ?? task.accountable })
+  const ownerLabel = item.accountableOwner?.state === 'suspended'
+    ? t('boardAccountableSuspended')
+    : task.accountable === humanMemberId ? t('boardAccountableYou') : t('boardAccountable', { name: item.accountableOwner?.name ?? task.accountable })
   // For resolved work the newest fact is the resolution itself.
   const activityAt = item.lastActivityAt
   const namedOwners = namedAvatarOwners(item.liveClaimOwners, human)

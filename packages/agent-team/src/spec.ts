@@ -190,6 +190,15 @@ const activityMarkerSchema = z.object({
   sequence: z.number().int().positive(),
 }).strict()
 
+const reminderMarkerSchema = z.object({
+  memberId: memberIdSchema,
+  threadRef: threadRefSchema,
+  taskRef: taskRefSchema,
+  kind: z.enum(['review-backlog', 'stalled']),
+  baselineSequence: z.number().int().positive(),
+  sequence: z.number().int().positive(),
+}).strict()
+
 const mainMessageSchema = z.object({
   messageRef: messageRefSchema,
   projectRef: projectRefSchema,
@@ -230,6 +239,10 @@ const inboxDeltaSchema = z.object({
     added: z.array(activityMarkerSchema),
     removed: z.array(activityMarkerSchema),
   }).strict(),
+  reminderMarkers: z.object({
+    added: z.array(reminderMarkerSchema),
+    removed: z.array(reminderMarkerSchema),
+  }).strict().optional(),
   mainMarkers: z.object({
     added: z.array(mainMarkerSchema),
     removed: z.array(mainMarkerSchema),
@@ -617,6 +630,19 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       activity: taskActivitySchema,
       task: taskSchema,
       thread: threadSchema,
+      inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/reminder-raised'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      taskRef: taskRefSchema,
+      kind: z.enum(['review-backlog', 'stalled']),
+      recipient: memberIdSchema,
+      baselineSequence: z.number().int().positive(),
       inbox: inboxDeltaSchema,
     }).strict(),
   }).strict(),

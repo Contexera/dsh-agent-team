@@ -32,4 +32,12 @@ Later steps of the same turn stay quiet unless the turn has run longer than the 
 
 The baseline folds from the Member Session's own events, so restart, resume, and compaction derive identical values without a second store; a generation swap starts a fresh log and renders elapsed as `unavailable` rather than guessing across generations; a wall-clock rollback clamps elapsed to `0s` without rewriting history. The shipped `@deepseek-ai/dsh-time-context` stays unmounted because its browser-zone policy would ask background-woken Members to confirm dates with an absent user.
 
-Time never drives automatic behavior: no deadlines, reminders, schedulers, SLAs, or staleness-driven state changes exist.
+Time conditions are evaluated only when Team events occur: a ledger commit, Member activation, an Inbox read, or an existing wake. The Host owns no reminder timer, deadline, scheduler, SLA, or staleness-driven state change. A completely silent Team therefore does not wake itself merely because a threshold passed.
+
+Two private Task reminders exist. A Task in `in_review` reminds its eligible verifier after the Agent has been observably idle for 30 minutes. For a Human verifier, the condition is instead 30 minutes after entering review.
+
+A Task in `in_progress` reminds its accountable owner after 24 hours without public Thread progress. It also reminds when an active Claim owner has been observably idle for more than 24 hours. Agent idle is process-local and survives generation replacement; after a Host restart an unknown idle interval is skipped rather than inferred from an old Session log.
+
+Each `team/reminder-raised` operation is durable and private to its recipient, keyed by Task, kind, recipient, and condition baseline. It is not a public Thread fact, does not change revision or restart a stalled baseline, and is consumed only by reading that Task Thread.
+
+An existing unread responsibility event suppresses a duplicate nudge without consuming the episode. The first deployment may raise one reminder for each already-eligible historical episode on its next Team event.

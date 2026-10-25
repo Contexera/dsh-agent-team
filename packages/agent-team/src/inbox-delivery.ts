@@ -1,5 +1,5 @@
 import type { AgentTeamProjectRef, AgentTeamThreadReadFact, AgentTeamThreadRef } from './types/entities.ts'
-import type { AgentTeamInboxItem, AgentTeamMainTimelineEntry } from './types/requests-results.ts'
+import type { AgentTeamInboxItem, AgentTeamInboxReminder, AgentTeamMainTimelineEntry } from './types/requests-results.ts'
 
 /** Ordinary Thread updates an owner accumulates per Thread before they interrupt it; a runtime parameter, never stored. */
 export const INBOX_THRESHOLD_UPDATES = 5
@@ -12,6 +12,7 @@ export type InboxScopeRole = 'owner' | 'follower' | 'member'
 export interface InboxThreadUnread {
   readonly item: AgentTeamInboxItem
   readonly facts: readonly AgentTeamThreadReadFact[]
+  readonly reminders?: readonly AgentTeamInboxReminder[]
 }
 
 export interface InboxMainUnread {
@@ -60,8 +61,9 @@ export function planInboxDelivery(input: InboxDeliveryInput): InboxDeliveryPlan 
   const summarizedThrough = new Map<AgentTeamThreadRef, number>()
   const threads: InboxThreadPlan[] = []
   let thresholdReached = false
-  for (const { item, facts } of input.threads) {
+  for (const { item, facts, reminders = [] } of input.threads) {
     const threadRef = item.thread.threadRef
+    if (reminders.length > 0) immediate.push([threadRef, 'reminder', ...reminders.map(reminder => `${reminder.kind}:${reminder.baselineSequence}`)])
     const owner = input.owns(item.projectRef)
     const waiting = facts.filter(entry => isThresholdFact(entry, owner))
     const now = facts.filter(entry => !isThresholdFact(entry, owner)).map(entry => entry.fact.sequence)
@@ -70,7 +72,7 @@ export function planInboxDelivery(input: InboxDeliveryInput): InboxDeliveryPlan 
     if (waiting.filter(entry => entry.fact.sequence > through).length >= INBOX_THRESHOLD_UPDATES) thresholdReached = true
     if (waiting.length > 0) summarizedThrough.set(threadRef, waiting.at(-1)!.fact.sequence)
     threads.push(Object.freeze({ threadRef, role: owner ? 'owner' : item.attention === undefined ? 'member' : 'follower',
-      delivery: now.length > 0 ? 'immediate' : 'threshold', thresholdCount: waiting.length }))
+      delivery: now.length > 0 || reminders.length > 0 ? 'immediate' : 'threshold', thresholdCount: waiting.length }))
   }
   for (const { projectRef, entries } of input.main) {
     if (entries.length > 0) immediate.push([projectRef, ...entries.map(entry => entry.sequence)])

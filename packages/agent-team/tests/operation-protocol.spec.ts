@@ -653,6 +653,17 @@ let ledger: AgentTeamLedger
  * dropped from) `AgentTeamOperation` fails typecheck here until its row is
  * declared, and every declared surface below is asserted behaviorally.
  */
+const reminderRaised: Op<'team/reminder-raised'> = {
+  ...opBase('operation:protocol-reminder', 'request:protocol-reminder', 40, hostActor),
+  previousOperationId,
+  kind: 'team/reminder-raised',
+  data: {
+    workspaceId: alpha, taskRef: fixtureTask.taskRef, kind: 'stalled', recipient: human.memberId, baselineSequence: 6,
+    inbox: { ...emptyInbox, reminderMarkers: { added: [{ memberId: human.memberId, threadRef: humanThread,
+      taskRef: fixtureTask.taskRef, kind: 'stalled', baselineSequence: 6, sequence: 40 }], removed: [] } },
+  },
+}
+
 const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
   'team/initialized': {
     stored: initialized,
@@ -1218,6 +1229,13 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/reminder-raised': {
+    stored: reminderRaised,
+    legacyShapes: [],
+    retry: { replayOnly: 'Host-internal: event evaluation appends an episode once and deduplicates it by its durable key, so no caller request id can retry or collide' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'no-op', inbox: 'delta' },
   },
   'team/thread-attention-changed': {
     stored: threadAttentionChanged,

@@ -19,6 +19,8 @@ All notable changes to this project are documented in this file. The format foll
 - Every visible Project carries one Main stream unread row in the Inbox, shared by the Human and Agents; `team_inbox` and the Human's inbox count agree.
 - The task board: a `taskBoard` Host projection and Remote method lists every visible Project's open Tasks plus the last five finished per Project; the Web Client's board derives the same open Tasks from its bounded project reads. `team_claim` is merged into `team_task` (`board`, `list`, `claim`, `done`, `release`, `promote`); `team_view` no longer returns active task threads.
 - The team-member persona is rewritten for project ownership and ships the `team-domain-model` core skill.
+- Event-evaluated Task reminders cover review backlog and stalled work. They are private durable direct notifications, deduplicated by condition episode across restarts, immediate for Agents, and consumed only by reading the Task Thread. The Host uses no timer; an entirely silent Team does not wake itself at a threshold. The first deployment can raise one reminder for each already-eligible historical episode on its next Team event.
+- Agent `team_thread` renders a discussion's derived Task cards with current status and accountable owner. Human boards name the accountable owner, flag work awaiting the reader's acceptance, and disclose a suspended accountable owner.
 
 **Changed**
 

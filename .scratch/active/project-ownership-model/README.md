@@ -27,6 +27,7 @@
 - `spec.md` §13 三项探针：DM 的 Workspace 边界已在 Host `sendDm` 校验；旧 accept 缺 `acceptedClaimRefs` 时已有回退，03 补测试；规则标记与启动恢复的写入顺序已在 03 查清并由 `initialize()` 保证。
 - 版本 2 的规则在 04–06 间逐步落地；预览开关 `DSH_AGENT_TEAM_PREVIEW_RULES` 已移除，版本 2 是默认规则，无需任何环境变量。
 - 08 已完成：Task 带 `accountable` 与不可变 `sourceThreadRefs`（仅同 Project 无 Task 讨论）；Agent 仅可验收 `in_review` 且从未持有该 Task 任何 Claim（含 released），执行过的 accountable 只能 close/reopen/transfer；close/reopen/transfer 限 Human 或当前 accountable，已结束 Task 仅 Human 可转交；owner 撤销/离开/归档/删除在同一 operation 把 open Task 原子转回 Human 并记公开 transfer 活动（Project 归档对全部 owner 生效，suspend 保留）；责任事件按角色进 Inbox direct 级（activity marker 计入 direct，投递一律 immediate）；看板带 `relation: 'accountable'` 与 `needsAcceptance`；来源 Task 不进 Main stream，来源讨论以只读卡片投影显示（不改 revision、不产生未读）；`team_task` 增加 accept/close/reopen/transfer，`team_message.start` 支持 accountable 与来源；persona 与 skill 同步。遗留：suspend 的「负责人已暂停」界面提示、Agent 侧 `team_thread` 渲染来源讨论派生 Task 卡（Host 已返回 `taskCards`）归入 09。Human 项目看板与全局看板已显示负责人（你负责/负责人 X）与「待你验收」徽标（Host 条目带 `accountableOwner`）。
+- 09 已完成：事件评估的待验收/停滞提醒（durable episode 跨重启去重、私有 marker 仅 Task Thread read 消费、无 timer、Agent idle 仅进程内可确认观测、写入边界防交错、生命周期清理补齐）；来源讨论 Agent Task 卡与「负责人已暂停」显示同批交付。最终验证 1279 单测通过、1 跳过，真实 Web 8/8，真实账本 24565 条全量重放通过。首次历史数据有 4 个 Human-time 候选，后续只在 Team 事件评估点写入，不主动定时补发。
 - 08/09 的补充决定：Agent 仅在 `in_review` 验收；已结束 Task 不在 owner 失效时批量转交，reopen 前必须显式修正失效 accountable；同一事项已有未读责任通知时不追加超时提醒。最终只有 v2，开发中间 v2 账本不承担公开迁移承诺。
 
 ## 完成条件
@@ -39,7 +40,7 @@
 - [x] 06 按责任投递、Inbox 与 Agent 指引；启用规则版本 2（交付后 Human 在 dev profile 试用一周，按 `spec.md` §11 的指标复盘再继续）
 - [x] 07 Task board 投影与 `team_task`
 - [x] 08 Task 负责人、转交与验收限制（属于最终规则版本 2；suspend 的界面提示归入 09）
-- [ ] 09 待验收积压与停滞提醒
+- [x] 09 待验收积压与停滞提醒
 - [ ] durable 结论进入正式文档双语对与 `CHANGELOG.md`
 - [ ] 面向外部使用者的升级说明：升级后所有项目只有 Human owner，需重新指定 Agent owner；先备份 `agent_team.sqlite`；不承诺降级
 

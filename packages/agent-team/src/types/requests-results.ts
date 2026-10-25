@@ -769,6 +769,18 @@ export interface AgentTeamInboxActor {
   readonly memberId: AgentTeamMemberId
   /** Public handle, or the raw Member id when the roster no longer names them. */
   readonly name: string
+  /** Agent lifecycle for accountable-owner display; absent for the Human and ordinary message actors. */
+  readonly state?: AgentTeamAgentMember['state']
+}
+
+/** One unread private Task reminder; never part of the public Thread history. */
+export interface AgentTeamInboxReminder {
+  readonly taskRef: AgentTeamTaskRef
+  readonly kind: 'review-backlog' | 'stalled'
+  readonly recipient: AgentTeamMemberId
+  readonly baselineSequence: number
+  readonly sequence: number
+  readonly occurredAt: string
 }
 
 /** One Thread summary containing no Message bodies. */
@@ -791,6 +803,7 @@ export interface AgentTeamInboxItem {
   readonly newestActor: AgentTeamInboxActor
   /** Owners of the Task's live Claims, in claim order, deduped. */
   readonly liveClaimOwners: readonly AgentTeamInboxActor[]
+  readonly reminders: readonly AgentTeamInboxReminder[]
   readonly attention?: AgentTeamThreadAttention
 }
 
@@ -845,6 +858,7 @@ export interface AgentTeamThreadReadResult {
   readonly earlierFactCount?: number
   readonly attention?: AgentTeamThreadAttention
   readonly consumedDirectMarkers: readonly AgentTeamDirectMarker[]
+  readonly reminders: readonly AgentTeamInboxReminder[]
 }
 
 /** Non-mutating Thread history request. */

@@ -53,7 +53,7 @@ export interface AgentTeamMemberActor {
   readonly handle: string
 }
 
-/** The Host acting on a Member's Session, never a business actor. Automatic Session recycling is the only user: the model neither asked for nor could refuse it, so Human or Member authority would misattribute it. */
+/** Host-owned effects, never a business actor: Session recycling, rules adoption and private Task reminders. A model cannot choose this authority. */
 export interface AgentTeamHostActor {
   readonly kind: 'host'
   readonly handle: 'agent-team'
@@ -389,6 +389,16 @@ export interface AgentTeamMainActivityMarker {
 /** Main stream marker: what a non-owner's Main stream unread consists of, and what an owner keeps on top of the ordinary unread. */
 export type AgentTeamMainMarker = AgentTeamMainMessageMarker | AgentTeamMainActivityMarker
 
+/** A Host reminder aimed at one Member. It is not a public Thread fact: reading its Task consumes only the recipient's marker. */
+export interface AgentTeamReminderMarker {
+  readonly memberId: AgentTeamMemberId
+  readonly threadRef: AgentTeamThreadRef
+  readonly taskRef: AgentTeamTaskRef
+  readonly kind: 'review-backlog' | 'stalled'
+  readonly baselineSequence: number
+  readonly sequence: number
+}
+
 /** Durable changes to private Member inbox state carried by one operation. */
 export interface AgentTeamInboxDelta {
   readonly attention: {
@@ -404,6 +414,11 @@ export interface AgentTeamInboxDelta {
   readonly activityMarkers: {
     readonly added: readonly AgentTeamActivityMarker[]
     readonly removed: readonly AgentTeamActivityMarker[]
+  }
+  /** Present only when it changes something, so existing deltas keep their stored shape. */
+  readonly reminderMarkers?: {
+    readonly added: readonly AgentTeamReminderMarker[]
+    readonly removed: readonly AgentTeamReminderMarker[]
   }
   /** Present only when it changes something, so every rules-version-1 delta keeps its stored bytes. */
   readonly mainMarkers?: {

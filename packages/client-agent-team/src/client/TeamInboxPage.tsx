@@ -240,14 +240,15 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
   const owners = item.liveClaimOwners
   // Names come from the Human identity so the chip's letter and the label move together on a rename.
   const namedOwners = namedAvatarOwners(owners, human)
-  const namedActor = namedAvatarOwners([item.newestActor], human)[0]!
+  const reminderIsNewest = item.reminders.at(-1)?.sequence === item.newestSequence
+  const namedActor = namedAvatarOwners([item.newestActor], reminderIsNewest ? undefined : human)[0]!
   return <InboxRowShell
     // A Task's live owners show when there are any, else the person the newest fact came from; this is the Thread's own fact,
     // so it keeps its shape between the queue and the 「最近活跃」 tail. The avatars are presentational: the stack's label joins
     // the control's accessible name.
     actor={owners.length > 0
       ? <TeamAvatarStack owners={namedOwners} label={claimersLabel(namedOwners, t)} human={human} />
-      : <TeamAvatarStack owners={[namedActor]} label={t('inboxRowActor', { name: `@${namedActor.name}` })} human={human} />}
+      : <TeamAvatarStack owners={[namedActor]} label={reminderIsNewest ? t('inboxReminderActor') : t('inboxRowActor', { name: `@${namedActor.name}` })} human={reminderIsNewest ? undefined : human} />}
     crumb={<>
       <WorkspacePrefix title={row.workspaceTitle} show={showWorkspace} />
       <span className={inboxCss.rowProject}>#{item.projectName}</span>
@@ -266,7 +267,9 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
     unreadCount={item.unreadCount}
     directCount={item.directCount}
     newestOccurredAt={item.newestOccurredAt}
-    preview={item.previewText}
+    preview={reminderIsNewest
+      ? t(item.reminders.at(-1)!.kind === 'review-backlog' ? 'inboxReviewReminder' : 'inboxStalledReminder')
+      : item.previewText}
     t={t}
     onOpen={onOpen}
   />

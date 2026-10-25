@@ -24,4 +24,14 @@ Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools �
 
 被跳过的 step 绝不回填。它们的时间跨度折叠进下一条 snapshot 的 elapsed。 默认 interval 为 30 分钟。preset row 的 plugin config 可覆盖它，留给未来的配置层接管。 baseline 从该 Member Session 自身事件折叠而来。restart、resume 和 compaction 无需第二存储即可派生出相同值。换代开启全新日志，elapsed 渲染为 `unavailable` 而不是跨代猜测。wall-clock 回拨将 elapsed 夹为 `0s` 而不改写历史。
 
-内置的 `@deepseek-ai/dsh-time-context` 保持不挂载，因为 browser-zone 策略会让后台唤醒的 Member 向不存在的用户确认日期。 时间绝不驱动自动行为：不存在 deadline、reminder、scheduler、SLA 或按陈旧度的状态变更。
+内置的 `@deepseek-ai/dsh-time-context` 保持不挂载，因为 browser-zone 策略会让后台唤醒的 Member 向不存在的用户确认日期。
+
+时间条件只在 Team 事件发生时评估：ledger 提交、Member activation、Inbox read 或已有 wake。Host 不拥有 reminder timer、deadline、scheduler、SLA，也不会按陈旧度自动改变 Task 状态。整个 Team 完全静默时，不会仅因阈值到点而自行唤醒。
+
+现有两类私有 Task 提醒。`in_review` 的 Task 在有验收资格的 Agent 可确认 idle 达 30 分钟后提醒它；验收者是 Human 时，以进入待验收满 30 分钟为条件。
+
+`in_progress` 的 Task 在公开 Thread 24 小时没有进展，或 active Claim 持有者可确认 idle 超过 24 小时时，提醒 accountable owner。Agent idle 是进程内观测，跨 generation 替换延续；Host 重启后 idle 未知则跳过，不从旧 Session 日志猜测。
+
+每条 `team/reminder-raised` 都是 durable、仅接收者可见的记录，以 Task、类型、接收者和条件起点去重。它不是公开 Thread fact，不改变 revision，也不重置停滞起点；只有读取所属 Task Thread 才消费。
+
+已有同一 Task 的未读责任事件时不重复催促，也不消耗 episode。首次部署后，下一次 Team 事件可能为已经达到条件的历史 episode 各补一条提醒。

@@ -54,6 +54,7 @@ import { agentTeamDomainSpec } from './spec.ts'
 import { SqliteStorageBackend } from './vendor/storage-sqlite/index.ts'
 import { formatTeamTimestamp } from './time-format.ts'
 import { INBOX_THRESHOLD_UPDATES, planInboxDelivery, type InboxDeliveryPlan } from './inbox-delivery.ts'
+import { MemberIdleTracker } from './member-idle.ts'
 import type {
   AgentTeamAddMemberRequest,
   AgentTeamAddMemberResult,
@@ -382,6 +383,10 @@ export default class AgentTeam extends TypertRemoteService {
    */
   private readonly humanUpdateCheck = createHumanUpdateChecker({ currentVersion: HUMAN_PROFILE_VERSION })
 
+  private readonly memberIdle = new MemberIdleTracker()
+  private reminderEvaluationTail: Promise<void> = Promise.resolve()
+  private reminderEvaluationRequested = false
+
   private readonly recovery = new RecoveryCoordinator({
     wake: memberId => { this.injectRecovery(memberId) },
     report: fact => { this.reportRecovery(fact) },
@@ -689,6 +694,7 @@ export default class AgentTeam extends TypertRemoteService {
       const member = this.memberForAgent(agent)
       if (status === 'running') this.runningAgents.add(agent.id)
       else this.runningAgents.delete(agent.id)
+      if (member !== undefined) this.memberIdle.status(member.memberId, status, Date.now())
       if (status === 'running' && member !== undefined) {
         const recovered = this.clearMemberFailure(member.memberId, 'runtime')
         const preTurnRecovered = this.clearMemberFailure(member.memberId, 'preTurnCancellation')
@@ -747,6 +753,7 @@ export default class AgentTeam extends TypertRemoteService {
       // one of the two maps (new ones reject at enqueue), so this snapshot
       // drains them all.
       await Promise.all([...this.memberLifecycleTails.values(), ...this.additionLifecycleTails.values()])
+      await this.reminderEvaluationTail
       await Promise.all([...this.handles.values()].map(handle => this.disposeWithWakeGuard(handle)))
       this.handles.clear()
       this.modelSelections.clear()
@@ -1650,6 +1657,7 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('inbox')
   inbox(request: AgentTeamInboxRequest): AgentTeamInbox {
     this.requireWorkspace(request.workspaceId)
+    this.scheduleTaskReminderEvaluation()
     return this.requireLedger().inbox(agentTeamHumanActor(), request)
   }
 
@@ -1781,6 +1789,7 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   inboxForAgent(agent: Agent, request: { readonly workspaceId?: WorkspaceId; readonly limit?: number }): AgentTeamInbox {
+    this.scheduleTaskReminderEvaluation()
     const actor = this.memberActor(agent)
     if (request.workspaceId === undefined) return this.requireLedger().memberInbox(actor, request)
     this.requireAgentWorkspace(actor, request.workspaceId)
@@ -2321,6 +2330,7 @@ export default class AgentTeam extends TypertRemoteService {
       this.memberRuntime.recordAppliedCapabilities(member.memberId, member.capabilities)
       await workspace.attachSession(member.sessionId)
       this.handles.set(member.memberId, created)
+      this.memberIdle.status(member.memberId, created.agent.status, Date.now())
       this.modelSelections.set(member.memberId, selected)
       this.clearMemberFailure(member.memberId, 'activation')
       this.clearMemberFailure(member.memberId, 'preTurnCancellation')
@@ -2352,6 +2362,7 @@ export default class AgentTeam extends TypertRemoteService {
           ...(lineageParent === undefined ? {} : { previousSessionId: lineageParent }),
         }, recoveryCarried > 0)
       }
+      this.scheduleTaskReminderEvaluation()
     } catch (error) {
       if (created !== undefined) {
         await this.disposeWithWakeGuard(created)
@@ -2512,6 +2523,32 @@ export default class AgentTeam extends TypertRemoteService {
     return workspace
   }
 
+  /** Coalesce event-driven checks; reminders themselves never recursively schedule another pass. */
+  private scheduleTaskReminderEvaluation(): void {
+    if (!this.accepting || this.ledger === undefined) return
+    this.reminderEvaluationRequested = true
+    void this.evaluateTaskReminders()
+  }
+
+  private evaluateTaskReminders(): Promise<void> {
+    this.reminderEvaluationTail = this.reminderEvaluationTail.then(async () => {
+      if (this.ledger === undefined) return
+      do {
+        this.reminderEvaluationRequested = false
+        const nowMs = Date.now()
+        const idleMs = (memberId: AgentTeamMemberId) => this.memberIdle.idleMs(memberId, nowMs)
+        const candidates = this.requireLedger().planReminders(nowMs, idleMs)
+        for (const candidate of candidates) {
+          const receipt = await this.requireLedger().raiseReminder(candidate, nowMs, idleMs)
+          if (receipt !== undefined) this.emitCommitted(receipt)
+        }
+      } while (this.reminderEvaluationRequested)
+    }).catch(error => {
+      this.ctx.logger.warn(`agent-team: Task reminder evaluation failed: ${failureDetail(error)}`)
+    })
+    return this.reminderEvaluationTail
+  }
+
   private requireLedger(): AgentTeamLedger {
     if (this.ledger === undefined || this.domain === undefined) throw new Error('agent-team service is not initialized')
     return this.ledger
@@ -2532,6 +2569,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const ledger = this.requireLedger()
     this.afterCommit('change invalidation', () => this.emitChanged(ledger.changeScopesOf(operation)))
+    if (operation.kind !== 'team/reminder-raised') this.scheduleTaskReminderEvaluation()
     if (operation.kind === 'team/member-workspace-joined' || operation.kind === 'team/member-workspace-left') {
       this.afterCommit('participation notice', () => {
         const agent = this.handles.get(operation.data.memberId)?.agent
@@ -2685,6 +2723,7 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   private async notifyMemberAtWake(memberId: AgentTeamMemberId, agent: Agent, cause: NotificationCause, sequenced: boolean): Promise<void> {
+    this.scheduleTaskReminderEvaluation()
     let gate: Error | undefined
     try {
       gate = await this.wakeGateFor(agent)
@@ -2870,7 +2909,7 @@ export default class AgentTeam extends TypertRemoteService {
     // some, and a dropped Thread's ordinary updates must stay undelivered.
     const rendered = new Set<AgentTeamThreadRef>()
     const roleText = { owner: 'owner of this Project', follower: 'follower of this Thread', member: 'Project member named here' } as const
-    for (const { item, facts } of notifications.slice(0, 8)) {
+    for (const { item, facts, reminders } of notifications.slice(0, 8)) {
       const scoped = plan?.threads.find(thread => thread.threadRef === item.thread.threadRef)
       const scopeText = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef} (Thread ${item.thread.threadRef})`
       const deliveryText = scoped === undefined ? [] : [`Your role: ${roleText[scoped.role]}`, scoped.delivery === 'immediate'
@@ -2879,6 +2918,12 @@ export default class AgentTeam extends TypertRemoteService {
       if (!append([`Workspace: ${item.workspaceId}`, `Project: ${item.projectRef}`, `Scope: ${scopeText}`, ...deliveryText,
         `Read: team_thread read with workspace ${item.workspaceId} and threadRef ${item.thread.threadRef}`].join('\n'))) break
       rendered.add(item.thread.threadRef)
+      for (const reminder of reminders) {
+        const detail = reminder.kind === 'review-backlog'
+          ? 'Team Task reminder\nThis Task has been waiting for acceptance for at least 30 minutes. Review the work and accept it, or record what still needs to change.'
+          : 'Team Task reminder\nThis Task has stalled: its public Thread has had no progress for 24 hours, or an active Claim owner has been idle for more than 24 hours. Check the current state and move it forward.'
+        if (append(`${detail}\nOccurred at: ${formatTeamTimestamp(reminder.occurredAt)}\nTask: ${reminder.taskRef}\nThread: ${item.thread.threadRef}`)) detailedFactCount += 1
+      }
       for (const { fact, direct } of facts) {
         if (detailedFactCount >= 20) {
           omitted = true
@@ -3003,6 +3048,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     this.modelSelections.delete(memberId)
     this.memberRuntime.forgetMember(memberId)
+    this.memberIdle.forget(memberId)
     this.clearMemberFailure(memberId, 'activation')
     this.clearMemberFailure(memberId, 'preTurnCancellation')
   }

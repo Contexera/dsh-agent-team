@@ -371,6 +371,19 @@ export interface AgentTeamTaskAccountableChangedOperation extends AgentTeamOpera
   }
 }
 
+/** One private, durable Task reminder. The complete episode stays for replay and deduplication after its Inbox marker is read. */
+export interface AgentTeamReminderRaisedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/reminder-raised'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly taskRef: AgentTeamTaskRef
+    readonly kind: 'review-backlog' | 'stalled'
+    readonly recipient: AgentTeamMemberId
+    readonly baselineSequence: number
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
 /** Durable personal Attention follow or unfollow; it does not revise the Thread. */
 export interface AgentTeamThreadAttentionChangedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/thread-attention-changed'
@@ -472,6 +485,7 @@ export type AgentTeamOperation =
   | AgentTeamTaskAccountableChangedOperation
   | AgentTeamThreadAttentionChangedOperation
   | AgentTeamThreadReadOperation
+  | AgentTeamReminderRaisedOperation
   | AgentTeamMemberRemovedOperation
   | AgentTeamDmSentOperation
 

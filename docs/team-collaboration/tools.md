@@ -40,13 +40,13 @@ A read renders five parts in order, then a footer:
 2. Thread identity and following state;
 3. orientation — the full anchor when the returned facts carry Host-supplied background, the bounded anchor subject otherwise, and never a duplicate when the anchor is itself a returned fact;
 4. active Claims only — the current collision surface, one line per Claim (claim ref, owner, direction);
-5. the chronological facts with inline unread/direct markers.
+5. the chronological facts with inline unread/direct markers. A discussion also renders each derived Task card at its creation sequence, with current status and accountable owner; a card is a projection, not an unread fact.
 
 The footer states the read-through sequence and the remaining unread count.
 
 When the read left Thread facts behind it, a further line states how many those are, so a returning reader sees the size of the span it is not looking at instead of assuming the batch is the Thread.
 
-A history page renders a historical outcome with Thread identity, the full anchor on a first page and the bounded subject on continuation pages, the selected facts, and the cursor/hasMore footer — never current Claims or a context recommendation. Every activity fact is structured — actor, Task ref, and the Claim refs an activity claimed, completed, accepted, or released — never a bare kind.
+A history page renders a historical outcome with Thread identity, the full anchor on a first page and the bounded subject on continuation pages, the selected facts and any derived Task cards in that sequence window, and the cursor/hasMore footer — never current Claims or a context recommendation. Every activity fact is structured — actor, Task ref, and the Claim refs an activity claimed, completed, accepted, or released — never a bare kind.
 
 A `read` acknowledges an unread acceptance of a still-done Task in its facts and recommends nothing about the reader's context: with no rollover tool and no generation choice, there is no action for a read to state.
 

@@ -263,7 +263,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
       status: options?.seedTaskStatus ?? 'todo', resolution: 'open', accountable: 'member:human', sourceThreadRefs: [] }, taskNumber: 1 }),
     thread: { threadRef: seedThreadRef, ...(taskless ? {} : { taskRef: seedTaskRef }), revision: 2 },
     // A seed carries no Claims, so the Host would project no owners either.
-    liveClaimOwners: [],
+    liveClaimOwners: [], reminders: [],
     messageCount: 1,
     // A seed is the only fact on its Thread, so the newest fact instant is the
     // Message's own: the feed reads that equality as "no follow-up yet".
@@ -505,7 +505,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     return { ok: true as const, value: {
       receipt: {}, task: top.task, thread: top.thread, claims: viewClaims,
       anchor: top.message, anchorMentions: [], facts: [...viewItems.map(item => ({ fact: { kind: 'message' as const, sequence: (item.message as { sequence: number }).sequence, message: item.message, mentions: (item as { mentions?: string[] }).mentions ?? [] }, unread: false, direct: false })), ...viewActivities.map(activity => ({ fact: { kind: 'activity' as const, sequence: activity.sequence as number, activity }, unread: false, direct: false }))],
-      readThroughSequence: (top.thread as { revision: number }).revision, remainingUnreadCount, consumedDirectMarkers: [],
+      readThroughSequence: (top.thread as { revision: number }).revision, remainingUnreadCount, consumedDirectMarkers: [], reminders: [],
     } }
   })
   const loadThreadHistory = vi.fn(async ({ taskRef, threadRef }: { taskRef?: string; threadRef?: string }) => {
