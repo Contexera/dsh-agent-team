@@ -281,6 +281,7 @@ const taskActivitySchema = z.object({
   releasedClaimRefs: z.array(claimRefSchema).min(1).optional(),
   completedClaimRefs: z.array(claimRefSchema).min(1).optional(),
   acceptedClaimRefs: z.array(claimRefSchema).optional(),
+  refollowedMembers: z.array(memberIdSchema).optional(),
 }).strict()
 
 const claimsReleasedActivitySchema = z.object({

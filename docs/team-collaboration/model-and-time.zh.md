@@ -35,3 +35,5 @@ Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools �
 每条 `team/reminder-raised` 都是 durable、仅接收者可见的记录，以 Task、类型、接收者和条件起点去重。它不是公开 Thread fact，不改变 revision，也不重置停滞起点；只有读取所属 Task Thread 才消费。
 
 已有同一 Task 的未读责任事件时不重复催促，也不消耗 episode。首次部署后，下一次 Team 事件可能为已经达到条件的历史 episode 各补一条提醒。
+
+读取未读 marker 时，当前 durable 条件决定它是否仍显示并参与 Agent 投递：Task 必须在可见 Project 中保持 open，且状态、接收者和条件起点仍然匹配。新的公开进展会使停滞提醒失效；同一 episode 的新提醒会使旧提醒失效。转交不会把私有 marker 转给新接收者。暂停保留提醒，恢复后继续投递。过滤不改写或删除存储的 marker，读取时也不重新要求运行时 idle。

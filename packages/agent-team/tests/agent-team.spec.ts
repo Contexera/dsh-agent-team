@@ -597,6 +597,17 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const reopened = committed((await ledger.changeTask({ requestId: requestId('reopen'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'reopen', baseRevision: closed.thread.revision, actor: agentTeamHumanActor() })).value)
     expect(reopened.task).toMatchObject({ status: 'todo', resolution: 'open' })
+    expect(reopened.activity.refollowedMembers).toEqual([])
+    await ledger.changeAttention({ requestId: requestId('follow-after-reopen'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'follow', actor: agentTeamHumanActor() })
+    expect(ledger.attentionStatus(agentTeamHumanActor(), { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeDefined()
+    const accepted = committed((await ledger.changeTask({ requestId: requestId('accept-before-reopen'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'accept', baseRevision: reopened.thread.revision, actor: agentTeamHumanActor() })).value)
+    const reopenedAccepted = committed((await ledger.changeTask({ requestId: requestId('reopen-after-accept'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'reopen', baseRevision: accepted.thread.revision, actor: agentTeamHumanActor() })).value)
+    expect(reopenedAccepted.activity.refollowedMembers).toEqual([])
+    expect(ledgerAtBoot(test).attentionStatus(agentTeamHumanActor(), { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeDefined()
+    ledger.validate()
   })
 
   it('resolves branded Task refs to navigation facts and omits unknown refs', async () => {
@@ -1454,22 +1465,27 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     ledger.validate()
   })
 
-  it('releases Claims and clears Attention on close without restoring it on reopen', async () => {
+  it('releases Claims on close and restores only the accountable follow on reopen', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    await makeOwner(ledger, project.project.projectRef, actor.memberId)
+    await ledger.transferTask({ requestId: requestId('assign-accountable'), workspaceId: alpha, taskRef: started.task.taskRef,
+      target: actor.memberId, baseRevision: started.thread.revision, actor: agentTeamHumanActor() })
+    const transferredRead = await ledger.readThread({ requestId: requestId('human-read-transfer'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
+    await ledger.readThread({ requestId: requestId('member-read-transfer'), workspaceId: alpha, taskRef: started.task.taskRef, actor })
     const claim = committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    expect(claim.attention).toMatchObject({ memberId: actor.memberId })
+      action: 'claim', direction: 'review', baseRevision: transferredRead.value.thread.revision, actor })).value)
+    await ledger.readThread({ requestId: requestId('human-read-claim'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
     const humanRead = (await ledger.readThread({ requestId: requestId('human-read'), workspaceId: alpha, taskRef: started.task.taskRef,
       actor: agentTeamHumanActor() })).value
     const closed = committed((await ledger.changeTask({ requestId: requestId('close'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'close', baseRevision: humanRead.thread.revision, actor: agentTeamHumanActor() })).value)
     expect(closed).toMatchObject({ task: { resolution: 'closed', status: 'closed' }, claims: [expect.objectContaining({ claimRef: claim.claim.claimRef, state: 'released' })] })
     expect(ledger.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeUndefined()
-    expect(ledger.inbox(actor, { workspaceId: alpha })).toMatchObject({ totalUnreadCount: 1, items: [
+    expect(ledger.inbox(actor, { workspaceId: alpha })).toMatchObject({ totalUnreadCount: 2, items: [
       expect.objectContaining({ task: expect.objectContaining({ taskRef: started.task.taskRef }), unreadCount: 1 }),
     ] })
     const terminalRead = (await ledger.readThread({ requestId: requestId('terminal-read'), workspaceId: alpha,
@@ -1477,11 +1493,24 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(terminalRead.facts).toEqual(expect.arrayContaining([
       expect.objectContaining({ unread: true, fact: expect.objectContaining({ kind: 'activity', activity: expect.objectContaining({ kind: 'close' }) }) }),
     ]))
-    expect(ledger.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(0)
+    expect(ledger.inbox(actor, { workspaceId: alpha }).totalUnreadCount).toBe(1)
     const reopened = committed((await ledger.changeTask({ requestId: requestId('reopen'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'reopen', baseRevision: closed.thread.revision, actor: agentTeamHumanActor() })).value)
     expect(reopened.task).toMatchObject({ resolution: 'open', status: 'todo' })
-    expect(ledger.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeUndefined()
+    expect(reopened.activity.refollowedMembers).toEqual([actor.memberId])
+    expect(ledger.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeDefined()
+    expect(ledgerAtBoot(test).attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeDefined()
+    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
+    const legacy = records.map(([key, value]) => {
+      const operation = value as AgentTeamOperation
+      if (operation.kind !== 'team/task-changed' || operation.data.activity.activityRef !== reopened.activity.activityRef) return [key, value] as [string, unknown]
+      const { refollowedMembers: _stripped, ...activity } = operation.data.activity
+      return [key, { ...operation, data: { ...operation.data, activity,
+        inbox: { ...operation.data.inbox, attention: { set: [], removed: [] } } } }] as [string, unknown]
+    })
+    const revived = ledgerAtBoot(await harness(storedPool(legacy)))
+    expect(revived.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeUndefined()
+    revived.validate()
     ledger.validate()
   })
 

@@ -20,6 +20,8 @@
 4. **扫正文里被本次发布证伪的句子。** 在维护文档里检索那些以「发布尚未发生」为前提的表述——`latest` 是 `<上一个版本>`、某项能力被描述为尚未发布、某个 peer 范围被描述为待定，或一条把更旧的 DSH 线与最后仍支持它的 bundle 版本配在一起的 warm-line pin。修正文档的当前状态声明确实属于发布提交的一部分；改写已发布的历史则不属于（§7）。
 5. **确认工作树没有未提交的构建输入。** `prepack` 是 `npm run build`，而 `packages/*/lib/**` 在发布的 `files` 白名单内，所以未提交的 `src/` 改动会被打进 tarball。白名单之外的未跟踪文件（`scripts/`、`.scratch/`）不会被打包，也不阻塞发布。绝不要为了让工作树干净而 stash 或回退其他 Member 的工作——先弄清那是谁的。
 6. **清楚 CI 会做什么、不会做什么。** 发布提交自身那一次运行必须在**两条 lane** 上都绿，然后才打 tag（§5）。纯文档推送根本不会产生运行：`ci.yml` 忽略 `**.md`、`docs/**`、`assets/**`，所以它的证据是 `git diff --check`、链接解析，以及从远端读回。
+7. **打开新构建前保护共享 Team ledger。** 用 SQLite online backup API，或在所有 Team profile 停止后备份 `$DSH_HOME/storages/agent_team.sqlite`；使用 WAL 的活数据库不能只复制主文件。保留备份及其 UTC 创建时间。在共用存储的所有 profile 上先安装新构建，再打开 Team。重放验证必须使用副本，不得操作真实 ledger。
+8. **每次真实 ledger 变更都单独确认。** 截断、删除、修复或改写真实记录前，用 UTC 列出精确范围内每条记录的 `occurredAt`、sequence、kind 和 actor，与维护者核对数据归属并取得明确许可。备份不构成丢弃当前工作的许可。
 
 ## 3. 检查阶梯
 

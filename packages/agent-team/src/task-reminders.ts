@@ -40,6 +40,15 @@ export interface ReminderCandidate {
   readonly baselineSequence: number
 }
 
+export function reviewReminderRecipient(task: AgentTeamTask,
+  isOwner: (projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId) => boolean,
+  heldEver: (taskRef: AgentTeamTaskRef, memberId: AgentTeamMemberId) => boolean): AgentTeamMemberId {
+  return task.accountable === 'member:human'
+    || !isOwner(task.projectRef, task.accountable)
+    || heldEver(task.taskRef, task.accountable)
+    ? 'member:human' as AgentTeamMemberId : task.accountable
+}
+
 function eligible(input: ReminderEvaluationInput, candidate: ReminderCandidate): boolean {
   return !input.episodeExists(candidate.taskRef, candidate.kind, candidate.recipient, candidate.baselineSequence)
     && !input.hasUnreadResponsibility(candidate.taskRef, candidate.recipient)
@@ -52,10 +61,7 @@ export function planTaskReminders(input: ReminderEvaluationInput): readonly Remi
     const { task } = facts
     if (!facts.projectActive || task.resolution !== 'open') continue
     if (task.status === 'in_review') {
-      const recipient = task.accountable === 'member:human'
-        || !input.isOwner(task.projectRef, task.accountable)
-        || input.heldEver(task.taskRef, task.accountable)
-        ? 'member:human' as AgentTeamMemberId : task.accountable
+      const recipient = reviewReminderRecipient(task, input.isOwner, input.heldEver)
       const idleMs = input.idleMs(recipient)
       const ready = recipient === 'member:human'
         ? input.nowMs - Date.parse(facts.statusBaselineOccurredAt) >= REVIEW_BACKLOG_IDLE_MS

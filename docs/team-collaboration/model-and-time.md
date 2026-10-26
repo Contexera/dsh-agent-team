@@ -41,3 +41,7 @@ A Task in `in_progress` reminds its accountable owner after 24 hours without pub
 Each `team/reminder-raised` operation is durable and private to its recipient, keyed by Task, kind, recipient, and condition baseline. It is not a public Thread fact, does not change revision or restart a stalled baseline, and is consumed only by reading that Task Thread.
 
 An existing unread responsibility event suppresses a duplicate nudge without consuming the episode. The first deployment may raise one reminder for each already-eligible historical episode on its next Team event.
+
+When an unread marker is read back, current durable conditions decide whether it still appears and participates in Agent delivery: the Task must remain open in a visible Project, with the expected status, recipient, and condition baseline. New public progress supersedes a stalled marker; a newer reminder in its episode supersedes the old one.
+
+Transfer does not move a private marker to the new recipient. Suspension retains it for resume. Filtering does not rewrite or delete the stored marker, and runtime idle is not required again at read time.

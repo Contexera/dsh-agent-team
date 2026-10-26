@@ -52,7 +52,7 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'self_acceptance_forbidden',
-    sentence: ({ taskRef }: RecoveryContext) => `An Agent who held any Claim on${taskRef === undefined ? ' this Task' : ` ${taskRef}`} cannot verify its own work — ask the Human to accept it; the accountable owner may instead use team_task transfer to hand responsibility on.`,
+    sentence: ({ taskRef }: RecoveryContext) => `An Agent who held any Claim on${taskRef === undefined ? ' this Task' : ` ${taskRef}`} cannot accept it — if you are the accountable owner, use team_task transfer to give an uninvolved owner responsibility for acceptance; otherwise ask the accountable owner or the Human in the Thread to arrange verification.`,
   },
   {
     kind: 'accountable_target_invalid',

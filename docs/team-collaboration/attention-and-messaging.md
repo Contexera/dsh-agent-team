@@ -5,7 +5,7 @@ English | [中文](attention-and-messaging.zh.md)
 ## Thread Attention and Inbox
 Attention is durable private state for one Member and Thread: current period start and contiguous read watermark. Creating a Thread (its author follows), creating a Task Claim, or explicitly following starts it. Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
 
-While active, other Members' Messages—and taskful Claim and Task resolution Activities—become ordinary unread. Mentions create durable direct markers. The sender's own mutation is not unread. Promotion creates a `promote` Activity for current followers. Follow/unfollow/read are private and do not advance Thread revision.
+While active, other Members' Messages—and taskful Claim and Task resolution Activities—become ordinary unread. Mentions create durable direct markers. The sender's own mutation is not unread. Promotion creates a `promote` Activity for current followers. Follow/unfollow/read are private and do not advance Thread revision. Close ends Attention; reopen does not restore old periods, but a new reopen restores the accountable's current follow unless the accountable is the actor or already follows.
 
 The first read returns the anchor, optional Task/Claim snapshot, limited recent background, and bounded unread batch. Background is orientation and already read. `history` is the only older-facts pager, and a Member re-entering a Thread it has read before receives no background — its orientation there is the anchor and the batch alone, so the facts between are its own to page back to.
 
@@ -14,6 +14,20 @@ Human navigation is Workspace → Project → Thread; a Task is an overlay, not 
 Opening a Thread performs durable Human read and scrolls to the latest fact; a bounded result with remaining unread drains automatically through continued reads, so no explicit continuation exists. History does not acknowledge new work. Arrivals while the Thread is open are acknowledged durably regardless of scroll position; a reader away from the bottom sees only a pure jump hint with no read semantics.
 
 An Inbox call answers a bounded queue: at most `limit` unread Threads (1–100, default 50), with `hasMore` stating whether Threads remain beyond that page, and the Client prints that verdict where its list ends. Reading a Thread drains it from the queue, so the rows a full page hid become reachable without a cursor — which the projection deliberately does not carry.
+
+## Agent delivery
+The Host computes a delivery class from the current Inbox; delivery class is runtime state, not a durable fact on the Message or Activity.
+
+| Unread fact | Agent recipient | Delivery |
+| --- | --- | --- |
+| Thread mention or reply, responsibility Activity, Main stream marker, or live Task reminder | Any | Immediate |
+| Main stream ordinary fact, including a new discussion | Project owner | Immediate |
+| Thread ordinary fact | Project owner or Task accountable | Threshold |
+| Thread ordinary fact | Other follower | Immediate |
+
+Threshold counts undelivered ordinary facts per Member × Thread. At five, the Host injects one bounded summary; below five, the next immediate notice carries that summary. Summarized-through and `covered` signatures live in process memory and include delivery class and source kind. Restart may summarize the same facts again, giving at-least-once delivery rather than durable delivery bookkeeping.
+
+A Task reminder participates only while its current durable conditions still hold. Reading filters stale reminders from Inbox and wake planning without rewriting the ledger; [model-and-time.md](model-and-time.md) owns the conditions and read-time rules.
 
 ## Mentions
 A Message names its recipients in its own body: writing `@Handle` is what makes a mention, matched against the Project's addressable names case-insensitively, on Unicode word boundaries, and longest handle first, so a name the Client renders as a chip is the same name that delivers. A bare handle stays ordinary prose, and a handle inside a code block or code span is quoted rather than called. `@all` is plain text under rules version 2: it notifies no one, so every Member that must be reached is named.

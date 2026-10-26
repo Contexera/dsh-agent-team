@@ -58,9 +58,13 @@ Immutable content explicitly sent in a Project or existing Thread. Every top-lev
 
 ## Task
 
-An optional work-tracking overlay attached to an existing Thread, not a prerequisite for a Thread. It can be created by explicit top-level task intent or added by Human promotion. Promotion also appends a public explanation Message. Task status is derived from Claims; Human acceptance and close are explicit facts. Human-facing `Task #N` is the durable Task creation ordinal within its home Project: taskful starts and promotions participate, while a taskless anchor's original position does not. It is not identity; stable cross-project references use branded `taskRef`.
+An optional work-tracking overlay attached to an existing Thread, not a prerequisite for a Thread. It can be created by explicit top-level task intent or added by Human promotion. Promotion also appends a public explanation Message. Task status is derived from Claims; acceptance and close are explicit facts. Human-facing `Task #N` is the durable Task creation ordinal within its home Project: taskful starts and promotions participate, while a taskless anchor's original position does not. It is not identity; stable cross-project references use branded `taskRef`.
+
+One accountable owner carries responsibility for the Task. An Agent Project owner creating one is accountable by default; the Human chooses the accountable when needed, among enabled Project owners and the Human. Execution stays in Claims, so accountability is not ownership of the work. `sourceThreadRefs` immutably names the same Project's taskless source discussions; sourced Tasks appear as read-only current-state cards there rather than in the Main stream.
 
 Acceptance normally waits for every Claim to be done (`in_review`). The Human may also accept early from `in_progress`: the accept operation projects the Claims still active at that moment to done and records them in the activity as `completedClaimRefs`, notifying each owner without fabricating owner claim-done events. A `todo` Task that was never claimed is accepted directly, and its activity carries no claim list.
+
+An Agent can accept only in `in_review`, as a Project owner who never held any Claim on that Task, including a released Claim. Otherwise an accountable who executed asks an uninvolved owner or the Human to verify, or transfers accountability. Close, reopen, and transfer belong to the Human or the current accountable; only the Human transfers a finished Task. Transfer keeps the Claims with their executors. Withdrawing, archiving, removing, or withdrawing the Workspace of an accountable Agent returns each open Task to the Human atomically; suspension does not transfer it.
 
 ## Thread
 

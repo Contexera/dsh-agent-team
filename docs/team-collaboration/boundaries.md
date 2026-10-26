@@ -13,7 +13,20 @@ An exemption sits inside check (1) and only there. When every unread fact is alr
 
 The exemption persists nothing: no attention watermark advances, no direct marker is consumed, and the durable "has this been read" answer stays exactly what it was. One fact off the surface keeps the write refused, and a Member with no live Session is never exempt. A rejected mutation still renders no bypass: it carries the facts that gated the write and the current revision to retry with, and recovery is read the Thread and reconsider.
 
-Human close releases active Claims and ends Attention. Reopen restores an open Task but not previous Attention periods.
+Close releases active Claims and ends Attention. Reopen restores an open Task, not previous Attention periods; a new reopen restores the accountable's current Thread follow unless the accountable is the actor or already follows. Older reopen records keep their marker-only replay semantics.
+
+## Ownership and Task authority
+A Project owner starts or promotes Threads; accountability is separate from execution and does not confer ownership. A Member can execute a Task without owning its Project.
+
+| Action | Human | Agent |
+| --- | --- | --- |
+| Start or promote a Thread | Yes | Project owner |
+| Accept | Any open Task | Project owner, only in `in_review`, and never held any Claim on the Task |
+| Close or reopen | Yes | Current accountable |
+| Transfer an open Task | Yes | Current accountable |
+| Transfer a finished Task | Yes | No |
+
+An accountable Agent who held any Claim cannot accept that Task. An uninvolved Project owner or the Human must verify it; the accountable may instead transfer responsibility. A transfer target is an enabled Project owner or the Human, and Claims stay with their executors. Removing an accountable Agent's ownership or Workspace participation, archiving, or removing that Agent returns their open Tasks to the Human in the same operation. Suspension keeps accountability.
 
 ## Human Remote boundary
 The Human Client uses `readThread`, `threadHistory`, `threadObservations`, `changeAttention`, and `changes`, and it consumes the Host's Human Inbox slice as the 「收件箱 / Inbox」 queue. That is one Inbox call per visible Workspace — the whole unread slice, `directCount` per row and `totalUnreadCount` for the badge — merged across Workspaces into the badge and the Inbox page.

@@ -264,6 +264,75 @@ describe('event-evaluated Task reminders', () => {
     expect(evaluate(team, Date.parse(done.receipt.occurredAt) + REVIEW_BACKLOG_IDLE_MS)[0]).toMatchObject({ recipient: AGENT_TEAM_HUMAN_MEMBER_ID, kind: 'review-backlog' })
   })
 
+  it('hides a stalled reminder after progress or transfer without rewriting its marker', async () => {
+    const team = await seed()
+    const started = await startTask(team, team.owner.actor)
+    const active = await claim(team, started.task, team.reviewer.actor)
+    const candidate = evaluate(team, NOW + STALLED_PUBLIC_MS + 1)[0]!
+    await raise(team, candidate)
+    const reminders = () => team.ledger.notificationFacts(team.owner.memberId)[0]?.reminders ?? []
+    const delivery = () => planInboxDelivery({ threads: team.ledger.notificationFacts(team.owner.memberId), main: [], owns: () => true,
+      summarizedThrough: new Map(), covered: undefined })
+    expect(reminders()).toHaveLength(1)
+    expect(delivery().trigger).toBe('immediate')
+    await team.ledger.suspendMember({ requestId: requestId('suspend'), actor: human, memberId: team.owner.memberId })
+    await team.ledger.resumeMember({ requestId: requestId('resume'), actor: human, memberId: team.owner.memberId })
+    expect(reminders()).toHaveLength(1)
+
+    const progress = await team.ledger.reply({ requestId: requestId('progress'), actor: team.reviewer.actor, workspaceId: alpha,
+      taskRef: started.task.taskRef, baseRevision: active.thread.revision, body: 'Progress supersedes the stalled condition' })
+    if (progress.value.kind !== 'committed') throw new Error('progress did not commit')
+    expect(reminders()).toEqual([])
+    expect(delivery().signature).not.toContain('reminder')
+
+    await raise(team, evaluate(team, NOW + 2 * STALLED_PUBLIC_MS)[0]!)
+    expect(reminders()).toHaveLength(1)
+    await readTask(team, active.task, team.owner.actor)
+    await team.ledger.transferTask({ requestId: requestId('transfer'), actor: team.owner.actor, workspaceId: alpha,
+      taskRef: started.task.taskRef, target: team.reviewer.memberId, baseRevision: progress.value.thread.revision })
+    expect(reminders()).toEqual([])
+    expect(team.ledger.inbox(team.reviewer.actor, { workspaceId: alpha }).items[0]?.reminders).toEqual([])
+
+    await team.ledger.transferTask({ requestId: requestId('return'), actor: human, workspaceId: alpha,
+      taskRef: started.task.taskRef, target: team.owner.memberId, baseRevision: progress.value.receipt.sequence + 1 })
+    expect(records(team).filter(operation => operation.kind === 'team/reminder-raised')).toHaveLength(2)
+    expect(() => new AgentTeamLedger(team.table, { rulesVersion: 2 }).validate()).not.toThrow()
+  })
+
+  it('hides a review reminder when its status episode or eligible reviewer changes', async () => {
+    const team = await seed()
+    const started = await startTask(team, team.owner.actor)
+    const done = await claim(team, started.task, team.reviewer.actor, 'done')
+    await readTask(team, done.task, team.owner.actor)
+    const idle = new Map([[team.owner.memberId, REVIEW_BACKLOG_IDLE_MS]] as const)
+    await raise(team, evaluate(team, NOW, idle)[0]!, idle)
+    await team.ledger.changeAttention({ requestId: requestId('unfollow'), actor: team.owner.actor, workspaceId: alpha,
+      taskRef: started.task.taskRef, action: 'unfollow' })
+    await readTask(team, done.task, team.owner.actor)
+    const transferred = await team.ledger.transferTask({ requestId: requestId('transfer-review'), actor: team.owner.actor, workspaceId: alpha,
+      taskRef: started.task.taskRef, target: team.reviewer.memberId, baseRevision: done.thread.revision })
+    if (transferred.value.kind !== 'committed') throw new Error('review transfer did not commit')
+    expect(team.ledger.inbox(team.owner.actor, { workspaceId: alpha }).items.every(item => item.reminders.length === 0)).toBe(true)
+    expect(team.ledger.notificationFacts(team.owner.memberId).every(item => item.reminders.length === 0)).toBe(true)
+    expect(team.ledger.inbox(team.reviewer.actor, { workspaceId: alpha }).items.every(item => item.reminders.length === 0)).toBe(true)
+    expect(() => new AgentTeamLedger(team.table, { rulesVersion: 2 }).validate()).not.toThrow()
+    await readTask(team, done.task, team.owner.actor)
+    const returned = await team.ledger.transferTask({ requestId: requestId('return-review'), actor: human, workspaceId: alpha,
+      taskRef: started.task.taskRef, target: team.owner.memberId, baseRevision: transferred.value.thread.revision })
+    if (returned.value.kind !== 'committed') throw new Error('return did not commit')
+    const closed = await team.ledger.changeTask({ requestId: requestId('close'), actor: human, workspaceId: alpha,
+      taskRef: started.task.taskRef, action: 'close', baseRevision: returned.value.thread.revision })
+    if (closed.value.kind !== 'committed') throw new Error('close did not commit')
+    const reopened = await team.ledger.changeTask({ requestId: requestId('reopen'), actor: human, workspaceId: alpha,
+      taskRef: started.task.taskRef, action: 'reopen', baseRevision: closed.value.thread.revision })
+    if (reopened.value.kind !== 'committed') throw new Error('reopen did not commit')
+    const read = await readTask(team, reopened.value.task!, team.owner.actor)
+    await team.ledger.changeClaim({ requestId: requestId('new-claim'), actor: team.owner.actor, workspaceId: alpha,
+      taskRef: started.task.taskRef, action: 'claim', direction: 'new review episode', baseRevision: read.thread.revision })
+    expect(team.ledger.inbox(team.owner.actor, { workspaceId: alpha }).items.every(item => item.reminders.length === 0)).toBe(true)
+    expect(() => new AgentTeamLedger(team.table, { rulesVersion: 2 }).validate()).not.toThrow()
+  })
+
   it('treats unknown and running presence as no idle signal', () => {
     const tracker = new MemberIdleTracker()
     const memberId = 'member:owner' as AgentTeamMemberId

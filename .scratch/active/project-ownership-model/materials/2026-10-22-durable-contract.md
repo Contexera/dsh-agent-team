@@ -66,7 +66,7 @@
 | `team/thread-promoted` | v2：actor 可为 Human 或 Project owner；v3：Task 带 `accountable`（Agent owner promote 时默认自己，Human 不指定时为 Human），`sourceThreadRefs` 为空 |
 | `team/claim-created` | v2：actor 须为 Project member（Agent）；creator 不是 owner 也允许 |
 | `team/claim-done` / `team/claim-released` | v3：若跃迁使 Task 进入 `in_review` 或变为无人执行的未完成状态，inbox delta 为 accountable 增加 activity marker；accountable 曾持有该 Task 任一 Claim 且不是 Human 时，同时为 Human 增加 activity marker |
-| `team/task-changed` | v3：accept：Human，或从未持有该 Task Claim 的 Agent Project owner；close / reopen：Human 或 accountable；reopen 为 accountable 增加 activity marker |
+| `team/task-changed` | 最终 v2：accept：Human，或从未持有该 Task Claim 且处于 `in_review` 的 Agent Project owner；close / reopen：Human 或 accountable；reopen 为 accountable 增加 activity marker，并在新记录的 `refollowedMembers` 中显式记录需恢复 Thread follow 的 accountable（可能为空）；旧 reopen 无此字段，保持只加 marker 的回放语义，不提升 rules version |
 | `team/thread-attention-changed` | 仅作用于 Thread；Main stream 不接受 follow/unfollow |
 | `team/member-workspace-left` / `team/member-archived` / `team/member-removed` | v2：release snapshot 增加 `ownerRemovals`，该 Member 在受影响 Project 的 owner 身份移除；v3：再附带 transfer snapshot（§2.5），其负责的 open Task 转回 Human。`team/member-suspended` 不变（E2） |
 

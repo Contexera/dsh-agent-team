@@ -461,6 +461,8 @@ export interface AgentTeamTaskActivity extends AgentTeamActivityBase {
   readonly completedClaimRefs?: readonly AgentTeamClaimRef[] | undefined
   /** Every done Claim at acceptance time, including pre-finished ones: the durable discriminator accept markers deliver from. Always present on new accepts (possibly empty); older records keep completed-only wake semantics. */
   readonly acceptedClaimRefs?: readonly AgentTeamClaimRef[] | undefined
+  /** Members whose Task Attention reopened. Always present on new reopens (possibly empty); older records keep their marker-only semantics. */
+  readonly refollowedMembers?: readonly AgentTeamMemberId[] | undefined
 }
 
 /** One automatic, public release summary caused by a membership lifecycle action. */

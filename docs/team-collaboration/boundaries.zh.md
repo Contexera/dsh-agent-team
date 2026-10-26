@@ -15,7 +15,20 @@ Host 按以下顺序检查 fences：
 
 这些结果属于正常协作结果，不是 infrastructure failures。被拒绝的 mutation 仍不提供 bypass：它带回挡住这次写入的事实与重试所用的当前 revision。恢复永远是读取 Thread 并重新考虑。不存在 force-send 或 unread bypass。
 
-Human close 做三件事：release active Claims、结束 Attention、停止 ordinary delivery。Reopen 恢复 open Task，但不恢复之前的 Attention periods。
+close 会 release active Claims、结束 Attention 并停止 ordinary delivery。reopen 恢复 open Task，但不恢复旧 Attention periods；新的 reopen 会为 accountable 恢复当前 Thread follow，accountable 是操作者或已经 follow 时除外。旧 reopen 记录保持只加 marker 的回放语义。
+
+## Ownership 与 Task 权限
+Project owner 才能发起或 promotion Thread。accountable 与执行分离，担任 accountable 不等于获得 Project owner 权限；非 owner 的 Project member 也能执行 Task。
+
+| 操作 | Human | Agent |
+| --- | --- | --- |
+| 发起或 promotion Thread | 可以 | Project owner |
+| 验收 | 任意 open Task | Project owner，仅 `in_review`，且从未持有该 Task 的任何 Claim |
+| close 或 reopen | 可以 | 当前 accountable |
+| 转交 open Task | 可以 | 当前 accountable |
+| 转交已结束 Task | 可以 | 不可以 |
+
+持有过该 Task 任一 Claim 的 accountable Agent 不能自行验收；应由未参与执行的 Project owner 或 Human 验收，accountable 也可转交责任。转交目标是 enabled Project owner 或 Human，Claims 仍归执行者。accountable Agent 被撤销 owner、离开 Workspace、归档或删除时，其负责的 open Task 在同一 operation 中转回 Human；suspend 保留 accountable。
 
 ## Human Remote boundary
 Human Client 使用 `readThread`、`threadHistory`、`threadObservations`、`changeAttention` 和 `changes`。它消费 Host 的 Human Inbox 切片，作为「收件箱 / Inbox」队列。对每个可见 Workspace 发一次 Inbox 调用：整片未读，行内 `directCount`、徽标取 `totalUnreadCount`。在 Client 内合并为徽标与 Inbox 页。 该页渲染 Host 的两片。第一片是未读队列「需要我」。徽标与页头计数只描述它。第二片是读者写过 Message 的「最近活跃」段。回复过的 Thread 无论是否 follow 都算他的。自己发起、还没人回复的也算。回复不会自动 follow。所以 Attention 决定的是「什么会通知你」，不是「你参与过什么」。按最新活跃降序，Host 侧每 Workspace 上限 10、页面合并后最多 5 条，与队列不重复。 两片都不收录已归档 Project 的 Thread。归档终结的不只是通知，还有参与记录。 Agent 的 Inbox 只拿到队列。 打开 Inbox 页不确认任何内容。只有 durable Thread read 消费 mention marker。

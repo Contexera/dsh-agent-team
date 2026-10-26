@@ -7,7 +7,7 @@ Thread Attention 是一个 Member 对一个 Thread 的 durable private state。�
 
 taskless Thread 可以直接 unfollow。taskful Thread 只有在 Agent 的 Task overlay 没有 active Claim 时才能 unfollow。Unfollow 结束当前 Attention period，并丢弃这个 period 的 unread work。之后再次 follow 会从当前 Thread tail 开始，放弃的 history 不会重新变成 unread。
 
-Attention active 时，三类事实会成为 ordinary unread facts。第一，其他 Members 的 Messages。第二，taskful Thread 上的 Claim changes。第三，Task accept/close/reopen activities。Mention 为收件人创建 durable direct marker。发送者自己的 mutation 不会成为自己的 unread。Promotion 为当前 followers 携带 durable Activity markers。Promotion 的 `promote` activity 像其他 Task transitions 一样作为 follower unread fact 到达。由 `team_thread.read` 渲染。Follow、unfollow 和 read operations 不是 public Thread facts，不推进 Thread revision。
+Attention active 时，三类事实会成为 ordinary unread facts。第一，其他 Members 的 Messages。第二，taskful Thread 上的 Claim changes。第三，Task accept/close/reopen activities。Mention 为收件人创建 durable direct marker。发送者自己的 mutation 不会成为自己的 unread。Promotion 为当前 followers 携带 durable Activity markers。Promotion 的 `promote` activity 像其他 Task transitions 一样作为 follower unread fact 到达。由 `team_thread.read` 渲染。Follow、unfollow 和 read operations 不是 public Thread facts，不推进 Thread revision。close 结束 Attention；reopen 不恢复旧 periods，但新的 reopen 会为 accountable 恢复当前 Thread follow，accountable 是操作者或已经 follow 时除外。
 
 一个 Attention period 的首次 read 返回 Thread anchor、可选的 current Task 与 Claim snapshot。外加有限的 recent background 和有界 unread batch。Background 只用于定位，并标记为已读。`team_thread.history` 是唯一用于翻页查看更旧 Thread facts 的 tool。重新进入一个自己读过的 Thread 的 Member 拿不到 background。Member 在那里的定位只有 anchor 加本次 batch。中间那些 facts 要靠自己往回翻。
 
@@ -18,6 +18,20 @@ Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默
 当前 Thread surface 展示 public revisioned facts，并且仅在存在时展示 Task status、Claims 和 runtime risk。Thread surface 刻意不渲染 follow/unfollow buttons 或 Human-only follow/unfollow observations。
 
 History paging 永远不确认新 work。Thread 打开期间到达的 updates 无论读者滚动位置一律自动确认。滚离底部的读者只会看到无读取语义的纯跳转提示。
+
+## Agent 投递
+Host 根据当前 Inbox 计算投递等级。投递等级是运行时状态，不是写在 Message 或 Activity 上的 durable 事实。
+
+| 未读事实 | Agent 接收者 | 投递等级 |
+| --- | --- | --- |
+| Thread mention 或回复、责任 Activity、Main stream marker、有效的 Task reminder | 任意 | immediate |
+| Main stream ordinary fact，包括新讨论 | Project owner | immediate |
+| Thread ordinary fact | Project owner 或 Task accountable | threshold |
+| Thread ordinary fact | 其他 follower | immediate |
+
+threshold 按 Member × Thread 统计未投递的 ordinary facts。达到 5 条时注入一次有界摘要；不足 5 条时随下一次 immediate notice 带出。已摘要位置和 `covered` 签名只保存在进程内，签名包含投递等级与来源类型。Host 重启后同一批 facts 可能再次摘要，因此保证 at-least-once，而不是 durable 的投递记录。
+
+Task reminder 只在当前 durable 条件仍成立时参与投递。读取会从 Inbox 和唤醒计划中过滤已失效提醒，但不改写 ledger；具体条件与读取规则见 [model-and-time.zh.md](model-and-time.zh.md)。
 
 ## Mentions
 Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention。匹配按 Project 内可寻址的名字，做大小写不敏感、Unicode 词边界、长名优先。因此 Client 渲染成 chip 的那个名字正是送达的那个名字。裸 handle 仍是普通散文，代码块或行内代码里的 handle 是引用而非呼叫。`@all` 在规则版本 2 下是普通文本：不通知任何人，需要触达的 Member 都要逐一点名。不存在收件人参数。无论 Human 在 Web Client 撰写还是 Agent 通过 `team_message` 撰写，Host 都解析正文。Human 也以同样方式寻址，即 `@human`。这是跨改名永久有效的别名。`team_view` 中的当前显示名同样可寻址，chip 两种写法都渲染当前显示名。任何 agent handle 不得占用 `human` 字面，因此这个别名永远不会通知到别人。
