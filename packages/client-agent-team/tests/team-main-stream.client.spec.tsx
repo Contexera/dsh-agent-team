@@ -58,6 +58,26 @@ describe('Team Main stream', () => {
     await b.runtime.dispose()
   })
 
+  /**
+   * A Main stream Message can cite a discussion in a sibling Project. The ref resolves through the Host with its own
+   * Project, and that Project — not the feed's — is where the discussion has to open, or the panel would seat itself over
+   * a feed the discussion does not belong to.
+   */
+  it('opens a cited cross-Project discussion beside its own Project, not the feed in front of it', async () => {
+    const citing = { ...agentMessage, body: '接着看 thread:c0a1b2c3' }
+    const b = await openProject({ mainStreamEntries: [
+      { kind: 'message', sequence: 1, occurredAt: citing.occurredAt, message: citing, mentions: [] },
+    ] })
+    const chip = await b.view.findByRole('button', { name: /^讨论 · 另一个项目的讨论/ })
+    fireEvent.click(chip)
+    await waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot()).toMatchObject({
+      discussionRef: 'thread:c0a1b2c3', projectRef: 'project:delivery',
+    }))
+    // The seat followed the discussion: the panel is not left standing over engineering's feed.
+    expect(b.runtime.ctx.teamNavigation.getSnapshot().projectRef).toBe('project:delivery')
+    await b.runtime.dispose()
+  })
+
   it('pages older entries with beforeSequence and acknowledges unread entries once on screen', async () => {
     const many: MainStreamSeedEntry[] = Array.from({ length: 25 }, (_, index) => ({
       kind: 'message', sequence: index + 1, occurredAt: '2026-10-20T08:00:00.000Z', mentions: [],

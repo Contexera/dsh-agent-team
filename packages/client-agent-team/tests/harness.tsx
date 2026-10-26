@@ -605,6 +605,23 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     })
     return { ok: true as const, value: { resolved } }
   })
+  // A `thread:` ref outside the loaded window resolves through the Host, which answers with the Thread's own Project —
+  // the fact that decides whether a citation opens beside another Project's feed. One discussion is seeded in a sibling
+  // Project so a cross-Project ref has something real to resolve.
+  const resolveThreadRefs = vi.fn(async (request: { workspaceId: string; threadRefs: readonly string[] }) => {
+    interface Resolved { threadRef: string; projectRef: string; title: string; taskRef?: string; taskNumber?: number }
+    const known = new Map<string, Resolved>(viewItems.map(item => {
+      const thread = item.thread as { threadRef: string }
+      return [thread.threadRef, { threadRef: thread.threadRef, projectRef: 'project:engineering', title: '已加载的讨论' }]
+    }))
+    known.set('thread:c0a1b2c3', { threadRef: 'thread:c0a1b2c3', projectRef: 'project:delivery', title: '另一个项目的讨论' })
+    known.set('thread:d0e1f2a3', { threadRef: 'thread:d0e1f2a3', projectRef: 'project:delivery', title: '另一个项目的 Task', taskRef: 'task:s1b11000', taskNumber: 4 })
+    const resolved = request.threadRefs.flatMap(threadRef => {
+      const hit = known.get(threadRef)
+      return hit === undefined ? [] : [hit]
+    })
+    return { ok: true as const, value: { resolved } }
+  })
   // Quoting a Message needs its author and gist, which only the Host can answer:
   // a quote target the Client has not resolved carries no `memberId`, so the
   // composer's notify row stays silent about a delivery that is really coming.
@@ -819,7 +836,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, changeAttention, transferTask, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, changeAttention, transferTask, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),
@@ -863,5 +880,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
   const failTaskBoard = (message?: string): void => { taskBoardFailure = message }
-  return { runtime, team, view, seedMainInbox, loadTaskBoard, failTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, changeAttention, transferTask, failAttention, seedTransferOutcome, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
+  return { runtime, team, view, seedMainInbox, loadTaskBoard, failTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, changeAttention, transferTask, failAttention, seedTransferOutcome, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
 }

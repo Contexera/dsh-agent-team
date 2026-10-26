@@ -134,9 +134,10 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     setTab(target.value)
     target.ref.current?.focus()
   }
-  // One destination rule for every `thread:` ref: a loaded row names its own Task, and a ref
-  // outside the window resolves through the Host.
-  const openThreadRef = resolvedThreadDestination(selectThread, threadRef => { selectDiscussion(threadRef, projectRef) })
+  // One destination rule for every `thread:` ref: a loaded row names its own Task, and a ref outside the window resolves
+  // through the Host. The resolved ref carries the Project it lives in, so a cross-Project discussion opens beside that
+  // Project's feed instead of this page's.
+  const openThreadRef = resolvedThreadDestination(selectThread, selectDiscussion)
   // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here.
   const openRef = (ref: string): void => {
     if (ref.startsWith('project:')) {
@@ -147,6 +148,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       const match = view?.items.find(item => item.thread.threadRef === ref)
       if (match !== undefined) {
         openThreadRef(match.task === undefined
+          // The row came from this Project's feed, so its own Project is the page's.
           ? { threadRef: match.thread.threadRef, projectRef }
           : { threadRef: match.thread.threadRef, projectRef, taskRef: match.task.taskRef, ...(match.taskNumber === undefined ? {} : { taskNumber: match.taskNumber }) })
         return

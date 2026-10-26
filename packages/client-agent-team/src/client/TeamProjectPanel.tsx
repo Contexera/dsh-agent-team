@@ -117,9 +117,9 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
 
   const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
 
+  // Stable: it is a dependency of the memoized ref opener below, and TeamMessage is memoized on that.
   // A resolved ref carries its own Project: a discussion may cite one in a sibling Project, and the panel opens there.
   const openThreadRef = useMemo(() => resolvedThreadDestination(selectThread, selectDiscussion), [selectThread, selectDiscussion])
-
   const openRef = useCallback((ref: string): void => {
     if (ref.startsWith('project:')) {
       if (ref !== projectRef) selectProject(ref as AgentTeamProjectRef)

@@ -233,12 +233,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     label: memberId === projectView?.humanMemberId ? t('transferTargetYou') : t('transferTargetLabel', { name: memberName(memberId) }),
   })), [transferTargets, projectView?.humanMemberId, memberName, t])
 
-  // Identity-stable: `openRef` feeds every row's props, so a fresh destination per render would re-render the timeline.
-  const openThreadRef = useMemo(() => resolvedThreadDestination(selectThread, next => {
-    // A discussion is a face of its own Project; a cross-Project ref moves the seat with it.
-    if (projectRef === undefined) selectThread(next, task?.projectRef)
-    else selectDiscussion(next, projectRef)
-  }), [selectThread, selectDiscussion, projectRef, task?.projectRef])
+  // Identity-stable: `openRef` feeds every row's props, so a fresh destination per render would re-render the timeline. The
+  // resolved ref carries its own Project, so a cross-Project discussion opens beside that Project's feed — this page's
+  // `projectRef` is the wrong answer, and a Thread page without one has no Project to substitute at all.
+  const openThreadRef = useMemo(() => resolvedThreadDestination(selectThread, selectDiscussion), [selectThread, selectDiscussion])
 
   // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here. Identity-stable: a fresh
   // closure per render would defeat TeamMessage's memo.

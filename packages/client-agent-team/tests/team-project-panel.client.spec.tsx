@@ -171,6 +171,63 @@ describe('Team Project discussion panel', () => {
   })
 
   /**
+   * A citation resolves to its own Project, and that Project is what the destination must carry. A Thread page opened
+   * without a `projectRef` — the shape a Task Thread takes when it is restored on its own — has no Project to substitute,
+   * so guessing one either sent the discussion to the full page or seated the panel in the wrong Project.
+   */
+  it('opens a cited cross-Project discussion beside its own Project from a Thread page that has no projectRef', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seededMessages: [
+      { body: '起因', occurredAt: '2026-10-14T09:00:00.000Z' },
+    ] })
+    const baseRead = b.readThread.getMockImplementation()!
+    // The Task Thread cites a discussion living in another Project; the Host resolves it with that Project's own ref.
+    b.readThread.mockImplementation(async request => {
+      const result = await baseRead(request)
+      return result.ok ? { ok: true as const, value: { ...result.value, facts: [
+        { fact: { kind: 'message' as const, sequence: 1, mentions: [], message: { messageRef: 'message:cite', projectRef: 'project:engineering', threadRef: 'thread:1', sender: 'member:human', body: '接着看 thread:c0a1b2c3', topLevel: true, sequence: 1, occurredAt: '2026-10-14T09:00:00.000Z' } }, unread: false, direct: false },
+      ] } } : result
+    })
+    // No projectRef: the page opened from a Task's own identity rather than from a Project feed.
+    b.runtime.ctx.teamNavigation.actions().selectThread('thread:1' as never, undefined, 'task:1' as never, 1)
+    // Wait for that surface: the panel's own `main` would satisfy a looser query before the page arrived.
+    await waitFor(() => expect(b.view.container.querySelector('main[data-team-thread="thread:1"]')).not.toBeNull())
+    const page = b.view.container.querySelector<HTMLElement>('main[data-team-thread="thread:1"]')!
+    fireEvent.click(await within(page).findByRole('button', { name: /^讨论 · 另一个项目的讨论/ }))
+    // The destination is the panel, carrying the resolved Project — not the full Thread page, and not this page's Project.
+    await waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot()).toMatchObject({
+      discussionRef: 'thread:c0a1b2c3', projectRef: 'project:delivery',
+    }))
+    expect(b.runtime.ctx.teamNavigation.getSnapshot().threadRef).toBeUndefined()
+    await b.runtime.dispose()
+  })
+
+  /**
+   * The same rule inside the panel: a discussion may cite one in a sibling Project, and the panel has to move the seat
+   * there rather than open that discussion over the feed it does not belong to.
+   */
+  it('follows a cited sibling-Project discussion out of the panel instead of keeping the current Project', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seededMessages: [
+      { body: '起因', occurredAt: '2026-10-14T09:00:00.000Z' },
+    ] })
+    const citing = { messageRef: 'message:cite', projectRef: 'project:engineering', threadRef: 'thread:1', sender: 'member:human', body: '也看 thread:c0a1b2c3', topLevel: false, sequence: 2, occurredAt: '2026-10-14T09:05:00.000Z' }
+    const baseRead = b.readThread.getMockImplementation()!
+    b.readThread.mockImplementation(async request => {
+      const result = await baseRead(request)
+      return result.ok ? { ok: true as const, value: { ...result.value, facts: [
+        { fact: { kind: 'message' as const, sequence: 2, message: citing, mentions: [] }, unread: false, direct: false },
+      ] } } : result
+    })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.findByRole('button', { name: /^打开讨论：/ }))
+    const panel = await b.view.findByRole('complementary', { name: '讨论' })
+    fireEvent.click(await within(panel).findByRole('button', { name: /^讨论 · 另一个项目的讨论/ }))
+    await waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot()).toMatchObject({
+      discussionRef: 'thread:c0a1b2c3', projectRef: 'project:delivery',
+    }))
+    await b.runtime.dispose()
+  })
+
+  /**
    * The card sits where its Task was created, not at the end of the feed: sequence 2 lands between the two Messages that
    * surround it, so a reader scrolling the discussion meets the work in the order it happened.
    */
