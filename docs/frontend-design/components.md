@@ -136,6 +136,8 @@ The same card family serves the one cross-Workspace board (`TeamTaskBoardPage`, 
 
 The first tab is `主对话`, the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. The second tab is the Task board; there is no version-1 feed.
 
+A Thread card is the feed's one large target: the page ground at rest behind a hairline and the md radius, inset 10px/12px like the composer card. Its pointer answer is the surface itself — the interactive fill the Inbox row takes — not a border that only lightens, which left the fill untouched and made the one reacting edge fainter under the pointer.
+
 The Main stream holds three entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, and Thread cards.
 
 A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and live Claim owners. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.

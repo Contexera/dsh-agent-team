@@ -3601,6 +3601,19 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   const taskCard = page.getByRole('button', { name: /^打开 Task #1：实现 API 网关/ })
   await taskCard.waitFor()
   expect(await discussionCard.getAttribute('data-main-card')).toBe('discussion')
+  // The feed's large target answers on its own surface, not on one edge: the border alone used to lighten under the
+  // pointer, which left the fill untouched and made the only reacting edge fainter.
+  const cardRestFill = await discussionCard.evaluate(element => getComputedStyle(element).backgroundColor)
+  expect(cardRestFill).not.toBe('rgba(0, 0, 0, 0)')
+  await discussionCard.hover()
+  await settleAnimations(page)
+  const cardHoverFacts = await discussionCard.evaluate(element => {
+    const style = getComputedStyle(element)
+    return { fill: style.backgroundColor, border: style.borderColor }
+  })
+  expect(cardHoverFacts.fill).not.toBe(cardRestFill)
+  expect(cardHoverFacts.border).not.toBe('rgba(0, 0, 0, 0)')
+  await page.mouse.move(0, 0)
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-desktop.png'), fullPage: true })
 
   // Keyboard: a card is a real button that opens the Thread side panel from Enter.

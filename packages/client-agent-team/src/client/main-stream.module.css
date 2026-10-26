@@ -23,7 +23,10 @@
   text-align: left;
   width: 100%;
 }
-.card:hover { border-color: var(--dsw-alias-border-l1); }
+/* The card is the feed's one large target, so the pointer answer is the surface itself: the same interactive fill the Inbox
+   row and the composer's options take. A border that only lightens was the wrong answer twice over — it left the card's
+   fill untouched, and it made the one edge that does react grow fainter under the pointer. */
+.card:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .card:focus-visible {
   outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 2px;
