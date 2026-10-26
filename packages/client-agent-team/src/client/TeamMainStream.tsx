@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import type {
   AgentTeamClientMemberStatus, AgentTeamMainThreadCard, AgentTeamMainTimelineEntry, AgentTeamMemberId, AgentTeamMessageRef,
@@ -72,6 +72,7 @@ export function TeamMainStream({
   const [asTask, setAsTask] = useState(false)
   const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
+  const [flashedMessage, setFlashedMessage] = useState<AgentTeamMessageRef>()
   const draftKey: TeamDraftKey = `project:${projectRef}`
   // Retained across transport failures so a replayed send dedupes on the Host.
   const pendingSendId = useRef<AgentTeamRequestId>()
@@ -98,6 +99,25 @@ export function TeamMainStream({
   const handleToggleCard = useCallback((messageRef: AgentTeamMessageRef): void => {
     setOpenCard(current => current === messageRef ? undefined : messageRef)
   }, [])
+  // A quoted line names a Message already in this timeline, so the jump is a scroll and a pulse rather than a route:
+  // the Thread page's own gesture, wired here because the row's quote falls back to inert text without it.
+  const timelineOnScroll = timeline.onScroll
+  const jumpToMessage = useCallback((messageRef: AgentTeamMessageRef): void => {
+    const node = document.querySelector(`[data-message-ref="${messageRef}"]`)
+    if (node === null) return
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    // Tell the shared scroll policy the reader is off the tail, or the next arriving Message counts them as pinned and
+    // undoes the jump.
+    timelineOnScroll()
+    setFlashedMessage(messageRef)
+  }, [timelineOnScroll])
+  useEffect(() => {
+    if (flashedMessage === undefined) return
+    // The pulse is the jump's lifetime: releasing it releases the mark, so a settling jump never outlives its highlight.
+    const timer = setTimeout(() => { setFlashedMessage(undefined) }, 1200)
+    return () => { clearTimeout(timer) }
+  }, [flashedMessage])
+  const handleOpenReplyTo = useCallback((messageRef: AgentTeamMessageRef): void => { jumpToMessage(messageRef) }, [jumpToMessage])
   const toggleThreadStart = (open: boolean): void => {
     setStartingThread(open)
     if (!open) setAsTask(false)
@@ -218,8 +238,10 @@ export function TeamMainStream({
             },
           })}
           onReply={handleReply}
+          onOpenReplyTo={handleOpenReplyTo}
           rowActions="always"
           replyTarget={replyTarget === message.messageRef}
+          replyFlash={flashedMessage === message.messageRef}
           {...(senderStatus === undefined ? {} : { senderTitle: senderStatus.member.description })}
         />
       </div>

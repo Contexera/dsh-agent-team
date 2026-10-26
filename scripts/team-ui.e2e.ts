@@ -3615,6 +3615,47 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await page.getByText('human 指定 @steward 为项目负责人').waitFor()
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-owner-desktop.png'), fullPage: true })
 
+  // A quoted line in the Main stream is the same gesture as in a Thread: it names a Message already in this timeline, so
+  // it is a button that centres that row and pulses it. Without the wiring the row degrades to inert text — the defect
+  // the Human reported here.
+  await composer.fill('引用测试：这条会被引用')
+  await send.click()
+  const quotedRow = page.locator('article').filter({ hasText: '引用测试：这条会被引用' }).first()
+  await quotedRow.waitFor()
+  await quotedRow.hover()
+  await quotedRow.getByRole('button', { name: '引用这条消息' }).click()
+  await composer.fill('主对话里的引用回复')
+  await send.click()
+  const mainQuotedRow = page.locator('article').filter({ hasText: '主对话里的引用回复' })
+  await mainQuotedRow.waitFor()
+  const mainQuoteLine = mainQuotedRow.locator('[data-quote-line]')
+  await expect.poll(() => mainQuoteLine.count()).toBe(1)
+  // A button, not a div: the inert fallback is exactly what the defect looked like.
+  expect(await mainQuoteLine.evaluate(element => element.tagName)).toBe('BUTTON')
+  // The Main stream keeps its rows inert under the pointer — a feed row is an entry row, not the Thread's reading seat —
+  // while the action card still reveals. This is the deliberate split, so the journey states both halves: no row layer,
+  // card present.
+  await quotedRow.hover()
+  await settleAnimations(page)
+  const mainHoverFacts = await quotedRow.evaluate(element => {
+    const row = getComputedStyle(element)
+    return {
+      rowFill: row.backgroundColor, rowRadius: row.borderRadius, rowShadow: row.boxShadow,
+      cardOpacity: getComputedStyle(element.querySelector('[data-message-card]')!).opacity,
+    }
+  })
+  expect(mainHoverFacts.rowFill).toBe('rgba(0, 0, 0, 0)')
+  expect(mainHoverFacts.rowShadow).toBe('none')
+  expect(mainHoverFacts.cardOpacity).toBe('1')
+  await mainQuoteLine.click()
+  await expect.poll(async () => await quotedRow.getAttribute('data-reply-flash')).toBe('true')
+  // The attribute is the wiring; the pulse is the feedback. The Main stream takes the pulse without the row layer its
+  // Thread seat has, so the fill is read here rather than assumed from the attribute.
+  await expect.poll(async () => quotedRow.evaluate(element => {
+    const fill = getComputedStyle(element).backgroundColor
+    return fill === 'rgba(0, 0, 0, 0)' ? 'none' : fill
+  })).not.toBe('none')
+
   // The composer picks no @all at version 2.
   await composer.fill('@')
   expect(await page.getByRole('option', { name: /通知所有成员/ }).count()).toBe(0)

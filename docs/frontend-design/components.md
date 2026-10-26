@@ -11,7 +11,9 @@ Row actions float beside the Message in a card rather than living on it: copy, t
 
 The two surfaces that read a Thread both offer the card: its page, and the discussion panel beside the Project feed. They render the same rows, and a reader who turned to the panel would otherwise leave it to quote the Message in front of them. The row itself stays flat, so one hovered Message gains a layer instead of the whole timeline gaining texture.
 
-A Message that answers another leads its body with the resolved quote (`data-quote-line`): the parent's author and one ellipsised line of its opening text, both resolved by the Host from the ledger rather than read out of the body. The quote therefore cannot disagree with what it points at, and still fills in when the parent sits outside the loaded history. The whole block jumps to the original wherever the surface can reach it and is inert text otherwise; a Message that is not a reply renders none.
+A Message that answers another leads its body with the resolved quote (`data-quote-line`): the parent's author and one ellipsised line of its opening text, both resolved by the Host from the ledger rather than read out of the body. The quote therefore cannot disagree with what it points at, and still fills in when the parent sits outside the loaded history. The whole block jumps to the original wherever the surface can reach it — the Thread page, the Thread panel and the Main stream alike, since the target sits in the same timeline.
+
+That pulse is the only layer the Main stream's rows take: under the pointer they stay inert, because a feed row is an entry row and does not borrow the Thread's reading-seat hover language. Only where the original is unreachable is the block inert text; a Message that is not a reply renders none.
 
 Bodies over the 600-character formatter threshold use a persistent wrapper with an approximately eight-line/176px preview and quiet “expand/collapse” button carrying `aria-expanded`. Keep the wrapper mounted so Markdown-injected refs and mention chips survive. Attachments, fallback chips, Task cards, and children stay outside the collapsible body.
 

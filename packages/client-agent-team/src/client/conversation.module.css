@@ -129,8 +129,12 @@
   20%, 70% { border-radius: var(--dsw-radius-md); background-color: var(--dsw-alias-interactive-bg-hover); }
 }
 [data-team-thread] .messageRow[data-reply-flash] { animation: rowFlash 1.2s ease-in-out; }
+/* The Main stream keeps its rows inert under the pointer — a feed row is an entry row, not the Thread's reading seat — but
+   a quote jump still has to land somewhere visible, so the pulse is the one layer it takes. */
+[data-team-project] .messageRow[data-reply-flash] { animation: rowFlash 1.2s ease-in-out; }
 @media (prefers-reduced-motion: reduce) {
-  [data-team-thread] .messageRow[data-reply-flash] { animation: none; background: var(--dsw-alias-interactive-bg-hover); }
+  [data-team-thread] .messageRow[data-reply-flash],
+  [data-team-project] .messageRow[data-reply-flash] { animation: none; background: var(--dsw-alias-interactive-bg-hover); }
 }
 .messageIdentity {
   align-items: center;
