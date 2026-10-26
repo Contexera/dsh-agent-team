@@ -144,4 +144,6 @@ macOS 桌面把这一层关掉：侧栏在那里是半透明叠在窗口材质�
 
 队列被截断时在列表结尾说明。Host 报告返回页之外仍有未读 Thread 时，该段以「未读 Thread 多于本页显示的上限；读完上面的之后，其余的会继续出现在这里」收尾——整页不会读成全部队列。读取失败时保留上一次判断，与保留的行一致。
 
-Inbox 页打开时订一次无 scope 的 changes，唤醒重拉列表，离开即停。徽标同法订阅，唤醒只重拉合计（`limit: 1`），绝不拉列表。徽标还会在每次 durable Thread read 完成后直接刷新。Host 的 changes 对 read 刻意不唤醒：read 不改变任何共享 projection。这个 read 消费了读者自己的未读，含 mention marker。
+Inbox 页打开时订一次无 scope 的 changes，唤醒重拉列表，离开即停。徽标同法订阅，唤醒只重拉合计（`limit: 1`），绝不拉列表。
+
+徽标还会在每次 durable read 完成后直接刷新。Host 的 changes 对 read 刻意不唤醒：read 不改变任何共享 projection。这个 read 消费了读者自己的未读，含 mention marker。两条 read 路径都算：Thread 页与 Project 的 Main stream 动的是同一个私有 watermark，Host 的两段 Inbox 都由它派生，所以只听其中一条的徽标，会让某个 Project 的未读在消费它的那次 read 之后继续留着。

@@ -230,7 +230,8 @@ function teamSeatInject(
     ...sharedRemotes,
     ...(name === 'main' ? {
       // A committed durable read consumes mention markers; the Host's changes stream never wakes on reads,
-      // so refresh the badge from the read itself.
+      // so refresh the badge from the read itself. Both read paths move the same private watermark and the
+      // Host derives both Inbox slices from it, so both answer the badge.
       readThread: async (request: AgentTeamThreadReadRequest) => {
         const result = await ctx.remote.agentTeam.readThread(request)
         if (result.ok) reads.bump()
@@ -240,7 +241,11 @@ function teamSeatInject(
       threadObservations: (request: AgentTeamThreadObservationsRequest) => ctx.remote.agentTeam.threadObservations(request),
       postMainMessage: (request: AgentTeamPostMainMessageRequest) => ctx.remote.agentTeam.postMainMessage(request),
       startThread: (request: AgentTeamStartThreadRequest) => ctx.remote.agentTeam.startThread(request),
-      readMainStream: (request: AgentTeamMainStreamReadRequest) => ctx.remote.agentTeam.readMainStream(request),
+      readMainStream: async (request: AgentTeamMainStreamReadRequest) => {
+        const result = await ctx.remote.agentTeam.readMainStream(request)
+        if (result.ok) reads.bump()
+        return result
+      },
       mainStreamHistory: (request: AgentTeamMainStreamHistoryRequest) => ctx.remote.agentTeam.mainStreamHistory(request),
       putAttachment: (request: AgentTeamPutAttachmentRequest) => ctx.remote.agentTeam.putAttachment(request),
       getAttachment: (request: AgentTeamGetAttachmentRequest) => ctx.remote.agentTeam.getAttachment(request),

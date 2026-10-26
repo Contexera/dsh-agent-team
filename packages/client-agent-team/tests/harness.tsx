@@ -374,6 +374,9 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   })
   const readMainStream = vi.fn(async () => {
     mainUnread = 0
+    // A Main stream read consumes this reader's markers, so the Project's Inbox
+    // row leaves the queue — the same projection move a Thread read makes.
+    mainInboxRows = mainInboxRows.filter(row => row.projectRef !== 'project:engineering')
     return { ok: true as const, value: { projectRef: 'project:engineering', readThroughSequence: mainEntries.at(-1)?.sequence ?? 0, entries: [], consumedMarkers: [], standing: mainStanding() } }
   })
   const requireMainRead = (): void => { mainUnreadRequiredOnce = true }

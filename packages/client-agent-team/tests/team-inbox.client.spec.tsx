@@ -317,6 +317,37 @@ describe('Team Inbox surfaces', () => {
     await b.runtime.dispose()
   })
 
+  /**
+   * A Main stream read moves the same private watermark a Thread read does, and
+   * the Host derives both Inbox slices from it. Only a Thread read announced
+   * itself to the badge, though, so a Project's unread survived the read that
+   * consumed it: the Inbox emptied while the sidebar kept the dot. The two read
+   * paths answer the reader with one rule, so the assertion is that the badge
+   * reaches the same zero the queue does.
+   */
+  it('clears the sidebar badge from the Main stream read that consumed it, as a Thread read does', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, mainStreamUnread: 3, mainStreamEntries: [
+      { kind: 'message', sequence: 1, occurredAt: '2026-09-13T04:00:00.000Z', mentions: [], message: {
+        messageRef: 'message:main-1', projectRef: 'project:engineering', scope: 'main', sender: 'member:builder',
+        body: 'Anyone seen the build?', sequence: 1, occurredAt: '2026-09-13T04:00:00.000Z',
+      } },
+    ] })
+    const card = await b.view.findByRole('button', { name: '收件箱' })
+    await b.changeSubscriptionsReady()
+    b.seedMainInbox([mainInboxRow('w1', { projectRef: 'project:engineering', projectName: 'engineering' })])
+    await waitFor(() => expect(card.getAttribute('aria-label')).toBe('收件箱，3 条未读'))
+    fireEvent.click(card)
+    fireEvent.click(await b.view.findByRole('button', { name: /#engineering · 主对话/ }))
+    // The page's own read is what acknowledges it; nothing else on this path may.
+    await waitFor(() => { expect(b.readMainStream).toHaveBeenCalled() })
+    await waitFor(() => expect(card.getAttribute('aria-label')).toBe('收件箱'))
+    expect(dotOf(card)).toBeNull()
+    // The queue agrees: the read emptied it, so it comes back with no unread at all.
+    fireEvent.click(card)
+    await waitFor(() => expect(b.view.queryByRole('button', { name: /#engineering · 主对话/ })).toBeNull())
+    await b.runtime.dispose()
+  })
+
   it('leads a row with the Task\'s live owners in the Project feed\'s own words, and with its newest actor when there are none', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     const card = await b.view.findByRole('button', { name: '收件箱' })

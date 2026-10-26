@@ -151,4 +151,6 @@ While the page is open it subscribes once without a change scope and refetches t
 
 A capped queue says so where the list ends: when the Host reports unread Threads beyond the page it returned, the section closes with 「未读 Thread 多于本页显示的上限；读完上面的之后，其余的会继续出现在这里」, so a full page never reads as the whole queue. A failed read keeps the last verdict alongside the rows it kept.
 
-The badge subscribes the same way for its totals and re-pulls only totals (`limit: 1`), never lists. The badge additionally refreshes from every completed durable Thread read: the Host's changes stream deliberately never wakes on reads (a read changes no shared projection), but the read consumes this reader's unread facts, markers included.
+The badge subscribes the same way for its totals and re-pulls only totals (`limit: 1`), never lists.
+
+The badge additionally refreshes from every completed durable read: the Host's changes stream deliberately never wakes on reads (a read changes no shared projection), but the read consumes this reader's unread facts, markers included. Both read paths count — a Thread's page and a Project's Main stream move the same private watermark, and the Host derives both Inbox slices from it, so a badge that listened to only one of them left a Project's unread standing after the read that consumed it.

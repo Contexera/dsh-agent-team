@@ -3731,6 +3731,51 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await page.getByText('human 指定 @steward 为项目负责人').waitFor()
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-owner-desktop.png'), fullPage: true })
 
+  // A Main stream read moves the same private watermark a Thread read does, and
+  // the Host derives both Inbox slices from it — so the sidebar's unread mark must
+  // go when this page acknowledges a Main stream arrival. It used to survive the
+  // read that consumed it: the Inbox emptied while the mark stayed, which is the
+  // drift the Human reported. The arrival is written by the Project's own Agent so
+  // the unread is a real Host marker, not a Client guess. It is written while the
+  // reader stands on the Inbox instead, because the Project page acknowledges on
+  // its own — a reader parked there would consume the mark before it was drawn.
+  const mainWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
+  const streamProject = scaffold.ctx.agentTeam.view({ workspaceId: mainWorkspace.id }).projects
+    .find((project: { name: string }) => project.name === 'stream-web')!
+  const stewardMember = scaffold.ctx.agentTeam.members({ workspaceId: mainWorkspace.id })
+    .find((status: { member: { handle: string } }) => status.member.handle === 'steward')!
+  const stewardAgent = scaffold.ctx.agents.get(stewardMember.member.sessionId)!
+  // The owner grant arrived while it was idle, so its own Main stream standing holds
+  // that marker: a writer reads its backlog before it may write (rules version 2).
+  await scaffold.ctx.agentTeam.readMainStreamForAgent(stewardAgent, {
+    requestId: 'm2-11-steward-read' as never, workspaceId: mainWorkspace.id, projectRef: streamProject.projectRef,
+  })
+  await page.getByRole('button', { name: '收件箱' }).click()
+  await page.locator('[data-team-inbox]').waitFor()
+  const mainUnreadBefore = scaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount
+  const arrivalPost = await scaffold.ctx.agentTeam.postMainMessageForAgent(stewardAgent, {
+    requestId: 'm2-11-main-arrival' as never, workspaceId: mainWorkspace.id,
+    projectRef: streamProject.projectRef, body: '网关灰度已经就绪，等你确认',
+    recipients: [scaffold.ctx.agentTeam.status().humanMemberId],
+  })
+  expect(arrivalPost.kind).toBe('committed')
+  expect(scaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount).toBe(mainUnreadBefore + 1)
+  const streamInboxCard = page.locator('button[class*="inboxCard"]')
+  // The card's name is the only place the quantity is written; the dot is its visible half.
+  await expect.poll(async () => await streamInboxCard.getAttribute('aria-label'), { timeout: 20_000 }).toBe(`收件箱，${mainUnreadBefore + 1} 条未读`)
+  await expect.poll(async () => await streamInboxCard.locator('[data-team-inbox-dot]').count()).toBe(1)
+  // The queue names the Project's Main stream: this is the row a reader follows to
+  // the very arrival they are being told about.
+  const streamMainRow = page.locator('[data-team-inbox] button').filter({ hasText: '#stream-web · 主对话' })
+  await streamMainRow.waitFor()
+  await streamMainRow.click()
+  await page.getByText('网关灰度已经就绪，等你确认', { exact: true }).waitFor()
+  // The page acknowledges the arrival on its own; once the Host watermark has moved,
+  // the mark and the count must clear together — one unread fact, one number.
+  await expect.poll(async () => await streamInboxCard.getAttribute('aria-label'), { timeout: 20_000 }).toBe('收件箱')
+  await expect.poll(async () => await streamInboxCard.locator('[data-team-inbox-dot]').count()).toBe(0)
+  expect(scaffold.ctx.agentTeam.inbox({ workspaceId: mainWorkspace.id }).totalUnreadCount).toBe(mainUnreadBefore)
+
   // A quoted line in the Main stream is the same gesture as in a Thread: it names a Message already in this timeline, so
   // it is a button that centres that row and pulses it. Without the wiring the row degrades to inert text — the defect
   // the Human reported here.
