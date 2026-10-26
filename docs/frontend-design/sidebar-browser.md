@@ -83,6 +83,12 @@ The page answers to the same empty rule as the Project board: when no Task is op
 
 The two cards and the Workspace selector read as one stack: every gap between them is that control's own 2px top step (the shipped list's within-group step), never the previous row's bottom, and the selector keeps its field chrome inside the same rhythm — the same unit, in the selector's own form. The Inbox card's 4px top is the stack's step off the exit slab above it, not part of the stack's internal rhythm.
 
+The browsing seat closes on the shipped session tree's own bottom fade: a 24px overlay at the scroll container's foot, transparent to `--dsw-specific-sidebar-fill`, with `pointer-events: none`. It is the seam between the scrolling list and the Settings/More row below it. Without it the last row is cut at the clip edge, and the drop to the footer row reads as a break rather than the list continuing under it.
+
+The two boxes and their gradients are measured equal in one render (`x`/`width`/`height`/`background`), and that equality is written into the journey. The list also carries a 16px bottom inset so the last row sits above the gradient at scroll end — the shipped list's own number. The seat states no trailing inset, so the gradient's bottom edge is the seat's bottom edge and meets the footer row directly.
+
+macOS desktop drops the overlay: the sidebar there is translucent over window vibrancy, so an opaque fill gradient would paint a solid smear instead of a fade — the shipped tree drops its own fade for the same reason.
+
 ### Page frame and header
 
 The page rides the shared conversation seat — the same header band, 880px centered reading column, `clamp(18px, 3vw, 36px)` gutters, and stable scrollbar gutter Project and Thread use. Its header carries the page h1 plus one count line built as segments rather than a sentence: the Thread count, the whole-unread total the page is about in primary 600 ink while its neighbours stay secondary, and the mention total only while the queue actually holds one.

@@ -68,6 +68,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Fixed**
 
+- The sidebar's browsing list now closes on the shipped session tree's bottom fade: a 24px gradient from transparent to the sidebar fill, inert to the pointer, with the last row clearing it by the shipped list's own 16px inset. The list previously ended at a hard clip, so the seam to the Settings/More row below read as a break instead of the list continuing under it.
 - A fenced code block in a message body follows the code-size setting again. DSH 0.2.1-rc.2 moved the Markdown code-block size onto `--dsh-code-font-delta` while its leading stayed on that same delta, so the Team Client's own fixed 13px held the words still while the lines around them grew with the setting: at 16px the block rendered 13px words on a 24px line. It now renders 13px at the default setting and moves with the setting on the same px-delta pattern the content axis uses.
 
 ## [0.2.4] - 2026-10-17

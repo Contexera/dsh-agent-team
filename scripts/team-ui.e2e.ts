@@ -339,6 +339,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Measured while on screen: Team mode's stand-down rule hides this bar.
   const shippedBarBox = await page.locator('button[class*="newSession"]').boundingBox()
   expect(shippedBarBox).not.toBeNull()
+  // The shipped tree's bottom fade is measured in the same render as the bar above: Team's browsing seat must close on
+  // the same seam, so the two boxes are compared as an equality rather than "looks faded".
+  const shippedFadeBox = await page.evaluate(() => {
+    const fade = document.querySelector('[class*="sidebarCol"] span[class*="fade"]')
+    if (fade === null) return null
+    const box = fade.getBoundingClientRect()
+    return { x: box.x, y: box.y, width: box.width, height: box.height, background: getComputedStyle(fade).backgroundImage }
+  })
+  expect(shippedFadeBox).not.toBeNull()
   const [teamBox, pluginsBox, settingsBox] = await Promise.all([teamTrigger.boundingBox(), pluginsTrigger.boundingBox(), settingsTrigger.boundingBox()])
   expect(teamBox).not.toBeNull()
   expect(pluginsBox).not.toBeNull()
@@ -410,6 +419,33 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // The shipped Settings row is not shadowed and keeps its position.
   expect(teamSettingsBox!.y).toBeCloseTo(settingsBox!.y, 0)
   expect(teamSettingsBox!.height).toBeCloseTo(settingsBox!.height, 0)
+  // Team's browsing seat closes on the shipped tree's own bottom fade: same box, same gradient, inert to the pointer.
+  // Without it the last row is cut at the clip edge and the seam to the Settings row reads as a break.
+  const teamFade = await page.evaluate(() => {
+    const fade = document.querySelector('span[class*="boardFade"]')
+    if (fade === null) return null
+    const box = fade.getBoundingClientRect()
+    const style = getComputedStyle(fade)
+    return { x: box.x, y: box.y, width: box.width, height: box.height, background: style.backgroundImage, pointerEvents: style.pointerEvents }
+  })
+  expect(teamFade).not.toBeNull()
+  expect(teamFade!.width).toBeCloseTo(shippedFadeBox!.width, 0)
+  expect(teamFade!.height).toBeCloseTo(shippedFadeBox!.height, 0)
+  expect(teamFade!.x).toBeCloseTo(shippedFadeBox!.x, 0)
+  expect(teamFade!.background).toBe(shippedFadeBox!.background)
+  expect(teamFade!.pointerEvents).toBe('none')
+  // The fade's bottom edge is the browsing seat's own bottom, and that seat ends where the footer row begins: no blank
+  // band between the gradient and the Settings row.
+  const fadeSeat = await page.evaluate(() => {
+    const fade = document.querySelector('span[class*="boardFade"]')
+    const seat = document.querySelector('section[class*="workspaceBrowser"]')
+    const row = document.querySelector('[data-slot="sidebar.settings"]')
+    if (fade === null || seat === null || row === null) return null
+    return { fadeBottom: fade.getBoundingClientRect().bottom, seatBottom: seat.getBoundingClientRect().bottom, rowTop: row.getBoundingClientRect().top }
+  })
+  expect(fadeSeat).not.toBeNull()
+  expect(fadeSeat!.fadeBottom).toBeCloseTo(fadeSeat!.seatBottom, 0)
+  expect(fadeSeat!.rowTop - fadeSeat!.seatBottom).toBeLessThanOrEqual(4.5)
   await expect.poll(() => page.getByRole('button', { name: '成员', exact: true }).count()).toBe(0)
   const newSessionButtons = page.locator('button[aria-label="新建会话"]')
   const newSessionButton = page.locator('button[class*="newSession"][aria-label="新建会话"]')
