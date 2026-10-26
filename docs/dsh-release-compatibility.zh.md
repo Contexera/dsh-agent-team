@@ -324,7 +324,7 @@ DSH `0.2.0-rc.1` 已认证，基线随之前移；它就是上一节预认证所
 
 **声明的 peer 区间决定 bundle 能否挂载。** `loadProfileDirectory` 对每个 bundle manifest 调用 `evaluatePluginCompatibility`，peers 不接纳运行宿主的 bundle 会被放进 `skippedBundles`。
 
-这一步不打印任何东西：警告文本只在插件管理器与 `dsh plugin allow-version` 中可见。旧区间下候选什么都没挂上——五条 browser journey 全红于 Host 服务缺失与 Client 模块缺失——这是区间闸门，不是源码不兼容。
+每次启动都会对每个被跳过的 bundle 往 stderr 打一行 `dsh: skipping profile bundle "<name>": <reason>`；peer 不匹配时该 reason 载有那条点名插件管理器与 `dsh plugin allow-version` 的兼容性警告。旧区间下候选什么都没挂上——五条 browser journey 全红于 Host 服务缺失与 Client 模块缺失——这是区间闸门，不是源码不兼容。
 
 本 bundle 引入的符号没有被删除或改名，源码零改动。peer 包内的差异是 680 个非文档文件，集中在 bundle 组合进去的随包 Client 界面（`ui-chat` 34、`ui-primitives` 22、`ui-settings-account` 20、`ui-workspace` 17）。
 

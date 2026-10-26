@@ -261,7 +261,7 @@ The candidate falls outside `>=0.1.7-rc.1 <0.1.8` — a comparator enables prere
 
 The declared range decides whether the bundle mounts at all. `loadProfileDirectory` evaluates each bundle manifest through `evaluatePluginCompatibility`, and a bundle whose peers do not admit the running Host goes into `skippedBundles`.
 
-Nothing is printed: the warning text surfaces only in the plugin manager and through `dsh plugin allow-version`. Under the old range the candidate mounted nothing — all five browser journeys failed on an absent Host service and an absent Client module — which is the range gate, not a source incompatibility.
+Each start prints one stderr line per skipped bundle — `dsh: skipping profile bundle "<name>": <reason>` — and for a peer mismatch that reason carries the compatibility warning that names the plugin manager and `dsh plugin allow-version`. Under the old range the candidate mounted nothing — all five browser journeys failed on an absent Host service and an absent Client module — which is the range gate, not a source incompatibility.
 
 No imported symbol was removed or renamed, and no bundle source changed. Inside the peered packages the delta is 680 non-documentation files, concentrated in the shipped Client surface this bundle composes into (`ui-chat` 34, `ui-primitives` 22, `ui-settings-account` 20, `ui-workspace` 17).
 
