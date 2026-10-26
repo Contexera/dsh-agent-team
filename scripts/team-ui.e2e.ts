@@ -3713,6 +3713,27 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   await boardRow.click()
   const boardPage = page.locator('[data-team-task-board]')
   await boardPage.waitFor()
+  // The stacked band is one band on every face: title line, 3px step, description line, and a stated height so the band
+  // cannot move with the data. Measured here across two of those faces in one render.
+  const bandOf = async (): Promise<{ h: number; titleY: number; subY: number } | null> => page.evaluate(() => {
+    const band = document.querySelector('[class*="surfaceHeader"]') as HTMLElement | null
+    if (band === null) return null
+    const title = band.querySelector('h1')
+    const sub = band.querySelector('p')
+    if (title === null || sub === null) return null
+    const box = band.getBoundingClientRect()
+    return { h: Math.round(box.height), titleY: Math.round(title.getBoundingClientRect().y - box.y), subY: Math.round(sub.getBoundingClientRect().y - box.y) }
+  })
+  const boardBand = await bandOf()
+  expect(boardBand).not.toBeNull()
+  // The Inbox is the other stacked face, measured in the same render: identical band height and identical baselines, so a
+  // reader switching between them sees the feed start in the same place.
+  await page.getByRole('button', { name: '收件箱' }).click()
+  await page.waitForTimeout(400)
+  const inboxBand = await bandOf()
+  expect(inboxBand).toEqual(boardBand)
+  await boardRow.click()
+  await page.waitForTimeout(400)
   await expect.poll(async () => await boardRow.getAttribute('aria-current')).toBe('page')
   expect(await page.locator('[data-team-workspace-trigger]').getAttribute('aria-current')).toBeNull()
   const globalCard = boardPage.getByRole('button', { name: /Task #1/ })

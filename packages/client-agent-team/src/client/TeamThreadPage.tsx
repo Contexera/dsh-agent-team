@@ -788,7 +788,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const backLabel = projectRef === undefined ? t('backToWorkspace') : t('backToProject')
 
   return <main className={css.surface} data-team-thread={threadRef}>
-    <div className={css.surfaceHeader}>
+    <div className={`${css.surfaceHeader} ${css.surfaceHeaderStacked}`}>
       <div className={css.backRow}><Button size="sm" icon={<IconChevronLeftOutlineRegular />} onClick={backToWorkspace}>{backLabel}</Button></div>
       <header className={css.headerRow}>
         <div className={css.headerCopy}>

@@ -31,7 +31,7 @@ export function TeamTaskBoardPage({ useWorkspaces, loadTaskBoard, subscribeChang
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => subscribeChanges(undefined, update => { if (update.type === 'changed') void refresh() }), [refresh, subscribeChanges])
   return <main className={css.surface} data-team-task-board>
-    <div className={css.surfaceHeader}><header className={css.headerRow}><div className={css.headerCopy}><h1>{t('taskBoard')}</h1><p>{t('taskBoardHint')}</p></div></header></div>
+    <div className={`${css.surfaceHeader} ${css.surfaceHeaderStacked}`}><header className={css.headerRow}><div className={css.headerCopy}><h1>{t('taskBoard')}</h1><p>{t('taskBoardHint')}</p></div></header></div>
     <section className={projectCss.board}>
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
       {items === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}>{t('boardLoading')}</p></div>}

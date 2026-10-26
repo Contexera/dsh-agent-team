@@ -209,7 +209,9 @@
   line-clamp: 1;
   font-size: 13px;
   line-height: 20px;
-  margin: 2px 0 0;
+  /* The stacked band's own step under the title, the same 3px every other stacked face states, so the description line
+     lands on one baseline across Inbox, the board and a Thread. */
+  margin: 3px 0 0;
   overflow: hidden;
   overflow-wrap: anywhere;
 }

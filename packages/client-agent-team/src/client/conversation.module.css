@@ -37,6 +37,14 @@
   min-width: 0;
 }
 
+/* The stacked band states its own height so it cannot move with the data: a title line, the 3px step, and the optional
+   description line, whether or not that description renders this paint. Without the floor an empty surface measured 55px
+   against 78px for the same band once a row arrived, so switching faces shifted everything below it. The floor is the
+   measured 51px (28 title + 3 step + 20 description), so a described and an undescribed band are the same height to the
+   pixel. Project's identity row is the other shape — its description sits beside the title instead of under it — and keeps
+   its own geometry there. */
+.surfaceHeaderStacked .headerCopy { min-height: 51px; }
+
 .headerCopy { min-width: 0; }
 .headerCopy h1 {
   color: var(--dsw-alias-label-primary);
@@ -70,6 +78,12 @@
 .surfaceHeaderWithTabs .headerRow {
   align-items: center;
   min-height: 30px;
+}
+
+/* The stacked band aligns its copy to the top: the description hangs under the title, so centring the row would float the
+   pair against actions that are taller than one line. */
+.surfaceHeaderStacked .headerRow {
+  align-items: flex-start;
 }
 
 .backRow {

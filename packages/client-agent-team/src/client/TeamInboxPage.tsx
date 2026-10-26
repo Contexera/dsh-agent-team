@@ -143,16 +143,20 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
     ? <InboxMainRow key={`${row.workspaceId} ${rowKey(row)}`} row={row} t={t} showWorkspace={showWorkspace} human={human} onOpen={() => { open(row) }} />
     : <InboxQueueRow key={`${row.workspaceId} ${rowKey(row)}`} row={row} t={t} showWorkspace={showWorkspace} human={human} onOpen={() => { open(row) }} />
   return <main className={css.surface} data-team-inbox>
-    <div className={css.surfaceHeader}>
+    <div className={`${css.surfaceHeader} ${css.surfaceHeaderStacked}`}>
       <header className={css.headerRow}>
         <div className={css.headerCopy}>
           <h1>{t('inboxTitle')}</h1>
-          {rows !== undefined && rows.length > 0 && <p className={inboxCss.headerMeta}>
-            {threadRowCount > 0 && <span>{t('inboxHeaderThreads', { count: threadRowCount })}</span>}
-            {mainRowCount > 0 && <span>{t('inboxHeaderMain', { count: mainRowCount })}</span>}
-            <span className={inboxCss.headerUnread}>{t('inboxHeaderUnread', { count: totalUnread })}</span>
-            {totalMentions > 0 && <span>{t('inboxHeaderMentions', { count: totalMentions })}</span>}
-          </p>}
+          {/* The description line always renders: the counts while there is a queue to count, a sentence naming the face
+              while there is not. A band that appeared only with data moved the feed under it on the first arrival. */}
+          {rows !== undefined && rows.length > 0
+            ? <p className={inboxCss.headerMeta}>
+              {threadRowCount > 0 && <span>{t('inboxHeaderThreads', { count: threadRowCount })}</span>}
+              {mainRowCount > 0 && <span>{t('inboxHeaderMain', { count: mainRowCount })}</span>}
+              <span className={inboxCss.headerUnread}>{t('inboxHeaderUnread', { count: totalUnread })}</span>
+              {totalMentions > 0 && <span>{t('inboxHeaderMentions', { count: totalMentions })}</span>}
+            </p>
+            : <p>{t('inboxHeaderHint')}</p>}
         </div>
       </header>
     </div>

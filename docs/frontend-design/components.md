@@ -197,3 +197,7 @@ That class answers the localizable question "what kind of problem is this", whil
 The opener under the Task or Thread identity is **one clamped line at every width and for every Thread kind**, with the full text on its `title`. A Task's title runs long and embeds unbreakable refs, and a discussion's opener is its own anchor message, repeated in full in the timeline directly below. A second line in the band would therefore spend header height on text the reader can already see, and make the band's height depend on how much someone happened to type.
 
 One line keeps a long opener and a two-character one at the same band height (measured: 114px either way on a taskless Thread).
+
+A stacked band — Inbox, the Task board, a Thread page — states its own height: a 28px title line, the 3px step and a 20px description line, a 51px floor. Its description line renders in every state: the counts while there is a queue, a sentence naming the face while there is not. A band with data and one without therefore measure the same to the pixel.
+
+The Project page is the other shape — description on the title's baseline, tab strip below — and keeps its own 10px top inset and 30px identity row, the shipped session header's rhythm.
