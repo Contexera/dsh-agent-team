@@ -255,13 +255,17 @@
 .cardAction {
   background: transparent;
   border: 0;
-  border-radius: var(--dsw-radius-sm, 8px);
+  /* The hover block sits inside the card rather than filling it: a 28px action in a 28px card would paint from edge to
+     edge at the card's own radius, so the pointer state reads as the card being cut or pressed instead of one control
+     lighting up. The 2px inset on every side leaves the card's surface visible around it. */
+  border-radius: var(--dsw-radius-xs, 4px);
   color: var(--dsw-alias-label-secondary);
   cursor: pointer;
   font-size: 12px;
-  height: 28px;
-  line-height: 28px;
-  padding: 0 10px;
+  height: 24px;
+  line-height: 24px;
+  margin: 2px;
+  padding: 0 8px;
   white-space: nowrap;
 }
 .cardAction:hover {

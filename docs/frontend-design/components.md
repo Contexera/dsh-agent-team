@@ -7,7 +7,9 @@ Props include sender identity, body, optional time, mention handles, sender titl
 
 The identity seat draws a picture for exactly one author. The profile avatar lands on a row only while that row is the Human's own, so an Agent row keeps the shared hue and the sender initial whatever the surface passes down — one seat painting the reader's face for another author would name two people alike.
 
-Row actions float beside the Message in a card rather than living on it: copy, the quote action, and — when the body itself names the reader — the `Mentioned you` notice. The card belongs to the row rather than to one action. A surface that withholds quoting (`rowActions` without `onReply`) keeps copy and the notice and drops only the quote button, while a surface that passes neither offers no card at all, which is what the Project feed does.
+Row actions float beside the Message in a card rather than living on it: copy, the quote action, and — when the body itself names the reader — the `Mentioned you` notice. The card belongs to the row rather than to one action. A surface that withholds quoting (`rowActions` without `onReply`) keeps copy and the notice and drops only the quote button, while a surface that passes neither offers no card at all.
+
+The Main stream passes `rowActions` unconditionally, so its rows carry the card too. Its action sits inside the card rather than filling it: a 24px control inset 2px on every side. At the card's own 28px height and 8px radius the hover fill painted from edge to edge, so the pointer state read as the card being cut open instead of one control lighting up — the shipped IconActions are 28px squares with their own padding, never flush with the surface that holds them.
 
 The two surfaces that read a Thread both offer the card: its page, and the discussion panel beside the Project feed. They render the same rows, and a reader who turned to the panel would otherwise leave it to quote the Message in front of them. The row itself stays flat, so one hovered Message gains a layer instead of the whole timeline gaining texture.
 

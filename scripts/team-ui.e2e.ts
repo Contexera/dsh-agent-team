@@ -1817,6 +1817,17 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
       cardHeight: Math.round(cardElement.getBoundingClientRect().height),
       cardTransition: `${card.transitionDuration} ${card.transitionTimingFunction}`,
       actionHeight: Math.round(Number.parseFloat(action.height)),
+      actionRadius: action.borderRadius,
+      // The hover block has to sit inside the card: an action as tall as the card paints from edge to edge at the card's
+      // own radius, so the pointer state reads as the card being cut open instead of one control lighting up.
+      actionInsets: (() => {
+        const cardBox = cardElement.getBoundingClientRect()
+        const actionBox = (cardElement.querySelector('[data-copy-message]') as HTMLElement).getBoundingClientRect()
+        return {
+          top: Math.round(actionBox.top - cardBox.top),
+          bottom: Math.round(cardBox.bottom - actionBox.bottom),
+        }
+      })(),
       seatWidth: Math.round(Number.parseFloat(getComputedStyle(cardElement.parentElement!.querySelector('[data-gutter-time]')!).width)),
       // Painted width: the box is 28px by construction, so only a Range over the
       // text sees overflow the box does not clip.
@@ -1847,7 +1858,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   })
   expect(hoverFacts.cardHeight).toBe(acceptFacts.height)
   expect(hoverFacts.cardRadius).toBe(acceptFacts.radius)
-  expect(hoverFacts.actionHeight).toBe(28)
+  // The action is one 24px control inside the 28px card, not the card's full height.
+  expect(hoverFacts.actionHeight).toBe(24)
+  expect(hoverFacts.actionRadius).toBe('4px')
+  // Inset on both sides, so the card's own surface still frames the control.
+  expect(hoverFacts.actionInsets.top).toBeGreaterThanOrEqual(2)
+  expect(hoverFacts.actionInsets.bottom).toBeGreaterThanOrEqual(2)
   expect(hoverFacts.cardTransition).toBe('0.16s ease-out')
   expect(hoverFacts.seatWidth).toBe(34)
   // A dated label (57px within the year, 87px across it) would paint over the
