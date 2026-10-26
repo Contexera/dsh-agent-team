@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { TeamQueries, describeRule, teamQueryKey, type TeamQueryIdentity, type TeamQueryKey, type TeamQueryRule } from '../src/client/team-queries.ts'
+import { TeamQueries, describeRule, teamQueryKey, type TeamQueryIdentity, type TeamQueryRule } from '../src/client/team-queries.ts'
 import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from '../src/client/team-changes.ts'
 
 function hub() {
