@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { TeamQueries, type TeamQueryIdentity } from '../src/client/team-queries.ts'
+import { TeamQueries, describeRule, teamQueryKey, type TeamQueryIdentity, type TeamQueryKey, type TeamQueryRule } from '../src/client/team-queries.ts'
 import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from '../src/client/team-changes.ts'
 
 function hub() {
@@ -35,11 +35,12 @@ const drainContinuations = async (): Promise<void> => {
 }
 
 /** The production roster identity, mirrored: one key per Workspace. */
-const roster = (): TeamQueryIdentity => ({
-  key: 'members:w1',
-  covers: scope => scope !== undefined
-    && ((scope.kind === 'presence' || scope.kind === 'workspace') && scope.workspaceId === ('w1' as never)),
-})
+const rosterRule: TeamQueryRule = { kinds: ['presence', 'workspace'], workspaceId: 'w1' as never }
+const rosterKey = teamQueryKey<string>('members:w1')
+const roster = (): TeamQueryIdentity<string> => ({ key: rosterKey, rule: rosterRule })
+const otherKey = teamQueryKey<string>('members:w2')
+const otherRule: TeamQueryRule = { kinds: ['workspace'], workspaceId: 'w2' as never }
+const other = (): TeamQueryIdentity<string> => ({ key: otherKey, rule: otherRule })
 
 describe('TeamQueries', () => {
   it('shares one in-flight read between concurrent consumers of the same query', async () => {
@@ -157,12 +158,16 @@ describe('TeamQueries', () => {
   it('counts a failure answered inside the payload as failed without changing delivery', async () => {
     const { changes } = hub()
     const queries = new TeamQueries(changes)
+    // A result envelope rather than a bare value: the production reads carry
+    // RemoteResult, and the counter must observe a failure the consumer still
+    // receives as a delivered value.
     const failure = { ok: false as const, error: { message: 'roster down' } }
-    const result = await queries.read(roster(), async () => failure)
+    const envelopeKey = teamQueryKey<{ readonly ok: boolean; readonly error?: { readonly message: string } }>('envelope:w1')
+    const result = await queries.read({ key: envelopeKey, rule: rosterRule }, async () => failure)
     // The consumer's own result.ok face still renders the error — the
     // counter observes, delivery is unchanged.
     expect(result).toBe(failure)
-    expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 1, failed: 1 })
+    expect(queries.diagnostics()['envelope:w1']).toMatchObject({ issued: 1, failed: 1 })
   })
 
   it('newGeneration resets watermarks and stops joining the old generation\'s reads', async () => {
@@ -189,9 +194,8 @@ describe('TeamQueries', () => {
   it('keeps diagnostics per query key', async () => {
     const { changes } = hub()
     const queries = new TeamQueries(changes)
-    const other: TeamQueryIdentity = { key: 'members:w2', covers: () => true }
     await queries.read(roster(), async () => 'w1')
-    await queries.read(other, async () => 'w2')
+    await queries.read(other(), async () => 'w2')
     expect(Object.keys(queries.diagnostics()).sort()).toEqual(['members:w1', 'members:w2'])
     expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 1, failed: 0 })
   })
@@ -277,5 +281,93 @@ describe('TeamQueries', () => {
     reissuedLoad.resolve('post-reset roster')
     expect(await reissued).toBe('post-reset roster')
     expect(await dying).toBe('post-reset roster')
+  })
+})
+
+/**
+ * The key's brand is what pairs a key with the loader it may be read through, so a key typed for one result cannot
+ * accept a loader returning another. These are compile-time assertions: `npm run typecheck` covers this file, so a
+ * regression turns the assertion into a build failure rather than a runtime surprise.
+ */
+describe('TeamQueries result-type boundary', () => {
+  it('rejects a loader whose result type differs from the key it is read through', async () => {
+    const { changes } = hub()
+    const queries = new TeamQueries(changes)
+    // @ts-expect-error -- a roster key may not be read through an inbox loader: the key's result type must match.
+    queries.read(roster(), async (): Promise<number> => 1)
+    // @ts-expect-error -- and the reverse, so the check is not merely "the loader is not the expected type".
+    queries.read({ key: teamQueryKey<number>('members:w1'), rule: rosterRule }, async () => 'roster')
+    // A matching pair still compiles, so the assertions above fail on the brand and not on an unrelated error.
+    await queries.read(roster(), async () => 'roster')
+  })
+
+  it('keeps the brand off the runtime key, so the shared string is what concurrent consumers agree on', async () => {
+    const { changes } = hub()
+    const queries = new TeamQueries(changes)
+    // Two separately branded keys with the same text are the same query at runtime.
+    const first = teamQueryKey<string>('members:w1')
+    const second = teamQueryKey<string>('members:w1')
+    expect(first).toBe(second)
+    const load = vi.fn(async () => 'roster')
+    const a = queries.read({ key: first, rule: rosterRule }, load)
+    const b = queries.read({ key: second, rule: rosterRule }, load)
+    expect(await a).toBe('roster')
+    expect(await b).toBe('roster')
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+})
+
+/**
+ * A key's invalidation rule is registered once. The rule is data rather than a type, so a second registration that
+ * names a different rule cannot be caught at compile time — it fails loudly here instead of silently replacing the
+ * policy that every later invalidation would then follow.
+ */
+describe('TeamQueries rule immutability', () => {
+  it('fails when a later read names a different rule for the same key', () => {
+    const { changes } = hub()
+    const queries = new TeamQueries(changes)
+    queries.read(roster(), async () => 'roster')
+    // Same key, same kinds, different Workspace: a different policy, so it must not replace the first.
+    expect(() => queries.read({ key: rosterKey, rule: { kinds: rosterRule.kinds, workspaceId: 'w2' as never } }, async () => 'roster'))
+      .toThrow(/members:w1/)
+    // Same key, different kinds: also a different policy.
+    expect(() => queries.read({ key: rosterKey, rule: { kinds: ['workspace'], workspaceId: 'w1' as never } }, async () => 'roster'))
+      .toThrow(/members:w1/)
+  })
+
+  it('accepts a re-registration that names the same rule, so a factory may rebuild it per render', async () => {
+    const { changes } = hub()
+    const queries = new TeamQueries(changes)
+    await queries.read(roster(), async () => 'roster')
+    // A factory builds a fresh identity each render: the same key and rule must stay idempotent.
+    await queries.read({ key: rosterKey, rule: { kinds: ['workspace', 'presence'], workspaceId: 'w1' as never } }, async () => 'roster')
+    // The order the kinds are listed in is not part of the identity.
+    await queries.read({ key: rosterKey, rule: { kinds: ['presence', 'workspace'], workspaceId: 'w1' as never } }, async () => 'roster')
+    expect(queries.diagnostics()['members:w1']).toMatchObject({ issued: 3 })
+  })
+
+  it('keeps the first rule in force after a rejected re-registration', async () => {
+    const { changes, emit } = hub()
+    const queries = new TeamQueries(changes)
+    queries.subscribeChanges(presence, () => {})
+    const held = Promise.withResolvers<string>()
+    const pending = queries.read(roster(), () => held.promise)
+    const rejected = () => queries.read({ key: rosterKey, rule: { kinds: ['workspace'], workspaceId: 'w1' as never } }, async () => 'roster')
+    expect(rejected).toThrow()
+    // The roster rule admits presence; a narrower rule would have lost that, and the in-flight read proves it did not.
+    emit(presence, { type: 'changed', version: 1, baseline: true })
+    expect(queries.diagnostics()['members:w1']).toMatchObject({ superseded: 1 })
+    held.resolve('roster')
+    expect(await pending).toBe('roster')
+  })
+
+  it('describes a rule by what it admits, not by the closure that computed it', () => {
+    // The descriptor is the rule's identity: sorted kinds plus the Workspace it scopes to.
+    expect(describeRule({ kinds: ['presence', 'workspace'], workspaceId: 'w1' as never }))
+      .toBe(describeRule({ kinds: ['workspace', 'presence'], workspaceId: 'w1' as never }))
+    expect(describeRule({ kinds: ['workspace'], workspaceId: 'w1' as never }))
+      .not.toBe(describeRule({ kinds: ['presence', 'workspace'], workspaceId: 'w1' as never }))
+    expect(describeRule({ kinds: ['workspace'], workspaceId: 'w1' as never }))
+      .not.toBe(describeRule({ kinds: ['workspace'], workspaceId: 'w2' as never }))
   })
 })

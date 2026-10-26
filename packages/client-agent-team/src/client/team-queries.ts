@@ -2,10 +2,44 @@ import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from './te
 import type { TeamChangeStream } from './team-changes.ts'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 
-/** `key` is what concurrent consumers agree on to share an in-flight read; `covers` lists the change scopes that can change its data. */
-export interface TeamQueryIdentity {
-  readonly key: string
-  readonly covers: (scope: TeamChangeScope) => boolean
+/** The scope kinds a rule can name; `scopeLess` is the stream without a scope, whose deliveries already woke every Workspace. */
+export type TeamQueryScopeKind = 'workspace' | 'presence' | 'project' | 'thread' | 'scopeLess'
+
+/**
+ * A query's invalidation policy in comparable form. `covers` closures are rebuilt on every render, so the rule that
+ * decides them carries its own identity: two reads of one key must name the same kinds and the same Workspace.
+ */
+export interface TeamQueryRule {
+  readonly kinds: readonly TeamQueryScopeKind[]
+  /** The Workspace whose `workspace` and `presence` scopes the rule admits; other kinds are not Workspace-scoped. */
+  readonly workspaceId: WorkspaceId | undefined
+}
+
+/**
+ * The stable identity of a rule: what it admits, not which closure computed it. Sorted so the order a factory lists
+ * kinds in cannot make two equivalent rules look different.
+ */
+export function describeRule(rule: TeamQueryRule): string {
+  return `${[...rule.kinds].sort().join(',')}|${rule.workspaceId ?? '*'}`
+}
+
+/** `key` is what concurrent consumers agree on to share an in-flight read; `rule` names the change scopes that can change its data. */
+export interface TeamQueryIdentity<Result> {
+  readonly key: TeamQueryKey<Result>
+  readonly rule: TeamQueryRule
+}
+
+declare const teamQueryResult: unique symbol
+
+/**
+ * A query key branded with the result type it reads. The brand exists only at compile time — at runtime the key is the
+ * plain string consumers agree on — so a key typed for one result cannot be read through a loader that returns another.
+ */
+export type TeamQueryKey<Result> = string & { readonly [teamQueryResult]: Result }
+
+/** The only way to brand a key: the production query factories call this, so every key's result type is stated once. */
+export function teamQueryKey<Result>(key: string): TeamQueryKey<Result> {
+  return key as TeamQueryKey<Result>
 }
 
 export type WorkspaceScopeKind = 'workspace' | 'presence'
@@ -16,6 +50,14 @@ export type WorkspaceScopeKind = 'workspace' | 'presence'
  */
 export function coversWorkspaceScope(scope: TeamChangeScope, workspaceId: WorkspaceId | undefined, kind: WorkspaceScopeKind): boolean {
   return scope !== undefined && scope.kind === kind && scope.workspaceId === workspaceId
+}
+
+/** Whether a rule admits a change scope. Derived from the rule, so no per-read closure can disagree with it. */
+export function coversRule(scope: TeamChangeScope, rule: TeamQueryRule): boolean {
+  if (scope === undefined) return rule.kinds.includes('scopeLess')
+  if (!rule.kinds.includes(scope.kind)) return false
+  if (scope.kind !== 'workspace' && scope.kind !== 'presence') return true
+  return rule.workspaceId === undefined || coversWorkspaceScope(scope, rule.workspaceId, scope.kind)
 }
 
 /** Per-query read counters. Diagnostics record identity and counts only — never response bodies. */
@@ -39,37 +81,39 @@ export interface TeamQueryCounters {
  */
 type VersionDomain = 'presence' | 'projection'
 
-interface QueryState {
-  identity: TeamQueryIdentity
+interface QueryState<Result> {
+  readonly key: TeamQueryKey<Result>
+  /** Registered once with the key; a later read naming a different rule fails rather than replacing it. */
+  readonly rule: TeamQueryRule
   readonly counters: Mutable<TeamQueryCounters>
   /** Last invalidating version seen per domain; the same version carries no new data. */
   readonly invalidated: Partial<Record<VersionDomain, number>>
   applied: number
   /** The response that last landed; a stale drop hands waiters this instead of its own payload. */
-  stored: { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: unknown } | undefined
+  stored: Outcome<Result> | undefined
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 
-interface Waiter {
-  resolve(value: unknown): void
+interface Waiter<Result> {
+  resolve(value: Result): void
   reject(reason: unknown): void
 }
 
-type Outcome = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: unknown }
+type Outcome<Result> = { readonly ok: true; readonly value: Result } | { readonly ok: false; readonly error: unknown }
 
-const answeredFailure = (outcome: Outcome): boolean =>
+const answeredFailure = (outcome: Outcome<unknown>): boolean =>
   outcome.ok && typeof outcome.value === 'object' && outcome.value !== null && (outcome.value as { readonly ok?: unknown }).ok === false
 
-interface InFlight {
-  readonly key: string
+interface InFlight<Result> {
+  readonly key: TeamQueryKey<Result>
   readonly issuance: number
-  readonly state: QueryState
-  readonly load: () => Promise<unknown>
+  readonly state: QueryState<Result>
+  readonly load: () => Promise<Result>
   superseded: boolean
   /** Set once the response landed: the entry still shares this response through the microtask drain. */
-  outcome?: Outcome
-  readonly waiters: Waiter[]
+  outcome?: Outcome<Result>
+  readonly waiters: Waiter<Result>[]
 }
 
 /**
@@ -83,8 +127,8 @@ interface InFlight {
  * - The response lands on the microtask that resolves it; the issuance guard drops any older response arriving later.
  */
 export class TeamQueries {
-  private readonly states = new Map<string, QueryState>()
-  private readonly inFlight = new Map<string, InFlight>()
+  private readonly states = new Map<string, QueryState<unknown>>()
+  private readonly inFlight = new Map<string, InFlight<unknown>>()
   /** Dispatches already folded into invalidations, so co-subscribers of one dispatch mark once. */
   private readonly folded = new WeakSet<TeamChangeUpdate>()
   private issuance = 0
@@ -92,32 +136,34 @@ export class TeamQueries {
 
   constructor(private readonly changes: Pick<TeamChangeStream, 'subscribe'>) {}
 
-  read<T>(identity: TeamQueryIdentity, load: () => Promise<T>): Promise<T> {
+  read<Result>(identity: TeamQueryIdentity<Result>, load: () => Promise<Result>): Promise<Result> {
+    const state = this.state(identity)
     const existing = this.inFlight.get(identity.key)
     if (existing !== undefined && !existing.superseded) {
       existing.state.counters.shared += 1
-      return new Promise<T>((resolve, reject) => {
-        const waiter = { resolve: resolve as unknown as (value: unknown) => void, reject }
-        if (existing.outcome !== undefined) {
-          if (existing.outcome.ok) waiter.resolve(existing.outcome.value)
-          else waiter.reject(existing.outcome.error)
+      // The key's brand is what makes this re-type sound: `state` already confirmed this key's result type matches.
+      const entry = existing as InFlight<Result>
+      return new Promise<Result>((resolve, reject) => {
+        const waiter: Waiter<Result> = { resolve, reject }
+        if (entry.outcome !== undefined) {
+          if (entry.outcome.ok) waiter.resolve(entry.outcome.value)
+          else waiter.reject(entry.outcome.error)
           return
         }
-        existing.waiters.push(waiter)
+        entry.waiters.push(waiter as Waiter<unknown>)
       })
     }
-    return new Promise<T>((resolve, reject) => {
-      this.issue(identity, load).waiters.push({ resolve: resolve as unknown as (value: unknown) => void, reject })
+    return new Promise<Result>((resolve, reject) => {
+      this.issue(identity, state, load).waiters.push({ resolve, reject } as Waiter<unknown>)
     })
   }
 
-  private issue(identity: TeamQueryIdentity, load: () => Promise<unknown>): InFlight {
-    const state = this.state(identity)
+  private issue<Result>(identity: TeamQueryIdentity<Result>, state: QueryState<Result>, load: () => Promise<Result>): InFlight<Result> {
     const issuance = (this.issuance += 1)
-    const entry: InFlight = { key: identity.key, issuance, state, load, superseded: false, waiters: [] }
-    this.inFlight.set(identity.key, entry)
+    const entry: InFlight<Result> = { key: identity.key, issuance, state, load, superseded: false, waiters: [] }
+    this.inFlight.set(identity.key, entry as InFlight<unknown>)
     state.counters.issued += 1
-    let started: Promise<unknown>
+    let started: Promise<Result>
     try {
       started = load()
     } catch (error) {
@@ -168,20 +214,28 @@ export class TeamQueries {
     this.inFlight.clear()
   }
 
-  private state(identity: TeamQueryIdentity): QueryState {
+  /**
+   * The state for a key, registering its rule on first use. A later read that names a different rule is a programming
+   * error the type system cannot catch — the rule is data, not a type — so it fails here instead of silently replacing
+   * the policy every later invalidation would then follow.
+   */
+  private state<Result>(identity: TeamQueryIdentity<Result>): QueryState<Result> {
     const existing = this.states.get(identity.key)
     if (existing !== undefined) {
-      existing.identity = identity
-      return existing
+      if (describeRule(existing.rule) !== describeRule(identity.rule)) {
+        throw new Error(`query ${identity.key} was registered with a different invalidation rule: ${describeRule(existing.rule)} then ${describeRule(identity.rule)}`)
+      }
+      return existing as QueryState<Result>
     }
-    const state: QueryState = {
-      identity,
+    const state: QueryState<Result> = {
+      key: identity.key,
+      rule: identity.rule,
       counters: { issued: 0, shared: 0, superseded: 0, droppedStale: 0, droppedSuperseded: 0, failed: 0 },
       invalidated: {},
       applied: 0,
       stored: undefined,
     }
-    this.states.set(identity.key, state)
+    this.states.set(identity.key, state as QueryState<unknown>)
     return state
   }
 
@@ -190,21 +244,21 @@ export class TeamQueries {
     this.folded.add(update)
     const domain: VersionDomain = scope?.kind === 'presence' ? 'presence' : 'projection'
     for (const state of this.states.values()) {
-      if (!state.identity.covers(scope)) continue
+      if (!coversRule(scope, state.rule)) continue
       if (update.baseline !== true && state.invalidated[domain] === update.version) continue
       state.invalidated[domain] = update.version
-      const entry = this.inFlight.get(state.identity.key)
+      const entry = this.inFlight.get(state.key)
       if (entry !== undefined) this.supersede(entry)
     }
   }
 
-  private supersede(entry: InFlight): void {
+  private supersede(entry: InFlight<unknown>): void {
     if (entry.superseded) return
     entry.superseded = true
     entry.state.counters.superseded += 1
   }
 
-  private settle(entry: InFlight, outcome: Outcome): void {
+  private settle<Result>(entry: InFlight<Result>, outcome: Outcome<Result>): void {
     const current = this.inFlight.get(entry.key) === entry
     const state = entry.state
     if (!outcome.ok || answeredFailure(outcome)) state.counters.failed += 1
@@ -234,7 +288,7 @@ export class TeamQueries {
   }
 
   /** The stale payload is dropped whole, failure included, so an old error never masks newer data. */
-  private dropStale(entry: InFlight, current: boolean): void {
+  private dropStale<Result>(entry: InFlight<Result>, current: boolean): void {
     entry.state.counters.droppedStale += 1
     this.logDrop(entry, 'stale')
     if (current) this.inFlight.delete(entry.key)
@@ -245,29 +299,29 @@ export class TeamQueries {
    * An invalidation superseded this read: its payload must never become the query's state. Waiters move to the
    * replacement read; when the wake left none, issue it here so the invalidation still ends in fresh data.
    */
-  private deliverSuperseded(entry: InFlight, current: boolean): void {
+  private deliverSuperseded<Result>(entry: InFlight<Result>, current: boolean): void {
     entry.state.counters.droppedSuperseded += 1
     this.logDrop(entry, 'superseded')
     if (current) this.inFlight.delete(entry.key)
     const target = this.inFlight.get(entry.key)
     if (target !== undefined && target !== entry) {
-      if (target.outcome !== undefined) this.deliver(entry, target.outcome)
+      if (target.outcome !== undefined) this.deliver(entry, target.outcome as Outcome<Result>)
       else target.waiters.push(...entry.waiters.splice(0, entry.waiters.length))
       return
     }
     if (!this.disposed) {
-      const retry = this.issue(entry.state.identity, entry.load)
+      const retry = this.issue({ key: entry.state.key, rule: entry.state.rule }, entry.state, entry.load)
       retry.waiters.push(...entry.waiters.splice(0, entry.waiters.length))
       return
     }
     this.deliver(entry, entry.state.stored)
   }
 
-  private logDrop(entry: InFlight, reason: 'stale' | 'superseded'): void {
+  private logDrop(entry: InFlight<unknown>, reason: 'stale' | 'superseded'): void {
     console.info('[agent-team] stale read response dropped', { query: entry.key, issuance: entry.issuance, landed: entry.state.applied, reason })
   }
 
-  private deliver(entry: InFlight, outcome: Outcome | undefined): void {
+  private deliver<Result>(entry: InFlight<Result>, outcome: Outcome<Result> | undefined): void {
     const waiters = entry.waiters.splice(0, entry.waiters.length)
     if (outcome === undefined) {
       // Only a drop after dispose lands here: live drops hand waiters the

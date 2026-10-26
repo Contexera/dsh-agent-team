@@ -5,6 +5,7 @@ import type {
   AgentTeamArchiveProjectRequest,
   AgentTeamArchiveMemberRequest,
   AgentTeamClientMemberStatus,
+  AgentTeamInbox,
   AgentTeamInboxRequest,
   AgentTeamTaskBoardRequest,
   AgentTeamProjectOwnerRequest,
@@ -44,6 +45,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { TeamSettingsSection } from './TeamSettingsSection.tsx'
 import { TeamConfigController, teamConfigScope } from './team-config.ts'
 import { TeamHumanIdentity } from './human-identity.ts'
@@ -51,7 +53,7 @@ import { TeamEnvironmentCheck } from './environment-check.ts'
 import { bytesToBase64 } from './attachment-preview.ts'
 import { TEAM_PANEL_ID, TeamNavigation } from './navigation.ts'
 import { TeamChangeStream, TeamReadStream, type TeamChangeListener, type TeamChangeScope } from './team-changes.ts'
-import { TeamQueries, coversWorkspaceScope, type TeamQueryIdentity, type WorkspaceScopeKind } from './team-queries.ts'
+import { TeamQueries, teamQueryKey, type TeamQueryIdentity, type WorkspaceScopeKind } from './team-queries.ts'
 import { TeamDraftStore } from './drafts.ts'
 import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
@@ -157,21 +159,24 @@ function openMemberSessionImpl(
 
 const ROSTER_SCOPE_KINDS = ['presence', 'workspace'] as const satisfies readonly WorkspaceScopeKind[]
 
-function membersQuery(request: AgentTeamMembersRequest): TeamQueryIdentity {
+/**
+ * The key's result type is what the read hands back. The remote facade declares the unwrapped type, but every
+ * consumer branches on `result.ok` and reads `result.value`, so the query layer carries the envelope: typing the key
+ * with the declared type would let a key be read through a loader that never unwraps, and the mismatch would only
+ * surface at the first failure.
+ */
+function membersQuery(request: AgentTeamMembersRequest): TeamQueryIdentity<RemoteResult<readonly AgentTeamClientMemberStatus[]>> {
   return {
-    key: `members:${request.workspaceId}`,
-    covers: scope => ROSTER_SCOPE_KINDS.some(kind => coversWorkspaceScope(scope, request.workspaceId, kind)),
+    key: teamQueryKey<RemoteResult<readonly AgentTeamClientMemberStatus[]>>(`members:${request.workspaceId}`),
+    rule: { kinds: ROSTER_SCOPE_KINDS, workspaceId: request.workspaceId },
   }
 }
 
 /** Inbox data moves with any shared-projection commit (a mention can land in any Thread), so the scope-less stream is its home; presence wakes never reach it. */
-function inboxQuery(request: AgentTeamInboxRequest): TeamQueryIdentity {
+function inboxQuery(request: AgentTeamInboxRequest): TeamQueryIdentity<RemoteResult<AgentTeamInbox>> {
   return {
-    key: `inbox:${request.workspaceId}:${request.limit ?? 'all'}`,
-    covers: scope => scope === undefined
-      || (scope.kind === 'workspace' && scope.workspaceId === request.workspaceId)
-      || scope.kind === 'project'
-      || scope.kind === 'thread',
+    key: teamQueryKey<RemoteResult<AgentTeamInbox>>(`inbox:${request.workspaceId}:${request.limit ?? 'all'}`),
+    rule: { kinds: ['scopeLess', 'workspace', 'project', 'thread'], workspaceId: request.workspaceId },
   }
 }
 
