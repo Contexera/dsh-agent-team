@@ -74,3 +74,44 @@ describe('vendored sqlite backend byte compatibility', () => {
     await upstream.close()
   })
 })
+
+describe('vendored sqlite backend teardown', () => {
+  // Teardown coverage the fork had none of: only `await close()` appeared
+  // before, with nothing asserting that units are released or that repeated
+  // and concurrent closes resolve once. It also pins the behavior `doClose`'s
+  // snapshot-iteration preserves — every open unit still closes — so a future
+  // restructuring of that loop is measured against real teardown, not lint.
+  it('closes every open unit and refuses new ones once closing', async () => {
+    const path = await freshDbPath()
+    const backend = new VendoredSqliteStorageBackend({ path, journalMode: 'delete' })
+    const descriptors = [DESCRIPTOR, { ...DESCRIPTOR, name: 'agent_team_second' }]
+    const units = await Promise.all(descriptors.map(d => backend.kv.open({ ...d, tables: [...d.tables] })))
+    for (const [index, unit] of units.entries()) await unit.putRecord('operations', `op:${index}`, { index })
+
+    await backend.close()
+
+    for (const [index, unit] of units.entries()) {
+      // The unit released itself: a later primitive rejects with the closed code.
+      await expect(unit.loadAll()).rejects.toMatchObject({ code: 'closed' })
+      await expect(unit.putRecord('operations', `op:late`, { index })).rejects.toMatchObject({ code: 'closed' })
+    }
+    // The backend closed its whole table, so the double-open guard is empty and
+    // `openUnit` refuses on the closing flag rather than on a stale entry.
+    await expect(backend.kv.open({ ...DESCRIPTOR, tables: [...DESCRIPTOR.tables] })).rejects.toMatchObject({
+      code: 'closed',
+    })
+  })
+
+  it('resolves repeated and concurrent close calls once', async () => {
+    const path = await freshDbPath()
+    const backend = new VendoredSqliteStorageBackend({ path, journalMode: 'delete' })
+    const unit = await backend.kv.open({ ...DESCRIPTOR, tables: [...DESCRIPTOR.tables] })
+    await unit.putRecord('operations', 'op:0001', { ok: true })
+
+    const first = backend.close()
+    const second = backend.close()
+    expect(second).toBe(first)
+    await Promise.all([first, second])
+    await expect(backend.close()).resolves.toBeUndefined()
+  })
+})

@@ -223,7 +223,7 @@ describe('Task accountability in final rules version 2', () => {
     // The reviewer is accountable and never touches a Claim, so the recorded
     // release carries the new responsibility marker the rewrite strips.
     const started = await startTask(team, human, team.reviewer.memberId)
-    const released = await claim(team, started.task, team.owner.actor, 'released')
+    await claim(team, started.task, team.owner.actor, 'released')
     expect(team.ledger.getTask(started.task.taskRef)).toMatchObject({ status: 'todo', accountable: team.reviewer.memberId })
 
     const emptyDelta = { attention: { set: [], removed: [] }, directMarkers: { added: [], removed: [] }, activityMarkers: { added: [], removed: [] } }

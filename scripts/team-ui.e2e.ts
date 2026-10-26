@@ -1278,7 +1278,6 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => panelCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
   // It clears its row as on the Thread page and stays wholly inside the body.
   const panelCardPlacement = await panelRow.evaluate(element => {
-    const row = element.getBoundingClientRect()
     const card = element.querySelector('[data-message-card]')!.getBoundingClientRect()
     const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
     const scroll = element.closest('section')!.getBoundingClientRect()

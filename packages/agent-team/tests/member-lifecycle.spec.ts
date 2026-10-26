@@ -3614,7 +3614,7 @@ describe('Agent Team wake-slot swap input across the commit (ticket 05)', () => 
     vi.useFakeTimers()
     try {
       vi.setSystemTime(new Date('2026-10-20T08:00:00Z'))
-      const { adapter, ctx, workspaceId, projectRef, memberId, sessionId, agent, archived, presets } = await recyclableMember('postcommit-late')
+      const { adapter, ctx, workspaceId, projectRef, memberId, sessionId, agent, presets } = await recyclableMember('postcommit-late')
       const late = createUserMessage({ content: [{ type: 'text', text: 'late followup recorded before activation failed' }], source: { kind: 'user' } })
       const put = holdRecycledPut(ctx)
       try {

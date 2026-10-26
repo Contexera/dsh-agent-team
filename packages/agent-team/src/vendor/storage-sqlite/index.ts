@@ -5,7 +5,9 @@
  * `packages/storage/storage-sqlite/src/index.ts` at version 0.1.5-rc.2
  * (MIT per that version's package metadata and the repo root LICENSE;
  * the stale npm `latest` tag 0.0.1-rc.1 carries BSD-3-Clause metadata).
- * Kept identical except the `@module` tag below.
+ * Kept identical except the `@module` tag below and one lint suppression in
+ * `doClose`, which keeps upstream's array snapshot in the teardown loop rather
+ * than restructuring the fork for a style rule.
  *
  * Why vendored instead of depended on: DSH Desktop generation installers
  * strip `@deepseek-ai/*` copies and resolve them from the host closure,
@@ -158,6 +160,12 @@ export class SqliteStorageBackend implements StorageBackend {
       // every unit call, so there is nothing left to release here.
       return
     }
+    // Upstream's text, kept verbatim. Iterating the live map would behave the
+    // same for every reachable state (the awaits only let `onClose` delete
+    // entries already visited, and `openUnit` refuses new ones once closing),
+    // but rewriting upstream teardown to satisfy a lint style rule would break
+    // the fork's identity contract for no behavioral gain.
+    // oxlint-disable-next-line unicorn/no-useless-spread -- snapshot kept verbatim from upstream; see the file header's identity contract
     for (const pending of [...this.units.values()]) {
       const unit = await pending.catch(() => undefined)
       await unit?.close()

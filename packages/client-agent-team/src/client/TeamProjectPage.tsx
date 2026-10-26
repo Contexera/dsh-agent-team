@@ -85,9 +85,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
   const [unreadByThread, setUnreadByThread] = useState<ReadonlyMap<AgentTeamThreadRef, number>>(new Map())
-  const [actionError, setError] = useState<string>()
   const [loadError, setLoadError] = useState<string>()
-  const error = actionError ?? loadError
   const [loading, setLoading] = useState(true)
   // The finished column starts at the Host's default page and grows on demand: the
   // reader asked to see older resolved work, so ask the Host for a deeper slice.
@@ -338,9 +336,9 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     </div>
 
     {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
-      {error !== undefined && <p className={css.error} role="alert">{error}</p>}
-      {error === undefined && taskBoard === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardLoading')}</p></div>}
-      {error === undefined && taskBoard !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
+      {loadError !== undefined && <p className={css.error} role="alert">{loadError}</p>}
+      {loadError === undefined && taskBoard === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardLoading')}</p></div>}
+      {loadError === undefined && taskBoard !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
       {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
         {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>
           <div className={projectCss.boardColumnHead}>{t(column.labelKey)}<span className={projectCss.boardColumnCount}>{column.items.length}</span></div>
@@ -388,9 +386,9 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         t={t}
       /> : <section className={css.timeline} aria-label={t('timelineLabel')}>
         <div className={css.timelineContent}>
-          {loading && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
-          {!loading && error === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('emptyProjects')}</p></div>}
-          {!loading && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void refresh(true) }}>{t('retry')}</Button></div>}
+          {loading && loadError === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
+          {!loading && loadError === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('emptyProjects')}</p></div>}
+          {!loading && loadError !== undefined && <div className={css.errorState} role="alert"><span>{loadError}</span><Button size="sm" variant="outline" onClick={() => { void refresh(true) }}>{t('retry')}</Button></div>}
         </div>
       </section>}
     </div>}
