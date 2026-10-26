@@ -124,7 +124,7 @@ The board reads the Host's `taskBoard` projection — the same rows the Agent `t
 
 Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable.
 
-The finished column offers `展开全部已完成` under its head only while older resolved Tasks remain, and the control retires once the column shows everything rather than standing there with nothing left to do. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
+The finished column offers `展开全部已完成` under its head only while the Host reports it cut the column — the board value's `finishedTruncated` — and the control retires once the column shows everything, and at the deepest page the Host accepts, rather than standing there with nothing to do. A full column is not a cut one, so the control never appears on a page that merely happens to be full. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
 
 A card names the Task's accountable owner — the reader as `你负责`, resolved from the board value's `humanMemberId` — and carries a `待你验收` badge when the reader may accept the work.
 

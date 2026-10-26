@@ -603,7 +603,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     // rows — the global board reads every Workspace and must not double-count
     // one Workspace's Task into another's.
     if (taskBoardFailure !== undefined) return { ok: false as const, error: { message: taskBoardFailure } }
-    if (workspaceId !== 'w1') return { ok: true as const, value: { humanMemberId: 'member:human', open: [], finished: [] } }
+    if (workspaceId !== 'w1') return { ok: true as const, value: { humanMemberId: 'member:human', open: [], finished: [], finishedTruncated: false } }
     const byTask = new Map<string, Record<string, unknown>>()
     for (const item of viewItems) {
       const task = item.task as { taskRef: string; status: string } | undefined
@@ -622,10 +622,12 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     const newestFirst = (left: typeof items[number], right: typeof items[number]) => right.lastActivitySequence - left.lastActivitySequence
     // The finished column honours the same per-Project page the Host applies, so a
     // spec that expands it is exercising the real contract rather than a stub that
-    // always returns everything.
+    // always returns everything. The truncation signal is the Host's own answer,
+    // never re-derived here from the page being full.
     const finished = items.filter(item => ['done', 'closed'].includes(item.task.status)).sort(newestFirst)
+    const finishedLimitOrDefault = finishedLimit ?? 5
     return { ok: true as const, value: { humanMemberId: 'member:human', open: items.filter(item => !['done', 'closed'].includes(item.task.status)).sort(newestFirst),
-      finished: finishedLimit === undefined ? finished.slice(0, 5) : finished.slice(0, finishedLimit) } }
+      finished: finished.slice(0, finishedLimitOrDefault), finishedTruncated: finished.length > finishedLimitOrDefault } }
   })
   const changesStream = async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
     let pending = false

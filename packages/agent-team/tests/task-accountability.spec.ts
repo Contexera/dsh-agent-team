@@ -284,9 +284,23 @@ describe('Task accountability in final rules version 2', () => {
     // The page is the newest slice, not the first seven the loop produced.
     const newestFirst = [...board.finished].sort((left, right) => right.lastActivitySequence - left.lastActivitySequence)
     expect(board.finished.map(item => item.task.taskRef)).toEqual(newestFirst.map(item => item.task.taskRef))
-    // Expanding asks for a deeper page; the Host answers with the whole set.
-    expect(team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit: 100 }).finished).toHaveLength(7)
-    expect(team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit: 2 }).finished).toHaveLength(2)
+    // Seven resolved Tasks behind a page of five: the Host says it cut the column,
+    // which is what lets the Client offer the expand control at all.
+    expect(board.finishedTruncated).toBe(true)
+    // Expanding asks for a deeper page; the Host answers with the whole set and
+    // stops claiming it cut anything.
+    const expanded = team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit: 100 })
+    expect(expanded.finished).toHaveLength(7)
+    expect(expanded.finishedTruncated).toBe(false)
+    // A page that is cut still reports the cut, whatever its size.
+    const narrow = team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit: 2 })
+    expect(narrow.finished).toHaveLength(2)
+    expect(narrow.finishedTruncated).toBe(true)
+    // A page that exactly matches what exists is full without being cut: the
+    // distinction the Client cannot make from row counts alone.
+    const exact = team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit: 7 })
+    expect(exact.finished).toHaveLength(7)
+    expect(exact.finishedTruncated).toBe(false)
     // Out-of-range pages are refused rather than silently clamped, so a Client
     // bug surfaces instead of quietly showing less than it asked for.
     for (const finishedLimit of [0, -1, 101, 2.5]) {

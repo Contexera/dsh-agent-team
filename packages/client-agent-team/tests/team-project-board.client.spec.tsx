@@ -79,7 +79,7 @@ describe('Team Project board', () => {
       taskNumber: 1, threadRef: 'thread:1', subject: '实现 API 网关', liveClaimOwners: [],
       accountableOwner: { memberId: 'member:iris', name: 'Iris', state: 'suspended' },
       lastActivitySequence: 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
-    }], finished: [] } }))
+    }], finished: [], finishedTruncated: false } }))
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     fireEvent.click(await b.view.findByRole('tab', { name: '看板' }))
     await waitFor(() => expect(b.view.getByText('负责人已暂停')).toBeTruthy())
@@ -166,6 +166,7 @@ describe('Team Project board', () => {
             lastActivitySequence: 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false },
         ],
         finished: [],
+        finishedTruncated: false,
       },
     }))
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -198,7 +199,8 @@ describe('Team Project board', () => {
     }))
     const page = (finishedLimit: number | undefined) => ({
       ok: true as const,
-      value: { humanMemberId: 'member:human', open: [], finished: finishedLimit === undefined ? finished.slice(-5) : finished.slice(-finishedLimit) },
+      value: { humanMemberId: 'member:human', open: [], finished: finishedLimit === undefined ? finished.slice(-5) : finished.slice(-finishedLimit),
+        finishedTruncated: finished.length > (finishedLimit ?? 5) },
     })
     b.loadTaskBoard.mockImplementation(async (request: { finishedLimit?: number }) => page(request.finishedLimit))
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
@@ -218,6 +220,58 @@ describe('Team Project board', () => {
     await waitFor(() => expect(b.loadTaskBoard.mock.calls.length).toBeGreaterThan(1))
     await waitFor(() => expect(b.loadTaskBoard.mock.calls.at(-1)?.[0]).toMatchObject({ finishedLimit: 100 }))
     expect(b.view.getByText('已完成 1')).toBeTruthy()
+    await b.runtime.dispose()
+  })
+
+  // A full page is not proof of an older one. This case and the next pin the two
+  // edges where counting rows instead of reading the Host's truncation signal
+  // offered a control that changed nothing.
+  it('offers no expand control when the page is full but nothing was cut', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'done', seededMessages: [
+      { body: '完成旧任务', occurredAt: '2026-10-14T09:00:00.000Z' },
+    ] })
+    // Exactly the Host's default page: a full column with no older work behind it.
+    const finished = Array.from({ length: 5 }, (_unused, index) => ({
+      workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: `thread:${index + 1}`,
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open' },
+      taskNumber: index + 1, subject: `已完成 ${index + 1}`, liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
+      lastActivitySequence: index + 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
+    }))
+    b.loadTaskBoard.mockImplementation(async () => ({
+      ok: true as const,
+      value: { humanMemberId: 'member:human', open: [], finished, finishedTruncated: false },
+    }))
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.getByRole('tab', { name: '看板' }))
+    expect(await b.view.findByText('已完成 5')).toBeTruthy()
+    expect(b.view.queryByRole('button', { name: '展开全部已完成' })).toBeNull()
+    await b.runtime.dispose()
+  })
+
+  it('retires the expand control at the deepest page the Host accepts', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'done', seededMessages: [
+      { body: '完成旧任务', occurredAt: '2026-10-14T09:00:00.000Z' },
+    ] })
+    // More resolved work than any page can show: the Host stays truncated at its
+    // own maximum, and a control that could only repeat the same request retires.
+    const finished = Array.from({ length: 101 }, (_unused, index) => ({
+      workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: `thread:${index + 1}`,
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open' },
+      taskNumber: index + 1, subject: `已完成 ${index + 1}`, liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
+      lastActivitySequence: index + 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
+    }))
+    b.loadTaskBoard.mockImplementation(async (request: { finishedLimit?: number }) => ({
+      ok: true as const,
+      value: { humanMemberId: 'member:human', open: [], finished: finished.slice(-(request.finishedLimit ?? 5)), finishedTruncated: true },
+    }))
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.getByRole('tab', { name: '看板' }))
+    expect(await b.view.findByText('已完成 101')).toBeTruthy()
+    fireEvent.click(b.view.getByRole('button', { name: '展开全部已完成' }))
+    await waitFor(() => expect(b.view.getByText('已完成 2')).toBeTruthy())
+    expect(b.loadTaskBoard.mock.calls.at(-1)?.[0]).toMatchObject({ finishedLimit: 100 })
+    // Still truncated, but there is no deeper page to ask for.
+    expect(b.view.queryByRole('button', { name: '展开全部已完成' })).toBeNull()
     await b.runtime.dispose()
   })
 })

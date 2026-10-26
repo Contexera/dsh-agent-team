@@ -223,6 +223,12 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     return BOARD_COLUMNS.map(column => ({ ...column, items: items.filter(item => column.match(item.task.status)) }))
   }, [taskBoard])
 
+  // Only the Host knows whether a full page was a cut or the end of the history,
+  // so the expand control reads its truncation signal rather than counting rows.
+  // At the deepest page the Host accepts there is nothing left to ask for, and
+  // the control retires even while older resolved work still exists.
+  const finishedHasMore = taskBoard?.finishedTruncated === true && finishedLimit < EXPANDED_FINISHED_LIMIT
+
   // The surface is laid out after this effect first runs, so the seat follows its box; a dragged choice is re-clamped, never re-derived.
   useEffect(() => {
     if (panelSurface === null) return
@@ -338,7 +344,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
         {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>
           <div className={projectCss.boardColumnHead}>{t(column.labelKey)}<span className={projectCss.boardColumnCount}>{column.items.length}</span></div>
-          {column.labelKey === 'taskStatusDone' && column.items.length >= finishedLimit
+          {column.labelKey === 'taskStatusDone' && finishedHasMore
             && <div className={projectCss.boardColumnExpand}><Button size="sm" variant="outline" disabled={expandingFinished} onClick={() => { void expandFinished() }}>{t('boardShowAllFinished')}</Button></div>}
           {column.items.map(item => <ProjectionBoardCard
             key={item.task.taskRef}

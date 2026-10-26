@@ -1950,8 +1950,14 @@ export class AgentTeamLedger {
       }
     }
     const newestFirst = (left: AgentTeamTaskBoardItem, right: AgentTeamTaskBoardItem) => right.lastActivitySequence - left.lastActivitySequence
-    const finished = [...finishedByProject.values()].flatMap(items => items.sort(newestFirst).slice(0, finishedLimit)).sort(newestFirst)
-    return Object.freeze({ humanMemberId: this.initialization().data.humanMemberId, open: Object.freeze(open.sort(newestFirst)), finished: Object.freeze(finished) })
+    const sortedByProject = [...finishedByProject.values()].map(items => items.sort(newestFirst))
+    // A full page is not proof of an older one, and a Client that cannot tell a
+    // page that ends here from a page the Host cut will offer a control that
+    // changes nothing. Only the Host knows which it was, so it says so.
+    const finishedTruncated = sortedByProject.some(items => items.length > finishedLimit)
+    const finished = sortedByProject.flatMap(items => items.slice(0, finishedLimit)).sort(newestFirst)
+    return Object.freeze({ humanMemberId: this.initialization().data.humanMemberId, open: Object.freeze(open.sort(newestFirst)),
+      finished: Object.freeze(finished), finishedTruncated })
   }
 
   private mainInboxItems(memberId: AgentTeamMemberId, workspaceIds: readonly WorkspaceId[]): readonly AgentTeamMainInboxItem[] {

@@ -80,6 +80,8 @@ DM 只用于快速澄清与状态同步。任务工作、决策和任何需要�
 
 `projectRef` 限定一个 Project；`mine` 只保留读者负责或持有 live Claim 的 Task。
 
+`finishedTruncated` 说明 Host 是否还压着更早的已了结工作；渲染结果会把它写出来，所以一页永远不会被读成整列。
+
 看板是当前状态，不是未读：读取不改变 read state，也不带写令牌。工具引导在读者遇到 Workspace 意外改动、或准备 claim 之前指向这里，让在途工作被识别为在途而非冲突。
 
 `promote` 把讨论 Thread 转为 Task，需要 `threadRef` 与该 Thread 的 `baseRevision`，可选 `accountable`，只有 Project owner 可以执行（否则 `project_owner_required`）。

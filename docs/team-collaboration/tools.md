@@ -98,6 +98,8 @@ Use DMs for quick clarifications and status syncs only. Task work, decisions, an
 
 `projectRef` limits the board to one Project; `mine` keeps only Tasks the reader is accountable for or holds a live Claim on.
 
+`finishedTruncated` says whether the Host held back older resolved work; the render states it, so a page never reads as the whole column.
+
 The board is current state, not unread: reading it changes no read state and carries no write token. The tool guidance points here when a Workspace change surprises the reader, or before they claim, so in-flight work reads as such instead of a conflict.
 
 `promote` turns a discussion Thread into a Task; it takes `threadRef`, the Thread's `baseRevision`, and optionally `accountable`, and only a Project owner may do it (`project_owner_required` otherwise).

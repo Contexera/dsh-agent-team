@@ -110,6 +110,21 @@ describe('team_task board renders the board projection', () => {
     expect(text).not.toContain('baseRevision')
   })
 
+  // The finished column is a page of the Project's resolved history, never the
+  // whole column. Without the Host's truncation signal the reader counts the
+  // page as the total and stops looking.
+  it('says when the finished column was cut, rather than passing the page off as the total', () => {
+    const truncated = renderText(teamTools().get('team_task')!, { action: 'board' }, {
+      kind: 'board', open: [], finished: [item('done')], finishedTruncated: true,
+    })
+    expect(truncated).toContain('Recently finished (1 shown, more exist)')
+    const whole = renderText(teamTools().get('team_task')!, { action: 'board' }, {
+      kind: 'board', open: [], finished: [item('done')], finishedTruncated: false,
+    })
+    expect(whole).toContain('Recently finished (1)')
+    expect(whole).not.toContain('more exist')
+  })
+
   it('names the accountable owner, and says so when the reader owes the acceptance', () => {
     const text = renderText(teamTools().get('team_task')!, { action: 'board' }, {
       kind: 'board', open: [item('in_review', { relation: 'project-owner', needsAcceptance: true, accountable: 'member:human' })], finished: [],

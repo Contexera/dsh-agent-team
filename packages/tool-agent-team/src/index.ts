@@ -871,7 +871,7 @@ function boardItemView(item: AgentTeamTaskBoardItem): BoardItemView {
     lastActivityAt: item.lastActivityAt, relation: item.relation, accountable: item.task.accountable, needsAcceptance: item.needsAcceptance }
 }
 
-function boardLines(open: readonly BoardItemView[], finished: readonly BoardItemView[]): string[] {
+function boardLines(open: readonly BoardItemView[], finished: readonly BoardItemView[], finishedTruncated: boolean): string[] {
   const line = (item: BoardItemView) => [`${item.taskRef} (#${item.taskNumber})`, `${item.projectName} ${item.projectRef}`, item.threadRef,
     ...(item.members.length === 0 ? [] : [item.members.map(name => `@${name}`).join(', ')]),
     ...(item.relation === 'none' ? [] : [`you: ${item.relation}`]),
@@ -884,7 +884,10 @@ function boardLines(open: readonly BoardItemView[], finished: readonly BoardItem
   }
   return ['Task board — current state; reading it changes no read state and supplies no write token.',
     ...column('To do', 'todo'), ...column('In progress', 'in_progress'), ...column('In review', 'in_review'),
-    `Recently finished (${finished.length})`, ...(finished.length === 0 ? ['—'] : finished.map(item => `${line(item)} · ${item.status}`)),
+    // The page is not the column: without this conclusion the reader takes the
+    // page size for the Project's whole resolved history.
+    `Recently finished (${finished.length}${finishedTruncated ? ' shown, more exist' : ''})`,
+    ...(finished.length === 0 ? ['—'] : finished.map(item => `${line(item)} · ${item.status}`)),
     'Read a Task\'s Thread with team_thread read before you claim or reply.']
 }
 
@@ -946,7 +949,7 @@ const teamTask = defineTool({
       revision: { type: 'number' }, expectedRevision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' },
       accountable: { type: 'string' }, from: { type: 'string' }, to: { type: 'string' },
       releasedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } },
-      open: { type: 'array', items: BOARD_ITEM_SCHEMA }, finished: { type: 'array', items: BOARD_ITEM_SCHEMA },
+      open: { type: 'array', items: BOARD_ITEM_SCHEMA }, finished: { type: 'array', items: BOARD_ITEM_SCHEMA }, finishedTruncated: { type: 'boolean' },
       unreadCount: { type: 'number' }, directCount: { type: 'number' }, occurredAt: { type: 'string' },
       claim: { type: 'object', additionalProperties: false, properties: {
         claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true },
@@ -956,7 +959,7 @@ const teamTask = defineTool({
     } },
         // A committed mutation renders the authoritative affected Claim first; the full archive is never appended. list renders the collision surface and no write token (a current Thread read remains the mutation basis). Rejections share the outcome-first recovery form and carry the gating facts plus the current revision as the next write token.
     render: (_args, value) => {
-      if (value.kind === 'board') return [{ type: 'text', text: boardLines(value.open ?? [], value.finished ?? []).join('\n') }]
+      if (value.kind === 'board') return [{ type: 'text', text: boardLines(value.open ?? [], value.finished ?? [], value.finishedTruncated === true).join('\n') }]
       if (value.kind === 'committed' && value.action === 'promote') {
         return [{ type: 'text', text: [
           `Committed — Thread promoted to Task ${value.taskRef} (${value.status}).`,
@@ -1014,7 +1017,7 @@ const teamTask = defineTool({
       if (args.target !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'board', parameter: 'target', owner: 'transfer' }))
       const board = host.taskBoardForAgent(agent, { ...(args.workspace === undefined ? {} : { workspaceId: workspaceOf(args, agent) }),
         ...(args.projectRef === undefined ? {} : { projectRef: projectRefOf(args.projectRef) as AgentTeamProjectRef }), ...(args.mine === true ? { mine: true } : {}) })
-      return { kind: 'board', open: board.open.map(boardItemView), finished: board.finished.map(boardItemView) }
+      return { kind: 'board', open: board.open.map(boardItemView), finished: board.finished.map(boardItemView), finishedTruncated: board.finishedTruncated }
     }
     if (args.action === 'promote') {
       if (args.taskRef !== undefined || args.direction !== undefined || args.claimRef !== undefined) throw new Error(recoveryFor('promote_takes_thread').sentence({}))

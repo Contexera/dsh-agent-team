@@ -979,8 +979,13 @@ export interface AgentTeamTaskBoard {
   readonly humanMemberId: AgentTeamMemberId
   /** Every open Task (todo, in_progress, in_review), newest activity first. */
   readonly open: readonly AgentTeamTaskBoardItem[]
-  /** Per Project, the newest finished (done or closed) Tasks, at most `TASK_BOARD_FINISHED_PER_PROJECT` each, newest activity first. */
+  /** Per Project, the newest finished (done or closed) Tasks, at most `finishedLimit` each (default `TASK_BOARD_FINISHED_PER_PROJECT`), newest activity first. */
   readonly finished: readonly AgentTeamTaskBoardItem[]
+  /**
+   * The Host cut at least one Project's finished column at `finishedLimit`, so older resolved Tasks exist beyond `finished`.
+   * A page that merely happens to be full is not truncated; the reader can raise `finishedLimit` and ask again.
+   */
+  readonly finishedTruncated: boolean
 }
 
 export interface AgentTeamViewRequest {
