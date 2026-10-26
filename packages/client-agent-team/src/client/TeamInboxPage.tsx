@@ -35,6 +35,7 @@ interface TeamInboxPageProps {
   readonly subscribeChanges: TeamConversationProps['subscribeChanges']
   readonly selectWorkspace: TeamConversationProps['selectWorkspace']
   readonly selectThread: TeamConversationProps['selectThread']
+  readonly selectDiscussion: TeamConversationProps['selectDiscussion']
   readonly selectProject: TeamConversationProps['selectProject']
   readonly humanName: string
   readonly humanAvatarUrl?: string | undefined
@@ -63,7 +64,7 @@ function compareByHostInboxOrder(left: TeamQueueRow, right: TeamQueueRow): numbe
  * nothing; only a durable read advances the watermark. A Thread with unread is only in the queue (the Host excludes it from
  * the tail); this page never re-derives that.
  */
-export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, selectWorkspace, selectThread, selectProject, humanName, humanAvatarUrl, t }: TeamInboxPageProps) {
+export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, selectWorkspace, selectThread, selectDiscussion, selectProject, humanName, humanAvatarUrl, t }: TeamInboxPageProps) {
   const workspaces = useWorkspaces(state => state.items)
   const [rows, setRows] = useState<readonly TeamQueueRow[]>()
   const [recentRows, setRecentRows] = useState<readonly TeamThreadInboxRow[]>([])
@@ -119,10 +120,22 @@ export function TeamInboxPage({ useWorkspaces, loadInbox, subscribeChanges, sele
     void refresh()
   }), [subscribeChanges, refresh])
 
+  // A Task keeps the full Thread page; a taskless discussion opens beside its Project's Main stream, landing where an
+  // unread row should: the first unread Message naming the reader. The Inbox names a Thread, never a Message, so the
+  // panel re-derives that position from its own read.
   const open = (row: TeamQueueRow): void => {
-    selectWorkspace(row.workspaceId)
-    if (row.kind === 'main') selectProject(row.item.projectRef)
-    else selectThread(row.item.thread.threadRef, row.item.projectRef, row.item.task?.taskRef, row.item.taskNumber)
+    if (row.kind === 'main') {
+      selectWorkspace(row.workspaceId)
+      selectProject(row.item.projectRef)
+      return
+    }
+    const { threadRef } = row.item.thread
+    if (row.item.task !== undefined) {
+      selectWorkspace(row.workspaceId)
+      selectThread(threadRef, row.item.projectRef, row.item.task.taskRef, row.item.taskNumber)
+      return
+    }
+    selectDiscussion(threadRef, row.item.projectRef, { workspaceId: row.workspaceId, anchor: 'unread' })
   }
 
   // Shares the conversation seat's header band and reading column with Project and Thread, so switching surfaces does not shift content.

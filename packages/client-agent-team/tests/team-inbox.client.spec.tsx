@@ -519,6 +519,61 @@ describe('Team Inbox surfaces', () => {
     await b.runtime.dispose()
   })
 
+  /**
+   * A taskless discussion is not a Task: opening its row must leave the Inbox for the Project's Main stream with the
+   * discussion beside it, never the full Thread page. The Inbox names a Thread, never a Message, so the panel derives the
+   * landing position itself — the first unread Message that names the Human, centred, with the boundary above it.
+   */
+  it('opens a taskless discussion row beside its Project feed, centred on the first unread Message naming the Human', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seededMessages: [
+      { body: '讨论起点', occurredAt: '2026-09-13T03:00:00.000Z' },
+    ] })
+    await b.changeSubscriptionsReady()
+    b.seedInbox([inboxRow('w1', 'thread:1', {
+      // A discussion row carries no Task, which is exactly what routes it to the panel.
+      task: undefined, taskNumber: undefined,
+      previewText: '@human 看这里', unreadCount: 2, directCount: 1,
+    })])
+    const addressed = { messageRef: 'message:addressed', projectRef: 'project:engineering', threadRef: 'thread:1', sender: 'member:iris', body: '@human 看这里', topLevel: false, sequence: 2, occurredAt: '2026-09-13T03:01:00.000Z' }
+    const quiet = { ...addressed, messageRef: 'message:quiet', body: '普通进展', sequence: 3 }
+    const baseRead = b.readThread.getMockImplementation()!
+    b.readThread.mockImplementation(async request => {
+      const result = await baseRead(request)
+      return result.ok ? { ok: true as const, value: { ...result.value, facts: [
+        { fact: { kind: 'message' as const, sequence: 2, message: addressed, mentions: ['member:human'] }, unread: true, direct: true },
+        { fact: { kind: 'message' as const, sequence: 3, message: quiet, mentions: [] }, unread: true, direct: false },
+      ] } } : result
+    })
+    // jsdom has no layout: record the centring request instead of moving a box.
+    const original = window.HTMLElement.prototype.scrollIntoView
+    const centred: string[] = []
+    window.HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) { centred.push(this.dataset.messageRef ?? '') }
+    try {
+      fireEvent.click(await b.view.findByRole('button', { name: '收件箱' }))
+      fireEvent.click(await b.view.findByRole('button', { name: /#engineering/ }))
+      // The Project page is the seat: the Main stream and the panel, never the Thread page's surface.
+      await waitFor(() => expect(b.view.container.querySelector('[data-team-panel="thread:1"]')).not.toBeNull())
+      expect(b.view.container.querySelector('[data-team-project]')).not.toBeNull()
+      // The full Thread page is a `<main data-team-thread>`; the panel reuses the attribute inside the aside only.
+      expect(b.view.container.querySelector('main[data-team-thread]')).toBeNull()
+      await waitFor(() => expect(centred).toContain('message:addressed'))
+      // The unread boundary marks where the opening landed, exactly once, as it does on the full page.
+      const panel = b.view.container.querySelector('[data-team-panel="thread:1"]')!
+      const boundaries = [...panel.querySelectorAll('[role="separator"]')].filter(node => node.textContent !== '')
+      expect(boundaries.map(node => node.textContent)).toEqual(['以下是本次打开收到的更新'])
+      // The persisted location is the panel, not a Thread page — a reload lands here.
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toMatchObject({
+        mode: 'team', workspaceId: 'w1', projectRef: 'project:engineering', discussionRef: 'thread:1', discussionAnchor: 'unread',
+      })
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('threadRef')
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('inbox')
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(window.HTMLElement.prototype, 'scrollIntoView')
+      else window.HTMLElement.prototype.scrollIntoView = original
+      await b.runtime.dispose()
+    }
+  })
+
   it('orders the narrow rail Conversations → Inbox → Projects → Agents with the unread dot on the Inbox icon', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1' })
     // Collapse the fixture sidebar to the narrow rail.

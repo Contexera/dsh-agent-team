@@ -6,6 +6,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/clie
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
+import type { TeamDiscussionAnchor } from './navigation.ts'
 import type { TeamDraftStore } from './drafts.ts'
 import { TeamMainStream } from './TeamMainStream.tsx'
 import { TeamProjectPanel } from './TeamProjectPanel.tsx'
@@ -15,7 +16,7 @@ import { TeamCountBadge } from './TeamCountBadge.tsx'
 import { claimersLabel, formatAbsoluteTime, formatInboxTime, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
-import { hostThreadRefLookup, jumpToThread } from './refs.ts'
+import { hostThreadRefLookup, jumpToThread, resolvedThreadDestination } from './refs.ts'
 import { rosterProjectName, rosterMember } from './refs.ts'
 import projectCss from './project.module.css'
 import css from './conversation.module.css'
@@ -45,7 +46,13 @@ interface TeamProjectPageProps {
   readonly promoteThread: TeamConversationProps['promoteThread']
   readonly changeAttention: TeamConversationProps['changeAttention']
   readonly selectThread: TeamConversationProps['selectThread']
+  readonly selectDiscussion: TeamConversationProps['selectDiscussion']
+  readonly closeDiscussion: TeamConversationProps['closeDiscussion']
   readonly selectProject: TeamConversationProps['selectProject']
+  /** The open discussion panel, from the persisted navigation fact; a reload reopens the same panel. */
+  readonly discussionRef?: AgentTeamThreadRef | undefined
+  /** Why that panel was opened, so an Inbox entry lands on its first unread Message naming the Human. */
+  readonly discussionAnchor?: TeamDiscussionAnchor | undefined
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
   readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
@@ -81,7 +88,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
@@ -97,7 +104,6 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const finishedLimitRef = useRef(FINISHED_PAGE)
   const [expandingFinished, setExpandingFinished] = useState(false)
   const [tab, setTab] = useState<'main' | 'board'>('main')
-  const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
   // The surface owns the panel-width variable; a drag writes it there so this page never re-renders.
   const [panelSurface, setPanelSurface] = useState<HTMLElement | null>(null)
   const mountedRef = useRef(false)
@@ -128,6 +134,9 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     setTab(target.value)
     target.ref.current?.focus()
   }
+  // One destination rule for every `thread:` ref: a loaded row names its own Task, and a ref
+  // outside the window resolves through the Host.
+  const openThreadRef = resolvedThreadDestination(selectThread, threadRef => { selectDiscussion(threadRef, projectRef) })
   // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here.
   const openRef = (ref: string): void => {
     if (ref.startsWith('project:')) {
@@ -137,11 +146,12 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     if (ref.startsWith('thread:')) {
       const match = view?.items.find(item => item.thread.threadRef === ref)
       if (match !== undefined) {
-        if (match.task === undefined) { setPanelThreadRef(match.thread.threadRef); return }
-        selectThread(match.thread.threadRef, projectRef, match.task.taskRef, match.taskNumber)
+        openThreadRef(match.task === undefined
+          ? { threadRef: match.thread.threadRef, projectRef }
+          : { threadRef: match.thread.threadRef, projectRef, taskRef: match.task.taskRef, ...(match.taskNumber === undefined ? {} : { taskNumber: match.taskNumber }) })
         return
       }
-      jumpToThread(resolveThreadRefs, workspaceId, ref as AgentTeamThreadRef, selectThread)
+      jumpToThread(resolveThreadRefs, workspaceId, ref as AgentTeamThreadRef, openThreadRef)
       return
     }
     if (ref.startsWith('task:')) {
@@ -182,17 +192,18 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       return next
     })
   }, [])
+  // Opening the new Task replaces the panel: a Task Thread keeps the full page, and `selectThread` retires the discussion
+  // it was promoted from.
   const handlePanelPromoted = useCallback((taskRef: AgentTeamTaskRef): void => {
-    if (panelThreadRef !== undefined) selectThread(panelThreadRef, projectRef, taskRef, taskNumberOf(taskRef))
-    setPanelThreadRef(undefined)
-  }, [panelThreadRef, projectRef, selectThread, taskNumberOf])
+    if (discussionRef !== undefined) selectThread(discussionRef, projectRef, taskRef, taskNumberOf(taskRef))
+  }, [discussionRef, projectRef, selectThread, taskNumberOf])
   // The board is the Task's home and the Task just started is its newest card; refresh so it is there before the Human looks.
   const handleTaskStarted = (): void => {
     setTab('board')
     void refresh()
     requestAnimationFrame(() => { boardTabRef.current?.focus() })
   }
-  const handlePanelClose = useCallback((): void => { setPanelThreadRef(undefined) }, [])
+  const handlePanelClose = useCallback((): void => { closeDiscussion() }, [closeDiscussion])
   // The Host caps the finished column per Project; expanding asks for the whole set once,
   // so the deeper slice is fetched on the click rather than on every board refresh.
   const expandFinished = async (): Promise<void> => {
@@ -240,7 +251,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     const observer = new ResizeObserver(seat)
     observer.observe(panelSurface)
     return () => { observer.disconnect() }
-  }, [panelSurface, panelThreadRef])
+  }, [panelSurface, discussionRef])
   const project = view?.projects.find(item => item.projectRef === projectRef)
   const projectMemberIds = new Set(view?.members.filter(item => item.projectRef === projectRef).map(item => item.memberId) ?? [])
 
@@ -292,7 +303,6 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     setFinishedLimit(FINISHED_PAGE)
     setView(undefined)
     setTab('main')
-    setPanelThreadRef(undefined)
     setLoadError(undefined)
     setLoading(true)
     void refresh()
@@ -358,7 +368,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       </div>}
     </section>}
 
-    {tab === 'main' && <div id={`${tabIdPrefix}-main-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-main`} className={projectCss.feedStage} data-panel={panelThreadRef === undefined ? 'closed' : 'open'}>
+    {tab === 'main' && <div id={`${tabIdPrefix}-main-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-main`} className={projectCss.feedStage} data-panel={discussionRef === undefined ? 'closed' : 'open'}>
       {project !== undefined && view !== undefined ? <TeamMainStream
         workspaceId={workspaceId}
         projectRef={projectRef}
@@ -381,7 +391,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         projectNameOf={projectNameOf}
         memberOf={memberOf}
         openMemberSession={openMemberSession}
-        onOpenDiscussion={setPanelThreadRef}
+        onOpenDiscussion={threadRef => { selectDiscussion(threadRef, projectRef) }}
         onOpenTask={(threadRef, taskRef, taskNumber) => { selectThread(threadRef, projectRef, taskRef, taskNumber) }}
         onTaskStarted={handleTaskStarted}
         t={t}
@@ -394,11 +404,13 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       </section>}
     </div>}
 
-    {tab === 'main' && panelThreadRef !== undefined && project !== undefined && <TeamProjectPanel
+    {tab === 'main' && discussionRef !== undefined && project !== undefined && <TeamProjectPanel
+      key={discussionAnchor ?? ''}
       surface={panelSurface}
       workspaceId={workspaceId}
       projectRef={projectRef}
-      threadRef={panelThreadRef}
+      threadRef={discussionRef}
+      {...(discussionAnchor === undefined ? {} : { anchor: discussionAnchor })}
       projectName={project.name}
       humanName={humanName}
       {...(humanAvatarUrl === undefined ? {} : { humanAvatarUrl })}
@@ -416,6 +428,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       changeAttention={changeAttention}
       subscribeChanges={subscribeChanges}
       selectThread={selectThread}
+      selectDiscussion={selectDiscussion}
       selectProject={selectProject}
       resolveTaskRefs={resolveTaskRefs}
       resolveThreadRefs={resolveThreadRefs}

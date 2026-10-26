@@ -153,6 +153,9 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   // The Message this opening lands on, held until its row exists: the jump is
   // decided from the first read, and rows render a paint later.
   const [pendingJump, setPendingJump] = useState<AgentTeamMessageRef>()
+  // The target whose opening pulse has already started; released with the pulse. This effect also re-runs while the
+  // timeline settles, and a state write on each of those commits would keep re-centring a reader who has already arrived.
+  const pulsedRef = useRef<AgentTeamMessageRef>()
   const [pending, setPending] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
@@ -279,6 +282,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     setAutoReadExhausted(false)
     setNewFactsCount(0)
     setPendingJump(undefined)
+    pulsedRef.current = undefined
     setError(undefined)
     const sequence = sequenceRef.current + 1
     sequenceRef.current = sequence
@@ -372,7 +376,7 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
   useEffect(() => {
     if (flashedMessage === undefined) return
     // The pulse is the opening jump's lifetime: releasing it releases the target, so a settling jump never outlives its mark or pulls a reader who moved on.
-    const timer = setTimeout(() => { setFlashedMessage(undefined); setPendingJump(undefined) }, 1200)
+    const timer = setTimeout(() => { setFlashedMessage(undefined); setPendingJump(undefined); pulsedRef.current = undefined }, 1200)
     return () => { clearTimeout(timer) }
   }, [flashedMessage])
 
@@ -385,7 +389,12 @@ export function useTeamThreadController(options: TeamThreadControllerOptions): T
     node.scrollIntoView({ block: 'center' })
     // Tell the shared scroll policy the reader is off the tail, or the next arriving fact counts them as pinned and undoes the jump.
     timelineOnScroll()
-    setFlashedMessage(pendingJump)
+    // The pulse starts once per target. This effect also re-runs while the timeline settles, and a state write on each
+    // of those commits would keep re-centring a reader who has already arrived.
+    if (pulsedRef.current !== pendingJump) {
+      pulsedRef.current = pendingJump
+      setFlashedMessage(pendingJump)
+    }
   }, [pendingJump, currentFacts, readFacts, timelineOnScroll])
 
   const replyTo = useMemo((): ReplyTarget | undefined => {

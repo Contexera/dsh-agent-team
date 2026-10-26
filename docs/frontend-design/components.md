@@ -148,6 +148,10 @@ The Main stream holds three entry kinds in ledger order: Main messages (the same
 
 A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and live Claim owners. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
 
+Both faces draw that card with the same component, and the discussion panel draws the Tasks its discussion spawned with it too: the status, the live Claim owners and the reply count must not depend on which of the three is open. A derived card sits at the sequence of the fact that created its Task, never collected at the end of the timeline, and clicking it opens that Task's Thread page.
+
+Where a discussion opens is a navigation fact, not a panel's private state: `discussionRef` rides the persisted Team location beside `projectRef`, so a reload reopens the same Project with the same discussion beside it, and every other face — Inbox, board, a Task's Thread page — replaces it the way it replaces any other location. The two never compete, because a Task keeps the full page.
+
 While the tab is mounted, a standing with unread entries or markers is acknowledged through `readMainStream`. An entry that arrives unread states the arrival with a thin accent in a reserved gutter, and releases it three seconds later on its own clock — the gutter stays reserved, so nothing shifts when it goes. The mark is information, not furniture: keeping it until the reader leaves the page turned a per-visit state into a permanent one, which is what the Human reported.
 
 Durable unread stays where it can be acted on — the sidebar's count and the card's own accessible name — because a mark that expires cannot be the only statement of it.
@@ -178,7 +182,9 @@ The seam is a real separator control with a keyboard path — the arrow keys nud
 
 Below the shared 600px breakpoint the panel covers the feed whole instead of standing beside one too narrow to read: the two take the surface's single column and the feed's rows, so the panel paints over the feed while the band above stays visible and keeps its own width. Placing either of them out of that column would open a second implicit column and squeeze the feed to a sliver rather than covering it.
 
-Promotion from the panel is the same Human-only durable mutation the Thread page runs, and it ends the panel's job: on success the panel closes as the reader walks into the new Task's Thread page. A read committed in the panel clears its feed row's unread capsule immediately rather than waiting for the next Inbox read to land.
+Promotion from the panel is the same Human-only durable mutation the Thread page runs, and it ends the panel's job: on success the panel closes as the reader walks into the new Task's Thread page.
+
+An Inbox row enters a discussion by the rule its full page follows: the panel opens on the first unread Message naming the Human, centred and briefly marked, with the boundary above it; without one it opens at the newest. The Inbox names a Thread, never a Message, so the destination carries only the Inbox origin and the panel derives the position itself. An ordinary Main stream opening keeps the newest-first seat. A read committed in the panel clears its feed row's unread capsule immediately instead of waiting for the next Inbox read.
 
 ## Whole-surface loading state
 Every surface that has nothing to show yet — the Inbox, the global Task board, both Thread seats, the Project feed and the Project board tab — renders the same box: `.emptySurface` holding a `.loadingState` line whose pulse mark (`.loadingMark`, `aria-hidden`) precedes the words.

@@ -158,9 +158,13 @@ const TASK_CARD_SCHEMA = {
   },
 } as const
 
-function taskCardView(card: AgentTeamThreadTaskCard): TaskCardView {
-  return { taskRef: card.taskRef, taskNumber: card.taskNumber, threadRef: card.threadRef, sequence: card.sequence, occurredAt: card.occurredAt,
-    subject: card.subject, status: card.status, resolution: card.resolution, accountable: card.accountable }
+function taskCardView(entry: AgentTeamThreadTaskCard): TaskCardView {
+  // Flattened from the shared card: the model-facing view keeps its own stable field set, so the Host projection can
+  // grow without changing what a tool result declares.
+  const card = entry.card
+  return { taskRef: card.task.taskRef, taskNumber: card.task.taskNumber, threadRef: card.threadRef, sequence: entry.sequence,
+    occurredAt: card.newestOccurredAt, subject: card.anchor.preview, status: card.task.status, resolution: card.task.resolution,
+    accountable: card.task.accountable }
 }
 
 /** One card line, marked as a projection so it never reads as a fact: where the Task was created, its current state, and the Thread to open it on. */

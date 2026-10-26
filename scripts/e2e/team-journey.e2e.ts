@@ -2856,14 +2856,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI07_SHOTS, 'inbox-row-focus.png'), fullPage: true })
 
   // Opening the Thread acknowledges the mention durably: the badge and row drop,
-  // and Back lands on the row's Project (the Inbox is not on the back path). The
-  // row still waiting keeps the badge at its count, and the row just read returns
-  // under 「最近活跃」 without a count.
+  // and the row lands on its Project. It is a taskless discussion, so that is the
+  // Main stream's side panel — the Inbox is never on a back path, and there is no
+  // full Thread page to come back from.
   await inboxRow.click()
-  await page.locator('[data-team-thread]').waitFor()
-  await expectSidebarUnread(baseUnread === 0 ? '1' : String(baseUnread + 1))
-  await page.getByRole('button', { name: '返回项目' }).click()
+  await page.locator(`[data-team-panel="${inboxThreadRef}"]`).waitFor()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
+  await expectSidebarUnread(baseUnread === 0 ? '1' : String(baseUnread + 1))
   await page.locator('button[class*="inboxCard"]').click()
   await page.locator('[data-team-inbox]').waitFor()
   // Wait on the section: a zero row count is also what the entry frame shows.
@@ -2882,10 +2881,9 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // component spec, since this reader always took part somewhere. Wait for the
   // section: rows are absent while loading.
   await plainRow.click()
-  await page.locator('[data-team-thread]').waitFor()
-  await expectSidebarUnread(baseUnread === 0 ? null : String(baseUnread))
-  await page.getByRole('button', { name: '返回项目' }).click()
+  await page.locator('[data-team-panel]').waitFor()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
+  await expectSidebarUnread(baseUnread === 0 ? null : String(baseUnread))
   await page.locator('button[class*="inboxCard"]').click()
   await page.locator('[data-team-inbox]').waitFor()
   await page.locator('[data-team-inbox]').getByRole('heading', { name: '最近活跃' }).waitFor({ timeout: 30_000 })

@@ -852,18 +852,19 @@ export interface AgentTeamThreadHistoryRequest {
   readonly limit?: number
 }
 
-/** A Task derived from this discussion, projected as a card at its creation point. Not a fact: it changes as the Task does and never counts as unread. */
+/**
+ * A Task derived from this discussion, projected as a card at its creation point. Not a fact: it changes as the
+ * Task does and never counts as unread.
+ *
+ * The card carries the Main stream's own `AgentTeamMainThreadCard` for the Task's Thread, so a discussion face and the
+ * Main stream that would have shown this Task hold the same projection: status, live Claim owners, reply count and
+ * newest instant cannot disagree between them.
+ */
 export interface AgentTeamThreadTaskCard {
-  readonly taskRef: AgentTeamTaskRef
-  readonly taskNumber: number
-  readonly threadRef: AgentTeamThreadRef
-  /** The Task's own anchor Message, at whose sequence the card sits in this discussion. */
+  /** At whose sequence the card sits in the source discussion: the Task's own anchor Message. */
   readonly sequence: number
-  readonly occurredAt: string
-  readonly subject: string
-  readonly status: AgentTeamTask['status']
-  readonly resolution: AgentTeamTask['resolution']
-  readonly accountable: AgentTeamMemberId
+  /** A derived card exists only for a Task, so the Main stream card's `task` facet is always present here. */
+  readonly card: AgentTeamMainThreadCard & { readonly task: NonNullable<AgentTeamMainThreadCard['task']> }
 }
 
 export interface AgentTeamThreadHistory {

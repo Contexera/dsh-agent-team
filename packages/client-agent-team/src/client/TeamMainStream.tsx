@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import type {
-  AgentTeamClientMemberStatus, AgentTeamMainThreadCard, AgentTeamMainTimelineEntry, AgentTeamMemberId, AgentTeamMessageRef,
+  AgentTeamClientMemberStatus, AgentTeamMainTimelineEntry, AgentTeamMemberId, AgentTeamMessageRef,
   AgentTeamProjectRef, AgentTeamRequestId, AgentTeamTaskRef, AgentTeamThreadRef,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -13,10 +13,10 @@ import { mainEntryKey, useMainStream } from './main-stream.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { TeamThreadStartControls } from './TeamThreadStartControls.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { TeamAvatarStack, namedAvatarOwners, type TeamAvatarHuman } from './TeamAvatarStack.tsx'
+import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
-import { TeamStateDot } from './TeamStateDot.tsx'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, formatTaskTitle, mentionNamesOf, taskStatusDot } from './team-formatters.ts'
+import { TeamThreadCard } from './TeamThreadCard.tsx'
+import { formatTaskTitle, mentionNamesOf } from './team-formatters.ts'
 import { chunkRunsWithDays, isRunGap } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import css from './conversation.module.css'
@@ -191,8 +191,8 @@ export function TeamMainStream({
       // The accent states the arrival; the card's accessible name states the durable standing a read clears. A name that
       // expired with the accent would be unstable to a screen reader.
       return <div className={streamCss.entry} data-main-entry="thread-card" data-unread={unread} key={mainEntryKey(entry)}>
-        <MainThreadCard
-          entry={entry}
+        <TeamThreadCard
+          card={entry.card}
           unread={entry.unread}
           human={human}
           t={t}
@@ -299,55 +299,4 @@ export function TeamMainStream({
       t={t}
     />
   </>
-}
-
-/** A Thread's current state at the place its anchor was written. A card is the entry door itself, so it carries no separate row. */
-function MainThreadCard({ entry, unread, human, t, onOpen }: {
-  readonly entry: Extract<AgentTeamMainTimelineEntry, { readonly kind: 'thread-card' }>
-  readonly unread: boolean
-  readonly human: TeamAvatarHuman | undefined
-  readonly t: TeamConversationProps['t']
-  readonly onOpen: () => void
-}) {
-  const card: AgentTeamMainThreadCard = entry.card
-  const task = card.task
-  const title = formatTaskTitle(card.anchor.preview)
-  const resolved = task?.status === 'done' || task?.status === 'closed'
-  const owners = namedAvatarOwners(task?.liveClaimOwners ?? [], human)
-  const replies = t('cardReplies', { count: card.replyCount })
-  const people = card.participants.length === 0 || task !== undefined ? undefined : t('cardParticipants', { count: card.participants.length })
-  const label = [
-    task === undefined ? t('openDiscussionCard', { title }) : t('openTaskCard', { number: task.taskNumber, title }),
-    task === undefined ? undefined : formatTaskStatus(task.status, t),
-    owners.length === 0 ? undefined : claimersLabel(owners, t),
-    replies,
-    people,
-    unread ? t('cardUnread') : undefined,
-  ].filter((part): part is string => part !== undefined).join(' · ')
-  return <button
-    type="button"
-    className={streamCss.card}
-    data-main-card={task === undefined ? 'discussion' : 'task'}
-    {...(resolved ? { 'data-resolved': '' } : {})}
-    aria-label={label}
-    onClick={onOpen}
-  >
-    <span className={streamCss.cardHead}>
-      <span className={streamCss.cardKind}>
-        {task === undefined ? t('discussionLabel') : <>
-          <TeamStateDot size={8} state={taskStatusDot(task.status)} />
-          {t('taskLabel', { number: task.taskNumber })}
-        </>}
-      </span>
-      {task !== undefined && <span className={streamCss.cardStatus}>{formatTaskStatus(task.status, t)}</span>}
-      {task !== undefined && owners.length === 0 && <span>{t('boardUnassigned')}</span>}
-      {task !== undefined && owners.length > 0 && <TeamAvatarStack owners={owners} label={claimersLabel(owners, t)} human={human} />}
-      <span className={streamCss.cardMeta}>
-        <span>{replies}</span>
-        {people !== undefined && <span>{people}</span>}
-        <time dateTime={card.newestOccurredAt} title={formatAbsoluteTime(card.newestOccurredAt)}>{formatInboxTime(card.newestOccurredAt, t)}</time>
-      </span>
-    </span>
-    <span className={streamCss.cardTitle}>{title}</span>
-  </button>
 }

@@ -88,6 +88,101 @@ describe('TeamNavigation', () => {
     })
   })
 
+  /**
+   * The side panel is a navigation fact like any other, so one `selectDiscussion` has to survive a reload on its own and
+   * the Project face around it must stay reachable. A Task keeps the full page, so the two never compete.
+   */
+  it('persists an open discussion beside its Project and reopens it with its anchor', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().selectWorkspace('workspace:one' as never)
+    navigation.actions().enterTeam()
+    navigation.actions().selectDiscussion('thread:1' as never, 'project:1' as never, { anchor: 'unread' })
+
+    expect(navigation.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      discussionRef: 'thread:1', discussionAnchor: 'unread',
+    })
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      discussionRef: 'thread:1', discussionAnchor: 'unread',
+    })
+    // A reload lands on the same Project with the same discussion and the same aim inside it.
+    expect(new TeamNavigation().getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      discussionRef: 'thread:1', discussionAnchor: 'unread',
+    })
+
+    // An Inbox row moves the seat and the destination in one step, because it reads across Workspaces.
+    navigation.actions().selectDiscussion('thread:2' as never, 'project:2' as never, { workspaceId: 'workspace:two' as never, anchor: 'unread' })
+    expect(navigation.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:two', projectRef: 'project:2',
+      discussionRef: 'thread:2', discussionAnchor: 'unread',
+    })
+    // Re-entering the same discussion from the Main stream retires a stale aim without closing the panel.
+    navigation.actions().selectDiscussion('thread:2' as never, 'project:2' as never)
+    expect(navigation.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:two', projectRef: 'project:2', discussionRef: 'thread:2',
+    })
+    // A discussion is a Project face: a snapshot naming one without a Project cannot reopen.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ mode: 'team', workspaceId: 'workspace:one', discussionRef: 'thread:1' }))
+    expect(new TeamNavigation().getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one' })
+  })
+
+  it('closes the discussion panel while keeping the Project page it was seated in', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().selectWorkspace('workspace:one' as never)
+    navigation.actions().enterTeam()
+    navigation.actions().selectDiscussion('thread:1' as never, 'project:1' as never, { anchor: 'unread' })
+
+    const changes: string[] = []
+    const off = navigation.subscribe(() => { changes.push(JSON.stringify(navigation.getSnapshot())) })
+    navigation.actions().closeDiscussion()
+    expect(navigation.getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1' })
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual({ mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1' })
+    // Closing an already closed panel commits nothing.
+    navigation.actions().closeDiscussion()
+    expect(changes).toHaveLength(1)
+    expect(new TeamNavigation().getSnapshot()).toEqual({ mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1' })
+    off()
+  })
+
+  it('leaves the discussion behind for every other Team face, and keeps a Task Thread off the panel', () => {
+    const open = (): TeamNavigation => {
+      const navigation = new TeamNavigation()
+      navigation.actions().selectWorkspace('workspace:one' as never)
+      navigation.actions().enterTeam()
+      navigation.actions().selectDiscussion('thread:1' as never, 'project:1' as never, { anchor: 'unread' })
+      return navigation
+    }
+    // A Task Thread replaces the panel: the Project page keeps one face at a time.
+    const threaded = open()
+    threaded.actions().selectThread('thread:9' as never, 'project:1' as never, 'task:9' as never, 9)
+    expect(threaded.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      threadRef: 'thread:9', taskRef: 'task:9', taskNumber: 9,
+    })
+    // Opening a discussion never disturbs a Thread face either: it is not a Thread page.
+    threaded.actions().selectDiscussion('thread:1' as never, 'project:1' as never)
+    expect(threaded.getSnapshot().threadRef).toBeUndefined()
+    expect(threaded.getSnapshot().discussionRef).toBe('thread:1')
+
+    const faces: Array<[string, (navigation: TeamNavigation) => void, object]> = [
+      ['Project', navigation => { navigation.actions().selectProject('project:2' as never) }, { projectRef: 'project:2' }],
+      ['Workspace', navigation => { navigation.actions().selectWorkspace('workspace:two' as never) }, { workspaceId: 'workspace:two' }],
+      ['Inbox', navigation => { navigation.actions().selectInbox() }, { inbox: true }],
+      ['Board', navigation => { navigation.actions().selectBoard() }, { board: true }],
+    ]
+    for (const [face, step, expected] of faces) {
+      const navigation = open()
+      step(navigation)
+      const snapshot = navigation.getSnapshot()
+      expect(snapshot.discussionRef, face).toBeUndefined()
+      expect(snapshot.discussionAnchor, face).toBeUndefined()
+      expect(snapshot, face).toMatchObject(expected)
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('discussionRef', 'thread:1')
+    }
+  })
+
   it('ignores malformed and incomplete persisted state', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',

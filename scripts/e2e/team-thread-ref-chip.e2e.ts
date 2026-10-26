@@ -38,12 +38,16 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip.png'), fullPage: true })
   await chip.click()
   // Separate "never navigated" from "navigated but failed to render": the
-  // persisted snapshot answers the first without waiting on the second.
-  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { threadRef?: string }).threadRef), { timeout: 10_000 }).toBe(alphaRef)
-  // Arrival at the cited Thread: the page marker carries the full ref and the
-  // persisted snapshot agrees.
-  await page.locator(`[data-team-thread="${alphaRef}"]`).waitFor({ timeout: 20_000 })
-  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { threadRef?: string }).threadRef)).toBe(alphaRef)
+  // persisted snapshot answers the first without waiting on the second. A
+  // taskless discussion is a face of its Project, so the destination is the
+  // side panel and never the full Thread page.
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { discussionRef?: string }).discussionRef), { timeout: 10_000 }).toBe(alphaRef)
+  await page.locator(`[data-team-panel="${alphaRef}"]`).waitFor({ timeout: 20_000 })
+  await page.locator(`main[data-team-thread="${alphaRef}"]`).waitFor({ state: 'detached', timeout: 5_000 })
+  // Arrival at the cited discussion: the panel carries the full ref, and the
+  // snapshot agrees without claiming a Thread page.
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { discussionRef?: string; threadRef?: string }).discussionRef)).toBe(alphaRef)
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem('dsh.agent-team.navigation') ?? '{}') as { threadRef?: string }).threadRef)).toBeUndefined()
   await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip-opened.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)

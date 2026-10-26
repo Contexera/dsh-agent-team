@@ -18,15 +18,17 @@ import type { TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { bodyMentionsHuman, firstSentence, formatActivity, formatRiskClass, formatTaskStatus, formatTaskTitle, taskStatusDot } from './team-formatters.ts'
+import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, formatTaskTitle, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
+import { TeamThreadCard } from './TeamThreadCard.tsx'
+import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { daySeparatorLabel, localDateKey } from './team-separators.ts'
 import { useTaskTransfer, useThreadFollow } from './thread-actions.ts'
 import { useTeamThreadController } from './thread-controller.ts'
 import { cachedResolvedMessageRef, useResolvedMessageRefVersion } from './refs.ts'
-import { factKey, mergeFacts, messageFact, stableMentionNames, type ThreadFactKey } from './thread-facts.ts'
+import { factKey, firstUnreadMention, mergeFacts, messageFact, stableMentionNames, type ThreadFactKey } from './thread-facts.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
-import { hostThreadRefLookup, jumpToThread } from './refs.ts'
+import { hostThreadRefLookup, jumpToThread, resolvedThreadDestination } from './refs.ts'
 import { rosterProjectName, rosterMember } from './refs.ts'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
@@ -56,6 +58,7 @@ interface TeamThreadPageProps {
   readonly putAttachment: TeamConversationProps['putAttachment']
   readonly selectProject: TeamConversationProps['selectProject']
   readonly selectThread: TeamConversationProps['selectThread']
+  readonly selectDiscussion: TeamConversationProps['selectDiscussion']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
   readonly resolveThreadRefs: TeamConversationProps['resolveThreadRefs']
   readonly resolveMessageRefs: TeamConversationProps['resolveMessageRefs']
@@ -67,20 +70,9 @@ function readMeta(facts: readonly AgentTeamThreadReadFact[]): ReadonlyMap<Thread
   return new Map(facts.map(fact => [factKey(fact.fact), fact]))
 }
 
-/** First unread Message that names the Human reader; flags come from the read that produced these facts, since opening a Thread acknowledges them. */
-function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], humanName: string): AgentTeamMessageRef | undefined {
-  for (const entry of facts) {
-    if (entry.unread !== true || entry.fact.kind !== 'message') continue
-    // The same body scan the card chip answers by: a Thread reaches its Human in every row, so "delivered" cannot decide where an opening lands.
-    if (!bodyMentionsHuman(entry.fact.message.body, humanName)) continue
-    return entry.fact.message.messageRef
-  }
-  return undefined
-}
-
 export function TeamThreadPage(props: TeamThreadPageProps) {
   const {
-    workspaceId, humanName, humanAvatarUrl, projectRef, taskRef, threadRef, taskNumber, backToWorkspace, selectProject, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
+    workspaceId, humanName, humanAvatarUrl, projectRef, taskRef, threadRef, taskNumber, backToWorkspace, selectProject, selectThread, selectDiscussion, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
     loadProjects, readThread, loadThreadHistory, threadObservations,
     subscribeChanges, loadMembers, drafts, getAttachment, reply, changeAttention, transferTask, changeTask, promoteThread, resolveMessageRefs, t,
   } = props
@@ -205,6 +197,9 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const projectMemberIds = useMemo(() => new Set(projectView?.members.filter(item => item.projectRef === effectiveProjectRef).map(item => item.memberId) ?? []), [projectView, effectiveProjectRef])
   const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
   const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
+  const humanIdentity: TeamAvatarHuman | undefined = projectView?.humanMemberId === undefined
+    ? undefined
+    : { memberId: projectView.humanMemberId, name: humanName, ...(humanAvatarUrl === undefined ? {} : { avatarUrl: humanAvatarUrl }) }
   const metadata = useMemo(() => readMeta(readFacts), [readFacts])
   const unreadIndex = useMemo(() => {
     const all = mergeFacts(
@@ -238,6 +233,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     label: memberId === projectView?.humanMemberId ? t('transferTargetYou') : t('transferTargetLabel', { name: memberName(memberId) }),
   })), [transferTargets, projectView?.humanMemberId, memberName, t])
 
+  // Identity-stable: `openRef` feeds every row's props, so a fresh destination per render would re-render the timeline.
+  const openThreadRef = useMemo(() => resolvedThreadDestination(selectThread, next => {
+    // A discussion is a face of its own Project; a cross-Project ref moves the seat with it.
+    if (projectRef === undefined) selectThread(next, task?.projectRef)
+    else selectDiscussion(next, projectRef)
+  }), [selectThread, selectDiscussion, projectRef, task?.projectRef])
+
   // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here. Identity-stable: a fresh
   // closure per render would defeat TeamMessage's memo.
   const openRef = useCallback((ref: string): void => {
@@ -246,13 +248,13 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       return
     }
     if (ref.startsWith('thread:') && ref !== threadRef) {
-      jumpToThread(resolveThreadRefs, workspaceId, ref as AgentTeamThreadRef, selectThread)
+      jumpToThread(resolveThreadRefs, workspaceId, ref as AgentTeamThreadRef, openThreadRef)
       return
     }
     if (ref.startsWith('task:') && ref !== taskRef) {
       jumpToTaskThread(resolveTaskRefs, workspaceId, ref as AgentTeamTaskRef, selectThread)
     }
-  }, [projectRef, threadRef, taskRef, workspaceId, selectProject, selectThread, resolveTaskRefs, resolveThreadRefs])
+  }, [projectRef, threadRef, taskRef, workspaceId, selectProject, openThreadRef, resolveTaskRefs, resolveThreadRefs])
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
@@ -346,17 +348,20 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return <p className={threadCss.activityRow} key={factKey(fact)}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{formatActivity(fact.activity, { t, actorName: memberName, claims: taskClaims })}</span></p>
   }
 
-  /** One derived Task card: the discussion's own projection of work it spawned, jumping to the Task Thread. */
-  const renderTaskCard = (card: AgentTeamThreadTaskCard): ReactNode => {
-    const accountableName = memberName(card.accountable)
-    const accountableSuspended = members.some(status => status.member.memberId === card.accountable && status.member.state === 'suspended')
-    return <button type="button" key={`task-card-${card.taskRef}`} className={threadCss.derivedTaskCard}
-      onClick={() => selectThread(card.threadRef, projectRef, card.taskRef, card.taskNumber)}>
-      <TeamStateDot size={8} state={taskStatusDot(card.status)} />
-      <span className={threadCss.derivedTaskCardTitle}>{t('derivedTaskCard', { number: card.taskNumber })}</span>
-      <span className={threadCss.derivedTaskCardSubject} title={card.subject}>{card.subject}</span>
-      <span className={threadCss.derivedTaskCardMeta}>{formatTaskStatus(card.status, t)} · {accountableName}{accountableSuspended ? ` · ${t('boardAccountableSuspended')}` : ''}</span>
-    </button>
+  /**
+   * One derived Task card: the discussion's own projection of work it spawned, jumping to the Task Thread. It renders the
+   * same component the Main stream and the side panel use, so the three faces cannot describe one Task differently.
+   */
+  const renderTaskCard = (entry: AgentTeamThreadTaskCard): ReactNode => {
+    const task = entry.card.task
+    return <TeamThreadCard
+      key={`task-card-${task.taskRef}`}
+      card={entry.card}
+      unread={false}
+      human={humanIdentity}
+      t={t}
+      onOpen={() => selectThread(entry.card.threadRef, projectRef, task.taskRef, task.taskNumber)}
+    />
   }
 
   /** One run = one same-sender reply turn; activities, derived Task cards, the unread boundary, and day changes break runs. */

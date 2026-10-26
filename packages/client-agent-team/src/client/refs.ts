@@ -226,16 +226,42 @@ export const jumpToTaskThread = (
   })
 }
 
+/** Where a resolved Thread ref points: a Task Thread, or a taskless discussion. */
+export interface ThreadDestination {
+  readonly threadRef: AgentTeamThreadRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly taskRef?: AgentTeamTaskRef | undefined
+  readonly taskNumber?: number | undefined
+}
+
+export type OpenResolvedThread = (entry: ThreadDestination) => void
+
+/**
+ * One resolved Thread ref, sent to the face its kind belongs to: a Task Thread keeps the full page, a taskless
+ * discussion opens beside its Project's Main stream. Every reader of a `thread:` ref routes through this, so a ref
+ * cannot land on the full page from one surface and in the panel from another.
+ */
+export const resolvedThreadDestination = (
+  selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void,
+  selectDiscussion: (threadRef: AgentTeamThreadRef, projectRef: AgentTeamProjectRef) => void,
+): OpenResolvedThread => entry => {
+  if (entry.taskRef !== undefined) {
+    selectThread(entry.threadRef, entry.projectRef, entry.taskRef, entry.taskNumber)
+    return
+  }
+  selectDiscussion(entry.threadRef, entry.projectRef)
+}
+
 export const jumpToThread = (
   resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => Promise<RemoteResult<AgentTeamResolveThreadRefsResult>>,
   workspaceId: AgentTeamResolveThreadRefsRequest['workspaceId'],
   threadRef: AgentTeamThreadRef,
-  selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void,
+  open: OpenResolvedThread,
 ): void => {
   void resolveThreadRefs({ workspaceId, threadRefs: [threadRef] }).then(result => {
     if (!result.ok) return
     const hit = result.value.resolved[0]
-    if (hit !== undefined) selectThread(hit.threadRef, hit.projectRef, hit.taskRef, hit.taskNumber)
+    if (hit !== undefined) open(hit)
   })
 }
 

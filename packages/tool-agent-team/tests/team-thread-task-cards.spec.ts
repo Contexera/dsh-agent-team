@@ -14,6 +14,19 @@ const PROJECT = 'project:046dd831-c679-4279-b6aa-7813476cf12e'
 const OWNER = 'member:6e8a5b10-df16-4ec0-943a-63738010953f'
 const CARD_THREAD = 'thread:bbbb2222-0000-4000-8000-000000000002'
 
+/** What the Host projects: the shared Main stream card, stamped with the sequence of the fact that created the Task. */
+const HOST_CARD = {
+  sequence: 12,
+  card: {
+    threadRef: CARD_THREAD,
+    anchor: { messageRef: 'message:created', sender: OWNER, preview: 'Ship the importer', sequence: 12, occurredAt: '2026-10-25T03:00:00.000Z' },
+    task: { taskRef: TASK, taskNumber: 7, status: 'in_review', resolution: 'open', accountable: OWNER, liveClaimOwners: [] },
+    replyCount: 0, participants: [], newestSequence: 12, newestOccurredAt: '2026-10-25T03:00:00.000Z',
+    newestActor: { memberId: OWNER, name: 'reeve' },
+  },
+}
+
+/** What the tool hands the renderer: the model-facing fields it flattens that card down to. */
 const CARD = {
   taskRef: TASK, taskNumber: 7, threadRef: CARD_THREAD,
   sequence: 12, occurredAt: '2026-10-25T03:00:00.000Z', subject: 'Ship the importer',
@@ -114,7 +127,7 @@ function fakeHost(overrides: Record<string, unknown> = {}) {
     attentionStatusForAgent: () => ({ attention: undefined }),
     readThreadForAgent: vi.fn(async () => READ_RESULT),
     threadHistoryForAgent: vi.fn(() => ({ thread: READ_RESULT.thread, anchor: READ_RESULT.anchor, anchorMentions: [], claims: [],
-      facts: [], cursor: 1, hasMore: false, taskCards: [CARD] })),
+      facts: [], cursor: 1, hasMore: false, taskCards: [HOST_CARD] })),
     ...overrides,
   }
 }

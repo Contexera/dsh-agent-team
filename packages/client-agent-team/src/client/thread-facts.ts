@@ -1,5 +1,5 @@
-import type { AgentTeamMemberId, AgentTeamMessage, AgentTeamThreadFact } from '@contexera/dsh-agent-team/types'
-import { mentionNameOf, mentionNamesOf, type MentionHandle } from './team-formatters.ts'
+import type { AgentTeamMemberId, AgentTeamMessage, AgentTeamMessageRef, AgentTeamThreadFact, AgentTeamThreadReadFact } from '@contexera/dsh-agent-team/types'
+import { bodyMentionsHuman, mentionNameOf, mentionNamesOf, type MentionHandle } from './team-formatters.ts'
 
 export type ThreadFactKey = string
 
@@ -20,6 +20,20 @@ export function mergeFacts(...groups: readonly (readonly AgentTeamThreadFact[])[
 
 export function minSequence(facts: readonly AgentTeamThreadFact[]): number | undefined {
   return facts.reduce<number | undefined>((minimum, fact) => minimum === undefined ? fact.sequence : Math.min(minimum, fact.sequence), undefined)
+}
+
+/**
+ * First unread Message that names the Human reader — where a discussion opens when the reader arrived from an unread
+ * Inbox row. Flags come from the read that produced these facts, so this has to run before the acknowledgement clears
+ * them. A body scan, not delivery, is the test: a Thread reaches its Human in every row.
+ */
+export function firstUnreadMention(facts: readonly AgentTeamThreadReadFact[], humanName: string): AgentTeamMessageRef | undefined {
+  for (const entry of facts) {
+    if (entry.unread !== true || entry.fact.kind !== 'message') continue
+    if (!bodyMentionsHuman(entry.fact.message.body, humanName)) continue
+    return entry.fact.message.messageRef
+  }
+  return undefined
 }
 
 /** Cached against the fact's mention array; compares resolved names, not map identity, since every roster refresh hands over an identical fresh Map and a memoized row must not re-render. */

@@ -2133,19 +2133,23 @@ export class AgentTeamLedger {
       cursor: facts.length === 0 ? before : facts[0]!.sequence, hasMore: all.length > facts.length })
   }
 
-  /** The Tasks this discussion spawned, as the cards the Thread renders at their creation points. */
+  /**
+   * The Tasks this discussion spawned, as the cards the Thread renders at their creation points. Each card is the Main
+   * stream's own `mainThreadCard` projection of the Task's Thread, so the two faces cannot drift apart.
+   */
   private derivedTaskCards(threadRef: AgentTeamThreadRef): readonly AgentTeamThreadTaskCard[] {
     const cards: AgentTeamThreadTaskCard[] = []
     for (const task of this.state.tasks.values()) {
       if (!task.sourceThreadRefs.includes(threadRef)) continue
       const anchor = this.state.anchorByThread.get(task.threadRef)
       if (anchor === undefined) continue
-      cards.push(Object.freeze({ taskRef: task.taskRef, taskNumber: this.state.taskNumberByTask.get(task.taskRef) ?? 0,
-        threadRef: task.threadRef, sequence: anchor.sequence, occurredAt: anchor.occurredAt,
-        subject: boundedOpeningLine(anchor.body, ONE_LINE_GIST_MAX_CHARACTERS),
-        status: task.status, resolution: task.resolution, accountable: task.accountable }))
+      const card = this.mainThreadCard(task.threadRef)
+      // The Task's own Thread always carries its taskRef, so the facet is present; the guard is what tells the type so.
+      if (card.task === undefined) continue
+      cards.push(Object.freeze({ sequence: anchor.sequence, card: { ...card, task: card.task } }))
     }
-    return Object.freeze(cards.sort((left, right) => left.sequence - right.sequence || left.taskRef.localeCompare(right.taskRef)))
+    return Object.freeze(cards.sort((left, right) => left.sequence - right.sequence
+      || left.card.task.taskRef.localeCompare(right.card.task.taskRef)))
   }
 
   listClaims(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: { workspaceId: WorkspaceId; taskRef: AgentTeamTaskRef }): AgentTeamClaimList {

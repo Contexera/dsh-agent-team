@@ -205,11 +205,24 @@ describe('Task accountability in final rules version 2', () => {
     const committedTask = { ...task.value, task: task.value.task }
     const discussionHistory = team.ledger.threadHistory(team.owner.actor, { workspaceId: alpha, threadRef: sourceRef })
     expect(discussionHistory.thread.revision).toBe(revision)
-    expect(discussionHistory.taskCards).toEqual([expect.objectContaining({ taskRef: committedTask.task.taskRef, taskNumber: 1,
-      threadRef: committedTask.thread.threadRef, sequence: committedTask.message.sequence, subject: 'Implement it',
-      status: 'todo', accountable: team.owner.memberId })])
+    // The card is the Main stream's own projection, stamped with the sequence that created the Task: one builder, so the
+    // discussion, the feed and the panel cannot describe one Task differently.
+    expect(discussionHistory.taskCards).toEqual([{
+      sequence: committedTask.message.sequence,
+      card: expect.objectContaining({
+        threadRef: committedTask.thread.threadRef,
+        anchor: expect.objectContaining({ preview: 'Implement it', sender: team.owner.memberId }),
+        task: expect.objectContaining({ taskRef: committedTask.task.taskRef, taskNumber: 1, status: 'todo',
+          resolution: 'open', accountable: team.owner.memberId, liveClaimOwners: [] }),
+      }),
+    }])
     expect(team.ledger.mainStreamHistory(team.owner.actor, { workspaceId: alpha, projectRef: team.projectRef }).entries
       .some(entry => entry.kind === 'thread-card' && entry.card.threadRef === task.value.thread.threadRef)).toBe(false)
+    // A card belongs to the discussion that sourced its Task, not to every discussion in the Project.
+    const unrelated = await team.ledger.startThread({ requestId: requestId('unrelated'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, kind: 'discussion', body: 'A discussion that sourced nothing' })
+    if (unrelated.value.kind !== 'committed') throw new Error('unrelated discussion did not commit')
+    expect(team.ledger.threadHistory(team.owner.actor, { workspaceId: alpha, threadRef: unrelated.value.thread.threadRef }).taskCards).toEqual([])
     await expect(team.ledger.startThread({ requestId: requestId('invalid-source'), actor: team.owner.actor, workspaceId: alpha,
       projectRef: team.projectRef, kind: 'task', body: 'Invalid source', sourceThreadRefs: [committedTask.thread.threadRef] })).rejects.toThrow(/must be a discussion/)
   })
