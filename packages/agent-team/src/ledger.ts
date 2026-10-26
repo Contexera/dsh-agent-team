@@ -1124,15 +1124,15 @@ export class AgentTeamLedger {
       for (const claim of releasedClaims) projectedClaims.set(claim.claimRef, claim)
       const sequence = this.nextSequence()
       const activities = this.releaseSummaries(releasedClaims, member.memberId, sequence)
-      const returned = this.accountabilityReturnsFrom(this.state, member.memberId, sequence, this.workspaceProjectRefsFrom(this.state, request.workspaceId))
-      const { tasks, threads } = this.mergeResponsibilityReturn(this.tasksForClaims(releasedClaims, projectedClaims), this.threadsForActivities(activities), returned)
-      const cleanup = this.removeMemberThreadInbox(member.memberId, threadRefs, this.workspaceProjectRefsFrom(this.state, request.workspaceId))
-      const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
+      const snapshot = this.buildReleaseSnapshot({
+        claims: releasedClaims, projected: projectedClaims, activities,
+        memberId: member.memberId,
+        projectRefs: this.workspaceProjectRefsFrom(this.state, request.workspaceId), sequence,
+        cleanup: this.removeMemberThreadInbox(member.memberId, threadRefs, this.workspaceProjectRefsFrom(this.state, request.workspaceId)),
+      })
       const operation: AgentTeamMemberWorkspaceLeftOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/member-workspace-left',
-        data: Object.freeze({ workspaceId: request.workspaceId, memberId: member.memberId,
-          claims: Object.freeze(releasedClaims), activities, transfers: returned.transfers, tasks, threads, inbox }),
+        data: Object.freeze({ workspaceId: request.workspaceId, memberId: member.memberId, ...snapshot }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
@@ -1165,17 +1165,19 @@ export class AgentTeamLedger {
       const nextClaims = new Map(this.state.claims)
       for (const claim of releasedClaims) nextClaims.set(claim.claimRef, claim)
       const sequence = this.nextSequence()
+      // Archiving a Project releases every owner's Claims, so one Activity per
+      // (owner, Thread) with the owners sorted — the shape the validator
+      // recomputes from the same projection.
       const owners = [...new Set(releasedClaims.map(claim => claim.owner))].sort()
       const activities = Object.freeze(owners.flatMap(owner => this.releaseSummaries(releasedClaims.filter(claim => claim.owner === owner), owner, sequence)))
-      const returned = this.accountabilityReturnsForCleanup(this.state, undefined, sequence, new Set([project.projectRef]))
-      const { tasks, threads } = this.mergeResponsibilityReturn(this.tasksForClaims(releasedClaims, nextClaims), this.threadsForActivities(activities), returned)
-      const cleanup = this.projectArchivalInbox(threadRefs, project.projectRef)
-      const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
+      const snapshot = this.buildReleaseSnapshot({
+        claims: releasedClaims, projected: nextClaims, activities,
+        memberId: undefined, projectRefs: new Set([project.projectRef]), sequence,
+        cleanup: this.projectArchivalInbox(threadRefs, project.projectRef),
+      })
       const operation: AgentTeamProjectArchivedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/project-archived',
-        data: Object.freeze({ workspaceId: request.workspaceId, project: nextProject,
-          claims: Object.freeze(releasedClaims), activities, transfers: returned.transfers, tasks, threads, inbox }),
+        data: Object.freeze({ workspaceId: request.workspaceId, project: nextProject, ...snapshot }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
@@ -1655,15 +1657,14 @@ export class AgentTeamLedger {
       for (const claim of releasedClaims) projectedClaims.set(claim.claimRef, claim)
       const sequence = this.nextSequence()
       const activities = this.releaseSummaries(releasedClaims, member.memberId, sequence)
-      const returned = this.accountabilityReturnsFrom(this.state, member.memberId, sequence)
-      const { tasks, threads } = this.mergeResponsibilityReturn(this.tasksForClaims(releasedClaims, projectedClaims), this.threadsForActivities(activities), returned)
-      const threadRefs = new Set(this.state.threads.keys())
-      const cleanup = this.removeMemberThreadInbox(member.memberId, threadRefs)
-      const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
+      const snapshot = this.buildReleaseSnapshot({
+        claims: releasedClaims, projected: projectedClaims, activities,
+        memberId: member.memberId, projectRefs: undefined, sequence,
+        cleanup: this.removeMemberThreadInbox(member.memberId, new Set(this.state.threads.keys())),
+      })
       const operation: AgentTeamMemberRemovedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/member-removed',
-        data: Object.freeze({ member: nextMember, claims: Object.freeze(releasedClaims), activities, transfers: returned.transfers, tasks, threads, inbox }),
+        data: Object.freeze({ member: nextMember, ...snapshot }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
@@ -1696,15 +1697,14 @@ export class AgentTeamLedger {
       for (const claim of releasedClaims) projectedClaims.set(claim.claimRef, claim)
       const sequence = this.nextSequence()
       const activities = this.releaseSummaries(releasedClaims, member.memberId, sequence)
-      const returned = this.accountabilityReturnsFrom(this.state, member.memberId, sequence)
-      const { tasks, threads } = this.mergeResponsibilityReturn(this.tasksForClaims(releasedClaims, projectedClaims), this.threadsForActivities(activities), returned)
-      const threadRefs = new Set(this.state.threads.keys())
-      const cleanup = this.removeMemberThreadInbox(member.memberId, threadRefs)
-      const inbox = this.inboxDelta([], cleanup.attention.removed, [], cleanup.directMarkers.removed,
-        returned.markers, cleanup.activityMarkers.removed, [], cleanup.mainMarkers?.removed ?? [], [], cleanup.reminderMarkers?.removed ?? [])
+      const snapshot = this.buildReleaseSnapshot({
+        claims: releasedClaims, projected: projectedClaims, activities,
+        memberId: member.memberId, projectRefs: undefined, sequence,
+        cleanup: this.removeMemberThreadInbox(member.memberId, new Set(this.state.threads.keys())),
+      })
       const operation: AgentTeamMemberArchivedOperation = Object.freeze({
         ...this.operationBase(request, sequence), kind: 'team/member-archived',
-        data: Object.freeze({ member: nextMember, claims: Object.freeze(releasedClaims), activities, transfers: returned.transfers, tasks, threads, inbox }),
+        data: Object.freeze({ member: nextMember, ...snapshot }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
@@ -5032,6 +5032,55 @@ export class AgentTeamLedger {
       result.push(this.readFactFrom(projection, memberId, fact, true))
     }
     return Object.freeze(result)
+  }
+
+  /**
+   * Assemble the departure snapshot every releasing entry persists. The four
+   * entries differ in scope (which Claims release, whose Attention and markers
+   * clear), in the shape of their release Activities (per owner and Thread for a
+   * Project, one per Thread for a Member), and in the responsibility-return
+   * range; those differences are arguments here, not branches in the callers.
+   *
+   * Pure by contract: it reads the live projection through the existing helpers
+   * and returns a frozen snapshot. It never writes a table, never advances the
+   * projection, and never mints an operation — each entry still owns its
+   * operation kind, its primary entity's state change, and the membership
+   * difference that makes archive a hidden state and remove a real departure.
+   */
+  private buildReleaseSnapshot(input: {
+    /** Claims this entry releases, already filtered by scope. */
+    readonly claims: readonly AgentTeamClaim[]
+    /** Claims projected as released, so a Task's status derives from the post-release set. */
+    readonly projected: ReadonlyMap<AgentTeamClaimRef, AgentTeamClaim>
+    /** Release Activities, already grouped and ordered the way this entry writes them. */
+    readonly activities: readonly AgentTeamClaimsReleasedActivity[]
+    /** The Member whose open Tasks return to the Human; `undefined` validates every owner, which is what archiving a Project releases. */
+    readonly memberId: AgentTeamMemberId | undefined
+    /** Project scoping the responsibility return; `undefined` searches every Project. */
+    readonly projectRefs: ReadonlySet<AgentTeamProjectRef> | undefined
+    readonly sequence: number
+    /** Attention and marker cleanup for the departing scope. */
+    readonly cleanup: AgentTeamInboxDelta
+  }): AgentTeamReleaseSnapshot {
+    const returned = this.accountabilityReturnsForCleanup(this.state, input.memberId, input.sequence, input.projectRefs)
+    const { tasks, threads } = this.mergeResponsibilityReturn(
+      this.tasksForClaims(input.claims, input.projected),
+      this.threadsForActivities(input.activities),
+      returned,
+    )
+    // The responsibility return carries its own activity markers, so they are
+    // the only ones added here; every other bucket is the entry's own cleanup.
+    const inbox = this.inboxDelta([], input.cleanup.attention.removed, [], input.cleanup.directMarkers.removed,
+      returned.markers, input.cleanup.activityMarkers.removed, [], input.cleanup.mainMarkers?.removed ?? [],
+      [], input.cleanup.reminderMarkers?.removed ?? [])
+    return Object.freeze({
+      claims: input.claims,
+      activities: input.activities,
+      transfers: returned.transfers,
+      tasks,
+      threads,
+      inbox,
+    })
   }
 
   private releaseSummaries(
