@@ -22,6 +22,7 @@ import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { chunkRunsWithDays } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, resolveUnknownMessageRefs, useResolvedMessageRefVersion, type ResolvedMemberRef } from './refs.ts'
+import { useThreadFollow } from './thread-actions.ts'
 import projectCss from './project.module.css'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
@@ -47,6 +48,7 @@ interface TeamProjectPanelProps {
   readonly threadObservations: TeamConversationProps['threadObservations']
   readonly reply: TeamConversationProps['reply']
   readonly promoteThread: TeamConversationProps['promoteThread']
+  readonly changeAttention: TeamConversationProps['changeAttention']
   readonly subscribeChanges: TeamConversationProps['subscribeChanges']
   readonly selectThread: TeamConversationProps['selectThread']
   readonly selectProject: TeamConversationProps['selectProject']
@@ -74,7 +76,7 @@ type ReadProjection = Awaited<ReturnType<TeamProjectPanelProps['readThread']>> e
   : never
 
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
-export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
+export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
   const threadRequest = { threadRef }
   const [projection, setProjection] = useState<ReadProjection>()
   const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
@@ -415,6 +417,10 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
     }
   }
 
+  // The same hook the Thread page uses, so the panel's follow control shows the Host's
+  // current observation and recovers from a failed write exactly like the other face.
+  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest })
+
   const clearSendState = useCallback((): void => {
     setReplyRequestId(current => current === undefined ? current : undefined)
   }, [])
@@ -476,10 +482,17 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
     <TeamPanelHandle surface={surface} label={t('panelResize')} />
     <div className={projectCss.panelHead}>
       <span className={projectCss.panelTitle} title={title}>{title}</span>
+      {thread !== undefined && <Button size="sm" variant="outline" disabled={follow.pending} aria-pressed={follow.following === true}
+        onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
+        {follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
+      </Button>}
       {task === undefined && thread !== undefined && <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>}
       {task !== undefined && <Button size="sm" variant="primary" onClick={() => { onPromoted(task.taskRef) }}>{t('openTask', { number: resolvedTaskNumber ?? '…' })}</Button>}
       <Button size="sm" icon={<IconCloseOutlineRegular size={14} />} aria-label={t('panelClose')} onClick={onClose} />
     </div>
+    {/* The follow control's own failure, stated beside the untouched control: a Remote failure is the
+        one error this face can raise that the read surface below does not own. */}
+    {follow.error !== undefined && <p className={css.error} role="alert">{follow.error}</p>}
     <section ref={timeline.ref} onScroll={timeline.onScroll} className={projectCss.panelBody} aria-label={t('timelineLabel')}>
       {loading && projection === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingThread')}</p></div>}
       {projection === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void readCurrent() }}>{t('retry')}</Button></div>}

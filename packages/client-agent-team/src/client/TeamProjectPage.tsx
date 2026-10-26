@@ -43,6 +43,7 @@ interface TeamProjectPageProps {
   readonly threadObservations: TeamConversationProps['threadObservations']
   readonly reply: TeamConversationProps['reply']
   readonly promoteThread: TeamConversationProps['promoteThread']
+  readonly changeAttention: TeamConversationProps['changeAttention']
   readonly selectThread: TeamConversationProps['selectThread']
   readonly selectProject: TeamConversationProps['selectProject']
   readonly resolveTaskRefs: TeamConversationProps['resolveTaskRefs']
@@ -80,7 +81,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
@@ -412,6 +413,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       threadObservations={threadObservations}
       reply={reply}
       promoteThread={promoteThread}
+      changeAttention={changeAttention}
       subscribeChanges={subscribeChanges}
       selectThread={selectThread}
       selectProject={selectProject}

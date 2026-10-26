@@ -29,6 +29,10 @@ import type {
   AgentTeamRecoverMemberResult,
   AgentTeamMembersRequest,
   AgentTeamReplyRequest,
+  AgentTeamThreadAttentionRequest,
+  AgentTeamThreadAttentionResult,
+  AgentTeamTransferTaskRequest,
+  AgentTeamTransferTaskResult,
   AgentTeamResolveTaskRefsRequest,
   AgentTeamResolveTaskRefsResult,
   AgentTeamResolveMessageRefsRequest,
@@ -148,6 +152,10 @@ export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> &
   readMainStream: (request: AgentTeamMainStreamReadRequest) => Promise<RemoteResult<AgentTeamMainStreamReadResult>>
   mainStreamHistory: (request: AgentTeamMainStreamHistoryRequest) => Promise<RemoteResult<AgentTeamMainStreamHistory>>
   reply: (request: AgentTeamReplyRequest) => Promise<RemoteResult<AgentTeamReplyResult>>
+  /** Human's own Thread Attention write; the Thread faces' follow control reads its answer, never an optimistic guess. */
+  changeAttention: (request: AgentTeamThreadAttentionRequest) => Promise<RemoteResult<AgentTeamThreadAttentionResult>>
+  /** Human-only Task responsibility transfer; the Host judges the target and the fences. */
+  transferTask: (request: AgentTeamTransferTaskRequest) => Promise<RemoteResult<AgentTeamTransferTaskResult>>
   changeTask: (request: AgentTeamTaskRequest) => Promise<RemoteResult<AgentTeamTaskResult>>
   promoteThread: (request: AgentTeamPromoteThreadRequest) => Promise<RemoteResult<AgentTeamPromoteThreadResult>>
   resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => Promise<RemoteResult<AgentTeamResolveTaskRefsResult>>

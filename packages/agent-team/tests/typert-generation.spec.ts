@@ -51,6 +51,7 @@ const EXPECTED_REMOTE_METHODS = [
   'taskBoard',
   'threadHistory',
   'threadObservations',
+  'transferTask',
   'updateMember',
   'updateProject',
   'view',

@@ -270,6 +270,15 @@ export const zh = {
   activityReopened: '{actor} 重新打开了此 Task',
   unreadRequired: '请先读取 {count} 条未读更新，再继续修改。',
   staleRevision: 'Thread 已发生变化，请按最新状态重试。',
+  followThread: '关注此 Thread',
+  unfollowThread: '取消关注此 Thread',
+  followPending: '正在更新关注状态…',
+  transferTask: '转交负责人',
+  transferringTask: '正在转交…',
+  transferTargetLabel: '转交给 {name}',
+  transferTargetYou: '转交给你自己',
+  transferUnreadRequired: '请先读取 {count} 条未读更新，再转交负责人。',
+  transferStaleRevision: '此 Thread 已发生变化，请按最新状态重试转交。',
 } as const
 
 export const en = {
@@ -537,6 +546,15 @@ export const en = {
   activityReopened: '{actor} reopened this Task',
   unreadRequired: 'Read {count} unread update(s) before changing this Thread.',
   staleRevision: 'This Thread changed; retry using the current state.',
+  followThread: 'Follow this Thread',
+  unfollowThread: 'Unfollow this Thread',
+  followPending: 'Updating follow state…',
+  transferTask: 'Transfer ownership',
+  transferringTask: 'Transferring…',
+  transferTargetLabel: 'Transfer to {name}',
+  transferTargetYou: 'Transfer to yourself',
+  transferUnreadRequired: 'Read {count} unread update(s) before transferring this Task.',
+  transferStaleRevision: 'This Thread changed; retry the transfer using the current state.',
 } as const
 
 export type TeamKey = keyof typeof zh

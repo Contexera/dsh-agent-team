@@ -1443,6 +1443,20 @@ export default class AgentTeam extends TypertRemoteService {
     return result.value
   }
 
+  /**
+   * Human-only Task responsibility transfer. It shares the ledger path, the request/result contract, and the
+   * authority rules with `transferTaskForAgent`: the Host decides whether the actor may move this Task and whether
+   * the target is a legal accountable, so the Client offers targets without re-implementing either judgement.
+   */
+  @Remote('transferTask')
+  async transferTask(request: AgentTeamTransferTaskRequest): Promise<AgentTeamTransferTaskResult> {
+    this.requireAccepting()
+    this.requireWorkspace(request.workspaceId)
+    const result = await this.requireLedger().transferTask({ ...request, actor: agentTeamHumanActor() })
+    this.emitCommittedOutcome(result)
+    return result.value
+  }
+
   /** Human-only Workspace participation grant; a pure relation — no Session moves. */
   @Remote('joinWorkspace')
   async joinWorkspace(request: AgentTeamJoinWorkspaceRequest): Promise<AgentTeamJoinWorkspaceResult> {

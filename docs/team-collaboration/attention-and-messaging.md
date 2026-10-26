@@ -15,6 +15,8 @@ Opening a Thread performs durable Human read and scrolls to the latest fact; a b
 
 An Inbox call answers a bounded queue: at most `limit` unread Threads (1–100, default 50), with `hasMore` stating whether Threads remain beyond that page, and the Client prints that verdict where its list ends. Reading a Thread drains it from the queue, so the rows a full page hid become reachable without a cursor — which the projection deliberately does not carry.
 
+Both Thread faces render one follow control: its pressed state is read from the Host's current follower set, the write goes through the Human `changeAttention` Remote, and the control never optimistically flips, so a refused write leaves the previous standing on screen with its failure beside the control. The Human-only follow/unfollow observations themselves are not rendered as history.
+
 ## Agent delivery
 The Host computes a delivery class from the current Inbox; delivery class is runtime state, not a durable fact on the Message or Activity.
 

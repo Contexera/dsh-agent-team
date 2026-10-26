@@ -15,7 +15,7 @@ Human Client 默认打开 Projects workspace。Human navigation 沿 Workspace �
 
 Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默认 50），`hasMore` 说明该页之外是否还有 Thread。Client 在列表结尾把这一判断渲染出来。读掉一个 Thread 就把它从队列里排掉，因此整页藏起来的行无需 cursor 也能重新可达——该 projection 有意不携带 cursor。
 
-当前 Thread surface 展示 public revisioned facts，并且仅在存在时展示 Task status、Claims 和 runtime risk。Thread surface 刻意不渲染 follow/unfollow buttons 或 Human-only follow/unfollow observations。
+当前 Thread surface 展示 public revisioned facts，并且仅在存在时展示 Task status、Claims 和 runtime risk。Thread 的两个面都渲染同一个 follow/unfollow 控件：按下状态读自 Host 的当前关注者集合，写入走 Human `changeAttention` Remote，不做乐观翻转；Human-only 的 follow/unfollow observations 历史本身不作渲染。
 
 History paging 永远不确认新 work。Thread 打开期间到达的 updates 无论读者滚动位置一律自动确认。滚离底部的读者只会看到无读取语义的纯跳转提示。
 

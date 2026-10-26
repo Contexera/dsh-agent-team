@@ -13,7 +13,7 @@ import type {
   AgentTeamView,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { Button, IconChevronLeftOutlineRegular, Modal, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronLeftOutlineRegular, Menu, Modal, Pill, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
@@ -24,6 +24,7 @@ import { TeamStateDot } from './TeamStateDot.tsx'
 import { mintRequestId, uploadComposerFiles } from './requests.ts'
 import { daySeparatorLabel, localDateKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
+import { useTaskTransfer, useThreadFollow } from './thread-actions.ts'
 import { cachedResolvedMessageRef, hostMessageRefLookup, resolveUnknownMessageRefs, useResolvedMessageRefVersion } from './refs.ts'
 import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames, type ThreadFactKey } from './thread-facts.ts'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
@@ -50,6 +51,8 @@ interface TeamThreadPageProps {
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly reply: TeamConversationProps['reply']
+  readonly changeAttention: TeamConversationProps['changeAttention']
+  readonly transferTask: TeamConversationProps['transferTask']
   readonly changeTask: TeamConversationProps['changeTask']
   readonly promoteThread: TeamConversationProps['promoteThread']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -85,7 +88,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const {
     workspaceId, humanName, humanAvatarUrl, projectRef, taskRef, threadRef, taskNumber, backToWorkspace, selectProject, selectThread, resolveTaskRefs, resolveThreadRefs, openMemberSession, putAttachment,
     loadProjects, readThread, loadThreadHistory, threadObservations,
-    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeTask, promoteThread, resolveMessageRefs, t,
+    subscribeChanges, loadMembers, drafts, getAttachment, reply, changeAttention, transferTask, changeTask, promoteThread, resolveMessageRefs, t,
   } = props
   const threadRequest = { threadRef, ...(taskRef === undefined ? {} : { taskRef }) }
   const [projection, setProjection] = useState<ReadProjection>()
@@ -288,6 +291,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     setProjectView(undefined)
     setMembers([])
     setFollowerIds(new Set())
+    setObservedFollowers(new Set())
     setCurrentFacts([])
     setTaskCards([])
     currentFactsRef.current = []
@@ -334,7 +338,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         // A rejected or refused history read must not take the only way back to older facts with it: pressing the affordance pages under its own error surface.
         setHistoryHasMore(true)
       }
-      if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
+      if (observations !== undefined && observations.ok) {
+        const observed = new Set(observations.value.followers)
+        setFollowerIds(observed)
+        setObservedFollowers(observed)
+      }
       setError(undefined)
       setLoading(false)
       await drainUnread()
@@ -427,6 +435,26 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     fact.kind === 'message' ? fact.message.sender : undefined
 
   const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
+
+  // Transfer targets come from the Host's own Project projection: the Agent owners are the rows the
+  // same view serves the Project settings page, and the Human owns every Project, so `humanMemberId`
+  // is the Host's own answer for the Human target — `owners` never lists it. Handing a Task back to
+  // the Human is what mends a finished Task whose accountable is no longer a Project owner. The
+  // Client offers the union without re-implementing the Host's legality rule.
+  // A finished Task still needs a mender: only a Member actor is confined to open Tasks, and this
+  // surface is the Human's, whose Remote moves a finished Task whose accountable left the Project.
+  const transferTargets = useMemo(() => {
+    if (task === undefined) return []
+    const projectOwners = (projectView?.owners ?? []).filter(owner => owner.projectRef === effectiveProjectRef).map(owner => owner.memberId)
+    const human = projectView?.humanMemberId
+    const targets = human === undefined ? projectOwners : [...projectOwners, human]
+    return [...new Set(targets)].filter(memberId => memberId !== task.accountable)
+  }, [projectView?.owners, projectView?.humanMemberId, effectiveProjectRef, task?.accountable])
+
+  const transferMenuItems = useMemo<readonly MenuEntry[]>(() => transferTargets.map(memberId => ({
+    id: memberId,
+    label: memberId === projectView?.humanMemberId ? t('transferTargetYou') : t('transferTargetLabel', { name: memberName(memberId) }),
+  })), [transferTargets, projectView?.humanMemberId, memberName, t])
 
   // Unresolvable refs never become links (see TeamMessage), so only Host-confirmed refs reach here. Identity-stable: a fresh
   // closure per render would defeat TeamMessage's memo.
@@ -627,6 +655,39 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     return nodes
   }
 
+  // The follow control and the transfer menu share the same two hooks the discussion panel uses, so both
+  // faces display the Host's current observation and recover from a refusal the same way. The page's mount
+  // observation already answered the follower set, so the control starts from that answer instead of
+  // issuing a second read for the same state.
+  const [observedFollowers, setObservedFollowers] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
+  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, observedFollowers)
+  const [transferMenuOpen, setTransferMenuOpen] = useState(false)
+  const transfer = useTaskTransfer(transferTask, {
+    workspaceId,
+    taskRef: task?.taskRef as AgentTeamTaskRef,
+    revisionOf: () => thread?.revision,
+    onCommitted: async (committed) => {
+      setProjection(current => current === undefined ? current : { ...current, task: committed.task, thread: committed.thread })
+      // The Host's own transfer activity row, merged exactly as an accept or close merges its own.
+      setCurrentFacts(current => {
+        const merged = mergeFacts(current, [{ kind: 'activity', sequence: committed.activity.sequence, activity: committed.activity, occurredAt: committed.receipt.occurredAt }])
+        currentFactsRef.current = merged
+        return merged
+      })
+      setTransferMenuOpen(false)
+      await readCurrent(true)
+      await refreshSupplemental()
+    },
+    // A fence re-reads through the page's own recovery path, exactly as accept, close, and reopen do:
+    // the unread gate drains, the stale revision re-projects the Thread, and the Task's current
+    // accountable stays on screen untouched while it happens.
+    onRefusal: async (refusal) => {
+      setTransferMenuOpen(false)
+      if (refusal.kind === 'unread_required') await refreshAfterFence()
+      else await refreshPassiveFacts()
+    },
+  })
+
   const refreshAfterFence = async (): Promise<void> => {
     timeline.scrollToBottom()
     await readCurrent(true)
@@ -801,6 +862,26 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         {task === undefined && thread !== undefined && <div className={css.headerActions}>
           <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
         </div>}
+        {/* The follow control stands on both faces of a Thread: a discussion and a Task alike. */}
+        {thread !== undefined && <div className={css.headerActions}>
+          <Button size="sm" variant="outline" disabled={follow.pending} aria-pressed={follow.following === true}
+            onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
+            {follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
+          </Button>
+        </div>}
+        {/* A finished Task is mended from here: only a Member actor is confined to open Tasks, so the
+            Human's transfer stands with the resolution. */}
+        {task !== undefined && thread !== undefined && transferTargets.length > 0 && <div className={css.headerActions}>
+          <Menu
+            open={transferMenuOpen}
+            onClose={() => { setTransferMenuOpen(false) }}
+            items={transferMenuItems}
+            onSelect={id => { void transfer.transfer(id as AgentTeamMemberId) }}
+            anchor={<Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="menu" onClick={() => { setTransferMenuOpen(value => !value) }}>
+              {transfer.pending ? t('transferringTask') : t('transferTask')}
+            </Button>}
+          />
+        </div>}
         {/* Open tasks act here; an accepted Thread keeps its header reopen. Reopen for a
             closed Thread lives only in the composer-slot closed notice. */}
         {task !== undefined && thread !== undefined && task.resolution !== 'closed' && <div className={css.headerActions}>
@@ -818,6 +899,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
             : <Button size="sm" variant="primary" disabled={pending} onClick={() => { void mutateTask('reopen') }}>{t('reopenTask')}</Button>}
         </div>}
       </header>
+      {(follow.error !== undefined || transfer.error !== undefined || transfer.refusal !== undefined) && <div className={css.errorState} role="alert">
+        <span>{follow.error ?? transfer.error ?? (transfer.refusal?.kind === 'unread_required'
+          ? t('transferUnreadRequired', { count: transfer.refusal.unreadCount })
+          : t('transferStaleRevision'))}</span>
+      </div>}
       {risks.length > 0 && <section className={threadCss.riskSection} aria-label={t('runtimeRisk')}>
         <h2>{t('runtimeRisk')}</h2>
         {risks.map(({ claim, status, label, sentenceKey, reason, full }) => <p className={threadCss.riskRow} key={claim.claimRef}>

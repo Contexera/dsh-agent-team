@@ -480,6 +480,47 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     wakeAll()
     return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, activity, task, thread } }
   })
+  // The Human Attention double keeps the follower set every observation read
+  // answers from, so a follow or unfollow is visible on both faces of the Thread
+  // the way the Host's own projection makes it visible.
+  let attentionFailure: string | undefined
+  const failAttention = (message?: string): void => { attentionFailure = message }
+  const changeAttention = vi.fn(async (request: { requestId: string; workspaceId: string; threadRef?: string; taskRef?: string; action: 'follow' | 'unfollow' }) => {
+    if (attentionFailure !== undefined) return { ok: false as const, error: { message: attentionFailure } }
+    const followed = threadFollowers.includes('member:human')
+    if (request.action === 'follow' && !followed) threadFollowers.push('member:human')
+    // Mutated in place: an observation read holds this same array, so a
+    // reassignment here would leave the double answering from a stale copy.
+    if (request.action === 'unfollow' && followed) threadFollowers.splice(0, threadFollowers.length, ...threadFollowers.filter(id => id !== 'member:human'))
+    const topThread = viewItems[0]?.thread as { revision?: number } | undefined
+    const thread = { ...(topThread as object), revision: topThread?.revision ?? 0 }
+    wakeAll()
+    // An Attention write is not a Thread revision: the Host's own result carries the Thread
+    // unchanged, which is why the control's own state comes from the row and the re-read.
+    return { ok: true as const, value: {
+      receipt: {}, thread,
+      // Present after follow, absent after unfollow: the result's own answer to what happened.
+      ...(request.action === 'follow' ? { attention: { threadRef: request.threadRef, taskRef: request.taskRef, memberId: 'member:human', action: 'follow' } } : {}),
+    } }
+  })
+  // The Task transfer double answers one seeded outcome per call, so a spec drives the
+  // committed, unread, stale, and failed branches without a second Host double.
+  let transferOutcome: 'committed' | 'unread_required' | 'stale_revision' | 'failure' = 'committed'
+  const seedTransferOutcome = (next: typeof transferOutcome): void => { transferOutcome = next }
+  const transferTask = vi.fn(async (request: { requestId: string; workspaceId: string; taskRef: string; target: string; baseRevision: number }) => {
+    if (transferOutcome === 'failure') return { ok: false as const, error: { message: 'transfer unavailable (spec)' } }
+    if (transferOutcome === 'unread_required') return { ok: true as const, value: { kind: 'unread_required' as const, unreadCount: 2 } }
+    if (transferOutcome === 'stale_revision') return { ok: true as const, value: { kind: 'stale_revision' as const } }
+    const top = viewItems.find(item => (item.task as { taskRef?: string } | undefined)?.taskRef === request.taskRef) ?? viewItems[0]
+    if (top === undefined) return { ok: false as const, error: { message: 'task missing' } }
+    const task = { ...(top.task as object), accountable: request.target }
+    const thread = { ...(top.thread as object), revision: request.baseRevision + 1 }
+    viewItems = viewItems.map(item => ({ ...item, task, thread }))
+    const activity = { activityRef: 'activity:transfer', kind: 'transfer' as const, taskRef: request.taskRef, threadRef: (top.thread as { threadRef: string }).threadRef, actor: 'member:human', from: 'member:human', to: request.target, sequence: request.baseRevision + 1 }
+    viewActivities = [...viewActivities, activity]
+    wakeAll()
+    return { ok: true as const, value: { kind: 'committed' as const, receipt: {}, activity, task, thread } }
+  })
   const changeTask = vi.fn(async (request: { action: 'accept' | 'close' | 'reopen' }) => {
     const top = viewItems[0]!
     const task = { ...(top.task as object),
@@ -522,7 +563,8 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   let threadHistoryFailure: string | undefined
   let taskBoardFailure: string | undefined
   // The Human author follows every seeded Thread; tests override the set to
-  // drive the mention-candidate ranking.
+  // drive the mention-candidate ranking. One follower set backs every observation
+  // read, exactly as the Host projects one state rather than a per-read answer.
   const threadFollowers = [...(options?.seedFollowers ?? ['member:human'])]
   const threadObservations = vi.fn(async ({ taskRef, threadRef }: { taskRef?: string; threadRef?: string }) => {
     void taskRef
@@ -768,7 +810,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, changeAttention, transferTask, resolveTaskRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),
@@ -812,5 +854,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
   const failTaskBoard = (message?: string): void => { taskBoardFailure = message }
-  return { runtime, team, view, seedMainInbox, loadTaskBoard, failTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
+  return { runtime, team, view, seedMainInbox, loadTaskBoard, failTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, changeAttention, transferTask, failAttention, seedTransferOutcome, resolveTaskRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
 }

@@ -72,6 +72,8 @@ Host 追加一条 `<system-reminder>`，要求 Member 把持久结论写进 `mem
 - 默认关闭的 Human「作为任务」control。
 - Human promotion 与 Host reread。
 - taskless header/Claim gating。
+- Human 对 Thread 的 follow/unfollow：显示以 Host observation 为准。
+- Human 把 Task 转交给 Project owner，以及转交给 Human 自己，含负责人已不是 Project owner 的已结束 Task 的补回。
 
 trace 还要求 Human 写入一条版本 2 的 mention，确认它直接送达、没有邀请确认环节。然后验证 Agent durable Inbox 与 explicit read/reply，再验证 Human Project 和 Thread state。Desktop、390×844 和 keyboard paths 都属于 assembled acceptance。Page reload 从 Host projections 读取同一批 facts。journey 最后离开 Team mode，确认 ordinary DSH conversation surface 恢复。
 
