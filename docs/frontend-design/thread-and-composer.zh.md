@@ -22,16 +22,16 @@
 续行没有身份行，它的时间按上面[时间线滚动](#时间线滚动timeline-scroll)所述坐在头像座位里。
 
 ## Composer 与 @mention
-- textarea 自增高（上限 336px），Project / Thread composer 出现时自动聚焦且不滚动时间线。Enter 发送、Shift+Enter 换行。IME composition 期间 Enter 不触发发送。发送期间输入框保持聚焦但只读，避免重复提交。发送按钮点击不抢走焦点，发送完成后可直接继续输入。未关注 Member 的首次发送返回确认提醒时，保留草稿与收件人。输入框自动恢复焦点，第二次 Enter 可直接确认发送。composer 卡片沿用 DSH 默认静态表面描边（`border: 0` + l2 elevation 发丝线 + `--dsw-elevation-soft`）。`focus-within` 不改它的颜色。
+- textarea 自增高（上限 336px），Project / Thread composer 出现时自动聚焦且不滚动时间线。Enter 发送、Shift+Enter 换行。IME composition 期间 Enter 不触发发送。发送期间输入框保持聚焦但只读，避免重复提交。发送按钮点击不抢走焦点，发送完成后可直接继续输入。版本 2 的回复从不要求确认：mention 直接送达，不存在需要保留草稿等待的第二次 Enter。composer 卡片沿用 DSH 默认静态表面描边（`border: 0` + l2 elevation 发丝线 + `--dsw-elevation-soft`）。`focus-within` 不改它的颜色。
 - mention 弹层向上展开，`role="listbox"`。textarea 以 `aria-controls/aria-activedescendant/aria-expanded` 关联弹层。↑↓ 循环、Tab/Enter 接受候选、Escape 关闭。外点关闭复用 `useDismissOnOutsidePointer`。高度钳制复用 `useAnchoredMaxHeight`（cap 320px）。高亮行始终通过 `scrollIntoView`（`block: 'nearest'`）保持在弹层可视区内，Member 多时键盘选中的候选不会被折叠隐藏。Thread 面通过 Human-only 的 `threadObservations` 读取当前关注者集合。读取时机是首屏并行一轮，加每次 thread 域 wake。
-- 候选集是整个 Workspace 的参与者，与 Host 的点名口径一致，并按「点中后多直接地送达」排序：本 Thread 的关注者 → 通过别的 Thread 参与本 Project 的 Member → Workspace 其余。所有档位都可选——账本对它们都能寻址，排序只是提示不是筛选。只有 `@all` 保持更窄的 Project 口径，因为 Host 就是这么展开它的。接受候选后光标落点精确到插入文本之后；删除提及文本会同步收缩 recipients。
+- 候选集是整个 Workspace 的参与者，与 Host 的点名口径一致，并按「点中后多直接地送达」排序：本 Thread 的关注者 → 通过别的 Thread 参与本 Project 的 Member → Workspace 其余。所有档位都可选——账本对它们都能寻址，排序只是提示不是筛选。手打的 `@all` 在版本 2 下是普通文本、不展开任何东西，因此菜单不提供它。接受候选后光标落点精确到插入文本之后；删除提及文本会同步收缩 recipients。
 - 一行只带一个事实：「浓淡」，落在 `data-mention-inside` 上，回答该 Member 是否在这个正在写的会话里。为 false 时名字降到 secondary label 档，行本身的对比度不变。浓淡就是这一行的全部区分——行写清这位 Member 是谁，不声明这次点名会做什么。
-- 两个表面对同一档位的判断相反。Thread 面的边界是「关注本 Thread」，所以通过别的 Thread 参与本 Project 的 Member 在它之外；Project 顶层发送则把任何 Project 参与者都算作在里面。逐行写出后果在两个表面上都没有增加信息：Thread 面上它标记的正是浓淡已经标记的那些行；Project 顶层发送没有确认步骤，而每个收件人都会加入它新建的 Thread——这对每一行都成立，逐行写出来只在写着的那一行是噪音、在不写的那一行制造假的差异。
-- 这份沉默不藏起任何东西：Host 会停下来确认的那次点名，由 composer 在发送后弹出的状态行（`mentionConfirmation`）说明。行负责说清谁在这个会话里，确认由发送后的状态行陈述。浓淡是这一行唯一的区分载体，因此必须扛住宽度变化：窄于 600px 时身边的 description 被丢弃，浓淡留下。
+- 两个表面对同一档位的判断相反。Thread 面的边界是「关注本 Thread」，所以通过别的 Thread 参与本 Project 的 Member 在它之外；Project 顶层发送则把任何 Project 参与者都算作在里面。逐行写出后果在两个表面上都没有增加信息：Thread 面上它标记的正是浓淡已经标记的那些行；每个收件人都会加入 Project 发送新建的 Thread——这对每一行都成立，逐行写出来只在写着的那一行是噪音、在不写的那一行制造假的差异。
+- 这份沉默不藏起任何东西：行负责说清谁在这个会话里，发送后的状态行陈述这次发送做了什么。浓淡是这一行唯一的区分载体，因此必须扛住宽度变化：窄于 600px 时身边的 description 被丢弃，浓淡留下。
 - 表面语言：mention 弹层画的是共享的半透明菜单 token。按 shipped 毛玻璃配方补 `--dsw-menu-backdrop-filter` 与 elevation 描边/阴影，而不是当实底用。0.1.7 把这个 token 改成半透明却没改名。实底弹层会真实地读不清，而存在性检查全绿。配方本身见「设计语言对齐」表。
 - 模式 chip（「作为任务」）：任何宽度都保留可见文字标签。窄于 560px 时改为缩工具组间距（`@container (max-width: 560px)`），而不是藏字。`aria-label`、`title`、`aria-pressed` 照旧承载模式语义。
 - Member Session 输入面即 shipped composer 本身，不做任何修改。Team 不注册任何 Member Session 的 composer 表面：无接管、无 trigger sources、无 dock 提示条。键盘合同、命令与引用菜单、附件与普通会话完全一致。
-- 收件人提示行：通知集合非空时在草稿与工具栏之间渲染 quiet 提示行（`.notifyRow`，`composerNotify` 文案 + `{ids}` 句柄列表）。发送前即可看到"将通知谁"。集合是菜单选中的 recipients 与正文手打 `@Handle` 的并集。`mentionedMemberIds` 从草稿派生，与 Host 同一套大小写不敏感、Unicode 词边界的规则。`@all` 按菜单的展开口径列出全部可投递 Member。空集合不占位。派生集合只用于显示，不进发送 payload。Project 之外的名字在正文里只是散文，作为显式 recipients 会被拒绝。
+- 收件人提示行：通知集合非空时在草稿与工具栏之间渲染 quiet 提示行（`.notifyRow`，`composerNotify` 文案 + `{ids}` 句柄列表）。发送前即可看到"将通知谁"。集合是菜单选中的 recipients 与正文手打 `@Handle` 的并集。`mentionedMemberIds` 从草稿派生，与 Host 同一套大小写不敏感、Unicode 词边界的规则。这个集合就是发送携带的内容：选中的 `recipients` 作为显式请求字段随正文一同发出，Host 在解析投递前把它与正文 mention 取并集，所以提示行与发送读出的是同一个集合。空集合不占位。Project 之外的名字在正文里只是散文，作为显式 recipients 会被拒绝。
 - 读者自己的 handle 是唯一一个必须「不读也能找到」的 mention chip，所以它是唯一离开 business 族的 chip。`[data-mention-human]` 用 success 档着色（error 与 warn 两族分别意味着失败与警示）。正文里写的是读者改名前的 handle 时，该 chip 同样被标记 —— 标记跟着身份走，不跟着拼写走。
 - Project composer 发到 Main stream，工具区是 `讨论/任务` 开关。它是 pressed button；打开后出现原生复选框 `作为任务`。关闭时发 `postMainMessage`（引用 Main 消息时带 `replyToMessageRef`）；打开时发 `startThread`，勾选则建 Task，否则建讨论；Task 提交后页面切到 `看板` 页签并把焦点放上去。引用会关掉开关，打开开关会丢掉引用，因为新 Thread 没有引用目标。Host 返回 `main_unread_required` 时保留草稿，刷新并读取主对话，用状态行提示 Human 先看一下再发；重发是新的 operation。版本 2 的回复不再要求确认；Main stream 与 Thread composer 都不提供 `@all`，也不把它展开为 recipients，手打的 `@all` 就是普通文本。
 - 草稿缓存：draft/recipients 不在页面局部。它们按 `project:<projectRef>` / `thread:<threadRef>` 键存放。每 Client 上下文存一份 `TeamDraftStore`（`drafts.ts`）。它用单一 localStorage 键 `dsh.agent-team.drafts.v1`，写穿持久化，按 savedAt 淘汰最旧 ~50 条。切换视图或刷新后草稿与收件人原样恢复。发送提交成功即清除对应键，失败保留。Composer 挂载收敛会剔除不再匹配文本/已失效的收件人。Project 的「作为任务」意图不进入草稿缓存：默认关闭，成功提交后再次复位关闭。
@@ -49,7 +49,7 @@ Thread 里的一条 Message，可以通过「选中它所回答的那条 Message
 时间线里，这条引用领在它所归属的 Message 之前，用的就是读者已经熟悉的 Markdown 引用形式。那是 2px 竖线后一行安静文字，写明作者与父消息第一行，整行都是跳回原文的入口。它是指向原文的把手而不是副本 —— 长父消息不会被粘贴第二遍，引用也不可能与它指向的 Message 不一致。composer 的引用条与它是同一种对象、同一种语言，这正是两者能被读成同一句话的原因。
 
 ## Thread / Task 入口行（project 时间线内）
-- 语义：每个 top-level Project 消息进入其 Thread 的唯一入口，形态是正文下方**一行**安静的行——既陈述状态，也负责开门。`Task #N` 是 home Project 内 durable Task creation 的展示编号，不是稳定身份。跨视图导航使用 branded Task ref。
+- 语义：每个 Thread 在 Project feed 里有唯一入口，形态是其 anchor 消息正文下方**一行**安静的行——既陈述状态，也负责开门。`Task #N` 是 home Project 内 durable Task creation 的展示编号，不是稳定身份。跨视图导航使用 branded Task ref。
 - **开门之后去哪，取决于门后是什么**：taskful 入口走 `selectThread` 进 Thread 页（那里承载验收与完整历史）；taskless 讨论不进新页，而是在 Project 页自己的右侧面板里打开，读者身边仍留着 feed。见「Project 页与讨论面板」。
 - 方位（本条的硬约束）：入口的任何状态都**不放在身份行上**。一个 run 里的后续消息没有自己的身份行内容，状态簇停在那里只会孤零零地悬在行尾；而任何靠右的落点都要读者为真正想看的价值横穿整列。状态改为**领起入口行**：与上方正文同一个左缘，且整条 feed 的所有入口共用一个 x。shipped DSH 的行也是这么做的（`SkillRow` 折叠态的首位槽、`JobListAction` 触发钮「点在前、计数在后」）。
 - 状态簇（`.stateCluster`）：**未走完的** taskful 入口依次是三样东西。第一，Task 在办 Claim 的所有者头像叠放。第二，`taskStatusDot(status)` 对应的 8px `TeamStateDot`。第三，本地化状态词。`in_progress`→ongoing、`in_review`→warning、`done`→done 走共享 `StateDot`。`todo` 是空心圆环、`closed` 是 tertiary 安静点。五个状态共用同一套形态语言。Claim 是 Host 事实而非装饰。只有 `in_progress`/`in_review` 的 Task 才有所有者。`released` 的 Claim 已不是工作，所有者按 Claim 顺序去重。taskless 入口不虚构状态点。

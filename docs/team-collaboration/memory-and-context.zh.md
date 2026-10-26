@@ -73,6 +73,6 @@ Host 追加一条 `<system-reminder>`，要求 Member 把持久结论写进 `mem
 - Human promotion 与 Host reread。
 - taskless header/Claim gating。
 
-trace 还要求 Human 第二次发送，确认邀请未关注的 Agent。然后验证 Agent durable Inbox 与 explicit read/reply，再验证 Human Project 和 Thread state。Desktop、390×844 和 keyboard paths 都属于 assembled acceptance。Page reload 从 Host projections 读取同一批 facts。journey 最后离开 Team mode，确认 ordinary DSH conversation surface 恢复。
+trace 还要求 Human 写入一条版本 2 的 mention，确认它直接送达、没有邀请确认环节。然后验证 Agent durable Inbox 与 explicit read/reply，再验证 Human Project 和 Thread state。Desktop、390×844 和 keyboard paths 都属于 assembled acceptance。Page reload 从 Host projections 读取同一批 facts。journey 最后离开 Team mode，确认 ordinary DSH conversation surface 恢复。
 
 Browser storage 仍仅限 navigation 和 Workspace selection。Acceptance trace 不从 local storage 或 Member Session relay text 推导 unread、Attention 或 Thread facts。真实 Agent-loop integration tests 单独覆盖 Agent safe-boundary wake 及三种 notification forms。测试代码见 `packages/agent-team/tests/member-lifecycle.spec.ts`。三者是 direct mention、Task/Claim Activity、无正文 ordinary route。browser replay 不依赖 live provider behavior。

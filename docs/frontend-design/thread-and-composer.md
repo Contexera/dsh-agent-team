@@ -20,7 +20,7 @@ The name and its time share one baseline, as in Raft's `items-baseline` row. The
 A continuation row has no identity line; its time rides in the avatar seat as described under [Timeline scrolling](#timeline-scrolling).
 
 ## Composer and mentions
-The textarea grows to 336px, autofocuses without moving the timeline, sends on Enter, and inserts a newline on Shift+Enter. IME composition suppresses send. During submit it stays focused and read-only; buttons do not steal focus. Confirmation for an unfollowed recipient preserves draft and focus for the second Enter.
+The textarea grows to 336px, autofocuses without moving the timeline, sends on Enter, and inserts a newline on Shift+Enter. IME composition suppresses send. During submit it stays focused and read-only; buttons do not steal focus. Replies never ask for confirmation at version 2: a mention delivers directly, so there is no second Enter to preserve a draft for.
 
 The mention popup is an upward `role="listbox"` associated through `aria-controls`, `aria-activedescendant`, and `aria-expanded`; arrows cycle, Tab/Enter accept, Escape closes, and outside dismissal/max height use public hooks. The highlighted row is kept inside the scrollable popup (`scrollIntoView` with `block: 'nearest'`), so long rosters never hide the keyboard selection.
 
@@ -28,15 +28,15 @@ The popup paints the shared translucent menu surface, so it takes the shipped fr
 
 On Thread surfaces the popup loads the current follower set through the Human-only `threadObservations` read (first paint round plus every thread-scope wake). The popup offers every Workspace participant, matching the Host's own candidate rule, and ranks them by how directly a pick reaches the Member: this Thread's followers, then Members taking part in the Project through another Thread, then the rest of the Workspace.
 
-Every tier stays pickable — the ledger addresses all of them, so the ranking is a hint rather than a filter. `@all` alone keeps the narrower Project scope, because that is what the Host expands it to. Accepted text places the caret precisely; deleting mention text shrinks recipients.
+Every tier stays pickable — the ledger addresses all of them, so the ranking is a hint rather than a filter. A typed `@all` is plain text under version 2 and expands to nothing, so it is not offered in the menu. Accepted text places the caret precisely; deleting mention text shrinks recipients.
 
 A row carries its weight on `data-mention-inside`: whether the Member is inside the conversation being written into. False means they are not, and the name drops to the secondary label alias while the row keeps its own contrast. Weight is the whole of the row's distinction — the row names the Member and says nothing about what the pick will do.
 
-The two surfaces disagree about the same tier. On a Thread the boundary is following that Thread, so a Member taking part in the Project through another Thread is outside it; a Project send counts any Project participant as inside. Stating the consequence per row added nothing on either surface: on a Thread it marked exactly the rows the weight already marks, and a Project send has no confirmation step while every recipient joins the Thread it creates — a fact true of every row, so writing it per row is noise where it appears and a false difference where it does not.
+The two surfaces disagree about the same tier. On a Thread the boundary is following that Thread, so a Member taking part in the Project through another Thread is outside it; a Project send counts any Project participant as inside. Stating the consequence per row added nothing on either surface: on a Thread it marked exactly the rows the weight already marks, and every recipient joins the Thread a Project send creates — a fact true of every row, so writing it per row is noise where it appears and a false difference where it does not.
 
-Nothing is hidden by that silence. A pick the Host stops to confirm is announced by the status line the composer shows after the send (`mentionConfirmation`), so the row states who is in the conversation and the confirmation states what the send did. Colour alone carries the row's distinction, which is why it must survive the width change: below 600px the description is dropped and the weight stays.
+Nothing is hidden by that silence. The row states who is in the conversation and the status line after the send states what the send did. Colour alone carries the row's distinction, which is why it must survive the width change: below 600px the description is dropped and the weight stays.
 
-A quiet recipient notice shows who will be notified: the picked recipients unioned with the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive word boundaries), with `@all` listing the menu's expansion. That derived set is display-only and never travels as explicit recipients, where a name outside the Project would be a rejected target instead of the prose the Host reads. Drafts and recipients are stored per Project/Thread in the bounded `TeamDraftStore`; successful sends clear them and failures preserve them.
+A quiet recipient notice shows who will be notified: the picked recipients unioned with the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive word boundaries). That set is what the send carries — the picked `recipients` travel as an explicit request field alongside the body, and the Host unions them with the body's mentions, so the notice and the send read the same set. Drafts and recipients are stored per Project/Thread in the bounded `TeamDraftStore`; successful sends clear them and failures preserve them.
 
 The 「作为任务」 intent is not persisted and resets off after success. The mode chip keeps its word label at every width and narrows the toolbar gap below 560px rather than hiding the word.
 
@@ -64,7 +64,7 @@ In the timeline the link leads the Message it belongs to, in the Markdown refere
 Taskless Thread promotion is Human-only, durable, and non-optimistic. On success reread Thread and supplemental Project/Member projections; on unread/stale fence errors preserve Host error and reread relevant facts.
 
 ## Thread/Task entry rows
-Every top-level Project Message has one Thread entry, drawn as a single quiet row under its body that both states and opens the Thread. It never treats Task as a navigation level, and no state of an entry ever lives on the identity line. A continuation row in a run has no identity of its own, so a cluster parked there would float alone at a line's far end. Any placement that far right costs the reader a trip across the column for the value they came for.
+Every Thread has one entry in the Project feed, drawn as a single quiet row under its anchor Message's body that both states and opens the Thread. It never treats Task as a navigation level, and no state of an entry ever lives on the identity line. A continuation row in a run has no identity of its own, so a cluster parked there would float alone at a line's far end. Any placement that far right costs the reader a trip across the column for the value they came for.
 
 The state instead leads the entry row, at the same left edge as the body above it and on one x for every entry in the feed. That is the same leading position shipped DSH rows give their state (a `SkillRow`'s collapsed leading slot, the `JobListAction` trigger's dot before its count).
 

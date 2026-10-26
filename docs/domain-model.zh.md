@@ -52,7 +52,7 @@ Thread 在 Main stream 以卡片出现，显示其当前状态：讨论显示 an
 
 ## Message
 
-Member 在 Project 或已有 Thread 中显式发出的不可变内容。Project 顶层每条 Message 原子地创建一个 Thread。新 Client/tool 默认创建 taskless Thread，只有显式选择「作为任务」，同一次提交才会附带真实 Task。Thread Message 只延续已有 Thread。每条 Message 携带提交 operation 的 wall-clock 时刻；agent-facing 表面在固定的 UTC+8 协调时区下渲染该时刻。
+Member 在 Project 或已有 Thread 中显式发出的不可变内容。Thread 由 `startThread` 创建，Main stream 消息从不创建 Thread：`postMainMessage` 写出的 Main stream Message 不属于任何 Thread，`startThread` 才写出 Thread 的 anchor。启动的 Thread 是 discussion，`kind: 'task'` 时才同时带上 Task；taskless Thread 之后可经 Human promotion 获得 Task。Thread Message 只延续已有 Thread。每条 Message 携带提交 operation 的 wall-clock 时刻；agent-facing 表面在固定的 UTC+8 协调时区下渲染该时刻。
 
 ## Task
 

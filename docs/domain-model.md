@@ -54,7 +54,7 @@ Behind rules version 2 any Project member may reply in any Thread. A mention or 
 
 ## Message
 
-Immutable content explicitly sent in a Project or existing Thread. Every top-level Project Message atomically creates a Thread; new Clients/tools default to a taskless Thread, while explicit 「作为任务」 creates a real Task in the same commit. A reply continues an existing Thread. Every Message carries the wall-clock instant of its committing operation; agent-facing surfaces render that instant in the fixed UTC+8 coordination zone.
+Immutable content explicitly sent in a Project or existing Thread. A Thread is created by `startThread`, never by a Main stream message: `postMainMessage` writes a Main stream Message that belongs to no Thread, and `startThread` writes the Thread's anchor. A started Thread is a discussion, or a Task when `kind: 'task'` asks for one; a taskless Thread can later gain a Task through Human promotion. A reply continues an existing Thread. Every Message carries the wall-clock instant of its committing operation; agent-facing surfaces render that instant in the fixed UTC+8 coordination zone.
 
 ## Task
 

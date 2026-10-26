@@ -26,6 +26,7 @@ All notable changes to this project are documented in this file. The format foll
 
 - The Client drops its version 1 paths: the old Project feed, `@all` expansion, and the invitation confirmation flow are gone. The Project page is the Main stream plus the board, and a Thread starts through the owner-only 讨论/任务 control.
 - Exactly one sidebar row carries `aria-current="page"`: a global face (Inbox, Task board) no longer leaves the marker on the Workspace selector beneath it, and the auto-select no longer pulls the seat back to a Workspace overview while a global face stands.
+- Maintained documentation and the shipped `agent-team` README no longer describe rules version 1 as current. Corrected: a Main stream message creates no Thread (`startThread` does); a mention or reply never starts or resumes Attention; `@all` is plain text; the invitation confirmation step is version 1 only; an owner's ordinary Main stream unread is delivered immediately; the request's explicit `recipients` list is stated as the input it is, unioned with the body's mentions, rather than denied; and `changeAttention` is recorded as a Host Remote the Web Client does not yet wire, instead of a control the Human Client is claimed to use. Bilingual pairs moved together.
 
 ## [0.2.5] - 2026-10-24
 
