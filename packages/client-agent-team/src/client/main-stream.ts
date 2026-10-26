@@ -9,29 +9,59 @@ import { mintRequestId } from './requests.ts'
 const PAGE_SIZE = 20
 const MAX_PAGE_SIZE = 100
 
+/** How long an arrival keeps its mark: long enough to be noticed, short enough to stay information rather than furniture. */
+export const ARRIVAL_MARK_MS = 3000
+
 interface MainStreamSnapshot {
   readonly entries: readonly AgentTeamMainTimelineEntry[]
   readonly cursor: number
   readonly hasMore: boolean
   readonly standing: AgentTeamMainStreamStanding
+  /** Keys first shown unread in this visit, with the instant they were shown. See {@link liveArrivals}. */
+  readonly arrivals: ReadonlyMap<string, number>
 }
 
 export function mainEntryKey(entry: AgentTeamMainTimelineEntry): string {
   return `${entry.kind}:${entry.sequence}`
 }
 
+const NO_ARRIVALS: ReadonlyMap<string, number> = new Map()
+
+/** Every key first shown unread is stamped once, when it is first shown. */
+function withArrivals(arrivals: ReadonlyMap<string, number>, entries: readonly AgentTeamMainTimelineEntry[], now: number): ReadonlyMap<string, number> {
+  let stamped: Map<string, number> | undefined
+  for (const entry of entries) {
+    // The mark records an arrival, not the Host's live flag: a read can answer in the same frame as the arrival, so a mark
+    // read off the current flag would be erased before the reader ever saw it. Once stamped, a key keeps its instant.
+    if (entry.unread !== true) continue
+    const key = mainEntryKey(entry)
+    if (arrivals.has(key)) continue
+    stamped ??= new Map(arrivals)
+    stamped.set(key, now)
+  }
+  return stamped ?? arrivals
+}
+
 /**
- * A fresh page is authoritative for the sequences it covers; loaded entries outside it stay. An entry that was unread
- * when first shown stays marked for this visit, so reading it on arrival does not erase what the Human is looking at.
+ * The keys still inside their arriving hold. The hold is what makes the mark information: an entry arrives marked, stays
+ * marked long enough to be noticed, and is released on its own clock — never held until the reader leaves the page.
  */
-export function mergeMainStream(current: MainStreamSnapshot | undefined, fresh: AgentTeamMainStreamHistory): MainStreamSnapshot {
-  if (current === undefined) return { entries: fresh.entries, cursor: fresh.cursor, hasMore: fresh.hasMore, standing: fresh.standing }
+export function liveArrivals(arrivals: ReadonlyMap<string, number>, now: number): ReadonlySet<string> {
+  const live = new Set<string>()
+  for (const [key, stamp] of arrivals) if (now - stamp < ARRIVAL_MARK_MS) live.add(key)
+  return live
+}
+
+/** A fresh page is authoritative for the sequences it covers; loaded entries outside it stay. */
+export function mergeMainStream(current: MainStreamSnapshot | undefined, fresh: AgentTeamMainStreamHistory, now = Date.now()): MainStreamSnapshot {
+  if (current === undefined) {
+    return { entries: fresh.entries, cursor: fresh.cursor, hasMore: fresh.hasMore, standing: fresh.standing, arrivals: withArrivals(NO_ARRIVALS, fresh.entries, now) }
+  }
   const floor = fresh.entries[0]?.sequence ?? Number.POSITIVE_INFINITY
   const ceiling = fresh.entries.at(-1)?.sequence ?? 0
-  const wasUnread = new Set(current.entries.filter(entry => entry.unread).map(mainEntryKey))
   const entries = [
     ...current.entries.filter(entry => entry.sequence < floor),
-    ...fresh.entries.map(entry => !entry.unread && wasUnread.has(mainEntryKey(entry)) ? { ...entry, unread: true } : entry),
+    ...fresh.entries,
     ...current.entries.filter(entry => entry.sequence > ceiling),
   ]
   const reachedOlder = current.cursor < fresh.cursor
@@ -40,6 +70,7 @@ export function mergeMainStream(current: MainStreamSnapshot | undefined, fresh: 
     cursor: Math.min(current.cursor, fresh.cursor),
     hasMore: fresh.hasMore || reachedOlder,
     standing: fresh.standing,
+    arrivals: withArrivals(current.arrivals, fresh.entries, now),
   }
 }
 
@@ -47,15 +78,32 @@ export function mergeMainStream(current: MainStreamSnapshot | undefined, fresh: 
  * A read's answer is authoritative for the entries it carries, flagged as the reader saw them before the read. Unlike a history page it is not
  * contiguous — it adds any older entry whose marker the read consumes — so entries overlay by key instead of replacing a range.
  */
-export function mergeMainRead(current: MainStreamSnapshot, read: AgentTeamMainStreamReadResult): MainStreamSnapshot {
-  const wasUnread = new Set(current.entries.filter(entry => entry.unread).map(mainEntryKey))
+export function mergeMainRead(current: MainStreamSnapshot, read: AgentTeamMainStreamReadResult, now = Date.now()): MainStreamSnapshot {
   const merged = new Map(current.entries.map(entry => [mainEntryKey(entry), entry]))
-  for (const entry of read.entries) {
-    const keepUnread = entry.unread || wasUnread.has(mainEntryKey(entry))
-    merged.set(mainEntryKey(entry), keepUnread ? { ...entry, unread: true } : entry)
-  }
+  for (const entry of read.entries) merged.set(mainEntryKey(entry), entry)
   const entries = [...merged.values()].sort((left, right) => left.sequence - right.sequence)
-  return { ...current, entries, standing: read.standing }
+  return { ...current, entries, standing: read.standing, arrivals: withArrivals(current.arrivals, read.entries, now) }
+}
+
+/**
+ * The marked keys of one render, and a timer for the next release: entries can arrive in a burst, so the earliest deadline
+ * schedules the re-render and the following one takes over from there.
+ */
+export function useArrivalMarks(arrivals: ReadonlyMap<string, number>): ReadonlySet<string> {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const clock = Date.now()
+    let soonest = Number.POSITIVE_INFINITY
+    for (const stamp of arrivals.values()) {
+      const deadline = stamp + ARRIVAL_MARK_MS
+      if (deadline > clock) soonest = Math.min(soonest, deadline)
+    }
+    // Released stamps stay in the map as history, so a deadline already past must schedule nothing: it would spin.
+    if (!Number.isFinite(soonest)) return
+    const timer = setTimeout(() => { setNow(Date.now()) }, soonest - clock)
+    return () => { clearTimeout(timer) }
+  }, [arrivals, now])
+  return liveArrivals(arrivals, now)
 }
 
 interface UseMainStreamOptions {
@@ -68,6 +116,8 @@ interface UseMainStreamOptions {
 
 export interface MainStreamState {
   readonly entries: readonly AgentTeamMainTimelineEntry[]
+  /** Entries still inside their arriving hold: the mark a reader sees, on its own clock. */
+  readonly marked: ReadonlySet<string>
   readonly hasMore: boolean
   readonly loading: boolean
   readonly loadingOlder: boolean
@@ -181,5 +231,6 @@ export function useMainStream({ workspaceId, projectRef, mainStreamHistory, read
     void markRead()
   }, [snapshot, markRead])
 
-  return { entries: snapshot?.entries ?? [], hasMore: snapshot?.hasMore ?? false, loading, loadingOlder, error, refresh, loadOlder, markRead }
+  const marked = useArrivalMarks(snapshot?.arrivals ?? NO_ARRIVALS)
+  return { entries: snapshot?.entries ?? [], marked, hasMore: snapshot?.hasMore ?? false, loading, loadingOlder, error, refresh, loadOlder, markRead }
 }

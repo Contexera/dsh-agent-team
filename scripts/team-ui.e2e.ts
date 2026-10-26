@@ -1276,18 +1276,28 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await settleAnimations(page)
   const panelCard = panelRow.locator('[data-message-card]')
   await expect.poll(() => panelCard.evaluate(element => getComputedStyle(element).opacity)).toBe('1')
-  // It clears its row as on the Thread page and stays wholly inside the body.
+  // It hangs off the Message's own top-right corner here too — the panel is a narrower seat, not a different card language,
+  // so the same anchoring holds and its lower edge still stops 2px above this Message's first line.
   const panelCardPlacement = await panelRow.evaluate(element => {
-    const card = element.querySelector('[data-message-card]')!.getBoundingClientRect()
-    const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
-    const scroll = element.closest('section')!.getBoundingClientRect()
+    const card = element.querySelector('[data-message-card]')!
+    const cardBox = card.getBoundingClientRect()
+    const rowBox = element.getBoundingClientRect()
+    const body = element.querySelector('[class*="messageBody"]')!
     return {
-      clearanceToContent: Math.round(body.top - card.bottom),
-      clipTop: Math.round(card.top - scroll.top),
+      cardPosition: getComputedStyle(card).position,
+      cardTop: getComputedStyle(card).top,
+      riseAboveRow: Math.round(rowBox.top - cardBox.top),
+      clearanceAboveWords: Math.round(
+        (body.querySelector('[class*="nameRow"]')?.nextElementSibling ?? body).getBoundingClientRect().top - cardBox.bottom,
+      ),
+      gapToRowEdge: Math.round(cardBox.right - rowBox.right),
     }
   })
-  expect(panelCardPlacement.clearanceToContent).toBe(2)
-  expect(panelCardPlacement.clipTop).toBeGreaterThanOrEqual(0)
+  expect(panelCardPlacement.cardPosition).toBe('absolute')
+  expect(panelCardPlacement.riseAboveRow).toBe(0)
+  // The same anchoring as the Thread page: never above its own row, never on the words it acts on.
+  expect(panelCardPlacement.clearanceAboveWords).toBeGreaterThanOrEqual(2)
+  expect(Math.abs(panelCardPlacement.gapToRowEdge)).toBeLessThanOrEqual(1)
   await panelCard.locator('[data-quote-message]').click()
   const replyBanner = page.locator('[data-team-panel] [data-reply-banner]')
   await replyBanner.waitFor()
@@ -1738,6 +1748,27 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const stateColumn = await taskEntryClusterLefts(page)
   expect(stateColumn.length).toBeGreaterThanOrEqual(2)
   expect(new Set(stateColumn).size).toBe(1)
+  // A board card is a target, so the pointer answers on its surface. Lightening the border was the wrong answer twice
+  // over — it left the fill untouched and made the one reacting edge fainter — which is the defect the Human reported
+  // on this board after naming the same thing on a Thread card.
+  await unreadEntryRow.hover()
+  await settleAnimations(page)
+  const boardHover = await unreadEntryRow.evaluate(element => {
+    const style = getComputedStyle(element)
+    return { fill: style.backgroundColor, border: style.borderColor, shadow: style.boxShadow }
+  })
+  expect(boardHover.fill).toBe(await resolveAliasColor(page, '--dsw-alias-interactive-bg-hover'))
+  expect(boardHover.border).toBe(await resolveAliasColor(page, '--dsw-alias-border-l2'))
+  // The column behind a card is the module ground, so a fill that did not move is the failure this pins.
+  const boardColumnGround = await page.evaluate(() => {
+    const column = document.querySelector('[data-team-project] [class*="boardColumn"]')!
+    return getComputedStyle(column).backgroundColor
+  })
+  expect(boardHover.fill).not.toBe(boardColumnGround)
+  await page.mouse.move(4, 4)
+  await settleAnimations(page)
+  const boardRest = await unreadEntryRow.evaluate(element => getComputedStyle(element).backgroundColor)
+  expect(boardRest).toBe(await resolveAliasColor(page, '--dsw-alias-bg-base'))
   await unreadEntryRow.scrollIntoViewIfNeeded()
   await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'board-card-unread.png'), fullPage: true })
@@ -1827,7 +1858,8 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
           bottom: Math.round(cardBox.bottom - actionBox.bottom),
         }
       })(),
-      seatWidth: Math.round(Number.parseFloat(getComputedStyle(cardElement.parentElement!.querySelector('[data-gutter-time]')!).width)),
+      // The seat is the row's own avatar-seat column, a sibling of the body column the card now closes.
+      seatWidth: Math.round(Number.parseFloat(getComputedStyle(element.querySelector('[data-gutter-time]')!).width)),
       // Painted width: the box is 28px by construction, so only a Range over the
       // text sees overflow the box does not clip.
       seatInk: (() => {
@@ -1872,26 +1904,82 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(hoverFacts.seatText).toMatch(/^\d{2}:\d{2}$/)
   expect(hoverFacts.seatInk).toBeLessThanOrEqual(hoverFacts.seatWidth)
   expect(hoverFacts.seatScrollWidth).toBeLessThanOrEqual(hoverFacts.seatClientWidth)
-  // The card floats level with the identity line, covering neither the author nor
-  // the words it acts on.
+  // The card hangs off the top-right corner of the Message it acts on, and its lower edge stops 2px above that Message's
+  // first line — measured against the body's own box, so it holds at any body length.
   const cardPlacement = await hoveredRow.evaluate(element => {
-    const row = element.getBoundingClientRect()
-    const card = element.querySelector('[data-message-card]')!.getBoundingClientRect()
-    const body = element.querySelector('[class*="messageBody"]')!.getBoundingClientRect()
+    const card = element.querySelector('[data-message-card]')!
+    const cardBox = card.getBoundingClientRect()
+    const rowBox = element.getBoundingClientRect()
+    const body = element.querySelector('[class*="messageBody"]')!
+    // The words start after the author line on a run head and at the body's own top on a continuation, so the first line
+    // the card must clear is the author line's successor — measured, not assumed.
+    const nameRow = body.querySelector('[class*="nameRow"]')
+    const firstWordsTop = (nameRow?.nextElementSibling ?? body).getBoundingClientRect().top
     return {
-      gapToBodyEdge: Math.round(body.right - card.right),
-      topInRow: Math.round(card.top - row.top),
-      // Clearance between the card's lower edge and the row's content edge.
-      clearanceToContent: Math.round(body.top - card.bottom),
+      // A continuation row has no author line to hang beside, so its card rises over its run's previous line.
+      grouped: element.hasAttribute('data-grouped'),
+      clearanceAboveWords: Math.round(firstWordsTop - cardBox.bottom),
+      // One equation instead of a hand-picked number: the card hangs from the row's top edge, so what is left between its
+      // lower edge and the first words is the row's own top padding plus whatever line came before those words, minus the
+      // card's height, plus however far the card rises above the row.
+      expectedClearance: Math.round(
+        Number.parseFloat(getComputedStyle(element).paddingTop)
+        + (nameRow?.getBoundingClientRect().height ?? 0)
+        - cardBox.height
+        + Math.max(0, rowBox.top - cardBox.top),
+      ),
+      // How far the card reaches above its own row's top edge. Zero for a run head means the card never lands in the band
+      // the row above owns — the defect the Human reported as a card that had clearly left its own Message.
+      riseAboveRow: Math.round(rowBox.top - cardBox.top),
+      gapToRowEdge: Math.round(cardBox.right - rowBox.right),
+      cardPosition: getComputedStyle(card).position,
+      cardTop: getComputedStyle(card).top,
     }
   })
-  expect(Math.abs(cardPlacement.gapToBodyEdge)).toBeLessThanOrEqual(1)
-  // The card's lower edge stops above the row's content. A continuation row's
-  // content starts 8px higher, so this clearance is the invariant, not the rise.
-  expect(cardPlacement.clearanceToContent).toBe(2)
-  // A continuation row's content starts at the 2px grouped inset, so the card
-  // rises the full 28px.
-  expect(cardPlacement.topInRow).toBe(-28)
+  expect(cardPlacement.grouped).toBe(true)
+  expect(cardPlacement.cardPosition).toBe('absolute')
+  // The accepted continuation geometry: over the run's own previous line, lower edge 2px clear of the words it acts on.
+  expect(cardPlacement.cardTop).toBe('-28px')
+  // Measuring the equation is what proves the anchoring: it holds only while the card hangs off this row's own top edge and
+  // clears the words it acts on rather than covering them.
+  expect(cardPlacement.clearanceAboveWords).toBe(cardPlacement.expectedClearance)
+  expect(cardPlacement.clearanceAboveWords).toBeGreaterThanOrEqual(2)
+  expect(Math.abs(cardPlacement.gapToRowEdge)).toBeLessThanOrEqual(1)
+  // The defect itself: a Message that opens a run hangs its card beside its own author line and never above its own row, so
+  // the card can not appear over the words (or the empty gutter) of the Message before it. Both row kinds stop their card's
+  // lower edge on the same 2px above the body, which is why the two assertions above and below agree on one number.
+  const headRow = page.locator('article').filter({ hasText: '离线期间的批量更新 一' }).first()
+  await headRow.hover()
+  await settleAnimations(page)
+  const headPlacement = await headRow.evaluate(element => {
+    const card = element.querySelector('[data-message-card]')!
+    const cardBox = card.getBoundingClientRect()
+    const rowBox = element.getBoundingClientRect()
+    const body = element.querySelector('[class*="messageBody"]')!
+    const nameRow = body.querySelector('[class*="nameRow"]')
+    return {
+      grouped: element.hasAttribute('data-grouped'),
+      riseAboveRow: Math.round(rowBox.top - cardBox.top),
+      clearanceAboveWords: Math.round(
+        (nameRow?.nextElementSibling ?? body).getBoundingClientRect().top - cardBox.bottom,
+      ),
+      expectedClearance: Math.round(
+        Number.parseFloat(getComputedStyle(element).paddingTop)
+        + (nameRow?.getBoundingClientRect().height ?? 0)
+        - cardBox.height,
+      ),
+      cardTop: getComputedStyle(card).top,
+    }
+  })
+  expect(headPlacement.grouped).toBe(false)
+  expect(headPlacement.cardTop).toBe('0px')
+  expect(headPlacement.riseAboveRow).toBe(0)
+  expect(headPlacement.clearanceAboveWords).toBe(headPlacement.expectedClearance)
+  expect(headPlacement.clearanceAboveWords).toBeGreaterThanOrEqual(2)
+  // The row the Human reported: one that opens a run, whose card used to sit over the row above it.
+  await page.screenshot({ path: join(UI05_SHOTS, 'thread-row-run-head-hover.png') })
+  await hoveredRow.hover()
+  await settleAnimations(page)
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-row-hover.png') })
   // The reveal follows the pointer and focus ring, never sticky state: off the
   // row it returns to rest...

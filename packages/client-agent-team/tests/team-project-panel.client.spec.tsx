@@ -38,7 +38,7 @@ describe('Team Project discussion panel', () => {
     await b.runtime.dispose()
   })
 
-  it('keeps the card marked unread for this visit while the panel reads it', async () => {
+  it('lets the panel\'s read answer the card\'s unread statement while the arrival accent keeps its own clock', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seededMessages: [
       { body: '帮我看看这个方案', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
@@ -49,15 +49,23 @@ describe('Team Project discussion panel', () => {
       previewText: '帮我看看这个方案', newestSequence: 1, newestOccurredAt: '2026-10-14T09:00:00.000Z',
     }])
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
-    // The card wears its unread in its name; the panel's durable read consumes it,
-    // yet the card stays marked until the Human leaves, as the Main stream keeps what was unread on arrival.
+    // The card's name states the durable standing, the entry's accent states the arrival. The panel's read answers the
+    // standing, so a refreshed card stops claiming 未读, while the accent — stamped when the entry was first shown —
+    // still holds for its own few seconds instead of lasting until the Human leaves the page.
     fireEvent.click(await b.view.findByRole('button', { name: /^打开讨论：.*未读/ }))
     expect(await b.view.findByRole('complementary', { name: '讨论' })).toBeTruthy()
     await waitFor(() => expect(b.readThread).toHaveBeenCalled())
     const loads = b.mainStreamHistory.mock.calls.length
     b.publishProjectUpdate()
     await waitFor(() => expect(b.mainStreamHistory.mock.calls.length).toBeGreaterThan(loads))
-    expect(b.view.getByRole('button', { name: /^打开讨论：/ }).getAttribute('aria-label')).toContain('未读')
+    // waitFor keeps polling only while the callback throws, so the wrong state has to throw to be retried.
+    await waitFor(() => {
+      const label = b.view.getByRole('button', { name: /^打开讨论：/ }).getAttribute('aria-label')
+      if (label?.includes('未读') === true) throw new Error(`the read has not answered the name yet: ${label}`)
+    })
+    const card = b.view.getByRole('button', { name: /^打开讨论：/ })
+    expect(card.getAttribute('aria-label')).not.toContain('未读')
+    expect(card.closest('[data-unread]')).not.toBeNull()
     await b.runtime.dispose()
   })
 

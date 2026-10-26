@@ -7,9 +7,13 @@ Props include sender identity, body, optional time, mention handles, sender titl
 
 The identity seat draws a picture for exactly one author. The profile avatar lands on a row only while that row is the Human's own, so an Agent row keeps the shared hue and the sender initial whatever the surface passes down — one seat painting the reader's face for another author would name two people alike.
 
-Row actions float beside the Message in a card rather than living on it: copy, the quote action, and — when the body itself names the reader — the `Mentioned you` notice. The card belongs to the row rather than to one action. A surface that withholds quoting (`rowActions` without `onReply`) keeps copy and the notice and drops only the quote button, while a surface that passes neither offers no card at all.
+Row actions hang off the Message they act on: its own top-right corner, revealed under the pointer or the caret. The card carries copy, the quote action, and — when the body itself names the reader — the `Mentioned you` notice. The card belongs to the row rather than to one action. A surface that withholds quoting (`rowActions` without `onReply`) keeps copy and the notice and drops only the quote button, while a surface that passes neither offers no card at all.
 
-The Main stream passes `rowActions` unconditionally, so its rows carry the card too. Its action sits inside the card rather than filling it: a 24px control inset 2px on every side. At the card's own 28px height and 8px radius the hover fill painted from edge to edge, so the pointer state read as the card being cut open instead of one control lighting up — the shipped IconActions are 28px squares with their own padding, never flush with the surface that holds them.
+It floats, anchored to its own row rather than to a rise measured upwards out of that row. A card pinned above the row edge sits in the band the row above owns, so a Message that opens a run showed its actions over the empty gutter — or the words — of the Message before it, which reads as somebody else's card.
+
+Anchored at the row's own top edge, the card hangs beside the author line, so the room between its lower edge and the first words is the row's top padding plus that author line minus the card's own height — 3px at the default content size, and it keeps clear as the content font axis grows. A continuation row has no author line to hang beside, so its card rises over its run's own previous line — the words those actions belong to — and still clears the first line it acts on.
+
+Its action sits inside the card rather than filling it: a 24px control inset 2px on every side. At the card's own 28px height and 8px radius the hover fill painted from edge to edge, so the pointer state read as the card being cut open instead of one control lighting up — the shipped IconActions are 28px squares with their own padding, never flush with the surface that holds them.
 
 The two surfaces that read a Thread both offer the card: its page, and the discussion panel beside the Project feed. They render the same rows, and a reader who turned to the panel would otherwise leave it to quote the Message in front of them. The row itself stays flat, so one hovered Message gains a layer instead of the whole timeline gaining texture.
 
@@ -142,11 +146,15 @@ The Main stream holds three entry kinds in ledger order: Main messages (the same
 
 A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and live Claim owners. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
 
-While the tab is mounted, a standing with unread entries or markers is acknowledged through `readMainStream`. Entries that arrived unread keep a thin accent bar for that visit.
+While the tab is mounted, a standing with unread entries or markers is acknowledged through `readMainStream`. An entry that arrives unread states the arrival with a thin accent in a reserved gutter, and releases it three seconds later on its own clock — the gutter stays reserved, so nothing shifts when it goes. The mark is information, not furniture: keeping it until the reader leaves the page turned a per-visit state into a permanent one, which is what the Human reported.
+
+Durable unread stays where it can be acted on — the sidebar's count and the card's own accessible name — because a mark that expires cannot be the only statement of it.
 
 The board is the one Client surface allowed past the 880px reading column, up to 1240px: four status columns are a scanning surface, and narrowing them to the reading measure would cost every column its card width.
 
 The columns are equal (`flex: 1` with `min-width: 0`), so a longer title in one column cannot buy it more room than its neighbours, and they sit on `--dsw-alias-bg-module-platform` — the shipped recessed fill a grouped module uses — so the cards' own base fill reads as raised against them.
+
+A board card answers the pointer on its own surface too, with the interactive fill the Thread card and the Inbox rows take. Lightening only the border was the defect here as well, and worse on this ground: the fill never moved, so a fainter edge was the whole feedback. A discussion's derived Task card takes the same answer, so a Task is one card language wherever it appears.
 
 The tab strip is a composite control: `role="tablist"` with two `role="tab"` buttons, one tab stop for the group (`tabIndex` -1 on the unselected tab), each tab naming the panel it controls through `aria-controls`/`aria-labelledby`, and Left/Right/Home/End moving selection **and** focus together.
 

@@ -176,7 +176,9 @@ export function TeamMainStream({
   }
 
   const renderEntry = (entry: AgentTeamMainTimelineEntry, index: number, run: readonly AgentTeamMainTimelineEntry[]) => {
-    const unread = entry.unread ? '' : undefined
+    // The accent states an arrival, not a standing: it holds for a few seconds after the entry is first shown and then
+    // releases on its own clock, so a reader who stays on the page is not left with a mark that never goes away.
+    const unread = stream.marked.has(mainEntryKey(entry)) ? '' : undefined
     if (entry.kind === 'activity') {
       const text = t(entry.activity.kind === 'owner-added' ? 'mainOwnerAdded' : 'mainOwnerRemoved', {
         actor: nameOf(entry.activity.actor), member: nameOf(entry.activity.memberId),
@@ -186,6 +188,8 @@ export function TeamMainStream({
       </div>
     }
     if (entry.kind === 'thread-card') {
+      // The accent states the arrival; the card's accessible name states the durable standing a read clears. A name that
+      // expired with the accent would be unstable to a screen reader.
       return <div className={streamCss.entry} data-main-entry="thread-card" data-unread={unread} key={mainEntryKey(entry)}>
         <MainThreadCard
           entry={entry}

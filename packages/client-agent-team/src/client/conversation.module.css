@@ -239,15 +239,12 @@
 
 /* The actions float beside the Message: they are about the row, not part of it, and appear only under the pointer or caret.
    The card is the only raised surface in a row. Its geometry is the shipped small control's (28px height, `--dsw-radius-sm`,
-   as the header's 验收 Button at `size="sm"`) with the shipped floating-card shadow tier. It rises clear of the first line
-   (`--team-card-rise`): only its lower edge may touch a Message, never the words. */
-/* The rise is one equation: the card is 28px tall, so the rise puts its lower edge exactly 2px above the row's content edge.
-   A turn opens with its identity line 10px down; a continuation row has none, so its content starts 8px higher and the card
-   rises with it. The first row has no predecessor to give it that room, so its scroll box does: a box padded shorter than the
-   rise clips the card. */
-[data-team-thread] { --team-card-rise: 20px; }
-[data-team-thread] .messageRow[data-grouped] { --team-card-rise: 28px; }
-[data-team-thread] .timeline { padding-top: max(12px, var(--team-card-rise)); }
+   as the header's 验收 Button at `size="sm"`) with the shipped floating-card shadow tier.
+   It hangs from its own row's top-right corner, inside that row. The rise it used to take put its lower edge above the row's
+   content edge, which for a Message that opens a run means the whole card sat above the row — over the empty gutter of the
+   Message before it, reading as someone else's card. Anchored at the row's own top edge it hangs beside the author line, and
+   the room left between its lower edge and the first words is the row's top padding plus the author line minus the card's
+   own height — one relationship that keeps the words clear instead of a number that has to be re-measured. */
 .messageCard {
   align-items: center;
   background: var(--dsw-alias-bg-layer-1);
@@ -263,9 +260,13 @@
   height: 28px;
   position: absolute;
   right: 0;
-  top: calc(-1 * var(--team-card-rise, 22px));
+  top: 0;
   z-index: 2;
 }
+/* A continuation row has no author line to hang beside, so the card rises over its run's own previous line — the words these
+   actions belong to — instead of covering the first words it acts on. A run's first Message is never a continuation, so no
+   card ever needs room reserved above the first row of a timeline. */
+.messageRow[data-grouped] .messageCard { top: -28px; }
 .cardAction {
   background: transparent;
   border: 0;

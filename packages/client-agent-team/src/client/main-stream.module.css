@@ -1,10 +1,14 @@
-/* The unread bar lives in a reserved gutter, so an entry never shifts when it is read. */
+/* An arriving entry states itself in a reserved gutter, so it never shifts when the mark is released. The mark is a short
+   accent, not a status: the Client stamps each arrival and releases it a few seconds later, and the fade keeps the release
+   from reading as a glitch. Durable unread lives in the sidebar's count and the card's own name. */
 .entry {
   border-left: 2px solid transparent;
   margin-left: -10px;
   padding-left: 8px;
+  transition: border-left-color 320ms ease-out;
 }
 .entry[data-unread] { border-left-color: var(--dsw-alias-state-business-primary); }
+@media (prefers-reduced-motion: reduce) { .entry { transition: none; } }
 
 .card {
   appearance: none;

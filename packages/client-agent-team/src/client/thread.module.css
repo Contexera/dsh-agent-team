@@ -61,7 +61,9 @@
   color: inherit;
 }
 
-.derivedTaskCard:hover { border-color: var(--dsw-alias-border-l1); }
+/* Same answer as the Main stream's Thread card and the board's: the pointer moves the surface, never the one edge that
+   would grow fainter under it. */
+.derivedTaskCard:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .derivedTaskCard:focus-visible { outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 2px; }
 .derivedTaskCardTitle { flex: none; font-weight: 600; }
 .derivedTaskCardSubject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
