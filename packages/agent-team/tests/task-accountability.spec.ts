@@ -6,7 +6,7 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
+import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, TASK_BOARD_FINISHED_PER_PROJECT, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import type { AgentTeamHumanActor, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask } from '../src/types.ts'
 
@@ -265,6 +265,34 @@ describe('Task accountability in final rules version 2', () => {
     const reviewerInbox = revived.inbox(team.reviewer.actor, { workspaceId: alpha })
     expect(reviewerInbox.items.find(row => row.thread.threadRef === started.task.threadRef)).toBeUndefined()
     expect(reviewerInbox.totalUnreadCount).toBe(1)
+  })
+
+  it('pages the finished column per Project and honours an explicit finishedLimit', async () => {
+    const team = await seed()
+    // Seven resolved Tasks: the board must not hand the Client all of them at once.
+    for (let index = 0; index < 7; index += 1) {
+      const started = await startTask(team, team.owner.actor, team.owner.memberId)
+      const claimed = await claim(team, started.task, team.owner.actor, 'done')
+      expect(claimed.task.status).toBe('in_review')
+      const read = await readTask(team, started.task, team.reviewer.actor)
+      const accepted = await team.ledger.changeTask({ requestId: requestId(`accept-${index}`), actor: team.reviewer.actor, workspaceId: alpha,
+        taskRef: started.task.taskRef, action: 'accept', baseRevision: read.thread.revision })
+      expect(accepted.value.kind).toBe('committed')
+    }
+    const board = team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef })
+    expect(board.finished).toHaveLength(TASK_BOARD_FINISHED_PER_PROJECT)
+    // The page is the newest slice, not the first seven the loop produced.
+    const newestFirst = [...board.finished].sort((left, right) => right.lastActivitySequence - left.lastActivitySequence)
+    expect(board.finished.map(item => item.task.taskRef)).toEqual(newestFirst.map(item => item.task.taskRef))
+    // Expanding asks for a deeper page; the Host answers with the whole set.
+    expect(team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit: 100 }).finished).toHaveLength(7)
+    expect(team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit: 2 }).finished).toHaveLength(2)
+    // Out-of-range pages are refused rather than silently clamped, so a Client
+    // bug surfaces instead of quietly showing less than it asked for.
+    for (const finishedLimit of [0, -1, 101, 2.5]) {
+      expect(() => team.ledger.taskBoard(human, { workspaceId: alpha, projectRef: team.projectRef, finishedLimit }))
+        .toThrow(/finished limit must be an integer between 1 and 100/)
+    }
   })
 
   it('refuses source Threads from another Project', async () => {

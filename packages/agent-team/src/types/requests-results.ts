@@ -969,6 +969,8 @@ export interface AgentTeamTaskBoardRequest {
   readonly projectRef?: AgentTeamProjectRef
   /** Only Tasks the reader is accountable for or actively executes. */
   readonly mine?: boolean
+  /** Per Project, how many finished (done or closed) Tasks to keep: 1–100, default `TASK_BOARD_FINISHED_PER_PROJECT`. */
+  readonly finishedLimit?: number
 }
 
 /** The Task board of the Projects a reader can see; the Human Client and `team_task board` render this same projection. */

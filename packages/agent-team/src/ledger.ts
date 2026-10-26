@@ -1910,6 +1910,8 @@ export class AgentTeamLedger {
   private taskBoardFor(authorized: AgentTeamHumanActor | AgentTeamMemberActor, workspaceIds: readonly WorkspaceId[],
     request: Omit<AgentTeamTaskBoardRequest, 'workspaceId'>): AgentTeamTaskBoard {
     const memberId = authorized.memberId
+    const finishedLimit = request.finishedLimit ?? TASK_BOARD_FINISHED_PER_PROJECT
+    if (!Number.isInteger(finishedLimit) || finishedLimit < 1 || finishedLimit > 100) throw new Error('finished limit must be an integer between 1 and 100')
     if (request.projectRef !== undefined) {
       const project = this.state.projects.get(request.projectRef)
       if (project === undefined || !workspaceIds.includes(project.workspaceId)) throw new Error(`unknown Project ref '${request.projectRef}'`)
@@ -1948,7 +1950,7 @@ export class AgentTeamLedger {
       }
     }
     const newestFirst = (left: AgentTeamTaskBoardItem, right: AgentTeamTaskBoardItem) => right.lastActivitySequence - left.lastActivitySequence
-    const finished = [...finishedByProject.values()].flatMap(items => items.sort(newestFirst).slice(0, TASK_BOARD_FINISHED_PER_PROJECT)).sort(newestFirst)
+    const finished = [...finishedByProject.values()].flatMap(items => items.sort(newestFirst).slice(0, finishedLimit)).sort(newestFirst)
     return Object.freeze({ humanMemberId: this.initialization().data.humanMemberId, open: Object.freeze(open.sort(newestFirst)), finished: Object.freeze(finished) })
   }
 
