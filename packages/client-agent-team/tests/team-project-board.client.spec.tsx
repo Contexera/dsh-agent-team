@@ -113,7 +113,10 @@ describe('Team Project board', () => {
     await b.runtime.dispose()
   })
 
-  it('reads the same window the feed has loaded and offers the way to older work', async () => {
+  // The board is a Task view, not a second reading of the loaded Message window:
+  // the ticket's regression is that it once inherited the feed's paging and its
+  // counters only described whatever Messages happened to be loaded.
+  it('shows every Task of the project and never inherits the feed\'s paging', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'in_progress', seededMessages: [
       { body: '实现 API 网关', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
@@ -124,9 +127,14 @@ describe('Team Project board', () => {
         projects: [{ projectRef: 'project:engineering', workspaceId: 'w1', name: 'engineering', description: 'Engineering work', createdAtSequence: 1 }],
         members: [],
         owners: [], rulesVersion: 2,
-        tasks: [{ taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' }],
-        threads: [{ threadRef: 'thread:1', taskRef: 'task:1', revision: 2 }],
-        taskNumbers: [{ taskRef: 'task:1', taskNumber: 1 }],
+        // `task:2` sits in no loaded Message: only the Host board can surface it,
+        // which is what pins the board's coverage to the Project rather than the feed.
+        tasks: [
+          { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
+          { taskRef: 'task:2', projectRef: 'project:engineering', threadRef: 'thread:2', status: 'todo', resolution: 'open' },
+        ],
+        threads: [{ threadRef: 'thread:1', taskRef: 'task:1', revision: 2 }, { threadRef: 'thread:2', taskRef: 'task:2', revision: 1 }],
+        taskNumbers: [{ taskRef: 'task:1', taskNumber: 1 }, { taskRef: 'task:2', taskNumber: 2 }],
         items: [{
           message: { messageRef: 'message:seed-0', projectRef: 'project:engineering', threadRef: 'thread:1', taskRef: 'task:1', sender: 'member:human', body: '实现 API 网关', topLevel: true, sequence: 1, occurredAt: '2026-10-14T09:00:00.000Z' },
           mentions: [],
@@ -138,21 +146,78 @@ describe('Team Project board', () => {
           lastActivityAt: '2026-10-14T09:00:00.000Z',
         }],
         claims: [], activities: [], cursor: 1,
-        // Older work exists beyond this window: one page of history, which the
-        // board must not walk on its own.
+        // Older Messages exist beyond this window. The board must ignore that
+        // entirely: no paging control, and no read issued to fill its columns.
         hasMore: true,
+      },
+    }))
+    b.loadTaskBoard.mockImplementation(async () => ({
+      ok: true,
+      value: {
+        humanMemberId: 'member:human',
+        open: [
+          { workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: 'thread:2',
+            task: { taskRef: 'task:2', projectRef: 'project:engineering', threadRef: 'thread:2', status: 'todo', resolution: 'open' },
+            taskNumber: 2, subject: '接入计费', liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
+            lastActivitySequence: 2, lastActivityAt: '2026-10-14T10:00:00.000Z', relation: 'project-owner', needsAcceptance: false },
+          { workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: 'thread:1',
+            task: { taskRef: 'task:1', projectRef: 'project:engineering', threadRef: 'thread:1', status: 'in_progress', resolution: 'open' },
+            taskNumber: 1, subject: '实现 API 网关', liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
+            lastActivitySequence: 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false },
+        ],
+        finished: [],
       },
     }))
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     fireEvent.click(await b.view.getByRole('tab', { name: '看板' }))
-    expect(await b.view.findByRole('button', { name: '加载更早消息' })).toBeTruthy()
-    // Opening the board issues no read of its own: the tab is a second reading
-    // of the window the feed already holds, not a reason to page the Project.
+    // (a) The board carries no Message-paging control of its own.
+    await waitFor(() => expect(b.view.getByText('实现 API 网关')).toBeTruthy())
+    expect(b.view.queryByRole('button', { name: '加载更早消息' })).toBeNull()
+    // (b) A Task absent from the loaded window still reaches its column.
+    expect(b.view.getByText('接入计费')).toBeTruthy()
+    // Switching tabs issues no read of the Project: the board is not a reason to
+    // page the feed, so its content cannot drift with the feed's window.
     const before = b.viewProjects.mock.calls.length
     fireEvent.click(b.view.getByRole('tab', { name: '主对话' }))
     fireEvent.click(b.view.getByRole('tab', { name: '看板' }))
     await Promise.resolve()
     expect(b.viewProjects.mock.calls.length).toBe(before)
+    await b.runtime.dispose()
+  })
+
+  it('expands the finished column to the whole resolved history on demand', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'done', seededMessages: [
+      { body: '完成旧任务', occurredAt: '2026-10-14T09:00:00.000Z' },
+    ] })
+    // Seven resolved Tasks: more than the Host's default page of five.
+    const finished = Array.from({ length: 7 }, (_unused, index) => ({
+      workspaceId: 'w1', projectRef: 'project:engineering', projectName: 'engineering', threadRef: `thread:${index + 1}`,
+      task: { taskRef: `task:${index + 1}`, projectRef: 'project:engineering', threadRef: `thread:${index + 1}`, status: 'done', resolution: 'open' },
+      taskNumber: index + 1, subject: `已完成 ${index + 1}`, liveClaimOwners: [], accountableOwner: { memberId: 'member:human', name: 'human' },
+      lastActivitySequence: index + 1, lastActivityAt: '2026-10-14T09:00:00.000Z', relation: 'project-owner', needsAcceptance: false,
+    }))
+    const page = (finishedLimit: number | undefined) => ({
+      ok: true as const,
+      value: { humanMemberId: 'member:human', open: [], finished: finishedLimit === undefined ? finished.slice(-5) : finished.slice(-finishedLimit) },
+    })
+    b.loadTaskBoard.mockImplementation(async (request: { finishedLimit?: number }) => page(request.finishedLimit))
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.getByRole('tab', { name: '看板' }))
+    // The column opens on the Host's page, so the oldest work is still hidden.
+    expect(await b.view.findByText('已完成 7')).toBeTruthy()
+    expect(b.view.queryByText('已完成 1')).toBeNull()
+    fireEvent.click(b.view.getByRole('button', { name: '展开全部已完成' }))
+    // Expanding asks for a deeper slice rather than re-deriving the old one.
+    await waitFor(() => expect(b.view.getByText('已完成 1')).toBeTruthy())
+    expect(b.loadTaskBoard.mock.calls.at(-1)?.[0]).toMatchObject({ finishedLimit: 100 })
+    // The control retires once the column shows everything.
+    expect(b.view.queryByRole('button', { name: '展开全部已完成' })).toBeNull()
+    // A change event refreshes the board with whatever the reader had asked for:
+    // the expanded page must survive it, or the column silently collapses under them.
+    b.publishProjectUpdate()
+    await waitFor(() => expect(b.loadTaskBoard.mock.calls.length).toBeGreaterThan(1))
+    await waitFor(() => expect(b.loadTaskBoard.mock.calls.at(-1)?.[0]).toMatchObject({ finishedLimit: 100 }))
+    expect(b.view.getByText('已完成 1')).toBeTruthy()
     await b.runtime.dispose()
   })
 })

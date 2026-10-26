@@ -120,9 +120,11 @@ The block carries `data-environment` with its verdict, so an acceptance journey 
 ## Project page and discussion panel
 The Project page reads one timeline two ways. A tab strip under the header switches between them: `项目` is the feed, `看板` is a four-column board of the Task-status projection. The board is a second **reading**, not a second surface — a Task's state, owners, and title cannot disagree between the two views.
 
-The board reads the Host's `taskBoard` projection — the same rows the Agent `team_task board` tool reads — not the feed's loaded window. One source means the board never merges the timeline's Messages to fill its columns, open Tasks are complete without paging, and the finished column keeps the newest few per Project the Host already bounds. The feed stays the only paged surface.
+The board reads the Host's `taskBoard` projection — the same rows the Agent `team_task board` tool reads — not the feed's loaded window. One source means the board never merges the timeline's Messages to fill its columns, open Tasks are complete without paging, and the finished column opens on the newest few per Project the Host bounds and expands to the rest on request. The feed stays the only paged surface.
 
-Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
+Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable.
+
+The finished column offers `展开全部已完成` under its head only while older resolved Tasks remain, and the control retires once the column shows everything rather than standing there with nothing left to do. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
 
 A card names the Task's accountable owner — the reader as `你负责`, resolved from the board value's `humanMemberId` — and carries a `待你验收` badge when the reader may accept the work.
 

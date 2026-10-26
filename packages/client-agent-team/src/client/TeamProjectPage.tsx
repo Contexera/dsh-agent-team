@@ -89,7 +89,14 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const [loadError, setLoadError] = useState<string>()
   const error = actionError ?? loadError
   const [loading, setLoading] = useState(true)
-  const [loadingOlder, setLoadingOlder] = useState(false)
+  // The finished column starts at the Host's default page and grows on demand: the
+  // reader asked to see older resolved work, so ask the Host for a deeper slice.
+  // The mirror ref is what `refresh` reads, because the change subscription holds
+  // the closure from the first render and a state read there would collapse an
+  // expanded column back to the default page on the next change event.
+  const [finishedLimit, setFinishedLimit] = useState(FINISHED_PAGE)
+  const finishedLimitRef = useRef(FINISHED_PAGE)
+  const [expandingFinished, setExpandingFinished] = useState(false)
   const [tab, setTab] = useState<'main' | 'board'>('main')
   const [panelThreadRef, setPanelThreadRef] = useState<AgentTeamThreadRef>()
   // The surface owns the panel-width variable; a drag writes it there so this page never re-renders.
@@ -187,6 +194,24 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     requestAnimationFrame(() => { boardTabRef.current?.focus() })
   }
   const handlePanelClose = useCallback((): void => { setPanelThreadRef(undefined) }, [])
+  // The Host caps the finished column per Project; expanding asks for the whole set once,
+  // so the deeper slice is fetched on the click rather than on every board refresh.
+  const expandFinished = async (): Promise<void> => {
+    if (expandingFinished) return
+    setExpandingFinished(true)
+    try {
+      const result = await loadTaskBoard({ workspaceId, projectRef, finishedLimit: EXPANDED_FINISHED_LIMIT })
+      if (!mountedRef.current) return
+      if (!result.ok) { setLoadError(result.error.message); return }
+      finishedLimitRef.current = EXPANDED_FINISHED_LIMIT
+      setFinishedLimit(EXPANDED_FINISHED_LIMIT)
+      setTaskBoard(result.value)
+    } catch (cause) {
+      if (mountedRef.current) setLoadError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (mountedRef.current) setExpandingFinished(false)
+    }
+  }
   const humanMemberId = view?.humanMemberId
   const humanIdentity: TeamAvatarHuman | undefined = humanMemberId === undefined
     ? undefined
@@ -223,7 +248,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     try {
       const [loaded, loadedTaskBoard, loadedMembers, loadedInbox] = await Promise.all([
         loadProjects({ workspaceId, projectRef, direction: 'before', topLevelOnly: true, includeActivities: false, limit: 20 }),
-        loadTaskBoard({ workspaceId, projectRef }),
+        loadTaskBoard({ workspaceId, projectRef, finishedLimit: finishedLimitRef.current }),
         loadMembers({ workspaceId }),
         // The Host Inbox is the authority for unread; never re-derive it from message mentions.
         loadInbox({ workspaceId, limit: 100 }),
@@ -258,6 +283,8 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   useEffect(() => {
     mountedRef.current = true
     loadedRef.current = false
+    finishedLimitRef.current = FINISHED_PAGE
+    setFinishedLimit(FINISHED_PAGE)
     setView(undefined)
     setTab('main')
     setPanelThreadRef(undefined)
@@ -288,21 +315,6 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     }
   }, [workspaceId, projectRef])
 
-  const loadOlder = async () => {
-    if (view === undefined || !view.hasMore || loadingOlder) return
-    setLoadingOlder(true)
-    try {
-      const result = await loadProjects({ workspaceId, projectRef, direction: 'before', topLevelOnly: true, includeActivities: false, cursor: view.cursor, limit: 20 })
-      if (!mountedRef.current) return
-      if (!result.ok) { setError(result.error.message); return }
-      setView(current => current === undefined ? result.value : mergeProjectView(current, result.value))
-    } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      if (mountedRef.current) setLoadingOlder(false)
-    }
-  }
-
   return <main className={css.surface} data-team-project={projectRef} ref={setPanelSurface}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderWithTabs}`}>
       <header className={css.headerRow}>
@@ -320,13 +332,14 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     </div>
 
     {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
-      {view?.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={loadingOlder} onClick={() => { void loadOlder() }}>{t('loadOlder')}</Button></div>}
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
       {error === undefined && taskBoard === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardLoading')}</p></div>}
       {error === undefined && taskBoard !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
       {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
         {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>
           <div className={projectCss.boardColumnHead}>{t(column.labelKey)}<span className={projectCss.boardColumnCount}>{column.items.length}</span></div>
+          {column.labelKey === 'taskStatusDone' && column.items.length >= finishedLimit
+            && <div className={projectCss.boardColumnExpand}><Button size="sm" variant="outline" disabled={expandingFinished} onClick={() => { void expandFinished() }}>{t('boardShowAllFinished')}</Button></div>}
           {column.items.map(item => <ProjectionBoardCard
             key={item.task.taskRef}
             item={item}
@@ -419,6 +432,12 @@ const BOARD_COLUMNS = [
   { labelKey: 'taskStatusInReview', match: (status: AgentTeamTask['status']): boolean => status === 'in_review' },
   { labelKey: 'taskStatusDone', match: (status: AgentTeamTask['status']): boolean => status === 'done' || status === 'closed' },
 ] as const
+
+/** The finished column's first page, matching the Host's per-Project default so the two agree before any expansion. */
+const FINISHED_PAGE = 5
+
+/** The finished column's expanded page: the Host caps a request at 100, which covers a Project's history in practice. */
+const EXPANDED_FINISHED_LIMIT = 100
 
 /** One Task on the board; resolved work dims so moving work stays loudest. */
 function ProjectionBoardCard({ item, unread, human, humanMemberId, t, onOpen }: {

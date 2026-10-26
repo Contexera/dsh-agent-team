@@ -595,7 +595,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     mainInboxRows = [...rows]
     wakeAll()
   }
-  const loadTaskBoard = vi.fn(async ({ workspaceId, projectRef }: { workspaceId: string; projectRef?: string }) => {
+  const loadTaskBoard = vi.fn(async ({ workspaceId, projectRef, finishedLimit }: { workspaceId: string; projectRef?: string; finishedLimit?: number }) => {
     // One card per Task, like the Host projection: a feed window may hold
     // several Messages of the same Task Thread, and the board keeps the
     // newest. The subject is the anchor's first line, as the Host bounds it.
@@ -618,9 +618,14 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
         relation: 'project-owner', needsAcceptance: task.status === 'in_review',
       })
     }
-    const items = [...byTask.values()] as Array<{ readonly task: { readonly status: string } }>
-    return { ok: true as const, value: { humanMemberId: 'member:human', open: items.filter(item => !['done', 'closed'].includes(item.task.status)),
-      finished: items.filter(item => ['done', 'closed'].includes(item.task.status)) } }
+    const items = [...byTask.values()] as Array<{ readonly task: { readonly status: string }; readonly lastActivitySequence: number }>
+    const newestFirst = (left: typeof items[number], right: typeof items[number]) => right.lastActivitySequence - left.lastActivitySequence
+    // The finished column honours the same per-Project page the Host applies, so a
+    // spec that expands it is exercising the real contract rather than a stub that
+    // always returns everything.
+    const finished = items.filter(item => ['done', 'closed'].includes(item.task.status)).sort(newestFirst)
+    return { ok: true as const, value: { humanMemberId: 'member:human', open: items.filter(item => !['done', 'closed'].includes(item.task.status)).sort(newestFirst),
+      finished: finishedLimit === undefined ? finished.slice(0, 5) : finished.slice(0, finishedLimit) } }
   })
   const changesStream = async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
     let pending = false

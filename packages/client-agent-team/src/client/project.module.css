@@ -121,6 +121,11 @@
   margin-left: auto;
 }
 
+/* The finished column's "show all" sits between its head and its cards, so the reader meets it before the truncated list. */
+.boardColumnExpand {
+  padding: 0 4px 8px;
+}
+
 /* Four 220px columns plus gaps and gutters need about 1120px; below that the board scrolls sideways, since a narrower card
    breaks its title to one character per line. */
 @media (max-width: 1120px) {
