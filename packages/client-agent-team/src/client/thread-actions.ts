@@ -21,6 +21,19 @@ import { mintRequestId } from './requests.ts'
 export type AttentionWrite = (request: AgentTeamThreadAttentionRequest) => Promise<RemoteResult<AgentTeamThreadAttentionResult>>
 export type AttentionObservation = (request: AgentTeamThreadObservationsRequest) => Promise<RemoteResult<AgentTeamThreadObservations>>
 
+/**
+ * Whether one Member follows a Thread, asked of the Host's whole follower set.
+ *
+ * The set holds every Member whose Attention is on the Thread, so "does the Human follow?" is a question about the
+ * Human's own id rather than about the set's size: a set holding other Members is not a followed Thread for this
+ * reader. An id that has not been projected yet leaves the question unanswered — `undefined` — because guessing an
+ * id would let another Member's Attention be read as the Human's.
+ */
+function followsIn(followers: readonly AgentTeamMemberId[] | ReadonlySet<AgentTeamMemberId>, humanMemberId: AgentTeamMemberId | undefined): boolean | undefined {
+  if (humanMemberId === undefined) return undefined
+  return (followers instanceof Set ? followers : new Set(followers)).has(humanMemberId)
+}
+
 export interface ThreadFollowState {
   /** Whether the Human follows this Thread right now; undefined until the Host has answered. */
   readonly following: boolean | undefined
@@ -35,6 +48,11 @@ export interface ThreadFollowState {
  * Remote. Both faces that can open a Thread share this hook, so the control's display rule — the Host's current
  * observation, never an optimistic guess — and its recovery on failure live in one place.
  *
+ * The observation is the Thread's whole follower set: every Member whose Attention is on it, not the Human's row
+ * alone. The Human's standing is therefore that set *asked about the Human's own id*, which is why the caller hands
+ * the id in rather than the hook assuming one: the Host projects it, and a set that holds other Members must read as
+ * not following just as an empty one does.
+ *
  * A write never optimistically flips the state: the button shows what the Host last answered, so a refused or failed
  * write leaves the previous standing on screen instead of a claim the next read would contradict.
  */
@@ -44,6 +62,8 @@ export function useThreadFollow(
   request: { readonly workspaceId: WorkspaceId; readonly threadRef?: AgentTeamThreadRef; readonly taskRef?: AgentTeamTaskRef },
   /** The observation a face has already read on mount, so the control starts from the answer that read landed instead of asking again. */
   observed?: ReadonlySet<AgentTeamMemberId> | undefined,
+  /** The Human's own Member id, from the Host's projection; undefined keeps the standing unanswered rather than guessing one. */
+  humanMemberId?: AgentTeamMemberId | undefined,
 ): ThreadFollowState {
   const [following, setFollowing] = useState<boolean | undefined>()
   const [pending, setPending] = useState(false)
@@ -59,20 +79,21 @@ export function useThreadFollow(
     try {
       const result = await threadObservations({ workspaceId: request.workspaceId, ...(request.threadRef === undefined ? {} : { threadRef: request.threadRef }), ...(request.taskRef === undefined ? {} : { taskRef: request.taskRef }) })
       if (!mounted.current) return
-      // The observation is the follower set, not one row: it is the state a follow
-      // or unfollow lands in, so the whole answer replaces the previous standing.
-      if (result.ok) setFollowing(result.value.followers.length > 0)
+      // The follower set is every Member's Attention, so the Human's standing is the answer to a
+      // question about the Human's own id. Until that id has been projected the standing stays
+      // unanswered: guessing an id would let another Member's Attention read as the Human's.
+      if (result.ok) setFollowing(followsIn(result.value.followers, humanMemberId))
     } catch {
       // A failed observation leaves the previous standing in place; the write itself reports its own failure.
     }
-  }, [threadObservations, request.workspaceId, request.threadRef, request.taskRef])
+  }, [threadObservations, request.workspaceId, request.threadRef, request.taskRef, humanMemberId])
 
   // A face that hands its own observation in takes each answer as the standing; a face with
   // none asks for one. Either way the control paints what the Host last answered.
   useEffect(() => {
     if (observed === undefined) { void refresh(); return }
-    setFollowing(observed.size > 0)
-  }, [observed, refresh])
+    setFollowing(followsIn(observed, humanMemberId))
+  }, [observed, refresh, humanMemberId])
 
   const toggle = useCallback(async (action: 'follow' | 'unfollow'): Promise<void> => {
     if (pending) return

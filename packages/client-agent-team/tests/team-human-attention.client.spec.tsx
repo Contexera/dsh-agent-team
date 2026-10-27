@@ -386,4 +386,58 @@ describe('Team Human Attention and Task transfer controls', () => {
     expect(b.changeAttention).not.toHaveBeenCalled()
     await b.runtime.dispose()
   })
+
+  // The follower set the Host projects is every Member's Attention, not the Human's row alone. Each
+  // case below pins one side of the identity question: a set that holds only other Members, a set
+  // that holds the Human, and a write whose re-read answers with the set that fooled the control.
+  describe('reads the Human\'s own standing out of the whole follower set', () => {
+    it('is not following when the set holds only other Members', async () => {
+      // Two Agents follow, the Human does not. The set is non-empty, so a control that asks
+      // "is anyone following?" reads this as followed — the wrong answer, in both directions.
+      const b = await seedThreadPage({ seedFollowers: ['member:builder', 'member:reviewer'] })
+      const follow = await b.view.findByRole('button', { name: '关注此 Thread' })
+      expect(follow.getAttribute('aria-pressed')).toBe('false')
+      // The visible verb says the same thing the attribute does: a mismatch between the two is
+      // the exact defect, where the label read 「关注」 while the button stayed pressed.
+      expect(follow.textContent).toBe('关注')
+      await b.runtime.dispose()
+    })
+
+    it('is following when the set holds the Human among other Members', async () => {
+      const b = await seedThreadPage({ seedFollowers: ['member:builder', 'member:human', 'member:reviewer'] })
+      const follow = await b.view.findByRole('button', { name: '取消关注此 Thread' })
+      expect(follow.getAttribute('aria-pressed')).toBe('true')
+      await b.runtime.dispose()
+    })
+
+    it('stays unfollowed after the unfollow, even though other Members still follow', async () => {
+      // The defect's own scenario: the Human unfollows, the Agents stay, and the re-read answers
+      // with a non-empty set. The pressed state must come from the Human's row in that set.
+      const b = await seedThreadPage({ seedFollowers: ['member:builder', 'member:human', 'member:reviewer'] })
+      fireEvent.click(await b.view.findByRole('button', { name: '取消关注此 Thread' }))
+      await waitFor(() => expect(b.changeAttention).toHaveBeenCalledWith(expect.objectContaining({ action: 'unfollow', taskRef: 'task:1' })))
+      // The re-read that follows the write is what used to overwrite the standing with "someone follows".
+      await waitFor(() => expect(b.threadObservations.mock.calls.length).toBeGreaterThan(1))
+      const follow = b.view.getByRole('button', { name: '关注此 Thread' })
+      expect(follow.getAttribute('aria-pressed')).toBe('false')
+      // And the pressed fill goes with the attribute: the fill is a class, so it needs its own check.
+      expect(hasClass(follow, 'toggleOn')).toBe(false)
+      // The Human's unfollow did not touch the other Members' Attention, which is the set the
+      // mention composer still ranks from — the fix must not clear it either. The read goes through
+      // the Host double, so the set it answers with is the one the control also read.
+      const observation = await b.threadObservations.getMockImplementation()!({ taskRef: 'task:1' })
+      expect(observation.value.followers).toEqual(['member:builder', 'member:reviewer'])
+      await b.runtime.dispose()
+    })
+
+    it('does not claim an existing follow when only other Members follow', async () => {
+      // The other direction of the same defect: pressing follow here used to answer
+      // "already following" from the Host, because the control thought it was followed already.
+      const b = await seedThreadPage({ seedFollowers: ['member:builder'] })
+      fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
+      await waitFor(() => expect(b.changeAttention).toHaveBeenCalledWith(expect.objectContaining({ action: 'follow', taskRef: 'task:1' })))
+      expect((await b.view.findByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
+      await b.runtime.dispose()
+    })
+  })
 })

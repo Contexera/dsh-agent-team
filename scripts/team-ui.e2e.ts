@@ -1592,6 +1592,26 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     requestId: 'm2-05-builder-follow' as never, action: 'follow', workspaceId: workspace.id, taskRef: task.taskRef,
   })
   expect(builderFollow.attention?.memberId).toBe(builder.member.memberId)
+  // The control's standing is the Human's own row in that follower set, not the set's size. This is the
+  // defect's own scenario: the Human unfollows while builder keeps following, and a control that asked
+  // "is anyone following?" kept `aria-pressed` true while its word read 「关注」 — the visible name hid
+  // the state, so the attribute and the fill are both asserted here. The page re-reads the observation
+  // on the Thread's own change, so the unfollowed standing has to survive an answer that now holds
+  // builder rather than the snapshot that was on screen when the write landed.
+  await page.getByRole('button', { name: '取消关注此 Thread' }).click()
+  await expect.poll(async () => await page.getByRole('button', { name: '关注此 Thread' }).count()).toBe(1)
+  await page.mouse.move(4, 4)
+  const agentFollowingFill = await page.getByRole('button', { name: '关注此 Thread' }).evaluate(element => getComputedStyle(element).backgroundColor)
+  expect(await page.getByRole('button', { name: '关注此 Thread' }).getAttribute('aria-pressed')).toBe('false')
+  expect(agentFollowingFill).toBe('rgba(0, 0, 0, 0)')
+  // And the Human can still follow from there: a control that believed it was followed already would
+  // send an unfollow the Host refuses. Following again is also what the notification gate below needs.
+  await page.getByRole('button', { name: '关注此 Thread' }).click()
+  await expect.poll(async () => await page.getByRole('button', { name: '取消关注此 Thread' }).count()).toBe(1)
+  expect(await page.getByRole('button', { name: '取消关注此 Thread' }).getAttribute('aria-pressed')).toBe('true')
+  await expect.poll(() => scaffold.ctx.agentTeam.threadObservations({ workspaceId: workspace.id, taskRef: task.taskRef }).followers.includes(humanMemberId)).toBe(true)
+  // builder's follow stays in the set: the follower tier the menu below ranks from is the whole set,
+  // and this control is the only thing that reads the Human's row out of it.
   const invitationComposer = page.getByRole('textbox', { name: '消息内容' })
   // The page mounts with the composer focused, which is what the reply flow below
   // relies on; the follow control's own focus check above left it elsewhere.

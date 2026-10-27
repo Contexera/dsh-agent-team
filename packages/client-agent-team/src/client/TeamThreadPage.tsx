@@ -658,9 +658,11 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // The follow control and the transfer menu share the same two hooks the discussion panel uses, so both
   // faces display the Host's current observation and recover from a refusal the same way. The page's mount
   // observation already answered the follower set, so the control starts from that answer instead of
-  // issuing a second read for the same state.
+  // issuing a second read for the same state. That set is every Member's Attention, so the control is also
+  // told which id is the Human's: the Host projects it, and it is what keeps another Member's follow from
+  // reading as the Human's own.
   const [observedFollowers, setObservedFollowers] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
-  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, observedFollowers)
+  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, observedFollowers, projectView?.humanMemberId)
   const [transferMenuOpen, setTransferMenuOpen] = useState(false)
   const transfer = useTaskTransfer(transferTask, {
     workspaceId,

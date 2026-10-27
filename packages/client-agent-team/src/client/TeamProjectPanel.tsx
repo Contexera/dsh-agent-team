@@ -418,8 +418,10 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
   }
 
   // The same hook the Thread page uses, so the panel's follow control shows the Host's
-  // current observation and recovers from a failed write exactly like the other face.
-  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest })
+  // current observation and recovers from a failed write exactly like the other face. The
+  // follower set the Host projects is every Member's Attention, so the control is told which
+  // id is the Human's — another Member's follow must not read as the Human's own.
+  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, undefined, humanMemberId)
 
   const clearSendState = useCallback((): void => {
     setReplyRequestId(current => current === undefined ? current : undefined)
