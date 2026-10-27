@@ -811,10 +811,11 @@ const teamMessage = markAgentTeamPreset(defineTool({
     const paths = attachmentPaths !== undefined && attachmentPaths.length > 0 ? { attachmentPaths } : {}
     if (typeof args.body !== 'string' || args.body.trim() === '') throw new Error(`team_message needs the message text in its body parameter — a blank or missing body is usually the text landing in the reply channel instead. Put the full message in body and resend.`)
     if (args.action === 'post') {
-      if (args.projectRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined
-        || args.kind !== undefined) throw new Error(`post requires projectRef and does not accept threadRef, taskRef, baseRevision, or kind — ${recoveryFor('post_requires_project').sentence({})}`)
+      // `post` is a plain Main stream message, so `kind`, `sourceThreadRefs`, and `accountable` belong to `start` alone. A model that fills every optional slot declares `kind: 'discussion'` on a post that is a discussion by definition; dropping those here, rather than refusing, is what keeps a post from costing a retry — the same reason a read ignores its page size.
+      if (args.projectRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined) throw new Error(`post requires projectRef and does not accept threadRef, taskRef, or baseRevision — ${recoveryFor('post_requires_project').sentence({})}`)
       if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'post', parameter: 'accountable', owner: 'start' }))
-      if (args.sourceThreadRefs !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'post', parameter: 'sourceThreadRefs', owner: 'start' }))
+      // An empty `sourceThreadRefs` names no source, exactly as `attachments: []` names no file: the parameter carries nothing to honor, so it is not a mis-sent `start` argument.
+      if (args.sourceThreadRefs !== undefined && args.sourceThreadRefs.length > 0) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'post', parameter: 'sourceThreadRefs', owner: 'start' }))
       const result = await host.postMainMessageForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
         projectRef: projectRefOf(args.projectRef) as never,
         ...(args.replyToMessageRef === undefined ? {} : { replyToMessageRef: args.replyToMessageRef as AgentTeamMessageRef }), body: args.body, ...paths })

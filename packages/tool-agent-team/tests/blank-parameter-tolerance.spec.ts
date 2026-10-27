@@ -95,6 +95,42 @@ describe('blank optional parameters count as not passed', () => {
   })
 })
 
+describe('a post that declares a start-only kind still posts', () => {
+  it('a Main stream post carrying kind, accountable, and an empty sourceThreadRefs commits instead of refusing', async () => {
+    const post = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({
+      kind: 'committed', receipt: { occurredAt: '2026-10-27T06:00:00.000Z' }, message: { messageRef: 'message:post', projectRef: PROJECT },
+    }))
+    const host = messageHost({ postMainMessageForAgent: post })
+    await call(teamTools().get('team_message')!, { action: 'post', projectRef: PROJECT, body: 'plain Main stream message',
+      kind: 'discussion', accountable: '', sourceThreadRefs: [], attachments: [], baseRevision: 0, threadRef: '', taskRef: '' }, host)
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post.mock.calls[0]![1]).toMatchObject({ projectRef: PROJECT, body: 'plain Main stream message' })
+    // None of the start-only parameters may reach the Host post request.
+    expect(post.mock.calls[0]![1]).not.toHaveProperty('kind')
+    expect(post.mock.calls[0]![1]).not.toHaveProperty('sourceThreadRefs')
+  })
+
+  it('a post that really names sources is still told they belong to start', async () => {
+    const host = messageHost()
+    const refusal = await call(teamTools().get('team_message')!, { action: 'post', projectRef: PROJECT, body: 'x', sourceThreadRefs: [THREAD] }, host)
+      .then(() => { throw new Error('the refusal was not thrown') }, (error: Error) => error)
+    expect(refusal.message).toContain('sourceThreadRefs')
+    expect(refusal.message).toContain('action: start')
+    expect(host.postMainMessageForAgent).not.toHaveBeenCalled()
+  })
+
+  it('a start still reads kind, because there it decides the Thread kind', async () => {
+    const start = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({
+      kind: 'committed', receipt: { occurredAt: '2026-10-27T06:00:00.000Z' },
+      message: { messageRef: 'message:anchor' }, thread: { threadRef: THREAD, revision: 20 }, task: undefined, attention: [], directMarkers: [],
+    }))
+    const host = messageHost({ startThreadForAgent: start })
+    await call(teamTools().get('team_message')!, { action: 'start', projectRef: PROJECT, body: 'open a Task', kind: 'task' }, host)
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(start.mock.calls[0]![1]).toMatchObject({ kind: 'task' })
+  })
+})
+
 describe('a read carrying a page size still returns its batch', () => {
   it('a Thread read with limit and beforeSequence reads one page instead of refusing the call', async () => {
     const host = threadHost()
