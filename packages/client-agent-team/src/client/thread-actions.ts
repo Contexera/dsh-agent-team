@@ -112,6 +112,8 @@ export interface TaskTransferState {
   readonly error: string | undefined
   /** A business fence the Host answered with; the caller re-reads and keeps the surface recoverable. */
   readonly refusal: TransferRefusal | undefined
+  /** The target a committed transfer landed on, so the surface can state the new accountable instead of leaving the reader to infer it from a feed row. */
+  readonly landedOn: AgentTeamMemberId | undefined
   /** Hand this Task to one legal accountable; the Host decides whether the target is legal and whether the Human may move it now. */
   readonly transfer: (target: AgentTeamMemberId) => Promise<void>
 }
@@ -142,6 +144,7 @@ export function useTaskTransfer(
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | undefined>()
   const [refusal, setRefusal] = useState<TransferRefusal>()
+  const [landedOn, setLandedOn] = useState<AgentTeamMemberId>()
   const requestIds = useRef(new Map<string, AgentTeamRequestId>())
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
@@ -153,6 +156,7 @@ export function useTaskTransfer(
     setPending(true)
     setError(undefined)
     setRefusal(undefined)
+    setLandedOn(undefined)
     const requestId = requestIds.current.get(target) ?? mintRequestId()
     requestIds.current.set(target, requestId)
     try {
@@ -161,6 +165,9 @@ export function useTaskTransfer(
       if (!result.ok) { setError(result.error.message); return }
       if (result.value.kind === 'committed') {
         requestIds.current.delete(target)
+        // Stated from the Host's committed answer, not from the target that was asked for: the surface
+        // names who holds the Task now, and a later refusal clears it again.
+        setLandedOn(target)
         await request.onCommitted(result.value)
       } else if (result.value.kind === 'unread_required') {
         requestIds.current.delete(target)
@@ -180,5 +187,5 @@ export function useTaskTransfer(
     }
   }, [pending, transferTask, request])
 
-  return { pending, error, refusal, transfer }
+  return { pending, error, refusal, landedOn, transfer }
 }

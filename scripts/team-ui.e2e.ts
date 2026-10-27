@@ -107,6 +107,59 @@ function taskEntryRow(page: Page, taskNumber: number) {
 }
 
 /**
+ * The Thread band's controls as the browser laid them out. Uniformity is a set of
+ * equations over one band's boxes — one height, one radius, one inset, one
+ * outline stroke, one step — not an impression, and widths stay out of it
+ * because a label's length is content, not chrome.
+ */
+async function actionBandGeometry(page: Page): Promise<{
+  readonly bands: number
+  readonly groups: number
+  readonly labels: readonly string[]
+  readonly heights: readonly string[]
+  readonly radii: readonly string[]
+  readonly insets: readonly string[]
+  readonly outlineWidths: readonly string[]
+  readonly outlineColors: readonly string[]
+  readonly steps: readonly string[]
+  readonly bandRight: number
+  readonly overflowing: readonly string[]
+} | null> {
+  return page.evaluate(() => {
+    const bands = [...document.querySelectorAll('[data-team-action-band]')]
+    const band = bands[0]
+    if (band === undefined) return null
+    const groups = [...band.querySelectorAll('[data-team-action-group]')]
+    const buttons = groups.flatMap(group => [...group.querySelectorAll('button')])
+    const styleOf = (button: Element) => getComputedStyle(button)
+    return {
+      bands: bands.length,
+      groups: groups.length,
+      labels: buttons.map(button => button.getAttribute('aria-label') ?? button.textContent?.trim() ?? ''),
+      heights: [...new Set(buttons.map(button => styleOf(button).height))],
+      radii: [...new Set(buttons.map(button => styleOf(button).borderTopLeftRadius))],
+      // The inline inset of the label: 10px on every shipped `sm` control.
+      insets: [...new Set(buttons.map(button => styleOf(button).paddingLeft))],
+      // Only the outlined controls carry a stroke: the primary is fill-only on purpose. Width is one
+      // value across them; colour is held separately because a followed control paints its own
+      // on-state stroke, which is a state difference rather than an inconsistency.
+      outlineWidths: [...new Set(buttons
+        .filter(button => styleOf(button).borderTopWidth !== '0px')
+        .map(button => styleOf(button).borderTopWidth))],
+      outlineColors: [...new Set(buttons
+        .filter(button => styleOf(button).borderTopWidth !== '0px')
+        .map(button => styleOf(button).borderTopColor))],
+      steps: [...new Set(groups.map(group => styleOf(group).gap))],
+      bandRight: Math.round(band.getBoundingClientRect().right),
+      // A wrapped band may use more than one line; no control may leave the band's box.
+      overflowing: buttons
+        .filter(button => Math.round(button.getBoundingClientRect().right) > Math.round(band.getBoundingClientRect().right) + 1)
+        .map(button => button.textContent?.trim() ?? ''),
+    }
+  })
+}
+
+/**
  * The colour a `--dsw-*` alias resolves to in the running theme, so
  * expectations follow palette changes.
  */
@@ -1418,6 +1471,34 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const followControl = page.getByRole('button', { name: '取消关注此 Thread' })
   await followControl.waitFor()
   expect(await followControl.getAttribute('aria-pressed')).toBe('true')
+  // Uniformity as equations over one band, not an impression of the row: one height, one radius,
+  // one inline inset, one outlined stroke, one step between the controls, and no two action
+  // containers. The width of each control is deliberately absent — a label's length is content —
+  // and so is every conditional control, since which of them may stand together is the Host's
+  // answer about this Task, not a styling fact.
+  const followedBand = (await actionBandGeometry(page))!
+  expect(followedBand.bands).toBe(1)
+  expect(followedBand.groups).toBe(2)
+  expect(followedBand.heights).toEqual(['28px'])
+  expect(followedBand.radii.length).toBe(1)
+  expect(followedBand.insets).toEqual(['10px'])
+  // Chromium rounds a `0.5px` border up to a whole pixel, so the value read back is `1px`; the
+  // equation this holds is that every outlined control in the band reports the same one.
+  expect(followedBand.outlineWidths).toEqual(['1px'])
+  // Followed: the control's own on-state stroke joins the neutral one, so the band carries exactly
+  // the two stroke colours a pressed control and an idle one take.
+  expect(followedBand.outlineColors.length).toBe(2)
+  expect(followedBand.outlineColors).toContain(await resolveAliasColor(page, '--dsw-alias-border-l3'))
+  expect(followedBand.outlineColors).toContain(await resolveAliasColor(page, '--dsw-alias-button-ghost-active-border'))
+  expect(followedBand.steps).toEqual(['6px'])
+  expect(followedBand.labels).toContain('取消关注此 Thread')
+  expect(followedBand.overflowing).toEqual([])
+  // The pressed state is visible on its own: the followed control paints a fill the unfollowed one does
+  // not, which is the one distinction the shipped outline variant does not draw. The pointer is parked
+  // off the band first, so this reads the resting state rather than a hover wash.
+  await page.mouse.move(4, 4)
+  const followedFill = await followControl.evaluate(element => getComputedStyle(element).backgroundColor)
+  expect(followedFill).not.toBe('rgba(0, 0, 0, 0)')
   const humanMemberId = scaffold.ctx.agentTeam.status().humanMemberId
   // One reply from a Project peer, ordinary (no mention) or a direct mention, written through the
   // Host exactly as an Agent writes it. Only the Inbox projection is asserted: the page's own
@@ -1470,6 +1551,12 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(humanUnread).toBe(0)
   await page.getByRole('button', { name: '取消关注此 Thread' }).click()
   await expect.poll(async () => await page.getByRole('button', { name: '关注此 Thread' }).count()).toBe(1)
+  // The same control in its other standing: the two states differ by a fill, not by a stroke alone,
+  // which is what made "followed" and "not followed" read alike before.
+  await page.mouse.move(4, 4)
+  const unfollowedFill = await page.getByRole('button', { name: '关注此 Thread' }).evaluate(element => getComputedStyle(element).backgroundColor)
+  expect(unfollowedFill).toBe('rgba(0, 0, 0, 0)')
+  expect(followedFill).not.toBe(unfollowedFill)
   await expect.poll(() => scaffold.ctx.agentTeam.threadObservations({ workspaceId: workspace.id, taskRef: task.taskRef }).followers.includes(humanMemberId)).toBe(false)
   await leaveThread()
   await publishOrdinaryReply('after-unfollow')
@@ -2514,6 +2601,18 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.getByRole('heading', { name: /Task #1/ }).waitFor()
   const transferTrigger = page.getByRole('button', { name: '转交负责人' })
   await transferTrigger.waitFor()
+  // The one render that carries every conditional control at once: the Thread's own group (follow,
+  // transfer) and the lifecycle group (accept, close) in one band, in that order, with one box.
+  const fullBand = (await actionBandGeometry(page))!
+  expect(fullBand.bands).toBe(1)
+  expect(fullBand.groups).toBe(2)
+  expect(fullBand.labels).toEqual(['取消关注此 Thread', '转交负责人', '验收', '关闭任务'])
+  expect(fullBand.heights).toEqual(['28px'])
+  expect(fullBand.radii.length).toBe(1)
+  expect(fullBand.insets).toEqual(['10px'])
+  expect(fullBand.outlineWidths).toEqual(['1px'])
+  expect(fullBand.steps).toEqual(['6px'])
+  expect(fullBand.overflowing).toEqual([])
   await transferTrigger.click()
   const transferMenu = page.getByRole('menu')
   await transferMenu.waitFor()
@@ -2525,7 +2624,10 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () =>
     JSON.stringify(scaffold.ctx.agentTeam.view({ workspaceId: workspace.id }).tasks.find(candidate => candidate.taskRef === task.taskRef)))
     .toContain(`"accountable":"${reviewer.member.memberId}"`)
-  await expect.poll(() => page.getByText(/转交给/).count()).toBe(1)
+  // Two statements, two places: the band states where the Task went, and the Host's own activity row
+  // records it in the feed. Counted together so a duplicate of either fails.
+  await expect.poll(() => page.getByText('已转交给 @reviewer', { exact: true }).count()).toBe(1)
+  await expect.poll(() => page.getByText(/把负责人从/).count()).toBe(1)
   // The Human is no longer the accountable, so the Task's accept authority moved
   // with it: the transfer is the one path the Human keeps for an owned Task.
   await page.getByRole('button', { name: '关闭任务' }).click()

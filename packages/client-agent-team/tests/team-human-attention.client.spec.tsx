@@ -22,6 +22,23 @@ async function seedThreadPage(options?: { seedFollowers?: readonly string[] }) {
 
 type Bench = Awaited<ReturnType<typeof runtimeWithTeam>>
 
+/** Whether an element carries one CSS-module class token, matched by substring because the build hashes the names. */
+function hasClass(element: Element | null, token: string): boolean {
+  return element !== null && [...element.classList].some(name => name.includes(token))
+}
+
+/** The Thread page's action band, by its own marker rather than by any localized class. */
+function actionBand(b: Bench): Element {
+  const band = b.view.container.querySelector('[data-team-action-band]')
+  if (band === null) throw new Error('no action band on the Thread page')
+  return band
+}
+
+/** One group inside the band: the Thread's own actions, or the ones that resolve the Task. */
+function actionGroup(b: Bench, group: 'thread' | 'lifecycle'): Element | null {
+  return actionBand(b).querySelector(`[data-team-action-group="${group}"]`)
+}
+
 /** One Agent Project owner besides the Human, the only legal transfer target the Host projects. */
 function seedProjectOwner(b: Bench): void {
   const baseView = b.viewProjects.getMockImplementation()!
@@ -50,6 +67,77 @@ describe('Team Human Attention and Task transfer controls', () => {
     // Host's re-projected observation is what retires the button's pressed state.
     await waitFor(() => expect(b.view.queryByRole('button', { name: '取消关注此 Thread' })).toBeNull())
     expect((b.view.getByRole('button', { name: '关注此 Thread' })).getAttribute('aria-pressed')).toBe('false')
+    await b.runtime.dispose()
+  })
+
+  it('puts the Thread page actions in one band of two groups, with the pressed state only while followed', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    seedProjectOwner(b)
+    // The Project grant reaches the page through its own supplemental read, so the transfer control
+    // appears once that lands; the band itself stands from the first render.
+    await b.view.findByRole('button', { name: '转交负责人' })
+    // One band, not four sibling containers: this is the layout claim the visual review
+    // raised, and it is structural rather than cosmetic.
+    expect(b.view.container.querySelectorAll('[data-team-action-band]').length).toBe(1)
+    const band = actionBand(b)
+    const threadGroup = actionGroup(b, 'thread')
+    const lifecycleGroup = actionGroup(b, 'lifecycle')
+    expect(threadGroup).not.toBeNull()
+    expect(lifecycleGroup).not.toBeNull()
+    // Both groups are direct children of the band, which is what lets the divider between them
+    // state the hierarchy; a nested copy would keep two containers alive.
+    expect(threadGroup!.parentElement).toBe(band)
+    expect(lifecycleGroup!.parentElement).toBe(band)
+    // Following the Thread and moving its responsibility are the Thread's own actions; accepting and
+    // closing resolve it. Neither group may borrow the other's control.
+    const threadLabels = within(threadGroup! as HTMLElement).getAllByRole('button').map(button => button.getAttribute('aria-label') ?? button.textContent)
+    expect(threadLabels).toEqual(['关注此 Thread', '转交负责人'])
+    const lifecycleLabels = within(lifecycleGroup! as HTMLElement).getAllByRole('button').map(button => button.textContent)
+    expect(lifecycleLabels).toEqual(['验收', '关闭任务'])
+    // The pressed state is the control's own attribute carrying a class, so a followed Thread differs
+    // from an unfollowed one by more than the stroke: the shipped outline variant paints nothing for
+    // `aria-pressed`, and the visual review called that out.
+    const follow = within(threadGroup! as HTMLElement).getByRole('button', { name: '关注此 Thread' })
+    expect(hasClass(follow, 'toggleOn')).toBe(false)
+    fireEvent.click(follow)
+    const following = await within(threadGroup! as HTMLElement).findByRole('button', { name: '取消关注此 Thread' })
+    expect(following.getAttribute('aria-pressed')).toBe('true')
+    expect(hasClass(following, 'toggleOn')).toBe(true)
+    // The band's only primary is the one that resolves the Task.
+    expect(hasClass(within(lifecycleGroup! as HTMLElement).getByRole('button', { name: '验收' }), 'primary')).toBe(true)
+    expect(hasClass(following, 'primary')).toBe(false)
+    await b.runtime.dispose()
+  })
+
+  it('states a committed transfer where the control stands and retires the receipt on the next move', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    seedProjectOwner(b)
+    fireEvent.click(await b.view.findByRole('button', { name: '转交负责人' }))
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    // The Host's activity row lands in the feed, but a long Thread scrolls it away from the band the
+    // Human just used, so the band states the result itself.
+    const receipt = await b.view.findByText('已转交给 @builder')
+    expect(receipt.getAttribute('role')).toBe('status')
+    // The receipt is derived from the projection, so when responsibility moves again the line
+    // retires instead of claiming the Task is still where the earlier write put it.
+    expect(await b.view.findByText(/把负责人从/)).toBeTruthy()
+    await b.runtime.dispose()
+  })
+
+  it('keeps each refusing control\'s failure on its own line inside the band', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    seedProjectOwner(b)
+    // Two controls can fail in one render; each states its own cause, so the reader is not asked to
+    // work out which of two actions the one message belongs to.
+    b.failAttention('关注状态不可用')
+    b.seedTransferOutcome('failure')
+    fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
+    await waitFor(() => expect(b.view.getByRole('alert').textContent).toContain('关注状态不可用'))
+    fireEvent.click(b.view.getByRole('button', { name: '转交负责人' }))
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    await waitFor(() => expect(b.view.getAllByRole('alert').map(node => node.textContent)).toEqual(['关注状态不可用', 'transfer unavailable (spec)']))
+    // Both lines are band lines, not the whole-surface replacement: that one centres itself in the band.
+    for (const alert of b.view.getAllByRole('alert')) expect(hasClass(alert, 'actionError')).toBe(true)
     await b.runtime.dispose()
   })
 
@@ -229,6 +317,62 @@ describe('Team Human Attention and Task transfer controls', () => {
     })
     // The second failure keeps the same recoverable surface rather than locking the control.
     expect(b.view.getByRole('alert').textContent).toContain('transfer unavailable (spec)')
+    await b.runtime.dispose()
+  })
+
+  it('announces a running write in the full phrase the shortened visible word cannot say', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    seedProjectOwner(b)
+    await b.view.findByRole('button', { name: '转交负责人' })
+    // Both writes are held open, so the pending render is a state this spec can read rather than a
+    // frame that has already passed: the point under test is what the control says while it runs.
+    let releaseFollow!: () => void
+    const followGate = new Promise<void>(resolve => { releaseFollow = resolve })
+    const commitFollow = b.changeAttention.getMockImplementation()!
+    b.changeAttention.mockImplementationOnce(async request => { await followGate; return commitFollow(request) })
+    fireEvent.click(b.view.getByRole('button', { name: '关注此 Thread' }))
+    // The visible word shortens to fit the band; the accessible name does not, because a reader who
+    // cannot see the band still has to be told the write is running. A name frozen at the idle phrase
+    // would announce the action as if nothing were happening.
+    const pendingFollow = await b.view.findByRole('button', { name: '正在更新关注状态…' })
+    expect(pendingFollow.textContent).toBe('更新中…')
+    expect((pendingFollow as HTMLButtonElement).disabled).toBe(true)
+    releaseFollow()
+    // The long name is only the pending standing: the settled control announces its idle phrase again.
+    expect(await b.view.findByRole('button', { name: '取消关注此 Thread' })).toBeTruthy()
+    expect(b.view.queryByRole('button', { name: '正在更新关注状态…' })).toBeNull()
+
+    let releaseTransfer!: () => void
+    const transferGate = new Promise<void>(resolve => { releaseTransfer = resolve })
+    const commitTransfer = b.transferTask.getMockImplementation()!
+    b.transferTask.mockImplementationOnce(async request => { await transferGate; return commitTransfer(request) })
+    fireEvent.click(b.view.getByRole('button', { name: '转交负责人' }))
+    fireEvent.click(await within(document.body).findByRole('menuitem', { name: /builder/ }))
+    const pendingTransfer = await b.view.findByRole('button', { name: '正在转交负责人…' })
+    expect(pendingTransfer.textContent).toBe('转交中…')
+    expect((pendingTransfer as HTMLButtonElement).disabled).toBe(true)
+    releaseTransfer()
+    await waitFor(() => expect(b.transferTask).toHaveBeenCalledWith(expect.objectContaining({ target: 'member:builder' })))
+    await b.runtime.dispose()
+  })
+
+  it('announces a running follow write on the discussion panel the same way', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskless: true, seedFollowers: [], seededMessages: [
+      { body: '帮我看看这个方案', occurredAt: '2026-10-14T09:00:00.000Z' },
+    ] })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.findByRole('button', { name: /^打开讨论：/ }))
+    const panel = await b.view.findByRole('complementary', { name: '讨论' })
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const commit = b.changeAttention.getMockImplementation()!
+    b.changeAttention.mockImplementationOnce(async request => { await gate; return commit(request) })
+    fireEvent.click(await within(panel).findByRole('button', { name: '关注此 Thread' }))
+    // The panel carries the same control in its own room, so it makes the same promise while running.
+    const pending = await within(panel).findByRole('button', { name: '正在更新关注状态…' })
+    expect(pending.textContent).toBe('更新中…')
+    release()
+    expect((await within(panel).findByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
     await b.runtime.dispose()
   })
 

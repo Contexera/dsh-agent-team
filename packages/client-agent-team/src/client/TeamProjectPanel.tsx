@@ -482,9 +482,14 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
     <TeamPanelHandle surface={surface} label={t('panelResize')} />
     <div className={projectCss.panelHead}>
       <span className={projectCss.panelTitle} title={title}>{title}</span>
-      {thread !== undefined && <Button size="sm" variant="outline" disabled={follow.pending} aria-pressed={follow.following === true}
+      {/* The same control the Thread page's band carries, in the head's own room: the visible verb is the
+          short one and the accessible name keeps the full phrase — and, while the write runs, the long
+          pending phrase, so the panel announces progress the shortened visible word cannot. */}
+      {thread !== undefined && <Button size="sm" variant="outline" className={follow.following === true ? css.toggleOn : undefined}
+        disabled={follow.pending} aria-pressed={follow.following === true}
+        aria-label={follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
         onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
-        {follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
+        {follow.pending ? t('followPendingLabel') : follow.following === true ? t('unfollowLabel') : t('followLabel')}
       </Button>}
       {task === undefined && thread !== undefined && <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>}
       {task !== undefined && <Button size="sm" variant="primary" onClick={() => { onPromoted(task.taskRef) }}>{t('openTask', { number: resolvedTaskNumber ?? '…' })}</Button>}
@@ -492,7 +497,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
     </div>
     {/* The follow control's own failure, stated beside the untouched control: a Remote failure is the
         one error this face can raise that the read surface below does not own. */}
-    {follow.error !== undefined && <p className={css.error} role="alert">{follow.error}</p>}
+    {follow.error !== undefined && <p className={css.actionError} role="alert">{follow.error}</p>}
     <section ref={timeline.ref} onScroll={timeline.onScroll} className={projectCss.panelBody} aria-label={t('timelineLabel')}>
       {loading && projection === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingThread')}</p></div>}
       {projection === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void readCurrent() }}>{t('retry')}</Button></div>}

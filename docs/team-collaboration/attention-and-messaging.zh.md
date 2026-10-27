@@ -17,6 +17,8 @@ Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默
 
 当前 Thread surface 展示 public revisioned facts，并且仅在存在时展示 Task status、Claims 和 runtime risk。Thread 的两个面都渲染同一个 follow/unfollow 控件：按下状态读自 Host 的当前关注者集合，写入走 Human `changeAttention` Remote，不做乐观翻转；Human-only 的 follow/unfollow observations 历史本身不作渲染。
 
+这个控件先说自己处在哪个状态，再说自己要做什么。已关注的 Thread 显示按下底色（shipped 的选中语汇，让两种状态差的是一条描边之外的东西）；写入失败不会翻转它，因此读者刚按下的那个按钮仍然显示 Host 最后一次回答的状态。可见动词很短，而无障碍名保留完整短语——正因如此它才能和 Task 自己的动作共用一条带。写入进行中时，该名取长句式而不是空闲那句：读屏读的不是收短后的可见词，名字不变就等于不宣布这次写入的进度。
+
 History paging 永远不确认新 work。Thread 打开期间到达的 updates 无论读者滚动位置一律自动确认。滚离底部的读者只会看到无读取语义的纯跳转提示。
 
 ## Agent 投递

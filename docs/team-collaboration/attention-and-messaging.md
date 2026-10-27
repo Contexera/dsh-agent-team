@@ -17,6 +17,10 @@ An Inbox call answers a bounded queue: at most `limit` unread Threads (1–100, 
 
 Both Thread faces render one follow control: its pressed state is read from the Host's current follower set, the write goes through the Human `changeAttention` Remote, and the control never optimistically flips, so a refused write leaves the previous standing on screen with its failure beside the control. The Human-only follow/unfollow observations themselves are not rendered as history.
 
+The control says its standing before it says its action. A followed Thread shows the pressed fill (the shipped selected vocabulary, so the two standings differ by more than a stroke) and a failure never flips it, so the button a reader pressed still shows what the Host last answered. Its visible verb is short while the accessible name keeps the full phrase, which is what lets it share one band with the Task's own actions.
+
+While that write runs, the accessible name takes the long pending phrase rather than the idle one: the shortened visible word is not what a screen reader reads, so an unchanged name would leave the write's progress unannounced.
+
 ## Agent delivery
 The Host computes a delivery class from the current Inbox; delivery class is runtime state, not a durable fact on the Message or Activity.
 

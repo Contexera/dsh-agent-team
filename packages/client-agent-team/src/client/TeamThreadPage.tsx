@@ -848,6 +848,18 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // returns to its timeline; a Thread restored without one returns further.
   const backLabel = projectRef === undefined ? t('backToWorkspace') : t('backToProject')
 
+  // The action band's lifecycle group, decided once so the divider can ask whether that group renders:
+  // a closed Task's reopen lives only in the composer-slot notice, so that state carries no group at all.
+  const activeClaimCount = projection?.claims.filter(claim => claim.taskRef === task?.taskRef && claim.state === 'active').length ?? 0
+  // Accepting early closes Claims with the Task, so it asks first; a todo Task's work finished outside
+  // the ledger, so there is nothing to confirm and no Claims to list.
+  const earlyAccept = task?.resolution === 'open' && task.status === 'in_progress' && activeClaimCount > 0
+  const canAccept = task?.resolution === 'open' && (task.status === 'in_review' || task.status === 'todo' || earlyAccept)
+  const showLifecycleGroup = task === undefined || task.resolution !== 'closed'
+  // The transfer receipt stands only while the Host still shows the Task where the write put it, so a later
+  // move — this band's or anyone else's — retires the line instead of contradicting the Task on screen.
+  const transferLandedOn = transfer.landedOn !== undefined && task?.accountable === transfer.landedOn ? transfer.landedOn : undefined
+
   return <main className={css.surface} data-team-thread={threadRef}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderStacked}`}>
       <div className={css.backRow}><Button size="sm" icon={<IconChevronLeftOutlineRegular />} onClick={backToWorkspace}>{backLabel}</Button></div>
@@ -859,51 +871,66 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
           </div>
           {taskTitle !== undefined && taskTitle !== '' && <p className={threadCss.taskTitle} title={taskTitle}>{taskTitle}</p>}
         </div>
-        {task === undefined && thread !== undefined && <div className={css.headerActions}>
-          <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
-        </div>}
-        {/* The follow control stands on both faces of a Thread: a discussion and a Task alike. */}
-        {thread !== undefined && <div className={css.headerActions}>
-          <Button size="sm" variant="outline" disabled={follow.pending} aria-pressed={follow.following === true}
-            onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
-            {follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
-          </Button>
-        </div>}
-        {/* A finished Task is mended from here: only a Member actor is confined to open Tasks, so the
-            Human's transfer stands with the resolution. */}
-        {task !== undefined && thread !== undefined && transferTargets.length > 0 && <div className={css.headerActions}>
-          <Menu
-            open={transferMenuOpen}
-            onClose={() => { setTransferMenuOpen(false) }}
-            items={transferMenuItems}
-            onSelect={id => { void transfer.transfer(id as AgentTeamMemberId) }}
-            anchor={<Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="menu" onClick={() => { setTransferMenuOpen(value => !value) }}>
-              {transfer.pending ? t('transferringTask') : t('transferTask')}
-            </Button>}
-          />
-        </div>}
-        {/* Open tasks act here; an accepted Thread keeps its header reopen. Reopen for a
-            closed Thread lives only in the composer-slot closed notice. */}
-        {task !== undefined && thread !== undefined && task.resolution !== 'closed' && <div className={css.headerActions}>
-          {(() => {
-            const activeClaims = projection?.claims.filter(claim => claim.taskRef === task.taskRef && claim.state === 'active') ?? []
-            const earlyAccept = task.resolution === 'open' && task.status === 'in_progress' && activeClaims.length > 0
-            // todo Tasks accept directly: the work finished outside the
-            // ledger, so there is nothing to confirm and no Claims to list.
-            if (!(task.status === 'in_review' || task.status === 'todo' || earlyAccept) || task.resolution !== 'open') return null
-            return <Button size="sm" variant="primary" disabled={pending}
-              onClick={() => { if (earlyAccept) { setConfirmingAccept(true) } else { void mutateTask('accept') } }}>{t('acceptTask')}</Button>
-          })()}
-          {task.resolution === 'open'
-            ? <Button size="sm" variant="outline" disabled={pending} onClick={() => { void mutateTask('close') }}>{t('closeTask')}</Button>
-            : <Button size="sm" variant="primary" disabled={pending} onClick={() => { void mutateTask('reopen') }}>{t('reopenTask')}</Button>}
+        {/* One band, two groups: what the reader does with this Thread (following it, moving its
+            responsibility), and what resolves it (promotion, acceptance, closing). The 1px rule
+            between them states that hierarchy instead of the whitespace four siblings used to. */}
+        {thread !== undefined && <div className={css.headerActions} data-team-action-band>
+          <div className={css.actionGroup} data-team-action-group="thread">
+            {/* The follow control stands on both faces of a Thread: a discussion and a Task alike. Its
+                pressed state is the band's own fill, because a shipped outline button paints nothing
+                for `aria-pressed` and "followed" and "not followed" would otherwise read alike. */}
+            {/* The visible verb is the band's own grade; the accessible name keeps the full phrase, so the
+                control still says what it follows while four actions share one line. While a write runs the
+                name says so in the long form: the shortened visible word is not what a screen reader reads,
+                and a control that stopped announcing its own progress would be a regression against the
+                previous copy. */}
+            <Button size="sm" variant="outline" className={follow.following === true ? css.toggleOn : undefined}
+              disabled={follow.pending} aria-pressed={follow.following === true}
+              aria-label={follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
+              onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
+              {follow.pending ? t('followPendingLabel') : follow.following === true ? t('unfollowLabel') : t('followLabel')}
+            </Button>
+            {/* A finished Task is mended from here: only a Member actor is confined to open Tasks, so the
+                Human's transfer stands with the resolution. */}
+            {task !== undefined && transferTargets.length > 0 && <Menu
+              open={transferMenuOpen}
+              onClose={() => { setTransferMenuOpen(false) }}
+              items={transferMenuItems}
+              onSelect={id => { void transfer.transfer(id as AgentTeamMemberId) }}
+              anchor={<Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="menu"
+                aria-label={transfer.pending ? t('transferringTask') : t('transferTask')} onClick={() => { setTransferMenuOpen(value => !value) }}>
+                {transfer.pending ? t('transferPendingLabel') : t('transferLabel')}
+              </Button>}
+            />}
+          </div>
+          {showLifecycleGroup && <div className={css.actionGroup} data-team-action-group="lifecycle">
+            {task === undefined
+              ? <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
+              : task.resolution === 'open'
+                ? <>
+                  {canAccept && <Button size="sm" variant="primary" disabled={pending}
+                    onClick={() => { if (earlyAccept) { setConfirmingAccept(true) } else { void mutateTask('accept') } }}>{t('acceptTask')}</Button>}
+                  <Button size="sm" variant="outline" disabled={pending} onClick={() => { void mutateTask('close') }}>{t('closeTask')}</Button>
+                </>
+                : <Button size="sm" variant="primary" disabled={pending} onClick={() => { void mutateTask('reopen') }}>{t('reopenTask')}</Button>}
+          </div>}
         </div>}
       </header>
-      {(follow.error !== undefined || transfer.error !== undefined || transfer.refusal !== undefined) && <div className={css.errorState} role="alert">
-        <span>{follow.error ?? transfer.error ?? (transfer.refusal?.kind === 'unread_required'
+      {/* Two failures, two lines: which control refused, and what to do next. A band's failure is not
+          the whole-surface replacement `.errorState` draws, which would centre itself in the band. */}
+      {follow.error !== undefined && <p className={css.actionError} role="alert">{follow.error}</p>}
+      {(transfer.error !== undefined || transfer.refusal !== undefined) && <p className={css.actionError} role="alert">
+        {transfer.error ?? (transfer.refusal?.kind === 'unread_required'
           ? t('transferUnreadRequired', { count: transfer.refusal.unreadCount })
-          : t('transferStaleRevision'))}</span>
-      </div>}
+          : t('transferStaleRevision'))}
+      </p>}
+      {/* What a committed transfer changed, where the control stands: the new accountable also lands in the
+          feed as the Host's own activity row, but that row sits below the fold of a long Thread. The receipt
+          is stated against the projection, so any later move of responsibility retires it instead of leaving
+          a line that claims the Task went somewhere it no longer is. */}
+      {transferLandedOn !== undefined && <p className={css.actionNotice} role="status">
+        {transferLandedOn === projectView?.humanMemberId ? t('transferDoneYou') : t('transferDone', { name: memberName(transferLandedOn) })}
+      </p>}
       {risks.length > 0 && <section className={threadCss.riskSection} aria-label={t('runtimeRisk')}>
         <h2>{t('runtimeRisk')}</h2>
         {risks.map(({ claim, status, label, sentenceKey, reason, full }) => <p className={threadCss.riskRow} key={claim.claimRef}>

@@ -33,6 +33,8 @@ Project owner 才能发起或 promotion Thread。accountable 与执行分离，�
 ## Human Remote boundary
 Human Client 使用 `readThread`、`threadHistory`、`threadObservations` 和 `changes`。它消费 Host 的 Human Inbox 切片，作为「收件箱 / Inbox」队列。Attention 有两条入口，且都不是 model-facing 的：Agent 工具 `team_attention` 走 `changeAttentionForAgent`；`@Remote('changeAttention')` 是 Human Remote——两个 Thread 面都接到同一个共享关注控件上，Human 因此可以从 Web 面订阅一个 Thread 的普通更新。Task 责任转交走 Human `transferTask` Remote：Client 只提供 Host `view` 已投影为 Project owner 的目标加 Human，转交规则与 accept/close/reopen 权限都不在 Client 复制，仍由 Host 判定。已结束 Task 的头部同样保留转交入口——只有 Member actor 被限制在 open Task 上，而负责人已不是 Project owner 的已结束 Task 正是从这里补回负责人。
 
+转交成功同样在控件所在处陈述：动作带用 Host 自己 committed 的结果印出新的负责人，一旦投影不再与它一致就把这行撤掉。Host 的 transfer 活动行仍然在 feed 里记录这次转移——带里的那行是同一个事实落在控件旁，不是对它的第二个权威。
+
 对每个可见 Workspace 发一次 Inbox 调用：整片未读，行内 `directCount`、徽标取 `totalUnreadCount`，在 Client 内合并为徽标与 Inbox 页。
 
 该页渲染 Host 的两片。第一片是未读队列「需要我」，徽标与页头计数只描述它。第二片是读者写过 Message 的「最近活跃」段：回复过的 Thread 无论是否 follow 都算他的，自己发起、还没人回复的也算；回复不会自动 follow，所以 Attention 决定的是「什么会通知你」，不是「你参与过什么」。按最新活跃降序，Host 侧每 Workspace 上限 10、页面合并后最多 5 条，与队列不重复。两片都不收录已归档 Project 的 Thread：归档终结的不只是通知，还有参与记录。Agent 的 Inbox 只拿到队列。打开 Inbox 页不确认任何内容，只有 durable Thread read 消费 mention marker。

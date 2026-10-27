@@ -61,11 +61,67 @@
   margin: 3px 0 0;
 }
 
+/* The Thread band's one action band. Four separate action containers used to spread these controls
+   across the band's full width, so what a reader saw was four isolated buttons with hundreds of
+   pixels between them instead of one group of related actions. */
 .headerActions {
   align-items: center;
   display: flex;
   flex: 0 0 auto;
   gap: 6px;
+}
+
+/* Two groups inside that band: what the reader does with the Thread, and what resolves it. A 1px
+   rule states that hierarchy in place of the whitespace that used to separate equal-looking buttons,
+   so the second group's leading edge sits 6px from the rule and 6px from the first group's last
+   button. Buttons take the shipped `size="sm"` box (28px tall, the small radius), and the band unifies
+   the box, its stroke and the 6px step — not the label widths, which stay length-to-content. */
+.actionGroup {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+.actionGroup + .actionGroup {
+  border-left: 1px solid var(--dsw-alias-border-l2);
+  padding-left: 6px;
+}
+
+/* A followed Thread reads as pressed. The shipped `Button` paints nothing for `aria-pressed`, so the
+   two standings used to differ by a stroke alone; this takes the shipped selected vocabulary (Pill and
+   ClockPicker: the ghost-active fill under a same-family stroke) rather than a second solid fill,
+   because acceptance is the one primary this band carries. The attribute is part of the selector so the
+   state rests on the button's own semantics. Specificity is why both declarations below name it: the
+   variant's `.outline` (0,1,0) sets the neutral stroke, its hover rule (0,3,0) sets the hover wash, and
+   the derived class alone would be overrun by that hover rule rather than merely tied with it. */
+.toggleOn[aria-pressed='true'] {
+  background: var(--dsw-alias-button-ghost-active-fill);
+  border-color: var(--dsw-alias-button-ghost-active-border);
+}
+.toggleOn[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--dsw-alias-button-ghost-active-hover);
+}
+
+/* A band's failure is one line per refusing control, under the band and inside its own padding: the
+   whole-surface `.errorState` centres itself in the free space it replaces, which inside a band would
+   push the timeline down by its 32px padding instead of stating what went wrong where the control is. */
+.actionError {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 6px 0 0;
+  max-width: 880px;
+}
+
+/* A committed write states its result in the same slot and the same grade, in the secondary ink rather
+   than the error one: the band keeps one feedback line under itself whether the write landed or failed,
+   so the reader never has to look somewhere else for the answer. */
+.actionNotice {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 6px 0 0;
+  max-width: 880px;
 }
 
 /* The shipped session header's rhythm: 10px top inset, 30px identity row, the strip's 10px margin, 16px tab line, 9px bottom
@@ -566,7 +622,10 @@
   .surfaceHeader { padding: 12px 12px 10px; }
   .surface:has(> [data-team-panel]) .surfaceHeader { padding-right: 12px; }
   .headerRow { align-items: stretch; flex-direction: column; gap: 8px; }
-  .headerActions { flex-wrap: wrap; }
+  /* The groups wrap as units: the divider keeps marking the hierarchy while both groups stand on their
+     own lines, and a long follow label never pushes the lifecycle group off the pane. */
+  .headerActions { flex-wrap: wrap; row-gap: 6px; }
+  .actionGroup { flex-wrap: wrap; }
   .backRow { margin-bottom: 6px; }
   .timeline { padding: 8px 12px 16px; scrollbar-gutter: auto; }
   .messageRow { gap: 8px; padding: 8px 0; }
