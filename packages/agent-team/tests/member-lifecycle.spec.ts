@@ -498,10 +498,15 @@ describe('Agent Team Member lifecycle', () => {
       return result.error.message
     }
 
-    // read drains unread and cannot page: the fix is the history action.
-    const historyArgs = await rejected('team_thread', { action: 'read', threadRef, beforeSequence: 1, limit: 5 })
+    // read drains unread and cannot page: the fix is the history action. A read ignores a
+    // page size instead of refusing, because a model that fills every optional slot reaches
+    // for one and a refusal it cannot act on only bought an identical retry.
+    const historyArgs = await rejected('team_thread', { action: 'message', threadRef, messageRef: 'message:23011', beforeSequence: 1, limit: 5 })
     expect(historyArgs).toContain('action: history')
-    expect(historyArgs).toMatch(/read .*(drain|unread)/i)
+    expect(historyArgs).toMatch(/cannot page/i)
+    const paged = await ctx.tools.execute({ signal: new AbortController().signal, callId: ToolCallId('shape-read-page'), name: 'team_thread',
+      arguments: { action: 'read', threadRef, beforeSequence: 1, limit: 5 }, agent })
+    expect(paged.isError, `read with a page size was refused: ${paged.isError ? paged.error.message : ''}`).toBe(false)
     for (const action of ['read', 'history'] as const) {
       const strayRef = await rejected('team_thread', { action, threadRef, messageRef: 'message:23011' })
       expect(strayRef, `${action} silently dropped messageRef`).toContain('does not accept messageRef')
