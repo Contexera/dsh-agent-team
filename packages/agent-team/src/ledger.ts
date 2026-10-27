@@ -5073,8 +5073,12 @@ export class AgentTeamLedger {
     const inbox = this.inboxDelta([], input.cleanup.attention.removed, [], input.cleanup.directMarkers.removed,
       returned.markers, input.cleanup.activityMarkers.removed, [], input.cleanup.mainMarkers?.removed ?? [],
       [], input.cleanup.reminderMarkers?.removed ?? [])
+    // The caller's array is copied, not frozen in place: the snapshot is what the
+    // operation data and the released result both hand out, so the copy is what
+    // keeps a caller from editing committed Claim records through the array it
+    // passed in. Every other bucket is already built here from frozen parts.
     return Object.freeze({
-      claims: input.claims,
+      claims: Object.freeze([...input.claims]),
       activities: input.activities,
       transfers: returned.transfers,
       tasks,

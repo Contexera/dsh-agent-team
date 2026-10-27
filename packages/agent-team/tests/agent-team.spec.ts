@@ -2345,6 +2345,21 @@ describe('AgentTeam release snapshot assembly', () => {
     })
     await expect(harness(storedPool(records))).rejects.toThrow(/invalid released Claim Task or Thread projection/)
   })
+
+  it('hands out a claims snapshot a caller cannot edit back into the operation', async () => {
+    const { test, ledger, first } = await seedRelease()
+    const removal = (await ledger.removeMember({ requestId: requestId('release-frozen-remove'), memberId: first.member.memberId,
+      actor: agentTeamHumanActor() })).value
+    // The result and the committed operation data are the same snapshot, so both
+    // must be closed: a caller that could edit either would leave the durable
+    // record disagreeing with what replay and validation recompute from it.
+    expect(Object.isFrozen(removal.releasedClaims)).toBe(true)
+    const claims = (soleOperation(test, 'team/member-removed').data as { claims: readonly unknown[] }).claims
+    expect(Object.isFrozen(claims)).toBe(true)
+    const original = [...claims]
+    expect(() => (claims as unknown[]).push({ ...original[0]! })).toThrow()
+    expect(claims).toHaveLength(original.length)
+  })
 })
 
 describe('AgentTeam Member archival ledger', () => {
