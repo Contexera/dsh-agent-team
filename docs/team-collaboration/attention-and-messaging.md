@@ -19,6 +19,8 @@ Both Thread faces render one follow control: its pressed state is read from the 
 
 That set is every Member whose Attention is on the Thread, so the control's question is never "is anyone following?": a set holding other Members reads as not followed exactly as an empty one does. The id comes from the Host's own projection, and until it arrives the control's standing stays unanswered rather than guessing one — a guess would let another Member's Attention be read as the Human's. The same set still ranks the composer's mention candidates whole, which is why the fix reads one row out of it instead of replacing it.
 
+The standing is re-read from the Host, not decided once. Every observation the control receives becomes the standing, so a change another face or another client makes reaches the button without the Human touching it. A write's requestId serves one answer and is then dropped, scoped to the action and the Thread: a cached id would make the Host answer the next write from its idempotency cache with the earlier result, leaving the button claiming a standing the Host's follower set does not hold.
+
 The control says its standing before it says its action. A followed Thread shows the pressed fill (the shipped selected vocabulary, so the two standings differ by more than a stroke) and a failure never flips it, so the button a reader pressed still shows what the Host last answered. Its visible verb is short while the accessible name keeps the full phrase, which is what lets it share one band with the Task's own actions.
 
 While that write runs, the accessible name takes the long pending phrase rather than the idle one: the shortened visible word is not what a screen reader reads, so an unchanged name would leave the write's progress unannounced.

@@ -68,7 +68,9 @@ export function useThreadFollow(
   const [following, setFollowing] = useState<boolean | undefined>()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | undefined>()
-  // The requestId a retry reuses: the Host answers a repeated id from its idempotency cache, so a lost answer converges instead of writing twice.
+  // The requestId a lost answer retries with, keyed by action and Thread: the Host answers a repeated
+  // id from its idempotency cache, so a retry converges instead of writing twice. An id that the Host
+  // has answered is dropped — the next write is a new operation, not a replay of the last one.
   const requestIds = useRef(new Map<string, AgentTeamRequestId>())
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
@@ -99,18 +101,24 @@ export function useThreadFollow(
     if (pending) return
     setPending(true)
     setError(undefined)
-    const requestId = requestIds.current.get(action) ?? mintRequestId()
-    requestIds.current.set(action, requestId)
+    const key = `${action}:${request.threadRef ?? request.taskRef ?? ''}`
+    const requestId = requestIds.current.get(key) ?? mintRequestId()
+    requestIds.current.set(key, requestId)
     try {
       const result = await changeAttention({ requestId, workspaceId: request.workspaceId, ...(request.threadRef === undefined ? {} : { threadRef: request.threadRef }), ...(request.taskRef === undefined ? {} : { taskRef: request.taskRef }), action })
       if (!mounted.current) return
-      if (!result.ok) { setError(result.error.message); return }
+      if (!result.ok) { setError(result.error.message); requestIds.current.delete(key); return }
+      // The Host answered, so this id has played its part: keeping it would make the next write on
+      // this action replay the old one instead of committing a new change of standing.
+      requestIds.current.delete(key)
       // The result carries the durable Attention row, present after a follow and absent after an
       // unfollow. The re-read that follows re-projects the whole follower set, which is what the
       // other face of the Thread reads too — so both faces agree without either keeping a copy.
       setFollowing(result.value.attention !== undefined)
       await refresh()
     } catch (cause) {
+      // The answer never arrived, so the id stays cached: a retry reuses it and converges on the
+      // Host's own record of the write instead of issuing a second one.
       if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       if (mounted.current) setPending(false)

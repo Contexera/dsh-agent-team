@@ -485,8 +485,15 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // the way the Host's own projection makes it visible.
   let attentionFailure: string | undefined
   const failAttention = (message?: string): void => { attentionFailure = message }
+  // The Host's idempotency: a repeated requestId answers the result that request
+  // first committed, rather than the state a fresh write would produce now. The
+  // double has to honour that, or a Client bug that reuses an id after the
+  // standing changed reads here as a success.
+  const attentionByRequest = new Map<string, { readonly receipt: {}; readonly thread: { revision: number }; readonly attention?: unknown }>()
   const changeAttention = vi.fn(async (request: { requestId: string; workspaceId: string; threadRef?: string; taskRef?: string; action: 'follow' | 'unfollow' }) => {
     if (attentionFailure !== undefined) return { ok: false as const, error: { message: attentionFailure } }
+    const replayed = attentionByRequest.get(request.requestId)
+    if (replayed !== undefined) return { ok: true as const, value: replayed }
     const followed = threadFollowers.includes('member:human')
     if (request.action === 'follow' && !followed) threadFollowers.push('member:human')
     // Mutated in place: an observation read holds this same array, so a
@@ -497,11 +504,13 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     wakeAll()
     // An Attention write is not a Thread revision: the Host's own result carries the Thread
     // unchanged, which is why the control's own state comes from the row and the re-read.
-    return { ok: true as const, value: {
+    const committed = {
       receipt: {}, thread,
       // Present after follow, absent after unfollow: the result's own answer to what happened.
       ...(request.action === 'follow' ? { attention: { threadRef: request.threadRef, taskRef: request.taskRef, memberId: 'member:human', action: 'follow' } } : {}),
-    } }
+    }
+    attentionByRequest.set(request.requestId, committed)
+    return { ok: true as const, value: committed }
   })
   // The Task transfer double answers one seeded outcome per call, so a spec drives the
   // committed, unread, stale, and failed branches without a second Host double.

@@ -18,6 +18,7 @@ Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默
 当前 Thread surface 展示 public revisioned facts，并且仅在存在时展示 Task status、Claims 和 runtime risk。Thread 的两个面都渲染同一个 follow/unfollow 控件：按下状态读自 Host 的当前关注者集合中属于 Human 自己 memberId 的那一条，写入走 Human `changeAttention` Remote，不做乐观翻转；Human-only 的 follow/unfollow observations 历史本身不作渲染。
 
 这个集合装的是每个对该 Thread 开着 Attention 的 Member，所以控件问的从来不是「有没有人在关注」：集合里只有别人时，读出来和空集合一样是未关注。memberId 来自 Host 自己的投影；它还没到达时，控件的状态保持未回答，而不是猜一个——猜就会把别人的 Attention 读成 Human 的。同一个集合仍然整体参与 composer 的 mention 候选排序，所以这次修的是从集合里读出属于 Human 的那一行，而不是换掉这个集合。
+状态是每次从 Host 重读得出的，不是一次定死。控件收到的每一次 observation 都成为当前状态，所以另一个面或另一个客户端改出的关注变化会到达按钮，不需要 Human 去点它。一次写入的 requestId 只服务一个回答，用过即弃，并按 action 与 Thread 限定：留着的 id 会让 Host 用幂等缓存里早先那次的结果回答下一次写入，于是按钮显示的关注状态与 Host 自己的关注者集合并不一致。
 
 这个控件先说自己处在哪个状态，再说自己要做什么。已关注的 Thread 显示按下底色（shipped 的选中语汇，让两种状态差的是一条描边之外的东西）；写入失败不会翻转它，因此读者刚按下的那个按钮仍然显示 Host 最后一次回答的状态。可见动词很短，而无障碍名保留完整短语——正因如此它才能和 Task 自己的动作共用一条带。写入进行中时，该名取长句式而不是空闲那句：读屏读的不是收短后的可见词，名字不变就等于不宣布这次写入的进度。
 

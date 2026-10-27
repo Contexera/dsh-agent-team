@@ -156,6 +156,42 @@ describe('Team Human Attention and Task transfer controls', () => {
     await b.runtime.dispose()
   })
 
+  it('commits a fresh follow after an unfollow instead of replaying the first one', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    fireEvent.click(await b.view.findByRole('button', { name: '关注此 Thread' }))
+    await waitFor(() => expect(b.changeAttention).toHaveBeenCalledTimes(1))
+    expect(await b.view.findByRole('button', { name: '取消关注此 Thread' })).toBeTruthy()
+    fireEvent.click(b.view.getByRole('button', { name: '取消关注此 Thread' }))
+    await waitFor(() => expect(b.changeAttention).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(b.view.queryByRole('button', { name: '取消关注此 Thread' })).toBeNull())
+    // Following again must be a new operation, not the first one replayed. The Host
+    // answers a requestId it has already committed from its cache — so a reused id
+    // would hand back the first follow's row and leave the button claiming a
+    // standing the Host's own follower set does not hold.
+    fireEvent.click(b.view.getByRole('button', { name: '关注此 Thread' }))
+    await waitFor(() => expect(b.changeAttention).toHaveBeenCalledTimes(3))
+    const ids = b.changeAttention.mock.calls.map(call => call[0].requestId)
+    expect(new Set(ids).size).toBe(3)
+    expect((await b.view.findByRole('button', { name: '取消关注此 Thread' })).getAttribute('aria-pressed')).toBe('true')
+    await b.runtime.dispose()
+  })
+
+  it('follows the Host observation when another face changes the standing', async () => {
+    const b = await seedThreadPage({ seedFollowers: [] })
+    await b.view.findByRole('button', { name: '关注此 Thread' })
+    // Another face — the discussion panel, or a second client — follows this Thread.
+    // The Host projects it, and the subscription tick is what carries it here.
+    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers: ['member:human'] } }))
+    b.publishProjectUpdate()
+    // The control paints what the Host last answered, without the Human touching it.
+    await waitFor(() => expect(b.view.queryByRole('button', { name: '取消关注此 Thread' })).not.toBeNull())
+    // And it stays in step the other way: stepping back must be offered as an unfollow.
+    b.threadObservations.mockImplementation(async () => ({ ok: true as const, value: { items: [], followers: [] } }))
+    b.publishProjectUpdate()
+    await waitFor(() => expect(b.view.queryByRole('button', { name: '取消关注此 Thread' })).toBeNull())
+    await b.runtime.dispose()
+  })
+
   it('hands an open Task to a Project owner the Host projected and merges the transfer activity', async () => {
     const b = await seedThreadPage({ seedFollowers: [] })
     seedProjectOwner(b)

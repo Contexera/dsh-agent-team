@@ -291,7 +291,6 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
     setProjectView(undefined)
     setMembers([])
     setFollowerIds(new Set())
-    setObservedFollowers(new Set())
     setCurrentFacts([])
     setTaskCards([])
     currentFactsRef.current = []
@@ -338,11 +337,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
         // A rejected or refused history read must not take the only way back to older facts with it: pressing the affordance pages under its own error surface.
         setHistoryHasMore(true)
       }
-      if (observations !== undefined && observations.ok) {
-        const observed = new Set(observations.value.followers)
-        setFollowerIds(observed)
-        setObservedFollowers(observed)
-      }
+      if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
       setError(undefined)
       setLoading(false)
       await drainUnread()
@@ -661,8 +656,10 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   // issuing a second read for the same state. That set is every Member's Attention, so the control is also
   // told which id is the Human's: the Host projects it, and it is what keeps another Member's follow from
   // reading as the Human's own.
-  const [observedFollowers, setObservedFollowers] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
-  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, observedFollowers, projectView?.humanMemberId)
+  // The page hands in the same follower set it refreshes for the composer, so a change another face or
+  // another client makes reaches the control: the set is re-read on every subscription tick, not only on
+  // the mount read that seeded it.
+  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, followerIds, projectView?.humanMemberId)
   const [transferMenuOpen, setTransferMenuOpen] = useState(false)
   const transfer = useTaskTransfer(transferTask, {
     workspaceId,
