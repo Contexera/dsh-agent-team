@@ -191,6 +191,27 @@ function requestId(agentId: string, callId: string): AgentTeamRequestId {
   return `agent-team:tool:${agentId}:${callId}` as AgentTeamRequestId
 }
 
+/**
+ * Some models fill every optional parameter slot with `""` (or a zero count) instead
+ * of omitting it, and every guard below asks `!== undefined`. Normalizing blanks to
+ * "not passed" at the entry keeps those guards honest and the address parameters
+ * resolvable, without weakening the guards for genuinely malformed values. Only
+ * address/selection parameters are normalized — `body` and `direction` are content,
+ * where an empty string is a real error the tool must report, not a missing field.
+ */
+function blankToAbsent<T extends { readonly [key: string]: unknown }>(args: T, keys: readonly string[]): T {
+  const copy: Record<string, unknown> = { ...args }
+  for (const key of keys) {
+    const value = copy[key]
+    if (value === '' || value === 0 || value === false) delete copy[key]
+  }
+  return copy as T
+}
+
+/** The address/selection parameters every Team tool treats as optional presence. */
+const OPTIONAL_ADDRESS_KEYS = ['projectRef', 'threadRef', 'taskRef', 'messageRef', 'replyToMessageRef',
+  'claimRef', 'memberRef', 'accountable', 'target', 'beforeSequence', 'limit', 'cursor', 'mine', 'baseRevision'] as const
+
 /** One fact as a rejection render receives it: the read fields with tag fields widened to plain strings, because the tool's output schema types `kind` as a string rather than a literal union. */
 type RejectedFact = {
   readonly sequence: number
@@ -298,7 +319,8 @@ const teamInbox = defineTool({
       ].join('\n') }]
     },
   },
-  async execute(args, exec) {
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_inbox requires an Agent session')
     const host = service(agent)
@@ -345,7 +367,8 @@ const teamAttention = defineTool({
       return [{ type: 'text', text: `${source}\nAttention status — ${value.following ? 'following' : 'not following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
     },
   },
-  async execute(args, exec) {
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_attention requires an Agent session')
     const host = service(agent)
@@ -491,7 +514,8 @@ const teamThread = defineTool({
       return [{ type: 'text', text: lines.join('\n') }]
     },
   },
-  async execute(args, exec) {
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_thread requires an Agent session')
     const host = service(agent)
@@ -691,13 +715,15 @@ const teamDm = defineTool({
       return [{ type: 'text', text: `Delivered — DM to @${value.recipientHandle} (${value.recipientMemberId})${value.occurredAt === undefined ? '' : ` at ${formatTeamTimestamp(value.occurredAt)}`}.` }]
     },
   },
-  async execute(args, exec) {
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_dm requires an Agent session')
         // A stray field is refused rather than ignored: a model reaching for a Thread write's shape meant a Thread reply, and dropping the field would send a private note where shared work was intended. Hand-written because the harness compiles parameter tables to `{type, properties, required}` with no `additionalProperties`, so no schema can refuse an unnamed key. Not redundant.
     const stray = Object.keys(args).filter(key => key !== 'memberRef' && key !== 'body' && key !== 'workspace')
     if (stray.length > 0) throw new Error(`team_dm does not accept ${stray.join(', ')}; it takes memberRef and body only — a DM addresses a person, so shared work belongs in a team_message reply.`)
     if (args.memberRef === undefined) throw new Error(recoveryFor('dm_requires_member').sentence({}))
+    if (typeof args.body !== 'string' || args.body.trim() === '') throw new Error(`team_dm needs the message text in its body parameter — a blank or missing body is usually the text landing in the reply channel instead. Put the full message in body and resend.`)
     try {
       const result = await service(agent).dmForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
         recipientMemberId: args.memberRef as AgentTeamMemberId, body: args.body })
@@ -772,13 +798,15 @@ const teamMessage = markAgentTeamPreset(defineTool({
       ? { kind: value.kind, threadRef: value.threadRef, ...(value.taskRef === undefined ? {} : { taskRef: value.taskRef }) }
       : { kind: value.kind },
   },
-  async execute(args, exec) {
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_message requires an Agent session')
     const host = service(agent)
     const rawPaths = args.attachments
     const attachmentPaths = Array.isArray(rawPaths) ? rawPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '') : undefined
     const paths = attachmentPaths !== undefined && attachmentPaths.length > 0 ? { attachmentPaths } : {}
+    if (typeof args.body !== 'string' || args.body.trim() === '') throw new Error(`team_message needs the message text in its body parameter — a blank or missing body is usually the text landing in the reply channel instead. Put the full message in body and resend.`)
     if (args.action === 'post') {
       if (args.projectRef === undefined || args.taskRef !== undefined || args.threadRef !== undefined || args.baseRevision !== undefined
         || args.kind !== undefined) throw new Error(`post requires projectRef and does not accept threadRef, taskRef, baseRevision, or kind — ${recoveryFor('post_requires_project').sentence({})}`)
@@ -807,7 +835,8 @@ const teamMessage = markAgentTeamPreset(defineTool({
       return messageOutcome(result, 'start')
     }
     const baseRevision = args.baseRevision
-    if ((args.threadRef === undefined && args.taskRef === undefined) || args.projectRef !== undefined || args.kind !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
+    if (args.projectRef !== undefined) throw new Error(`reply does not take projectRef — ${recoveryFor('main_stream_addressing').sentence({ refused: 'projectRef on reply' })}`)
+    if ((args.threadRef === undefined && args.taskRef === undefined) || args.kind !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
       throw new Error(`reply requires threadRef and a positive baseRevision — ${recoveryFor('missing_write_token').sentence({})}`)
     }
     if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'reply', parameter: 'accountable', owner: 'start' }))
@@ -1007,7 +1036,8 @@ const teamTask = defineTool({
       return [{ type: 'text', text: rejectionLines(value as Parameters<typeof rejectionLines>[0]).join('\n') }]
     },
   },
-  async execute(args, exec) {
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_task requires an Agent session')
     const host = service(agent)
@@ -1171,7 +1201,8 @@ const teamView = defineTool({
       return [{ type: 'text', text: lines.join('\n') }]
     },
   },
-  async execute(args, exec) {
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_view requires an Agent session')
     const host = service(agent)
