@@ -10,7 +10,6 @@ import type {
   AgentTeamClaim,
   AgentTeamClaimActivity,
   AgentTeamClaimRef,
-  AgentTeamConfirmationToken,
   AgentTeamDirectMarker,
   AgentTeamMainActivity,
   AgentTeamMainMarker,
@@ -378,26 +377,12 @@ export interface AgentTeamReplyRequest {
   readonly taskRef?: AgentTeamTaskRef
   readonly body: string
   readonly baseRevision: number
-  readonly recipients?: readonly AgentTeamMemberId[]
-  /** The Message this reply answers. The Host refuses an unknown ref or one from another Thread; the parent's author joins the recipients, so answering a Member reaches them. */
+  /** The Message this reply answers. The Host refuses an unknown ref or one from another Thread; the parent's author is delivered to, so answering a Member reaches them. */
   readonly replyToMessageRef?: AgentTeamMessageRef
   /** Agent-supplied absolute file paths, resolved like startThread's. */
   readonly attachmentPaths?: readonly string[] | undefined
   /** Attachment cache IDs from the Human picker, resolved like startThread's. */
   readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
-  readonly confirmationToken?: AgentTeamConfirmationToken
-}
-
-/** A Human must send the same invitation one more time with this token. */
-export interface AgentTeamConfirmationRequired {
-  readonly kind: 'confirmation_required'
-  readonly confirmationToken: AgentTeamConfirmationToken
-  readonly workspaceId: WorkspaceId
-  readonly projectRef: AgentTeamProjectRef
-  readonly recipients: readonly AgentTeamMemberId[]
-  readonly taskRef?: AgentTeamTaskRef
-  readonly threadRef?: AgentTeamThreadRef
-  readonly revision?: number
 }
 
 /** Existing unread work must be read before this Thread mutation can proceed. */
@@ -513,8 +498,7 @@ export interface AgentTeamPostMainMessageRequest {
   readonly workspaceId: WorkspaceId
   readonly projectRef: AgentTeamProjectRef
   readonly body: string
-  readonly recipients?: readonly AgentTeamMemberId[]
-  /** The Main stream Message this answers; its author joins the recipients. */
+  /** The Main stream Message this answers; its author is delivered to. */
   readonly replyToMessageRef?: AgentTeamMessageRef
   readonly attachments?: readonly AgentTeamAttachmentId[] | undefined
   readonly attachmentPaths?: readonly string[] | undefined
@@ -584,7 +568,6 @@ export interface AgentTeamStartThreadRequest {
   readonly projectRef: AgentTeamProjectRef
   readonly kind: 'discussion' | 'task'
   readonly body: string
-  readonly recipients?: readonly AgentTeamMemberId[]
   readonly sourceThreadRefs?: readonly AgentTeamThreadRef[]
   /** Task accountable; absent means the Agent owner creator, or Human for a Human creator. */
   readonly accountable?: AgentTeamMemberId
@@ -606,7 +589,6 @@ export interface AgentTeamReplyCommittedResult {
 
 export type AgentTeamReplyResult =
   | AgentTeamReplyCommittedResult
-  | AgentTeamConfirmationRequired
   | AgentTeamUnreadRequired
   | AgentTeamStaleRevision
   | AgentTeamMemberNotFollowing

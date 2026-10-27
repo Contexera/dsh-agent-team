@@ -39,7 +39,7 @@ threshold 按 Member × Thread 统计未投递的 ordinary facts。达到 5 条�
 Task reminder 只在当前 durable 条件仍成立时参与投递。读取会从 Inbox 和唤醒计划中过滤已失效提醒，但不改写 ledger；具体条件与读取规则见 [model-and-time.zh.md](model-and-time.zh.md)。
 
 ## Mentions
-Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention。匹配按 Project 内可寻址的名字，做大小写不敏感、Unicode 词边界、长名优先。因此 Client 渲染成 chip 的那个名字正是送达的那个名字。裸 handle 仍是普通散文，代码块或行内代码里的 handle 是引用而非呼叫。`@all` 在规则版本 2 下是普通文本：不通知任何人，需要触达的 Member 都要逐一点名。请求同时携带显式的 `recipients` 列表，Host 按同一套可寻址集合规范化它，并在投递前与正文 mention 取并集——提交时二者是一个收件人集合，不是两个权威：`recipients` 里正文没写的名字照样送达，集合之外的名字是被拒绝的目标而不是散文。无论 Human 在 Web Client 撰写还是 Agent 通过 `team_message` 撰写，Host 都解析正文。Human 也以同样方式寻址，即 `@human`——跨改名永久有效的别名，任何 agent handle 不得占用该字面。
+Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention。匹配按 Project 内可寻址的名字，做大小写不敏感、Unicode 词边界、长名优先。因此 Client 渲染成 chip 的那个名字正是送达的那个名字。裸 handle 仍是普通散文，代码块或行内代码里的 handle 是引用而非呼叫。`@all` 在规则版本 2 下是普通文本：不通知任何人，需要触达的 Member 都要逐一点名。请求不携带任何收件人列表：正文是唯一的投递依据，正文点到的名字就是全部收件人，回复时再加上父消息的作者。正文没写的名字不会被送达；写到可寻址集合之外的 Member，那串文字只当普通散文。无论 Human 在 Web Client 撰写还是 Agent 通过 `team_message` 撰写，Host 都解析正文。Human 也以同样方式寻址，即 `@human`——跨改名永久有效的别名，任何 agent handle 不得占用该字面。
 
 mention——在开 Thread、回复或 Main stream 发言中——只把这条 Message 送达被点名的 Member 一次，绝不开始或恢复 Attention：是否 follow 是 Member 自己的显式决定。Project 内每个可寻址的 Member 都可以被点名，不存在邀请环节。Agent 可以 mention Human，但不会因此让 Human 成为 follower。
 

@@ -99,7 +99,7 @@ describe('post-commit delivery', () => {
     const before = ctx.agentTeam.status().sequence
     // The message commits durably; only the recipient's wake fails afterwards.
     const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('wake-fail'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'Needs a look', recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body: `@${member.handle} needs a look` })
     expect(sent.kind).toBe('committed')
     if (sent.kind !== 'committed') return
     // Exactly one operation landed: the failure is not a second write or a rollback.
@@ -132,7 +132,7 @@ describe('post-commit delivery', () => {
     // touches the Member rederives the same durable Inbox facts and delivers.
     state.fail = false
     const second = await ctx.agentTeam.reply({ requestId: requestId('wake-recover'), workspaceId: alpha,
-      threadRef: sent.thread.threadRef, body: 'Following up', recipients: [member.memberId], baseRevision: sent.thread.revision })
+      threadRef: sent.thread.threadRef, body: `@${member.handle} following up`, baseRevision: sent.thread.revision })
     expect(second.kind).toBe('committed')
     if (second.kind !== 'committed') return
     expect(state.calls).toHaveLength(1)
@@ -162,7 +162,7 @@ describe('post-commit delivery', () => {
     const lines = (spy: typeof info): string[] => spy.mock.calls.map(args => String(args[0]))
 
     const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('duplicate-send'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'Needs a look', recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body: `@${member.handle} needs a look` })
     expect(sent.kind).toBe('committed')
     expect(state.calls).toHaveLength(1)
     expect(lines(info).filter(line => line.includes('Team Inbox notice queued'))).toHaveLength(1)
@@ -211,7 +211,7 @@ describe('post-commit delivery', () => {
     expect(owner).toMatchObject({ type: 'text', text: expect.stringContaining('made you an owner of Project engineering') })
 
     const posted = await ctx.agentTeam.postMainMessage({ requestId: requestId('main-post'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'Over to you', recipients: [member.memberId] })
+      body: `@${member.handle} over to you` })
     expect(posted.kind).toBe('committed')
     const mention = state.calls.at(-1)?.content[0]
     expect(mention).toMatchObject({ type: 'text', text: expect.stringContaining('Direct Main stream mention') })

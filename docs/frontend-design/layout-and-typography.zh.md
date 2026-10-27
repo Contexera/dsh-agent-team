@@ -18,7 +18,7 @@
 - 阅读类是 flex 列，`margin: auto` 本来就有纵向效力；看板与讨论面板是普通 block 滚动容器，`margin: auto` 的纵向那一半会解析成 0。让盒子自己去占住空白区，才是两族容器都落在中间的原因——否则加载态在那两个 block 面上贴顶。
 - 父容器高度不确定时百分比解析成 `auto`，`margin: auto` 仍能居中，所以哪一族都不依赖另一族的机制。
 - 侧栏两个面板（Agents/Projects）都订阅 `{kind:'workspace'}` 变更。`TeamChangeStream` 在每个页面内按 scope 共享一个流式订阅，每次开场或重连基线都触发补读，之后响应匹配的通知。Project 刷新成功后清除加载错误，不清除无关的操作错误。
-- 发送幂等：Project 顶层发送与 Thread reply 一致按 requestId 幂等。Project composer 的「作为任务」是默认关闭的原生 pressed control。chip 自绘，任何宽度都保留文字。选中态为 primary 底色，hover 不改变按压底色。形态与座位见设计语言表的「模式控件」行。新发送显式携带 taskless 意图，选中时才原子创建 Task。`committed` 与确定性拒绝（如 `unread_required`、`stale_revision`）后换新 id。`confirmation_required` 保留同 id 续发同一操作。传输异常保留 id 以便安全重试（Host 按 requestId 去重并返回原结果）。成功发送后「作为任务」复位为关闭。
+- 发送幂等：Project 顶层发送与 Thread reply 一致按 requestId 幂等。Project composer 的「作为任务」是默认关闭的原生 pressed control。chip 自绘，任何宽度都保留文字。选中态为 primary 底色，hover 不改变按压底色。形态与座位见设计语言表的「模式控件」行。新发送显式携带 taskless 意图，选中时才原子创建 Task。`committed` 与确定性拒绝（如 `unread_required`、`stale_revision`）后换新 id。传输异常保留 id 以便安全重试（Host 按 requestId 去重并返回原结果）。成功发送后「作为任务」复位为关闭。
 
 ## 排版与身份
 | 元素 | 规格 |

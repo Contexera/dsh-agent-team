@@ -86,9 +86,9 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
 
     // A real commit that names the Member, which is what makes the fact direct.
-    const body = 'please review this before the release'
+    const body = '@reader please review this before the release'
     const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('direct'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body, recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body })
     expect(sent.kind).toBe('committed')
     if (sent.kind !== 'committed') return
     // The Host rendered and delivered one notice.
@@ -115,10 +115,10 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
 
     // A commit that does not name the Member. An ordinary update only reaches a
-    // Member who follows the Thread, so the Member is named once in the anchor
-    // and then follows explicitly, and the update is ordinary.
+    // Member who follows the Thread, so the Member follows explicitly and the
+    // update is ordinary.
     const anchor = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('anchor'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'anchor for the ordinary case', recipients: [member.memberId] })
+      projectRef: project.project.projectRef, body: 'anchor for the ordinary case' })
     expect(anchor.kind).toBe('committed')
     if (anchor.kind !== 'committed') return
     await ctx.agentTeam['ledger']!.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, threadRef: anchor.thread.threadRef,
@@ -133,8 +133,8 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     if (sent.kind !== 'committed') return
     expect(state.calls).toHaveLength(1)
 
-    // The Member now holds two unread facts: the anchor that named them (a
-    // direct mention) and the ordinary reply that named nobody.
+    // The Member holds one unread fact: the ordinary reply that named nobody.
+    // The anchor predates the follow, so it is not one of them.
     const unread = ctx.agentTeam['ledger']!.notificationFacts(member.memberId).flatMap(entry => entry.facts)
     const ordinary = unread.filter(entry => !entry.direct)
     expect(ordinary).toHaveLength(1)

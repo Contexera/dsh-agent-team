@@ -36,9 +36,6 @@ export type AgentTeamActivityRef = Branded<'AgentTeamActivityRef'>
 /** Opaque, restorable reference to one completed-turn context checkpoint in a Member's private Session lineage. The ref is the selection authority; the name is display only. */
 export type AgentTeamContextCheckpointRef = Branded<'AgentTeamContextCheckpointRef'>
 
-/** Process-local one-use authorization for one Human invitation. */
-export type AgentTeamConfirmationToken = Branded<'AgentTeamConfirmationToken'>
-
 /** Snapshot of the Human authority authorized for an operation. */
 export interface AgentTeamHumanActor {
   readonly kind: 'human'

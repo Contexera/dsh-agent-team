@@ -130,7 +130,7 @@ export function TeamMainStream({
 
   const send = async (): Promise<void> => {
     // Read at send time: this page does not subscribe to the draft.
-    const { draft, recipients } = drafts.getSnapshot(draftKey)
+    const { draft } = drafts.getSnapshot(draftKey)
     if (pending || draft.trim() === '') return
     const requestId = pendingSendId.current ?? mintRequestId()
     pendingSendId.current = requestId
@@ -143,7 +143,7 @@ export function TeamMainStream({
         return
       }
       const content = {
-        requestId, workspaceId, projectRef, body: draft.trim(), recipients: [...recipients].sort(),
+        requestId, workspaceId, projectRef, body: draft.trim(),
         ...(upload.attachmentIds.length === 0 ? {} : { attachments: upload.attachmentIds }),
       }
       const starting = startingThread

@@ -1,10 +1,9 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useMemo, useRef, useState } from 'react'
 import type {
   AgentTeamProjectRef,
   AgentTeamClientMemberStatus,
   AgentTeamMemberId,
   AgentTeamMessageRef,
-  AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadFact,
   AgentTeamThreadRef,
@@ -12,17 +11,17 @@ import type {
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { Button, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
-import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
+import type { TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { TeamPanelHandle } from './TeamPanelHandle.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { formatActivity, mentionedMemberIds } from './team-formatters.ts'
-import { factKey, mergeFacts, messageFact, minSequence, stableMentionNames } from './thread-facts.ts'
-import { mintRequestId, uploadComposerFiles } from './requests.ts'
+import { formatActivity } from './team-formatters.ts'
+import { factKey, mergeFacts, messageFact, stableMentionNames } from './thread-facts.ts'
 import { chunkRunsWithDays } from './team-separators.ts'
-import { useTimelineScroll } from './timeline-scroll.ts'
-import { cachedResolvedMessageRef, hostMessageRefLookup, hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, resolveUnknownMessageRefs, useResolvedMessageRefVersion, type ResolvedMemberRef } from './refs.ts'
+import { cachedResolvedMessageRef, useResolvedMessageRefVersion } from './refs.ts'
+import { hostTaskRefLookup, hostThreadRefLookup, jumpToTaskThread, jumpToThread, type ResolvedMemberRef } from './refs.ts'
 import { useThreadFollow } from './thread-actions.ts'
+import { useTeamThreadController } from './thread-controller.ts'
 import projectCss from './project.module.css'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
@@ -71,211 +70,13 @@ interface TeamProjectPanelProps {
 const factSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined => fact.kind === 'message' ? fact.message.sender : undefined
 const factOccurredAt = (fact: AgentTeamThreadFact): string | undefined => fact.kind === 'message' ? fact.message.occurredAt : undefined
 
-type ReadProjection = Awaited<ReturnType<TeamProjectPanelProps['readThread']>> extends infer Result
-  ? Result extends { ok: true; value: infer Value } ? Value : never
-  : never
-
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
 export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, subscribeChanges, selectThread, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
-  const threadRequest = { threadRef }
-  const [projection, setProjection] = useState<ReadProjection>()
-  const [followerIds, setFollowerIds] = useState<ReadonlySet<AgentTeamMemberId>>(() => new Set())
-  const [currentFacts, setCurrentFacts] = useState<readonly AgentTeamThreadFact[]>([])
-  const [olderFacts, setOlderFacts] = useState<readonly AgentTeamThreadFact[]>([])
-  const [historyCursor, setHistoryCursor] = useState<number>()
-  const [historyHasMore, setHistoryHasMore] = useState(false)
-  // A read acknowledges at most 20 unread facts, so the cap stops a
-  // pathological feed from looping without bound.
-  const MAX_AUTO_READ_ROUNDS = 50
-  const [autoReadExhausted, setAutoReadExhausted] = useState(false)
-  // The Thread page's draft key, so a draft continues across both faces.
-  const draftKey: TeamDraftKey = `thread:${threadRef}`
-  const [replyRequestId, setReplyRequestId] = useState<AgentTeamRequestId>()
-  const [pending, setPending] = useState(false)
-  const [mutating, setMutating] = useState<'promote' | undefined>()
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string>()
-  const [pendingFiles, setPendingFiles] = useState<readonly File[]>([])
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
-  const [replyTarget, setReplyTarget] = useState<AgentTeamMessageRef>()
-  const mountedRef = useRef(false)
+  // The promote button's own label: a reply send also raises the shared `pending` gate, and must not retitle it.
+  const [mutating, setMutating] = useState<'promote' | undefined>()
   const rootRef = useRef<HTMLElement | null>(null)
-  const currentFactsRef = useRef<readonly AgentTeamThreadFact[]>([])
-  const sequenceRef = useRef(0)
-  const readRequestIdRef = useRef<AgentTeamRequestId>(mintRequestId())
-  const projectionRef = useRef<ReadProjection>()
-  const mutationRequests = useRef(new Map<string, AgentTeamRequestId>())
-  const threadLastFact = currentFacts[currentFacts.length - 1]
-  const timeline = useTimelineScroll(`${currentFacts.length}:${olderFacts.length}:${threadLastFact === undefined ? '' : factKey(threadLastFact)}`)
 
-  const updateProjection = (next: ReadProjection): void => {
-    projectionRef.current = next
-    setProjection(next)
-    const anchor = messageFact(next.anchor, next.anchorMentions)
-    const batch = [anchor, ...next.facts.map(fact => fact.fact)]
-    setCurrentFacts(current => {
-      const merged = mergeFacts(current, batch)
-      currentFactsRef.current = merged
-      return merged
-    })
-  }
-
-  const readCurrent = async (newRequest = false): Promise<boolean> => {
-    if (!mountedRef.current) return false
-    if (newRequest) readRequestIdRef.current = mintRequestId()
-    const sequence = sequenceRef.current + 1
-    sequenceRef.current = sequence
-    setLoading(true)
-    try {
-      const result = await readThread({ requestId: readRequestIdRef.current, workspaceId, ...threadRequest })
-      if (!mountedRef.current || sequence !== sequenceRef.current) return false
-      if (!result.ok) { setError(result.error.message); return false }
-      updateProjection(result.value)
-      setError(undefined)
-      onRead(threadRef)
-      return true
-    } catch (cause) {
-      if (mountedRef.current && sequence === sequenceRef.current) setError(cause instanceof Error ? cause.message : String(cause))
-      return false
-    } finally {
-      if (mountedRef.current && sequence === sequenceRef.current) setLoading(false)
-    }
-  }
-
-  // Each round mints a fresh requestId: the Host replays a repeated id from its
-  // idempotency cache, which would return the same batch forever.
-  const drainUnread = async (): Promise<void> => {
-    for (let round = 1; round <= MAX_AUTO_READ_ROUNDS; round += 1) {
-      const snapshot = projectionRef.current
-      if (snapshot === undefined || snapshot.remainingUnreadCount <= 0) return
-      const beforeSequence = sequenceRef.current
-      if (!await readCurrent(true)) return
-      if (!mountedRef.current || sequenceRef.current !== beforeSequence + 1) return
-      if (projectionRef.current?.remainingUnreadCount === snapshot.remainingUnreadCount) return
-    }
-    setAutoReadExhausted(true)
-  }
-
-  const refreshPassiveFacts = async (): Promise<void> => {
-    try {
-      const result = await loadThreadHistory({ workspaceId, ...threadRequest, limit: 100 })
-      if (!mountedRef.current || !result.ok) return
-      const incoming = result.value.facts
-      const shown = currentFactsRef.current
-      if (shown.length === 0) return
-      const known = new Set(shown.map(fact => factKey(fact)))
-      const newestShown = shown.reduce((maximum, fact) => Math.max(maximum, fact.sequence), 0)
-      const additions = incoming.filter(fact => !known.has(factKey(fact)) && fact.sequence > newestShown)
-      setCurrentFacts(current => {
-        const merged = mergeFacts(current, incoming)
-        currentFactsRef.current = merged
-        return merged
-      })
-      setProjection(current => {
-        const next = current === undefined ? current : { ...current, ...(result.value.task === undefined ? {} : { task: result.value.task }), thread: result.value.thread, claims: result.value.claims }
-        if (next !== undefined) projectionRef.current = next
-        return next
-      })
-      if (additions.length === 0) return
-      await readCurrent(true)
-    } catch {
-    }
-  }
-
-  // Follower ranking is an enhancement: a failed read leaves roster order.
-  const refreshFollowers = async (): Promise<void> => {
-    try {
-      const result = await threadObservations({ workspaceId, ...threadRequest })
-      if (!mountedRef.current || !result.ok) return
-      setFollowerIds(new Set(result.value.followers))
-    } catch {
-    }
-  }
-
-  useEffect(() => {
-    mountedRef.current = true
-    projectionRef.current = undefined
-    setProjection(undefined)
-    setFollowerIds(new Set())
-    setCurrentFacts([])
-    currentFactsRef.current = []
-    setOlderFacts([])
-    setHistoryCursor(undefined)
-    setHistoryHasMore(false)
-    setAutoReadExhausted(false)
-    setError(undefined)
-    const sequence = sequenceRef.current + 1
-    sequenceRef.current = sequence
-    setLoading(true)
-    void (async () => {
-      const [read, history, observations] = await Promise.all([
-        readThread({ requestId: readRequestIdRef.current, workspaceId, ...threadRequest }),
-        loadThreadHistory({ workspaceId, ...threadRequest, limit: 20 }).catch(() => undefined),
-        threadObservations({ workspaceId, ...threadRequest }).catch(() => undefined),
-      ])
-      if (!mountedRef.current || sequence !== sequenceRef.current) return
-      if (!read.ok) {
-        setError(read.error.message)
-        setLoading(false)
-        return
-      }
-      updateProjection(read.value)
-      onRead(threadRef)
-      timeline.scrollToBottom()
-      if (history !== undefined && history.ok) {
-        setCurrentFacts(current => {
-          const merged = mergeFacts(current, history.value.facts)
-          currentFactsRef.current = merged
-          return merged
-        })
-        setHistoryCursor(history.value.cursor)
-        setHistoryHasMore(history.value.hasMore)
-      } else {
-        setHistoryHasMore(true)
-      }
-      if (observations !== undefined && observations.ok) setFollowerIds(new Set(observations.value.followers))
-      setError(undefined)
-      setLoading(false)
-      await drainUnread()
-    })()
-    const disposers = [
-      subscribeChanges({ kind: 'thread', threadRef }, update => {
-        if (!mountedRef.current) return
-        if (update.type === 'failed') { setError(update.message); return }
-        void refreshPassiveFacts()
-        void refreshFollowers()
-      }),
-    ]
-    return () => {
-      mountedRef.current = false
-      sequenceRef.current += 1
-      for (const dispose of disposers) dispose()
-    }
-  }, [workspaceId, threadRef])
-
-  const loadOlder = async (): Promise<void> => {
-    if (historyHasMore === false && historyCursor === undefined) return
-    const beforeSequence = historyCursor ?? minSequence(currentFactsRef.current)
-    if (beforeSequence === undefined) return
-    setLoading(true)
-    try {
-      const result = await loadThreadHistory({ workspaceId, ...threadRequest, beforeSequence, limit: 20 })
-      if (!mountedRef.current) return
-      if (!result.ok) { setError(result.error.message); return }
-      setOlderFacts(current => mergeFacts(current, result.value.facts))
-      setHistoryCursor(result.value.cursor)
-      setHistoryHasMore(result.value.hasMore)
-      setError(undefined)
-    } catch (cause) {
-      if (mountedRef.current) setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      if (mountedRef.current) setLoading(false)
-    }
-  }
-
-  const task = projection?.task
-  const thread = projection?.thread
-  const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
   const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
 
   const memberName = (memberId: AgentTeamMemberId): string => {
@@ -283,6 +84,22 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
     const status = members.find(candidate => candidate.member.memberId === memberId)
     return status === undefined ? t('memberUnknown') : `@${status.member.handle}`
   }
+
+  const controller = useTeamThreadController({
+    workspaceId, threadRef, readThread, loadThreadHistory, threadObservations, subscribeChanges, resolveMessageRefs, reply, drafts, putAttachment,
+    projectMembers: () => projectMembers,
+    memberName, t,
+    onRead: () => { onRead(threadRef) },
+  })
+
+  const {
+    projection, task, thread,
+    currentFacts, olderFacts, followerIds, historyHasMore, loading, error, pending, autoReadExhausted,
+    replyTarget, replyTo, pendingFiles, draftKey, timelineRef,
+    readCurrent, loadOlder, retryAutoRead, onTimelineScroll, setReplyTarget, setPendingFiles, clearSendState, sendReply, commit,
+  } = controller
+
+  const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
 
   const openRef = useCallback((ref: string): void => {
     if (ref.startsWith('project:')) {
@@ -301,13 +118,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
 
   const lookupTaskRefs = useMemo(() => hostTaskRefLookup(resolveTaskRefs, workspaceId), [resolveTaskRefs, workspaceId])
   const lookupThreadRefs = useMemo(() => hostThreadRefLookup(resolveThreadRefs, workspaceId), [resolveThreadRefs, workspaceId])
-  const lookupMessageRefs = useMemo(() => hostMessageRefLookup(resolveMessageRefs, workspaceId), [resolveMessageRefs, workspaceId])
   const messageRefVersion = useResolvedMessageRefVersion()
-  useEffect(() => {
-    const refs = currentFacts.flatMap(fact => fact.kind === 'message' && fact.message.replyToMessageRef !== undefined ? [fact.message.replyToMessageRef] : [])
-    if (replyTarget !== undefined && !refs.includes(replyTarget)) refs.push(replyTarget)
-    if (refs.length > 0) void resolveUnknownMessageRefs(refs, lookupMessageRefs)
-  }, [currentFacts, replyTarget, lookupMessageRefs, messageRefVersion])
 
   const replyContexts = useMemo(() => {
     const contexts = new Map<AgentTeamMessageRef, { readonly senderName: string; readonly excerpt: string; readonly messageRef: AgentTeamMessageRef }>()
@@ -380,100 +191,25 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
         {block.items.map((entry, entryIndex) => <Fragment key={factKey(entry)}>{renderFact(entry, entryIndex > 0)}</Fragment>)}
       </div>)
 
-  const refreshAfterFence = async (): Promise<void> => {
-    timeline.scrollToBottom()
-    await readCurrent(true)
-    await drainUnread()
-  }
-
-  const convertToTask = async (): Promise<void> => {
-    if (pending || thread === undefined || task !== undefined) return
-    setPending(true)
-    setMutating('promote')
-    setError(undefined)
-    const key = 'promote'
-    const requestId = mutationRequests.current.get(key) ?? mintRequestId()
-    mutationRequests.current.set(key, requestId)
-    try {
-      const result = await promoteThread({ requestId, workspaceId, threadRef, baseRevision: thread.revision })
-      if (!result.ok) { setError(result.error.message); return }
-      if (result.value.kind === 'committed') {
-        mutationRequests.current.delete(key)
-        onPromoted(result.value.task.taskRef)
-      } else if (result.value.kind === 'unread_required') {
-        setError(t('unreadRequired', { count: result.value.unreadCount }))
-        mutationRequests.current.delete(key)
-        await refreshAfterFence()
-      } else {
-        setError(t('staleRevision'))
-        mutationRequests.current.delete(key)
-        await refreshPassiveFacts()
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally {
-      setPending(false)
-      setMutating(undefined)
-    }
-  }
-
   // The same hook the Thread page uses, so the panel's follow control shows the Host's
   // current observation and recovers from a failed write exactly like the other face. The
   // follower set the Host projects is every Member's Attention, so the control is told which
   // id is the Human's — another Member's follow must not read as the Human's own.
-  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, ...threadRequest }, undefined, humanMemberId)
+  const follow = useThreadFollow(changeAttention, threadObservations, { workspaceId, threadRef }, undefined, humanMemberId)
 
-  const clearSendState = useCallback((): void => {
-    setReplyRequestId(current => current === undefined ? current : undefined)
-  }, [])
-
-  const sendReply = async (): Promise<void> => {
-    // The composer owns the draft subscription; a captured render value would be stale.
-    const { draft, recipients } = drafts.getSnapshot(draftKey)
-    if (pending || thread === undefined || draft.trim() === '') return
-    const id = replyRequestId ?? mintRequestId()
-    setReplyRequestId(id)
-    setPending(true)
-    setError(undefined)
+  // The panel's only Task action; the promotion walks the reader into the Task's own Thread.
+  const convertToTask = async (): Promise<void> => {
+    if (pending || thread === undefined || task !== undefined) return
+    setMutating('promote')
     try {
-      const upload = await uploadComposerFiles(putAttachment, workspaceId, pendingFiles)
-      if (!upload.ok) {
-        setError(upload.error)
-        return
-      }
-      const attachmentIds = upload.attachmentIds
-      const result = await reply({ requestId: id, workspaceId, threadRef, ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(replyTarget === undefined ? {} : { replyToMessageRef: replyTarget }), body: draft.trim(), baseRevision: thread.revision, recipients: [...recipients].sort(), ...(attachmentIds.length === 0 ? {} : { attachments: attachmentIds }) })
-      if (!result.ok) {
-        setError(result.error.message)
-        return
-      }
-      if (result.value.kind === 'committed') {
-        const committed = result.value as Extract<typeof result.value, { kind: 'committed' }>
-        // Chips what the Host is about to report; its committed facts replace
-        // this row as soon as they arrive.
-        const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, projectMembers)])].sort()
-        setCurrentFacts(current => {
-          const merged = mergeFacts(current, [{ kind: 'message', sequence: committed.message.sequence, message: committed.message, mentions: optimisticMentions, occurredAt: committed.receipt.occurredAt }])
-          currentFactsRef.current = merged
-          return merged
-        })
-        setProjection(current => current === undefined ? current : { ...current, ...(committed.task === undefined ? {} : { task: committed.task }), thread: committed.thread })
-        drafts.clear(draftKey)
-        setReplyTarget(undefined)
-        setPendingFiles([])
-        setReplyRequestId(undefined)
-      } else if (result.value.kind === 'unread_required') {
-        setError(t('unreadRequired', { count: result.value.unreadCount }))
-        setReplyRequestId(undefined)
-        await refreshAfterFence()
-      } else if (result.value.kind === 'stale_revision') {
-        setError(t('staleRevision'))
-        setReplyRequestId(undefined)
-        await refreshPassiveFacts()
-      }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
-    } finally { setPending(false) }
+      await commit({
+        key: 'promote',
+        write: requestId => promoteThread({ requestId, workspaceId, threadRef, baseRevision: thread.revision }),
+        onCommitted: committed => { onPromoted(committed.task.taskRef) },
+      })
+    } finally {
+      setMutating(undefined)
+    }
   }
 
   const currentFactsWithAnchor = mergeFacts(projection === undefined ? [] : [messageFact(projection.anchor, projection.anchorMentions)], currentFacts)
@@ -500,7 +236,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
     {/* The follow control's own failure, stated beside the untouched control: a Remote failure is the
         one error this face can raise that the read surface below does not own. */}
     {follow.error !== undefined && <p className={css.actionError} role="alert">{follow.error}</p>}
-    <section ref={timeline.ref} onScroll={timeline.onScroll} className={projectCss.panelBody} aria-label={t('timelineLabel')}>
+    <section ref={timelineRef} onScroll={onTimelineScroll} className={projectCss.panelBody} aria-label={t('timelineLabel')}>
       {loading && projection === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingThread')}</p></div>}
       {projection === undefined && error !== undefined && <div className={css.errorState} role="alert"><span>{error}</span><Button size="sm" variant="outline" onClick={() => { void readCurrent() }}>{t('retry')}</Button></div>}
       {renderBlocks(olderFacts)}
@@ -508,7 +244,7 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       {renderBlocks(currentFactsWithAnchor)}
       {autoReadExhausted && <div className={css.timelineAction} role="alert">
         <span>{t('autoReadIncomplete')}</span>
-        <Button size="sm" onClick={() => { setAutoReadExhausted(false); void drainUnread() }} disabled={loading}>{t('retry')}</Button>
+        <Button size="sm" onClick={retryAutoRead} disabled={loading}>{t('retry')}</Button>
       </div>}
     </section>
     {projection !== undefined && thread !== undefined && <TeamComposer
@@ -525,13 +261,8 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       placeholder={t('replyPlaceholder')}
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
-      {...(replyTarget === undefined ? {} : {
-        replyTo: (() => {
-          const target = cachedResolvedMessageRef(replyTarget)
-          return target === undefined
-            ? { senderName: t('memberUnknown'), excerpt: '' }
-            : { memberId: target.sender, senderName: memberName(target.sender), excerpt: target.excerpt }
-        })(),
+      {...(replyTo === undefined ? {} : {
+        replyTo,
         onCancelReply: () => { setReplyTarget(undefined) },
       })}
       t={t}

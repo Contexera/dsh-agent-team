@@ -6,9 +6,9 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { AgentTeamLedger, agentTeamHumanActor } from '../src/ledger.ts'
+import { AgentTeamLedger, agentTeamHumanActor, AGENT_TEAM_HUMAN_MEMBER_ID } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
-import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamThreadRef } from '../src/types.ts'
+import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamThreadRef, AgentTeamThreadRepliedOperation } from '../src/types.ts'
 import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 
 const alpha = WorkspaceId('workspace:alpha')
@@ -92,31 +92,38 @@ describe('replaying a rules version 1 ledger', () => {
     for (const handle of handles) expect(standing(v2, handle, threadRefs), `${handle} after adoption`).toEqual(before[handle])
 
     // The old rules' outcomes stand: authors and explicit recipients follow, `@all` was expanded to the Project roster when written,
-    // and a mention of a Workspace participant outside the Project reached them.
+    // the invitation brought carol into the Task Thread, and a mention of a Workspace participant outside the Project reached them.
     const following = (handle: keyof typeof rulesV1Ledger.members) => standing(v2, handle, threadRefs).attention.map(attention => attention !== undefined)
     expect(following('alice')).toEqual([false, true, true, false])
     expect(following('bob')).toEqual([false, true, true, false])
-    expect(following('carol')).toEqual([false, false, true, false])
+    expect(following('carol')).toEqual([true, false, true, false])
     expect(following('dave')).toEqual([false, false, false, true])
     expect(standing(v2, 'dave', threadRefs).projects).toEqual([projectRef])
     expect(v2.view({ workspaceId: alpha }, bystander.memberId).projects).toEqual([])
   })
 
-  it('replays an invitation and an undelivered mention written under version 1', async () => {
+  it('replays the invitation and the undelivered mention captured under version 1', async () => {
     const { pool, v1, adopt } = await openBoth()
     const task = rulesV1Ledger.task
-    const held = (await v1.reply({ requestId: requestId('invite'), workspaceId: alpha, taskRef: task.taskRef as never, body: '@carol, please look',
-      baseRevision: task.revision, actor: human })).value
-    if (held.kind !== 'confirmation_required') throw new Error(`expected confirmation, received ${held.kind}`)
-    const invited = (await v1.reply({ requestId: requestId('invite-confirmed'), workspaceId: alpha, taskRef: task.taskRef as never, body: '@carol, please look',
-      baseRevision: task.revision, actor: human, confirmationToken: held.confirmationToken })).value
-    if (invited.kind !== 'committed') throw new Error(`expected committed invitation, received ${invited.kind}`)
-    expect(invited.attention).toEqual([expect.objectContaining({ memberId: rulesV1Ledger.members.carol, startSequence: invited.message.sequence })])
-
-    const unheard = (await v1.reply({ requestId: requestId('undelivered'), workspaceId: alpha, taskRef: task.taskRef as never, body: '@dave, over to you',
-      baseRevision: invited.thread.revision, actor: memberActor('alice') })).value
-    if (unheard.kind !== 'committed') throw new Error(`expected committed reply, received ${unheard.kind}`)
-    expect(unheard.undeliveredMentions).toEqual([rulesV1Ledger.members.dave])
+    const replies = rulesV1Ledger.records.map(([, record]) => record as AgentTeamOperation)
+      .filter((operation): operation is AgentTeamThreadRepliedOperation => operation.kind === 'team/thread-replied')
+    expect(replies.map(operation => operation.data.message.sequence)).toEqual([rulesV1Ledger.invitation.sequence, rulesV1Ledger.undelivered.sequence])
+    const [invited, unheard] = replies as [AgentTeamThreadRepliedOperation, AgentTeamThreadRepliedOperation]
+    // The confirmed invitation starts carol's Attention at its own sequence and delivers one direct marker to her.
+    expect(invited.data.message).toMatchObject({ body: '@carol, please look', sender: AGENT_TEAM_HUMAN_MEMBER_ID, topLevel: false })
+    expect(invited.data.mentions).toEqual([rulesV1Ledger.members.carol])
+    expect(invited.data.thread.revision).toBe(rulesV1Ledger.invitation.revision)
+    expect(invited.data.inbox.attention).toEqual({ set: [{ memberId: rulesV1Ledger.members.carol, threadRef: task.threadRef,
+      startSequence: rulesV1Ledger.invitation.sequence, readThroughSequence: rulesV1Ledger.invitation.sequence - 1 }], removed: [] })
+    expect(invited.data.inbox.directMarkers).toEqual({ added: [{ memberId: rulesV1Ledger.members.carol, threadRef: task.threadRef,
+      messageRef: rulesV1Ledger.invitation.messageRef, sequence: rulesV1Ledger.invitation.sequence }], removed: [] })
+    // alice's mention of dave reaches nobody: dave never took part in this Thread, so the reply stores no mention and
+    // no marker, and dave's Attention stays where the outsider Thread put it.
+    expect(unheard.data.message).toMatchObject({ body: '@dave, over to you', sender: rulesV1Ledger.members.alice, topLevel: false })
+    expect(unheard.data.mentions).toEqual([])
+    expect(unheard.data.thread.revision).toBe(rulesV1Ledger.undelivered.revision)
+    expect(unheard.data.inbox).toEqual({ attention: { set: [], removed: [] }, directMarkers: { added: [], removed: [] },
+      activityMarkers: { added: [], removed: [] } })
 
     const before = Object.fromEntries(handles.map(handle => [handle, standing(v1, handle, threadRefs)]))
     const history = (ledger: AgentTeamLedger) => ledger.threadHistory(human, { workspaceId: alpha, threadRef: threadRef(task.threadRef) }).facts
@@ -126,6 +133,7 @@ describe('replaying a rules version 1 ledger', () => {
     expect(storedKinds(pool).filter(kind => kind === 'team/thread-replied')).toHaveLength(2)
     expect(() => v2.validate()).not.toThrow()
     expect(history(v2)).toEqual(['Investigate the regression', '@carol, please look', '@dave, over to you'])
+    expect(standing(v2, 'carol', threadRefs).attention[0]).toMatchObject({ startSequence: rulesV1Ledger.invitation.sequence })
     for (const handle of handles) expect(standing(v2, handle, threadRefs), `${handle} after adoption`).toEqual(before[handle])
     expect(standing(v2, 'dave', threadRefs).attention[0]).toBeUndefined()
   })

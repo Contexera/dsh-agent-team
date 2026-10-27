@@ -50,7 +50,7 @@ describe('Team conversation surfaces', () => {
     expect((await within(projectPage).findByRole('alert')).textContent).toContain('send failed')
     expect((b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement).value).toBe('hello team @builder ')
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
-    await waitFor(() => expect(b.startThread).toHaveBeenLastCalledWith(expect.objectContaining({ body: 'hello team @builder', recipients: ['member:builder'], kind: 'task' })))
+    await waitFor(() => expect(b.startThread).toHaveBeenLastCalledWith(expect.objectContaining({ body: 'hello team @builder', kind: 'task' })))
     expect(b.startThread.mock.calls[0]![0].requestId).not.toBe(b.startThread.mock.calls[1]![0].requestId)
     // A started Task lands on the board, where its card carries the opener's first line and no owner yet.
     const startedCard = await b.view.findByRole('button', { name: '打开 Task #1' })
@@ -307,13 +307,12 @@ describe('Team conversation surfaces', () => {
     fireEvent.change(input, { target: { value: '请看一下' } })
     await waitFor(() => expect(b.view.queryByText(/将通知/)).toBeNull())
 
-    // The Host owns body resolution: the payload keeps explicit recipients
-    // empty, because a name the Project cannot reach is prose, not a target.
+    // The Host owns body resolution: the payload carries the body alone, and a
+    // name the Project cannot reach is prose, not a target.
     fireEvent.change(input, { target: { value: '请 @builder 看一下' } })
     fireEvent.click(b.view.getByRole('button', { name: '发送' }))
     await waitFor(() => expect(b.postMainMessage).toHaveBeenLastCalledWith(expect.objectContaining({
       body: '请 @builder 看一下',
-      recipients: [],
     })))
     await b.runtime.dispose()
   })
@@ -537,7 +536,7 @@ describe('Team conversation surfaces', () => {
     fireEvent.change(input, { target: { value: 'engineering draft' } })
     // Writes go straight through to the persisted cache.
     expect(JSON.parse(localStorage.getItem(TEAM_DRAFTS_STORAGE_KEY) ?? '{}')).toMatchObject({
-      'project:project:engineering': { draft: 'engineering draft', recipientIds: [] },
+      'project:project:engineering': { draft: 'engineering draft' },
     })
 
     // Switching views unmounts the page; returning restores from the cache.
@@ -565,7 +564,7 @@ describe('Team conversation surfaces', () => {
     await b.runtime.dispose()
   })
 
-  it('rehydrates drafts from localStorage and prunes stale recipients on restore', async () => {
+  it('rehydrates drafts from localStorage and ignores the legacy recipient list', async () => {
     const b = await runtimeWithTeam({ initialProjects: true })
     fireEvent.click(b.view.getByRole('button', { name: '团队' }))
     // Open the seeded Project first so the browser's one-time workspace
@@ -598,12 +597,9 @@ describe('Team conversation surfaces', () => {
       const input = b.view.getByRole('textbox', { name: '消息内容' }) as HTMLTextAreaElement
       return expect(input.value).toBe('hello team @builder')
     })
-    // ...while the Composer's convergence pass rewrites the cached entry with
-    // only the recipients that are known Members still named in the draft.
-    await waitFor(() => {
-      const stored = JSON.parse(localStorage.getItem(TEAM_DRAFTS_STORAGE_KEY) ?? '{}') as Record<string, { recipientIds: string[] }>
-      return expect(stored[`project:${projectRef}`]?.recipientIds).toEqual(['member:builder'])
-    })
+    // ...and the legacy recipient list in the stored entry is ignored: body
+    // mentions are the sole authority, so the restored state is the text alone.
+    expect(b.runtime.ctx.teamDrafts.getSnapshot(`project:${projectRef}` as never)).toEqual({ draft: 'hello team @builder' })
     await b.runtime.dispose()
   })
 

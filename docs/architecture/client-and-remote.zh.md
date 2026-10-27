@@ -24,7 +24,7 @@ Client remote service
 ## Remote failure vocabulary
 生成的 Remote methods resolve 为 `RemoteResult`。`{ ok: true, value }` 携带业务结果，`{ ok: false, error }` 携带失败：稳定的 `code` 是判别字段，`details` 随 `code` 收窄，无需 cast。
 
-- 业务拒绝（`unread_required`、`stale_revision`）保持 result union。它们是 Client 已经建模的正常控制流，不是 Remote error。`confirmation_required` 只属于规则版本 1：版本 2 的写入直接拒绝 confirmation token，因此当前写入不会返回它。该变体留在 reply result union 里只为 legacy 路径与 replay，不是版本 2 Client 会走到的分支。
+- 业务拒绝（`unread_required`、`stale_revision`）保持 result union。它们是 Client 已经建模的正常控制流，不是 Remote error。它们也是版本 2 写入的全部拒绝词表：mention 与回复都直接送达，没有任何写入要求调用方再发一次。
 - 需要 Client 独立分支的预期跨 Remote 失败以 `RemoteError` 抛出。owner 通过向 `RemoteErrorDetailsMap` merge 声明自己的 code。Team 把 codes merge 进两个 face 共同编译的公开 types 入口。Team 的第一个 code 是 `team/attachment-not-found`。attachment read 把已消失的 cache entry 与其他一切失败分开。
 - Client 按 `code` 分支，绝不解析 message 文本。message 只是人类诊断，不是契约。未知 code 与未分类的 Host 异常以 `gateway/internal` 到达，因此每个分支都保留通用 fallback。attachment preview 把 not-found 结算为过期 chip。其它失败一律不缓存，下一次渲染重试 Host。
 

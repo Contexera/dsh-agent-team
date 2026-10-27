@@ -215,7 +215,7 @@ export function containsMention(body: string, handle: string): boolean {
 /**
 * Member ids a draft notifies by text alone, previewing the Host's body mention resolution.
 * A written handle counts whenever its Member can still take a Message (offline included).
-* Preview-only: only picked recipients travel as explicit recipients.
+* Preview-only: the body is the sole delivery authority, so this is exactly what the Host derives.
 */
 export function mentionedMemberIds(body: string, members: readonly AgentTeamClientMemberStatus[]): readonly AgentTeamMemberId[] {
   const candidates = members

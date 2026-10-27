@@ -84,13 +84,13 @@ async function seed(rulesVersion = 2) {
 type Seeded = Awaited<ReturnType<typeof seed>>
 type Poster = typeof human | AgentTeamMemberActor
 
-const post = (team: Seeded, actor: Poster, body: string, extra: { replyToMessageRef?: AgentTeamMessageRef; recipients?: AgentTeamMemberId[] } = {}) =>
+const post = (team: Seeded, actor: Poster, body: string, extra: { replyToMessageRef?: AgentTeamMessageRef } = {}) =>
   team.ledger.postMainMessage({ requestId: requestId('post'), actor, workspaceId: alpha, projectRef: team.projectRef, body, ...extra })
 const readMain = (team: Seeded, actor: Poster, readThroughSequence?: number) =>
   team.ledger.readMainStream({ requestId: requestId('read'), actor, workspaceId: alpha, projectRef: team.projectRef, ...(readThroughSequence === undefined ? {} : { readThroughSequence }) })
 const page = (team: Seeded, actor: Poster) => team.ledger.mainStreamHistory(actor, { workspaceId: alpha, projectRef: team.projectRef })
-const start = (team: Seeded, actor: Poster, kind: 'discussion' | 'task', body: string, recipients?: AgentTeamMemberId[]) =>
-  team.ledger.startThread({ requestId: requestId('start'), actor, workspaceId: alpha, projectRef: team.projectRef, kind, body, ...(recipients === undefined ? {} : { recipients }) })
+const start = (team: Seeded, actor: Poster, kind: 'discussion' | 'task', body: string) =>
+  team.ledger.startThread({ requestId: requestId('start'), actor, workspaceId: alpha, projectRef: team.projectRef, kind, body })
 
 const committedMessage = (result: Awaited<ReturnType<typeof post>>) => {
   if (!result.committed || result.value.kind !== 'committed') throw new Error(`expected a committed post, got ${JSON.stringify(result.value).slice(0, 200)}`)
@@ -216,7 +216,7 @@ describe('Thread start permission', () => {
     await expect(start(team, team.writer.actor, 'discussion', 'let me start')).rejects.toThrow(/project_owner_required/)
     await expect(start(team, team.outsider.actor, 'task', 'let me start')).rejects.toThrow(/not_project_member/)
 
-    const started = await start(team, team.owner.actor, 'discussion', 'Topic for @writer', [])
+    const started = await start(team, team.owner.actor, 'discussion', 'Topic for @writer')
     if (started.value.kind !== 'committed') throw new Error('start did not commit')
     expect(started.value.attention.map(attention => attention.memberId)).toEqual([team.owner.memberId])
     expect(started.value.directMarkers.map(marker => marker.memberId)).toEqual([team.writer.memberId])
@@ -297,8 +297,10 @@ describe('Thread replies at rules version 2', () => {
     const human2 = await team.ledger.reply({ requestId: requestId('reply'), actor: human, workspaceId: alpha, threadRef, body: 'And @outsider',
       baseRevision: reply.value.thread.revision })
     expect(human2.value.kind).toBe('committed')
-    await expect(team.ledger.reply({ requestId: requestId('reply'), actor: human, workspaceId: alpha, threadRef, body: 'x', baseRevision: 1,
-      confirmationToken: 'token' as never })).rejects.toThrow(/does not exist at rules version 2/)
+    if (human2.value.kind !== 'committed') return
+    // The Member who never took part still takes a direct marker from this Message.
+    expect(human2.value.directMarkers.map(marker => marker.memberId)).toEqual([team.outsider.memberId])
+    expect(human2.value.undeliveredMentions).toBeUndefined()
   })
 
   it('answers the Human by marker and refuses a stranger', async () => {
@@ -370,7 +372,7 @@ describe('earlier-version Threads and replay', () => {
     await upgraded.addProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef, memberId: writer.memberId })
     const team: Seeded = { pool, table, ledger: upgraded, projectRef, owner: writer, writer, outsider: writer }
     const card = cardOf(page(team, human).entries, rulesV1Ledger.task.threadRef as AgentTeamThreadRef)
-    expect(card).toMatchObject({ unread: false, card: { task: { taskNumber: 1, status: 'todo' }, replyCount: 0 } })
+    expect(card).toMatchObject({ unread: false, card: { task: { taskNumber: 1, status: 'todo' }, replyCount: 2 } })
     // The older card is not unread for the Human or the new owner; the new owner only holds its grant marker.
     expect(page(team, human).standing.unreadCount).toBe(0)
     expect(page(team, writer.actor).standing).toMatchObject({ unreadCount: 1, directCount: 1 })

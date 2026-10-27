@@ -106,9 +106,9 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       factOrder.push({ projectRef: project, messageRef: started.value.message.messageRef })
       return entry
     }
-    const reply = async (label: string, body: string, actor: typeof human | AgentTeamMemberActor, recipients?: readonly AgentTeamMemberId[]): Promise<void> => {
+    const reply = async (label: string, body: string, actor: typeof human | AgentTeamMemberActor): Promise<void> => {
       const thread = byLabel.get(label)!
-      const replied = await ledger.reply({ requestId: requestId(`reply-${label}-${body}`), workspaceId: thread.workspaceId, taskRef: thread.taskRef, body, baseRevision: thread.revision, actor, ...(recipients === undefined ? {} : { recipients }) })
+      const replied = await ledger.reply({ requestId: requestId(`reply-${label}-${body}`), workspaceId: thread.workspaceId, taskRef: thread.taskRef, body, baseRevision: thread.revision, actor })
       if (replied.value.kind !== 'committed') throw new Error(`expected committed reply on ${label}: ${replied.value.kind}`)
       thread.revision = replied.value.thread.revision
       thread.messageRefs.push(replied.value.message.messageRef)
@@ -148,8 +148,8 @@ describe('large-ledger projection equivalence (issue #21)', () => {
     // catches up on each mentioned Thread first: the deferred-write gate
     // refuses replies while the sender still holds unread.
     for (const label of ['a5', 'a6', 'a7', 'a8', 'a9']) await ledger.readThread({ requestId: requestId(`read-${label}`), workspaceId: alpha, taskRef: byLabel.get(label)!.taskRef, actor: human })
-    for (const label of ['a5', 'a6', 'a7', 'a8', 'a9']) await reply(label, 'scout, please look', human, [agentA])
-    for (const label of ['b0', 'b1', 'b2', 'b3', 'b4']) await reply(label, 'noting the operator', memberActor(agentB, 'planner'), [AGENT_TEAM_HUMAN_MEMBER_ID])
+    for (const label of ['a5', 'a6', 'a7', 'a8', 'a9']) await reply(label, '@scout, please look', human)
+    for (const label of ['b0', 'b1', 'b2', 'b3', 'b4']) await reply(label, '@human noting the operator', memberActor(agentB, 'planner'))
 
     // A durable read consumes the Human's own markers on b0/b1 only.
     await ledger.readThread({ requestId: requestId('read-b0'), workspaceId: alpha, taskRef: byLabel.get('b0')!.taskRef, actor: human })

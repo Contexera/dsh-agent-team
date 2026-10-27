@@ -106,10 +106,5 @@ describe('TeamComposer mention menu', () => {
     openMenu(ui, '@')
     expect(optionTexts(ui).some(text => text.includes('通知所有成员'))).toBe(false)
     expect(optionTexts(ui).some(text => text.includes('@insider'))).toBe(true)
-
-    // A recipient whose handle left the text is pruned even though `@all` is in it.
-    drafts.writeRecipients('project:project:one' as never, new Set([inside.member.memberId]))
-    openMenu(ui, '@all hello')
-    expect(drafts.getSnapshot('project:project:one' as never).recipients.size).toBe(0)
   })
 })

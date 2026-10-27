@@ -28,7 +28,7 @@ The popup paints the shared translucent menu surface, so it takes the shipped fr
 
 On Thread surfaces the popup loads the current follower set through the Human-only `threadObservations` read (first paint round plus every thread-scope wake). The popup offers every Workspace participant, matching the Host's own candidate rule, and ranks them by how directly a pick reaches the Member: this Thread's followers, then Members taking part in the Project through another Thread, then the rest of the Workspace.
 
-Every tier stays pickable — the ledger addresses all of them, so the ranking is a hint rather than a filter. A typed `@all` is plain text under version 2 and expands to nothing, so it is not offered in the menu. Accepted text places the caret precisely; deleting mention text shrinks recipients.
+Every tier stays pickable — the ledger addresses all of them, so the ranking is a hint rather than a filter. A typed `@all` is plain text under version 2 and expands to nothing, so it is not offered in the menu. Accepted text places the caret precisely; deleting mention text shrinks the notified set.
 
 A row carries its weight on `data-mention-inside`: whether the Member is inside the conversation being written into. False means they are not, and the name drops to the secondary label alias while the row keeps its own contrast. Weight is the whole of the row's distinction — the row names the Member and says nothing about what the pick will do.
 
@@ -36,7 +36,7 @@ The two surfaces disagree about the same tier. On a Thread the boundary is follo
 
 Nothing is hidden by that silence. The row states who is in the conversation and the status line after the send states what the send did. Colour alone carries the row's distinction, which is why it must survive the width change: below 600px the description is dropped and the weight stays.
 
-A quiet recipient notice shows who will be notified: the picked recipients unioned with the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive word boundaries). That set is what the send carries — the picked `recipients` travel as an explicit request field alongside the body, and the Host unions them with the body's mentions, so the notice and the send read the same set. Drafts and recipients are stored per Project/Thread in the bounded `TeamDraftStore`; successful sends clear them and failures preserve them.
+A quiet recipient notice shows who will be notified: the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive word boundaries), plus the quoted Message's author on a reply. The body is the sole delivery authority — no explicit recipient list travels with the request — so the notice and the send read the same set. Drafts are stored per Project/Thread in the bounded `TeamDraftStore`; a legacy `recipientIds` field in an old entry is ignored on load, successful sends clear the draft and failures preserve it.
 
 The 「作为任务」 intent is not persisted and resets off after success. The mode chip keeps its word label at every width and narrows the toolbar gap below 560px rather than hiding the word.
 

@@ -1,4 +1,4 @@
-import type { AgentTeamProjectRef, AgentTeamMemberId, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamProjectRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 
 /** Drafts are local UI convenience state, never Host-authoritative, so localStorage is their home. */
 export type TeamDraftKey = `project:${AgentTeamProjectRef}` | `thread:${AgentTeamThreadRef}`
@@ -10,30 +10,26 @@ export function draftKindOf(key: TeamDraftKey): TeamDraftKind {
   return key.startsWith('project:') ? 'project' : 'thread'
 }
 
-/** One cached composer state; `recipients` mirrors the structured mention set. */
+/** One cached composer state. */
 export interface TeamDraftState {
   readonly draft: string
-  readonly recipients: ReadonlySet<AgentTeamMemberId>
 }
 
 interface StoredDraft {
   draft: string
-  recipientIds: AgentTeamMemberId[]
   savedAt: number
 }
 
 /** Rewriting identical content must not bump `savedAt` or notify: convergence effects re-run freely and would loop through persistence. */
 function sameDraftEntry(previous: StoredDraft | undefined, next: StoredDraft): boolean {
   return previous !== undefined && previous.draft === next.draft
-    && previous.recipientIds.length === next.recipientIds.length
-    && previous.recipientIds.every((id, index) => id === next.recipientIds[index])
 }
 
 const STORAGE_KEY = 'dsh.agent-team.drafts.v1'
 /** Retention ceiling; the oldest savedAt entries fall out first. */
 const LIMIT = 50
 
-const EMPTY: TeamDraftState = Object.freeze({ draft: '', recipients: new Set<AgentTeamMemberId>() })
+const EMPTY: TeamDraftState = Object.freeze({ draft: '' })
 
 function isTeamDraftKey(value: string): value is TeamDraftKey {
   return value.startsWith('project:') || value.startsWith('thread:')
@@ -49,9 +45,9 @@ function readStored(): Map<TeamDraftKey, StoredDraft> {
       const key = storedKey.replace(/^channel:channel:/, 'project:project:')
       if (!isTeamDraftKey(key) || typeof value !== 'object' || value === null) continue
       const candidate = value as Partial<StoredDraft>
-      if (typeof candidate.draft !== 'string' || !Array.isArray(candidate.recipientIds) || typeof candidate.savedAt !== 'number') continue
-      if (!candidate.recipientIds.every(id => typeof id === 'string')) continue
-      restored.set(key, { draft: candidate.draft, recipientIds: candidate.recipientIds as AgentTeamMemberId[], savedAt: candidate.savedAt })
+      if (typeof candidate.draft !== 'string' || typeof candidate.savedAt !== 'number') continue
+      // Legacy drafts carried `recipientIds`; ignore it — body mentions are now the sole authority.
+      restored.set(key, { draft: candidate.draft, savedAt: candidate.savedAt })
     }
     return restored
   } catch {
@@ -91,17 +87,13 @@ export class TeamDraftStore {
     if (cached !== undefined) return cached
     const entry = this.entries.get(key)
     if (entry === undefined) return EMPTY
-    const snapshot: TeamDraftState = Object.freeze({ draft: entry.draft, recipients: new Set(entry.recipientIds) })
+    const snapshot: TeamDraftState = Object.freeze({ draft: entry.draft })
     this.snapshots.set(key, snapshot)
     return snapshot
   }
 
   writeDraft(key: TeamDraftKey, draft: string): void {
     this.write(key, { draft })
-  }
-
-  writeRecipients(key: TeamDraftKey, recipients: Iterable<AgentTeamMemberId>): void {
-    this.write(key, { recipientIds: [...recipients] })
   }
 
   clear(key: TeamDraftKey): void {
@@ -125,15 +117,14 @@ export class TeamDraftStore {
     for (const listener of this.listeners) listener()
   }
 
-  private write(key: TeamDraftKey, patch: Partial<Pick<StoredDraft, 'draft' | 'recipientIds'>>): void {
+  private write(key: TeamDraftKey, patch: Partial<Pick<StoredDraft, 'draft'>>): void {
     const previous = this.entries.get(key)
     const next: StoredDraft = {
       draft: patch.draft ?? previous?.draft ?? '',
-      recipientIds: patch.recipientIds ?? previous?.recipientIds ?? [],
       savedAt: Date.now(),
     }
     if (sameDraftEntry(previous, next)) return
-    if (next.draft === '' && next.recipientIds.length === 0) {
+    if (next.draft === '') {
       this.clear(key)
       return
     }

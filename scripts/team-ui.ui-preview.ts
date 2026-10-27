@@ -120,20 +120,15 @@ beforeAll(async () => {
   /** Every Thread write drains its own read first: a reply carries the revision it is based on. */
   const asHuman = async (id: string, body: string, replyToMessageRef?: string) => {
     const read = await team.readThread({ requestId: `${id}-read` as never, workspaceId: workspace.id, threadRef })
-    const write = (confirmationToken?: string) => team.reply({
+    // Answering a Member delivers to them the way a mention does: no second write.
+    const written = await team.reply({
       requestId: id as never,
       workspaceId: workspace.id,
       threadRef,
       body,
       baseRevision: read.thread.revision,
       ...(replyToMessageRef === undefined ? {} : { replyToMessageRef: replyToMessageRef as never }),
-      ...(confirmationToken === undefined ? {} : { confirmationToken: confirmationToken as never }),
     })
-    // Answering a Member delivers to them, and a Human hand-delivering to a
-    // Member is the Host's own confirmation case: the same invitation goes out
-    // again carrying the token it returned.
-    let written = await write()
-    if (written.kind === 'confirmation_required') written = await write(written.confirmationToken)
     if (written.kind !== 'committed') throw new Error(`${id} was rejected: ${written.kind}`)
     return written
   }

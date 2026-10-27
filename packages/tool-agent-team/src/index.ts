@@ -871,7 +871,7 @@ function messageOutcome(result: Awaited<ReturnType<AgentTeam['startThreadForAgen
     expectedRevision: result.expectedRevision, revision: result.revision,
     ...(result.staleTokenKind === undefined ? {} : { staleTokenKind: result.staleTokenKind }),
     ...(result.facts === undefined ? {} : { facts: result.facts.map(entry => readFactView(entry)) }) }
-  throw new Error('Agents cannot receive invitation confirmations')
+  throw new Error(`Agents cannot receive a ${result.kind} message outcome`)
 }
 
 const BOARD_ITEM_SCHEMA = { type: 'object', additionalProperties: false, properties: {

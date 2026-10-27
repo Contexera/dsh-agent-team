@@ -6,7 +6,7 @@ import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { mentionSurfaceOf, mentionTierIsParticipant } from './mention-presentation.ts'
-import { containsMention, HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
+import { HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
 
@@ -82,13 +82,11 @@ function revokeDraftPreviewUrl(file: File): void {
 
 /** The Human is never delivered to (they read the Thread directly), so quoting them, even oneself, joins no row. */
 function deliverableRecipients(
-  recipients: ReadonlySet<AgentTeamMemberId>,
   draft: string,
   members: readonly AgentTeamClientMemberStatus[],
   replyTo: ReplyTarget | undefined,
 ): readonly AgentTeamMemberId[] {
   return [...new Set<AgentTeamMemberId>([
-    ...recipients,
     ...mentionedMemberIds(draft, members),
     ...(replyTo?.memberId === undefined || replyTo.memberId === HUMAN_MEMBER_ID ? [] : [replyTo.memberId]),
   ])].sort()
@@ -126,7 +124,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   const activeOptionRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
   // Subscribing here, not in the hosting page, keeps a keystroke off the timeline.
-  const { draft, recipients } = useSyncExternalStore(drafts.subscribe, () => drafts.getSnapshot(draftKey))
+  const { draft } = useSyncExternalStore(drafts.subscribe, () => drafts.getSnapshot(draftKey))
   const [mention, setMention] = useState<MentionMatch>()
   const [highlight, setHighlight] = useState(0)
   const memberCandidates = mention === undefined ? [] : rankMentionCandidates(mentionCandidates(members, mention.query), followerMemberIds, projectPeerMemberIds)
@@ -176,22 +174,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
 
   const memberHandles = new Map(members.map(status => [status.member.memberId, status.member.handle]))
 
-  const pruneRecipients = (nextDraft: string): void => {
-    const next = new Set([...recipients].filter(memberId => {
-      const handle = memberHandles.get(memberId)
-      return handle !== undefined && containsMention(nextDraft, handle)
-    }))
-    if (next.size !== recipients.size) drafts.writeRecipients(draftKey, next)
-  }
-
-  // Restored drafts may carry recipients that no longer match the text; converge so the cache never stays stale.
-  // An unloaded roster must never judge recipients unknown.
-  useEffect(() => {
-    if (members.length === 0) return
-    pruneRecipients(draft)
-  }, [draft, recipients, members])
-
-  const notifiedIds = deliverableRecipients(recipients, draft, members, replyTo)
+  const notifiedIds = deliverableRecipients(draft, members, replyTo)
 
   const updateMention = (nextDraft: string, caret: number): void => {
     const match = findMention(nextDraft, caret)
@@ -203,13 +186,11 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     const nextDraft = event.target.value
     drafts.writeDraft(draftKey, nextDraft)
     onEdit?.()
-    pruneRecipients(nextDraft)
     updateMention(nextDraft, event.target.selectionStart ?? nextDraft.length)
   }
 
-  const commitMention = (nextDraft: string, nextCaret: number, nextRecipients: ReadonlySet<AgentTeamMemberId>): void => {
+  const commitMention = (nextDraft: string, nextCaret: number): void => {
     drafts.writeDraft(draftKey, nextDraft)
-    drafts.writeRecipients(draftKey, nextRecipients)
     onEdit?.()
     setMention(undefined)
     setHighlight(0)
@@ -227,7 +208,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     const inserted = `@${member.member.handle} `
     const nextDraft = `${draft.slice(0, mention.start)}${inserted}${draft.slice(mention.end)}`
     const nextCaret = mention.start + inserted.length
-    commitMention(nextDraft, nextCaret, new Set(recipients).add(member.member.memberId))
+    commitMention(nextDraft, nextCaret)
   }
 
   // Only a paste that carries files is intercepted, so plain text keeps native insertion.

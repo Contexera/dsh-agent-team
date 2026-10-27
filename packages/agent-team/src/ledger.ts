@@ -53,8 +53,6 @@ import type {
   AgentTeamClaimRequest,
   AgentTeamClaimResult,
   AgentTeamClaimRef,
-  AgentTeamConfirmationRequired,
-  AgentTeamConfirmationToken,
   AgentTeamCreateProjectRequest,
   AgentTeamCreateProjectResult,
   AgentTeamDirectMarker,
@@ -372,18 +370,6 @@ interface AgentTeamDurableMemberResult {
 
 export type { AgentTeamDurableMemberResult }
 
-interface Confirmation {
-  readonly actor: AgentTeamMemberId
-  readonly workspaceId: WorkspaceId
-  readonly projectRef: AgentTeamProjectRef
-  readonly taskRef?: AgentTeamTaskRef
-  readonly threadRef?: AgentTeamThreadRef
-  readonly body: string
-  readonly recipients: readonly AgentTeamMemberId[]
-  /** Whether each recipient was following when confirmation was issued. */
-  readonly attention: readonly boolean[]
-  readonly memberStates: readonly AgentTeamAgentMember['state'][]
-}
 
 /**
  * Everything one Thread read durably claims, plus the projection state the
@@ -630,7 +616,6 @@ function freezeCapabilities(capabilities: AgentTeamMemberCapabilities | undefine
 export class AgentTeamLedger {
   /** Live projection; record validation replays build independent Projection values instead. */
   private readonly state: Projection = emptyProjection()
-  private readonly confirmations = new Map<AgentTeamConfirmationToken, Confirmation>()
   private readonly createOperationId: () => AgentTeamOperationId
   private readonly createOccurredAt: () => string
   private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
@@ -1190,20 +1175,18 @@ export class AgentTeamLedger {
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
       const { task, thread, projectRef } = this.threadContextForActor(actor, request.workspaceId, request)
       const v2 = this.state.rulesVersion >= 2
-      if (v2 && request.confirmationToken !== undefined) throw new Error('invitation confirmation does not exist at rules version 2: a mention delivers directly')
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
       const project = this.requireProject(request.workspaceId, projectRef)
       const parent = this.requireReplyParent(request, thread.threadRef)
-      const explicit = this.normalizeRecipients(actor, request.recipients)
       // Answering a Member delivers to them the way a mention does: a reply the
       // recipient never learns about is not a reply. Before version 2 the Human
       // is skipped — they read the Thread directly — as is the author's own
-      // Message, which `normalizeRecipients` refuses outright.
+      // Message.
       const answered = parent === undefined || parent.sender === actor.memberId || (!v2 && parent.sender === AGENT_TEAM_HUMAN_MEMBER_ID)
-        ? explicit
-        : [...new Set([...explicit, parent.sender])].sort()
-      const recipients = this.mergeBodyMentions(actor.memberId, projectRef, body, answered)
+        ? []
+        : [parent.sender]
+      const recipients = this.deliveryRecipientsFor(actor.memberId, projectRef, body, answered)
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameReply(existing, request, recipients)
@@ -1215,21 +1198,11 @@ export class AgentTeamLedger {
       if (task?.resolution === 'closed') throw new Error(`Task '${task.taskRef}' is closed; reopen it before replying`)
       // An Agent cannot invite into an existing Thread, so a body mention the
       // Thread has never carried is dropped and reported back rather than
-      // failing the send. The Human keeps the confirmation step, which is what
-      // actually grants the invitation.
+      // failing the send. Version 2 delivers every addressable recipient.
       const undelivered = v2 ? Object.freeze([] as AgentTeamMemberId[]) : this.undeliverableRecipients(actor, thread.threadRef, recipients)
       const delivered = undelivered.length === 0 ? recipients : recipients.filter(memberId => !undelivered.includes(memberId))
       // Version 2: a mention or an answer delivers one direct marker and never starts or resumes Attention.
       const unfollowedAgents = v2 ? [] : delivered.filter(memberId => this.state.members.has(memberId) && !this.isFollowing(thread.threadRef, memberId))
-      // A Member that once took part in this Thread is delivered to directly:
-      // re-joining a Thread it already belongs to is not an invitation.
-      if (unfollowedAgents.length > 0 && actor.kind === 'human' && request.confirmationToken === undefined) {
-        return this.resolved(this.issueConfirmation(request.actor, request.workspaceId, projectRef, body, delivered, task, thread))
-      }
-      if (request.confirmationToken !== undefined) {
-        this.consumeConfirmation(request.confirmationToken, request.actor, request.workspaceId, projectRef,
-          task, thread, body, delivered)
-      }
       const sequence = this.nextSequence()
       const base = this.operationBase(request, sequence)
       const message: AgentTeamMessage = Object.freeze({
@@ -1264,9 +1237,8 @@ export class AgentTeamLedger {
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
       const parent = this.requireMainReplyParent(request.replyToMessageRef, project.projectRef)
-      const explicit = this.normalizeRecipients(actor, request.recipients)
-      const answered = parent === undefined || parent.sender === actor.memberId ? explicit : [...new Set([...explicit, parent.sender])].sort()
-      const recipients = this.mergeBodyMentions(actor.memberId, project.projectRef, body, answered)
+      const answered = parent === undefined || parent.sender === actor.memberId ? [] : [parent.sender]
+      const recipients = this.deliveryRecipientsFor(actor.memberId, project.projectRef, body, answered)
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameMainMessage(existing, request, recipients)
@@ -1342,7 +1314,7 @@ export class AgentTeamLedger {
       const project = this.requireActiveProject(request.workspaceId, request.projectRef)
       const body = request.body.trim()
       if (body === '') throw new Error('message body must not be empty')
-      const recipients = this.mergeBodyMentions(actor.memberId, project.projectRef, body, this.normalizeRecipients(actor, request.recipients))
+      const recipients = this.deliveryRecipientsFor(actor.memberId, project.projectRef, body, [])
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameThreadStart(existing, request, recipients)
@@ -1668,7 +1640,6 @@ export class AgentTeamLedger {
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      this.confirmations.clear()
       return this.committed(this.removalResult(operation))
     })
   }
@@ -1708,7 +1679,6 @@ export class AgentTeamLedger {
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      this.confirmations.clear()
       return this.committed(this.archivalResult(operation))
     })
   }
@@ -4600,48 +4570,6 @@ export class AgentTeamLedger {
     return markers === undefined ? [] : Object.freeze([...markers])
   }
 
-  private issueConfirmation(
-    actor: AgentTeamHumanActor | AgentTeamMemberActor,
-    workspaceId: WorkspaceId,
-    projectRef: AgentTeamProjectRef,
-    body: string,
-    recipients: readonly AgentTeamMemberId[],
-    task?: AgentTeamTask,
-    thread?: AgentTeamThread,
-  ): AgentTeamConfirmationRequired {
-    if (actor.kind !== 'human') throw new Error('only Human may invite an unfollowed Agent')
-    for (const [token, confirmation] of this.confirmations) if (confirmation.actor === actor.memberId) this.confirmations.delete(token)
-    const confirmationToken = `confirmation:${randomUUID()}` as AgentTeamConfirmationToken
-    this.confirmations.set(confirmationToken, Object.freeze({ actor: actor.memberId, workspaceId, projectRef,
-      ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(thread === undefined ? {} : { threadRef: thread.threadRef }),
-      body, recipients, attention: recipients.map(memberId => thread !== undefined && this.isFollowing(thread.threadRef, memberId)),
-      memberStates: recipients.map(memberId => this.state.members.get(memberId)?.state ?? 'enabled') }))
-    return Object.freeze({ kind: 'confirmation_required', confirmationToken, workspaceId, projectRef,
-      recipients: Object.freeze(recipients.filter(memberId => this.state.members.has(memberId) && (thread === undefined || !this.isFollowing(thread.threadRef, memberId)))),
-      ...(task === undefined ? {} : { taskRef: task.taskRef }), ...(thread === undefined ? {} : { threadRef: thread.threadRef, revision: thread.revision }) })
-  }
-
-  private consumeConfirmation(
-    token: AgentTeamConfirmationToken,
-    actor: AgentTeamHumanActor | AgentTeamMemberActor,
-    workspaceId: WorkspaceId,
-    projectRef: AgentTeamProjectRef,
-    task: AgentTeamTask | undefined,
-    thread: AgentTeamThread | undefined,
-    body: string,
-    recipients: readonly AgentTeamMemberId[],
-  ): void {
-    const confirmation = this.confirmations.get(token)
-    this.confirmations.delete(token)
-    const attention = recipients.map(memberId => thread !== undefined && this.isFollowing(thread.threadRef, memberId))
-    const states = recipients.map(memberId => this.state.members.get(memberId)?.state ?? 'enabled')
-    if (confirmation === undefined || confirmation.actor !== actor.memberId || confirmation.workspaceId !== workspaceId
-      || confirmation.projectRef !== projectRef || confirmation.taskRef !== task?.taskRef || confirmation.threadRef !== thread?.threadRef
-      || confirmation.body !== body || !this.sameList(confirmation.recipients, recipients)
-      || !this.sameList(confirmation.attention, attention) || !this.sameList(confirmation.memberStates, states)) {
-      throw new Error('confirmation token is invalid or expired')
-    }
-  }
 
   private assertMentionTargets(project: AgentTeamProject, recipients: readonly AgentTeamMemberId[]): void {
     for (const memberId of recipients) {
@@ -5242,7 +5170,6 @@ export class AgentTeamLedger {
         : Object.freeze({ ...this.operationBase(request, this.nextSequence()), kind: 'team/member-resumed', data: Object.freeze({ member: next }) })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      this.confirmations.clear()
       return this.committed(this.memberResult(operation))
     })
   }
@@ -5555,12 +5482,6 @@ export class AgentTeamLedger {
     if (member.state !== 'enabled') throw new Error(`Agent Member '${memberId}' is ${member.state}; only enabled Members can join a Project`)
   }
 
-  private normalizeRecipients(actor: AgentTeamHumanActor | AgentTeamMemberActor, recipients: readonly AgentTeamMemberId[] | undefined): readonly AgentTeamMemberId[] {
-    const normalized = this.normalizeUnique(recipients, 'recipient set')
-    if (normalized.includes(actor.memberId)) throw new Error('sender cannot be a recipient intent')
-    return normalized
-  }
-
   private normalizeUnique<T extends string>(values: readonly T[] | undefined, label: string): readonly T[] {
     const unique = new Set(values ?? [])
     if (unique.size !== (values?.length ?? 0)) throw new Error(`${label} contains duplicate Member refs`)
@@ -5637,17 +5558,17 @@ export class AgentTeamLedger {
   }
 
   /**
-   * Merge the `@Handle` mentions authored in `body` into an explicit
-   * recipient set. An Agent has no recipient parameter to forget, and the
-   * same scan serves Human input typed by hand. The result stays a plain
-   * recipient set, so every downstream projection (delivery markers, chip
-   * rendering, confirmation) is unaffected.
+   * The recipient set one write delivers to. The body is the sole authority on
+   * mentions: the `@Handle` scan below is the only thing a caller can name with,
+   * and it is the same scan for an Agent and for Human input typed by hand. The
+   * one input besides the body is `answered`, the parent Message's author, whom
+   * a reply reaches the way a mention does.
    */
-  private mergeBodyMentions(
+  private deliveryRecipientsFor(
     sender: AgentTeamMemberId,
     projectRef: AgentTeamProjectRef,
     body: string,
-    explicit: readonly AgentTeamMemberId[],
+    answered: readonly AgentTeamMemberId[],
   ): readonly AgentTeamMemberId[] {
     const candidates = this.mentionCandidatesFor(projectRef)
     const resolution = resolveBodyMentions(body, candidates, sender)
@@ -5656,7 +5577,7 @@ export class AgentTeamLedger {
     // retroactively alter what this operation delivered. It expands to the
     // Project's own participants, not to every name the body could address.
     const authored = resolution.all && this.state.rulesVersion < 2 ? this.allRecipientsFor(projectRef) : resolution.memberIds
-    const merged = new Set([...explicit, ...authored])
+    const merged = new Set([...answered, ...authored])
     merged.delete(sender)
     return Object.freeze([...merged].sort())
   }

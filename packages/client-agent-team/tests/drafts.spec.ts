@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { TEAM_DRAFTS_STORAGE_KEY, TeamDraftStore } from '../src/client/drafts.ts'
 
 function storage(): Storage {
@@ -23,33 +22,29 @@ describe('TeamDraftStore', () => {
     vi.stubGlobal('localStorage', storage())
   })
 
-  it('round-trips drafts and recipients per key and writes through to localStorage', () => {
+  it('round-trips drafts per key and writes through to localStorage', () => {
     const store = new TeamDraftStore()
     const changes: string[] = []
     const off = store.subscribe(() => { changes.push(store.getSnapshot('project:project:one' as never).draft) })
 
     store.writeDraft('project:project:one' as never, 'half written')
-    store.writeRecipients('project:project:one' as never, ['member:builder' as AgentTeamMemberId])
 
     const snapshot = store.getSnapshot('project:project:one' as never)
     expect(snapshot.draft).toBe('half written')
-    expect([...snapshot.recipients]).toEqual(['member:builder'])
     // Snapshot identity is stable across unrelated reads for useSyncExternalStore.
     expect(store.getSnapshot('project:project:one' as never)).toBe(snapshot)
-    expect(stored()['project:project:one']).toMatchObject({ draft: 'half written', recipientIds: ['member:builder'] })
-    expect(changes).toEqual(['half written', 'half written'])
+    expect(stored()['project:project:one']).toMatchObject({ draft: 'half written' })
+    expect(changes).toEqual(['half written'])
     off()
   })
 
   it('rebuilds entries from localStorage in a fresh store (refresh semantics)', () => {
     const first = new TeamDraftStore()
     first.writeDraft('thread:thread:nine' as never, 'reply draft')
-    first.writeRecipients('thread:thread:nine' as never, ['member:lead' as AgentTeamMemberId])
 
     const second = new TeamDraftStore()
     const snapshot = second.getSnapshot('thread:thread:nine' as never)
     expect(snapshot.draft).toBe('reply draft')
-    expect([...snapshot.recipients]).toEqual(['member:lead'])
   })
 
   it('keeps a Project draft saved before Projects were renamed from Channels', () => {
@@ -64,7 +59,7 @@ describe('TeamDraftStore', () => {
 
     store.clear('thread:thread:b' as never)
 
-    expect(store.getSnapshot('thread:thread:b' as never)).toEqual({ draft: '', recipients: new Set() })
+    expect(store.getSnapshot('thread:thread:b' as never)).toEqual({ draft: '' })
     expect(store.getSnapshot('project:project:a' as never).draft).toBe('keep me')
     expect(Object.keys(stored())).toEqual(['project:project:a'])
   })
@@ -105,18 +100,28 @@ describe('TeamDraftStore', () => {
 
   it('tolerates malformed persisted content', () => {
     localStorage.setItem(TEAM_DRAFTS_STORAGE_KEY, '{broken')
-    expect(new TeamDraftStore().getSnapshot('project:project:a' as never)).toEqual({ draft: '', recipients: new Set() })
+    expect(new TeamDraftStore().getSnapshot('project:project:a' as never)).toEqual({ draft: '' })
 
     localStorage.setItem(TEAM_DRAFTS_STORAGE_KEY, JSON.stringify({
       'project:good': { draft: 'kept', recipientIds: [], savedAt: 1 },
       'bogus:key': { draft: 'wrong prefix', recipientIds: [], savedAt: 1 },
       'project:mismatch': { draft: 42, recipientIds: [], savedAt: 1 },
-      'thread:no-recipients': { draft: 'no ids', savedAt: 1 },
+      'thread:no-saved-at': { draft: 'no timestamp' },
     }))
     const store = new TeamDraftStore()
     expect(store.getSnapshot('project:good' as never).draft).toBe('kept')
     expect(store.getSnapshot('bogus:key' as never).draft).toBe('')
     expect(store.getSnapshot('project:mismatch' as never).draft).toBe('')
-    expect(store.getSnapshot('thread:no-recipients' as never).draft).toBe('')
+    expect(store.getSnapshot('thread:no-saved-at' as never).draft).toBe('')
+  })
+
+  it('ignores legacy recipientIds when restoring from localStorage', () => {
+    localStorage.setItem(TEAM_DRAFTS_STORAGE_KEY, JSON.stringify({
+      'project:legacy': { draft: 'kept text', recipientIds: ['member:a', 'member:b'], savedAt: 1 },
+    }))
+    const store = new TeamDraftStore()
+    const snapshot = store.getSnapshot('project:legacy' as never)
+    expect(snapshot.draft).toBe('kept text')
+    expect(snapshot).not.toHaveProperty('recipients')
   })
 })

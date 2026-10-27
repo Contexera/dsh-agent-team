@@ -563,7 +563,7 @@ const mainMessagePosted: Op<'team/main-message-posted'> = {
     workspaceId: alpha,
     mentions: [memberId],
     message: { messageRef: 'message:protocol-main-1' as AgentTeamMessageRef, projectRef, scope: 'main', sender: human.memberId,
-      body: 'protocol fixture main message', sequence: 32, occurredAt: instant },
+      body: `@${memberHandle} protocol fixture main message`, sequence: 32, occurredAt: instant },
     inbox: { ...emptyInbox, mainMarkers: { added: [{ memberId, projectRef, messageRef: 'message:protocol-main-1' as AgentTeamMessageRef, sequence: 32 }], removed: [] } },
   },
 }
@@ -1029,7 +1029,6 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
           workspaceId: alpha,
           projectRef,
           body: mainMessagePosted.data.message.body,
-          recipients: [memberId],
         })
         expect(mappedCommitted(out.value).message.messageRef, 'the post mapper answers with the stored Message').toBe(mainMessagePosted.data.message.messageRef)
         return out
@@ -1040,7 +1039,6 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         workspaceId: alpha,
         projectRef,
         body: 'a different body under the same request id',
-        recipients: [memberId],
       }),
     },
     legacy: { normalize: 'none', repair: 'none' },
