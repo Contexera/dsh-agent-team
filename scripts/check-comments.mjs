@@ -67,6 +67,14 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // ~3% the other scopes carry, absorbing one ordinary scripts commit (36 lines)
 // while still tripping on the audited drift rate within about four commits.
 //
+// 2026-10-27: the one 4244-line `team-ui.e2e.ts` became eight scenarios under
+// `scripts/e2e/` plus a shared `support.ts`. That move is comment-neutral — the
+// narrative comments were carried verbatim (793 lines before, 800 after) — but
+// the shared module's own header and each scenario's opening raised the scope's
+// total by ~810. 2800 keeps the same ~3% headroom over the new total and absorbs
+// one ordinary scripts commit; a further split or a genuinely new constraint
+// still trips the ratchet.
+//
 // `client-agent-team/src` carried the identical defect and was the other scope
 // left without slack: 1950 was the audited count of the day, and it drifted up
 // to 1948/1950 — two comment lines of headroom — with the next Client comment
@@ -97,7 +105,7 @@ const COMMENT_BUDGETS = {
   'packages/agent-team/src': 4150,
   'packages/client-agent-team/src': 2020,
   'packages/tool-agent-team/src': 280,
-  'scripts': 1980,
+  'scripts': 2800,
 }
 
 const EXCLUDED_DIRECTORY = 'vendor'
