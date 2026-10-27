@@ -1599,9 +1599,18 @@ describe('AgentTeam durable Thread Attention ledger', () => {
   // 465ms to over 5s on identical code, so it needs headroom over the default.
   it('replays an Agent Attention read watermark from SQLite across a Host restart', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agent-team-sqlite-'))
-    cleanups.push(() => rm(root, { recursive: true, force: true }))
     const path = join(root, 'team.sqlite')
+    const harnesses: Array<Awaited<ReturnType<typeof sqliteHarness>>> = []
+    cleanups.push(async () => {
+      for (const test of harnesses) {
+        await test.fiber.dispose()
+        await test.facility.closeAll()
+        await test.backend.close()
+      }
+      await rm(root, { recursive: true, force: true })
+    })
     const first = await sqliteHarness(path)
+    harnesses.push(first)
     const project = await first.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const started = withTask(committed(await first.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Persistent task' })))
     const ledger = ledgerAtBoot(first)
@@ -1611,8 +1620,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       body: 'Persistent update', baseRevision: started.thread.revision, actor: agentTeamHumanActor() })).value)
     const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef, actor })).value
     expect(read.readThroughSequence).toBe(update.thread.revision)
-    await first.fiber.dispose(); await first.facility.closeAll()
+    await first.fiber.dispose(); await first.facility.closeAll(); await first.backend.close()
     const second = await sqliteHarness(path)
+    harnesses.push(second)
     const replay = ledgerAtBoot(second)
     expect(replay.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
     expect(second.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef }).items.map(item => item.message.body)).toEqual(['Persistent task', 'Persistent update'])

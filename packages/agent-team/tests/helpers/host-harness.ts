@@ -28,6 +28,10 @@ export interface TeamHarness {
   readonly facility: DomainFacility
 }
 
+export interface SqliteTeamHarness extends TeamHarness {
+  readonly backend: SqliteStorageBackend
+}
+
 /** The two Workspaces the Host specs address; a third is built locally where a spec needs one. */
 export const alpha = WorkspaceId('workspace:alpha')
 export const beta = WorkspaceId('workspace:beta')
@@ -64,7 +68,7 @@ export async function harness(
 }
 
 /** Boot the Team over a SQLite file: the shape that survives a dispose and a reopen. */
-export async function sqliteHarness(path: string): Promise<TeamHarness> {
+export async function sqliteHarness(path: string): Promise<SqliteTeamHarness> {
   const ctx = new Context()
   await ctx.plugin(Storage)
   const backend = new SqliteStorageBackend({ path, journalMode: 'delete' })
@@ -81,7 +85,7 @@ export async function sqliteHarness(path: string): Promise<TeamHarness> {
   provideQuietTokenMeter(ctx)
   await ctx.plugin(SessionProjectionRegistry)
   const fiber = await ctx.plugin(AgentTeam)
-  return { ctx, fiber, facility }
+  return { ctx, fiber, facility, backend }
 }
 
 /**
