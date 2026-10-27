@@ -35,7 +35,7 @@ Mention chips are rendered only for handles in the Message's resolved mention li
 
 Human literal, Agent plain prose, and rich Markdown use their corresponding segmentation path; absent names become a trailing fallback row without duplication.
 
-Every mention chip renders alike, the reader's own handle included: recognising yourself is the row's job, not the chip's, so a chip carries no second treatment and `[data-mention-human]` is gone. The row states it instead, through `data-mentions-me` and the `Mentioned you` notice on the action card, and that scan follows the identity rather than the spelling, so a body written before the reader's rename still counts. Chip ink mixes the business alias toward `label-primary`, which is what holds it over the 4.5:1 body-text floor in both themes.
+Every mention chip renders alike, the reader's own handle included: recognising yourself is the row's job, not the chip's, so a chip carries no second treatment and `[data-mention-human]` is gone. The row states it instead, through `data-mentions-me` and the `Mentioned you` notice on the action card, and that scan follows the identity rather than the spelling, so a body written before the reader's rename still counts. Chip ink mixes the business alias toward `label-primary`, which holds it over the 4.5:1 body-text floor in both themes.
 
 The trailing fallback row never repeats the reader's own name — that would print a bare `@me` under a body that already chips it in place — nor an author the quote line above it already names, since that line states the delivery itself. A quote that no longer resolves names nobody, so there the chip is the only place the delivery still shows.
 
@@ -43,7 +43,7 @@ Known branded `task:*` refs are resolved in batches and rendered at their origin
 
 Known branded `thread:*` refs resolve the same way through `resolveThreadRefs` and render at their original position as clickable Thread chips titled with the cited Thread's opening line (`讨论 · …` in Chinese), so one taskless Thread no longer reads exactly like the next. A ref becomes a link only when the Host confirms it — abbreviated spellings included — and clicks navigate by the resolved full ref, so unresolvable text stays plain and never silently no-ops.
 
-Known branded `project:*` refs render at their original position as Project chips naming the cited Project (`项目 · …` under the Chinese locale, `Project · …` under English); clicks hop to that Project. Known branded `member:*` refs render as Member chips naming the cited Member (`成员 · @…` / `Member · @…`) — deliberately distinct from `@mention` chips, which notify, while a cited ref never does. Clicking an active Member's chip opens their session exactly the way the agent card does; suspended Members and the Human render as labelled but inert text.
+Known branded `project:*` refs render as Project chips naming the cited Project (`项目 · …` under the Chinese locale, `Project · …` under English); clicks hop to that Project. Known branded `member:*` refs render as Member chips naming the cited Member (`成员 · @…` / `Member · @…`) — deliberately distinct from `@mention` chips, which notify, while a cited ref never does. Clicking an active Member's chip opens their session exactly the way the agent card does; suspended Members and the Human render as inert labelled text.
 
 Both resolve against the already-loaded Project and member rosters with no new Host call, so a ref outside the loaded window stays plain text under the same rule unresolvable refs follow.
 
@@ -134,7 +134,7 @@ The board reads the Host's `taskBoard` projection — the same rows the Agent `t
 
 Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task statuses folded so `done` and `closed` share the resolved column. Resolved cards dim rather than hide — the board's job is to keep moving work loudest while leaving finished work findable.
 
-The finished column offers `展开全部已完成` under its head only while the Host reports it cut the column — the board value's `finishedTruncated` — and the control retires once the column shows everything, and at the deepest page the Host accepts, rather than standing there with nothing to do. A full column is not a cut one, so the control never appears on a page that merely happens to be full. A column with nothing in it states its own `0` in the head; it draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
+The finished column offers `展开全部已完成` under its head only while the Host reports it cut the column — the board value's `finishedTruncated` — and the control retires once the column shows everything, and at the deepest page the Host accepts, rather than standing there with nothing to do. A full column is not a cut one, so the control never appears on a page that merely happens to be full. An empty column states its own `0` in the head and draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
 
 A card names the Task's accountable owner — the reader as `你负责`, resolved from the board value's `humanMemberId` — and carries a `待你验收` badge when the reader may accept the work.
 

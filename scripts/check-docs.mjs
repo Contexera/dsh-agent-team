@@ -66,7 +66,7 @@ const BLOCK_CHARACTER_CEILINGS = {
   'domain-model.md': [593, 580],
   'dsh-release-compatibility.md': [475, 235],
   'frontend-design/README.md': [367, 189],
-  'frontend-design/components.md': [576, 523],
+  'frontend-design/components.md': [563, 443],
   'frontend-design/layout-and-typography.md': [536, 452],
   'frontend-design/principles-and-language.md': [775, 557],
   'frontend-design/refresh-copy-accessibility.md': [510, 310],
