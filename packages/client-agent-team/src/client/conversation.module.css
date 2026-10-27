@@ -363,12 +363,13 @@
   outline-offset: 1px;
 }
 /* "This Message names you" is a fact about the Message, so it leads the card and
-   survives being read — unlike the unread batch, which is about the reader. The
-   warn label is the shipped "attention, not an error" colour, and it is a line of
-   text here rather than a filled badge: the card is already a surface, and a
-   second surface inside it would read as a control. */
+   survives being read — unlike the unread batch, which is about the reader. It is
+   a line of text here rather than a filled badge: the card is already a surface,
+   and a second surface inside it would read as a control. Its ink is mixed toward
+   `label-primary` as the chip below is — bare warn measures 2.79:1 on the light
+   card, the mix 4.90:1 light and 7.63:1 dark. */
 .cardMention {
-  color: var(--dsw-alias-state-warn-label);
+  color: color-mix(in srgb, var(--dsw-alias-state-warn-label) 70%, var(--dsw-alias-label-primary));
   /* The card's own type tier, shared with the actions beside it: the notice is
      read at the size of the things it sits between, never smaller than them. */
   font-size: 12px;
@@ -672,20 +673,17 @@
   margin: 2px 0 0 calc(var(--team-identity-seat, 34px) + 10px);
 }
 
-/* Mention chip for @Member references in Human literal messages and the structured mention fallback row. */
+/* Mention chip for @Member references in Human literal messages and the structured mention fallback row. Every handle
+   takes this one recipe: who the reader is belongs to the row, not to the shape of a chip. The ink is the business alias
+   mixed toward `label-primary`, the one alias that inverts with the theme, so one declaration clears the 4.5:1 body-text
+   floor in both — bare it measures 3.66:1 on the chip's own tint in light and 3.59:1 on a hovered dark row. */
 .mention {
   background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
   border-radius: var(--dsw-radius-sm, 6px);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
-  color: var(--dsw-alias-state-business-primary);
+  color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 70%, var(--dsw-alias-label-primary));
   font-weight: 500;
   padding: 0 4px;
-}
-/* The reader's own handle is the one chip to find without reading, so it takes a second family (success: "for you" without
-   the alarm of the error and warn families). */
-.mention[data-mention-human] {
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent);
-  color: var(--dsw-alias-state-success-primary);
 }
 
 /* Structured mentions the body text does not carry: names the sender omitted and all chips of Markdown agent bodies. */

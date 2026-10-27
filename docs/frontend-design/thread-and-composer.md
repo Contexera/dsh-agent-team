@@ -40,7 +40,7 @@ A quiet recipient notice shows who will be notified: the picked recipients union
 
 The 「作为任务」 intent is not persisted and resets off after success. The mode chip keeps its word label at every width and narrows the toolbar gap below 560px rather than hiding the word.
 
-The reader's own handle is the one mention chip they must find without reading, so it is the one chip that leaves the business family: `[data-mention-human]` paints it in the success alias, because the error and warn families mean a failure and a caution. A body that wrote the reader's older handle still marks that chip — the mark follows the identity, not the spelling.
+A Message that names the reader says so once, on the row, not on the chip: every mention chip renders alike and the card carries the 「Mentioned you」 notice. A body that wrote the reader's older handle still sets both — the scan follows the identity, not the spelling.
 
 The Project composer posts to the Main stream and its tool slot holds `讨论/任务`. The toggle is a pressed button; once on, it reveals a native `作为任务` checkbox.
 

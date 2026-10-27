@@ -160,6 +160,44 @@ async function actionBandGeometry(page: Page): Promise<{
 }
 
 /**
+ * The contrast a rendered element's own ink has against what actually sits behind
+ * it. The declarations are `color-mix(...)`, which the browser reports back as
+ * `color(srgb …)` rather than `rgb()`, so the ratio is computed here instead of
+ * trusting a token name: a floor is a number.
+ */
+async function inkContrast(page: Page, scope: string, selector: string): Promise<number | null> {
+  return page.evaluate(({ within, sel }) => {
+    const parse = (value: string): { rgb: number[]; alpha: number } | null => {
+      const mixed = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)$/.exec(value)
+      if (mixed !== null) return { rgb: [1, 2, 3].map(index => Number(mixed[index]) * 255), alpha: mixed[4] === undefined ? 1 : Number(mixed[4]) }
+      const classic = /^rgba?\(([^)]+)\)$/.exec(value)
+      if (classic === null) return null
+      const parts = classic[1]!.split(/[ ,/]+/).filter(part => part !== '').map(Number)
+      return { rgb: parts.slice(0, 3), alpha: parts.length > 3 ? parts[3]! : 1 }
+    }
+    const target = document.querySelector(within)?.querySelector(sel) ?? null
+    if (target === null) return null
+    const own = parse(getComputedStyle(target).backgroundColor)
+    const ink = parse(getComputedStyle(target).color)
+    if (own === null || ink === null) return null
+    // The fill may be translucent; composite it onto the first opaque box above it.
+    let base: number[] = [255, 255, 255]
+    for (let node: Element | null = target; node !== null; node = node.parentElement) {
+      const layer = parse(getComputedStyle(node).backgroundColor)
+      if (layer !== null && layer.alpha >= 0.999) { base = layer.rgb; break }
+    }
+    const fill = own.alpha >= 0.999 ? own.rgb : own.rgb.map((channel, index) => own.alpha * channel + (1 - own.alpha) * base[index]!)
+    const linear = (channel: number): number => {
+      const scaled = channel / 255
+      return scaled <= 0.04045 ? scaled / 12.92 : ((scaled + 0.055) / 1.055) ** 2.4
+    }
+    const luminance = (rgb: readonly number[]): number => 0.2126 * linear(rgb[0]!) + 0.7152 * linear(rgb[1]!) + 0.0722 * linear(rgb[2]!)
+    const [light, dark] = [luminance(ink.rgb), luminance(fill)].sort((left, right) => right - left) as [number, number]
+    return Math.round(((light + 0.05) / (dark + 0.05)) * 100) / 100
+  }, { within: scope, sel: selector })
+}
+
+/**
  * The colour a `--dsw-*` alias resolves to in the running theme, so
  * expectations follow palette changes.
  */
@@ -2405,6 +2443,27 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
     }
   })
   expect(noticeFacts.noticeSize).toBe(noticeFacts.actionSize)
+  // Every chip is one recipe, the reader's own included, stated as an equation
+  // over every chip on the timeline: the self-chip sits in one row and plain ones
+  // in another, so painted ink and fill have to come out identical.
+  expect(await addressedRow.locator('[data-mention-human]').count()).toBe(0)
+  const chipInks = await page.evaluate(() => [...document.querySelectorAll('[data-team-thread] [data-mention-chip]')].map((chip) => {
+    const style = getComputedStyle(chip)
+    return {
+      own: chip.closest('[data-mentions-me]') !== null,
+      ink: style.color,
+      fill: style.backgroundColor,
+    }
+  }))
+  // A page with no self-chip would pass the equality vacuously.
+  expect(chipInks.some(chip => chip.own)).toBe(true)
+  expect(chipInks.some(chip => !chip.own)).toBe(true)
+  expect([...new Set(chipInks.map(chip => `${chip.ink}|${chip.fill}`))]).toHaveLength(1)
+  // Legibility is a measurement, not a token name: the bare aliases measured
+  // 3.66:1 and 2.79:1 here in the light theme, so both mixed inks must clear the
+  // 4.5:1 body-text floor as painted.
+  expect(await inkContrast(page, '[data-team-thread]', '[data-mention-chip]')).toBeGreaterThanOrEqual(4.5)
+  expect(await inkContrast(page, '[data-team-thread]', '[data-mentions-you]')).toBeGreaterThanOrEqual(4.5)
   // The elevation hairline keeps the chip legible over white code blocks and
   // screenshots; beneath it sits the lightest shipped elevation (--dsw-elevation-
   // panel), one step below the composer card's (--dsw-elevation-soft).

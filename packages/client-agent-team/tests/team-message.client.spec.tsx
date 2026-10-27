@@ -39,7 +39,7 @@ describe('TeamMessage structured mention rendering', () => {
     expect([...container.querySelectorAll('div')].some(div => hasClassToken(div, 'mentionsRow'))).toBe(false)
   })
 
-  it('marks the reader\'s own chip, including a handle written before a rename', () => {
+  it('chips every handle alike and states "this one is you" on the row, not on the chip', () => {
     const { container } = render(
       <TeamMessage
         senderName="Builder"
@@ -48,14 +48,20 @@ describe('TeamMessage structured mention rendering', () => {
         body="@Iris and @lead please look"
         mentionNames={[{ name: 'Iris', also: ['human'] }, 'lead']}
         readerName="Iris"
+        t={t}
+        onReply={() => {}}
       />,
     )
-    // Every member's chip is business-tinted, so the reader's own carries the
-    // marker their eye can follow back to "this one is me".
-    expect(spansWithText(container, '@Iris')[0]!.getAttribute('data-mention-human')).toBe('')
-    expect(spansWithText(container, '@lead')[0]!.getAttribute('data-mention-human')).toBeNull()
-    // A body written before the reader renamed themselves still marks the chip:
-    // the mark follows the identity, not the spelling.
+    // One recipe for every handle and no marker a stylesheet could hang a second
+    // treatment on; the row is what says the Message names the reader.
+    const chips = [...container.querySelectorAll('[data-mention-chip]')]
+    expect(chips.map(chip => chip.textContent)).toEqual(['@Iris', '@lead'])
+    expect([...new Set(chips.map(chip => chip.className))]).toHaveLength(1)
+    expect(container.querySelector('[data-mention-human]')).toBeNull()
+    expect(container.querySelector('[data-mentions-me]')).not.toBeNull()
+    expect(container.querySelector('[data-mentions-you]')!.textContent).toBe('提到了你')
+    // A body written before the reader renamed themselves still chips the name
+    // they answer to today, unmarked like every other chip.
     const renamed = render(
       <TeamMessage
         senderName="Builder"
@@ -64,10 +70,13 @@ describe('TeamMessage structured mention rendering', () => {
         body="@human look"
         mentionNames={[{ name: 'Iris', also: ['human'] }]}
         readerName="Iris"
+        t={t}
       />,
     )
-    const historic = renamed.container.querySelector('[data-mention-human]')
-    expect(historic?.textContent).toBe('@Iris')
+    const historic = renamed.container.querySelector('[data-mention-chip]')!
+    expect(historic.textContent).toBe('@Iris')
+    expect(renamed.container.querySelector('[data-mention-human]')).toBeNull()
+    expect(renamed.container.querySelector('[data-mentions-me]')).not.toBeNull()
   })
 
   it('falls back to the trailing chip row for rich markdown agent bodies without ref navigation', () => {

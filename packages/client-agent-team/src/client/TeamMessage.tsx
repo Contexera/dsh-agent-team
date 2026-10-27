@@ -121,7 +121,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   const bodyNode = plan.render === 'inline' && plan.inline !== undefined
     ? <div className={css.messageText}>
         {plan.inline.segments.map((segment, index) => segment.mention
-          ? <span key={index} className={css.mention} data-mention-human={readerName !== undefined && segment.name === readerName ? '' : undefined}>{segment.text}</span>
+          ? <span key={index} className={css.mention} data-mention-chip="">{segment.text}</span>
           : <Fragment key={index}>{renderRefs(segment.text)}</Fragment>)}
       </div>
     : plan.render === 'literal'
@@ -168,7 +168,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
         )}
         {(fallbackNames.length > 0 || plan.fallbackRefs.length > 0) && (
           <div className={css.mentionsRow}>
-            {fallbackNames.map(name => <span key={name} className={css.mention}>@{name}</span>)}
+            {fallbackNames.map(name => <span key={name} className={css.mention} data-mention-chip="">@{name}</span>)}
             {plan.fallbackRefs.map(ref => {
               const resolved = cachedResolvedTaskRef(ref as AgentTeamTaskRef)
               const label = resolved !== undefined && ref.startsWith('task:') ? taskLabel(resolved.taskNumber) : ref
@@ -416,6 +416,7 @@ function renderResolvedMarkdownText(node: Text, mentionNames: readonly MentionHa
         changed = true
         const chip = document.createElement('span')
         if (css.mention !== undefined) chip.className = css.mention
+        chip.setAttribute('data-mention-chip', '')
         chip.textContent = mentionSegment.text
         fragment.append(chip)
       }
