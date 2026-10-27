@@ -36,6 +36,7 @@ All notable changes to this project are documented in this file. The format foll
 **Fixed**
 
 - The follow control reads the Human's own row out of the follower set instead of asking whether the set is non-empty. The set holds every Member whose Attention is on the Thread, so while any Agent still followed, the Human's unfollow left the button pressed with the pressed fill while its word read 「关注」; the same reading also made a press on a Thread only an Agent followed answer "already following". The Human's own Attention and notification gate were never wrong — only the Client's identity test was.
+- Every whole-surface loading state renders one box in one place. The box centres by taking the free space itself (`min-height: 100%`) instead of relying on its container being a flex column, so the Task board and the discussion panel — plain block scroll boxes, where the vertical half of `margin: auto` resolves to zero — no longer drew their state against the top edge while the reading surfaces drew theirs in the middle; a whole-surface failure takes the same box so one surface never splits its two states. The board's loading frame was also drawn with the empty state's own style and no pulse mark, which read as 「already empty」 rather than 「still reading」. The Main stream no longer loads under the Projects sentence: it has its own key, and `正在读取看板…` joined the 「正在加载…」 verb family.
 
 ## [0.2.5] - 2026-10-24
 

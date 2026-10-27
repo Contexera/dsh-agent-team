@@ -338,7 +338,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
 
     {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
       {loadError !== undefined && <p className={css.error} role="alert">{loadError}</p>}
-      {loadError === undefined && taskBoard === undefined && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardLoading')}</p></div>}
+      {loadError === undefined && taskBoard === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('boardLoading')}</p></div>}
       {loadError === undefined && taskBoard !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
       {boardColumns.some(column => column.items.length > 0) && <div className={projectCss.boardColumns}>
         {boardColumns.map(column => <div className={projectCss.boardColumn} key={column.labelKey}>

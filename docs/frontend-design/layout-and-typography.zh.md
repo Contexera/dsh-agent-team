@@ -12,7 +12,11 @@
 - Thread 是导航终点；Task 只在存在时叠加为 header/card。taskful Thread 的头部将 `Task #N` 与状态 Pill 放在同一行（`.titleLine`），任务标题为副行。header 动作区只在 open 任务出现（验收/关闭），accepted 任务保留 header 重新打开主按钮。taskless Thread 显示 Thread 标题与唯一的「转为任务」动作。它不显示状态。
 - 关闭任务是终态：composer 槽位换成解释性提示条（`.closedBar/.closedNotice`，文案 + 唯一的重新打开动作），不再渲染禁用的输入框。taskless Thread 保持普通 reply composer。
 - Project 页与 Thread 页共用顶层栏、发丝线与 880px 居中阅读列。Project 页的顶层栏取 shipped session 页头的形状与节奏：10px 顶距下一条 30px 身份行，下面接页签行。身份行是 Project 标题，description 跟在标题同一条基线上，单行截断（完整文本在 `title`）。
-- 顶层栏是**面板 chrome，不与阅读列共用左边缘**。shipped 会话页头左缩进 20px（`padding: 10px 28px 0 20px`），其正文列居中，所以那个页面上标题与标题下面的正文刻意不在同一条 x 上。Team 各面照搬这个安排，而不是把页头居中对齐到阅读列。该栏也不带返回行：侧栏本来就列出全部 Project，页内再放一个返回控件是重复入口。Project 页另在页头收口线上加一条 `项目 | 看板` 页签行；taskless 讨论在右侧 360px 面板里打开，座位只在面板打开时预留。看板是唯一被允许超出阅读列的 Team 表面，上限 1240px。时间线空/加载态在自由空间内居中（`.emptySurface` + `margin:auto`）。
+- 顶层栏是**面板 chrome，不与阅读列共用左边缘**。shipped 会话页头左缩进 20px（`padding: 10px 28px 0 20px`），其正文列居中，所以那个页面上标题与标题下面的正文刻意不在同一条 x 上。Team 各面照搬这个安排，而不是把页头居中对齐到阅读列。该栏也不带返回行：侧栏本来就列出全部 Project，页内再放一个返回控件是重复入口。Project 页另在页头收口线上加一条 `项目 | 看板` 页签行；taskless 讨论在右侧 360px 面板里打开，座位只在面板打开时预留。看板是唯一被允许超出阅读列的 Team 表面，上限 1240px。
+- **整面状态**（投影还在加载、投影回来是空的、替代它的失败）共用同一个盒子 `.emptySurface`，在它所在的空白区里居中。
+- 居中由盒子自己承担，不从容器继承：盒子用 `min-height: 100%` 撑满滚动容器再居中内容，并用 `box-sizing: border-box` 挡住它自己那 32px padding 加到这 100% 上撑出滚动条。
+- 阅读类是 flex 列，`margin: auto` 本来就有纵向效力；看板与讨论面板是普通 block 滚动容器，`margin: auto` 的纵向那一半会解析成 0。让盒子自己去占住空白区，才是两族容器都落在中间的原因——否则加载态在那两个 block 面上贴顶。
+- 父容器高度不确定时百分比解析成 `auto`，`margin: auto` 仍能居中，所以哪一族都不依赖另一族的机制。
 - 侧栏两个面板（Agents/Projects）都订阅 `{kind:'workspace'}` 变更。`TeamChangeStream` 在每个页面内按 scope 共享一个流式订阅，每次开场或重连基线都触发补读，之后响应匹配的通知。Project 刷新成功后清除加载错误，不清除无关的操作错误。
 - 发送幂等：Project 顶层发送与 Thread reply 一致按 requestId 幂等。Project composer 的「作为任务」是默认关闭的原生 pressed control。chip 自绘，任何宽度都保留文字。选中态为 primary 底色，hover 不改变按压底色。形态与座位见设计语言表的「模式控件」行。新发送显式携带 taskless 意图，选中时才原子创建 Task。`committed` 与确定性拒绝（如 `unread_required`、`stale_revision`）后换新 id。`confirmation_required` 保留同 id 续发同一操作。传输异常保留 id 以便安全重试（Host 按 requestId 去重并返回原结果）。成功发送后「作为任务」复位为关闭。
 

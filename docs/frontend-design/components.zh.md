@@ -102,6 +102,13 @@
 - 窄于 600px 的共享断点下，面板整块盖住 feed，而不是并排站在一个窄到读不了的 feed 旁边：两者占 surface 的同一条列与 feed 自己的行区，于是面板画在 feed 之上，上方的带仍然可见且保持自己的宽度。把任一方放到这条列之外，会多开出一条隐式列，结果是把 feed 挤成一条窄缝，而不是盖住它。
 - 面板里的「转为 Task」与 Thread 页跑同一套 Human-only durable mutation，成功即结束面板的任务：面板关闭，读者直接进入新 Task 的 Thread 页。在面板里完成的读取立即清掉它在 feed 行上的未读胶囊，不必等下一次 Inbox 读取落地。
 
+## 整面加载态（whole-surface loading state）
+- 任何「还没有内容可显示」的面都渲染同一个盒子：`.emptySurface` 里一行 `.loadingState`，跳动标记（`.loadingMark`，`aria-hidden`）在文字之前。收件箱、全局任务看板、Thread 的两处座位、Project 主对话与看板页签都是这一个形状。
+- 盒子靠**自己占住空白区**居中（`min-height: 100%`、`box-sizing: border-box`），而不是依赖父容器是 flex 列。所以看板与讨论面板这两个 block 滚动容器，其加载态与阅读类落在同一个位置；机制写在 [`layout-and-typography.zh.md`](layout-and-typography.zh.md)。
+- 这一行说明**在加载什么**，动词一律是「正在加载…」：`正在加载收件箱…`、`正在加载看板…`、`正在加载主对话…`、`正在加载 Thread…`。每个面用自己的键。借用别人的句子会让读者以为别的东西在加载——Main stream 曾经就用「正在加载项目…」加载自己。
+- 加载帧不穿空态的衣服。两个状态类分开：`loadingState` 是「读取进行中」，`emptyState` 是「投影成功回来是空的」。它们是关于这个面的两个不同声明；看板把加载帧画成空态，读起来就是「已经空了」而不是「还在读」。
+- 整面失败与它同站一个盒子：`margin: auto` 之外也带 `min-height: 100%`，以免同一个面出现「加载在中间、失败贴顶」。
+
 ## 失败态呈现（failure surfaces）
 - 投影失败的呈现只有两种，选哪一种等于声明「屏幕上还剩什么」。**整面失败**（从未加载出投影）用 `errorState`。`errorState` 与所替代的 loading / empty 面共用同一份空白区居中（`margin: auto`、`padding: 32px 0`）。整面失败保持在 880px 阅读列内，取 12px/18px 的 error 字号与 `--dsw-alias-state-error-primary`。内容是 Host message 加一个重新发起读取的 `重试`，message 与按钮同在一个 `role="alert"` 里。**行旁失败**（行还在）用内联 `error`。在内容列内 `margin: 0`，读作所属列表的最后一行，而不是让已有内容的面重新居中。
 - 两种失败都不充当空态。空的判定要求「投影成功返回且确实为空」：`view !== undefined`、无 error、里面没有东西。所以断连永远不会被读成「这个工作区是空的」。

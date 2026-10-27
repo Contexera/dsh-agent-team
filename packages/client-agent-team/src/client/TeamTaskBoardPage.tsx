@@ -34,7 +34,7 @@ export function TeamTaskBoardPage({ useWorkspaces, loadTaskBoard, subscribeChang
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderStacked}`}><header className={css.headerRow}><div className={css.headerCopy}><h1>{t('taskBoard')}</h1><p>{t('taskBoardHint')}</p></div></header></div>
     <section className={projectCss.board}>
       {error !== undefined && <p className={css.error} role="alert">{error}</p>}
-      {items === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}>{t('boardLoading')}</p></div>}
+      {items === undefined && error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('boardLoading')}</p></div>}
       {items !== undefined && items.length === 0 && <div className={css.emptySurface}><p className={css.emptyState}>{t('taskBoardEmpty')}</p></div>}
       {items !== undefined && items.length > 0 && <div className={projectCss.boardColumns}>{columns.map(column => {
         const columnItems = items.filter(item => item.task.status === column.key)

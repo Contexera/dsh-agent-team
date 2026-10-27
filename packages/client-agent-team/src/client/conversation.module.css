@@ -163,10 +163,25 @@
   min-height: 100%;
   min-width: 0;
 }
+/* One shape wherever a whole surface has nothing to show yet: a loading read, an empty result, a failure that replaced the
+   projection. It centres in the free space it stands in, and it has to do that in both container families the surfaces use — a
+   flex column (the reading surfaces, where an auto margin has vertical authority) and a plain block scroll box (the board and
+   the discussion panel, where the vertical half of `margin: auto` resolves to zero and the state would sit against the top edge
+   instead of in the middle). Taking the free space itself is what makes the block family centre: `min-height: 100%` fills the
+   scroll box, and the column's own centring then does the placing. `box-sizing: border-box` keeps that 100% from adding this
+   rule's padding on top of it and opening a scrollbar; where the parent's height is indefinite the percentage resolves to auto
+   and the auto margin still centres, so both families land in the middle. */
 .emptySurface {
+  align-items: center;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   margin: auto;
+  min-height: 100%;
   padding: 32px 0;
 }
+/* The two-line empty copy centres as a block inside the box's column, which also keeps its own `display: grid` row rhythm. */
 .emptySurface .emptyState {
   justify-items: center;
   text-align: center;
@@ -570,9 +585,12 @@
   max-width: 880px;
   padding-top: 6px;
 }
-/* A failure that replaces the whole surface rides the same free space as the loading and empty surfaces; `margin: auto` also takes the box off stretch and centres it. */
+/* A failure that replaces the whole surface rides the same free space as the loading and empty surfaces above, so it takes
+   their box rule as well as `margin: auto`: the two have to sit on one vertical axis, or a surface would show its loading
+   state in the middle and its failure against the top edge. */
 .errorState {
   align-items: center;
+  box-sizing: border-box;
   color: var(--dsw-alias-state-error-primary);
   display: flex;
   font-size: 12px;
@@ -581,6 +599,7 @@
   line-height: 18px;
   margin: auto;
   max-width: 880px;
+  min-height: 100%;
   padding: 32px 0;
 }
 

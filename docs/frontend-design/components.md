@@ -178,6 +178,17 @@ Below the shared 600px breakpoint the panel covers the feed whole instead of sta
 
 Promotion from the panel is the same Human-only durable mutation the Thread page runs, and it ends the panel's job: on success the panel closes as the reader walks into the new Task's Thread page. A read committed in the panel clears its feed row's unread capsule immediately rather than waiting for the next Inbox read to land.
 
+## Whole-surface loading state
+Every surface that has nothing to show yet — the Inbox, the global Task board, both Thread seats, the Project feed and the Project board tab — renders the same box: `.emptySurface` holding a `.loadingState` line whose pulse mark (`.loadingMark`, `aria-hidden`) precedes the words.
+
+The box centres in the free space by taking it (`min-height: 100%`, `box-sizing: border-box`) rather than relying on the container being a flex column. That is what puts the two block scroll boxes — the board and the discussion panel — on the same axis as the reading surfaces; the mechanism is stated in [`layout-and-typography.md`](layout-and-typography.md).
+
+The line says what is loading and always uses the 「正在加载…」 verb family: `正在加载收件箱…`, `正在加载看板…`, `正在加载主对话…`, `正在加载 Thread…`. Each surface owns its own key. A feed that borrows another surface's sentence tells the reader the wrong thing is loading, which is how the Main stream once loaded under the Projects sentence.
+
+A loading frame is never drawn in the empty state's clothes. The status classes are separate — `loadingState` for a read in flight, `emptyState` for a projection that came back empty — because the two are different claims about the surface, and a board that renders its loading frame as an empty one reads as 「already empty」 rather than 「still reading」.
+
+A whole-surface failure stands on this same box, carrying `min-height: 100%` beside `margin: auto`, so one surface never shows its loading state in the middle and its failure against the top edge.
+
 ## Failure surfaces
 A failed projection renders one of two shapes, and the choice is a claim about what is still on screen. When nothing was ever loaded, the failure replaces the whole surface as `errorState`: it rides the same free space as the loading and empty surfaces it stands in for (`margin: auto`, `padding: 32px 0`), keeps to the 880px reading column, and takes the 12px/18px error scale in `--dsw-alias-state-error-primary`. It carries the Host's message plus one `重试` that re-issues the read — message and retry inside a single `role="alert"`.
 

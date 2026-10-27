@@ -17,6 +17,14 @@ The band is pane chrome and does **not** share the reading column's edge. The sh
 
 The Project page additionally seats a `项目 | 看板` tab strip on its header's closing rule and, for a taskless discussion, a 360px right-hand panel whose seat is reserved only while it is open; the board is the one Team surface allowed past the reading column, up to 1240px.
 
+A whole-surface state — a projection still loading, one that came back empty, a failure that replaced it — rides one box, `.emptySurface`, and centres in the free space it stands in.
+
+The box carries that centring rather than inheriting it: it fills the scroll box with `min-height: 100%` and centres its content, with `box-sizing: border-box` so its own 32px padding cannot add to that 100% and open a scrollbar.
+
+The reading surfaces are flex columns, where an auto margin already has vertical authority; the board and the discussion panel are plain block scroll boxes, where the vertical half of `margin: auto` resolves to zero. Making the box take the free space is what puts both families in the middle, instead of a loading read sitting against the top edge on the two block surfaces.
+
+Where the parent's height is indefinite the percentage resolves to `auto` and the auto margin still centres, so neither family depends on the other's mechanism.
+
 Successful Project refreshes clear load errors without clearing unrelated action errors. Project top-level and Thread replies are idempotent by request ID. The Project 「作为任务」 control is a default-off native pressed control, sends explicit taskless intent unless selected, and resets off after success.
 
 It sits beside the attach control as the labeled mode chip of the language table above, keeping its word at every width — the composer narrows its control gaps below 560px instead of dropping the label.

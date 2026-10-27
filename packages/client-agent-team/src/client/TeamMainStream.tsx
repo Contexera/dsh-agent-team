@@ -261,7 +261,7 @@ export function TeamMainStream({
   return <>
     <section ref={timeline.ref} onScroll={timeline.onScroll} className={css.timeline} aria-label={t('timelineLabel')}>
       <div className={css.timelineContent}>
-        {stream.loading && entries.length === 0 && stream.error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingProjects')}</p></div>}
+        {stream.loading && entries.length === 0 && stream.error === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('loadingMainStream')}</p></div>}
         {!stream.loading && entries.length === 0 && stream.error !== undefined && <div className={css.errorState} role="alert"><span>{stream.error}</span><Button size="sm" variant="outline" onClick={() => { void stream.refresh() }}>{t('retry')}</Button></div>}
         {stream.hasMore && <div className={css.timelineAction}><Button size="sm" disabled={stream.loadingOlder} onClick={() => { void stream.loadOlder() }}>{t('loadOlder')}</Button></div>}
         {!stream.loading && entries.length === 0 && stream.error === undefined && <div className={css.emptySurface}>
