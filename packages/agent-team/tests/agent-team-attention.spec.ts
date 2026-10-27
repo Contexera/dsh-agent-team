@@ -1,99 +1,29 @@
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 // Every test here boots a Host over a throwaway tree, and the windows lane has
 // stretched one cold replay to 2.7s against vitest's 5s default (worst of 11 CI
 // runs, 2026-09-17..21). The SQLite case below keeps its own 30s argument.
 vi.setConfig({ testTimeout: 30_000 })
-import { Context } from '@deepseek-ai/cordis'
-import Storage from '@deepseek-ai/dsh-storage'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
-import { SqliteStorageBackend } from '../src/vendor/storage-sqlite/index.ts'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
-import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import { fabricateLegacyThreadReadSnapshot, counterfactualReceiptReadData } from './helpers/legacy-thread-read.ts'
-import AgentTeam, { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
-import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot } from '../src/ledger.ts'
-import { agentTeamDomainSpec } from '../src/spec.ts'
+import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import AgentTeam from '../src/index.ts'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { fabricateLegacyThreadReadSnapshot } from './helpers/legacy-thread-read.ts'
 import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
-import type { AgentTeamAgentMember, AgentTeamHostActor, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadReadData, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadRef } from '../src/types.ts'
-
-interface TeamHarness {
-  readonly ctx: Context
-  readonly fiber: Awaited<ReturnType<Context['plugin']>>
-  readonly facility: DomainFacility
-}
+import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot } from '../src/ledger.ts'
+import { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
+import { addLedgerMember, alpha, beta, committed, harness, inFlight, ledgerAtBoot, makeOwner, requestId, sqliteHarness, storedPool, withTask } from './helpers/host-harness.ts'
+import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadReadData, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadRef } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
-const alpha = WorkspaceId('workspace:alpha')
-const beta = WorkspaceId('workspace:beta')
-const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
 
-/** The in-progress and in-review rows of a Member's Task board, shaped like the address-book radar the board replaced. */
-function inFlight(ledger: AgentTeamLedger, workspaceId: WorkspaceId, memberId: AgentTeamAgentMember['memberId']) {
-  const actor = { kind: 'member' as const, memberId, handle: ledger.getMember(memberId)!.handle }
-  return ledger.taskBoard(actor, { workspaceId }).open.filter(item => item.task.status === 'in_progress' || item.task.status === 'in_review')
-    .map(item => ({ threadRef: item.threadRef, taskRef: item.task.taskRef, status: item.task.status, subject: item.subject, taskNumber: item.taskNumber, members: item.liveClaimOwners }))
-}
-
-async function harness(
-  pool = new MemoryMediaPool(),
-  workspaceIds = [alpha],
-  config?: { readonly gate?: { readonly tokens?: number; readonly idleMs?: number; readonly judgeTimeoutMs?: number } },
-): Promise<TeamHarness> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
-  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', {
-    get: (id: WorkspaceId) => workspaceIds.includes(id) ? { id, path: process.cwd(), attachSession: async () => {} } : undefined,
-    list: () => workspaceIds.map(id => ({ id, path: process.cwd() })),
-    archiveSession: async () => {},
-  })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = config === undefined ? await ctx.plugin(AgentTeam) : await ctx.plugin(AgentTeam, config)
-  cleanups.push(async () => { await fiber.dispose(); await facility.closeAll() })
-  return { ctx, fiber, facility }
-}
-
-async function sqliteHarness(path: string): Promise<TeamHarness> {
-  const ctx = new Context()
-  await ctx.plugin(Storage)
-  const backend = new SqliteStorageBackend({ path, journalMode: 'delete' })
-  ctx.storage.backend.register('sqlite', backend)
-  const facility = new DomainFacility(ctx, { backend: 'sqlite', routes: {} })
-  ctx.storage.mount('domain', facility)
-  ctx.provide('storageDomain', facility)
-  ctx.provide('workspaceRegistry', { get: (id: WorkspaceId) => ({ id, path: process.cwd(), attachSession: async () => {}, archiveSession: async () => {} }), list: () => [] })
-  ctx.provide('agents', { create: async () => { throw new Error('unused') }, resume: async () => { throw new Error('unused') } })
-  ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'mock', model: 'mock' }) })
-  ctx.provide('agentPresets', { mount: async () => { throw new Error('unused') } })
-  ctx.provide('tools', { schemas: () => [] })
-  ctx.provide('sessionPersistence', { list: async () => [] })
-  provideQuietTokenMeter(ctx)
-  await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
-  cleanups.push(async () => { await fiber.dispose(); await facility.closeAll(); await backend.close() })
-  return { ctx, fiber, facility }
-}
 
 /**
  * A frozen old ledger whose Member was enrolled into the Project by hand and
@@ -120,55 +50,6 @@ const legacyRemovalLedger = JSON.parse("{\"records\":[[\"operation:0c1feff4-292a
   readonly projectRef: string
   readonly memberId: string
 }
-
-function storedPool(records: Array<[string, unknown]>, version: number = agentTeamDomainSpec.version): MemoryMediaPool {
-  const pool = new MemoryMediaPool()
-  pool.versions.set('agent_team', version)
-  pool.media.set('agent_team', { tables: new Map([['operations', new Map(records)]]), global: null })
-  return pool
-}
-
-function committed<T extends { readonly kind: string }>(result: T): Extract<T, { readonly kind: 'committed' }> {
-  if (result.kind !== 'committed') throw new Error(`expected committed result, received ${result.kind}`)
-  return result as Extract<T, { readonly kind: 'committed' }>
-}
-
-function withTask<T extends { readonly task?: AgentTeamTask }>(result: T): T & { readonly task: AgentTeamTask } {
-  if (result.task === undefined) throw new Error('expected Task overlay')
-  return result as T & { readonly task: AgentTeamTask }
-}
-
-function ledgerAtBoot(test: TeamHarness): AgentTeamLedger {
-  return new AgentTeamLedger(test.facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>)
-}
-
-async function addLedgerMember(
-  ledger: AgentTeamLedger,
-  projectRef: string | undefined,
-  memberId = `member:agent-${crypto.randomUUID()}`,
-  description = 'Test Agent',
-  handle = memberId.slice('member:'.length),
-): Promise<{ readonly member: AgentTeamAgentMember; readonly actor: AgentTeamMemberActor }> {
-  const member: AgentTeamAgentMember = {
-    memberId: memberId as never,
-    sessionId: SessionId(`session:${memberId}`),
-    workspaceId: alpha,
-    handle,
-    description,
-    presetId: 'team-member',
-    privateMemoryPath: `/tmp/${memberId}`,
-    state: 'enabled',
-  }
-  await ledger.addMember({ requestId: requestId(`add:${memberId}`), actor: agentTeamHumanActor(), member, handle: member.handle,
-    description: member.description, presetId: member.presetId, workspaceId: alpha,
-    projectRefs: projectRef === undefined ? [] : [projectRef as never] })
-  return { member, actor: { kind: 'member', memberId: member.memberId, handle: member.handle } }
-}
-
-/** Starting a Thread is a Project owner's act; the Human grants the standing. */
-const makeOwner = (ledger: AgentTeamLedger, projectRef: string, memberId: string, workspaceId: WorkspaceId = alpha) =>
-  ledger.addProjectOwner({ requestId: requestId(`owner:${workspaceId}:${projectRef}:${memberId}`), actor: agentTeamHumanActor(),
-    workspaceId, projectRef: projectRef as never, memberId: memberId as never })
 
 describe('AgentTeam durable Thread Attention ledger', () => {
   it('replays Workspace participation without moving the default Workspace or Session', async () => {
@@ -719,7 +600,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const { member, actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     const before = ledger.status().sequence
     const sent = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('mention'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'Please investigate this', recipients: [member.memberId], actor: agentTeamHumanActor() })).value))
+      body: '@builder please investigate this', actor: agentTeamHumanActor() })).value))
     expect(ledger.status().sequence).toBe(before + 1)
     expect(sent.attention.map(attention => attention.memberId)).toEqual([AGENT_TEAM_HUMAN_MEMBER_ID])
     expect(ledger.attentionStatus(actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeUndefined()
@@ -734,11 +615,11 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { member: builder, actor: builderActor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
+    const { actor: builderActor } = await addLedgerMember(ledger, project.project.projectRef, 'member:builder')
     const { actor: reviewerActor } = await addLedgerMember(ledger, project.project.projectRef, 'member:reviewer')
 
     const sent = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('anchor'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'Please investigate this', recipients: [builder.memberId], actor: agentTeamHumanActor() })).value))
+      projectRef: project.project.projectRef, body: 'Please investigate this', actor: agentTeamHumanActor() })).value))
     // The anchor mentions the builder, so the unread fence stands until the
     // builder acknowledges it; an unread mutation would be refused.
     await ledger.readThread({ requestId: requestId('builder-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: builderActor })
@@ -875,7 +756,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // A followed Thread carrying BOTH an unread mention and ordinary follow
     // unread: one row, and the badge counts every unread fact on it.
     const followed = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('followed'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Followed thread anchor', actor: agentTeamHumanActor() })).value))
-    const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: followed.task.taskRef, body: 'Decision needed on the rollout', baseRevision: followed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
+    const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: followed.task.taskRef, body: '@human decision needed on the rollout', baseRevision: followed.thread.revision, actor })).value)
     committed((await ledger.reply({ requestId: requestId('ordinary'), workspaceId: alpha, taskRef: followed.task.taskRef, body: 'Ordinary progress reply', baseRevision: mentioned.thread.revision, actor })).value)
 
     // An unfollowed Thread whose fresh mention must still surface: direct
@@ -883,7 +764,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // the 120-character preview bound the Thread page applies to Task titles.
     const unfollowed = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('unfollowed'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'x'.repeat(130)}\nsecond line`, actor: agentTeamHumanActor() })).value))
     await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, action: 'unfollow', actor: agentTeamHumanActor() })
-    committed((await ledger.reply({ requestId: requestId('ping'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, body: 'Blocking on your call', baseRevision: unfollowed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
+    committed((await ledger.reply({ requestId: requestId('ping'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, body: '@human blocking on your call', baseRevision: unfollowed.thread.revision, actor })).value)
 
     const inbox = ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })
     // Rows: both Threads carry one mention, so newest unread first — the ping
@@ -965,7 +846,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'unfollow', actor: agentTeamHumanActor() })).value
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef,
-      body: 'Please check this', baseRevision: unfollowed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
+      body: '@human please check this', baseRevision: unfollowed.thread.revision, actor })).value)
     const ordinary = committed((await ledger.reply({ requestId: requestId('ordinary'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: 'Later reply', baseRevision: mentioned.thread.revision, actor })).value)
     const followed = (await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1020,7 +901,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const alone = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('alone'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Notes to self', actor: agentTeamHumanActor() })).value)
     const theirs = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('theirs'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Agent thread', actor })).value)
     committed((await ledger.reply({ requestId: requestId('join'), workspaceId: alpha, threadRef: theirs.thread.threadRef, body: 'Looking now', baseRevision: theirs.thread.revision, actor: agentTeamHumanActor() })).value)
-    const told = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('told'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Status only', recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
+    const told = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('told'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Status only', actor })).value)
     for (const [name, threadRef] of [['alone', alone.thread.threadRef], ['theirs', theirs.thread.threadRef], ['told', told.thread.threadRef]] as const) {
       await ledger.readThread({ requestId: requestId(`read-${name}`), workspaceId: alpha, threadRef, actor: agentTeamHumanActor() })
     }
@@ -1090,7 +971,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
     await makeOwner(ledger, project.project.projectRef, actor.memberId)
     const { actor: reader } = await addLedgerMember(ledger, project.project.projectRef, 'member:reader', 'Reader', 'Reader')
-    const started = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Active task', recipients: [reader.memberId], actor })).value))
+    const started = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: '@Reader active task', actor })).value))
     committed((await ledger.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'claim', direction: 'on it', baseRevision: started.thread.revision, actor })).value)
     // The reader was mentioned and has an unread on this Thread — the unread
     // queue carries it, and so does the radar, independently.
@@ -1229,7 +1110,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'unfollow', actor: agentTeamHumanActor() })).value
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef,
-      body: 'Please check this', baseRevision: unfollowed.thread.revision, recipients: [AGENT_TEAM_HUMAN_MEMBER_ID], actor })).value)
+      body: '@human please check this', baseRevision: unfollowed.thread.revision, actor })).value)
     const followed = (await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef,
       action: 'follow', actor: agentTeamHumanActor() })).value
     const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef,
@@ -1420,8 +1301,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'First task' })))
     const other = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start-other'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Second task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor: reader } = await addLedgerMember(ledger, project.project.projectRef)
-    const { actor: bystander } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor: reader, member: readerMember } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor: bystander, member: bystanderMember } = await addLedgerMember(ledger, project.project.projectRef)
     await ledger.changeAttention({ requestId: requestId('follow-first'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor: reader })
     await ledger.changeAttention({ requestId: requestId('follow-second'), workspaceId: alpha, taskRef: other.task.taskRef, action: 'follow', actor: reader })
     // Following keeps the mention a plain marker: an unfollowed Member would
@@ -1433,16 +1314,16 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     // count is the reader-visible consequence of that consumption.
     let firstRevision = started.thread.revision
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention-reader'), workspaceId: alpha, taskRef: started.task.taskRef,
-      body: 'Check this', baseRevision: firstRevision, recipients: [reader.memberId], actor: agentTeamHumanActor() })).value)
+      body: `@${readerMember.handle} check this`, baseRevision: firstRevision, actor: agentTeamHumanActor() })).value)
     firstRevision = mentioned.thread.revision
     const bystanderMention = committed((await ledger.reply({ requestId: requestId('mention-bystander'), workspaceId: alpha, taskRef: started.task.taskRef,
-      body: 'And this one', baseRevision: firstRevision, recipients: [bystander.memberId], actor: agentTeamHumanActor() })).value)
+      body: `@${bystanderMember.handle} and this one`, baseRevision: firstRevision, actor: agentTeamHumanActor() })).value)
     firstRevision = bystanderMention.thread.revision
     const update = committed((await ledger.reply({ requestId: requestId('update'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: 'Ordinary update', baseRevision: firstRevision, actor: agentTeamHumanActor() })).value)
     firstRevision = update.thread.revision
     committed((await ledger.reply({ requestId: requestId('mention-other-thread'), workspaceId: alpha, taskRef: other.task.taskRef,
-      body: 'Mention in the other Thread', baseRevision: other.thread.revision, recipients: [reader.memberId], actor: agentTeamHumanActor() })).value)
+      body: `@${readerMember.handle} mention in the other Thread`, baseRevision: other.thread.revision, actor: agentTeamHumanActor() })).value)
 
     const first = await ledger.readThread({ requestId: requestId('read-first'), workspaceId: alpha, taskRef: started.task.taskRef, actor: reader })
     expect(first.committed).toBe(true)
@@ -1674,9 +1555,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor, member } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
-    committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Check this', baseRevision: followed.value.thread.revision, recipients: [actor.memberId], actor: agentTeamHumanActor() })).value)
+    committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: `@${member.handle} check this`, baseRevision: followed.value.thread.revision, actor: agentTeamHumanActor() })).value)
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
       if (typed.kind !== 'team/thread-replied') return [id, typed] as [string, unknown]
@@ -1693,9 +1574,9 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor, member } = await addLedgerMember(ledger, project.project.projectRef)
     const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
-    const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Check this', baseRevision: followed.value.thread.revision, recipients: [actor.memberId], actor: agentTeamHumanActor() })).value)
+    const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: `@${member.handle} check this`, baseRevision: followed.value.thread.revision, actor: agentTeamHumanActor() })).value)
     const later = committed((await ledger.reply({ requestId: requestId('later'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Later update', baseRevision: mentioned.thread.revision, actor: agentTeamHumanActor() })).value)
     // The marker is rewritten to a Message that is real, in the same Thread, with
     // the sequence it carries — everything a linear scan of the ledger's whole
@@ -1759,7 +1640,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
         const facts = data.facts.map(fact => fact.fact.kind === 'message'
           ? (() => {
             const { occurredAt: _factDropped, ...message } = fact.fact.message
-            return { ...fact, fact: { kind: 'message' as const, sequence: fact.fact.sequence, message } }
+            return { ...fact, fact: { kind: 'message' as const, sequence: fact.fact.sequence, message, mentions: fact.fact.mentions } }
           })()
           : fact)
         return [id, { ...typed, data: { ...data, anchor, facts } }] as [string, unknown]
@@ -1770,7 +1651,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       .find(operation => operation.kind === 'team/message-sent')!
     const revived = await harness(storedPool(records))
     const view = revived.ctx.agentTeam.view({ workspaceId: alpha, threadRef: started.thread.threadRef })
-    expect(view.items.map(item => item.message.body)).toEqual(['Investigate the regression'])
+    expect(view.items.map(item => item.message.body)).toEqual(['Investigate the regression', '@carol, please look', '@dave, over to you'])
     expect(view.items[0]!.message.occurredAt).toBe(storedMessage.occurredAt)
     expect(() => ledgerAtBoot(revived).validate()).not.toThrow()
   })
@@ -2036,10 +1917,10 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
+    const { actor, member } = await addLedgerMember(ledger, project.project.projectRef)
     const sent = committed((await ledger.startThread({
       requestId: requestId('chat'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId],
+      body: `plain conversation for @${member.handle}`, kind: 'discussion', actor: agentTeamHumanActor(),
     })).value)
     expect(sent.task).toBeUndefined()
     expect(sent.thread.taskRef).toBeUndefined()
@@ -2070,7 +1951,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const history = ledger.threadHistory(actor, { workspaceId: alpha, threadRef: sent.thread.threadRef })
     expect(history.anchor.messageRef).toBe(sent.message.messageRef)
     expect(history.facts.map(fact => fact.kind === 'message' ? fact.message.body : fact.activity.kind)).toEqual([
-      'plain conversation', 'promote',
+      `plain conversation for @${member.handle}`, 'promote',
     ])
     const view = ledger.view({ workspaceId: alpha, projectRef: project.project.projectRef, topLevelOnly: true, includeActivities: false })
     const promotedItem = view.items.find(item => item.thread.threadRef === sent.thread.threadRef)
@@ -2083,1330 +1964,5 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     ]))
     expect(ledger.affectedMembersOf(ledgerAtBoot(test).getOperation(promoted.receipt.operationId)!)).toEqual(expect.arrayContaining([actor.memberId]))
     expect(() => ledgerAtBoot(test).validate()).not.toThrow()
-  })
-})
-
-describe('AgentTeam Human Task transfer Remote', () => {
-  /** One Task with a second Project owner to hand it to. */
-  async function seedTransfer() {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('transfer-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const added = await test.ctx.agentTeam.addMember({ requestId: requestId('transfer-member'), workspaceId: alpha,
-      handle: 'reviewer', description: 'Reviews changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
-    await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('transfer-owner'), workspaceId: alpha,
-      projectRef: project.project.projectRef, memberId: added.status.member.memberId })
-    const actor = { kind: 'member' as const, memberId: added.status.member.memberId, handle: added.status.member.handle }
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('transfer-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Hand this over' })))
-    return { test, project, actor, started }
-  }
-
-  it('hands an open Task to another Project owner through the Human Remote and replays the same operation', async () => {
-    const { test, actor, started } = await seedTransfer()
-    expect(started.task.accountable).toBe(AGENT_TEAM_HUMAN_MEMBER_ID)
-    const transferred = await test.ctx.agentTeam.transferTask({ requestId: requestId('transfer'), workspaceId: alpha,
-      taskRef: started.task.taskRef, target: actor.memberId, baseRevision: started.thread.revision })
-    if (transferred.kind !== 'committed') throw new Error(`transfer did not commit, received ${transferred.kind}`)
-    expect(transferred.task.accountable).toBe(actor.memberId)
-    expect(transferred.activity).toMatchObject({ kind: 'transfer', from: AGENT_TEAM_HUMAN_MEMBER_ID, to: actor.memberId })
-    // The new accountable is followed and notified exactly as an Agent-initiated transfer would leave them.
-    const ledger = ledgerAtBoot(test)
-    expect(ledger.attentionStatus(actor, { workspaceId: alpha, taskRef: started.task.taskRef }).attention).toBeDefined()
-    expect(ledger.memberInbox(actor, {}).items[0]).toMatchObject({ directCount: 1 })
-    expect(ledger.getTask(started.task.taskRef)?.accountable).toBe(actor.memberId)
-    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
-  })
-
-  it('replays a repeated requestId from the idempotency cache instead of transferring twice', async () => {
-    const { test, actor, started } = await seedTransfer()
-    const request = { requestId: requestId('transfer-replay'), workspaceId: alpha, taskRef: started.task.taskRef, target: actor.memberId, baseRevision: started.thread.revision }
-    const first = await test.ctx.agentTeam.transferTask(request)
-    if (first.kind !== 'committed') throw new Error(`first transfer did not commit, received ${first.kind}`)
-    const second = await test.ctx.agentTeam.transferTask(request)
-    // A retry after a lost answer is answered from the cache: same accountable, no second operation.
-    if (second.kind !== 'committed') throw new Error(`retry did not commit, received ${second.kind}`)
-    expect(second.task.accountable).toBe(actor.memberId)
-    expect(second.receipt).toEqual(first.receipt)
-    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
-  })
-
-  it('refuses a target that is not a current Project owner, and reports a stale revision as a business outcome', async () => {
-    const { test, actor: seedOwner, started } = await seedTransfer()
-    const outsider = await test.ctx.agentTeam.addMember({ requestId: requestId('outsider'), workspaceId: alpha,
-      handle: 'outsider', description: 'Not an owner', presetId: 'team-member', projectRefs: [] })
-    await expect(test.ctx.agentTeam.transferTask({ requestId: requestId('bad-target'), workspaceId: alpha,
-      taskRef: started.task.taskRef, target: outsider.status.member.memberId, baseRevision: started.thread.revision })).rejects.toThrow(/accountable_target_invalid/)
-    // The stale case is the normal control flow the Client already models: it comes back as a result, not a Remote error. A legal target keeps the illegal one from masking it.
-    const stale = await test.ctx.agentTeam.transferTask({ requestId: requestId('stale'), workspaceId: alpha,
-      taskRef: started.task.taskRef, target: seedOwner.memberId, baseRevision: started.thread.revision + 99 })
-    expect(stale.kind).toBe('stale_revision')
-    expect(stale.kind === 'stale_revision' && stale.revision).toBe(started.thread.revision)
-    // Neither refusal moved the Task: the accountable is still the Human's.
-    expect(ledgerAtBoot(test).getTask(started.task.taskRef)?.accountable).toBe(AGENT_TEAM_HUMAN_MEMBER_ID)
-  })
-
-  it('fences a transfer behind the unread gate and answers it once the Human has read', async () => {
-    const { test, actor, started } = await seedTransfer()
-    // The Member's reply lands while the Human still follows the Thread, so ordinary unread stands between the Human and the next write.
-    // It is written through the Host's own ledger, because a boot snapshot would replay from the table and never reach the running service instance.
-    const serviceLedger = (test.ctx.agentTeam as unknown as { ledger: AgentTeamLedger }).ledger
-    const reply = committed((await serviceLedger.reply({ requestId: requestId('unread-reply'), workspaceId: alpha, taskRef: started.task.taskRef,
-      body: 'A reply the Human has not read', baseRevision: started.thread.revision, actor })).value)
-    expect(serviceLedger.inbox(agentTeamHumanActor(), { workspaceId: alpha }).totalUnreadCount).toBe(1)
-    // The gate refuses on the revision the reply produced, and the retry after the Human's read commits with the target accountable.
-    const request = { requestId: requestId('gated'), workspaceId: alpha, taskRef: started.task.taskRef, target: actor.memberId, baseRevision: started.thread.revision }
-    const blocked = await test.ctx.agentTeam.transferTask(request)
-    expect(blocked.kind).toBe('unread_required')
-    expect(blocked.kind === 'unread_required' && blocked.revision).toBe(reply.thread.revision)
-    const read = await test.ctx.agentTeam.readThread({ requestId: requestId('human-read'), workspaceId: alpha, taskRef: started.task.taskRef })
-    const transferred = await test.ctx.agentTeam.transferTask({ ...request, baseRevision: read.thread.revision })
-    if (transferred.kind !== 'committed') throw new Error(`transfer after read did not commit, received ${transferred.kind}`)
-    expect(transferred.task.accountable).toBe(actor.memberId)
-  })
-
-  it('mends a finished Task whose accountable is no longer a Project owner', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('finish-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const added = await test.ctx.agentTeam.addMember({ requestId: requestId('finish-member'), workspaceId: alpha,
-      handle: 'builder', description: 'Builds changes', presetId: 'team-member', projectRefs: [project.project.projectRef] })
-    await test.ctx.agentTeam.addProjectOwner({ requestId: requestId('finish-owner'), workspaceId: alpha,
-      projectRef: project.project.projectRef, memberId: added.status.member.memberId })
-    // The Task is accountable to the second owner, who then finishes it: the grant that made them accountable ends afterwards.
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('finish-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Finish then mend', accountable: added.status.member.memberId })))
-    expect(started.task.accountable).toBe(added.status.member.memberId)
-    await test.ctx.agentTeam.changeTask({ requestId: requestId('accept'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'accept', baseRevision: started.thread.revision })
-    await test.ctx.agentTeam.removeProjectOwner({ requestId: requestId('remove-owner'), workspaceId: alpha,
-      projectRef: project.project.projectRef, memberId: added.status.member.memberId })
-    // The finished Task keeps its accountable across the grant ending, so the removed owner stays named until the Human mends it.
-    expect(ledgerAtBoot(test).getTask(started.task.taskRef)?.accountable).toBe(added.status.member.memberId)
-    const read = await test.ctx.agentTeam.readThread({ requestId: requestId('mend-read'), workspaceId: alpha, taskRef: started.task.taskRef })
-    // The Human repair is a transfer back to the Human, which reopen then follows.
-    const mended = await test.ctx.agentTeam.transferTask({ requestId: requestId('mend'), workspaceId: alpha,
-      taskRef: started.task.taskRef, target: AGENT_TEAM_HUMAN_MEMBER_ID, baseRevision: read.thread.revision })
-    if (mended.kind !== 'committed') throw new Error(`mend did not commit, received ${mended.kind}`)
-    expect(mended.task.accountable).toBe(AGENT_TEAM_HUMAN_MEMBER_ID)
-    expect(mended.activity).toMatchObject({ kind: 'transfer', from: added.status.member.memberId, to: AGENT_TEAM_HUMAN_MEMBER_ID })
-    // The mend transferred the Task into the Human's Inbox, so the Human reads before reopening it — which then lands open again.
-    const reopenRead = await test.ctx.agentTeam.readThread({ requestId: requestId('reopen-read'), workspaceId: alpha, taskRef: started.task.taskRef })
-    const reopened = await test.ctx.agentTeam.changeTask({ requestId: requestId('reopen'), workspaceId: alpha,
-      taskRef: started.task.taskRef, action: 'reopen', baseRevision: reopenRead.thread.revision })
-    expect(reopened.kind).toBe('committed')
-    expect(reopened.kind === 'committed' && reopened.task.resolution).toBe('open')
-    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
-  })
-})
-
-describe('AgentTeam release snapshot assembly', () => {
-  /**
-   * One Project, two Members holding Claims on the same Task, and a second
-   * Project so the responsibility return has somewhere to land. Each entry is
-   * then exercised against this shared shape, which is what makes a difference
-   * dropped by unification observable rather than inferred.
-   */
-  async function seedRelease() {
-    const test: TeamHarness = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('release-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const startedRaw = await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('release-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Release the claims' })
-    const started = withTask(committed(startedRaw))
-    const ledger = ledgerAtBoot(test)
-    const first = await addLedgerMember(ledger, project.project.projectRef, 'member:release-first')
-    const second = await addLedgerMember(ledger, project.project.projectRef, 'member:release-second')
-    // Each Claim advances the Thread, so the next one claims from the revision the previous one committed.
-    let revision = started.thread.revision
-    for (const [index, { actor }] of [first, second].entries()) {
-      const claimed = committed((await ledger.changeClaim({ requestId: requestId(`release-claim-${index}`), workspaceId: alpha, taskRef: started.task.taskRef,
-        action: 'claim', direction: `review ${index}`, baseRevision: revision, actor })).value)
-      revision = claimed.thread.revision
-    }
-    await makeOwner(ledger, project.project.projectRef, first.member.memberId)
-    // Claiming already starts Attention for the claimant, so both Members follow the Thread without a
-    // separate follow: the cleanup each entry carries therefore has two rows to compare.
-    return { test, ledger, project, started, first, second }
-  }
-
-  /** The one operation of the given kind a fresh ledger holds. */
-  function soleOperation(test: TeamHarness, kind: string): Extract<AgentTeamOperation, { readonly kind: string }> {
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, AgentTeamOperation]>
-    const found = records.map(([, operation]) => operation).filter(operation => operation.kind === kind)
-    if (found.length !== 1) throw new Error(`expected exactly one ${kind}, received ${found.length}`)
-    return found[0] as Extract<AgentTeamOperation, { readonly kind: string }>
-  }
-
-  it('releases every owner Claim when a Project is archived, one Activity per owner and Thread', async () => {
-    const { test, ledger, project, first, second } = await seedRelease()
-    await ledger.archiveProject({ requestId: requestId('release-archive-project'), workspaceId: alpha,
-      projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
-    const data = (soleOperation(test, 'team/project-archived').data as { claims: readonly { owner: string }[]; activities: readonly { actor: string; claimRefs: readonly string[] }[] })
-    // Neither owner is filtered out: archiving a Project releases everyone's Claims.
-    expect(data.claims.map(claim => claim.owner).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
-    // Two owners on one Thread means two Activities, each naming its own owner's Claims.
-    expect(data.activities).toHaveLength(2)
-    expect(data.activities.map(activity => activity.actor).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
-    for (const activity of data.activities) expect(activity.claimRefs).toHaveLength(1)
-    expect(() => ledger.validate()).not.toThrow()
-  })
-
-  it('clears every Member Attention on an archived Project but only the departing Member on a removal', async () => {
-    const archived = await seedRelease()
-    await archived.ledger.archiveProject({ requestId: requestId('release-clean-project'), workspaceId: alpha,
-      projectRef: archived.project.project.projectRef, actor: agentTeamHumanActor() })
-    const projectData = soleOperation(archived.test, 'team/project-archived').data as { inbox: { attention: { removed: readonly { memberId: string }[] } } }
-    // Every follower clears, the Human included — it started the Thread, and a hidden Project
-    // must not leave anyone's Attention behind it.
-    expect(projectData.inbox.attention.removed.map(entry => entry.memberId).sort())
-      .toEqual([AGENT_TEAM_HUMAN_MEMBER_ID, archived.first.member.memberId, archived.second.member.memberId].sort())
-
-    // The same shape with a Member leaving instead: only its own row clears.
-    const removed = await seedRelease()
-    await removed.ledger.removeMember({ requestId: requestId('release-clean-member'), memberId: removed.first.member.memberId,
-      actor: agentTeamHumanActor() })
-    const memberData = soleOperation(removed.test, 'team/member-removed').data as { inbox: { attention: { removed: readonly { memberId: string }[] } } }
-    expect(memberData.inbox.attention.removed.map(entry => entry.memberId)).toEqual([removed.first.member.memberId])
-    // The other Member keeps following, which is the difference unification must not flatten.
-    expect(removed.ledger.attentionStatus(agentTeamHumanActor(), { workspaceId: alpha, taskRef: removed.started.task.taskRef })).toBeDefined()
-    expect(() => removed.ledger.validate()).not.toThrow()
-    expect(() => removed.ledger.validate()).not.toThrow()
-  })
-
-  it('keeps membership on archive and ends it on removal, while both release the same Claims', async () => {
-    const archived = await seedRelease()
-    await archived.ledger.archiveMember({ requestId: requestId('release-archive-member'), memberId: archived.first.member.memberId,
-      actor: agentTeamHumanActor() })
-    const archiveData = soleOperation(archived.test, 'team/member-archived').data as { claims: readonly { state: string }[] }
-    expect(archiveData.claims.every(claim => claim.state === 'released')).toBe(true)
-    // Archival is a hidden state, not a departure: the Member stays a Project
-    // member and only its surface visibility ends.
-    expect(archived.ledger.getMember(archived.first.member.memberId)?.state).toBe('archived')
-    expect(archived.ledger.view({ workspaceId: alpha }).projects.map(project => project.projectRef))
-      .toContain(archived.project.project.projectRef)
-
-    const removed = await seedRelease()
-    const removal = (await removed.ledger.removeMember({ requestId: requestId('release-remove-member'), memberId: removed.first.member.memberId,
-      actor: agentTeamHumanActor() })).value
-    expect(removal.member.state).toBe('inactive')
-    const removeData = soleOperation(removed.test, 'team/member-removed').data as { claims: readonly { state: string }[] }
-    // Same release shape, and the membership really ended: the departing Member leaves the
-    // membership projection while the other one keeps its place.
-    expect(removeData.claims.every(claim => claim.state === 'released')).toBe(true)
-    expect(removed.ledger.view({ workspaceId: alpha }).members.map(entry => entry.memberId))
-      .toEqual([removed.second.member.memberId])
-  })
-
-  it('returns accountability and replays identically', async () => {
-    const { test, ledger, project, started, first } = await seedRelease()
-    // Hand the Task to the departing Member so the return has somewhere to come from.
-    await makeOwner(ledger, project.project.projectRef, first.member.memberId)
-    const beforeTransfer = (await ledger.readThread({ requestId: requestId('release-transfer-read'), workspaceId: alpha,
-      taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).value
-    const transferOutcome = await ledger.transferTask({ requestId: requestId('release-transfer'), workspaceId: alpha,
-      taskRef: started.task.taskRef, target: first.member.memberId, baseRevision: beforeTransfer.thread.revision,
-      actor: agentTeamHumanActor() })
-    // A ledger outcome is a result plus a committed flag; a fence resolves without committing.
-    if (!transferOutcome.committed) throw new Error(`transfer did not commit: ${transferOutcome.value.kind}`)
-    const removalOutcome = await ledger.removeMember({ requestId: requestId('release-return-remove'), memberId: first.member.memberId,
-      actor: agentTeamHumanActor() })
-    if (!removalOutcome.committed) throw new Error('removal did not commit')
-    const data = soleOperation(test, 'team/member-removed').data as {
-      readonly transfers: readonly { readonly kind: string; readonly from: string; readonly to: string }[]
-      readonly tasks: readonly { readonly accountable: string }[]
-      readonly threads: readonly { readonly revision: number }[]
-    }
-    // The departing Member was the accountable, so the open Task returns to the Human.
-    expect(data.transfers).toEqual([expect.objectContaining({ kind: 'transfer', from: first.member.memberId, to: AGENT_TEAM_HUMAN_MEMBER_ID })])
-    expect(data.tasks).toEqual([expect.objectContaining({ accountable: AGENT_TEAM_HUMAN_MEMBER_ID })])
-    // The Task's Thread revision moves with the snapshot, and replay agrees byte for byte.
-    expect(data.threads[0]!.revision).toBeGreaterThan(started.thread.revision)
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const replayed = await harness(storedPool(records))
-    expect(() => ledgerAtBoot(replayed).validate()).not.toThrow()
-    const cold = ledgerAtBoot(replayed)
-    const replayedTask = cold.view({ workspaceId: alpha }).tasks.find(task => task.taskRef === started.task.taskRef)
-    expect(replayedTask?.accountable).toBe(AGENT_TEAM_HUMAN_MEMBER_ID)
-  })
-
-  it('rejects a forged responsibility return during replay, so the builder cannot silently drop it', async () => {
-    const seeded = await seedRelease()
-    const { test, project, started, first } = seeded
-    const ledger = seeded.ledger
-    await makeOwner(ledger, project.project.projectRef, first.member.memberId)
-    const beforeForge = (await ledger.readThread({ requestId: requestId('release-forge-read'), workspaceId: alpha,
-      taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).value
-    const forgeTransfer = await ledger.transferTask({ requestId: requestId('release-forge-transfer'), workspaceId: alpha,
-      taskRef: started.task.taskRef, target: first.member.memberId, actor: agentTeamHumanActor(),
-      baseRevision: beforeForge.thread.revision })
-    if (!forgeTransfer.committed) throw new Error('forge transfer did not commit: ' + forgeTransfer.value.kind)
-    const forgeRemoval = await ledger.removeMember({ requestId: requestId('release-forge-remove'), memberId: first.member.memberId,
-      actor: agentTeamHumanActor() })
-    if (!forgeRemoval.committed) throw new Error('forge removal did not commit')
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/member-removed') return [id, typed] as [string, unknown]
-      // Drop exactly the piece a unified builder might be tempted to skip.
-      return [id, { ...typed, data: { ...typed.data, transfers: [], tasks: [], threads: [] } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(records))).rejects.toThrow(/invalid released Claim Task or Thread projection/)
-  })
-
-  it('hands out a claims snapshot a caller cannot edit back into the operation', async () => {
-    const { test, ledger, first } = await seedRelease()
-    const removal = (await ledger.removeMember({ requestId: requestId('release-frozen-remove'), memberId: first.member.memberId,
-      actor: agentTeamHumanActor() })).value
-    // The result and the committed operation data are the same snapshot, so both
-    // must be closed: a caller that could edit either would leave the durable
-    // record disagreeing with what replay and validation recompute from it.
-    expect(Object.isFrozen(removal.releasedClaims)).toBe(true)
-    const claims = (soleOperation(test, 'team/member-removed').data as { claims: readonly unknown[] }).claims
-    expect(Object.isFrozen(claims)).toBe(true)
-    const original = [...claims]
-    expect(() => (claims as unknown[]).push({ ...original[0]! })).toThrow()
-    expect(claims).toHaveLength(original.length)
-  })
-})
-
-describe('AgentTeam Member archival ledger', () => {
-  it('archives a Member: claims release, attention clears, view hides, removal still available', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.changeClaim({ requestId: requestId('archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    expect(ledger.view({ workspaceId: alpha }).members).toEqual([expect.objectContaining({ memberId: member.memberId })])
-    expect(ledger.view({ workspaceId: alpha }).tasks[0]).toMatchObject({ status: 'in_progress' })
-    const archived = (await ledger.archiveMember({ requestId: requestId('archive'), memberId: member.memberId, actor: agentTeamHumanActor() })).value
-    expect(archived.member.state).toBe('archived')
-    expect(archived.member.sessionId).toBe(member.sessionId)
-    expect(archived.releasedClaims).toEqual([expect.objectContaining({ claimRef: expect.any(String), owner: member.memberId, state: 'released' })])
-    expect(archived.removedAttention).toEqual([expect.objectContaining({ memberId: member.memberId, threadRef: started.thread.threadRef })])
-
-    // Hidden from the view members projection; the released claim drops the
-    // Task back to todo; the archived Member's attention and markers are gone.
-    expect(ledger.view({ workspaceId: alpha }).members).toEqual([])
-    expect(ledger.view({ workspaceId: alpha }).tasks[0]).toMatchObject({ status: 'todo' })
-    const activity = ledger.view({ workspaceId: alpha }).activities.find(fact => fact.kind === 'claims_released')
-    expect(activity).toMatchObject({ kind: 'claims_released', actor: member.memberId })
-
-    // Guards: double archive, suspend/resume, edit, mention, and DM all reject.
-    await expect(ledger.archiveMember({ requestId: requestId('archive-again'), memberId: member.memberId, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
-    await expect(ledger.suspendMember({ requestId: requestId('archive-suspend'), memberId: member.memberId, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
-    await expect(ledger.resumeMember({ requestId: requestId('archive-resume'), memberId: member.memberId, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
-    await expect(ledger.updateMember({ requestId: requestId('archive-edit'), memberId: member.memberId, handle: member.handle, description: 'new', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and can no longer be edited/)
-    const second = await addLedgerMember(ledger, project.project.projectRef, 'member:blocker')
-    await expect(ledger.startThread({ kind: 'discussion', requestId: requestId('archive-mention'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'ping', recipients: [member.memberId], actor: agentTeamHumanActor() })).rejects.toThrow(/not authorized for Project/)
-    await expect(ledger.sendDm({ requestId: requestId('archive-dm'), workspaceId: alpha, recipientMemberId: member.memberId,
-      body: 'still there?', actor: second.actor })).rejects.toThrow(/archived; DM delivery requires an enabled Member/)
-
-    // Removal stays available from archived: the data hygiene path.
-    const removed = (await ledger.removeMember({ requestId: requestId('archive-remove'), memberId: member.memberId, actor: agentTeamHumanActor() })).value
-    expect(removed.member.state).toBe('inactive')
-    ledger.validate()
-  })
-
-  it('archives a suspended Member and replays archival across a cold restart', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('susp-archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering Work' })
-    const ledger = ledgerAtBoot(test)
-    const { member } = await addLedgerMember(ledger, project.project.projectRef)
-    await ledger.suspendMember({ requestId: requestId('susp-archive-suspend'), memberId: member.memberId, actor: agentTeamHumanActor() })
-    const archived = (await ledger.archiveMember({ requestId: requestId('susp-archive'), memberId: member.memberId, actor: agentTeamHumanActor() })).value
-    expect(archived.member.state).toBe('archived')
-    ledger.validate()
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const replayed = await harness(storedPool(records))
-    expect(() => ledgerAtBoot(replayed).validate()).not.toThrow()
-    const cold = ledgerAtBoot(replayed)
-    expect(cold.getMember(member.memberId)?.state).toBe('archived')
-  })
-
-  it('rejects a forged archival release snapshot during replay', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forge-archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('forge-archive-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.changeClaim({ requestId: requestId('forge-archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    await ledger.archiveMember({ requestId: requestId('forge-archive'), memberId: member.memberId, actor: agentTeamHumanActor() })
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/member-archived') return [id, typed] as [string, unknown]
-      return [id, { ...typed, data: { ...typed.data, claims: [] } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(records))).rejects.toThrow(/invalid released Claim projection/)
-  })
-
-  it('archives a Member that also follows a taskless Thread: attention clears there too', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('taskless-archive-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    // One taskful Thread (for the Claim) and one taskless Thread the Member
-    // follows: leaving must clear Attention on BOTH, not just taskful ones —
-    // the replay validator scopes cleanup to every Thread.
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('taskless-archive-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const plain = committed((await ledger.startThread({ requestId: requestId('taskless-archive-plain'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'Plain conversation', kind: 'discussion', actor: agentTeamHumanActor() })).value)
-    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.changeClaim({ requestId: requestId('taskless-archive-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    await ledger.changeAttention({ requestId: requestId('taskless-archive-follow'), workspaceId: alpha,
-      threadRef: plain.thread.threadRef, action: 'follow', actor })
-    const archived = (await ledger.archiveMember({ requestId: requestId('taskless-archive'), memberId: member.memberId, actor: agentTeamHumanActor() })).value
-    expect(archived.removedAttention.map(entry => entry.threadRef).sort())
-      .toEqual([plain.thread.threadRef, started.task.threadRef].sort())
-    // The commit and the replay validator agree: cold replay validates clean.
-    ledger.validate()
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const replayed = await harness(storedPool(records))
-    expect(() => ledgerAtBoot(replayed).validate()).not.toThrow()
-  })
-
-  it('rejects a forged Member departure inbox during replay', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forge-member-inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('forge-member-inbox-task'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const plain = committed((await ledger.startThread({ requestId: requestId('forge-member-inbox-plain'), workspaceId: alpha,
-      projectRef: project.project.projectRef, body: 'Plain conversation', kind: 'discussion', actor: agentTeamHumanActor() })).value)
-    const { member, actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.changeClaim({ requestId: requestId('forge-member-inbox-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    await ledger.changeAttention({ requestId: requestId('forge-member-inbox-follow'), workspaceId: alpha,
-      threadRef: plain.thread.threadRef, action: 'follow', actor })
-    await ledger.archiveMember({ requestId: requestId('forge-member-inbox-archive'), memberId: member.memberId, actor: agentTeamHumanActor() })
-    // The Project archival path's own message is pinned by its test above; this
-    // is the only place the Member-scoped wording and filter are asserted at all.
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/member-archived') return [id, typed] as [string, unknown]
-      const removed = typed.data.inbox.attention.removed.filter(entry => entry.threadRef !== plain.thread.threadRef)
-      // Fail closed: a forge that removed nothing would vacuously "pass".
-      expect(removed).toHaveLength(typed.data.inbox.attention.removed.length - 1)
-      return [id, { ...typed, data: { ...typed.data, inbox: { ...typed.data.inbox, attention: { ...typed.data.inbox.attention, removed } } } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(records))).rejects.toThrow(/invalid Member inbox cleanup/)
-  })
-})
-
-describe('AgentTeam Project archival ledger', () => {
-  it('archives a Project: every owner releases, attention clears, view hides, mutations reject', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const projectRef = project.project.projectRef
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-arch-start'), workspaceId: alpha, projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const first = await addLedgerMember(ledger, projectRef, 'member:first')
-    const second = await addLedgerMember(ledger, projectRef, 'member:second')
-    const firstClaim = committed((await ledger.changeClaim({ requestId: requestId('ch-arch-claim-1'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'first direction', baseRevision: started.thread.revision, actor: first.actor })).value)
-    committed((await ledger.changeClaim({ requestId: requestId('ch-arch-claim-2'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'second direction', baseRevision: firstClaim.thread.revision, actor: second.actor })).value)
-    expect(ledger.view({ workspaceId: alpha }).tasks[0]).toMatchObject({ status: 'in_progress' })
-    expect(ledger.view({ workspaceId: alpha }).projects).toEqual([expect.objectContaining({ projectRef })])
-
-    const archived = (await ledger.archiveProject({ requestId: requestId('ch-arch'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).value
-    expect(archived.project).toMatchObject({ projectRef, state: 'archived' })
-    expect(archived.releasedClaims).toHaveLength(2)
-    expect(archived.releasedClaims.map(claim => claim.owner).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
-
-    // Hidden from view: project, threads, and tasks all leave the projection.
-    // The per-owner release activities stay as durable audit facts on the
-    // hidden Threads (replay validation in the cold-restart test recomputes
-    // them exactly).
-    expect(ledger.view({ workspaceId: alpha }).projects).toEqual([])
-    expect(ledger.view({ workspaceId: alpha }).threads).toEqual([])
-    expect(ledger.view({ workspaceId: alpha }).tasks).toEqual([])
-    const operation = ledger.getOperation(archived.receipt.operationId)!
-    expect(operation.kind === 'team/project-archived' ? operation.data.activities.map(activity => activity.actor).sort()
-      : []).toEqual([first.member.memberId, second.member.memberId].sort())
-
-    // Idempotent retry; mutation guards reject with the archived message.
-    const again = (await ledger.archiveProject({ requestId: requestId('ch-arch'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).value
-    expect(again.receipt.operationId).toBe(archived.receipt.operationId)
-    await expect(ledger.archiveProject({ requestId: requestId('ch-arch-2'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).rejects.toThrow(/already archived/)
-    await expect(ledger.updateProject({ requestId: requestId('ch-arch-rename'), workspaceId: alpha, projectRef, name: 'renamed', description: '', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    await expect(ledger.startThread({ kind: 'discussion', requestId: requestId('ch-arch-send'), workspaceId: alpha, projectRef, body: 'hello', actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    // A brand-new Member cannot be created into the archived Project, and
-    // existing Members (Memberships survive archival) cannot follow or
-    // mutate its Tasks.
-    await expect((async () => addLedgerMember(ledger, projectRef, 'member:third'))()).rejects.toThrow(/archived and no longer accepts Team work/)
-    await expect(ledger.changeAttention({ requestId: requestId('ch-arch-follow'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'follow', actor: first.actor })).rejects.toThrow(/archived and no longer accepts Team work/)
-    await expect(ledger.changeTask({ requestId: requestId('ch-arch-close'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'close', baseRevision: started.thread.revision, actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    ledger.validate()
-  })
-
-  it('replays Project archival across a cold restart', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-replay-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-replay-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.changeClaim({ requestId: requestId('ch-replay-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    await ledger.archiveProject({ requestId: requestId('ch-replay-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
-    ledger.validate()
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const replayed = await harness(storedPool(records))
-    expect(() => ledgerAtBoot(replayed).validate()).not.toThrow()
-    expect(ledgerAtBoot(replayed).view({ workspaceId: alpha }).projects).toEqual([])
-  })
-
-  it('normalizes legacy project records without state to active on load', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-legacy-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-legacy-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' }))
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/project-created') return [id, typed] as [string, unknown]
-      const { state: _state, ...legacyProject } = typed.data.project
-      return [id, { ...typed, data: { ...typed.data, project: legacyProject } }] as [string, unknown]
-    })
-    const legacy = await harness(storedPool(records))
-    const legacyLedger = ledgerAtBoot(legacy)
-    expect(() => legacyLedger.validate()).not.toThrow()
-    expect(legacyLedger.view({ workspaceId: alpha }).projects[0]).toMatchObject({ projectRef: project.project.projectRef, state: 'active' })
-  })
-
-  it('rejects a forged Project archival snapshot during replay', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('ch-forge-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('ch-forge-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.changeClaim({ requestId: requestId('ch-forge-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'review', baseRevision: started.thread.revision, actor })).value)
-    await ledger.archiveProject({ requestId: requestId('ch-forge-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/project-archived') return [id, typed] as [string, unknown]
-      return [id, { ...typed, data: { ...typed.data, claims: [] } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(records))).rejects.toThrow(/invalid released Claim projection/)
-  })
-
-  it('archives a Project containing a taskless Thread: cleanup covers it and cold restart replays', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('taskless-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const projectRef = project.project.projectRef
-    const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, projectRef)
-    // A taskless Thread carries Human and Member Attention that archival must clear.
-    const chat = committed((await ledger.startThread({ requestId: requestId('taskless-arch-chat'), workspaceId: alpha, projectRef,
-      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-    // A taskful Thread keeps the archival snapshot meaningful (claim release).
-    const started = withTask(committed((await ledger.startThread({ requestId: requestId('taskless-arch-start'), workspaceId: alpha, projectRef,
-      body: 'Task', kind: 'task', actor: agentTeamHumanActor() })).value))
-    committed((await ledger.changeClaim({ requestId: requestId('taskless-arch-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
-
-    const archived = (await ledger.archiveProject({ requestId: requestId('taskless-arch-archive'), workspaceId: alpha, projectRef, actor: agentTeamHumanActor() })).value
-    const operation = ledger.getOperation(archived.receipt.operationId)!
-    const removed = operation.kind === 'team/project-archived' ? operation.data.inbox.attention.removed : []
-    expect(removed.map(entry => entry.threadRef)).toEqual(expect.arrayContaining([chat.thread.threadRef, started.thread.threadRef]))
-    ledger.validate()
-
-    // Cold restart: replay must accept the archive snapshot it wrote itself.
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const replayed = await harness(storedPool(records))
-    expect(() => ledgerAtBoot(replayed)).not.toThrow()
-    expect(ledgerAtBoot(replayed).view({ workspaceId: alpha }).projects).toEqual([])
-  })
-
-  it('repairs a legacy Project archival record that omitted taskless-Thread cleanup on load', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('legacy-arch-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    const chat = committed((await ledger.startThread({ requestId: requestId('legacy-arch-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-    const archived = (await ledger.archiveProject({ requestId: requestId('legacy-arch-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })).value
-    // Rewrite the archive to the 0.1.7-0.1.9 shape: cleanup scoped to taskful Threads only.
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/project-archived') return [id, typed] as [string, unknown]
-      const dropTaskless = (removed: readonly { threadRef: string }[]) => removed.filter(entry => entry.threadRef !== chat.thread.threadRef)
-      return [id, { ...typed, data: { ...typed.data, inbox: {
-        attention: { set: [], removed: dropTaskless(typed.data.inbox.attention.removed) },
-        directMarkers: { added: [], removed: dropTaskless(typed.data.inbox.directMarkers.removed) },
-        activityMarkers: { added: [], removed: dropTaskless(typed.data.inbox.activityMarkers.removed) },
-      } } }] as [string, unknown]
-    })
-    const legacy = await harness(storedPool(records))
-    const legacyLedger = ledgerAtBoot(legacy)
-    expect(() => legacyLedger.validate()).not.toThrow()
-    const repaired = legacyLedger.getOperation(archived.receipt.operationId)!
-    expect(repaired.kind === 'team/project-archived' ? repaired.data.inbox.attention.removed.map(entry => entry.threadRef) : [])
-      .toContain(chat.thread.threadRef)
-  })
-
-  it('still rejects a forged Project archival inbox during replay', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('forged-inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    committed((await ledger.startThread({ requestId: requestId('forged-inbox-chat'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'plain conversation', kind: 'discussion', actor: agentTeamHumanActor(), recipients: [actor.memberId] })).value)
-    const started = withTask(committed((await ledger.startThread({ requestId: requestId('forged-inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: 'Task', kind: 'task', actor: agentTeamHumanActor() })).value))
-    committed((await ledger.changeClaim({ requestId: requestId('forged-inbox-claim'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'claim', direction: 'work', baseRevision: started.thread.revision, actor })).value)
-    await ledger.archiveProject({ requestId: requestId('forged-inbox-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
-    // Forge the opposite omission (drop a taskful-Thread cleanup entry): not the legacy shape, so it must still fail.
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/project-archived') return [id, typed] as [string, unknown]
-      return [id, { ...typed, data: { ...typed.data, inbox: {
-        ...typed.data.inbox,
-        attention: { set: [], removed: typed.data.inbox.attention.removed.filter(entry => entry.threadRef !== started.thread.threadRef) },
-      } } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(records))).rejects.toThrow(/invalid Project archival inbox cleanup/)
-  })
-})
-
-describe('AgentTeam archived read surfaces', () => {
-  it('hides archived-Project Tasks from ref resolution and rejects direct thread reads', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('reads-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('reads-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    await ledger.changeAttention({ requestId: requestId('reads-follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
-    await ledger.readThread({ requestId: requestId('reads-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
-    // Pre-archival everything resolves and reads.
-    expect(ledger.resolveTaskRefs(alpha, [started.task.taskRef])).toHaveLength(1)
-    expect(ledger.threadHistory(actor, { workspaceId: alpha, taskRef: started.task.taskRef })).toMatchObject({ thread: { threadRef: started.thread.threadRef } })
-    expect(ledger.threadObservations(agentTeamHumanActor(), { workspaceId: alpha, threadRef: started.thread.threadRef })).toBeTruthy()
-
-    await ledger.archiveProject({ requestId: requestId('reads-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
-
-    // Archived Projects do not exist on Team API surfaces: refs stop
-    // resolving and every ref-addressed read rejects with the explicit
-    // archived error instead of an unknown-ref disguise.
-    expect(ledger.resolveTaskRefs(alpha, [started.task.taskRef])).toEqual([])
-    await expect(ledger.readThread({ requestId: requestId('reads-read-2'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })).rejects.toThrow(/archived and no longer accepts Team work/)
-    expect(() => ledger.threadHistory(actor, { workspaceId: alpha, taskRef: started.task.taskRef })).toThrow(/archived and no longer accepts Team work/)
-    expect(() => ledger.threadObservations(agentTeamHumanActor(), { workspaceId: alpha, threadRef: started.thread.threadRef })).toThrow(/archived and no longer accepts Team work/)
-    expect(() => ledger.view({ workspaceId: alpha, threadRef: started.thread.threadRef })).toThrow(/archived and no longer accepts Team work/)
-    await expect(ledger.changeAttention({ requestId: requestId('reads-unfollow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'unfollow', actor })).rejects.toThrow(/archived and no longer accepts Team work/)
-    expect(() => ledger.listClaims(actor, { workspaceId: alpha, taskRef: started.task.taskRef })).toThrow(/archived and no longer accepts Team work/)
-
-    // The durable layer stays whole: replay validates every pre-archival
-    // read against the then-active Project, and the facts survive intact.
-    ledger.validate()
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const replayed = await harness(storedPool(records))
-    expect(() => ledgerAtBoot(replayed).validate()).not.toThrow()
-    const cold = ledgerAtBoot(replayed)
-    expect(cold.getTask(started.task.taskRef)).toMatchObject({ taskRef: started.task.taskRef })
-    expect(cold.resolveTaskRefs(alpha, [started.task.taskRef])).toEqual([])
-  })
-
-  it('excludes archived-Project Threads from every Inbox slice', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('inbox-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('inbox-start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
-    const ledger = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    await ledger.readThread({ requestId: requestId('inbox-read'), workspaceId: alpha, taskRef: started.task.taskRef, actor: agentTeamHumanActor() })
-    // Pre-archival the participated Thread is the Human recent tail's.
-    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toMatchObject({ items: [],
-      recent: [expect.objectContaining({ thread: expect.objectContaining({ threadRef: started.thread.threadRef }) })] })
-
-    await ledger.archiveProject({ requestId: requestId('inbox-archive'), workspaceId: alpha, projectRef: project.project.projectRef, actor: agentTeamHumanActor() })
-
-    // Archived Projects do not exist on Team API surfaces: neither the unread
-    // queue nor the Human recent tail names their Threads, for the Human or
-    // for a Member, and the picture survives a cold restart.
-    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledger.inbox(actor, { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledger.memberInbox(actor, {})).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-    expect(ledgerAtBoot(test).inbox(agentTeamHumanActor(), { workspaceId: alpha })).toEqual({ humanMemberId: AGENT_TEAM_HUMAN_MEMBER_ID, items: [], main: [], recent: [], hasMore: false, totalUnreadCount: 0, totalDirectCount: 0 })
-  })
-})
-
-describe('AgentTeam legacy session-transition records', () => {
-  /**
-   * Append one durable operation to the harness's operation table as an earlier
-   * build would have written it. Boot replay, not a live writer, is what has to
-   * accept it: the retired renewal and rollover request paths are gone.
-   */
-  async function appendRecord(test: TeamHarness, operation: AgentTeamOperation): Promise<void> {
-    await test.facility.get('agent_team')!.table('operations').put(operation.operationId, operation)
-  }
-
-  function rolledOverRecord(
-    sequence: number,
-    previousOperationId: AgentTeamOperationId,
-    actor: AgentTeamOperation['actor'],
-    data: Extract<AgentTeamOperation, { kind: 'team/member-session-rolled-over' }>['data'],
-  ): AgentTeamOperation {
-    return {
-      sequence,
-      operationId: `operation:legacy-rollover-${sequence}` as AgentTeamOperationId,
-      requestId: `legacy:rollover:${sequence}` as AgentTeamRequestId,
-      occurredAt: '2026-01-01T00:00:00.000Z',
-      actor,
-      previousOperationId,
-      kind: 'team/member-session-rolled-over',
-      data,
-    }
-  }
-
-  it('replays a Member-authored rollover that moves exactly the sessionId', async () => {
-    const test = await harness()
-    const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, undefined)
-    const newSessionId = SessionId(`agent-team-rollover-${crypto.randomUUID()}`)
-    const head = ledger.status().sequence
-    const previousOperationId = [...test.facility.get('agent_team')!.table('operations').keys()].at(-1) as AgentTeamOperationId
-    await appendRecord(test, rolledOverRecord(head + 1, previousOperationId, actor, {
-      member: { ...member, sessionId: newSessionId },
-      previousSessionId: member.sessionId,
-      newSessionId,
-      handoffEventSeq: 42 as never,
-      trigger: 'model',
-    }))
-
-    const replayed = ledgerAtBoot(test)
-    // The recorded envelope moves exactly the binding; identity and memory stay.
-    expect(replayed.getMember(member.memberId)).toMatchObject({
-      memberId: member.memberId, handle: member.handle, state: 'enabled',
-      privateMemoryPath: member.privateMemoryPath, sessionId: newSessionId,
-    })
-    expect(replayed.previousSessionForMember(member.memberId)).toBe(member.sessionId)
-    expect(() => replayed.validate()).not.toThrow()
-  })
-
-  it('replays a checkpoint-seeded rollover and rejects one that moves more than the sessionId', async () => {
-    const pool = new MemoryMediaPool()
-    const test = await harness(pool)
-    const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, undefined)
-    const newSessionId = SessionId(`agent-team-rollover-${crypto.randomUUID()}`)
-    const head = ledger.status().sequence
-    const previousOperationId = [...test.facility.get('agent_team')!.table('operations').keys()].at(-1) as AgentTeamOperationId
-    await appendRecord(test, rolledOverRecord(head + 1, previousOperationId, actor, {
-      member: { ...member, sessionId: newSessionId },
-      previousSessionId: member.sessionId,
-      newSessionId,
-      handoffEventSeq: 5 as never,
-      trigger: 'model',
-      sourceSessionId: member.sessionId,
-      sourceThroughSeq: 30 as never,
-      checkpointRef: `context-checkpoint-${'a'.repeat(64)}` as never,
-    }))
-    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
-    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
-    await test.fiber.dispose()
-    cleanups.pop()
-
-    // Forging the recorded Member snapshot — the handle changed alongside the
-    // sessionId — must not replay.
-    const forged = records.map(([key, operation]) => {
-      if (typeof operation !== 'object' || operation === null || (operation as AgentTeamOperation).kind !== 'team/member-session-rolled-over') return [key, operation] as [string, unknown]
-      const rolled = operation as Extract<AgentTeamOperation, { kind: 'team/member-session-rolled-over' }>
-      return [key, { ...rolled, data: { ...rolled.data, member: { ...rolled.data.member, handle: 'impostor' } } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(forged))).rejects.toThrow(/invalid Member session rollover/)
-  })
-
-  it('rejects a forged rollover whose actor is not the target Member', async () => {
-    const pool = new MemoryMediaPool()
-    const test = await harness(pool)
-    const ledger = ledgerAtBoot(test)
-    const { member } = await addLedgerMember(ledger, undefined)
-    const { actor: other } = await addLedgerMember(ledger, undefined, `member:agent-${crypto.randomUUID()}`)
-    const newSessionId = SessionId(`agent-team-rollover-${crypto.randomUUID()}`)
-    const head = ledger.status().sequence
-    const previousOperationId = [...test.facility.get('agent_team')!.table('operations').keys()].at(-1) as AgentTeamOperationId
-    await appendRecord(test, rolledOverRecord(head + 1, previousOperationId, other, {
-      member: { ...member, sessionId: newSessionId },
-      previousSessionId: member.sessionId,
-      newSessionId,
-      handoffEventSeq: 1 as never,
-      trigger: 'model',
-    }))
-    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
-    await test.fiber.dispose()
-    cleanups.pop()
-    await expect(harness(storedPool(records))).rejects.toThrow(/rolled-over Member must match its actor/)
-  })
-})
-
-describe('AgentTeam Host-initiated Session recycling ledger command', () => {
-  const hostActor = (): AgentTeamHostActor => ({ kind: 'host', handle: 'agent-team' })
-
-  it('commits a Host-actored recycling that moves exactly the sessionId', async () => {
-    const pool = new MemoryMediaPool()
-    const test = await harness(pool)
-    const ledger = ledgerAtBoot(test)
-    const { member } = await addLedgerMember(ledger, undefined)
-    const newSessionId = SessionId(`agent-team-${crypto.randomUUID()}`)
-
-    const recycled = (await ledger.recycleMemberSession({
-      requestId: requestId('recycle'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
-      previousSessionId: member.sessionId, newSessionId,
-    })).value
-
-    // Identity, memory, and binding survive; only the generation moves.
-    expect(recycled.member.sessionId).toBe(newSessionId)
-    expect(recycled.member).toMatchObject({
-      memberId: member.memberId, handle: member.handle, state: 'enabled', privateMemoryPath: member.privateMemoryPath,
-    })
-    expect(ledger.previousSessionForMember(member.memberId)).toBe(member.sessionId)
-    const operation = [...pool.media.get('agent_team')!.tables.get('operations')!.values() as Iterable<AgentTeamOperation>]
-      .find(op => op.kind === 'team/member-session-recycled')
-    // The Host records itself: no Member or Human authority is borrowed for a
-    // decision neither of them made.
-    expect(operation).toMatchObject({
-      kind: 'team/member-session-recycled',
-      actor: { kind: 'host', handle: 'agent-team' },
-      data: { previousSessionId: member.sessionId, newSessionId },
-    })
-    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
-  })
-
-  it('persists the input boundary across replay and rejects a retry changing it', async () => {
-    const pool = new MemoryMediaPool()
-    const test = await harness(pool)
-    const ledger = ledgerAtBoot(test)
-    const { member } = await addLedgerMember(ledger, undefined)
-    const request = {
-      requestId: requestId('recycle-input'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
-      previousSessionId: member.sessionId, newSessionId: SessionId(`agent-team-${crypto.randomUUID()}`), inputFromSeq: 17 as never,
-    }
-    await ledger.recycleMemberSession(request)
-    await expect(ledger.recycleMemberSession(request)).resolves.toMatchObject({ committed: false })
-    await expect(ledger.recycleMemberSession({ ...request, inputFromSeq: 18 as never })).rejects.toThrow()
-    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
-    const reopened = await harness(storedPool(records))
-    expect(ledgerAtBoot(reopened).lastTransitionForMember(member.memberId)).toEqual({
-      previousSessionId: member.sessionId, targetSessionId: request.newSessionId, inputFromSeq: 17,
-    })
-  })
-
-  it('rejects a non-Host actor, a stale binding, and a forged replay', async () => {
-    const pool = new MemoryMediaPool()
-    const test = await harness(pool)
-    const ledger = ledgerAtBoot(test)
-    const { member, actor } = await addLedgerMember(ledger, undefined)
-    const newSessionId = SessionId(`agent-team-${crypto.randomUUID()}`)
-
-    // A Member may roll itself over, but recycling is the Host's decision.
-    await expect(ledger.recycleMemberSession({
-      requestId: requestId('member-actor'), workspaceId: alpha, memberId: member.memberId, actor: actor as never,
-      previousSessionId: member.sessionId, newSessionId,
-    })).rejects.toThrow(/requires Host authority/)
-    await expect(ledger.recycleMemberSession({
-      requestId: requestId('stale'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
-      previousSessionId: SessionId('agent-team-stale'), newSessionId,
-    })).rejects.toThrow(/no longer bound/)
-    await ledger.recycleMemberSession({
-      requestId: requestId('recycle'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
-      previousSessionId: member.sessionId, newSessionId,
-    })
-    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
-    await test.fiber.dispose()
-    cleanups.pop()
-    // Forging a snapshot that moves more than the sessionId must not replay.
-    const forged = records.map(([key, operation]) => {
-      if (typeof operation !== 'object' || operation === null || (operation as AgentTeamOperation).kind !== 'team/member-session-recycled') return [key, operation] as [string, unknown]
-      const recycled = operation as Extract<AgentTeamOperation, { kind: 'team/member-session-recycled' }>
-      return [key, { ...recycled, data: { ...recycled.data, member: { ...recycled.data.member, handle: 'impostor' } } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(forged))).rejects.toThrow(/invalid Member session recycling/)
-  })
-
-  it('rejects a replay whose actor is not the Host', async () => {
-    const pool = new MemoryMediaPool()
-    const test = await harness(pool)
-    const ledger = ledgerAtBoot(test)
-    const { member } = await addLedgerMember(ledger, undefined)
-    const newSessionId = SessionId(`agent-team-${crypto.randomUUID()}`)
-    await ledger.recycleMemberSession({
-      requestId: requestId('recycle'), workspaceId: alpha, memberId: member.memberId, actor: hostActor(),
-      previousSessionId: member.sessionId, newSessionId,
-    })
-    const records = [...pool.media.get('agent_team')!.tables.get('operations')!.entries()]
-    await test.fiber.dispose()
-    cleanups.pop()
-    const forged = records.map(([key, operation]) => {
-      if (typeof operation !== 'object' || operation === null || (operation as AgentTeamOperation).kind !== 'team/member-session-recycled') return [key, operation] as [string, unknown]
-      const recycled = operation as Extract<AgentTeamOperation, { kind: 'team/member-session-recycled' }>
-      return [key, { ...recycled, actor: { kind: 'human', memberId: AGENT_TEAM_HUMAN_MEMBER_ID, handle: 'human' } }] as [string, unknown]
-    })
-    await expect(harness(storedPool(forged))).rejects.toThrow(/invalid Member session recycling authority/)
-  })
-})
-
-describe('AgentTeam durable Thread read progress', () => {
-  /**
-   * A live facility holding one committed Human Thread read — a reply from a
-   * Member the Human had not seen — plus the picture that read answered with,
-   * which the legacy snapshot form needs to rebuild the record it used to write.
-   */
-  async function committedHumanRead(): Promise<{ readonly test: TeamHarness; readonly read: AgentTeamThreadReadResult; readonly records: Array<[string, unknown]> }> {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
-    const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, project.project.projectRef)
-    let revision = sent.thread.revision
-    for (const body of ['Working on it', 'Pushed a fix']) {
-      revision = committed((await writer.reply({ requestId: requestId(body), workspaceId: alpha, taskRef: sent.task.taskRef, body, baseRevision: revision, actor })).value).thread.revision
-    }
-    const outcome = await writer.readThread({ requestId: requestId('human-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })
-    if (!outcome.committed) throw new Error('expected the Human read to commit a receipt')
-    return { test, read: outcome.value, records: [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]> }
-  }
-
-  /** Rewrite every slim Thread read record of one ledger through `shape`. */
-  function reshapeReads(records: Array<[string, unknown]>, shape: (operation: AgentTeamThreadReadOperation) => AgentTeamThreadReadData): Array<[string, unknown]> {
-    return records.map(([id, operation]) => {
-      const typed = operation as AgentTeamOperation
-      if (typed.kind !== 'team/thread-read') return [id, typed] as [string, unknown]
-      return [id, { ...typed, data: shape(typed) }] as [string, unknown]
-    })
-  }
-
-  it('answers a Thread with nothing unread for its reader without writing a receipt', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
-    const table = test.facility.get('agent_team')!.table('operations')
-    const committedOperations = table.size
-    const commits: unknown[] = []
-    test.ctx.on('agent-team/committed', payload => commits.push(payload))
-
-    // The creator's own opening is never unread for the creator, so this read
-    // has no watermark to advance and no marker to consume.
-    const read = await test.ctx.agentTeam.readThread({ requestId: requestId('read-nothing'), workspaceId: alpha, taskRef: sent.task.taskRef })
-
-    // Nothing changed, so nothing is written: no record, no commit event (and
-    // therefore no deferred replay), and no receipt for an operation that does
-    // not exist.
-    expect(table.size).toBe(committedOperations)
-    expect(commits).toEqual([])
-    expect(read.receipt).toBeUndefined()
-    // The picture is still the whole Thread state, not a stub: a no-op read
-    // shares the committed read's derivation.
-    expect(read.task).toEqual(sent.task)
-    expect(read.thread).toEqual(sent.thread)
-    expect(read.anchor.messageRef).toBe(sent.message.messageRef)
-    expect(read.remainingUnreadCount).toBe(0)
-    expect(read.facts.some(fact => fact.unread)).toBe(false)
-  })
-
-  it('keeps the watermark a progress read advanced across a restart', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
-    const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, project.project.projectRef)
-    committed((await writer.reply({ requestId: requestId('agent-reply'), workspaceId: alpha, taskRef: sent.task.taskRef, body: 'Working on it', baseRevision: sent.thread.revision, actor })).value)
-
-    // A reply the reader has not seen is real progress: it commits a watermark.
-    const first = await writer.readThread({ requestId: requestId('human-read'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })
-    expect(first.committed).toBe(true)
-    expect(first.value.remainingUnreadCount).toBe(0)
-    const records = [...test.facility.get('agent_team')!.table('operations').entries()]
-
-    const revived = await harness(storedPool(records as Array<[string, unknown]>))
-    const reader = ledgerAtBoot(revived)
-    const again = await reader.readThread({ requestId: requestId('human-read-after-restart'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })
-
-    // The acknowledged reply stayed acknowledged: a restart that lost the
-    // recorded progress would have to write it again here.
-    expect(again.value.remainingUnreadCount).toBe(0)
-    expect(again.committed).toBe(false)
-  })
-
-  it('drains unread replies by remainingUnreadCount and stops writing once caught up', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
-    const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, project.project.projectRef)
-    let revision = sent.thread.revision
-    for (const body of ['first reply', 'second reply', 'third reply']) {
-      const replied = committed((await writer.reply({ requestId: requestId(body), workspaceId: alpha, taskRef: sent.task.taskRef, body, baseRevision: revision, actor })).value)
-      revision = replied.thread.revision
-    }
-
-    const reader = ledgerAtBoot(test)
-    const table = test.facility.get('agent_team')!.table('operations')
-    let rounds = 0
-    while (rounds < 10) {
-      const read = await reader.readThread({ requestId: requestId(`drain-${rounds}`), workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })
-      if (!read.committed) throw new Error('expected every unread round to commit')
-      rounds += 1
-      if (read.value.remainingUnreadCount === 0) break
-    }
-    expect(rounds).toBeGreaterThan(0)
-    expect((await reader.readThread({ requestId: requestId('drain-final'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })).value.remainingUnreadCount).toBe(0)
-
-    // Caught up: the drain stops on the unread count, and the next read writes
-    // nothing at all — including a retry of that same request id, which is not
-    // a durable operation and so is answered from the current projection.
-    const settled = table.size
-    const extra = await reader.readThread({ requestId: requestId('drain-extra'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })
-    expect(extra.committed).toBe(false)
-    expect(extra.value.receipt).toBeUndefined()
-    const retry = await reader.readThread({ requestId: requestId('drain-extra'), workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })
-    expect(retry.committed).toBe(false)
-    expect(retry.value.remainingUnreadCount).toBe(0)
-    expect(table.size).toBe(settled)
-  })
-
-  it('stores a committing read as the slim receipt: progress and its Inbox, with no Thread picture', async () => {
-    const { records, read } = await committedHumanRead()
-    const record = records.map(([, operation]) => operation as AgentTeamOperation).find(operation => operation.kind === 'team/thread-read')
-    if (record?.kind !== 'team/thread-read') throw new Error('expected a durable Thread read record')
-
-    // The durable content is exactly the progress the read made and the Inbox
-    // delta it consumed. The Thread, its facts, the anchor, the Attention row
-    // and the count it left behind are projection state a replay re-derives for
-    // every surface that needs them, so freezing them here only adds weight
-    // nothing reads back.
-    expect(isThreadReadSnapshot(record.data)).toBe(false)
-    expect(Object.keys(record.data).sort()).toEqual(['inbox', 'memberId', 'readThroughSequence', 'taskRef', 'threadRef', 'workspaceId'])
-    expect(record.data.readThroughSequence).toBe(read.readThroughSequence)
-    expect(record.data.inbox).toEqual(expect.objectContaining({ attention: expect.objectContaining({ set: expect.any(Array) }) }))
-  })
-
-  it('refuses to open a slim Thread read record that grows a picture field or loses its watermark', async () => {
-    const { records } = await committedHumanRead()
-    const record = records.map(([, operation]) => operation as AgentTeamOperation).find(operation => operation.kind === 'team/thread-read')
-    if (record?.kind !== 'team/thread-read' || isThreadReadSnapshot(record.data)) throw new Error('expected one slim Thread read record')
-    const attention = record.data.inbox.attention.set[0]
-    if (attention === undefined) throw new Error('expected the read to record an Attention advance')
-
-    // Both forms are strict and disjoint, so a stored record parses as exactly
-    // one of them. A field that only the frozen picture form ever carried is
-    // therefore not "extra data" a newer reader may ignore: it makes the record
-    // neither form, and the whole domain refuses to open rather than guess.
-    await expect(harness(storedPool(reshapeReads(records, operation => ({ ...operation.data as AgentTeamThreadReadReceipt, attention }))))).rejects.toThrow(/does not match its schema/)
-    // Progress is the receipt's whole content, so a read that reports none is
-    // not a receipt either.
-    await expect(harness(storedPool(reshapeReads(records, operation => {
-      const { readThroughSequence: _dropped, ...rest } = operation.data as AgentTeamThreadReadReceipt
-      return rest as AgentTeamThreadReadData
-    })))).rejects.toThrow(/does not match its schema/)
-  })
-
-  it('rejects a slim Thread read receipt that under-reports the progress it made or the Task it belongs to', async () => {
-    const { records } = await committedHumanRead()
-    // Forging the watermark down keeps the record internally consistent — the
-    // Inbox delta still advances Attention to the real watermark — so only the
-    // independent derivation from the record's own prior projection can catch
-    // a read that claims less progress than the ledger already gave it.
-    await expect(harness(storedPool(reshapeReads(records, operation => ({
-      ...operation.data as AgentTeamThreadReadReceipt, readThroughSequence: (operation.data as AgentTeamThreadReadReceipt).readThroughSequence - 1,
-    }))))).rejects.toThrow(/invalid Thread read receipt/)
-    // Identity is derived too: a Task Thread read that drops the Task it
-    // belongs to would otherwise shrink its own claim unchecked, because the
-    // Thread alone still resolves the same read.
-    await expect(harness(storedPool(reshapeReads(records, operation => {
-      const { taskRef: _dropped, ...rest } = operation.data as AgentTeamThreadReadReceipt
-      return rest as AgentTeamThreadReadData
-    })))).rejects.toThrow(/invalid Thread read receipt/)
-  })
-
-  it('rejects a legacy Thread read snapshot whose recorded facts were trimmed', async () => {
-    const { read, records } = await committedHumanRead()
-    const snapshots = reshapeReads(records, operation => fabricateLegacyThreadReadSnapshot(operation.data as AgentTeamThreadReadReceipt, read))
-    const stored = snapshots.map(([, operation]) => operation as AgentTeamOperation).find(operation => operation.kind === 'team/thread-read')
-    if (stored?.kind !== 'team/thread-read' || !isThreadReadSnapshot(stored.data)) throw new Error('expected one legacy Thread read snapshot')
-    expect(stored.data.facts.length).toBeGreaterThan(1)
-
-    // A snapshot is not a trusted record just because it is old: the legacy
-    // form still gets the full picture derivation, so trimming one fact the
-    // read answered with is a forged projection, not a smaller record.
-    await expect(harness(storedPool(reshapeReads(records, operation => {
-      const snapshot = fabricateLegacyThreadReadSnapshot(operation.data as AgentTeamThreadReadReceipt, read)
-      return { ...snapshot, facts: snapshot.facts.slice(0, -1) }
-    })))).rejects.toThrow(/invalid Thread read projection/)
-  })
-
-  it('opens and validates a legacy Thread read snapshot without rewriting one stored byte', async () => {
-    const { read, records } = await committedHumanRead()
-    const snapshots = reshapeReads(records, operation => fabricateLegacyThreadReadSnapshot(operation.data as AgentTeamThreadReadReceipt, read))
-    const pool = storedPool(snapshots)
-    const revived = await harness(pool)
-    revived.ctx.agentTeam.validateLedger()
-
-    // Loading normalizes the projection, never the record: an installation that
-    // upgrades keeps every ledger byte it already committed, and the legacy
-    // read stays a legacy read.
-    expect([...pool.media.get('agent_team')!.tables.get('operations')!.entries()]).toEqual(snapshots)
-    const stored = [...pool.media.get('agent_team')!.tables.get('operations')!.values()]
-      .map(operation => operation as AgentTeamOperation).find(operation => operation.kind === 'team/thread-read')
-    if (stored?.kind !== 'team/thread-read') throw new Error('expected the Thread read record to survive the boot')
-    expect(isThreadReadSnapshot(stored.data)).toBe(true)
-  })
-
-  it('replays frozen snapshots and slim receipts into the same projections, mixed or uniform', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
-    const sent = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Investigate the regression' })))
-    const writer = ledgerAtBoot(test)
-    const { actor } = await addLedgerMember(writer, project.project.projectRef)
-    await writer.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: sent.task.taskRef, action: 'follow', actor })
-    const claimed = committed((await writer.changeClaim({ requestId: requestId('claim'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      action: 'claim', direction: 'read the regression', baseRevision: sent.thread.revision, actor })).value)
-    committed((await writer.reply({ requestId: requestId('agent-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: 'Working on it', baseRevision: claimed.thread.revision, actor })).value)
-    const humanReadId = requestId('human-read')
-    const memberReadId = requestId('member-read')
-    // The Human drains the claim and the reply, replies in turn, and the Member
-    // drains that: two committed reads over one Thread, at different points.
-    const humanOutcome = await writer.readThread({ requestId: humanReadId, workspaceId: alpha, taskRef: sent.task.taskRef, actor: agentTeamHumanActor() })
-    if (!humanOutcome.committed) throw new Error('expected the Human read to commit a receipt')
-    committed((await writer.reply({ requestId: requestId('human-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: 'Please continue', baseRevision: humanOutcome.value.readThroughSequence, actor: agentTeamHumanActor() })).value)
-    const memberOutcome = await writer.readThread({ requestId: memberReadId, workspaceId: alpha, taskRef: sent.task.taskRef, actor })
-    if (!memberOutcome.committed) throw new Error('expected the Member read to commit a receipt')
-    const pictures = new Map<AgentTeamRequestId, Omit<AgentTeamThreadReadResult, 'receipt'>>([[humanReadId, humanOutcome.value], [memberReadId, memberOutcome.value]])
-    const base = [...test.facility.get('agent_team')!.table('operations').entries()] as Array<[string, unknown]>
-    const asSnapshot = (operation: AgentTeamThreadReadOperation): AgentTeamThreadReadData => isThreadReadSnapshot(operation.data)
-      ? operation.data : fabricateLegacyThreadReadSnapshot(operation.data, pictures.get(operation.requestId)!)
-    const asReceipt = (operation: AgentTeamThreadReadOperation): AgentTeamThreadReadData => isThreadReadSnapshot(operation.data)
-      ? counterfactualReceiptReadData(operation.data) : operation.data
-
-    // Three ledgers that record the same two reads three ways: the pre-slim
-    // shape, the slim shape, and one of each. Every other record is identical.
-    const variants = [reshapeReads(base, asSnapshot), reshapeReads(base, asReceipt),
-      reshapeReads(base, operation => operation.requestId === humanReadId ? asSnapshot(operation) : asReceipt(operation))]
-    const summary = (instance: TeamHarness) => {
-      const ledger = ledgerAtBoot(instance)
-      return {
-        status: instance.ctx.agentTeam.status(),
-        view: instance.ctx.agentTeam.view({ workspaceId: alpha, threadRef: sent.thread.threadRef }),
-        inbox: ledger.inbox(actor, { workspaceId: alpha }),
-        attention: ledger.attentionStatus(actor, { workspaceId: alpha, taskRef: sent.task.taskRef }),
-        history: ledger.threadHistory(actor, { workspaceId: alpha, taskRef: sent.task.taskRef }),
-      }
-    }
-    const booted: unknown[] = []
-    for (const records of variants) {
-      const revived = await harness(storedPool(records))
-      ledgerAtBoot(revived).validate()
-      booted.push(summary(revived))
-    }
-    expect(booted[0]).toBeDefined()
-    expect(booted[1]).toEqual(booted[0])
-    expect(booted[2]).toEqual(booted[0])
-  })
-})
-
-describe('body-authored mentions', () => {
-  /** One Project and every write in it run through the same ledger projection. */
-  async function projectOf(test: TeamHarness) {
-    const ledger = ledgerAtBoot(test)
-    const created = (await ledger.createProject({ requestId: requestId('project'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      name: 'engineering', description: 'Engineering work' })).value
-    return { ledger, projectRef: created.project.projectRef }
-  }
-
-  /** A Member with a readable handle and a realistic branded id. */
-  const enroll = (ledger: AgentTeamLedger, projectRef: string, handle: string) =>
-    addLedgerMember(ledger, projectRef, `member:${crypto.randomUUID()}`, 'Test Agent', handle)
-
-  const start = async (ledger: AgentTeamLedger, projectRef: string, body: string) =>
-    withTask(committed((await ledger.startThread({ requestId: requestId(`start:${crypto.randomUUID()}`), actor: agentTeamHumanActor(),
-      kind: 'task', workspaceId: alpha, projectRef: projectRef as never, body })).value))
-
-  it('delivers a reply mention to a Project Member the Thread never carried, without making them follow', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const sent = await start(ledger, projectRef, 'Investigate the regression')
-    const author = await enroll(ledger, projectRef, 'author')
-    const stranger = await enroll(ledger, projectRef, 'stranger')
-
-    const reply = committed((await ledger.reply({ requestId: requestId('reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@stranger, please look at this', baseRevision: sent.thread.revision, actor: author.actor })).value)
-    expect(reply.undeliveredMentions).toBeUndefined()
-    expect(reply.directMarkers).toEqual([expect.objectContaining({ memberId: stranger.member.memberId })])
-    expect(ledger.attentionStatus(stranger.actor, { workspaceId: alpha, threadRef: sent.thread.threadRef }).attention).toBeUndefined()
-    expect(ledger.inbox(stranger.actor, { workspaceId: alpha })).toMatchObject({ totalUnreadCount: 1, totalDirectCount: 1 })
-  })
-
-  it('names a Workspace participant who is not a Project Member', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const insider = await enroll(ledger, projectRef, 'insider')
-    // Participates in the Workspace, never enrolled in the Project: Project
-    // membership is a Human-side organisation, not a gate on being addressed.
-    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    expect(ledger.view({ workspaceId: alpha }, insider.member.memberId).projects.map(project => project.projectRef)).toEqual([projectRef as never])
-
-    const sent = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('name-outsider'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@outsider, please look at this' })).value)
-    expect(sent.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
-    // A Human naming someone is a pull-in, not a report: the write commits
-    // outright and the marker is durable. (Inbox listing and Attention reads
-    // stay Project-gated until visibility is derived from participation.)
-
-  })
-
-  it('treats @all as plain text while @Handle reaches the Workspace', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    await enroll(ledger, projectRef, 'insider')
-    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-
-    const all = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('all-is-text'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@all, standup in ten minutes' })).value)
-    expect(all.directMarkers).toEqual([])
-    const named = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('all-stays-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: `@${outsider.member.handle}, named from the Workspace` })).value)
-    expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
-  })
-
-  it('lists a derived Project participant in the view roster the composer reads', async () => {
-    const test = await harness()
-    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('roster-project'), workspaceId: alpha, name: 'engineering', description: '' })
-    const ledger = ledgerAtBoot(test)
-    const insider = await addLedgerMember(ledger, project.project.projectRef, undefined, 'Test Agent', 'insider')
-    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    committed((await ledger.startThread({ requestId: requestId('roster-msg'), workspaceId: alpha, projectRef: project.project.projectRef,
-      body: '@outsider, please look', kind: 'discussion', actor: agentTeamHumanActor() })).value)
-
-    // The roster a UI mention picker reads is derived the same way visibility
-    // is: the Member the Host now lets you address must appear in it, or the
-    // composer offers a narrower set than the ledger accepts.
-    const roster = ledger.view({ workspaceId: alpha }).members
-    expect(roster).toContainEqual({ projectRef: project.project.projectRef, memberId: insider.member.memberId })
-    expect(roster).toContainEqual({ projectRef: project.project.projectRef, memberId: outsider.member.memberId })
-
-    // Removing the Member ends it: derivation never outlives the Member.
-    await ledger.removeMember({ requestId: requestId('roster-remove'), memberId: outsider.member.memberId, actor: agentTeamHumanActor() })
-    expect(ledger.view({ workspaceId: alpha }).members).not.toContainEqual({ projectRef: project.project.projectRef, memberId: outsider.member.memberId })
-    ledger.validate()
-  })
-
-  it('reloads a ledger written with the widened mention rules and keeps committing', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const insider = await enroll(ledger, projectRef, 'insider')
-    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-
-    const historic = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('historic-all'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@insider, historic write' })).value)
-    const named = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('historic-named'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@outsider, named from the Workspace' })).value)
-    expect(historic.directMarkers.map(marker => marker.memberId).sort()).toEqual([insider.member.memberId].sort())
-    expect(named.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
-
-    // A fresh Ledger over the same persisted operations re-validates every
-    // record on load. Widening is replay-safe, so both the Project Member and
-    // the Workspace-only mention survive the re-check and the next commit still lands.
-    const reopened = ledgerAtBoot(test)
-    // Naming the Workspace-only Member again through the reloaded Ledger proves
-    // the widened target check is live after a replay, not just on first write.
-    const again = committed((await reopened.startThread({ kind: 'discussion', requestId: requestId('after-reload'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@outsider, again after the reload' })).value)
-    expect(again.directMarkers.map(marker => marker.memberId)).toEqual([outsider.member.memberId])
-  })
-
-  it('shows a Member the Project of a Thread they took part in', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    await enroll(ledger, projectRef, 'insider')
-    const outsider = await addLedgerMember(ledger, undefined, undefined, 'Test Agent', 'outsider')
-    const elsewhere = (await ledger.createProject({ requestId: requestId('project-elsewhere'), workspaceId: alpha,
-      name: 'elsewhere', description: '', memberIds: [], actor: agentTeamHumanActor() })).value.project
-
-    // Project participation is derived now: no enrolment happens, and taking
-    // part in one Thread of the Project is what makes it visible.
-    expect(ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects.map(project => project.projectRef)).toEqual([])
-    await start(ledger, projectRef, '@outsider, please look')
-
-    const seen = ledger.view({ workspaceId: alpha }, outsider.member.memberId).projects.map(project => project.projectRef)
-    expect(seen).toEqual([projectRef as never])
-    // The derived rule does not widen to the Workspace: a Project this Member
-    // never took part in stays out of reach.
-    expect(seen).not.toContain(elsewhere.projectRef)
-  })
-
-  it('keeps a Project visible for an explicit Member who never wrote, across a reload', async () => {
-    // Enrolment by hand is retired, so this Member comes from a frozen old
-    // ledger: the explicit membership it carries must stay visible even though
-    // nothing can produce one any more.
-    const ledger = ledgerAtBoot(await harness(storedPool(legacyJoinLedger.records)))
-    const visible = () => ledger.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).projects.map(project => project.projectRef)
-    expect(visible()).toEqual([legacyJoinLedger.projectRef as never])
-
-    const reopened = ledgerAtBoot(await harness(storedPool(legacyJoinLedger.records)))
-    expect(reopened.view({ workspaceId: alpha }, legacyJoinLedger.memberId as never).projects.map(project => project.projectRef))
-      .toEqual([legacyJoinLedger.projectRef as never])
-  })
-
-  it('still refuses a Member who does not participate in the Workspace', async () => {
-    const test = await harness(new MemoryMediaPool(), [alpha, beta])
-    const { ledger, projectRef } = await projectOf(test)
-    const sent = await start(ledger, projectRef, 'Investigate the regression')
-    // A Member rooted in another Workspace: the boundary moved from Project
-    // down to Workspace, it did not disappear, so this Member is refused
-    // everywhere in this Workspace.
-    const foreignMember: AgentTeamAgentMember = { memberId: `member:foreign-${crypto.randomUUID()}` as never, sessionId: SessionId('session:foreign'),
-      workspaceId: beta, handle: 'foreign', description: 'Test Agent', presetId: 'team-member', privateMemoryPath: '/tmp/foreign', state: 'enabled' }
-    await ledger.addMember({ requestId: requestId('add-foreign'), actor: agentTeamHumanActor(), member: foreignMember,
-      handle: foreignMember.handle, description: foreignMember.description, presetId: foreignMember.presetId, workspaceId: beta, projectRefs: [] })
-    const foreign = { member: foreignMember, actor: { kind: 'member' as const, memberId: foreignMember.memberId, handle: 'foreign' } }
-    await expect(ledger.reply({ requestId: requestId('foreign-reply'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: 'Still here', baseRevision: sent.thread.revision, actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)
-    await expect(ledger.changeAttention({ requestId: requestId('foreign-follow'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      action: 'follow', actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)
-    await expect(ledger.changeClaim({ requestId: requestId('foreign-claim'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      action: 'claim', direction: 'Mine', baseRevision: sent.thread.revision, actor: foreign.actor })).rejects.toThrow(/not authorized|another Workspace/)
-  })
-
-  it('merges explicit recipients with body mentions without duplicating a Member', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const first = await enroll(ledger, projectRef, 'first')
-    const second = await enroll(ledger, projectRef, 'second')
-
-    const sent = committed((await ledger.startThread({ kind: 'discussion', requestId: requestId('merge'), actor: agentTeamHumanActor(), workspaceId: alpha,
-      projectRef: projectRef as never, body: '@first please look', recipients: [first.member.memberId, second.member.memberId] })).value)
-    expect(sent.directMarkers.map(marker => marker.memberId).sort()).toEqual([first.member.memberId, second.member.memberId].sort())
-  })
-
-  it('keeps @human deliverable after the human renames, under any casing', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    const sent = await start(ledger, projectRef, 'Investigate the regression')
-    const author = await enroll(ledger, projectRef, 'author')
-    ledger.setHumanDisplayHandle('YuCreate')
-
-    // The historic literal survives as a permanent alias: every casing reaches
-    // the same human, and the inbox counts it as a direct mention.
-    const aliased = committed((await ledger.reply({ requestId: requestId('reply-alias'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@human and @Human, heads up', baseRevision: sent.thread.revision, actor: author.actor })).value)
-    expect(aliased.undeliveredMentions).toBeUndefined()
-    expect(aliased.directMarkers.map(marker => marker.memberId)).toEqual([AGENT_TEAM_HUMAN_MEMBER_ID])
-    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toMatchObject({ totalDirectCount: 1 })
-
-    const renamed = committed((await ledger.reply({ requestId: requestId('reply-renamed'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@YuCreate, same thing', baseRevision: aliased.thread.revision, actor: author.actor })).value)
-    expect(renamed.directMarkers.map(marker => marker.memberId)).toEqual([AGENT_TEAM_HUMAN_MEMBER_ID])
-
-    // Both names in one body still notify the human exactly once.
-    const both = committed((await ledger.reply({ requestId: requestId('reply-both'), workspaceId: alpha, taskRef: sent.task.taskRef,
-      body: '@human aka @YuCreate, once please', baseRevision: renamed.thread.revision, actor: author.actor })).value)
-    expect(both.directMarkers.map(marker => marker.memberId)).toEqual([AGENT_TEAM_HUMAN_MEMBER_ID])
-    expect(ledger.inbox(agentTeamHumanActor(), { workspaceId: alpha })).toMatchObject({ totalDirectCount: 3 })
-  })
-
-  it('reserves the historic human literal against agent handles even after a rename', async () => {
-    const test = await harness()
-    const { ledger, projectRef } = await projectOf(test)
-    ledger.setHumanDisplayHandle('YuCreate')
-    await expect(enroll(ledger, projectRef, 'human')).rejects.toThrow('reserved human alias')
-    await expect(enroll(ledger, projectRef, 'Human')).rejects.toThrow('reserved human alias')
   })
 })
