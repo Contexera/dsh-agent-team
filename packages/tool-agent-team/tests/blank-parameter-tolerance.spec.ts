@@ -9,6 +9,14 @@ import { teamTools } from './render-text.ts'
  * blank addresses (23 rejections in one real session), a reply that carried a
  * stray `projectRef` being told to fetch a token it already held (7 rejections),
  * and a blank `body` being reported as a generic missing-property error.
+ *
+ * The same fill-every-slot habit produces one more shape: a read that carries a
+ * page size. `read` is the one action that returns a bounded batch by design —
+ * the Host's read request has no `limit` at all — so a `limit` there is the
+ * model asking for something the action cannot deliver, and refusing the whole
+ * call teaches it nothing (one real session retried the identical arguments
+ * twice after being told to drop them). `history`, whose request really does
+ * carry `limit`, keeps refusing it.
  */
 
 const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
@@ -84,6 +92,55 @@ describe('blank optional parameters count as not passed', () => {
     const host = threadHost({ taskBoardForAgent: board })
     await call(teamTools().get('team_task')!, { action: 'board', projectRef: '', mine: false, taskRef: '', threadRef: '', baseRevision: 0 }, host)
     expect(board).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('a read carrying a page size still returns its batch', () => {
+  it('a Thread read with limit and beforeSequence reads one page instead of refusing the call', async () => {
+    const host = threadHost()
+    await call(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD, limit: 200, beforeSequence: 0, workspace: 'workspace:alpha' }, host)
+    const read = host.readThreadForAgent as ReturnType<typeof vi.fn>
+    expect(read).toHaveBeenCalledTimes(1)
+    // The Host read request has no limit field, so the page size must not reach it.
+    expect(read.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD })
+    expect(read.mock.calls[0]![1]).not.toHaveProperty('limit')
+    expect(read.mock.calls[0]![1]).not.toHaveProperty('beforeSequence')
+  })
+
+  it('a Main stream read with limit and beforeSequence reads one page instead of refusing the call', async () => {
+    const read = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({
+      projectRef: PROJECT, entries: [], readThroughSequence: 12,
+      standing: { unreadCount: 3, directCount: 0 }, consumedDirectMarkers: [], reminders: [],
+    }))
+    const host = threadHost({ readMainStreamForAgent: read })
+    await call(teamTools().get('team_thread')!, { action: 'read', projectRef: PROJECT, limit: 200, beforeSequence: 0, workspace: 'workspace:alpha' }, host)
+    expect(read).toHaveBeenCalledTimes(1)
+    expect(read.mock.calls[0]![1]).not.toHaveProperty('limit')
+  })
+
+  it('the rendered page still names how much is left, so paging stays the way to get more', async () => {
+    const read = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({
+      thread: { threadRef: THREAD, revision: 20 },
+      anchor: { messageRef: 'message:anchor', sender: 'member:reeve', body: 'Can we unify the importers?', sequence: 1 },
+      anchorMentions: [], claims: [], facts: [], readThroughSequence: 40, remainingUnreadCount: 57,
+      earlierFactCount: 57, consumedDirectMarkers: [], reminders: [],
+    }))
+    const host = threadHost({ readThreadForAgent: read })
+    const result = await call(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD, limit: 200, workspace: 'workspace:alpha' }, host) as never
+    const blocks = teamTools().get('team_thread')!.output.render({ action: 'read', threadRef: THREAD, limit: 200 }, result)
+    const text = blocks.map(block => block.type === 'text' ? block.text : '').join('\n')
+    expect(text).toContain('57')
+  })
+
+  it('history still honors the page size, because its request really carries one', async () => {
+    const history = vi.fn((_agent: unknown, _request: Record<string, unknown>) => ({ thread: { threadRef: THREAD, revision: 20 }, anchor: READ_RESULT.anchor, anchorMentions: [],
+      claims: [], facts: [], cursor: 1, hasMore: false, taskCards: [] }))
+    const host = threadHost({ threadHistoryForAgent: history })
+    await call(teamTools().get('team_thread')!, { action: 'history', threadRef: THREAD, limit: 50, workspace: 'workspace:alpha' }, host)
+    expect(history).toHaveBeenCalledTimes(1)
+    // The same parameter that a read ignores is a real request field here, so the
+    // Host (which bounds it to 1..100) must still receive it.
+    expect(history.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD, limit: 50 })
   })
 })
 

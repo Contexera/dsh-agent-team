@@ -96,7 +96,8 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'history_only_arguments',
-    sentence: ({ action }: RecoveryContext) => `${action ?? 'read'} drains unread and cannot page — drop beforeSequence and limit, or call action: history to page older facts.`,
+    // Only `message` reaches this now: a read ignores a page size, because its batch is bounded by design and its footer already names what remains.
+    sentence: ({ action }: RecoveryContext) => `${action ?? 'message'} reads one Message back and cannot page — drop beforeSequence and limit, or call action: history to page older facts.`,
   },
   {
     kind: 'action_only_arguments',

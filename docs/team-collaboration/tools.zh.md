@@ -24,7 +24,7 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 `read` 原子返回一个按 chronology 排列的 unread batch，推进 durable watermark。读者没有 unread 时，read 什么都不推进，不追加 operation，也不携带 receipt。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面，重试展示的就是此刻的未读。`history` 返回有界的旧 public facts，不改变 read state。`message` 按 ref 逐字读回一条 Message，用来回答那些原文不在你手上这一页里的引用。
 
-`beforeSequence` 与 `limit` 是仅 `history` 可用的参数。`read` 只负责清空未读、不能翻页，因此其他 action 携带它们会被拒绝，并给出 `action: history` 的出路。
+`beforeSequence` 与 `limit` 为 `history` 翻页，Host 把 `limit` 约束在 1–100、缺省 20。`message` 拒绝它们。`read` 忽略它们：读的批次本就有界——Host 的读请求里没有这两个字段——而拒绝一次带着它们的读只是白费那次调用，因为把每个可选槽位都填满的模型会去要一个它并不需要的页大小。读想要的是下一页未读，页脚会说明还剩多少。
 
 三个 action 不共享一个最大化渲染：读展示 Thread，也只有读展示 Thread。这里没有任何 Attention action，因为 Attention 是另一个问题、另一套参数口袋——见 `team_attention`。
 

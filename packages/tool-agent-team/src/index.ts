@@ -409,14 +409,14 @@ function attentionResult(
 
 const teamThread = defineTool({
   name: 'team_thread',
-  description: `Read one Thread's facts, or a Project's Main stream (pass projectRef instead of threadRef — exactly one). read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit are history-only: read and message reject them — ${recoveryFor('history_only_arguments').sentence({ action: 'those actions' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here. On the Main stream, read answers with its newest entries (plus any entry carrying a mention of you) and acknowledges through them — an owner's unread and the mentions of every Member; a backlog longer than one page is read oldest first, one page per read, until none remains; history pages older entries; Thread cards in it name the Thread to read.`,
+  description: `Read one Thread's facts, or a Project's Main stream (pass projectRef instead of threadRef — exactly one). read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit page history and are ignored by read, whose batch is bounded by design and names how much remains — message rejects them — ${recoveryFor('history_only_arguments').sentence({ action: 'message' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here. On the Main stream, read answers with its newest entries (plus any entry carrying a mention of you) and acknowledges through them — an owner's unread and the mentions of every Member; a backlog longer than one page is read oldest first, one page per read, until none remains; history pages older entries; Thread cards in it name the Thread to read.`,
   parameters: {
     action: { type: 'string', required: true, enum: ['read', 'history', 'message'] },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     projectRef: { type: 'string', description: "Full branded Project ref: reads that Project's Main stream instead of a Thread. Give this or threadRef, never both." },
     taskRef: { type: 'string', description: "Optional Task ref alias for released clients. Prefer threadRef; if both are given they must identify the same Thread." },
     messageRef: { type: 'string', description: "For action `message`: the full branded Message ref to read back, exactly as rendered by this tool or by an inbox notice — including the `message:` prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
-    beforeSequence: { type: 'number', description: 'history only: the oldest fact sequence to page before (exclusive). read and message reject it.' }, limit: { type: 'number', description: 'history only: max older facts to return. read and message reject it.' }, workspace: workspaceParam,
+    beforeSequence: { type: 'number', description: 'history only: the oldest fact sequence to page before (exclusive). message rejects it; read ignores it, since a read batch is bounded by design.' }, limit: { type: 'number', description: 'history only: max older facts to return, 1–100, default 20. message rejects it; read ignores it, since a read batch is bounded by design.' }, workspace: workspaceParam,
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
@@ -556,7 +556,10 @@ const teamThread = defineTool({
         ...taskNumberOf(snapshot.task),
       })
     }
-    if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'read' }))
+        // `read` is the one action that returns a bounded batch by design — its Host request carries neither paging field, so a page size here cannot be honored. Refusing the whole call taught the model nothing: one real session retried the identical arguments twice. The batch it did get names what remains, which is the route to more.
+    if (args.action !== 'read' && (args.beforeSequence !== undefined || args.limit !== undefined)) {
+      throw new Error(recoveryFor('history_only_arguments').sentence({ action: args.action }))
+    }
     const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base })
     // Only a discussion needs the extra history projection for its derived cards.
     const cards = read.task === undefined
@@ -626,7 +629,7 @@ async function mainStreamOutcome(
     return { ...base, projectRef: history.projectRef, kind: 'history', entries: history.entries.map(mainEntryView), cursor: history.cursor,
       hasMore: history.hasMore, standing: standingView(history.standing) }
   }
-  if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'read' }))
+  if (args.action !== 'read' && (args.beforeSequence !== undefined || args.limit !== undefined)) throw new Error(recoveryFor('history_only_arguments').sentence({ action: args.action }))
   const read = await host.readMainStreamForAgent(agent, { requestId: readRequestId, workspaceId, projectRef })
   return { ...base, projectRef: read.projectRef, kind: 'read', entries: read.entries.map(mainEntryView), readThroughSequence: read.readThroughSequence,
     remainingUnreadCount: read.standing.unreadCount, standing: standingView(read.standing) }
