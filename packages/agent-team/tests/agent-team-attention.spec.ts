@@ -1991,7 +1991,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
 })
 
 /** One stored operations table over a seeded memory pool, opened the way a Host restart opens it. */
-async function openLegacy(records: Array<[string, unknown]>, version: number): Promise<KvTable<AgentTeamOperationId, AgentTeamOperation>> {
+async function openLegacy(records: Array<[string, unknown]>): Promise<KvTable<AgentTeamOperationId, AgentTeamOperation>> {
   const pool = new MemoryMediaPool()
   pool.versions.set('agent_team', agentTeamDomainSpec.version)
   pool.media.set('agent_team', { tables: new Map([['operations', new Map(records)]]), global: null })
@@ -2069,14 +2069,13 @@ describe('what established an Attention period', () => {
       baseRevision: reopenRead.thread.revision, action: 'reopen', actor: agentTeamHumanActor() })).value)
     expect(sourceOn(ledger, owner, task.thread.threadRef)).toBe('accountable')
     expect(() => ledgerAtBoot(test).validate()).not.toThrow()
-    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
   })
 
   it('reads a row written before the source existed as the cause that segment had', async () => {
     // A rules-version-1 ledger establishes Attention through the mention rule,
     // and its rows carry no source. They replay as written, and read back as the
     // rule that established them rather than as the Member's own choice.
-    const version1 = new AgentTeamLedger(await openLegacy(rulesV1Ledger.records as Array<[string, unknown]>, 1), { rulesVersion: 1 })
+    const version1 = new AgentTeamLedger(await openLegacy(rulesV1Ledger.records as Array<[string, unknown]>), { rulesVersion: 1 })
     await version1.initialize()
     version1.validateAtMount()
     // Every row in the segment came from the mention rule, and none of them

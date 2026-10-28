@@ -4,6 +4,7 @@ import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
 import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
 import type {
+  AgentTeamAttentionSource,
   AgentTeamClaimRef,
   AgentTeamInboxReminder,
   AgentTeamMemberId,
@@ -344,9 +345,8 @@ const teamInbox = defineTool({
   },
 })
 
-/** Attention (following a Thread) is a different question from reading one. `status`, `follow`, and `unfollow` take exactly the Thread address and routing Workspace; sharing a parameter pocket with read would put `messageRef`, `beforeSequence`, and `limit` in front of actions that never accept them. */
 /** What each Attention source means to the reader, in the words the result uses. */
-const CAUSE_OF_SOURCE: Record<string, string> = {
+const CAUSE_OF_SOURCE: Record<AgentTeamAttentionSource, string> = {
   'thread-author': 'because you started it',
   claim: 'because you claimed its Task',
   accountable: 'because you are accountable for its Task',
@@ -355,6 +355,18 @@ const CAUSE_OF_SOURCE: Record<string, string> = {
   self: 'because you chose to follow',
 }
 
+/**
+ * The phrase for one source, or an empty string when the value is absent or is
+ * not a source this build writes: a render never prints a raw enum value or the
+ * word `undefined`, and a source added later cannot silently render as nothing.
+ */
+function causeOf(source: string | undefined): string {
+  if (source === undefined) return ''
+  const phrase = CAUSE_OF_SOURCE[source as AgentTeamAttentionSource]
+  return phrase === undefined ? '' : `(${phrase})`
+}
+
+/** Attention (following a Thread) is a different question from reading one. `status`, `follow`, and `unfollow` take exactly the Thread address and routing Workspace; sharing a parameter pocket with read would put `messageRef`, `beforeSequence`, and `limit` in front of actions that never accept them. */
 const teamAttention = defineTool({
   name: 'team_attention',
   description: `Read or change your Attention — whether you are following one Thread or a Project's Main stream. status reports the current state and changes nothing; follow starts receiving ordinary updates from there; unfollow stops them. Attention is not reading: none of these actions render facts, acknowledge unread work, or hand off a write token, and reading never changes whether you follow it. Unfollowing leaves every mention, reply and responsibility event reaching you, and it does not release a Claim or drop a Task you are accountable for. Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task; projectRef addresses the Main stream instead — give exactly one of the three.`,
@@ -384,7 +396,7 @@ const teamAttention = defineTool({
       // it: a Member that never followed has no cause to name, and a row the
       // ledger cannot attribute is reported as the reader's own choice rather
       // than guessed at.
-      const cause = value.following === false || value.source === undefined ? '' : ` (${CAUSE_OF_SOURCE[value.source]})`
+      const cause = value.following === false ? '' : causeOf(value.source)
       if (value.kind === 'follow' || value.kind === 'unfollow') {
         return [{ type: 'text', text: `${source}\nAttention changed — ${value.following ? 'now following' : 'no longer following'} ${subject}${standing === '' ? '' : ` · ${standing}`}${cause}.\n${consequence}` }]
       }
@@ -434,7 +446,7 @@ const teamAttention = defineTool({
 })
 
 /** The one result shape a Main stream Attention action returns: address, scope, and the standing itself. */
-function mainAttentionResult(kind: 'status' | 'follow' | 'unfollow', workspaceId: string, projectRef: string, following: boolean, source?: string) {
+function mainAttentionResult(kind: 'status' | 'follow' | 'unfollow', workspaceId: string, projectRef: string, following: boolean, source?: AgentTeamAttentionSource) {
   return { workspaceId, projectRef, kind, scope: 'main', following, ...(source === undefined ? {} : { source }) }
 }
 
@@ -445,7 +457,7 @@ function attentionResult(
   snapshot: ReturnType<AgentTeam['threadHistoryForAgent']>,
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
   task: { taskNumber?: number; accountable?: string },
-): { workspaceId: string; projectRef: string; kind: string; threadRef: string; revision: number; following: boolean; source?: string; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string } {
+): { workspaceId: string; projectRef: string; kind: string; threadRef: string; revision: number; following: boolean; source?: AgentTeamAttentionSource; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string } {
   return {
     workspaceId, projectRef: snapshot.anchor.projectRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
@@ -850,7 +862,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
           ...(value.sourceThreadRefs === undefined || value.sourceThreadRefs.length === 0 ? [] : [`Derived from ${value.sourceThreadRefs.join(', ')} — its card renders there, not in the Main stream.`]),
           // A start follows its author, so the result states the Attention it
           // just acquired: ordinary updates from this Thread will now interrupt.
-          ...(value.action !== 'start' || value.source === undefined ? [] : [`You now follow this Thread (${CAUSE_OF_SOURCE[value.source]}). Ordinary updates from here will interrupt you; team_attention unfollow with threadRef stops them.`]),
+          ...(value.action !== 'start' || value.source === undefined ? [] : [`You now follow this Thread ${causeOf(value.source)}. Ordinary updates from here will interrupt you; team_attention unfollow with threadRef stops them.`]),
           ...(value.occurredAt === undefined ? [] : [`Committed at ${formatTeamTimestamp(value.occurredAt)}`]),
           ...(value.undeliveredMentions === undefined || value.undeliveredMentions.length === 0 ? [] : [
             `Mention not delivered — ${value.undeliveredMentions.join(', ')} never took part in this Thread, so nothing reached them. Only a Human can invite a Member: reach them with a dm, or ask the Human.`,
@@ -1057,6 +1069,9 @@ const teamTask = defineTool({
       } },
       claims: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { claimRef: { type: 'string', required: true }, direction: { type: 'string', required: true }, state: { type: 'string', required: true }, owner: { type: 'string', required: true } } } },
       facts: { type: 'array', items: FACT_SCHEMA }, staleTokenKind: { type: 'string', enum: ['unknown', 'unrecognized'] },
+      // Present when the action started the caller's own Attention, which is the
+      // one cause a result can state without asking the projection again.
+      source: { type: 'string' },
     } },
         // A committed mutation renders the authoritative affected Claim first; the full archive is never appended. list renders the collision surface and no write token (a current Thread read remains the mutation basis). Rejections share the outcome-first recovery form and carry the gating facts plus the current revision as the next write token.
     render: (_args, value) => {
@@ -1080,7 +1095,7 @@ const teamTask = defineTool({
       if (value.kind === 'committed' && value.claim !== undefined) {
         // A new Claim follows the Thread it executes, so the result says so: the
         // reader now holds Attention it did not ask for.
-        const follows = value.source === undefined ? [] : [`You now follow this Thread (${CAUSE_OF_SOURCE[value.source]}). Ordinary updates from here will interrupt you; team_attention unfollow with threadRef stops them and releases no Claim.`]
+        const follows = value.source === undefined ? [] : [`You now follow this Thread ${causeOf(value.source)}. Ordinary updates from here will interrupt you; team_attention unfollow with threadRef stops them and releases no Claim.`]
         return [{ type: 'text', text: [
           `Committed — Claim ${value.action === 'claim' ? 'created' : value.action === 'done' ? 'completed' : 'released'}.`,
           `${value.claim.claimRef} · ${value.claim.state} — ${value.claim.owner}: ${value.claim.direction}`,

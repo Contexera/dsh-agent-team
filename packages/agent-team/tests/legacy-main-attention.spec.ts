@@ -129,10 +129,11 @@ describe('pre-Main-stream-Attention records', () => {
     const team = await seed()
     await team.ledger.postMainMessage({ requestId: requestId('post'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef, body: 'an update' })
     await team.ledger.readMainStream({ requestId: requestId('read'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef })
-    // A forged watermark: not the era's shape, so the repair must not launder it.
+    // A forged watermark: not the era's shape, so the repair must not launder it. The row carries the
+    // source a repair would backfill, so the watermark is the only thing left to catch it.
     await rewrite(team, 'team/main-stream-read', delta => ({
       ...delta,
-      mainAttention: { set: [{ memberId: team.memberId, projectRef: team.projectRef, startSequence: 1, readThroughSequence: 999999 }], removed: [] },
+      mainAttention: { set: [{ memberId: team.memberId, projectRef: team.projectRef, startSequence: 1, readThroughSequence: 999999, source: 'self' }], removed: [] },
     } as AgentTeamInboxDelta))
     await expect(reopen(team)).rejects.toThrow()
   })
@@ -162,6 +163,78 @@ describe('pre-Main-stream-Attention records', () => {
     // The marker is consumed and the watermark was never there to advance.
     expect(standingOf(reopened, team.projectRef, reader)).toMatchObject({ following: true, unreadCount: 0, markers: [] })
     // The next ordinary post is ordinary unread, exactly as it was before.
+    await reopened.postMainMessage({ requestId: requestId('later'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'later' })
+    expect(standingOf(reopened, team.projectRef, reader).unreadCount).toBe(1)
+  })
+})
+
+describe('records written before Attention recorded its source', () => {
+  /** Strip the field from every stored Attention row, as the previous build wrote it. */
+  async function stripSources(team: Seeded): Promise<Table> {
+    const stripped: Array<[string, unknown]> = []
+    for await (const [id, operation] of await team.table.entries()) {
+      const typed = operation as AgentTeamOperation
+      if (!('inbox' in typed.data)) { stripped.push([id, operation]); continue }
+      const inbox = typed.data.inbox
+      stripped.push([id, { ...typed, data: { ...typed.data, inbox: {
+        ...inbox,
+        attention: { ...inbox.attention, set: inbox.attention.set.map(({ source: _dropped, ...row }) => row) },
+        ...(inbox.mainAttention === undefined ? {} : { mainAttention: { ...inbox.mainAttention,
+          set: inbox.mainAttention.set.map(({ source: _dropped, ...row }) => row) } }),
+      } } }])
+    }
+    const table = await openTable()
+    for (const [id, operation] of stripped) await table.put(id as AgentTeamOperationId, operation as AgentTeamOperation)
+    return table
+  }
+
+  it('reopens a ledger whose owner grant, Claim, and reopen carry no source', async () => {
+    const team = await seed()
+    const readerId = `member:reader` as AgentTeamMemberId
+    await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+    const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
+    // The three shapes whose validators re-derive a row with a cause: the grant,
+    // a Claim, and the accountable a reopen re-establishes.
+    await team.ledger.addProjectOwner({ requestId: requestId('own'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: readerId })
+    const task = await team.ledger.startThread({ requestId: requestId('task'), actor: human, workspaceId: alpha, projectRef: team.projectRef, kind: 'task', body: 'a task' })
+    if (task.value.kind !== 'committed' || task.value.task === undefined) throw new Error('task start did not commit')
+    await team.ledger.changeClaim({ requestId: requestId('claim'), actor: reader, workspaceId: alpha,
+      taskRef: task.value.task.taskRef, baseRevision: task.value.thread.revision, action: 'claim', direction: 'do it' })
+    await team.ledger.changeTask({ requestId: requestId('close'), actor: human, workspaceId: alpha,
+      taskRef: task.value.task.taskRef, baseRevision: task.value.thread.revision, action: 'close' })
+    const reopened = new AgentTeamLedger(await stripSources(team), { rulesVersion: 2 })
+    // Every cause is derived from its own operation, so the ledger opens.
+    await reopened.initialize()
+    reopened.validateAtMount()
+    expect(standingOf(reopened, team.projectRef, reader).following).toBe(true)
+  })
+
+  it('keeps the read progress an owner grant used to overwrite, when neither row carries a source', async () => {
+    const team = await seed()
+    const readerId = `member:reader` as AgentTeamMemberId
+    await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+    const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
+    await team.ledger.postMainMessage({ requestId: requestId('one'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'one' })
+    await team.ledger.changeAttention({ requestId: requestId('follow'), actor: reader, workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    await team.ledger.readMainStream({ requestId: requestId('read'), actor: reader, workspaceId: alpha, projectRef: team.projectRef })
+    // The grant from a build that overwrote the row unconditionally.
+    await team.ledger.addProjectOwner({ requestId: requestId('own'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: readerId })
+    const reopened = new AgentTeamLedger(await stripSources(team), { rulesVersion: 2 })
+    await reopened.initialize()
+    reopened.validateAtMount()
+    // The overwriting row is recognised without its source and dropped, so the
+    // reader's own watermark stands rather than the grant's: only the grant's
+    // own owner-added marker is left, not the update the reader had already read.
+    const standing = standingOf(reopened, team.projectRef, reader)
+    expect(standing).toMatchObject({ following: true, unreadCount: 1, directCount: 1 })
+    await reopened.readMainStream({ requestId: requestId('read-2'), actor: reader, workspaceId: alpha, projectRef: team.projectRef })
+    expect(standingOf(reopened, team.projectRef, reader).unreadCount).toBe(0)
+    // A later ordinary update is still ordinary unread, so the watermark the
+    // repair restored is the reader's own and not the grant's.
     await reopened.postMainMessage({ requestId: requestId('later'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'later' })
     expect(standingOf(reopened, team.projectRef, reader).unreadCount).toBe(1)
   })

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { renderText, teamTools, occurrences } from './render-text.ts'
 
 const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
@@ -884,5 +885,43 @@ describe('an Attention result names what established it', () => {
       kind: 'committed', action: 'reply', threadRef: THREAD, messageRef: 'message:2', revision: 13,
     })
     expect(reply).not.toContain('You now follow')
+  })
+})
+
+describe('every declared output shape accepts what its tool returns', () => {
+  /**
+   * The render harness renders directly, so it never sees the schema the Host
+   * validates a result against. A property the tool returns but the schema does
+   * not declare fails at runtime with `additionalProperties: false` — which is
+   * how the Claim's `source` reached the model as an error rather than a result.
+   */
+  const validate = (tool: Parameters<typeof renderText>[0], value: unknown): void => {
+    // The Host throws on any violation, so the assertion is on the returned list.
+    expect(validateJsonSchemaValue(tool.output.schema as never, value as never)).toEqual([])
+  }
+
+  it('accepts the Claim result that carries the Attention it started', () => {
+    const tool = teamTools().get('team_task')!
+    validate(tool, {
+      kind: 'committed', action: 'claim', taskRef: TASK, threadRef: THREAD, revision: 12,
+      status: 'in_progress', claim: { claimRef: CLAIM, state: 'active', owner: 'Tars', direction: 'Implement' },
+      claims: [], source: 'claim',
+    })
+  })
+
+  it('accepts every Attention result shape, with and without a cause', () => {
+    const tool = teamTools().get('team_attention')!
+    for (const source of ['thread-author', 'claim', 'accountable', 'project-owner', 'mention', 'self']) {
+      validate(tool, { workspaceId: 'workspace:alpha', projectRef: PROJECT, threadRef: THREAD,
+        kind: 'follow', scope: 'thread', following: true, source, revision: 12 })
+    }
+    validate(tool, { workspaceId: 'workspace:alpha', projectRef: PROJECT, kind: 'status', scope: 'main', following: false })
+    validate(tool, { workspaceId: 'workspace:alpha', projectRef: PROJECT, kind: 'status', scope: 'main', following: true, source: 'project-owner' })
+  })
+
+  it('accepts a Thread start that names its own Attention, and a reply that names none', () => {
+    const tool = teamTools().get('team_message')!
+    validate(tool, { kind: 'committed', action: 'start', threadRef: THREAD, messageRef: 'message:1', revision: 12, source: 'thread-author' })
+    validate(tool, { kind: 'committed', action: 'reply', threadRef: THREAD, messageRef: 'message:2', revision: 13 })
   })
 })
