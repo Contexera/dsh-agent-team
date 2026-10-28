@@ -836,3 +836,53 @@ describe('the Main stream through team_thread and team_message', () => {
     expect(blocked).toContain(`team_thread read and projectRef ${PROJECT}`)
   })
 })
+
+describe('an Attention result names what established it', () => {
+  it('states the cause once the reader follows, and no cause once it does not', () => {
+    const tool = teamTools().get('team_attention')!
+    // A status on a stream the reader follows names the cause of its Attention.
+    const following = renderText(tool, {}, {
+      workspaceId: 'workspace:alpha', projectRef: PROJECT, kind: 'status', scope: 'main', following: true, source: 'project-owner',
+    })
+    expect(following).toContain('following the Main stream')
+    expect(following).toContain('because you own the Project')
+    // A status on a stream the reader does not follow has no cause to name.
+    const unfollowed = renderText(tool, {}, {
+      workspaceId: 'workspace:alpha', projectRef: PROJECT, kind: 'status', scope: 'main', following: false,
+    })
+    expect(unfollowed).toContain('not following the Main stream')
+    expect(unfollowed).not.toContain('because')
+    // Every cause has words, so no source ever renders as a raw enum value.
+    for (const source of ['thread-author', 'claim', 'accountable', 'project-owner', 'mention', 'self']) {
+      const text = renderText(tool, {}, {
+        workspaceId: 'workspace:alpha', projectRef: PROJECT, threadRef: THREAD, kind: 'status', scope: 'thread',
+        following: true, source, revision: 12,
+      })
+      expect(text).toContain(`Thread ${THREAD}`)
+      expect(text).toMatch(/\(because [a-z]/)
+      expect(text).not.toContain(`(${source})`)
+    }
+  })
+
+  it('tells a new Claim owner that it now follows the Thread', () => {
+    const text = renderText(teamTools().get('team_task')!, {}, {
+      kind: 'committed', action: 'claim', taskRef: TASK, threadRef: THREAD, revision: 12,
+      status: 'in_progress', claim: { claimRef: CLAIM, state: 'active', owner: 'Tars', direction: 'Implement' },
+      claims: [], source: 'claim',
+    })
+    expect(text).toContain('You now follow this Thread (because you claimed its Task)')
+    expect(text).toContain('team_attention unfollow with threadRef stops them and releases no Claim')
+  })
+
+  it('tells a Thread author that starting it follows it', () => {
+    const text = renderText(teamTools().get('team_message')!, {}, {
+      kind: 'committed', action: 'start', threadRef: THREAD, messageRef: 'message:1', revision: 12, source: 'thread-author',
+    })
+    expect(text).toContain('You now follow this Thread (because you started it)')
+    // A reply never starts Attention, so it carries no cause.
+    const reply = renderText(teamTools().get('team_message')!, {}, {
+      kind: 'committed', action: 'reply', threadRef: THREAD, messageRef: 'message:2', revision: 13,
+    })
+    expect(reply).not.toContain('You now follow')
+  })
+})

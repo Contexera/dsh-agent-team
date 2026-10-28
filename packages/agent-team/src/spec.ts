@@ -164,11 +164,16 @@ const threadSchema = z.object({
   revision: z.number().int().positive(),
 }).strict().transform(omitUndefined)
 
+const attentionSourceSchema = z.enum(['thread-author', 'claim', 'accountable', 'project-owner', 'mention', 'self'])
+
 const attentionSchema = z.object({
   memberId: memberIdSchema,
   threadRef: threadRefSchema,
   startSequence: z.number().int().positive(),
   readThroughSequence: z.number().int().nonnegative(),
+  // Absent on every row written before Attention recorded its source, so those
+  // ledgers keep their stored bytes; the ledger supplies the source on load.
+  source: attentionSourceSchema.optional(),
 }).strict()
 
 const attentionKeySchema = z.object({
@@ -231,6 +236,7 @@ const mainAttentionSchema = z.object({
   projectRef: projectRefSchema,
   startSequence: z.number().int().positive(),
   readThroughSequence: z.number().int().nonnegative(),
+  source: attentionSourceSchema.optional(),
 }).strict()
 
 const mainAttentionKeySchema = z.object({

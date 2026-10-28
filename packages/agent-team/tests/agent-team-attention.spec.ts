@@ -3,13 +3,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 // stretched one cold replay to 2.7s against vitest's 5s default (worst of 11 CI
 // runs, 2026-09-17..21). The SQLite case below keeps its own 30s argument.
 vi.setConfig({ testTimeout: 30_000 })
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Context } from '@deepseek-ai/cordis'
+import Storage from '@deepseek-ai/dsh-storage'
+import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import AgentTeam from '../src/index.ts'
+import { agentTeamDomainSpec } from '../src/spec.ts'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MemoryMediaPool } from './helpers/memory-backend.ts'
+import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { fabricateLegacyThreadReadSnapshot } from './helpers/legacy-thread-read.ts'
 import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
@@ -1983,5 +1987,102 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     ]))
     expect(ledger.affectedMembersOf(ledgerAtBoot(test).getOperation(promoted.receipt.operationId)!)).toEqual(expect.arrayContaining([actor.memberId]))
     expect(() => ledgerAtBoot(test).validate()).not.toThrow()
+  })
+})
+
+/** One stored operations table over a seeded memory pool, opened the way a Host restart opens it. */
+async function openLegacy(records: Array<[string, unknown]>, version: number): Promise<KvTable<AgentTeamOperationId, AgentTeamOperation>> {
+  const pool = new MemoryMediaPool()
+  pool.versions.set('agent_team', agentTeamDomainSpec.version)
+  pool.media.set('agent_team', { tables: new Map([['operations', new Map(records)]]), global: null })
+  const ctx = new Context()
+  await ctx.plugin(Storage)
+  ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
+  const facility = new DomainFacility(ctx, { backend: 'memory', routes: {} })
+  ctx.storage.mount('domain', facility)
+  ctx.provide('storageDomain', facility)
+  cleanups.push(async () => { await facility.closeAll() })
+  return await (await ctx.storageDomain.open(agentTeamDomainSpec)).table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>
+}
+
+describe('what established an Attention period', () => {
+  /** The source the ledger now holds for one Member's row on one Thread. */
+  const sourceOn = (ledger: AgentTeamLedger, actor: AgentTeamMemberActor, threadRef: AgentTeamThreadRef) =>
+    ledger.attentionStatus(actor, { workspaceId: alpha, threadRef }).attention?.source
+
+  it('names the Thread author, the Claim owner, and the Member own choice', async () => {
+    const test = await harness()
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('source-project'), workspaceId: alpha, name: 'engineering', description: '' })
+    const ledger = ledgerAtBoot(test)
+    const { actor: author, member: authorMember } = await addLedgerMember(ledger, project.project.projectRef, 'member:author', 'Writes', 'author')
+    const { actor: claimer } = await addLedgerMember(ledger, project.project.projectRef, 'member:claimer', 'Claims', 'claimer')
+    const { actor: chooser } = await addLedgerMember(ledger, project.project.projectRef, 'member:chooser', 'Chooses', 'chooser')
+    await makeOwner(ledger, project.project.projectRef, authorMember.memberId)
+
+    // Starting a Thread follows its author.
+    const discussion = committed((await ledger.startThread({ requestId: requestId('source-discussion'), actor: author, workspaceId: alpha,
+      projectRef: project.project.projectRef, kind: 'discussion', body: 'A question' })).value)
+    expect(sourceOn(ledger, author, discussion.thread.threadRef)).toBe('thread-author')
+
+    // Claiming a Task follows the executor.
+    const task = withTask(committed((await ledger.startThread({ requestId: requestId('source-task'), actor: author, workspaceId: alpha,
+      projectRef: project.project.projectRef, kind: 'task', body: 'Investigate' })).value))
+    committed((await ledger.changeClaim({ requestId: requestId('source-claim'), workspaceId: alpha, taskRef: task.task.taskRef,
+      baseRevision: task.thread.revision, action: 'claim', direction: 'Implement', actor: claimer })).value)
+    expect(sourceOn(ledger, claimer, task.thread.threadRef)).toBe('claim')
+
+    // An explicit follow is the Member's own choice, which is the one source
+    // that claims no cause: nothing established it but the request itself.
+    const followed = (await ledger.changeAttention({ requestId: requestId('source-follow'), workspaceId: alpha,
+      threadRef: discussion.thread.threadRef, action: 'follow', actor: chooser })).value
+    expect(followed.attention?.source).toBe('self')
+    expect(sourceOn(ledger, chooser, discussion.thread.threadRef)).toBe('self')
+    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
+  })
+
+  it('names the accountable a transfer and a reopen establish', async () => {
+    const test = await harness()
+    const project = await test.ctx.agentTeam.createProject({ requestId: requestId('transfer-project'), workspaceId: alpha, name: 'engineering', description: '' })
+    const ledger = ledgerAtBoot(test)
+    const { actor: owner } = await addLedgerMember(ledger, project.project.projectRef, 'member:owner', 'Owns', 'owner')
+    const { actor: target } = await addLedgerMember(ledger, project.project.projectRef, 'member:target', 'Receives', 'target')
+    await makeOwner(ledger, project.project.projectRef, owner.memberId)
+    // The Human starts the Task, so it is accountable to the Human and the
+    // transfer moves accountability onto the Agent owner.
+    const task = withTask(committed((await ledger.startThread({ requestId: requestId('transfer-task'), actor: agentTeamHumanActor(), workspaceId: alpha,
+      projectRef: project.project.projectRef, kind: 'task', body: 'Investigate' })).value))
+    const transferred = committed((await ledger.transferTask({ requestId: requestId('transfer-do'), workspaceId: alpha, taskRef: task.task.taskRef,
+      baseRevision: task.thread.revision, target: owner.memberId, actor: agentTeamHumanActor() })).value)
+    expect(transferred.task.accountable).toBe(owner.memberId)
+    // A transfer follows its new accountable, and a reopen re-establishes that
+    // same Attention rather than inventing a sixth kind of cause.
+    expect(sourceOn(ledger, owner, task.thread.threadRef)).toBe('accountable')
+    // Close it first, so the reopen is legal: it re-establishes the
+    // accountable's Attention without inventing a sixth kind of cause.
+    const closeRead = (await ledger.readThread({ requestId: requestId('transfer-read'), workspaceId: alpha, taskRef: task.task.taskRef,
+      actor: agentTeamHumanActor() })).value
+    committed((await ledger.changeTask({ requestId: requestId('transfer-close'), workspaceId: alpha, taskRef: task.task.taskRef,
+      baseRevision: closeRead.thread.revision, action: 'close', actor: agentTeamHumanActor() })).value)
+    const reopenRead = (await ledger.readThread({ requestId: requestId('transfer-read-2'), workspaceId: alpha, taskRef: task.task.taskRef,
+      actor: agentTeamHumanActor() })).value
+    committed((await ledger.changeTask({ requestId: requestId('transfer-reopen'), workspaceId: alpha, taskRef: task.task.taskRef,
+      baseRevision: reopenRead.thread.revision, action: 'reopen', actor: agentTeamHumanActor() })).value)
+    expect(sourceOn(ledger, owner, task.thread.threadRef)).toBe('accountable')
+    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
+    expect(() => ledgerAtBoot(test).validate()).not.toThrow()
+  })
+
+  it('reads a row written before the source existed as the cause that segment had', async () => {
+    // A rules-version-1 ledger establishes Attention through the mention rule,
+    // and its rows carry no source. They replay as written, and read back as the
+    // rule that established them rather than as the Member's own choice.
+    const version1 = new AgentTeamLedger(await openLegacy(rulesV1Ledger.records as Array<[string, unknown]>, 1), { rulesVersion: 1 })
+    await version1.initialize()
+    version1.validateAtMount()
+    // Every row in the segment came from the mention rule, and none of them
+    // claims a cause the stored bytes never had.
+    const sources = [...version1['state'].attention.values()].map(attention => attention.source)
+    expect(sources.length).toBeGreaterThan(0)
+    expect([...new Set(sources)]).toEqual(['mention'])
   })
 })

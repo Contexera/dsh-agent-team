@@ -885,7 +885,7 @@ export class AgentTeamLedger {
       // is its own choice and its read progress, not the grant's to reset.
       const grantedMainAttention = kind === 'team/project-owner-added'
         && this.mainAttentionForFrom(this.state, request.memberId, request.projectRef) === undefined
-        ? [this.startMainAttention(request.memberId, request.projectRef, sequence)] : []
+        ? [this.startMainAttention(request.memberId, request.projectRef, sequence, 'project-owner')] : []
       const inbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention)
       const data = Object.freeze({ ...base, activity, inbox,
         ...(kind === 'team/project-owner-removed' ? { transfers: returned.transfers, tasks: returned.tasks, threads: returned.threads } : {}) })
@@ -1226,7 +1226,7 @@ export class AgentTeamLedger {
         topLevel: false, sequence, occurredAt: base.occurredAt,
       })
       const nextThread: AgentTeamThread = Object.freeze({ ...thread, revision: sequence })
-      const started = unfollowedAgents.map(memberId => this.startAttention(memberId, thread.threadRef, sequence))
+      const started = unfollowedAgents.map(memberId => this.startAttention(memberId, thread.threadRef, sequence, 'mention'))
       const inbox = this.messageInboxDelta(message, request.actor.memberId, delivered, started)
       const operation: AgentTeamThreadRepliedOperation = Object.freeze({
         ...base, kind: 'team/thread-replied',
@@ -1359,7 +1359,7 @@ export class AgentTeamLedger {
         topLevel: true, sequence, occurredAt: base.occurredAt,
       })
       const inbox = taskActivity === undefined
-        ? this.messageInboxDelta(anchor, actor.memberId, recipients, [this.startAttention(actor.memberId, threadRef, sequence)])
+        ? this.messageInboxDelta(anchor, actor.memberId, recipients, [this.startAttention(actor.memberId, threadRef, sequence, 'thread-author')])
         : this.inboxDeltaForTaskResponsibility(this.state, task!, taskActivity, anchor, recipients)
       const operation: AgentTeamThreadStartedOperation = Object.freeze({
         ...base, kind: 'team/thread-started',
@@ -1498,7 +1498,7 @@ export class AgentTeamLedger {
         threadRef: task.threadRef, actor: actor.memberId, claimRef: claim.claimRef, sequence,
       })
       const ownAttention = request.action === 'claim' && actor.kind === 'member' && !this.isFollowing(thread.threadRef, actor.memberId)
-        ? [this.startAttention(actor.memberId, thread.threadRef, sequence)] : []
+        ? [this.startAttention(actor.memberId, thread.threadRef, sequence, 'claim')] : []
       const inbox = this.inboxDelta(ownAttention, [], [], [], this.responsibilityActivityRecipientsFrom(this.state, nextTask, actor.memberId)
         .map(memberId => Object.freeze({ memberId, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence })))
       const operation: AgentTeamClaimChangedOperation = Object.freeze({
@@ -1537,7 +1537,7 @@ export class AgentTeamLedger {
       const activity: AgentTeamTaskActivity = Object.freeze({ activityRef: this.ref('activity'), kind: 'transfer', taskRef: task.taskRef,
         threadRef: thread.threadRef, actor: actor.memberId, from: task.accountable, to: target, sequence })
       const attention = target === actor.memberId || this.isFollowing(thread.threadRef, target) ? []
-        : [this.followAttention(target, thread.threadRef)]
+        : [this.followAttention(target, thread.threadRef, 'accountable')]
       const inbox = this.inboxDelta(attention, [], [], [], [{ memberId: target, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence }])
       const operation: AgentTeamTaskAccountableChangedOperation = Object.freeze({ ...this.operationBase(request, sequence), kind: 'team/task-accountable-changed',
         data: Object.freeze({ workspaceId: request.workspaceId, baseRevision: request.baseRevision, activity, task: nextTask, thread: nextThread, inbox }) })
@@ -1728,7 +1728,7 @@ export class AgentTeamLedger {
       if (request.action === 'follow') {
         if (task?.resolution === 'closed') throw new Error(`Task '${task.taskRef}' is closed; reopen it before following`)
         if (current !== undefined) throw new Error(`Member is already following Thread '${thread.threadRef}'`)
-        const attention = this.followAttention(actor.memberId, thread.threadRef)
+        const attention = this.followAttention(actor.memberId, thread.threadRef, 'self')
         const operation: AgentTeamThreadAttentionChangedOperation = Object.freeze({
           ...this.operationBase(request, this.nextSequence()), kind: 'team/thread-attention-changed',
           data: Object.freeze({ workspaceId: request.workspaceId, action: 'follow', memberId: actor.memberId,
@@ -1769,7 +1769,7 @@ export class AgentTeamLedger {
     const current = this.mainAttentionForFrom(this.state, actor.memberId, projectRef)
     if (request.action === 'follow') {
       if (current !== undefined) throw new Error(`Member is already following the Main stream of Project '${projectRef}'`)
-      const attention = this.startMainAttention(actor.memberId, projectRef, (this.mainSourcesFrom(this.state, projectRef).at(-1)?.sequence ?? 0) + 1)
+      const attention = this.startMainAttention(actor.memberId, projectRef, (this.mainSourcesFrom(this.state, projectRef).at(-1)?.sequence ?? 0) + 1, 'self')
       const operation: AgentTeamMainAttentionChangedOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/main-attention-changed',
         data: Object.freeze({ workspaceId: request.workspaceId, action: 'follow', memberId: actor.memberId, project: project,
@@ -2940,7 +2940,7 @@ export class AgentTeamLedger {
       const alreadyFollowing = operation.kind === 'team/project-owner-added'
         && this.mainAttentionForFrom(projection, operation.data.memberId, operation.data.projectRef) !== undefined
       const grantedMainAttention = operation.kind === 'team/project-owner-added' && !alreadyFollowing
-        ? [this.startMainAttention(operation.data.memberId, operation.data.projectRef, operation.sequence)] : []
+        ? [this.startMainAttention(operation.data.memberId, operation.data.projectRef, operation.sequence, 'project-owner')] : []
       const expectedInbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention)
       const transfers = operation.kind === 'team/project-owner-removed' ? operation.data.transfers : []
       if (!this.sameInboxDelta(operation.data.inbox, expectedInbox, transfers)) throw new Error('invalid Project owner inbox projection')
@@ -3091,9 +3091,9 @@ export class AgentTeamLedger {
         throw new Error('invalid Attention transition')
       }
       const expected = operation.data.action === 'follow'
-        ? this.inboxDelta([this.followAttentionFrom(projection, operation.data.memberId, thread.threadRef)])
+        ? this.inboxDelta([this.followAttentionFrom(projection, operation.data.memberId, thread.threadRef, 'self')])
         : this.inboxDelta([], [{ memberId: operation.data.memberId, threadRef: thread.threadRef }], [], this.frozenMarkerSnapshot(projection, operation.data.memberId, thread.threadRef))
-      if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Attention projection')
+      if (!isDeepStrictEqual(this.sourcelessDelta(operation.data.inbox), this.sourcelessDelta(expected))) throw new Error('invalid Attention projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs)
       return
     }
@@ -3117,9 +3117,9 @@ export class AgentTeamLedger {
         && (operation.data.inbox.mainAttention?.removed.length ?? 0) > 0) throw new Error('invalid Main stream Attention projection')
       const stored = projection.mainAttention.get(mainAttentionKey(operation.data.memberId, project.projectRef))
       const expected = operation.data.action === 'follow'
-        ? this.inboxDelta([], [], [], [], [], [], [], [], [], [], [this.startMainAttention(operation.data.memberId, project.projectRef, (this.mainSourcesFrom(projection, project.projectRef).at(-1)?.sequence ?? 0) + 1)], [])
+        ? this.inboxDelta([], [], [], [], [], [], [], [], [], [], [this.startMainAttention(operation.data.memberId, project.projectRef, (this.mainSourcesFrom(projection, project.projectRef).at(-1)?.sequence ?? 0) + 1, 'self')], [])
         : this.inboxDelta([], [], [], [], [], [], [], [], [], [], [], stored === undefined ? [] : [{ memberId: operation.data.memberId, projectRef: project.projectRef }])
-      if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Main stream Attention projection')
+      if (!isDeepStrictEqual(this.sourcelessDelta(operation.data.inbox), this.sourcelessDelta(expected))) throw new Error('invalid Main stream Attention projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs)
       return
     }
@@ -3201,9 +3201,9 @@ export class AgentTeamLedger {
       if (taskActivity !== undefined && (task === undefined || taskActivity.kind !== 'promote' || taskActivity.taskRef !== task.taskRef
         || taskActivity.threadRef !== thread.threadRef || taskActivity.sequence !== operation.sequence || taskActivity.actor !== actorMemberId())) throw new Error('invalid Task creation activity')
       const expected = taskActivity === undefined
-        ? this.messageInboxDelta(anchor, anchor.sender, mentions, [this.startAttention(anchor.sender, thread.threadRef, operation.sequence)])
+        ? this.messageInboxDelta(anchor, anchor.sender, mentions, [this.startAttention(anchor.sender, thread.threadRef, operation.sequence, 'thread-author')])
         : this.inboxDeltaForTaskResponsibility(projection, task!, taskActivity, anchor, mentions)
-      if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Thread start inbox projection')
+      if (!isDeepStrictEqual(this.sourcelessDelta(operation.data.inbox), this.sourcelessDelta(expected))) throw new Error('invalid Thread start inbox projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs, [thread.threadRef], [anchor], taskActivity === undefined ? [] : [taskActivity])
       return
     }
@@ -3294,7 +3294,7 @@ export class AgentTeamLedger {
       this.addRef(refs, activity.activityRef)
       if (creates) this.addRef(refs, claim.claimRef)
       const expectedInbox = creates && !this.isFollowingFrom(projection, thread.threadRef, actorMemberId())
-        ? this.inboxDelta([this.startAttention(actorMemberId(), thread.threadRef, operation.sequence)])
+        ? this.inboxDelta([this.startAttention(actorMemberId(), thread.threadRef, operation.sequence, 'claim')])
         : this.inboxDelta()
       const projectedTask = { ...task, status: this.deriveResolvedTaskStatus(task, new Map(projection.claims).set(claim.claimRef, claim).values()) }
       const withResponsibility = projection.rulesVersion >= 2
@@ -3327,9 +3327,9 @@ export class AgentTeamLedger {
       }
       this.addRef(refs, activity.activityRef)
       const attention = task.accountable === actorMemberId() || this.isFollowingFrom(projection, thread.threadRef, task.accountable) ? []
-        : [this.followAttentionFrom(projection, task.accountable, thread.threadRef)]
+        : [this.followAttentionFrom(projection, task.accountable, thread.threadRef, 'accountable')]
       const expected = this.inboxDelta(attention, [], [], [], [{ memberId: task.accountable, threadRef: thread.threadRef, activityRef: activity.activityRef, sequence: operation.sequence }])
-      if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Task transfer inbox')
+      if (!isDeepStrictEqual(this.sourcelessDelta(operation.data.inbox), this.sourcelessDelta(expected))) throw new Error('invalid Task transfer inbox')
       this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [activity])
       return
     }
@@ -3665,6 +3665,25 @@ export class AgentTeamLedger {
    * refs of its transfer Activities, so replay compares business fields and
    * matches each such marker's ref against the transfer recorded beside it.
    */
+  /**
+   * A delta with the Attention source dropped from every row. The source is the
+   * one field of a row that is not validated content: a row written before the
+   * field existed carries none, and every later row carries the cause its own
+   * write knew. Comparing it would make an old record fail against the row the
+   * projection re-derives, so both sides are compared without it.
+   */
+  private sourcelessDelta(delta: AgentTeamInboxDelta): AgentTeamInboxDelta {
+    const strip = <T extends AgentTeamThreadAttention | AgentTeamMainAttention>(row: T): T => {
+      const { source: _dropped, ...rest } = row as T & { readonly source?: unknown }
+      return rest as T
+    }
+    return {
+      ...delta,
+      attention: { ...delta.attention, set: delta.attention.set.map(strip) },
+      ...(delta.mainAttention === undefined ? {} : { mainAttention: { ...delta.mainAttention, set: delta.mainAttention.set.map(strip) } }),
+    }
+  }
+
   private sameInboxDelta(actual: AgentTeamInboxDelta, expected: AgentTeamInboxDelta, transfers: readonly AgentTeamActivity[]): boolean {
     const byKey = new Map(transfers.map(activity => [`${activity.threadRef}:${activity.sequence}`, activity]))
     const normalize = (delta: AgentTeamInboxDelta): AgentTeamInboxDelta => ({
@@ -3729,14 +3748,14 @@ export class AgentTeamLedger {
     }
     const started = v2 ? []
       : operation.kind === 'team/message-sent'
-        ? [this.startAttention(message.sender, message.threadRef, message.sequence),
-          ...mentionedAgents.map(memberId => this.startAttention(memberId, message.threadRef, message.sequence))]
+        ? [this.startAttention(message.sender, message.threadRef, message.sequence, 'mention'),
+          ...mentionedAgents.map(memberId => this.startAttention(memberId, message.threadRef, message.sequence, 'mention'))]
         : mentionedAgents.filter(memberId => !this.isFollowingFrom(projection, message.threadRef, memberId))
-          .map(memberId => this.startAttention(memberId, message.threadRef, message.sequence))
+          .map(memberId => this.startAttention(memberId, message.threadRef, message.sequence, 'mention'))
     const markers = mentions.map(memberId => Object.freeze({ memberId, threadRef: message.threadRef,
       messageRef: message.messageRef, sequence: message.sequence }))
     const expected = this.inboxDelta(started, [], markers)
-    if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Message inbox projection')
+    if (!isDeepStrictEqual(this.sourcelessDelta(operation.data.inbox), this.sourcelessDelta(expected))) throw new Error('invalid Message inbox projection')
   }
 
   private validateMentions(
@@ -4144,7 +4163,28 @@ export class AgentTeamLedger {
     target.observationsByThread.set(threadRef, observations)
   }
 
-  private applyInboxDelta(target: Projection, delta: AgentTeamInboxDelta): void {
+  /**
+   * The Attention row this ledger would write for `stored`: the row itself when
+   * it carries a source, and the same row with the default source when it does
+   * not. Rows written before Attention recorded its source hold none, so every
+   * re-derivation compares against this rather than against a row that claims a
+   * cause the stored bytes never had.
+   */
+  private withSource<T extends AgentTeamThreadAttention | AgentTeamMainAttention>(row: T): T {
+    return row.source === undefined ? { ...row, source: 'self' as const } : row
+  }
+
+  private applyInboxDelta(target: Projection, incoming: AgentTeamInboxDelta): void {
+    // Every Attention row written before the source field existed carries none.
+    // It is defaulted here, in the one place every path applies a delta, rather
+    // than in each writer: a row whose cause the ledger cannot know is the
+    // Member's own choice, which is the only source that claims nothing.
+    const delta = incoming.attention.set.length === 0 && (incoming.mainAttention?.set.length ?? 0) === 0 ? incoming : {
+      ...incoming,
+      attention: { ...incoming.attention, set: incoming.attention.set.map(attention => this.withSource(attention)) },
+      ...(incoming.mainAttention === undefined ? {} : { mainAttention: { ...incoming.mainAttention,
+        set: incoming.mainAttention.set.map(attention => this.withSource(attention)) } }),
+    }
     for (const key of delta.attention.removed) {
       target.attention.delete(this.attentionKey(key.memberId, key.threadRef))
       const followers = target.attentionByThread.get(key.threadRef)
@@ -4581,7 +4621,7 @@ export class AgentTeamLedger {
     const markers = [...recipients].map(memberId => Object.freeze({ memberId, threadRef,
       activityRef: activity.activityRef, sequence: activity.sequence }))
     const attention = activity.refollowedMembers === undefined ? []
-      : activity.refollowedMembers.map(memberId => this.followAttentionFrom(projection, memberId, threadRef))
+      : activity.refollowedMembers.map(memberId => this.followAttentionFrom(projection, memberId, threadRef, 'accountable'))
     return this.inboxDelta(attention, [], [], [], markers)
   }
 
@@ -4661,17 +4701,19 @@ export class AgentTeamLedger {
     })
   }
 
-  private startAttention(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef, startSequence: number): AgentTeamThreadAttention {
-    return Object.freeze({ memberId, threadRef, startSequence, readThroughSequence: Math.max(0, startSequence - 1) })
+  /** A Thread Attention period starting at `startSequence`, established by `source`. */
+  private startAttention(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef, startSequence: number, source: AgentTeamAttentionSource): AgentTeamThreadAttention {
+    return Object.freeze({ memberId, threadRef, startSequence, readThroughSequence: Math.max(0, startSequence - 1), source })
   }
 
-  private followAttention(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): AgentTeamThreadAttention {
-    return this.followAttentionFrom(this.state, memberId, threadRef)
+  /** A Thread Attention period starting after everything the Thread holds now, so it inherits no backlog. */
+  private followAttention(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef, source: AgentTeamAttentionSource): AgentTeamThreadAttention {
+    return this.followAttentionFrom(this.state, memberId, threadRef, source)
   }
 
-  private followAttentionFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): AgentTeamThreadAttention {
+  private followAttentionFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef, source: AgentTeamAttentionSource): AgentTeamThreadAttention {
     const tail = this.threadFactsFrom(projection, threadRef).at(-1)?.sequence ?? 1
-    return Object.freeze({ memberId, threadRef, startSequence: tail + 1, readThroughSequence: tail })
+    return this.startAttention(memberId, threadRef, tail + 1, source)
   }
 
   private currentTail(threadRef: AgentTeamThreadRef): number {
@@ -4684,8 +4726,8 @@ export class AgentTeamLedger {
    * stream's current tail, so a new follower inherits no backlog; an ownership
    * grant anchors at the grant itself.
    */
-  private startMainAttention(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, sequence: number): AgentTeamMainAttention {
-    return Object.freeze({ memberId, projectRef, startSequence: sequence, readThroughSequence: Math.max(0, sequence - 1) })
+  private startMainAttention(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, sequence: number, source: AgentTeamAttentionSource): AgentTeamMainAttention {
+    return Object.freeze({ memberId, projectRef, startSequence: sequence, readThroughSequence: Math.max(0, sequence - 1), source })
   }
 
   /**
@@ -4699,7 +4741,7 @@ export class AgentTeamLedger {
     const project = projection.projects.get(projectRef)
     if (project === undefined) return undefined
     const readThrough = Math.max(project.createdAtSequence - 1, projection.humanMainWatermarks.get(projectRef) ?? 0)
-    return Object.freeze({ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, projectRef, startSequence: project.createdAtSequence, readThroughSequence: readThrough })
+    return Object.freeze({ memberId: AGENT_TEAM_HUMAN_MEMBER_ID, projectRef, startSequence: project.createdAtSequence, readThroughSequence: readThrough, source: 'project-owner' as const })
   }
 
   private mainAttentionForFrom(projection: Projection, memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): AgentTeamMainAttention | undefined {
@@ -4899,14 +4941,14 @@ export class AgentTeamLedger {
       if (attention.threadRef === task.threadRef && attention.memberId !== actor) recipients.add(attention.memberId)
     }
     const attention = follow && task.accountable !== actor && !this.isFollowingFrom(projection, task.threadRef, task.accountable)
-      ? [this.startAttention(task.accountable, task.threadRef, activity.sequence)] : []
+      ? [this.startAttention(task.accountable, task.threadRef, activity.sequence, 'accountable')] : []
     return this.inboxDelta(attention, [], [], [], [...recipients].map(memberId => Object.freeze({ memberId, threadRef: task.threadRef, activityRef: activity.activityRef, sequence: activity.sequence })))
   }
 
   private inboxDeltaForTaskResponsibility(projection: Projection, task: AgentTeamTask, activity: AgentTeamTaskActivity,
     anchor: AgentTeamMessage, mentions: readonly AgentTeamMemberId[] = []): AgentTeamInboxDelta {
-    const attention = [this.startAttention(anchor.sender, task.threadRef, activity.sequence)]
-    if (task.accountable !== anchor.sender && !this.isFollowingFrom(projection, task.threadRef, task.accountable)) attention.push(this.startAttention(task.accountable, task.threadRef, activity.sequence))
+    const attention = [this.startAttention(anchor.sender, task.threadRef, activity.sequence, 'thread-author')]
+    if (task.accountable !== anchor.sender && !this.isFollowingFrom(projection, task.threadRef, task.accountable)) attention.push(this.startAttention(task.accountable, task.threadRef, activity.sequence, 'accountable'))
     const markers = mentions.map(memberId => Object.freeze({ memberId, threadRef: task.threadRef, messageRef: anchor.messageRef, sequence: activity.sequence }))
     const responsible = task.accountable === anchor.sender ? [] : [Object.freeze({ memberId: task.accountable, threadRef: task.threadRef, activityRef: activity.activityRef, sequence: activity.sequence })]
     return this.inboxDelta(attention, [], markers, [], responsible)
@@ -6274,10 +6316,39 @@ export class AgentTeamLedger {
     // cleanup repair sees the same state its validator will.
     const projection = emptyProjection()
     return records.map(([id, operation]) => {
-      const normalized = this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrantOverwrite(this.repairLegacyMainAttentionGrant(this.normalizeOperation(operation, occurrences, instants), projection), projection), projection), projection)
+      const normalized = this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrantOverwrite(this.repairLegacyMainAttentionGrant(this.repairLegacyAttentionSource(this.normalizeOperation(operation, occurrences, instants), projection), projection), projection), projection), projection)
       this.applyTo(projection, normalized)
       return [id, normalized]
     })
+  }
+
+  /**
+   * Attention rows written before the source field existed carry none, and a
+   * replay validator re-derives the row it expects from the projection — which
+   * always has one. The missing source is supplied in memory, so an old record
+   * validates against the same row the projection holds. `self` is the only
+   * source that claims a cause the stored bytes never had, so it is the honest
+   * default: a row whose origin the ledger cannot know is treated as the
+   * Member's own choice.
+   */
+  private repairLegacyAttentionSource(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+    if (!('inbox' in operation.data)) return operation
+    const { inbox } = operation.data
+    const threadRows = inbox.attention.set.filter(attention => attention.source === undefined)
+    const mainRows = (inbox.mainAttention?.set ?? []).filter(attention => attention.source === undefined)
+    if (threadRows.length === 0 && mainRows.length === 0) return operation
+    // A version-1 segment established Attention through the mention rule, so
+    // that is the source its rows carry. Every later segment wrote a row the
+    // ledger can name, so a missing source there is the Member's own choice —
+    // the one source that claims no cause the stored bytes never had.
+    const fallback: AgentTeamAttentionSource = projection.rulesVersion >= 2 ? 'self' : 'mention'
+    const withDefault = (attention: AgentTeamThreadAttention | AgentTeamMainAttention) => (
+      attention.source === undefined ? { ...attention, source: fallback } : attention)
+    return { ...operation, data: { ...operation.data, inbox: {
+      ...inbox,
+      attention: { ...inbox.attention, set: inbox.attention.set.map(withDefault) },
+      ...(inbox.mainAttention === undefined ? {} : { mainAttention: { ...inbox.mainAttention, set: inbox.mainAttention.set.map(withDefault) } }),
+    } } }
   }
 
   /**
@@ -6293,7 +6364,7 @@ export class AgentTeamLedger {
     if (operation.kind !== 'team/project-owner-added') return operation
     const { inbox, memberId, projectRef } = operation.data
     if (inbox.mainAttention !== undefined) return operation
-    const granted = [this.startMainAttention(memberId, projectRef, operation.sequence)]
+    const granted = [this.startMainAttention(memberId, projectRef, operation.sequence, 'project-owner')]
     // The era's delta: the owner-added Main marker and nothing else. A delta
     // that differs in any other way is a shape this build never wrote, so it
     // is left alone and still fails validation.
@@ -6318,7 +6389,7 @@ export class AgentTeamLedger {
     const set = inbox.mainAttention?.set ?? []
     if (set.length !== 1) return operation
     if (this.mainAttentionForFrom(projection, memberId, projectRef) === undefined) return operation
-    const overwrite = [this.startMainAttention(memberId, projectRef, operation.sequence)]
+    const overwrite = [this.startMainAttention(memberId, projectRef, operation.sequence, 'project-owner')]
     if (!isDeepStrictEqual(set, overwrite)) return operation
     return { ...operation, data: { ...operation.data,
       inbox: this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [], [], [], [], [], []) } }

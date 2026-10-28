@@ -317,6 +317,8 @@ export interface AgentTeamThreadAttention {
   readonly threadRef: AgentTeamThreadRef
   readonly startSequence: number
   readonly readThroughSequence: number
+  /** What established this period, so a result can say why the reader follows it instead of guessing. */
+  readonly source: AgentTeamAttentionSource
 }
 
 /** Identity of one Member × Thread attention period. */
@@ -324,6 +326,16 @@ export interface AgentTeamThreadAttentionKey {
   readonly memberId: AgentTeamMemberId
   readonly threadRef: AgentTeamThreadRef
 }
+
+/**
+ * Why one Attention period exists. Four are identity actions that establish a
+ * default, one is a version-1 rule that no longer applies, and one is the
+ * Member's own choice: the difference matters, because only the last is a
+ * subscription the Member picked rather than a responsibility it holds. A
+ * reopened Task re-establishes its accountable's Attention, so it is the same
+ * source as being named accountable rather than a sixth kind.
+ */
+export type AgentTeamAttentionSource = 'thread-author' | 'claim' | 'accountable' | 'project-owner' | 'mention' | 'self'
 
 /**
  * A Member's current attention period for one Project's Main stream. It is the
@@ -337,6 +349,8 @@ export interface AgentTeamMainAttention {
   readonly projectRef: AgentTeamProjectRef
   readonly startSequence: number
   readonly readThroughSequence: number
+  /** What established this period; the Main stream is only ever granted or chosen. */
+  readonly source: AgentTeamAttentionSource
 }
 
 /** Identity of one Member × Project Main stream attention period. */
