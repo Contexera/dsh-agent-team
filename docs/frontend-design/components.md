@@ -136,7 +136,9 @@ Columns are `待处理` / `进行中` / `待验收` / `已完成`, the five Task
 
 The finished column offers `展开全部已完成` under its head only while the Host reports it cut the column — the board value's `finishedTruncated` — and the control retires once the column shows everything, and at the deepest page the Host accepts, rather than standing there with nothing to do. A full column is not a cut one, so the control never appears on a page that merely happens to be full. An empty column states its own `0` in the head and draws no placeholder row, because a placeholder inside a column the count has already closed says the same thing twice.
 
-A card names the Task's accountable owner — the reader as `你负责`, resolved from the board value's `humanMemberId` — and carries a `待你验收` badge when the reader may accept the work.
+A card splits the two people roles by their count. The accountable owner stays text — the reader as `你负责`, resolved from the board value's `humanMemberId` — because one named person has to be read. Executors are the avatar stack under a `执行者` caption, since they are 0–N read at a glance; an open Task nobody has claimed says `待认领`, and a resolved card drops the executor slot rather than claiming nobody is on it.
+
+A `待你验收` badge rides the cards the reader may accept.
 
 The same card family serves the one cross-Workspace board (`TeamTaskBoardPage`, reached from the sidebar's 任务看板 entry — see [sidebar-browser.md](sidebar-browser.md)): three open-status columns over every visible Workspace, each card prefixed with its Project name. It answers to the same empty rule — the empty message stands alone, no column heads beside it — and carries no unread badges, which stay per-Thread facts on the Project face.
 
@@ -146,7 +148,7 @@ A Thread card is the feed's one large target: the page ground at rest behind a h
 
 The Main stream holds three entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, and Thread cards.
 
-A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and live Claim owners. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
+A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and, until it resolves, its live Claim owners or `待认领`. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
 
 Both faces draw that card with the same component, and the discussion panel draws the Tasks its discussion spawned with it too: the status, the live Claim owners and the reply count must not depend on which of the three is open. A derived card sits at the sequence of the fact that created its Task, never collected at the end of the timeline, and clicking it opens that Task's Thread page.
 

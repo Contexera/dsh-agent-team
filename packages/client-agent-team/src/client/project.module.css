@@ -186,13 +186,18 @@
   align-items: center;
   color: var(--dsw-alias-label-caption);
   display: flex;
+  flex-wrap: wrap;
   font-size: 11px;
-  gap: 8px;
+  gap: 2px 8px;
   line-height: 18px;
 }
 
 .boardCardFoot time { margin-left: auto; }
 .boardCardOwner { flex: none; color: var(--dsw-alias-label-caption); }
+/* The executor group keeps its caption and faces on one line; only the row wraps, never mid-group, so a narrow column
+   moves the whole "executors" reading to a second line instead of splitting a caption from its avatars. */
+.boardCardExecutor { align-items: center; display: inline-flex; flex: none; gap: 4px; }
+.boardCardRole { color: var(--dsw-alias-label-caption); }
 .boardAcceptBadge {
   flex: none;
   margin-left: 6px;

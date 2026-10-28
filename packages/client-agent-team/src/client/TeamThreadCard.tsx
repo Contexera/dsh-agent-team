@@ -29,7 +29,7 @@ export function TeamThreadCard({ card, unread, human, t, onOpen }: {
   const label = [
     task === undefined ? t('openDiscussionCard', { title }) : t('openTaskCard', { number: task.taskNumber, title }),
     task === undefined ? undefined : formatTaskStatus(task.status, t),
-    owners.length === 0 ? undefined : claimersLabel(owners, t),
+    task === undefined || resolved ? undefined : owners.length === 0 ? t('boardAwaitingClaim') : claimersLabel(owners, t),
     replies,
     people,
     unread ? t('cardUnread') : undefined,
@@ -50,8 +50,8 @@ export function TeamThreadCard({ card, unread, human, t, onOpen }: {
         </>}
       </span>
       {task !== undefined && <span className={streamCss.cardStatus}>{formatTaskStatus(task.status, t)}</span>}
-      {task !== undefined && owners.length === 0 && <span>{t('boardUnassigned')}</span>}
-      {task !== undefined && owners.length > 0 && <TeamAvatarStack owners={owners} label={claimersLabel(owners, t)} human={human} />}
+      {task !== undefined && !resolved && owners.length === 0 && <span>{t('boardAwaitingClaim')}</span>}
+      {task !== undefined && !resolved && owners.length > 0 && <TeamAvatarStack owners={owners} label={claimersLabel(owners, t)} human={human} />}
       <span className={streamCss.cardMeta}>
         <span>{replies}</span>
         {people !== undefined && <span>{people}</span>}

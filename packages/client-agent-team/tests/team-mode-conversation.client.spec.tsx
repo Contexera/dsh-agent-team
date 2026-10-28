@@ -55,7 +55,7 @@ describe('Team conversation surfaces', () => {
     // A started Task lands on the board, where its card carries the opener's first line and no owner yet.
     const startedCard = await b.view.findByRole('button', { name: '打开 Task #1' })
     expect(startedCard.textContent).toContain('hello team @builder')
-    expect(startedCard.textContent).toContain('未指派')
+    expect(startedCard.textContent).toContain('待认领')
     b.publishAgentReply()
     await waitFor(() => expect(b.view.queryByText('agent reply')).toBeNull())
     fireEvent.click(b.view.getByRole('button', { name: '打开 Task #1' }))

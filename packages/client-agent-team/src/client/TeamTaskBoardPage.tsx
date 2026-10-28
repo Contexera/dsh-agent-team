@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AgentTeamMemberId, AgentTeamTaskBoardItem } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
-import { formatAbsoluteTime, formatInboxTime, taskStatusDot } from './team-formatters.ts'
+import { taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
+import { BoardCardFoot } from './BoardCardFoot.tsx'
 import projectCss from './project.module.css'
 import css from './conversation.module.css'
 
@@ -38,7 +39,7 @@ export function TeamTaskBoardPage({ useWorkspaces, loadTaskBoard, subscribeChang
       {items !== undefined && items.length === 0 && <div className={css.emptySurface}><p className={css.emptyState}>{t('taskBoardEmpty')}</p></div>}
       {items !== undefined && items.length > 0 && <div className={projectCss.boardColumns}>{columns.map(column => {
         const columnItems = items.filter(item => item.task.status === column.key)
-        return <div className={projectCss.boardColumn} key={column.key}><div className={projectCss.boardColumnHead}>{t(column.label)}<span className={projectCss.boardColumnCount}>{columnItems.length}</span></div>{columnItems.map(item => <button key={item.task.taskRef} type="button" className={projectCss.boardCard} onClick={() => { selectWorkspace(item.workspaceId); selectThread(item.threadRef, item.projectRef, item.task.taskRef, item.taskNumber) }}><span className={projectCss.boardCardNum}><TeamStateDot size={8} state={taskStatusDot(item.task.status)} />{t('taskLabel', { number: item.taskNumber })}{item.needsAcceptance && <span className={projectCss.boardAcceptBadge}>{t('boardNeedsAcceptance')}</span>}</span><span className={projectCss.boardCardTitle}>{item.projectName}: {item.subject}</span><span className={projectCss.boardCardFoot}><span className={projectCss.boardCardOwner}>{item.accountableOwner?.state === 'suspended' ? t('boardAccountableSuspended') : item.task.accountable === humanMemberId ? t('boardAccountableYou') : t('boardAccountable', { name: item.accountableOwner?.name ?? item.task.accountable })}</span><span>{item.relation === 'executor' ? t('boardMine') : item.liveClaimOwners.length > 0 ? t('boardAssigned') : t('boardUnassigned')}</span><time dateTime={item.lastActivityAt} title={formatAbsoluteTime(item.lastActivityAt)}>{formatInboxTime(item.lastActivityAt, t)}</time></span></button>)}</div>
+        return <div className={projectCss.boardColumn} key={column.key}><div className={projectCss.boardColumnHead}>{t(column.label)}<span className={projectCss.boardColumnCount}>{columnItems.length}</span></div>{columnItems.map(item => <button key={item.task.taskRef} type="button" className={projectCss.boardCard} onClick={() => { selectWorkspace(item.workspaceId); selectThread(item.threadRef, item.projectRef, item.task.taskRef, item.taskNumber) }}><span className={projectCss.boardCardNum}><TeamStateDot size={8} state={taskStatusDot(item.task.status)} />{t('taskLabel', { number: item.taskNumber })}{item.needsAcceptance && <span className={projectCss.boardAcceptBadge}>{t('boardNeedsAcceptance')}</span>}</span><span className={projectCss.boardCardTitle}>{item.projectName}: {item.subject}</span><BoardCardFoot item={item} human={undefined} humanMemberId={humanMemberId} t={t} /></button>)}</div>
       })}</div>}
     </section>
   </main>

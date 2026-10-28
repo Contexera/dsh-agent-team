@@ -39,7 +39,7 @@ describe('Team task board page', () => {
     expect(card.textContent).toContain('实现 API 网关')
     expect(card.textContent).not.toContain('细节在 Thread 里')
     expect(card.textContent).toContain('你负责')
-    expect(card.textContent).toContain('未指派')
+    expect(card.textContent).toContain('待认领')
     expect(card.querySelector('time')?.getAttribute('dateTime')).toBe('2026-10-14T09:00:00.000Z')
 
     // A card opens the Task's own Thread level and leaves the global face,

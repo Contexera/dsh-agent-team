@@ -11,10 +11,11 @@ import type { TeamDraftStore } from './drafts.ts'
 import { TeamMainStream } from './TeamMainStream.tsx'
 import { TeamProjectPanel } from './TeamProjectPanel.tsx'
 import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
-import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman } from './TeamAvatarStack.tsx'
+import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime, taskStatusDot } from './team-formatters.ts'
+import { taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
+import { BoardCardFoot } from './BoardCardFoot.tsx'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
 import { hostThreadRefLookup, jumpToThread, resolvedThreadDestination } from './refs.ts'
 import { rosterProjectName, rosterMember } from './refs.ts'
@@ -472,12 +473,6 @@ function ProjectionBoardCard({ item, unread, human, humanMemberId, t, onOpen }: 
   const task = item.task
   const taskNumber = item.taskNumber ?? 0
   const resolved = task.status === 'done' || task.status === 'closed'
-  const ownerLabel = item.accountableOwner?.state === 'suspended'
-    ? t('boardAccountableSuspended')
-    : task.accountable === humanMemberId ? t('boardAccountableYou') : t('boardAccountable', { name: item.accountableOwner?.name ?? task.accountable })
-  // For resolved work the newest fact is the resolution itself.
-  const activityAt = item.lastActivityAt
-  const namedOwners = namedAvatarOwners(item.liveClaimOwners, human)
   return <button
     type="button"
     className={projectCss.boardCard}
@@ -492,12 +487,6 @@ function ProjectionBoardCard({ item, unread, human, humanMemberId, t, onOpen }: 
       <TeamCountBadge count={unread} />
     </span>
     <span className={projectCss.boardCardTitle}>{item.subject}</span>
-    <span className={projectCss.boardCardFoot}>
-      <span className={projectCss.boardCardOwner}>{ownerLabel}</span>
-      {namedOwners.length === 0
-        ? <span>{t('boardUnassigned')}</span>
-        : <TeamAvatarStack owners={namedOwners} label={claimersLabel(namedOwners, t)} human={human} />}
-      <time dateTime={activityAt} title={formatAbsoluteTime(activityAt)}>{formatInboxTime(activityAt, t)}</time>
-    </span>
+    <BoardCardFoot item={item} human={human} humanMemberId={humanMemberId} t={t} />
   </button>
 }
