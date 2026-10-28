@@ -194,10 +194,10 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       return next
     })
   }, [])
-  // Opening the new Task replaces the panel: a Task Thread keeps the full page, and `selectThread` retires the discussion
-  // it was promoted from.
+  // Promotion has no panel to restore: the discussion became the Task, so `selectThread` must drop the panel state
+  // explicitly instead of treating this as a same-Project Task cover.
   const handlePanelPromoted = useCallback((taskRef: AgentTeamTaskRef): void => {
-    if (discussionRef !== undefined) selectThread(discussionRef, projectRef, taskRef, taskNumberOf(taskRef))
+    if (discussionRef !== undefined) selectThread(discussionRef, projectRef, taskRef, taskNumberOf(taskRef), { preserveDiscussion: false })
   }, [discussionRef, projectRef, selectThread, taskNumberOf])
   // The board is the Task's home and the Task just started is its newest card; refresh so it is there before the Human looks.
   const handleTaskStarted = (): void => {

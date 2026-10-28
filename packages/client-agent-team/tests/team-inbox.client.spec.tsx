@@ -537,11 +537,14 @@ describe('Team Inbox surfaces', () => {
     const addressed = { messageRef: 'message:addressed', projectRef: 'project:engineering', threadRef: 'thread:1', sender: 'member:iris', body: '@human 看这里', topLevel: false, sequence: 2, occurredAt: '2026-09-13T03:01:00.000Z' }
     const quiet = { ...addressed, messageRef: 'message:quiet', body: '普通进展', sequence: 3 }
     const baseRead = b.readThread.getMockImplementation()!
+    let reads = 0
     b.readThread.mockImplementation(async request => {
       const result = await baseRead(request)
+      // The opening read carries the unread facts; every later read reflects the acknowledgement it committed.
+      const opening = reads++ === 0
       return result.ok ? { ok: true as const, value: { ...result.value, facts: [
-        { fact: { kind: 'message' as const, sequence: 2, message: addressed, mentions: ['member:human'] }, unread: true, direct: true },
-        { fact: { kind: 'message' as const, sequence: 3, message: quiet, mentions: [] }, unread: true, direct: false },
+        { fact: { kind: 'message' as const, sequence: 2, message: addressed, mentions: ['member:human'] }, unread: opening, direct: opening },
+        { fact: { kind: 'message' as const, sequence: 3, message: quiet, mentions: [] }, unread: opening, direct: false },
       ] } } : result
     })
     // jsdom has no layout: record the centring request instead of moving a box.
@@ -557,6 +560,7 @@ describe('Team Inbox surfaces', () => {
       // The full Thread page is a `<main data-team-thread>`; the panel reuses the attribute inside the aside only.
       expect(b.view.container.querySelector('main[data-team-thread]')).toBeNull()
       await waitFor(() => expect(centred).toContain('message:addressed'))
+      const centredOnOpen = centred.filter(ref => ref === 'message:addressed').length
       // The unread boundary marks where the opening landed, exactly once, as it does on the full page.
       const panel = b.view.container.querySelector('[data-team-panel="thread:1"]')!
       const boundaries = [...panel.querySelectorAll('[role="separator"]')].filter(node => node.textContent !== '')
@@ -567,6 +571,15 @@ describe('Team Inbox surfaces', () => {
       })
       expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('threadRef')
       expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).not.toHaveProperty('inbox')
+      // A same-Project Task page covers the panel; returning restores it and must not re-pulse the
+      // unread landing the first open already acknowledged.
+      b.runtime.ctx.teamNavigation.actions().selectThread('thread:derived' as never, 'project:engineering' as never, 'task:derived' as never, 2)
+      await waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot().threadRef).toBe('thread:derived'))
+      fireEvent.click(await b.view.findByRole('button', { name: '返回项目' }))
+      await waitFor(() => expect(b.view.container.querySelector('[data-team-panel="thread:1"]')).not.toBeNull())
+      expect(centred.filter(ref => ref === 'message:addressed')).toHaveLength(centredOnOpen)
+      const restored = b.view.container.querySelector('[data-team-panel="thread:1"] [data-message-ref="message:addressed"]')
+      expect(restored?.getAttribute('data-reply-flash')).toBeNull()
     } finally {
       if (original === undefined) Reflect.deleteProperty(window.HTMLElement.prototype, 'scrollIntoView')
       else window.HTMLElement.prototype.scrollIntoView = original

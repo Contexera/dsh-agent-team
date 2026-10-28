@@ -90,7 +90,8 @@ describe('TeamNavigation', () => {
 
   /**
    * The side panel is a navigation fact like any other, so one `selectDiscussion` has to survive a reload on its own and
-   * the Project face around it must stay reachable. A Task keeps the full page, so the two never compete.
+   * the Project face around it must stay reachable. A Task covers the full page without erasing that face, so the two
+   * can coexist in the snapshot.
    */
   it('persists an open discussion beside its Project and reopens it with its anchor', () => {
     const navigation = new TeamNavigation()
@@ -146,7 +147,30 @@ describe('TeamNavigation', () => {
     off()
   })
 
-  it('leaves the discussion behind for every other Team face, and keeps a Task Thread off the panel', () => {
+  it('keeps the discussion under a same-Project Task page, across reload, and restores it on Back', () => {
+    const navigation = new TeamNavigation()
+    navigation.actions().selectWorkspace('workspace:one' as never)
+    navigation.actions().enterTeam()
+    navigation.actions().selectDiscussion('thread:1' as never, 'project:1' as never, { anchor: 'unread' })
+
+    navigation.actions().selectThread('thread:9' as never, 'project:1' as never, 'task:9' as never, 9)
+    const covered = {
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      discussionRef: 'thread:1', discussionAnchor: 'unread',
+      threadRef: 'thread:9', taskRef: 'task:9', taskNumber: 9,
+    }
+    expect(navigation.getSnapshot()).toEqual(covered)
+    // A reload lands on the Task page with the panel state underneath it, ready for Back.
+    expect(new TeamNavigation().getSnapshot()).toEqual(covered)
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '')).toEqual(covered)
+    navigation.actions().backToWorkspace()
+    expect(navigation.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      discussionRef: 'thread:1', discussionAnchor: 'unread',
+    })
+  })
+
+  it('clears the discussion when a Task is entered from outside its Project, from another Task, or by promotion', () => {
     const open = (): TeamNavigation => {
       const navigation = new TeamNavigation()
       navigation.actions().selectWorkspace('workspace:one' as never)
@@ -154,18 +178,38 @@ describe('TeamNavigation', () => {
       navigation.actions().selectDiscussion('thread:1' as never, 'project:1' as never, { anchor: 'unread' })
       return navigation
     }
-    // A Task Thread replaces the panel: the Project page keeps one face at a time.
-    const threaded = open()
-    threaded.actions().selectThread('thread:9' as never, 'project:1' as never, 'task:9' as never, 9)
-    expect(threaded.getSnapshot()).toEqual({
-      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+    // A sibling-Project Task carries no right to the panel the reader left behind.
+    const crossProject = open()
+    crossProject.actions().selectThread('thread:9' as never, 'project:2' as never, 'task:9' as never, 9)
+    expect(crossProject.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:2',
       threadRef: 'thread:9', taskRef: 'task:9', taskNumber: 9,
     })
-    // Opening a discussion never disturbs a Thread face either: it is not a Thread page.
-    threaded.actions().selectDiscussion('thread:1' as never, 'project:1' as never)
-    expect(threaded.getSnapshot().threadRef).toBeUndefined()
-    expect(threaded.getSnapshot().discussionRef).toBe('thread:1')
+    // A Task page is not the Project face: jumping to a second Task drops the panel state instead of stacking.
+    const fromTask = open()
+    fromTask.actions().selectThread('thread:9' as never, 'project:1' as never, 'task:9' as never, 9)
+    fromTask.actions().selectThread('thread:10' as never, 'project:1' as never, 'task:10' as never, 10)
+    expect(fromTask.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      threadRef: 'thread:10', taskRef: 'task:10', taskNumber: 10,
+    })
+    // Promotion turns the discussion into the Task itself, so there is no separate panel to restore.
+    const promoted = open()
+    promoted.actions().selectThread('thread:1' as never, 'project:1' as never, 'task:1' as never, 1, { preserveDiscussion: false })
+    expect(promoted.getSnapshot()).toEqual({
+      mode: 'team', workspaceId: 'workspace:one', projectRef: 'project:1',
+      threadRef: 'thread:1', taskRef: 'task:1', taskNumber: 1,
+    })
+  })
 
+  it('leaves the discussion behind for every other Team face', () => {
+    const open = (): TeamNavigation => {
+      const navigation = new TeamNavigation()
+      navigation.actions().selectWorkspace('workspace:one' as never)
+      navigation.actions().enterTeam()
+      navigation.actions().selectDiscussion('thread:1' as never, 'project:1' as never, { anchor: 'unread' })
+      return navigation
+    }
     const faces: Array<[string, (navigation: TeamNavigation) => void, object]> = [
       ['Project', navigation => { navigation.actions().selectProject('project:2' as never) }, { projectRef: 'project:2' }],
       ['Workspace', navigation => { navigation.actions().selectWorkspace('workspace:two' as never) }, { workspaceId: 'workspace:two' }],

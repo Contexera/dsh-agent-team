@@ -864,8 +864,39 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // the discussion's door stay.
   const panel = page.locator('[data-team-panel]')
   await panel.waitFor()
+  const discussionPanelRef = await panel.getAttribute('data-team-panel')
   await expect.poll(async () => await page.getByRole('heading', { name: '# delivery' }).count()).toBe(1)
   await expect.poll(async () => await page.locator('[data-team-project]').count()).toBe(1)
+  // A Task derived from this discussion is the panel's other door: opening it
+  // covers the Project face, and Back restores the panel the reader left open.
+  const panelWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
+  const panelProjectRef = scaffold.ctx.agentTeam.view({ workspaceId: panelWorkspace.id })
+    .projects.find((project: { name: string }) => project.name === 'delivery')!.projectRef
+  const derivedStart = await scaffold.ctx.agentTeam.startThread({
+    requestId: 'm2-04-panel-derived-task' as never,
+    workspaceId: panelWorkspace.id,
+    projectRef: panelProjectRef,
+    kind: 'task',
+    body: '由讨论派生的 Task',
+    sourceThreadRefs: [discussionPanelRef as never],
+  })
+  if (derivedStart.kind !== 'committed') throw new Error(`derived Task was rejected: ${derivedStart.kind}`)
+  const derivedNumber = scaffold.ctx.agentTeam.view({ workspaceId: panelWorkspace.id })
+    .taskNumbers.find((entry: { taskRef: string }) => entry.taskRef === derivedStart.task!.taskRef)!.taskNumber
+  // Creation reaches the discussion's projection on its next read, not through a
+  // fact on the open panel; reopen the card as a reader arriving later would.
+  await page.getByRole('button', { name: '关闭讨论' }).click()
+  await expect.poll(async () => await page.locator('[data-team-panel]').count()).toBe(0)
+  await tasklessCard.click()
+  await panel.waitFor()
+  const derivedCard = panel.getByRole('button', { name: new RegExp(`^打开 Task #${derivedNumber}：`) })
+  await derivedCard.waitFor()
+  await derivedCard.click()
+  await page.getByRole('heading', { name: `Task #${derivedNumber}` }).waitFor()
+  await expect.poll(async () => await page.locator('[data-team-panel]').count()).toBe(0)
+  await page.getByRole('button', { name: '返回项目' }).click()
+  await panel.waitFor()
+  await expect.poll(async () => await panel.getAttribute('data-team-panel')).toBe(discussionPanelRef)
   // A discussion has no acceptance control; the feed beside it holds a Task's
   // door.
   expect(await panel.getByRole('button', { name: '验收' }).count()).toBe(0)
@@ -1008,11 +1039,13 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI04_SHOTS, 'taskless-panel-desktop.png'), fullPage: true })
   await promote.focus()
   await page.keyboard.press('Enter')
-  await page.getByRole('heading', { name: 'Task #2' }).waitFor()
+  await page.getByRole('heading', { name: /^Task #\d+$/ }).waitFor()
   await page.getByText('Human 为此讨论创建了 Task').waitFor()
   expect(await page.getByRole('button', { name: '转为 Task' }).count()).toBe(0)
   await page.getByRole('button', { name: '返回项目' }).click()
   await page.getByRole('heading', { name: '# delivery' }).waitFor()
+  // Promotion ends the panel's job, so this Back lands on a bare Project.
+  await expect.poll(async () => await page.locator('[data-team-panel]').count()).toBe(0)
 
   // The Project's two readings form one tab stop; arrow keys move selection with
   // focus.

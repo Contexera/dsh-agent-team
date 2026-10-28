@@ -124,6 +124,9 @@ describe('Team Project discussion panel', () => {
     fireEvent.click(b.view.getByRole('button', { name: '返回项目' }))
     expect(await b.view.findByRole('heading', { name: '# engineering' })).toBeTruthy()
     expect(await b.view.findByRole('button', { name: /^打开 Task #1：/ })).toBeTruthy()
+    // Promotion is not a cover: there is no separate discussion left to restore.
+    expect(b.runtime.ctx.teamNavigation.getSnapshot().discussionRef).toBeUndefined()
+    expect(b.view.queryByRole('complementary', { name: '讨论' })).toBeNull()
     await b.runtime.dispose()
   })
 
@@ -269,6 +272,13 @@ describe('Team Project discussion panel', () => {
     // Document order, not list order: the card sits between the facts that surround its creation.
     expect(rowOf('message:first').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(rowOf('message:last').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    // A card is a door: the Task page covers the Project face, and Back restores the panel the reader left open.
+    fireEvent.click(card)
+    await waitFor(() => expect(b.runtime.ctx.teamNavigation.getSnapshot().threadRef).toBe('thread:derived'))
+    expect(b.runtime.ctx.teamNavigation.getSnapshot().discussionRef).toBe('thread:1')
+    fireEvent.click(await b.view.findByRole('button', { name: '返回项目' }))
+    await waitFor(() => expect(b.view.container.querySelector('[data-team-panel="thread:1"]')).not.toBeNull())
+    expect(await b.view.findByRole('complementary', { name: '讨论' })).toBeTruthy()
     await b.runtime.dispose()
   })
 

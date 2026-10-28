@@ -19,8 +19,8 @@ export interface TeamNavigationSnapshot {
   threadRef?: AgentTeamThreadRef
   taskNumber?: number
   /**
-   * A taskless discussion open in the Project page's side panel. A Task Thread keeps the full page, so this never
-   * competes with `threadRef`: the two are different faces of the same Project.
+   * A taskless discussion open in the Project page's side panel. A Task Thread covers the whole page, but the panel
+   * stays part of the Project face underneath: returning from a Task opened inside that Project restores it.
    */
   discussionRef?: AgentTeamThreadRef
   /**
@@ -105,7 +105,7 @@ export interface TeamNavigationActions {
   leaveTeamForConversation: (releasePanel: () => void) => void
   selectWorkspace: (workspaceId: WorkspaceId) => void
   selectProject: (projectRef: AgentTeamProjectRef) => void
-  selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number) => void
+  selectThread: (threadRef: AgentTeamThreadRef, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number, options?: SelectThreadOptions) => void
   /**
    * Open a taskless discussion beside its Project's Main stream. `workspaceId` moves the seat and the destination in one
    * step — the Inbox reads across Workspaces — and `anchor` chooses where inside the discussion the panel lands.
@@ -124,6 +124,14 @@ export interface TeamNavigationActions {
 export interface SelectDiscussionOptions {
   readonly workspaceId?: WorkspaceId
   readonly anchor?: TeamDiscussionAnchor
+}
+
+export interface SelectThreadOptions {
+  /**
+   * False drops any open discussion panel even when the Task is in the same Project. Promotion is the one caller that
+   * needs this: the discussion became the Task, so there is no separate panel to restore.
+   */
+  readonly preserveDiscussion?: boolean
 }
 
 function isReselectingActiveMember(snapshot: TeamNavigationSnapshot, sessionId: SessionId): boolean {
@@ -152,7 +160,7 @@ export class TeamNavigation {
       },
       selectWorkspace: workspaceId => { this.clearMemberSession(); this.setWorkspace(workspaceId) },
       selectProject: projectRef => { this.clearMemberSession(); this.setProject(projectRef) },
-      selectThread: (threadRef, projectRef, taskRef, taskNumber) => { this.clearMemberSession(); this.setThread(threadRef, projectRef, taskRef, taskNumber) },
+      selectThread: (threadRef, projectRef, taskRef, taskNumber, options) => { this.clearMemberSession(); this.setThread(threadRef, projectRef, taskRef, taskNumber, options) },
       selectDiscussion: (threadRef, projectRef, options) => { this.clearMemberSession(); this.setDiscussion(threadRef, projectRef, options) },
       closeDiscussion: () => { this.clearMemberSession(); this.setDiscussion(undefined) },
       selectInbox: () => { this.clearMemberSession(); this.setInbox() },
@@ -222,14 +230,29 @@ export class TeamNavigation {
     this.commit()
   }
 
-  private setThread(threadRef: AgentTeamThreadRef | undefined, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number): void {
+  private setThread(threadRef: AgentTeamThreadRef | undefined, projectRef?: AgentTeamProjectRef, taskRef?: AgentTeamTaskRef, taskNumber?: number, options?: SelectThreadOptions): void {
     if (this.snapshot.threadRef === threadRef && this.snapshot.taskRef === taskRef && this.snapshot.projectRef === projectRef && this.snapshot.taskNumber === taskNumber && this.snapshot.inbox !== true && this.snapshot.board !== true) return
-    const { discussionRef: _discussionRef, discussionAnchor: _discussionAnchor, ...withoutDiscussion } = this.snapshot
+    // A Task opened from its own Project covers that Project face; keep the panel state underneath so Back restores it.
+    // Entry from anywhere else (Inbox, Board, another Task page, a sibling Project) and promotion clear it instead.
+    const keepsDiscussion = threadRef === undefined
+      ? this.snapshot.discussionRef !== undefined
+      : options?.preserveDiscussion !== false
+        && this.snapshot.threadRef === undefined
+        && this.snapshot.inbox !== true
+        && this.snapshot.board !== true
+        && this.snapshot.projectRef !== undefined
+        && this.snapshot.projectRef === projectRef
+        && this.snapshot.discussionRef !== undefined
+    const baseSnapshot: TeamNavigationSnapshot = (() => {
+      if (keepsDiscussion) return this.snapshot
+      const { discussionRef: _discussionRef, discussionAnchor: _discussionAnchor, ...withoutDiscussion } = this.snapshot
+      return withoutDiscussion
+    })()
     if (threadRef === undefined) {
-      const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = withoutDiscussion
+      const { taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, ...base } = baseSnapshot
       this.snapshot = base
     } else {
-      const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, board: _board, ...base } = withoutDiscussion
+      const { projectRef: _projectRef, taskRef: _taskRef, threadRef: _threadRef, taskNumber: _taskNumber, inbox: _inbox, board: _board, ...base } = baseSnapshot
       this.snapshot = {
         ...base,
         threadRef,
