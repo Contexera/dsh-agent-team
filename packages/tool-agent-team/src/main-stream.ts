@@ -45,7 +45,7 @@ export const MAIN_ENTRY_SCHEMA = {
 
 export const MAIN_STANDING_SCHEMA = {
   type: 'object', additionalProperties: false, properties: {
-    owner: { type: 'boolean', required: true }, head: { type: 'number', required: true },
+    following: { type: 'boolean', required: true }, head: { type: 'number', required: true },
     unreadCount: { type: 'number', required: true }, directCount: { type: 'number', required: true },
   },
 } as const
@@ -68,8 +68,8 @@ export function mainEntryView(entry: AgentTeamMainTimelineEntry): MainEntryView 
       resolution: card.task.resolution, accountable: card.task.accountable, liveClaimOwners: card.task.liveClaimOwners.map(actor => actor.name) }) }
 }
 
-export function standingView(standing: AgentTeamMainStreamStanding): { owner: boolean; head: number; unreadCount: number; directCount: number } {
-  return { owner: standing.owner, head: standing.head, unreadCount: standing.unreadCount, directCount: standing.directCount }
+export function standingView(standing: AgentTeamMainStreamStanding): { following: boolean; head: number; unreadCount: number; directCount: number } {
+  return { following: standing.following, head: standing.head, unreadCount: standing.unreadCount, directCount: standing.directCount }
 }
 
 function markers(entry: MainEntryView): string {

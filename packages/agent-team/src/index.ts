@@ -153,6 +153,7 @@ import type {
   AgentTeamTransferTaskResult,
   AgentTeamThreadAttentionRequest,
   AgentTeamThreadAttentionResult,
+  AgentTeamMainAttentionResult,
   AgentTeamThreadAttentionStatus,
   AgentTeamThreadHistory,
   AgentTeamThreadHistoryRequest,
@@ -1658,7 +1659,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Human's personal Attention operation. */
   @Remote('changeAttention')
-  async changeAttention(request: AgentTeamThreadAttentionRequest): Promise<AgentTeamThreadAttentionResult> {
+  async changeAttention(request: AgentTeamThreadAttentionRequest): Promise<AgentTeamThreadAttentionResult | AgentTeamMainAttentionResult> {
     const actor = this.humanCall(request.workspaceId)
     const result = await this.requireLedger().changeAttention({ ...request, actor })
     if (result.committed) this.emitCommitted(result.value.receipt)
@@ -1743,7 +1744,7 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /** Agent-only personal Attention change. */
-  async changeAttentionForAgent(agent: Agent, request: AgentTeamThreadAttentionRequest): Promise<AgentTeamThreadAttentionResult> {
+  async changeAttentionForAgent(agent: Agent, request: AgentTeamThreadAttentionRequest): Promise<AgentTeamThreadAttentionResult | AgentTeamMainAttentionResult> {
     const actor = this.memberCall(agent, request.workspaceId)
     const result = await this.requireLedger().changeAttention({ ...request, actor })
     if (result.committed) this.emitCommitted(result.value.receipt)

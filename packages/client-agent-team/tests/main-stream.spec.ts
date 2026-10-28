@@ -5,7 +5,7 @@ import type {
 import { ARRIVAL_MARK_MS, liveArrivals, mergeMainRead, mergeMainStream, mainEntryKey } from '../src/client/main-stream.ts'
 
 const standing = (unreadCount: number): AgentTeamMainStreamStanding =>
-  ({ owner: true, head: 12, unreadCount, directCount: 0, markers: [] })
+  ({ following: true, head: 12, unreadCount, directCount: 0, markers: [] })
 
 function entry(sequence: number, unread: boolean): AgentTeamMainTimelineEntry {
   return { kind: 'activity', sequence, occurredAt: '2026-10-24T00:00:00Z', unread, direct: unread } as AgentTeamMainTimelineEntry

@@ -89,6 +89,8 @@ const post = (team: Seeded, actor: Poster, body: string, extra: { replyToMessage
 const readMain = (team: Seeded, actor: Poster, readThroughSequence?: number) =>
   team.ledger.readMainStream({ requestId: requestId('read'), actor, workspaceId: alpha, projectRef: team.projectRef, ...(readThroughSequence === undefined ? {} : { readThroughSequence }) })
 const page = (team: Seeded, actor: Poster) => team.ledger.mainStreamHistory(actor, { workspaceId: alpha, projectRef: team.projectRef })
+/** One Member's current handle, so a mention names the Member the ledger holds. */
+const handleOf = (team: Seeded, agent: Agent) => team.ledger.getMember(agent.memberId)?.handle ?? agent.memberId
 const start = (team: Seeded, actor: Poster, kind: 'discussion' | 'task', body: string) =>
   team.ledger.startThread({ requestId: requestId('start'), actor, workspaceId: alpha, projectRef: team.projectRef, kind, body })
 
@@ -149,7 +151,7 @@ describe('Main stream posting and the unread gate', () => {
     expect(blocked.value.kind === 'main_unread_required' && blocked.value.entries.map(entry => entry.kind)).toEqual(['activity', 'message'])
     await readMain(team, team.owner.actor)
     expect((await post(team, team.owner.actor, 'my turn')).committed).toBe(true)
-    expect(page(team, team.owner.actor).standing).toMatchObject({ owner: true, unreadCount: 0 })
+    expect(page(team, team.owner.actor).standing).toMatchObject({ following: true, unreadCount: 0 })
     // The Human is an owner too: the Agent's post is unread for them.
     expect((await post(team, human, 'reply')).value).toMatchObject({ kind: 'main_unread_required', unreadCount: 1 })
   })
@@ -172,7 +174,8 @@ describe('Main stream posting and the unread gate', () => {
     await post(team, human, 'first')
     const posted = await post(team, team.writer.actor, 'from a member')
     expect(posted.committed).toBe(true)
-    expect(page(team, team.writer.actor).standing).toMatchObject({ owner: false, unreadCount: 0, markers: [] })
+    // A non-owner Member has no Main stream Attention, so it has no ordinary unread to read before posting.
+    expect(page(team, team.writer.actor).standing).toMatchObject({ following: false, unreadCount: 0, markers: [] })
     await expect(post(team, team.outsider.actor, 'let me in')).rejects.toThrow(/not_project_member/)
     await expect(readMain(team, team.outsider.actor)).rejects.toThrow(/not_project_member/)
   })
@@ -183,7 +186,7 @@ describe('Main stream posting and the unread gate', () => {
     expect(first.scope).toBe('main')
     // A mention makes the Agent a Project member: it can now take part.
     const mentioned = page(team, team.outsider.actor).standing
-    expect(mentioned).toMatchObject({ owner: false, unreadCount: 1, directCount: 1 })
+    expect(mentioned).toMatchObject({ following: false, unreadCount: 1, directCount: 1 })
     await readMain(team, human)
     const answered = committedMessage(await post(team, human, 'Answer', { replyToMessageRef: first.messageRef }))
     expect(answered.replyToMessageRef).toBe(first.messageRef)
@@ -335,6 +338,88 @@ describe('Main stream rows in the Inbox', () => {
   })
 })
 
+describe('Main stream Attention', () => {
+  it('gives a non-owner Member ordinary unread once it follows the Main stream, and none after it unfollows', async () => {
+    const team = await seed()
+    // The writer is a Project member with no ownership, so before following it
+    // holds markers alone — the same rule a Thread reader who does not follow it.
+    await post(team, human, 'first')
+    expect(page(team, team.writer.actor).standing).toMatchObject({ following: false, unreadCount: 0 })
+
+    const followed = await team.ledger.changeAttention({ requestId: requestId('follow-main'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    expect(followed.committed).toBe(true)
+    expect(followed.value.attention).toMatchObject({ projectRef: team.projectRef })
+    // Following starts at the tail, so the earlier post is not inherited as ordinary unread.
+    expect(page(team, team.writer.actor).standing).toMatchObject({ following: true, unreadCount: 0 })
+
+    // A post by somebody else is now ordinary unread for the follower.
+    await post(team, human, 'second')
+    expect(page(team, team.writer.actor).standing).toMatchObject({ following: true, unreadCount: 1 })
+    expect(team.ledger.memberInbox(team.writer.actor, {}).main).toMatchObject([{ unreadCount: 1 }])
+    // Its own post never counts against it.
+    await post(team, team.writer.actor, 'mine')
+    expect(page(team, team.writer.actor).standing.unreadCount).toBe(1)
+
+    await readMain(team, team.writer.actor)
+    expect(page(team, team.writer.actor).standing.unreadCount).toBe(0)
+
+    const unfollowed = await team.ledger.changeAttention({ requestId: requestId('unfollow-main'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'unfollow' })
+    expect(unfollowed.committed).toBe(true)
+    expect(unfollowed.value.attention).toBeUndefined()
+    await post(team, human, 'third')
+    expect(page(team, team.writer.actor).standing).toMatchObject({ following: false, unreadCount: 0 })
+    expect(team.ledger.memberInbox(team.writer.actor, {}).main).toEqual([])
+  })
+
+  it('keeps a mention reaching a Member that does not follow the Main stream, and following does not double-count it', async () => {
+    const team = await seed()
+    await post(team, human, `@${handleOf(team, team.writer)} please look`)
+    // The marker is the whole reason it is unread: no Attention is involved.
+    const before = page(team, team.writer.actor).standing
+    expect(before).toMatchObject({ following: false, unreadCount: 1, directCount: 1 })
+    await team.ledger.changeAttention({ requestId: requestId('follow-after-marker'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    const after = page(team, team.writer.actor).standing
+    expect(after).toMatchObject({ following: true, unreadCount: 1, directCount: 1 })
+    expect(after.markers).toHaveLength(1)
+  })
+
+  it('refuses a second follow and an unfollow that never followed, naming the Project', async () => {
+    const team = await seed()
+    await team.ledger.changeAttention({ requestId: requestId('follow-once'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    await expect(team.ledger.changeAttention({ requestId: requestId('follow-twice'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })).rejects.toThrow(/already following the Main stream/)
+    await team.ledger.changeAttention({ requestId: requestId('unfollow-once'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'unfollow' })
+    await expect(team.ledger.changeAttention({ requestId: requestId('unfollow-twice'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'unfollow' })).rejects.toThrow(/already unfollowed/)
+  })
+
+  it('replays every Main stream Attention change and read through a cold ledger', async () => {
+    const team = await seed()
+    await post(team, human, 'one')
+    await team.ledger.changeAttention({ requestId: requestId('replay-follow'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    await post(team, human, 'two')
+    await readMain(team, team.writer.actor)
+    await post(team, human, 'three')
+    await team.ledger.changeAttention({ requestId: requestId('replay-unfollow'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'unfollow' })
+    await post(team, human, 'four')
+
+    const cold = new AgentTeamLedger(team.table, { rulesVersion: 2 })
+    // The replay re-derives both rows: the follower's ended period is gone, and
+    // the owner's own row keeps the watermark its read advanced.
+    expect(cold.mainStreamHistory(team.writer.actor, { workspaceId: alpha, projectRef: team.projectRef }).standing)
+      .toMatchObject({ following: false, unreadCount: 0 })
+    expect(cold.mainStreamHistory(team.owner.actor, { workspaceId: alpha, projectRef: team.projectRef }).standing)
+      .toMatchObject({ following: true })
+  })
+})
+
 describe('owner changes in the Main stream', () => {
   it('gives the new owner a marker, and starts its ordinary unread at the grant', async () => {
     const team = await seed(2)
@@ -342,17 +427,23 @@ describe('owner changes in the Main stream', () => {
     await post(team, human, 'before the grant')
     await team.ledger.addProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: earlier.memberId })
     const standing = page(team, earlier.actor).standing
-    expect(standing).toMatchObject({ owner: true, unreadCount: 1, directCount: 1 })
+    // The grant starts following the Main stream here, so the earlier post is a
+    // marker the grant itself delivered rather than ordinary unread it inherited.
+    expect(standing).toMatchObject({ following: true, unreadCount: 1, directCount: 1 })
     expect(standing.markers).toMatchObject([{ activityRef: expect.stringMatching(/^activity:/) }])
   })
 
-  it('drops ordinary unread when ownership ends but keeps the markers, and the member stays in the Project', async () => {
+  it('keeps ordinary unread when ownership ends, because the Attention is now the Member own', async () => {
     const team = await seed(2)
     await post(team, human, 'ordinary')
     expect(page(team, team.owner.actor).standing.unreadCount).toBe(2)
     await team.ledger.removeProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: team.owner.memberId })
     const standing = page(team, team.owner.actor).standing
-    expect(standing).toMatchObject({ owner: false, unreadCount: 2, directCount: 2 })
+    // Withdrawing ownership is not an unfollow: the Member keeps the Main stream
+    // Attention it was granted, so the ordinary unread stands until it reads or
+    // unfollows. Only the owner privilege is gone. The withdrawal itself is one
+    // more ordinary entry, since the Member still follows the stream.
+    expect(standing).toMatchObject({ following: true, unreadCount: 3, directCount: 2 })
     expect(standing.markers).toHaveLength(2)
     expect((await readMain(team, team.owner.actor)).committed).toBe(true)
     expect(page(team, team.owner.actor).standing.unreadCount).toBe(0)

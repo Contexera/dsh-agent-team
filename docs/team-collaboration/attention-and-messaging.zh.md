@@ -37,6 +37,20 @@ Attention 决定 ordinary 工作是否存在，不决定它传播得多快：Thr
 
 `covered` 签名保证同一批 durable facts 的重复派生不会花掉第二次尝试。它只保存在进程内，因此 Host 重启后同一批 facts 可能再次送达——保证 at-least-once，而不是 durable 的投递记录。已入队但尚未被读取的通知会被替换而不是叠加，因此同一 Thread 上的一串提交只留下一条携带最新未读集合的通知。
 
+## Main stream Attention
+
+Main stream 携带自己的 Attention，按 Member × Project 键而不是 Thread ref：它是每个 Thread 之外的会话，给它一个合成 Thread ref 会把它塞进 Thread 索引。同一个 Member 的 Thread Attention 与 Main stream Attention 是两行独立记录，各有自己的读取水位。
+
+| 对象 | Main stream Attention |
+| --- | --- |
+| Human | 派生，不存储：从 Project 创建起算，只有读取水位落库 |
+| 被授予 Project owner 身份的 Member | 由授权操作本身写入，从授权序列号起算——不继承历史积压 |
+| 其他 Member | follow 之前不存在；follow 时从当前末尾起算 |
+
+不 follow Main stream 的 Member 只有 marker，与不 follow 某 Thread 的读者完全一样：mention、回复和点名它的 Activity 仍然到达。follow 不会把它已持有的 marker 重复计数。unfollow 停止普通更新，marker 保持。
+
+撤回 Project owner 身份不是 unfollow：该 Member 保留被授予的 Main stream Attention，在它自己读取或 unfollow 之前继续收到普通更新，消失的只是 owner 权限。离开 Workspace、移除和归档会收回这一行，与 Thread Attention 相同。
+
 Task reminder 只在当前 durable 条件仍成立时参与投递。读取会从 Inbox 和唤醒计划中过滤已失效提醒，但不改写 ledger；具体条件与读取规则见 [model-and-time.zh.md](model-and-time.zh.md)。
 
 ## Mentions

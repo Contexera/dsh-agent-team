@@ -397,6 +397,18 @@ export interface AgentTeamThreadAttentionChangedOperation extends AgentTeamOpera
   }
 }
 
+/** Durable personal Attention follow or unfollow on one Project's Main stream; it revises nothing. */
+export interface AgentTeamMainAttentionChangedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/main-attention-changed'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly action: 'follow' | 'unfollow'
+    readonly memberId: AgentTeamMemberId
+    readonly project: AgentTeamProject
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
 /** Durable content of one Thread read: the watermark advanced to and the Inbox delta consumed. Everything else the read answered with is derived from the projection at read time and on replay. */
 export interface AgentTeamThreadReadReceipt {
   readonly workspaceId: WorkspaceId
@@ -484,6 +496,7 @@ export type AgentTeamOperation =
   | AgentTeamTaskChangedOperation
   | AgentTeamTaskAccountableChangedOperation
   | AgentTeamThreadAttentionChangedOperation
+  | AgentTeamMainAttentionChangedOperation
   | AgentTeamThreadReadOperation
   | AgentTeamReminderRaisedOperation
   | AgentTeamMemberRemovedOperation

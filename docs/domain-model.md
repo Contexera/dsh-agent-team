@@ -42,9 +42,9 @@ From version 2, Project membership also counts owners and every Member ever ment
 
 Behind rules version 2 a Project also has a Main stream: a conversation of its own, outside every Thread. Any Project member may post to it (`team/main-message-posted`). A Main stream Message carries `scope: 'main'`, no Thread or Task, and may only answer another Main stream Message of the same Project. Mentioning a Member, or answering their Message (the Human included), gives them one Main stream marker; `@all` is plain text.
 
-An owner's Main stream unread is what other Members wrote after the owner started and after its read watermark — Messages, owner changes and new discussion Threads — plus its markers; the Human starts at the later of the Project's creation and the version-2 adoption. Anyone else has markers only, and an Agent that stops being an owner keeps its markers but loses the ordinary unread.
+A reader's ordinary Main stream unread comes from its own Main stream Attention — what other Members wrote after that row's read watermark — plus its markers. The Human's row is derived from the Project's creation and never stored; an Agent's is written by its ownership grant, and any other Member's by an explicit follow. Withdrawing ownership keeps the row, so the Member keeps its ordinary unread until it reads or unfollows; leaving the Workspace, removal and archival end it. [Attention and messaging](team-collaboration/attention-and-messaging.md) owns the rows.
 
-A writer holding Main stream unread reads first (`main_unread_required`). `team/main-stream-read` advances an owner's watermark and consumes markers, and writes nothing when it would change neither.
+A writer holding Main stream unread reads first (`main_unread_required`). `team/main-stream-read` advances the reader's own Main stream watermark and consumes markers, and writes nothing when it would change neither.
 
 Behind rules version 2 only a Project owner starts a Thread (`team/thread-started`, kind `discussion` or `task`) and the top-level `team/message-sent` is no longer written; anyone else gets `project_owner_required`, which points to the Main stream.
 

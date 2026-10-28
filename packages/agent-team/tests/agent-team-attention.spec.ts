@@ -15,6 +15,7 @@ import { rulesV1Ledger } from './fixtures/rules-v1-ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import { AgentTeamLedger, agentTeamHumanActor, isThreadReadSnapshot } from '../src/ledger.ts'
 import { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from '../src/index.ts'
+import type { AgentTeamThreadAttentionResult } from '../src/types.ts'
 import { addLedgerMember, alpha, beta, committed, harness, inFlight, ledgerAtBoot, makeOwner, requestId, sqliteHarness, storedPool, withTask } from './helpers/host-harness.ts'
 import type { AgentTeamAgentMember, AgentTeamMemberActor, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadReadData, AgentTeamThreadReadOperation, AgentTeamThreadReadReceipt, AgentTeamThreadReadResult, AgentTeamThreadRef } from '../src/types.ts'
 
@@ -23,6 +24,12 @@ const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
 })
+
+/** One Thread Attention change: a request addressing a `threadRef` or `taskRef` answers with the Thread face, whose result carries the Thread. */
+function threadAttentionOf(result: { readonly value: object }): AgentTeamThreadAttentionResult {
+  if (!('thread' in result.value)) throw new Error('expected a Thread Attention result')
+  return result.value as AgentTeamThreadAttentionResult
+}
 
 
 /**
@@ -845,14 +852,14 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'unfollow', actor: agentTeamHumanActor() })).value
+    const unfollowed = threadAttentionOf(await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'unfollow', actor: agentTeamHumanActor() }))
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: '@human please check this', baseRevision: unfollowed.thread.revision, actor })).value)
     const ordinary = committed((await ledger.reply({ requestId: requestId('ordinary'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: 'Later reply', baseRevision: mentioned.thread.revision, actor })).value)
-    const followed = (await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'follow', actor: agentTeamHumanActor() })).value
+    const followed = threadAttentionOf(await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'follow', actor: agentTeamHumanActor() }))
     const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef,
       actor: agentTeamHumanActor() })).value
     expect(followed.attention).toMatchObject({ readThroughSequence: ordinary.message.sequence })
@@ -1109,12 +1116,12 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor } = await addLedgerMember(ledger, project.project.projectRef)
-    const unfollowed = (await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'unfollow', actor: agentTeamHumanActor() })).value
+    const unfollowed = threadAttentionOf(await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'unfollow', actor: agentTeamHumanActor() }))
     const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef,
       body: '@human please check this', baseRevision: unfollowed.thread.revision, actor })).value)
-    const followed = (await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef,
-      action: 'follow', actor: agentTeamHumanActor() })).value
+    const followed = threadAttentionOf(await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef,
+      action: 'follow', actor: agentTeamHumanActor() }))
     const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef: started.task.taskRef,
       actor: agentTeamHumanActor() })).value
     expect(mentioned.directMarkers).toEqual([expect.objectContaining({ memberId: AGENT_TEAM_HUMAN_MEMBER_ID })])
@@ -1157,7 +1164,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const { actor } = await addLedgerMember(ledger, project.project.projectRef, 'member:reviewer', 'Reviews changes', 'reviewer')
     // Joining takes the watermark to the tail, so the two facts already in the
     // Thread stay behind an Attention period this member has never read through.
-    const joined = (await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })).value
+    const joined = threadAttentionOf(await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor }))
     expect(joined.attention).toMatchObject({ readThroughSequence: history.receipt.sequence })
 
     // The Thread moves on, and this member is answered with the background
@@ -1558,8 +1565,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor, member } = await addLedgerMember(ledger, project.project.projectRef)
-    const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
-    committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: `@${member.handle} check this`, baseRevision: followed.value.thread.revision, actor: agentTeamHumanActor() })).value)
+    const followed = threadAttentionOf(await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor }))
+    committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: `@${member.handle} check this`, baseRevision: followed.thread.revision, actor: agentTeamHumanActor() })).value)
     const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
       const typed = operation as AgentTeamOperation
       if (typed.kind !== 'team/thread-replied') return [id, typed] as [string, unknown]
@@ -1577,8 +1584,8 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     const started = withTask(committed(await test.ctx.agentTeam.startThread({ kind: 'task', requestId: requestId('start'), workspaceId: alpha, projectRef: project.project.projectRef, body: 'Task' })))
     const ledger = ledgerAtBoot(test)
     const { actor, member } = await addLedgerMember(ledger, project.project.projectRef)
-    const followed = await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor })
-    const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: `@${member.handle} check this`, baseRevision: followed.value.thread.revision, actor: agentTeamHumanActor() })).value)
+    const followed = threadAttentionOf(await ledger.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, taskRef: started.task.taskRef, action: 'follow', actor }))
+    const mentioned = committed((await ledger.reply({ requestId: requestId('mention'), workspaceId: alpha, taskRef: started.task.taskRef, body: `@${member.handle} check this`, baseRevision: followed.thread.revision, actor: agentTeamHumanActor() })).value)
     const later = committed((await ledger.reply({ requestId: requestId('later'), workspaceId: alpha, taskRef: started.task.taskRef, body: 'Later update', baseRevision: mentioned.thread.revision, actor: agentTeamHumanActor() })).value)
     // The marker is rewritten to a Message that is real, in the same Thread, with
     // the sequence it carries — everything a linear scan of the ledger's whole

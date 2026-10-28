@@ -463,6 +463,14 @@ const threadAttentionChanged: Op<'team/thread-attention-changed'> = {
   data: { workspaceId: alpha, action: 'follow', memberId: human.memberId, thread: plainThread, inbox: emptyInbox },
 }
 
+const mainAttentionChanged: Op<'team/main-attention-changed'> = {
+  ...opBase('operation:protocol-26', 'request:protocol-main-attention-changed', 26),
+  previousOperationId,
+  kind: 'team/main-attention-changed',
+  data: { workspaceId: alpha, action: 'follow', memberId: human.memberId, project: fixtureProject,
+    inbox: { ...emptyInbox, mainAttention: { set: [], removed: [] } } },
+}
+
 /** The receipt form every current read writes: the record's current shape. */
 const threadReadReceipt: AgentTeamThreadReadReceipt = {
   workspaceId: alpha,
@@ -1247,6 +1255,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
           threadRef: threadAttentionChanged.data.thread.threadRef,
           action: threadAttentionChanged.data.action,
         })
+        if (!('thread' in out.value)) throw new Error('expected a Thread Attention result')
         expect(out.value.thread.threadRef, 'the attention mapper answers with the stored Thread').toBe(humanThread)
         return out
       },
@@ -1255,6 +1264,33 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
         actor: human,
         workspaceId: threadAttentionChanged.data.workspaceId,
         threadRef: threadAttentionChanged.data.thread.threadRef,
+        action: 'unfollow',
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/main-attention-changed': {
+    stored: mainAttentionChanged,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.changeAttention({
+          requestId: mainAttentionChanged.requestId,
+          actor: human,
+          workspaceId: mainAttentionChanged.data.workspaceId,
+          projectRef: mainAttentionChanged.data.project.projectRef,
+          action: mainAttentionChanged.data.action,
+        })
+        if (!('project' in out.value)) throw new Error('expected a Main stream Attention result')
+        expect(out.value.project.projectRef, 'the attention mapper answers with the stored Project').toBe(projectRef)
+        return out
+      },
+      changed: () => ledger.changeAttention({
+        requestId: mainAttentionChanged.requestId,
+        actor: human,
+        workspaceId: mainAttentionChanged.data.workspaceId,
+        projectRef: mainAttentionChanged.data.project.projectRef,
         action: 'unfollow',
       }),
     },

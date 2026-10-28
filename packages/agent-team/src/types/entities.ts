@@ -325,6 +325,26 @@ export interface AgentTeamThreadAttentionKey {
   readonly threadRef: AgentTeamThreadRef
 }
 
+/**
+ * A Member's current attention period for one Project's Main stream. It is the
+ * Main stream's own row, keyed by Member × Project rather than a Thread ref:
+ * the Main stream is a conversation of its own outside every Thread, so giving
+ * it a synthetic Thread ref would put it in the Thread indexes. Absence means
+ * the Main stream's ordinary updates never reach this Member, whoever it is.
+ */
+export interface AgentTeamMainAttention {
+  readonly memberId: AgentTeamMemberId
+  readonly projectRef: AgentTeamProjectRef
+  readonly startSequence: number
+  readonly readThroughSequence: number
+}
+
+/** Identity of one Member × Project Main stream attention period. */
+export interface AgentTeamMainAttentionKey {
+  readonly memberId: AgentTeamMemberId
+  readonly projectRef: AgentTeamProjectRef
+}
+
 /** Sparse direct-priority marker for one structured Message mention. */
 export interface AgentTeamDirectMarker {
   readonly memberId: AgentTeamMemberId
@@ -421,6 +441,13 @@ export interface AgentTeamInboxDelta {
   readonly mainMarkers?: {
     readonly added: readonly AgentTeamMainMarker[]
     readonly removed: readonly AgentTeamMainMarker[]
+  }
+  /** Present only when it changes something, so every delta written before Main stream Attention existed keeps its stored bytes. */
+  readonly mainAttention?: {
+    /** New or replacement current Main stream Attention records. */
+    readonly set: readonly AgentTeamMainAttention[]
+    /** Main stream Attention periods ended by this operation. */
+    readonly removed: readonly AgentTeamMainAttentionKey[]
   }
 }
 

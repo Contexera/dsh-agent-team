@@ -226,6 +226,18 @@ const mainMarkerSchema = z.union([
   z.object({ memberId: memberIdSchema, projectRef: projectRefSchema, activityRef: activityRefSchema, sequence: z.number().int().positive() }).strict(),
 ])
 
+const mainAttentionSchema = z.object({
+  memberId: memberIdSchema,
+  projectRef: projectRefSchema,
+  startSequence: z.number().int().positive(),
+  readThroughSequence: z.number().int().nonnegative(),
+}).strict()
+
+const mainAttentionKeySchema = z.object({
+  memberId: memberIdSchema,
+  projectRef: projectRefSchema,
+}).strict()
+
 const inboxDeltaSchema = z.object({
   attention: z.object({
     set: z.array(attentionSchema),
@@ -246,6 +258,10 @@ const inboxDeltaSchema = z.object({
   mainMarkers: z.object({
     added: z.array(mainMarkerSchema),
     removed: z.array(mainMarkerSchema),
+  }).strict().optional(),
+  mainAttention: z.object({
+    set: z.array(mainAttentionSchema),
+    removed: z.array(mainAttentionKeySchema),
   }).strict().optional(),
 }).strict()
 
@@ -657,6 +673,18 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       memberId: memberIdSchema,
       task: taskSchema.optional(),
       thread: threadSchema,
+      inbox: inboxDeltaSchema,
+    }).strict().transform(omitUndefined),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/main-attention-changed'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      action: z.union([z.literal('follow'), z.literal('unfollow')]),
+      memberId: memberIdSchema,
+      project: projectSchema,
       inbox: inboxDeltaSchema,
     }).strict().transform(omitUndefined),
   }).strict(),

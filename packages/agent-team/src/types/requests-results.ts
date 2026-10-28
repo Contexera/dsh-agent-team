@@ -27,6 +27,7 @@ import type {
   AgentTeamTaskRef,
   AgentTeamThread,
   AgentTeamThreadAttention,
+  AgentTeamMainAttention,
   AgentTeamThreadAttentionKey,
   AgentTeamThreadFact,
   AgentTeamThreadReadFact,
@@ -483,8 +484,8 @@ export type AgentTeamMainTimelineEntry =
 
 /** The reader's own Main stream standing in one Project. */
 export interface AgentTeamMainStreamStanding {
-  /** Owners (the Human always) have ordinary unread; everyone else only has markers. */
-  readonly owner: boolean
+  /** Whether this reader's own Attention covers the Main stream; without it the ordinary updates never reach them. */
+  readonly following: boolean
   /** Newest sequence the Main stream holds (0 when empty): what a read can pass as `readThroughSequence`. */
   readonly head: number
   readonly unreadCount: number
@@ -677,6 +678,8 @@ export interface AgentTeamThreadAttentionRequest {
   readonly workspaceId: WorkspaceId
   readonly threadRef?: AgentTeamThreadRef
   readonly taskRef?: AgentTeamTaskRef
+  /** Addresses one Project's Main stream instead of a Thread: give this or threadRef, never both. */
+  readonly projectRef?: AgentTeamProjectRef
   readonly action: 'follow' | 'unfollow'
 }
 
@@ -705,6 +708,20 @@ export interface AgentTeamThreadAttentionStatus {
   readonly task?: AgentTeamTask
   readonly thread: AgentTeamThread
   readonly attention?: AgentTeamThreadAttention
+}
+
+/** Following or unfollowing one Project's Main stream answers with the Project and the row now standing. */
+export interface AgentTeamMainAttentionResult {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly project: AgentTeamProject
+  /** Present after follow, absent after unfollow. */
+  readonly attention?: AgentTeamMainAttention
+}
+
+/** One Member's Main stream Attention standing on one Project, as a status query answers it. */
+export interface AgentTeamMainAttentionStatus {
+  readonly project: AgentTeamProject
+  readonly attention?: AgentTeamMainAttention
 }
 
 /** Direction Claim mutation. `baseRevision` fences every non-list public mutation. */
