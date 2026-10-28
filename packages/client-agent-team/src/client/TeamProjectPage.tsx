@@ -114,6 +114,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const tabIdPrefix = useId()
   const mainTabRef = useRef<HTMLButtonElement>(null)
   const boardTabRef = useRef<HTMLButtonElement>(null)
+  const boardPanelRef = useRef<HTMLElement>(null)
   // Enter and Space need no branch: the button's own activation fires click.
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
     const order: readonly { readonly value: 'main' | 'board'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
@@ -200,11 +201,25 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const handlePanelPromoted = useCallback((taskRef: AgentTeamTaskRef): void => {
     if (discussionRef !== undefined) selectThread(discussionRef, projectRef, taskRef, taskNumberOf(taskRef), { preserveDiscussion: false })
   }, [discussionRef, projectRef, selectThread, taskNumberOf])
-  // The board is the Task's home and the Task just started is its newest card; refresh so it is there before the Human looks.
-  const handleTaskStarted = (): void => {
+  // The composer the reader typed in unmounts with the switch to the board, so focus must land somewhere: the Task's own
+  // new card (Enter opens it), taking the same `.boardCard:focus-visible` ring every card takes — no second focus language.
+  // A start with no ref, or a board that never produces the card, falls back to the tab so focus is never dropped.
+  const focusSettledTaskCard = (taskRef: AgentTeamTaskRef | undefined): void => {
+    void refresh().then(() => {
+      let attempts = 0
+      const land = (): void => {
+        const card = taskRef === undefined ? null : boardPanelRef.current?.querySelector<HTMLButtonElement>(`[data-team-task-ref="${taskRef}"]`)
+        if (card !== null && card !== undefined) { card.focus(); return }
+        // The refreshed board is a fresh React value; it is committed within a frame or two of refresh resolving.
+        if (attempts++ < 12) { requestAnimationFrame(land); return }
+        boardTabRef.current?.focus()
+      }
+      requestAnimationFrame(land)
+    })
+  }
+  const handleTaskStarted = (taskRef: AgentTeamTaskRef | undefined): void => {
     setTab('board')
-    void refresh()
-    requestAnimationFrame(() => { boardTabRef.current?.focus() })
+    focusSettledTaskCard(taskRef)
   }
   const handlePanelClose = useCallback((): void => { closeDiscussion() }, [closeDiscussion])
   // The Host caps the finished column per Project; expanding asks for the whole set once,
@@ -349,7 +364,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       </nav>
     </div>
 
-    {tab === 'board' && <section id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
+    {tab === 'board' && <section ref={boardPanelRef} id={`${tabIdPrefix}-board-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-board`} className={projectCss.board}>
       {loadError !== undefined && <p className={css.error} role="alert">{loadError}</p>}
       {loadError === undefined && taskBoard === undefined && <div className={css.emptySurface}><p className={css.loadingState}><span className={css.loadingMark} aria-hidden="true" />{t('boardLoading')}</p></div>}
       {loadError === undefined && taskBoard !== undefined && boardColumns.every(column => column.items.length === 0) && <div className={css.emptySurface}><p className={css.emptyState}>{t('boardEmpty')}</p></div>}
@@ -476,6 +491,7 @@ function ProjectionBoardCard({ item, unread, human, humanMemberId, t, onOpen }: 
   return <button
     type="button"
     className={projectCss.boardCard}
+    data-team-task-ref={task.taskRef}
     {...(resolved ? { 'data-resolved': '' } : {})}
     aria-label={`${unread > 0 ? t('openTaskUnread', { number: taskNumber, count: unread }) : t('openTask', { number: taskNumber })}${item.needsAcceptance ? ` · ${t('boardNeedsAcceptance')}` : ''}`}
     onClick={onOpen}

@@ -140,6 +140,8 @@ A card splits the two people roles by their count. The accountable owner stays t
 
 A `待你验收` badge rides the cards the reader may accept.
 
+A Task started from the composer switches the Project to the board, and the keyboard focus lands on that Task's own new card rather than the `看板` tab. The composer unmounts with the switch, so focus has to move somewhere; the card the reader just created is that place, and Enter on it opens the Task. A pointer-driven send focuses the card without a visible ring, and the landing takes the same `:focus-visible` ring every board card draws — the tab is not rung.
+
 The same card family serves the one cross-Workspace board (`TeamTaskBoardPage`, reached from the sidebar's 任务看板 entry — see [sidebar-browser.md](sidebar-browser.md)): three open-status columns over every visible Workspace, each card prefixed with its Project name. It answers to the same empty rule — the empty message stands alone, no column heads beside it — and carries no unread badges, which stay per-Thread facts on the Project face.
 
 The first tab is `主对话`, the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. The second tab is the Task board; there is no version-1 feed.

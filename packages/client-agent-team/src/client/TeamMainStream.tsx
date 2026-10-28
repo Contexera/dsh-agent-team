@@ -49,8 +49,8 @@ interface TeamMainStreamProps {
   readonly openMemberSession: TeamConversationProps['openMemberSession']
   readonly onOpenDiscussion: (threadRef: AgentTeamThreadRef) => void
   readonly onOpenTask: (threadRef: AgentTeamThreadRef, taskRef: AgentTeamTaskRef, taskNumber: number) => void
-  /** A committed Task start: the board is where it lands. */
-  readonly onTaskStarted: () => void
+  /** A committed Task start: the board is where it lands, and the Task's own card is the landing target. */
+  readonly onTaskStarted: (taskRef: AgentTeamTaskRef | undefined) => void
   readonly t: TeamConversationProps['t']
 }
 
@@ -163,7 +163,7 @@ export function TeamMainStream({
         drafts.clear(draftKey)
         setPendingFiles([])
         timeline.scrollToBottom()
-        if (startedTask) onTaskStarted()
+        if (startedTask) onTaskStarted('task' in result.value ? result.value.task?.taskRef : undefined)
       } else {
         // The draft stays; a resend after reading is a new operation.
         pendingSendId.current = undefined
