@@ -17,7 +17,64 @@
 
 未结束的工作项位于 `active/<work>/`（Git 忽略，不随仓库分发），本索引不列其中的本地条目；工作项结束时移入 `archive/YYYY-MM/`，其 README 会被追加到下面的已归档清单。
 
-已归档：[Team 工具 × 新模型（gpt-6.1-sol）系统评测](archive/2026-10/team-tools-model-eval/README.md)（2026-10-28 归档：Task #4 已被 Human accept——两层评测 harness（离线语料 824 份 session log / 7,239 次 team 调用 / 159 种参数形状，按轮次归因 gpt-6.1-sol 78 次 / 49 次非 ok；活模型 144 次调用）坐实「把事实序号当 ref」一族并修复 `a03c0a0`（readMessage 报错补指路，归档时未推送）；10-27 三修零复发、10-28 该模型全绿。harness 随归档进 Git 并按新深度重跑验证，Human 的真实环境回归清单留在该 README）、[Project 与具名 Owner](archive/2026-10/project-ownership-model/README.md)（2026-10-28 归档：01–09 全部交付——读懂 Project 写法的发布、全仓 Channel → Project 改名、规则版本 2、owner 与 member 派生、Main stream 与开 Thread 权限、按责任投递与 Inbox、Host Task board 投影、Task 负责人与验收限制、事件评估的待验收与停滞提醒；真实账本全量重放通过。dev profile 试用复盘与 Attention 模型后续调整转交 `attention-delivery-model`）、[Channel 页面分流重设计](archive/2026-10/channel-page-redesign/README.md)（2026-10-28 归档：页签式看板入口、已完成 Task 瘦成脚注、无 Task 讨论的右面板三项合入 master；看板的数据源与归属判定为 Task 的独立视图，由 project-ownership-model 的 Host Task board 投影交付；B-4 的 read/drain 抽取未做，不再跟踪）、[Team Member 工具面控制权](archive/2026-10/member-tool-surface-control/README.md)（2026-10-23 归档：默认按 preset 限制工具，过滤其他插件注入的未声明工具并拦截执行；prompt 不过滤，公开接口不支持完整提示隔离；用户接受该边界，上游改造和完整共存不在本轮范围）、[自动压缩迁移收尾](archive/2026-10/auto-compaction-migration/README.md)（2026-10-21 归档：直接使用 DSH 默认压缩引擎与默认模板，删除 Team 摘要副本、无消费者状态与旧写入口；唤醒换代用 maintenance 与 ledger 输入边界保住提交期间输入，退役后从原始日志恢复；保留旧日志解码与必要恢复。1056 passed + 1 skipped，typecheck、lint、docs、browser 5 passed、build、artifact 通过；真实模型摘要质量与成本未测）、[全量注释审查](archive/2026-10/comment-audit/README.md)（2026-10-19 归档：删 1145 行复述代码的注释；A 档 12 条缺陷、B 档 80 行改名与抽函数、C 档 6 条公开类型收窄全部落地；C 档 4 条经复核跳过，`tools.allow` 保留。合入 master `23385f99`）、[Thread 的引用与 mention 语义](archive/2026-10/thread-quoting-and-mentions/README.md)（2026-10-10 归档：消息行 hover 的层次与时间座位、右侧动作卡（复制 / 引用）、「提到了你」、打开 Thread 命中第一条未读点名消息、引用可直接送达发出者；读侧引用与 Host 侧 `replyToMessageRef` 一并落地，回合分隔线最终不带时刻。durable 结论见 `docs/frontend-design/thread-and-composer.md` 等双语对与 CHANGELOG）、[Issue #43 逐条复现与判定](archive/2026-10/issue-43-triage/README.md)（2026-10-10 归档：10 条 + 2 条附注逐条复现，5 条成立、2 条部分成立、3 条不成立；按批准的工单实施 02/03/05/06/07，01 关闭，04 取做法 A。对外回复草稿见该归档的 `reply.md`）、[状态机、数据请求与诊断日志](archive/2026-10/state-requests-diagnostics/README.md)（task:60eadddc #113，2026-10-09 归档：6 票全部完成——成员执行隔离、共享读取与过期响应保护、有界投影、通知与恢复追踪、规模与故障整体验收）、[Context 管理：三个动作与一个状态面](archive/2026-10/context-relevant-turn-reduction/README.md)（task:1e3b9e0f #45 → 实现 #6，2026-10-04 归档）、[质量改进审计](archive/2026-10/quality-improvement/README.md)（task:e33c4efd #105，2026-10-01 归档）、[0.1.7 UI 设计语言再基线](archive/2026-09/ui-parity-0.1.7/README.md)（task:d3ec167b，2026-09-24 归档）、[Member Session 架构](archive/2026-09/member-session-architecture/README.md)、[Context continuity](archive/2026-09/context-continuity/README.md)。
+## 已归档工作项
+
+| 月 | 工作项 | 一句话结论 | 链接 |
+| --- | --- | --- | --- |
+| 2026-08 | agent-team-quality-audit | 只读简化与可维护性审查；发现已实施或记为保留/延后，政策结论进架构与开发文档。 | [README](archive/2026-08/agent-team-quality-audit/README.md) |
+| 2026-08 | agent-team-storage-architecture | 设计操作账本持久化（v7→v8 事故后），0.1.0 发布 01+02，03/04/05 延后。 | [README](archive/2026-08/agent-team-storage-architecture/README.md) |
+| 2026-08 | community-outreach | 社区外联操作；发布节奏与产品链接归 root README 与开发文档。 | [README](archive/2026-08/community-outreach/README.md) |
+| 2026-08 | m1 | 首版 Agent Team（M1）的领域设计、实施票与机制验证快照。 | [README](archive/2026-08/m1/README.md) |
+| 2026-08 | m2-ui | 第一版 Team mode UI（M2 第一阶段）的闭环设计快照与实施记录。 | [README](archive/2026-08/m2-ui/README.md) |
+| 2026-08 | member-compaction-diagnosis | Member 自动压缩 unavailable 复发诊断；修复 2aa5130 经日常使用验收。 | [README](archive/2026-08/member-compaction-diagnosis/README.md) |
+| 2026-08 | readme-positioning | README value-first 定位落地到中英 README 与 package.json（0.1.0）。 | [README](archive/2026-08/readme-positioning/README.md) |
+| 2026-08 | session-log-repair | 会话日志 seq 撞号损坏的诊断与修复工具；损坏日志全部修复并验证。 | [README](archive/2026-08/session-log-repair/README.md) |
+| 2026-08 | team-client-ui-round2 | Client UI 第二轮：消息时间戳、排版统一、任务卡重设计。 | [README](archive/2026-08/team-client-ui-round2/README.md) |
+| 2026-08 | team-client-ui-round3 | Client UI 第三轮：messageRun、mention chip、排版刻度和五态状态点。 | [README](archive/2026-08/team-client-ui-round3/README.md) |
+| 2026-08 | team-conversation-page-design | Channel/Thread 顶层页面设计优化（header 减负、返回路径等）。 | [README](archive/2026-08/team-conversation-page-design/README.md) |
+| 2026-08 | team-sidebar-sections | 侧栏分区化：工作区列表加「频道」「Agents」两个分区替代双 tab。 | [README](archive/2026-08/team-sidebar-sections/README.md) |
+| 2026-08 | team-ui-loading-investigation | Team UI loading 调查：按 scope 唤醒、增量投影、共享 long-poll 等性能修复。 | [README](archive/2026-08/team-ui-loading-investigation/README.md) |
+| 2026-08 | thermo-round2-cleanup | 第二轮质量清理（thermo）：hygiene sweep 加 Host/Client 审查，六提交合入。 | [README](archive/2026-08/thermo-round2-cleanup/README.md) |
+| 2026-08 | thread-inbox | Thread Attention、durable Inbox、五工具与 Member context 的初版方案与实施票。 | [README](archive/2026-08/thread-inbox/README.md) |
+| 2026-08 | ui-redesign | Client presentation 的 native-feel 重做，不动 Host/ledger/Remote。 | [README](archive/2026-08/ui-redesign/README.md) |
+| 2026-09 | agent-team-architecture | 文件与包结构审计；交付为 Client panel 去中间层、纠正「三包独立」错误表述。 | [README](archive/2026-09/agent-team-architecture/README.md) |
+| 2026-09 | agent-team-simplification-audit | 全仓简化审查（机械→消融→语义）加消融仪器；8 月审计裁决逐条复核维持。 | [README](archive/2026-09/agent-team-simplification-audit/README.md) |
+| 2026-09 | claim-panel-ux | Claim 面板与 Thread/Channel 顶层栏走查；真因是顶栏过高，压高度并给分区留距。 | [README](archive/2026-09/claim-panel-ux/README.md) |
+| 2026-09 | context-continuity | Context 引擎抽为独立插件并接入；检索阶梯经 Human 决定撤回，Team 只发八工具。 | [README](archive/2026-09/context-continuity/README.md) |
+| 2026-09 | context-self-management | Context 自管理（rollover/checkpoint/fold/压力）四票完成并验收。 | [README](archive/2026-09/context-self-management/README.md) |
+| 2026-09 | dsh-0.1.5-rc.1-compatibility | DSH 0.1.5-rc.1 差异评估与认证：peer 移到 `>=0.1.5-rc.1 <0.2.0`，七处断裂适配。 | [README](archive/2026-09/dsh-0.1.5-rc.1-compatibility/README.md) |
+| 2026-09 | dsh-adaptation-playbook | DSH 版本适配 playbook（扫描→认证→评审→合并→发布），供下次发版复用。 | [README](archive/2026-09/dsh-adaptation-playbook/README.md) |
+| 2026-09 | global-agent-architecture | 全局 Agent Member：拆开身份与参与集合，Workspace 是地址不是位置（PR #26）。 | [README](archive/2026-09/global-agent-architecture/README.md) |
+| 2026-09 | host-file-split | Host 大文件拆分：index/types 瘦身加 MemberRuntime 提取，零测试改动。 | [README](archive/2026-09/host-file-split/README.md) |
+| 2026-09 | human-mention-inbox | Human「提到我」Inbox 与 mention prompt（PR #20 加跨 Workspace 全局降序）。 | [README](archive/2026-09/human-mention-inbox/README.md) |
+| 2026-09 | human-profile-settings | Human 可配置项（avatar/name/版本脚注）接口落地，UI 交 Iris。 | [README](archive/2026-09/human-profile-settings/README.md) |
+| 2026-09 | inbox-model | Inbox 模型统一：human/agent 同一套订阅与投递，改造「提到我」为收件箱。 | [README](archive/2026-09/inbox-model/README.md) |
+| 2026-09 | member-memory-dir-drift | Member 私有目录 colon/拼写漂移修复（issue #7），真实数据回收孪生目录。 | [README](archive/2026-09/member-memory-dir-drift/README.md) |
+| 2026-09 | member-runtime-architecture | Member Runtime Phase 1：持久 capabilities、tools/skills 双接缝、九人技能装配。 | [README](archive/2026-09/member-runtime-architecture/README.md) |
+| 2026-09 | member-session-architecture | Member Session：统一读取 seam、历史召回与安全回返的设计与 ticket 03–05。 | [README](archive/2026-09/member-session-architecture/README.md) |
+| 2026-09 | member-time-awareness | Member 时间感知：固定 UTC+8 formatter、per-step 时钟快照、事实携带事件时刻。 | [README](archive/2026-09/member-time-awareness/README.md) |
+| 2026-09 | multi-web-support | 多 Web 页面支持第一阶段：Host changes/Client 改流式 Remote，多页面可并发（PR #25）。 | [README](archive/2026-09/multi-web-support/README.md) |
+| 2026-09 | polish-0.1.11 | 0.1.11 打磨简化审计：A 桶 01–07 与 B 桶 5 条实施，3 条裁定保留。 | [README](archive/2026-09/polish-0.1.11/README.md) |
+| 2026-09 | progress-nudge | 进度可见性 nudge：无 claim/message 时按 tool_call 阈值注入提示。 | [README](archive/2026-09/progress-nudge/README.md) |
+| 2026-09 | render-ia | Team tools 渲染信息架构：team_view/thread/message 的呈现契约与 render 测试。 | [README](archive/2026-09/render-ia/README.md) |
+| 2026-09 | session-fold-incremental | Session fold 增量（team-perf 07 续作）：增量折叠替代逐事件，Vera 验收 bf4c172。 | [README](archive/2026-09/session-fold-incremental/README.md) |
+| 2026-09 | session-trace-analysis | Session trace context 分析；产出 scripts/session-trace.ts 离线评测工具。 | [README](archive/2026-09/session-trace-analysis/README.md) |
+| 2026-09 | team-perf | Team 性能 01–06：削减账本 replay、读与 Thread 渲染成本，07 另立。 | [README](archive/2026-09/team-perf/README.md) |
+| 2026-09 | ui-parity-0.1.7 | 0.1.7 UI 设计语言再基线：重锚 audit needles、B 类可读性与半径分档。 | [README](archive/2026-09/ui-parity-0.1.7/README.md) |
+| 2026-09 | windows-e2e-validation | Windows 原生 e2e 排查：#7 回归与 Windows 路径语义，F1–F11 归因并修复 F11。 | [README](archive/2026-09/windows-e2e-validation/README.md) |
+| 2026-10 | auto-compaction-migration | 自动压缩迁移：改用 DSH 默认压缩引擎与模板，删 Team 摘要副本与旧写入口。 | [README](archive/2026-10/auto-compaction-migration/README.md) |
+| 2026-10 | channel-page-redesign | Channel 页面分流重设计：切片 1–3 合入，看板归属由 project-ownership-model 取代。 | [README](archive/2026-10/channel-page-redesign/README.md) |
+| 2026-10 | comment-audit | 全量注释审查：删 1145 行复述代码的注释，A/B/C 档处理。 | [README](archive/2026-10/comment-audit/README.md) |
+| 2026-10 | context-relevant-turn-reduction | Context 管理三动作（压缩/换代/回退）与状态面；机制落 continuity，本仓零机制代码。 | [README](archive/2026-10/context-relevant-turn-reduction/README.md) |
+| 2026-10 | inbox-write-gate-redesign | Inbox 写入门重设计：两票落地、Reeve 通过、human 定规矩，结论进 boundaries。 | [README](archive/2026-10/inbox-write-gate-redesign/README.md) |
+| 2026-10 | issue-43-triage | Issue #43 逐条复现判定：10+2 条中 5 成立/2 部分/3 不成立，按批准工单实施。 | [README](archive/2026-10/issue-43-triage/README.md) |
+| 2026-10 | member-channel-participation-redesign | Member 参与 Channel 逻辑重设计：五票落码（放宽/复用/删管理面），待 Reeve 统一验收。 | [README](archive/2026-10/member-channel-participation-redesign/README.md) |
+| 2026-10 | member-tool-surface-control | Member 工具面控制权：按 preset 限工具并拦截未声明工具；不隔离 prompt（用户接受边界）。 | [README](archive/2026-10/member-tool-surface-control/README.md) |
+| 2026-10 | project-ownership-model | Project 与具名 Owner：参与派生改责任派生、规则版本 2、Task board 投影等 01–09。 | [README](archive/2026-10/project-ownership-model/README.md) |
+| 2026-10 | quality-improvement | 质量改进：研究收敛为 spec 加七张依赖排序票（context 续期、lifecycle、附件幂等）。 | [README](archive/2026-10/quality-improvement/README.md) |
+| 2026-10 | state-requests-diagnostics | 状态机/数据请求/诊断日志 6 票完成：成员隔离、共享读取、有界投影、规模与故障验收。 | [README](archive/2026-10/state-requests-diagnostics/README.md) |
+| 2026-10 | team-tools-model-eval | Team 工具 × gpt-6.1-sol 系统评测：两层 harness 加语料加修复 a03c0a0，Task #4 accept。 | [README](archive/2026-10/team-tools-model-eval/README.md) |
+| 2026-10 | thread-quoting-and-mentions | Thread 引用与 mention 语义：读侧引用、「提到了你」、开 Thread 落点、引用送达作者。 | [README](archive/2026-10/thread-quoting-and-mentions/README.md) |
 
 ## 临时材料和 UI 证据
 
