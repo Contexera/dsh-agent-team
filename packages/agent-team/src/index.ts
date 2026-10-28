@@ -223,6 +223,13 @@ type NotificationCause =
 interface InboxNoticeDelivery {
   readonly covered: string
   readonly attempt: number
+  /**
+   * Threads whose facts the last notice could not render — the section cap or
+   * the character budget dropped them. They keep their facts out of the next
+   * signature, so an unchanged rederivation retries them rather than treating
+   * them as delivered by a notice that never named them.
+   */
+  readonly undelivered: readonly AgentTeamThreadRef[]
 }
 
 function sameChangeScope(left: AgentTeamChangeScope, right: AgentTeamChangeScope): boolean {
@@ -2704,7 +2711,7 @@ export default class AgentTeam extends TypertRemoteService {
   private inboxDeliveryPlan(notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
     main: ReturnType<AgentTeamLedger['mainNotificationFacts']>, previous?: InboxNoticeDelivery): InboxDeliveryPlan {
     return planInboxDelivery({ threads: notifications, main: main.map(({ project, entries }) => ({ projectRef: project.projectRef, entries })),
-      covered: previous?.covered })
+      covered: previous?.covered, undelivered: previous?.undelivered })
   }
 
   private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): string {
@@ -2807,7 +2814,7 @@ export default class AgentTeam extends TypertRemoteService {
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY },
     })
     this.trackTeamWake(agent, hint)
-    const attempt = this.beginInboxDelivery(member.memberId, plan)
+    const attempt = this.beginInboxDelivery(member.memberId, plan, notice.undelivered)
     try {
       // Steer normally claims the nearest step boundary — which would
       // preempt carried input that a swap or crash recovery queued as
@@ -2906,7 +2913,7 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): { readonly text: string; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef> } {
+  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): { readonly text: string; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
     const maxCharacters = 32 * 1024
     const sections: string[] = [TEAM_INBOX_NOTICE_SUMMARY]
     let characterCount = sections[0]!.length
@@ -2923,7 +2930,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const plan = readerId === undefined ? undefined : this.inboxDeliveryPlan(notifications, main)
     const rendered = new Set<AgentTeamThreadRef>()
-    const roleText = { owner: 'owner of this Project', follower: 'follower of this Thread', member: 'Project member named here' } as const
+    const roleText = { follower: 'follower of this Thread', member: 'Project member named here' } as const
     for (const { item, facts, reminders } of notifications.slice(0, 8)) {
       const scoped = plan?.threads.find(thread => thread.threadRef === item.thread.threadRef)
       const scopeText = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef} (Thread ${item.thread.threadRef})`
@@ -2985,7 +2992,11 @@ export default class AgentTeam extends TypertRemoteService {
     if (omitted) sections.push('More unread work remains in team_inbox; the automatic context is bounded.')
     if (notifications.length > 0) sections.push('Use team_thread read with the relevant workspace and threadRef before acting or replying. Use team_inbox only when you need to triage the remaining Threads.')
     if (main.length > 0) sections.push('Use team_thread read with the relevant workspace and projectRef to read the Project Main stream before answering there.')
-    return { text: sections.join('\n\n'), renderedThreads: rendered }
+    // The Threads this notice named nothing of, because the section cap or the
+    // character budget dropped them. Their facts were never delivered, so the
+    // next plan must keep them out of `covered`.
+    const undelivered = notifications.map(({ item }) => item.thread.threadRef).filter(threadRef => !rendered.has(threadRef))
+    return { text: sections.join('\n\n'), renderedThreads: rendered, undelivered }
   }
 
   private mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: AgentTeamProject): string {
@@ -3082,13 +3093,16 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Record that the queued notice now answers these facts, keeping the attempt count. */
   private coverInboxFacts(memberId: AgentTeamMemberId, plan: InboxDeliveryPlan): void {
-    this.inboxNoticeDeliveries.set(memberId, { covered: plan.signature, attempt: this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0 })
+    this.inboxNoticeDeliveries.set(memberId, { covered: plan.delivered, attempt: this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0,
+      undelivered: this.inboxNoticeDeliveries.get(memberId)?.undelivered ?? [] })
   }
 
   /** Spend one delivery attempt and mark the facts it covers; the count rises first so a failed wake still reports the attempt it spent. */
-  private beginInboxDelivery(memberId: AgentTeamMemberId, plan: InboxDeliveryPlan): number {
+  private beginInboxDelivery(memberId: AgentTeamMemberId, plan: InboxDeliveryPlan, undelivered: readonly AgentTeamThreadRef[]): number {
     const attempt = (this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0) + 1
-    this.inboxNoticeDeliveries.set(memberId, { covered: plan.signature, attempt })
+    // `delivered` is what this notice actually answered, so an unchanged
+    // rederivation of the same facts stands down; `signature` is only for the log.
+    this.inboxNoticeDeliveries.set(memberId, { covered: plan.delivered, attempt, undelivered })
     return attempt
   }
 
@@ -3098,7 +3112,7 @@ export default class AgentTeam extends TypertRemoteService {
   private dropInboxCoverage(memberId: AgentTeamMemberId): void {
     const delivery = this.inboxNoticeDeliveries.get(memberId)
     if (delivery !== undefined) {
-      this.inboxNoticeDeliveries.set(memberId, { covered: '', attempt: delivery.attempt })
+      this.inboxNoticeDeliveries.set(memberId, { covered: '', attempt: delivery.attempt, undelivered: delivery.undelivered })
     }
   }
 

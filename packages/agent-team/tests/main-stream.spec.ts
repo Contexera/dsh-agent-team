@@ -398,6 +398,32 @@ describe('Main stream Attention', () => {
       workspaceId: alpha, projectRef: team.projectRef, action: 'unfollow' })).rejects.toThrow(/already unfollowed/)
   })
 
+  it('refuses a Main stream unfollow from the Human, whose Attention follows from owning the Project', async () => {
+    const team = await seed()
+    // The Human's row is derived rather than stored, so it cannot end: recording
+    // the unfollow would answer as though the row was gone while every later
+    // read still finds it, and a second unfollow would commit again.
+    await expect(team.ledger.changeAttention({ requestId: requestId('human-unfollow'), actor: human,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'unfollow' })).rejects.toThrow(/cannot be unfollowed/)
+    await expect(team.ledger.changeAttention({ requestId: requestId('human-unfollow-again'), actor: human,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'unfollow' })).rejects.toThrow(/cannot be unfollowed/)
+    expect(page(team, human).standing).toMatchObject({ following: true })
+  })
+
+  it('refuses one request addressing both the Main stream and a Thread', async () => {
+    const team = await seed()
+    const started = await start(team, human, 'discussion', 'a question')
+    if (started.value.kind !== 'committed') throw new Error('start did not commit')
+    // The same shape must not mean two different scopes depending on whether the
+    // request was committed before, so the Remote refuses what the tool refuses.
+    await expect(team.ledger.changeAttention({ requestId: requestId('both-scopes'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, threadRef: started.value.thread.threadRef, action: 'follow' }))
+      .rejects.toThrow(/never both/)
+    await expect(team.ledger.changeAttention({ requestId: requestId('both-scopes-task'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, threadRef: started.value.thread.threadRef, action: 'unfollow' }))
+      .rejects.toThrow(/never both/)
+  })
+
   it('replays every Main stream Attention change and read through a cold ledger', async () => {
     const team = await seed()
     await post(team, human, 'one')
@@ -417,6 +443,72 @@ describe('Main stream Attention', () => {
       .toMatchObject({ following: false, unreadCount: 0 })
     expect(cold.mainStreamHistory(team.owner.actor, { workspaceId: alpha, projectRef: team.projectRef }).standing)
       .toMatchObject({ following: true })
+  })
+
+  it('wakes the followers a Main stream commit reaches, and only those', async () => {
+    const team = await seed()
+    // A Member that never joined the Project holds no Main stream Attention, so
+    // it is not on the wake list even though it is in the Workspace.
+    await team.ledger.changeAttention({ requestId: requestId('follow-main'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    const wakeOf = async (kind: string) => {
+      const records: AgentTeamOperation[] = []
+      for await (const [, operation] of await team.table.entries()) records.push(operation as AgentTeamOperation)
+      const found = records.filter(operation => operation.kind === kind)
+      return team.ledger.affectedMembersOf(found.at(-1)!)
+    }
+
+    // The Human posts: both Main stream Attention holders are woken. The Human
+    // is the sender, so it does not wake itself for its own post.
+    await post(team, human, 'ordinary')
+    expect(await wakeOf('team/main-message-posted')).toEqual([team.owner.memberId, team.writer.memberId])
+
+    // The follower posts: the Human owner's row is derived, and it is woken.
+    await readMain(team, team.writer.actor)
+    await post(team, team.writer.actor, 'answer')
+    expect(await wakeOf('team/main-message-posted')).toContain(AGENT_TEAM_HUMAN_MEMBER_ID)
+
+    // A new discussion reaches the same set: it is ordinary Main stream work.
+    // Only an owner starts one, so the owner is the sender here and the writer
+    // is the follower being woken. The owner still appears in the list, through
+    // the separate rule that any writing Member is a recipient of its own
+    // commit — that is not the Main stream branch.
+    await start(team, team.owner.actor, 'discussion', 'a question')
+    expect(await wakeOf('team/thread-started')).toContain(team.writer.memberId)
+
+    // The Member that never joined is never on the list.
+    for (const kind of ['team/main-message-posted', 'team/thread-started']) {
+      expect(await wakeOf(kind)).not.toContain(team.outsider.memberId)
+    }
+  })
+
+  it('refuses a Main stream follow from a Workspace Member that is not in the Project', async () => {
+    const team = await seed()
+    // Reading the stream already refuses this Member; following it must not be
+    // the door that gets it in, or the follow would carry Project content.
+    await expect(team.ledger.changeAttention({ requestId: requestId('outsider-follow'), actor: team.outsider.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })).rejects.toThrow(/not_project_member/)
+    await post(team, human, 'project only')
+    expect(team.ledger.memberInbox(team.outsider.actor, {}).main).toEqual([])
+    expect(team.ledger.mainNotificationFacts(team.outsider.memberId)).toEqual([])
+  })
+
+  it('leaves an existing follow alone when ownership is granted, so its read progress stands', async () => {
+    const team = await seed(2)
+    await team.ledger.changeAttention({ requestId: requestId('follow-then-own'), actor: team.writer.actor,
+      workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    await post(team, human, 'one')
+    await post(team, human, 'two')
+    const before = page(team, team.writer.actor).standing
+    expect(before.unreadCount).toBe(2)
+    // The Member was already following, so the grant writes no row: the two
+    // ordinary updates stay unread instead of being cleared by a fresh start.
+    await team.ledger.addProjectOwner({ requestId: requestId('owner'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: team.writer.memberId })
+    const after = page(team, team.writer.actor).standing
+    expect(after).toMatchObject({ following: true, unreadCount: 3 })
+    expect(after.markers).toHaveLength(1)
+    await expect(readMain(team, team.writer.actor)).resolves.toMatchObject({ committed: true })
+    expect(page(team, team.writer.actor).standing.unreadCount).toBe(0)
   })
 })
 

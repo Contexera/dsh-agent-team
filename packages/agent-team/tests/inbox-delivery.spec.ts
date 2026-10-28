@@ -8,10 +8,11 @@ const other = 'project:00000000-0000-4000-8000-000000000002' as AgentTeamProject
 const threadA = 'thread:00000000-0000-4000-8000-00000000000a' as AgentTeamThreadRef
 const threadB = 'thread:00000000-0000-4000-8000-00000000000b' as AgentTeamThreadRef
 
-function thread(threadRef: AgentTeamThreadRef, projectRef: AgentTeamProjectRef, sequences: readonly number[], options: { direct?: readonly number[]; following?: boolean } = {}): InboxThreadUnread {
+function thread(threadRef: AgentTeamThreadRef, projectRef: AgentTeamProjectRef, sequences: readonly number[], options: { direct?: readonly number[]; following?: boolean; reminders?: readonly { kind: string; baselineSequence: number }[] } = {}): InboxThreadUnread {
   return {
     item: { projectRef, thread: { threadRef }, ...(options.following === false ? {} : { attention: {} }) },
     facts: sequences.map(sequence => ({ fact: { kind: 'message', sequence }, unread: true, direct: options.direct?.includes(sequence) ?? false })),
+    ...(options.reminders === undefined ? {} : { reminders: options.reminders }),
   } as unknown as InboxThreadUnread
 }
 
@@ -62,6 +63,34 @@ describe('an unchanged unread set spends no second attempt', () => {
     const threads = [thread(threadA, owned, [1]), thread(threadB, owned, [2])]
     const first = plan({ threads })
     expect(plan({ threads, covered: first.signature }).trigger).toBeUndefined()
+  })
+})
+
+describe('a Thread the notice could not render stays undelivered', () => {
+  it('retries the dropped Thread facts the next time, unchanged', () => {
+    const threads = [thread(threadA, owned, [1]), thread(threadB, owned, [2])]
+    const first = plan({ threads })
+    // The notice rendered Thread A and dropped Thread B, so what it answered is
+    // Thread A's facts alone. The dropped Thread keeps its facts out of that.
+    const answered = plan({ threads, undelivered: [threadB] })
+    expect(answered.delivered).not.toContain(threadB)
+    expect(plan({ threads, covered: answered.delivered }).trigger).toBe('immediate')
+  })
+
+  it('still stands down for the Threads the notice did render', () => {
+    const threads = [thread(threadA, owned, [1]), thread(threadB, owned, [2])]
+    const answered = plan({ threads, undelivered: [threadB] })
+    // Thread A is unchanged and was rendered, so it is covered: only Thread B
+    // still owes a delivery.
+    const retry = plan({ threads: [thread(threadB, owned, [2])], covered: answered.delivered })
+    expect(retry.trigger).toBe('immediate')
+  })
+
+  it('carries a reminder as delivered even when the Thread holds no ordinary unread', () => {
+    const withReminder = thread(threadA, owned, [1], { reminders: [{ kind: 'review-backlog', baselineSequence: 1 }] })
+    const first = plan({ threads: [withReminder] })
+    expect(first.delivered).toContain('reminder')
+    expect(plan({ threads: [withReminder], covered: first.delivered }).trigger).toBeUndefined()
   })
 })
 

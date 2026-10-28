@@ -79,6 +79,36 @@ describe('pre-Main-stream-Attention records', () => {
     expect(standingOf(await reopen(team), team.projectRef, team.actor).following).toBe(true)
   })
 
+  it('restores the read progress an owner grant used to overwrite', async () => {
+    const team = await seed()
+    // A Member that followed and read, then was granted ownership by a build
+    // that overwrote the row unconditionally: its watermark was reset to the
+    // grant and its unread silently cleared. The correct durable result of that
+    // grant is no row at all, so the overwriting row is dropped on replay and
+    // the Member's own progress stands.
+    const readerId = `member:reader` as AgentTeamMemberId
+    await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+    const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
+    await team.ledger.postMainMessage({ requestId: requestId('one'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'one' })
+    await team.ledger.changeAttention({ requestId: requestId('follow'), actor: reader, workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    await team.ledger.readMainStream({ requestId: requestId('read'), actor: reader, workspaceId: alpha, projectRef: team.projectRef })
+    // The overwriting grant, exactly as the old build wrote it.
+    await team.ledger.addProjectOwner({ requestId: requestId('own'), actor: human, workspaceId: alpha, projectRef: team.projectRef, memberId: readerId })
+    const reopened = await reopen(team)
+    // The reader's own watermark stands, so the only unread left is the one the
+    // grant itself appended as a marker: its owner-added activity. Without the
+    // repair the watermark would sit at the grant and the count would be 2.
+    expect(standingOf(reopened, team.projectRef, reader)).toMatchObject({ following: true, unreadCount: 1, directCount: 1 })
+    await reopened.readMainStream({ requestId: requestId('read-2'), actor: reader, workspaceId: alpha, projectRef: team.projectRef })
+    expect(standingOf(reopened, team.projectRef, reader).unreadCount).toBe(0)
+    // A later ordinary update is still ordinary unread, so the watermark the
+    // repair restored is the reader's own and not the grant's.
+    await reopened.postMainMessage({ requestId: requestId('later'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'later' })
+    expect(standingOf(reopened, team.projectRef, reader).unreadCount).toBe(1)
+  })
+
   it('reopens an Agent Main stream read whose watermark was not a row yet', async () => {
     const team = await seed()
     await team.ledger.postMainMessage({ requestId: requestId('post-1'), actor: team.actor, workspaceId: alpha, projectRef: team.projectRef, body: 'first update' })
@@ -110,5 +140,29 @@ describe('pre-Main-stream-Attention records', () => {
   it('leaves an owner grant that already carries a row untouched', async () => {
     const team = await seed()
     expect(standingOf(await reopen(team), team.projectRef, team.actor).following).toBe(true)
+  })
+
+  it('leaves a current-format read that consumed only markers alone', async () => {
+    const team = await seed()
+    // A Member that is not the owner, so its follow is its own: a mention
+    // before it followed, then a read. The read consumes the marker and advances
+    // no watermark, so this build writes exactly the shape the pre-Attention era
+    // wrote. Repairing it anyway would mint a row the current replay expectation
+    // refuses, and the ledger would not reopen.
+    const readerId = `member:reader` as AgentTeamMemberId
+    await team.ledger.addMember({ requestId: requestId('add-reader'), actor: human,
+      member: { memberId: readerId, sessionId: SessionId('session:reader'), workspaceId: alpha, handle: 'reader', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/reader', state: 'enabled' },
+      handle: 'reader', description: '', presetId: 'team-member', workspaceId: alpha, projectRefs: [team.projectRef] })
+    const reader = { kind: 'member', memberId: readerId, handle: 'reader' } as AgentTeamMemberActor
+    await team.ledger.postMainMessage({ requestId: requestId('mention'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: '@reader please look' })
+    await team.ledger.changeAttention({ requestId: requestId('follow'), actor: reader, workspaceId: alpha, projectRef: team.projectRef, action: 'follow' })
+    const read = await team.ledger.readMainStream({ requestId: requestId('read'), actor: reader, workspaceId: alpha, projectRef: team.projectRef })
+    expect(read.committed).toBe(true)
+    const reopened = await reopen(team)
+    // The marker is consumed and the watermark was never there to advance.
+    expect(standingOf(reopened, team.projectRef, reader)).toMatchObject({ following: true, unreadCount: 0, markers: [] })
+    // The next ordinary post is ordinary unread, exactly as it was before.
+    await reopened.postMainMessage({ requestId: requestId('later'), actor: human, workspaceId: alpha, projectRef: team.projectRef, body: 'later' })
+    expect(standingOf(reopened, team.projectRef, reader).unreadCount).toBe(1)
   })
 })

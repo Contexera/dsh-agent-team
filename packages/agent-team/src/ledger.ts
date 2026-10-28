@@ -471,12 +471,8 @@ interface Projection {
   readonly mainMarkersByMember: Map<AgentTeamMemberId, Map<AgentTeamProjectRef, AgentTeamMainMarker[]>>
   /** Current Main stream Attention per Member and Project; absence means the Main stream's ordinary updates never reach this Member. */
   readonly mainAttention: Map<string, AgentTeamMainAttention>
-  /** Main stream Attention bucketed per Member, for the per-reader Inbox derivation. */
-  readonly mainAttentionByMember: Map<AgentTeamMemberId, Set<AgentTeamProjectRef>>
   /** The Human's own Main stream read watermark per Project. The Human's attention is derived, so its read state is the one piece that must be stored. */
   readonly humanMainWatermarks: Map<AgentTeamProjectRef, number>
-  /** Sequence of the marker that adopted rules version 2 (0 before it): the earliest the Human's Main stream unread can start. */
-  humanOwnerFloor: number
 }
 
 /** Kinds a rules-version-1 segment rejects (owner operations carry their own check), and the one kind version 2 stops writing. */
@@ -532,7 +528,7 @@ function emptyProjection(): Projection {
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
     directMarkersByMember: new Map(), activityMarkersByMember: new Map(), reminderMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
-    mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainAttention: new Map(), mainAttentionByMember: new Map(), humanMainWatermarks: new Map(), humanOwnerFloor: 0 }
+    mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainAttention: new Map(), humanMainWatermarks: new Map() }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -590,10 +586,6 @@ function reminderEpisodeKey(taskRef: AgentTeamTaskRef, kind: AgentTeamReminderMa
 
 function mainMarkerKey(marker: AgentTeamMainMarker): string {
   return `${marker.memberId}|${marker.projectRef}|${'messageRef' in marker ? marker.messageRef : marker.activityRef}`
-}
-
-function mainWatermarkKey(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): string {
-  return `${memberId}|${projectRef}`
 }
 
 /** One Main stream Attention period's identity, as the projection's flat key. */
@@ -889,7 +881,10 @@ export class AgentTeamLedger {
       const ownerInbox = this.ownerActivityInboxDelta(activity)
       // An owner's default attention is the Main stream, never every Thread: the
       // grant starts following the stream from here, so it inherits no backlog.
+      // A Member already following the stream keeps its own row — that following
+      // is its own choice and its read progress, not the grant's to reset.
       const grantedMainAttention = kind === 'team/project-owner-added'
+        && this.mainAttentionForFrom(this.state, request.memberId, request.projectRef) === undefined
         ? [this.startMainAttention(request.memberId, request.projectRef, sequence)] : []
       const inbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention)
       const data = Object.freeze({ ...base, activity, inbox,
@@ -1401,6 +1396,10 @@ export class AgentTeamLedger {
     const result: { project: AgentTeamProject; entries: readonly AgentTeamMainTimelineEntry[] }[] = []
     for (const project of this.state.projects.values()) {
       if (this.visibleProject(project) === undefined || !this.participatesIn(memberId, project.workspaceId)) continue
+      // The Main stream is read and written only by Project members, so an
+      // Attention row left behind by a departed Member delivers nothing. The
+      // Human owns every Project, so membership never has to be asked of it.
+      if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.isProjectMemberFrom(this.state, project.projectRef, memberId)) continue
       const unread = this.mainUnreadFrom(this.state, memberId, project.projectRef)
       if (unread.length > 0) result.push({ project, entries: this.mainEntries(unread.map(item => item.source), unread) })
     }
@@ -1716,8 +1715,13 @@ export class AgentTeamLedger {
         return this.resolved(this.attentionResult(existing as AgentTeamThreadAttentionChangedOperation))
       }
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
-      // The Main stream is addressed by its own Project ref, not by a Thread: its
-      // Attention row is keyed by Member × Project and never enters a Thread index.
+      // One scope per request: the Main stream is addressed by its own Project
+      // ref and a Thread by its Thread or Task ref. Accepting both would make
+      // the same request shape mean two different scopes depending on commit
+      // history, so the Remote refuses what the tool already refuses.
+      if (request.projectRef !== undefined && (request.threadRef !== undefined || request.taskRef !== undefined)) {
+        throw new Error('A Main stream Attention request takes projectRef or a Thread ref, never both')
+      }
       if (request.projectRef !== undefined) return this.writeMainAttention(actor, request)
       const { task, thread } = this.threadContextForActor(actor, request.workspaceId, request)
       const current = this.attentionFor(actor.memberId, thread.threadRef)
@@ -1735,7 +1739,7 @@ export class AgentTeamLedger {
         return this.committed(this.attentionResult(operation))
       }
       if (current === undefined) throw new Error(`Member is already unfollowed from Thread '${thread.threadRef}'`)
-      if (task !== undefined && this.hasActiveClaim(actor.memberId, task.taskRef)) throw new Error('Member cannot unfollow while owning an active Claim')
+      if (task !== undefined && this.hasActiveClaim(actor.memberId, task.taskRef)) throw new Error(`Member cannot unfollow Thread '${thread.threadRef}' while owning an active Claim on Task '${task.taskRef}'; finish the work or release the Claim first`)
       const operation: AgentTeamThreadAttentionChangedOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/thread-attention-changed',
         data: Object.freeze({ workspaceId: request.workspaceId, action: 'unfollow', memberId: actor.memberId,
@@ -1757,38 +1761,42 @@ export class AgentTeamLedger {
     actor: AgentTeamHumanActor | AgentTeamMemberActor,
     request: AgentTeamAuthorizedThreadAttentionRequest,
   ): Promise<AgentTeamLedgerResult<AgentTeamMainAttentionResult>> {
-    {
-      const project = this.requireActiveProject(request.workspaceId, request.projectRef!)
-      const projectRef = project.projectRef
-      const current = this.mainAttentionForFrom(this.state, actor.memberId, projectRef)
-      if (request.action === 'follow') {
-        if (current !== undefined) throw new Error(`Member is already following the Main stream of Project '${projectRef}'`)
-        const attention = this.followMainAttention(this.state, actor.memberId, projectRef)
-        const operation: AgentTeamMainAttentionChangedOperation = Object.freeze({
-          ...this.operationBase(request, this.nextSequence()), kind: 'team/main-attention-changed',
-          data: Object.freeze({ workspaceId: request.workspaceId, action: 'follow', memberId: actor.memberId, project: project,
-            inbox: this.inboxDelta([], [], [], [], [], [], [], [], [], [], [attention], []) }),
-        })
-        await this.table.put(operation.operationId, operation)
-        this.applyAndAdvanceProjectionVersion(operation)
-        return this.committed(this.mainAttentionResult(operation, attention))
-      }
-      if (current === undefined) throw new Error(`Member is already unfollowed from the Main stream of Project '${projectRef}'`)
-      // The Human's Attention is derived rather than stored, so an unfollow is a
-      // no-op the ledger records without pretending a row was removed.
-      const stored = actor.memberId === AGENT_TEAM_HUMAN_MEMBER_ID
-        ? undefined
-        : this.state.mainAttention.get(mainAttentionKey(actor.memberId, projectRef))
+    const project = this.requireActiveProject(request.workspaceId, request.projectRef!)
+    // Reading and writing the Main stream both require Project membership, so
+    // following one cannot be the door that gets a Member in.
+    this.requireProjectMemberActor(actor, project.projectRef)
+    const projectRef = project.projectRef
+    const current = this.mainAttentionForFrom(this.state, actor.memberId, projectRef)
+    if (request.action === 'follow') {
+      if (current !== undefined) throw new Error(`Member is already following the Main stream of Project '${projectRef}'`)
+      const attention = this.startMainAttention(actor.memberId, projectRef, (this.mainSourcesFrom(this.state, projectRef).at(-1)?.sequence ?? 0) + 1)
       const operation: AgentTeamMainAttentionChangedOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/main-attention-changed',
-        data: Object.freeze({ workspaceId: request.workspaceId, action: 'unfollow', memberId: actor.memberId, project: project,
-          inbox: this.inboxDelta([], [], [], [], [], [], [], [], [], [], [],
-            stored === undefined ? [] : [{ memberId: actor.memberId, projectRef }]) }),
+        data: Object.freeze({ workspaceId: request.workspaceId, action: 'follow', memberId: actor.memberId, project: project,
+          inbox: this.inboxDelta([], [], [], [], [], [], [], [], [], [], [attention], []) }),
       })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.mainAttentionResult(operation, undefined))
+      return this.committed(this.mainAttentionResult(operation, attention))
     }
+    if (current === undefined) throw new Error(`Member is already unfollowed from the Main stream of Project '${projectRef}'`)
+    // The Human's Attention is derived from owning the Project, so it cannot
+    // end: an unfollow would record an operation that changes nothing while
+    // answering as though the row was gone, and the next unfollow would
+    // commit again. Refuse it instead of recording a lie.
+    if (actor.memberId === AGENT_TEAM_HUMAN_MEMBER_ID) {
+      throw new Error(`The Human's Main stream Attention follows from owning Project '${projectRef}' and cannot be unfollowed; read the stream to acknowledge its updates`)
+    }
+    const stored = this.state.mainAttention.get(mainAttentionKey(actor.memberId, projectRef))
+    const operation: AgentTeamMainAttentionChangedOperation = Object.freeze({
+      ...this.operationBase(request, this.nextSequence()), kind: 'team/main-attention-changed',
+      data: Object.freeze({ workspaceId: request.workspaceId, action: 'unfollow', memberId: actor.memberId, project: project,
+        inbox: this.inboxDelta([], [], [], [], [], [], [], [], [], [], [],
+          stored === undefined ? [] : [{ memberId: actor.memberId, projectRef }]) }),
+    })
+    await this.table.put(operation.operationId, operation)
+    this.applyAndAdvanceProjectionVersion(operation)
+    return this.committed(this.mainAttentionResult(operation, undefined))
   }
 
   /**
@@ -1868,6 +1876,7 @@ export class AgentTeamLedger {
   }): AgentTeamMainAttentionStatus {
     const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
     const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+    this.requireProjectMemberActor(authorized, project.projectRef)
     const attention = this.mainAttentionForFrom(this.state, authorized.memberId, project.projectRef)
     return Object.freeze({ project, ...(attention === undefined ? {} : { attention }) })
   }
@@ -1990,7 +1999,7 @@ export class AgentTeamLedger {
           ...(this.state.members.get(task.accountable)?.state === undefined ? {} : { state: this.state.members.get(task.accountable)!.state }),
         },
         lastActivitySequence: newest.sequence, lastActivityAt: newest.occurredAt,
-        relation: accountable ? 'accountable' : executor ? 'executor' : authorized.kind === 'human' || this.ownerSinceFrom(this.state, task.projectRef, memberId) !== undefined ? 'project-owner' : 'none',
+        relation: accountable ? 'accountable' : executor ? 'executor' : authorized.kind === 'human' || this.isProjectOwnerFrom(this.state, task.projectRef, memberId) ? 'project-owner' : 'none',
         needsAcceptance: task.status === 'in_review' && (authorized.kind === 'human' || this.isProjectOwnerFrom(this.state, task.projectRef, memberId)) && !this.heldTaskClaimFrom(this.state, task.taskRef, memberId) })
       if (task.status === 'done' || task.status === 'closed') {
         const finished = finishedByProject.get(task.projectRef) ?? []
@@ -2015,6 +2024,7 @@ export class AgentTeamLedger {
     const rows: AgentTeamMainInboxItem[] = []
     for (const project of this.state.projects.values()) {
       if (!workspaceIds.includes(project.workspaceId) || this.visibleProject(project) === undefined) continue
+      if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.isProjectMemberFrom(this.state, project.projectRef, memberId)) continue
       const unread = this.mainUnreadFrom(this.state, memberId, project.projectRef)
       if (unread.length === 0) continue
       const newest = unread.at(-1)!
@@ -2724,15 +2734,17 @@ export class AgentTeamLedger {
       for (const follower of this.state.attentionByThread.get(threadRef) ?? []) members.add(follower)
     }
     if (operation.kind === 'team/member-workspace-joined' || operation.kind === 'team/member-workspace-left') members.add(operation.data.memberId)
-    // An owner's ordinary Main stream post and a new discussion wake the other
-    // owners immediately; a new Task does not — the other owners read it off the
-    // board. Without this the wake only follows inbox deltas, so an owner's
-    // derived unread grows with no commit ever notifying them.
+    // An ordinary Main stream post and a new discussion wake everyone whose
+    // Main stream Attention covers that stream, and nobody else: a new Task
+    // does not — the others read it off the board. Without this the wake only
+    // follows inbox deltas, so an Attention-covered reader's unread grows with
+    // no commit ever notifying them. An owner's row is derived rather than
+    // stored, so the owner ids join the stored rows here.
     if (operation.kind === 'team/main-message-posted' || (operation.kind === 'team/thread-started' && operation.data.task === undefined)) {
       const sender = operation.actor.kind === 'host' ? undefined : operation.actor.memberId
       const projectRef = operation.kind === 'team/main-message-posted' ? operation.data.message.projectRef : operation.data.projectRef
-      for (const owner of this.projectOwnerIds(projectRef)) {
-        if (sender === undefined || owner !== sender) members.add(owner)
+      for (const memberId of this.mainStreamRecipientsFrom(this.state, projectRef)) {
+        if (sender === undefined || memberId !== sender) members.add(memberId)
       }
     }
     if (operation.actor.kind === 'member') members.add(operation.actor.memberId)
@@ -2922,7 +2934,12 @@ export class AgentTeamLedger {
         ? this.accountabilityReturnsFrom(projection, operation.data.memberId, operation.sequence, new Set([operation.data.projectRef]))
         : { transfers: [], tasks: [], threads: [], markers: [] }
       const ownerInbox = this.ownerActivityInboxDelta(activity)
-      const grantedMainAttention = operation.kind === 'team/project-owner-added'
+      // The grant writes a row only for a Member not already following the
+      // stream. A ledger written by a build that overwrote unconditionally
+      // replays as the row it actually stored, so both shapes stay valid.
+      const alreadyFollowing = operation.kind === 'team/project-owner-added'
+        && this.mainAttentionForFrom(projection, operation.data.memberId, operation.data.projectRef) !== undefined
+      const grantedMainAttention = operation.kind === 'team/project-owner-added' && !alreadyFollowing
         ? [this.startMainAttention(operation.data.memberId, operation.data.projectRef, operation.sequence)] : []
       const expectedInbox = this.inboxDelta([], [], [], [], returned.markers, [], ownerInbox.mainMarkers?.added ?? [], [], [], [], grantedMainAttention)
       const transfers = operation.kind === 'team/project-owner-removed' ? operation.data.transfers : []
@@ -3092,11 +3109,15 @@ export class AgentTeamLedger {
       const current = this.mainAttentionForFrom(projection, operation.data.memberId, project.projectRef)
       if ((operation.data.action === 'follow' && current !== undefined)
         || (operation.data.action === 'unfollow' && current === undefined)) throw new Error('invalid Main stream Attention transition')
-      const stored = operation.data.memberId === AGENT_TEAM_HUMAN_MEMBER_ID
-        ? undefined
-        : projection.mainAttention.get(mainAttentionKey(operation.data.memberId, project.projectRef))
+      // The Human's row is derived from owning the Project, so it can never end
+      // and an unfollow naming it is a shape this build refuses to write. A
+      // ledger holding one from an earlier build replays as the no-op it was,
+      // because the derived row still stands and the delta removed nothing.
+      if (operation.data.action === 'unfollow' && operation.data.memberId === AGENT_TEAM_HUMAN_MEMBER_ID
+        && (operation.data.inbox.mainAttention?.removed.length ?? 0) > 0) throw new Error('invalid Main stream Attention projection')
+      const stored = projection.mainAttention.get(mainAttentionKey(operation.data.memberId, project.projectRef))
       const expected = operation.data.action === 'follow'
-        ? this.inboxDelta([], [], [], [], [], [], [], [], [], [], [this.followMainAttention(projection, operation.data.memberId, project.projectRef)], [])
+        ? this.inboxDelta([], [], [], [], [], [], [], [], [], [], [this.startMainAttention(operation.data.memberId, project.projectRef, (this.mainSourcesFrom(projection, project.projectRef).at(-1)?.sequence ?? 0) + 1)], [])
         : this.inboxDelta([], [], [], [], [], [], [], [], [], [], [], stored === undefined ? [] : [{ memberId: operation.data.memberId, projectRef: project.projectRef }])
       if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error('invalid Main stream Attention projection')
       this.validateInboxDelta(operation.data.inbox, projection, refs)
@@ -3780,7 +3801,6 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/rules-version-adopted') {
       target.rulesVersion = operation.data.version
-      if (operation.data.version >= 2 && target.humanOwnerFloor === 0) target.humanOwnerFloor = operation.sequence
       return
     }
     if (operation.kind === 'team/project-owner-added') {
@@ -4181,13 +4201,9 @@ export class AgentTeamLedger {
     }
     for (const key of delta.mainAttention?.removed ?? []) {
       target.mainAttention.delete(mainAttentionKey(key.memberId, key.projectRef))
-      target.mainAttentionByMember.get(key.memberId)?.delete(key.projectRef)
     }
     for (const attention of delta.mainAttention?.set ?? []) {
       target.mainAttention.set(mainAttentionKey(attention.memberId, attention.projectRef), attention)
-      const projects = target.mainAttentionByMember.get(attention.memberId) ?? new Set<AgentTeamProjectRef>()
-      projects.add(attention.projectRef)
-      target.mainAttentionByMember.set(attention.memberId, projects)
     }
   }
 
@@ -4224,10 +4240,9 @@ export class AgentTeamLedger {
 
   /** Departure ends every Main stream Attention this Member holds, as it ends its Thread Attention. */
   private dropMainAttention(target: Projection, memberId: AgentTeamMemberId): void {
-    for (const projectRef of target.mainAttentionByMember.get(memberId) ?? []) {
-      target.mainAttention.delete(mainAttentionKey(memberId, projectRef))
+    for (const key of [...target.mainAttention.keys()]) {
+      if (key.startsWith(`${memberId}|`)) target.mainAttention.delete(key)
     }
-    target.mainAttentionByMember.delete(memberId)
   }
 
   /** Insert into the Member's Thread bucket keeping the sequence order the read path must see. */
@@ -4663,13 +4678,12 @@ export class AgentTeamLedger {
     return this.threadFacts(threadRef).at(-1)?.sequence ?? 1
   }
 
-  /** A Main stream Attention period starting after everything the stream holds now, so a new follower inherits no backlog. */
-  private followMainAttention(projection: Projection, memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): AgentTeamMainAttention {
-    const tail = this.mainSourcesFrom(projection, projectRef).at(-1)?.sequence ?? 0
-    return Object.freeze({ memberId, projectRef, startSequence: tail + 1, readThroughSequence: tail })
-  }
-
-  /** A Main stream Attention period anchored at `sequence`: the reader saw everything before it and nothing after. */
+  /**
+   * A Main stream Attention period anchored at `sequence`: the reader saw
+   * everything before it and nothing after. An explicit follow anchors at the
+   * stream's current tail, so a new follower inherits no backlog; an ownership
+   * grant anchors at the grant itself.
+   */
   private startMainAttention(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, sequence: number): AgentTeamMainAttention {
     return Object.freeze({ memberId, projectRef, startSequence: sequence, readThroughSequence: Math.max(0, sequence - 1) })
   }
@@ -4696,6 +4710,23 @@ export class AgentTeamLedger {
 
   private isFollowingMainFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
     return this.mainAttentionForFrom(projection, memberId, projectRef) !== undefined
+  }
+
+  /**
+   * Everyone whose Main stream Attention covers one Project: the stored rows
+   * plus the Human, whose row is derived from owning the Project. Membership is
+   * re-checked, because a row survives the departure that should have ended it
+   * and a departed Member must not be woken for a stream it can no longer read.
+   */
+  private mainStreamRecipientsFrom(projection: Projection, projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
+    if (!projection.projects.has(projectRef)) return []
+    const found = new Set<AgentTeamMemberId>([AGENT_TEAM_HUMAN_MEMBER_ID])
+    for (const attention of projection.mainAttention.values()) {
+      if (attention.projectRef !== projectRef) continue
+      if (!this.isProjectMemberFrom(projection, projectRef, attention.memberId)) continue
+      found.add(attention.memberId)
+    }
+    return [...found]
   }
 
   private attentionFor(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): AgentTeamThreadAttention | undefined {
@@ -4891,15 +4922,6 @@ export class AgentTeamLedger {
   private isProjectOwnerFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): boolean {
     if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) return projection.projects.has(projectRef)
     return projection.owners.get(projectRef)?.has(memberId) === true
-  }
-
-  /** Sequence from which an owner's ordinary Main stream unread counts; undefined for a non-owner. */
-  private ownerSinceFrom(projection: Projection, projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId): number | undefined {
-    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID) {
-      const project = projection.projects.get(projectRef)
-      return project === undefined ? undefined : Math.max(project.createdAtSequence, projection.humanOwnerFloor)
-    }
-    return projection.owners.get(projectRef)?.get(memberId)
   }
 
   private mainSourcesFrom(projection: Projection, projectRef: AgentTeamProjectRef): readonly MainSource[] {
@@ -6252,7 +6274,7 @@ export class AgentTeamLedger {
     // cleanup repair sees the same state its validator will.
     const projection = emptyProjection()
     return records.map(([id, operation]) => {
-      const normalized = this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrant(this.normalizeOperation(operation, occurrences, instants), projection), projection), projection)
+      const normalized = this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrantOverwrite(this.repairLegacyMainAttentionGrant(this.normalizeOperation(operation, occurrences, instants), projection), projection), projection), projection)
       this.applyTo(projection, normalized)
       return [id, normalized]
     })
@@ -6281,6 +6303,28 @@ export class AgentTeamLedger {
   }
 
   /**
+   * An owner grant written before the grant learned to leave an existing follow
+   * alone overwrote the Member's Main stream Attention with a fresh row anchored
+   * at the grant, discarding the read watermark its own follow had earned. The
+   * Member was already following, so the correct durable result of that grant is
+   * no row at all: the existing one stands. The overwriting row is dropped in
+   * memory, which restores the progress the write destroyed. Only that exact
+   * shape is repaired — a grant that minted a row for a Member not yet following
+   * is what this build writes and is left alone.
+   */
+  private repairLegacyMainAttentionGrantOverwrite(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+    if (operation.kind !== 'team/project-owner-added') return operation
+    const { inbox, memberId, projectRef } = operation.data
+    const set = inbox.mainAttention?.set ?? []
+    if (set.length !== 1) return operation
+    if (this.mainAttentionForFrom(projection, memberId, projectRef) === undefined) return operation
+    const overwrite = [this.startMainAttention(memberId, projectRef, operation.sequence)]
+    if (!isDeepStrictEqual(set, overwrite)) return operation
+    return { ...operation, data: { ...operation.data,
+      inbox: this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [], [], [], [], [], []) } }
+  }
+
+  /**
    * An Agent's Main stream read written before Main stream Attention existed
    * carried only the markers it consumed: its watermark lived in a projection
    * field that no longer exists, so replay alone would lose every byte of read
@@ -6297,6 +6341,10 @@ export class AgentTeamLedger {
     if (attention === undefined) return operation
     // The era's receipt: the markers it consumed and nothing else.
     if (!isDeepStrictEqual(inbox, this.inboxDelta([], [], [], [], [], [], [], inbox.mainMarkers?.removed ?? []))) return operation
+    // A read that advanced nothing is a shape this build still writes: a read
+    // consuming only markers leaves the watermark alone, so repairing it would
+    // mint a row the current replay expectation refuses.
+    if (!this.prepareMainReadFrom(projection, memberId, projectRef, readThroughSequence).advances) return operation
     const advanced = Object.freeze({ ...attention, readThroughSequence: Math.max(attention.readThroughSequence, readThroughSequence) })
     return { ...operation, data: { ...operation.data,
       inbox: this.inboxDelta([], [], [], [], [], [], [], inbox.mainMarkers?.removed ?? [], [], [], [advanced]) } }
