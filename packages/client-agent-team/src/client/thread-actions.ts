@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
+  AgentTeamMainAttentionResult,
   AgentTeamMemberId,
   AgentTeamRequestId,
   AgentTeamTask,
@@ -17,8 +18,12 @@ import type {
 } from '@contexera/dsh-agent-team/types'
 import { mintRequestId } from './requests.ts'
 
-/** One Human Attention write, answered by the Host's own projection of the Thread's current followers. */
-export type AttentionWrite = (request: AgentTeamThreadAttentionRequest) => Promise<RemoteResult<AgentTeamThreadAttentionResult>>
+/**
+ * One Human Attention write. The Remote method is shared with the Project Main-stream control, so its answer is the
+ * union of both shapes; this hook always addresses a Thread, and every Thread-addressed write answers with the
+ * Thread result — the `attention` row both variants carry is the only field the control reads.
+ */
+export type AttentionWrite = (request: AgentTeamThreadAttentionRequest) => Promise<RemoteResult<AgentTeamThreadAttentionResult | AgentTeamMainAttentionResult>>
 export type AttentionObservation = (request: AgentTeamThreadObservationsRequest) => Promise<RemoteResult<AgentTeamThreadObservations>>
 
 /**

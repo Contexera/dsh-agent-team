@@ -54,6 +54,7 @@ import type {
   AgentTeamStartThreadResult,
   AgentTeamPostMainMessageRequest,
   AgentTeamPostMainMessageResult,
+  AgentTeamMainAttentionResult,
   AgentTeamMainStreamReadRequest,
   AgentTeamMainStreamReadResult,
   AgentTeamMainStreamHistoryRequest,
