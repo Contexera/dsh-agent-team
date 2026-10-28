@@ -136,6 +136,7 @@ import type {
   AgentTeamThreadAttentionRequest,
   AgentTeamThreadAttentionResult,
   AgentTeamMainAttentionResult,
+  AgentTeamMainAttentionStatus,
   AgentTeamThreadAttentionStatus,
   AgentTeamThreadFact,
   AgentTeamThreadHistory,
@@ -1858,6 +1859,17 @@ export class AgentTeamLedger {
     const { task, thread } = this.threadContextForActor(authorized, request.workspaceId, request)
     const attention = this.attentionFor(authorized.memberId, thread.threadRef)
     return Object.freeze({ ...(task === undefined ? {} : { task }), thread, ...(attention === undefined ? {} : { attention }) })
+  }
+
+  /** The reader's own Main stream Attention on one Project, answered without writing. */
+  mainAttentionStatus(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: {
+    workspaceId: WorkspaceId
+    projectRef: AgentTeamProjectRef
+  }): AgentTeamMainAttentionStatus {
+    const authorized = this.assertActorForWorkspace(actor, request.workspaceId)
+    const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+    const attention = this.mainAttentionForFrom(this.state, authorized.memberId, project.projectRef)
+    return Object.freeze({ project, ...(attention === undefined ? {} : { attention }) })
   }
 
   inbox(actor: AgentTeamHumanActor | AgentTeamMemberActor, request: AgentTeamInboxRequest): AgentTeamInbox {

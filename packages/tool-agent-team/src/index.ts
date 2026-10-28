@@ -347,28 +347,33 @@ const teamInbox = defineTool({
 /** Attention (following a Thread) is a different question from reading one. `status`, `follow`, and `unfollow` take exactly the Thread address and routing Workspace; sharing a parameter pocket with read would put `messageRef`, `beforeSequence`, and `limit` in front of actions that never accept them. */
 const teamAttention = defineTool({
   name: 'team_attention',
-  description: `Read or change your Attention on one Thread — whether you are following it. status reports the current state and changes nothing; follow starts receiving that Thread's updates; unfollow stops them. Attention is not reading: none of these actions render the Thread's facts, acknowledge unread work, or hand off a write token, and reading a Thread never changes whether you follow it. Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task.`,
+  description: `Read or change your Attention — whether you are following one Thread or a Project's Main stream. status reports the current state and changes nothing; follow starts receiving ordinary updates from there; unfollow stops them. Attention is not reading: none of these actions render facts, acknowledge unread work, or hand off a write token, and reading never changes whether you follow it. Unfollowing leaves every mention, reply and responsibility event reaching you, and it does not release a Claim or drop a Task you are accountable for. Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task; projectRef addresses the Main stream instead — give exactly one of the three.`,
   parameters: {
     action: { type: 'string', required: true, enum: ['status', 'follow', 'unfollow'] },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for released clients. Prefer threadRef; if both are given they must identify the same Thread." },
+    projectRef: { type: 'string', description: "Full branded Project ref: addresses that Project's Main stream instead of a Thread. Give this or threadRef, never both." },
     workspace: workspaceParam,
   },
   output: {
     schema: { type: 'object', additionalProperties: false, properties: {
       workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
-      kind: { type: 'string', required: true }, threadRef: { type: 'string', required: true }, taskRef: { type: 'string' },
-      revision: { type: 'number', required: true }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' }, accountable: { type: 'string' },
-      following: { type: 'boolean', required: true },
+      kind: { type: 'string', required: true }, threadRef: { type: 'string' }, taskRef: { type: 'string' },
+      revision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' }, accountable: { type: 'string' },
+      following: { type: 'boolean', required: true }, scope: { type: 'string' },
     } },
-        // Renders are the only channel a tool result reaches the model through. One outcome line plus the Attention state; a yes/no on one Thread needs no orientation, facts, or write token (a status read authorizes no mutation).
-    render: (args, value) => {
-      const standing = taskStanding(value)
+        // Renders are the only channel a tool result reaches the model through. One outcome line, the Attention state, and the one consequence the model cannot infer from the verb alone.
+    render: (_args, value) => {
       const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef}`
+      const subject = value.scope === 'main' ? 'the Main stream' : `Thread ${value.threadRef}`
+      const standing = value.scope === 'main' ? '' : taskStanding(value)
+      const consequence = value.following
+        ? 'Ordinary updates from there will interrupt you; mentions, replies and responsibility events already did.'
+        : 'Ordinary updates will no longer interrupt you. Mentions, replies and responsibility events still will; follow again to resume.'
       if (value.kind === 'follow' || value.kind === 'unfollow') {
-        return [{ type: 'text', text: `${source}\nAttention changed — ${value.following ? 'now following' : 'no longer following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
+        return [{ type: 'text', text: `${source}\nAttention changed — ${value.following ? 'now following' : 'no longer following'} ${subject}${standing === '' ? '' : ` · ${standing}`}.\n${consequence}` }]
       }
-      return [{ type: 'text', text: `${source}\nAttention status — ${value.following ? 'following' : 'not following'} ${value.threadRef}${standing === '' ? '' : ` · ${standing}`}.` }]
+      return [{ type: 'text', text: `${source}\nAttention status — ${value.following ? 'following' : 'not following'} ${subject}${standing === '' ? '' : ` · ${standing}`}.\n${consequence}` }]
     },
   },
   async execute(rawArgs, exec) {
@@ -376,7 +381,23 @@ const teamAttention = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_attention requires an Agent session')
     const host = service(agent)
-    if (args.threadRef === undefined && args.taskRef === undefined) throw new Error(`team_attention needs threadRef (or taskRef on a Taskful Thread) — ${recoveryFor('missing_thread_identity').sentence({})}`)
+    const threadAddressed = args.threadRef !== undefined || args.taskRef !== undefined
+    if (!threadAddressed && args.projectRef === undefined) {
+      throw new Error(`team_attention needs one of threadRef, taskRef, or projectRef (the Main stream) — ${recoveryFor('missing_thread_identity').sentence({})}`)
+    }
+    if (threadAddressed && args.projectRef !== undefined) {
+      throw new Error(`team_attention takes either a Thread or a projectRef for the Main stream, never both — ${recoveryFor('main_stream_addressing').sentence({ refused: 'threadRef and projectRef' })}`)
+    }
+    if (args.projectRef !== undefined) {
+      const base = { workspaceId: workspaceOf(args, agent), projectRef: args.projectRef as AgentTeamProjectRef }
+      if (args.action === 'status') {
+        const status = host.mainAttentionStatusForAgent(agent, base)
+        return mainAttentionResult('status', base.workspaceId, status.project.projectRef, status.attention !== undefined)
+      }
+      const result = await host.changeAttentionForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action })
+      if (!('project' in result)) throw new Error('expected a Main stream Attention result')
+      return mainAttentionResult(args.action, base.workspaceId, result.project.projectRef, result.attention !== undefined)
+    }
     const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
     const taskNumberOf = (task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } => {
       if (task === undefined) return {}
@@ -390,9 +411,17 @@ const teamAttention = defineTool({
     }
     const result = await host.changeAttentionForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base, action: args.action })
     const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
+    // A Thread request can only answer with the Thread face; the Main stream
+    // face is reached through projectRef above.
+    if (!('thread' in result)) throw new Error('expected a Thread Attention result')
     return attentionResult(args.action, base.workspaceId, snapshot, result.attention, taskNumberOf(snapshot.task))
   },
 })
+
+/** The one result shape a Main stream Attention action returns: address, scope, and the standing itself. */
+function mainAttentionResult(kind: 'status' | 'follow' | 'unfollow', workspaceId: string, projectRef: string, following: boolean) {
+  return { workspaceId, projectRef, kind, scope: 'main', following }
+}
 
 /** The one result shape every Attention action returns: address, standing, and the state itself. */
 function attentionResult(
@@ -491,6 +520,9 @@ const teamThread = defineTool({
           ? `Read — no unread updates on ${value.threadRef}; nothing remains.`
           : `Read committed — acknowledged ${acknowledged} unread update(s) on ${value.threadRef}; ${remaining} remain.`,
         `${value.threadRef}${standing === '' ? '' : ` · ${standing}`} · ${value.following ? 'following' : 'not following'}`,
+        // Reading is not following: the one consequence a reader cannot infer
+        // from the verb, stated where it can act on it.
+        ...(value.following ? [] : ['Not following — ordinary updates here will not interrupt you. team_attention follow with threadRef starts them.']),
       ]
             // Orientation: A) the anchor is a returned fact (renders once, no separate anchor); B) a Host-supplied background fact carries `unread === false`, so the full anchor renders before the facts; C) otherwise (continuation or unfollowed ad-hoc read) the shared bounded subject, never the full anchor.
       const anchorInFacts = facts.some(fact => fact.sequence === value.anchor.sequence)
@@ -585,9 +617,15 @@ function mainStreamLines(action: string, value: {
   readonly workspaceId: string; readonly projectRef: string; readonly kind: string
   readonly entries?: readonly MainEntryView[] | undefined; readonly cursor?: number | undefined; readonly hasMore?: boolean | undefined
   readonly readThroughSequence?: number | undefined; readonly remainingUnreadCount?: number | undefined
+  readonly standing?: { following: boolean } | undefined
   readonly message?: { readonly messageRef: string; readonly sender: string; readonly sequence: number; readonly occurredAt?: string | undefined; readonly body: string } | undefined
 }): string[] {
   const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef} · Main stream`
+  // The standing names the reader's own Attention, which is the one fact this
+  // read cannot show: reading is not following, and neither changes the other.
+  const attention = value.standing === undefined ? [] : [value.standing.following
+    ? 'Attention: following — ordinary updates here will interrupt you.'
+    : 'Attention: not following — ordinary updates here will not interrupt you. team_attention follow with projectRef starts them.']
   if (value.kind === 'message') {
     const message = value.message!
     return [source, `Message ${message.messageRef}`, `${message.sequence}${message.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(message.occurredAt)}`} [${message.sender}]`, '', message.body]
@@ -599,7 +637,7 @@ function mainStreamLines(action: string, value: {
   }
   const acknowledged = entries.filter(entry => entry.unread).length
   const remaining = value.remainingUnreadCount ?? 0
-  return [source,
+  return [source, ...attention,
     acknowledged === 0 ? `Read — no unread updates on the Main stream of ${value.projectRef}.`
       : `Read committed — acknowledged ${acknowledged} unread update(s) on the Main stream of ${value.projectRef}; ${remaining} remain.`,
     '', 'Entries', ...(entries.length === 0 ? ['The Main stream is empty.'] : entries.map(mainEntryLine)), '',

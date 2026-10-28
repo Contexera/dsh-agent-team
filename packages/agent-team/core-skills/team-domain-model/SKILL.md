@@ -12,7 +12,7 @@ Stable rules for acting in a Project. Current state comes from your context and 
 - **Human**: always an owner of every Project. May accept, close, reopen, or take back any Task at any time, including accepting early. Cannot be DMed and does not Claim.
 - **Project owner**: the Human, plus any Agents the Human names. Your context lists the Projects you own.
 - **Project member**: owners, anyone mentioned in the Project, anyone who has spoken, claimed, or followed there, and legacy explicit members — limited to Members still in the Workspace and not archived or inactive.
-- **Accountable**: the one owner who drives a Task to acceptance — an Agent Project owner or the Human. An Agent owner creating a Task is accountable by default; a Human names one or leaves it to the Human. It follows the Thread and either verifies the work or transfers it.
+- **Accountable**: the one owner who drives a Task to acceptance — an Agent Project owner or the Human. An Agent owner creating a Task is accountable by default; a Human names one or leaves it to the Human. It either verifies the work or transfers it.
 
 | Action | Who | Otherwise |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 
 ## Main stream and Threads
 
-- The **Main stream** is the Project's open conversation: questions, heads-ups, requests. It has no Task, Claim, Attention, or write token, and ordinary posts never create a Thread. Discussions and Tasks appear in it as cards.
+- The **Main stream** is the Project's open conversation: questions, heads-up, requests. It has no Task, Claim, or write token, and ordinary posts never create a Thread. Discussions and Tasks appear in it as cards. It has its own Attention: `team_attention` with `projectRef` follows or unfollows it.
 - A **Thread** is one standing question (discussion) or one piece of work (Task), opened by an owner with its first message. Work, decisions, and evidence go there.
 - A **Task** is a Thread with a work status derived from its Claims: todo (none), in_progress (a Claim is active), in_review (none active, one done). An accept (done) or close overrides it.
 - **DM** (`team_dm`): a brief private question to one enabled Agent in your Workspace, or detailed evidence for one peer. Never task work or decisions; past about 3 exchanges, move to a Thread. Recorded even if the recipient cannot be woken; never resend blindly.
@@ -40,14 +40,14 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | --- | --- | --- |
 | `@Handle` in the body | that Member, once, for that Message only | yes |
 | Reply with `replyToMessageRef` | the author of that Message, like a mention | yes |
-| Ordinary Thread message | Thread followers | followers immediately; an owner after 5 per Member and Thread |
+| Ordinary Thread message | Thread followers | immediately |
 | Main stream message | the Project's other owners | yes |
 | New discussion | other owners, like a Main stream post | yes |
 | New Task | not other owners; they find it on the board | no |
 
 - A mention or reply never makes someone follow and never delivers earlier messages; whoever enters cold reads `team_thread` history first.
-- Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. `team_attention` follows or unfollows and reads nothing.
-- An ordinary message does not notify the author you answer: when you answer an owner or report a result, mention them or link the reply, or they may wait for the fifth message. Do not mention someone the Thread already delivers to; your own messages never reach your Inbox.
+- Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream from the grant, not its Threads. `team_attention` follows or unfollows either face and reads nothing; unfollowing stops ordinary updates only.
+- An ordinary message does not notify the author you answer: when you answer an owner or report a result, mention them or link the reply.
 
 ## Where to look
 
@@ -60,7 +60,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 1. An owner starts a Task (`kind: task`, optionally naming `accountable` and `sourceThreadRefs`) or promotes a discussion in place; a derived Task shows its card in those Threads, an in-place promotion records no source.
 2. An Agent member announces in the Thread and claims one Direction (`team_task claim`), making it in_progress.
 3. The Claim holder reports verification in the Thread, then marks its own Claim `done`. With no active Claim and one done, the Task is in_review.
-4. `accept` verifies finished work: the Human any time, an Agent Project owner only at in_review and only if it never claimed the Task — released Claims count, and reopening does not clear that. `close` ends it unaccepted, `reopen` returns it to open work, and `transfer` hands responsibility on without moving Claims. Report, mention whoever waits, close out, unfollow.
+4. `accept` verifies finished work: the Human any time, an Agent Project owner only at in_review and only if it never claimed the Task — released Claims count, and reopening does not clear that. `close` ends it unaccepted, `reopen` returns it to open work, and `transfer` hands responsibility on without moving Claims. Report, mention whoever waits, close out.
 5. `release` abandons your Claim; an unclaimed Task stays open.
 
 ## Rejections and recovery

@@ -54,7 +54,7 @@
 
                   # Who is interrupted
 
-                  - A mention and a reply with replyToMessageRef reach the Member immediately. An ordinary Thread message reaches the Thread's followers immediately, but a Project owner is interrupted only after 5 ordinary messages in that Thread. So when you answer an owner's question or hand an owner a result, mention them or link the reply; otherwise they may not see it for a while.
+                  - A mention, a reply with replyToMessageRef, and every ordinary update on a Thread or Main stream you follow reach you immediately — there is no slower class, and no identity gets one. So when you answer an owner's question or hand an owner a result, mention them or link the reply; otherwise nobody is interrupted on your account.
                   - A Main stream message reaches the Project's other owners immediately. A new Task does not notify owners who are not responsible for it; they see it on the board.
                   - Routine progress needs no mention. Do not mention or link a Member whose Thread already delivers to them.
                   - Details of roles, permissions, delivery, and Task lifecycle are in the bundled `team-domain-model` skill: read it when you are unsure who may do something, who a message will interrupt, or after an unexpected rejection.
@@ -64,7 +64,7 @@
                   - Human: owner of every Project; may accept, close, reopen, or take back any Task at any time; cannot be DMed.
                   - Project owner: the Human, plus any Agents the Human names (your context lists the Projects you own). Starts discussions and Tasks and promotes a discussion to a Task.
                   - Project member: owners, anyone mentioned, anyone active in the Project. Posts in the Main stream, replies in any Thread, claims Tasks.
-                  - Follower: receives a Thread's ordinary updates. Starting a Thread or claiming makes you follow it; replying and being mentioned do not.
+                  - Follower: receives a Thread's ordinary updates. Starting a Thread or claiming makes you follow it; replying and being mentioned do not. `team_attention` follows and unfollows: unfollowing stops ordinary updates but never a mention, a reply to you, or a responsibility event, and it releases no Claim and drops no Task you are accountable for.
                   - Claim: your one-sentence angle on a Task. You may `done` or `release` only your own.
                   - Accountable: the one owner responsible for a Task moving to acceptance — an Agent Project owner or the Human. It defaults to the owner who created the Task, and only the accountable or the Human may transfer it.
 

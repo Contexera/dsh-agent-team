@@ -57,6 +57,73 @@ async function seed(rulesVersion: number) {
 
 const visible = (ledger: AgentTeamLedger, memberId: AgentTeamMemberId) => ledger.view({ workspaceId: alpha }, memberId).projects.map(project => project.projectRef)
 
+describe('default Attention from an ownership change', () => {
+  it('starts the new owner on the Main stream without subscribing it to the Project Threads', async () => {
+    const { ledger, owner, projectRef, change } = await seed(2)
+    // A discussion the Human starts before the grant: the Thread belongs to
+    // nobody's Attention yet.
+    const discussion = await ledger.startThread({ requestId: requestId('discussion'), actor: human, workspaceId: alpha, projectRef, kind: 'discussion', body: 'Plan' })
+    if (!discussion.committed) throw new Error('expected a started Thread')
+    const threadRef = discussion.value.thread.threadRef
+
+    await ledger.addProjectOwner(change(owner))
+
+    // The grant writes exactly one Attention row, on the Main stream.
+    const attention = ledger['state'].mainAttention
+    expect([...attention.keys()].filter(key => key.startsWith(`${owner}|`))).toHaveLength(1)
+    expect(attention.get(`${owner}|${projectRef}`)).toMatchObject({ projectRef, startSequence: expect.any(Number) })
+    // No Thread Attention was created for the existing discussion, and none for
+    // a Thread opened after the grant either.
+    expect(ledger.attentionStatus({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, threadRef }).attention).toBeUndefined()
+    const later = await ledger.startThread({ requestId: requestId('later'), actor: human, workspaceId: alpha, projectRef, kind: 'discussion', body: 'Later' })
+    if (!later.committed) throw new Error('expected a started Thread')
+    expect(ledger.attentionStatus({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, threadRef: later.value.thread.threadRef }).attention).toBeUndefined()
+
+    // The earlier discussion still reaches the new owner through the Main stream,
+    // whose attention started at the grant rather than at the Thread's own facts.
+    const standing = ledger.mainStreamHistory({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, projectRef }).standing
+    expect(standing).toMatchObject({ following: true })
+    expect(standing.unreadCount).toBeGreaterThan(0)
+  })
+
+  it('keeps the withdrawn owner Main stream Attention, because withdrawing ownership is not an unfollow', async () => {
+    const { ledger, owner, projectRef, change } = await seed(2)
+    await ledger.addProjectOwner(change(owner))
+    await ledger.postMainMessage({ requestId: requestId('post'), actor: human, workspaceId: alpha, projectRef, body: 'Ordinary update' })
+    const before = ledger.mainStreamHistory({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, projectRef }).standing
+    expect(before).toMatchObject({ following: true, unreadCount: 2 })
+
+    await ledger.removeProjectOwner(change(owner))
+
+    const after = ledger.mainStreamHistory({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, projectRef }).standing
+    // The row stands, so the ordinary unread stands with it: only the owner
+    // privilege is gone, and an explicit unfollow is the only thing that ends it.
+    expect(after).toMatchObject({ following: true, unreadCount: 3 })
+    expect(ledger['state'].mainAttention.has(`${owner}|${projectRef}`)).toBe(true)
+
+    await ledger.changeAttention({ requestId: requestId('unfollow-main'), actor: { kind: 'member', memberId: owner, handle: 'owner' },
+      workspaceId: alpha, projectRef, action: 'unfollow' })
+    expect(ledger['state'].mainAttention.has(`${owner}|${projectRef}`)).toBe(false)
+    // The ordinary unread is gone; the two ownership Activities still address
+    // this Member, so their markers remain — exactly as on a Thread unfollow.
+    const standing = ledger.mainStreamHistory({ kind: 'member', memberId: owner, handle: 'owner' }, { workspaceId: alpha, projectRef }).standing
+    expect(standing).toMatchObject({ following: false, unreadCount: 2, directCount: 2 })
+  })
+
+  it('ends the Main stream Attention when the Member is archived or removed', async () => {
+    const { ledger, owner, projectRef, change } = await seed(2)
+    await ledger.addProjectOwner(change(owner))
+    // Archival ends ownership, so the derived row it wrote ends with it.
+    await ledger.archiveMember({ requestId: requestId('archive'), actor: human, memberId: owner })
+    expect(ledger['state'].mainAttention.has(`${owner}|${projectRef}`)).toBe(false)
+
+    const removed = await seed(2)
+    await removed.ledger.addProjectOwner(removed.change(removed.owner))
+    await removed.ledger.removeMember({ requestId: requestId('remove'), actor: human, memberId: removed.owner })
+    expect(removed.ledger['state'].mainAttention.has(`${removed.owner}|${removed.projectRef}`)).toBe(false)
+  })
+})
+
 describe('Project owners', () => {
   it('are refused while the ledger runs rules version 1', async () => {
     const { ledger, owner, change } = await seed(1)

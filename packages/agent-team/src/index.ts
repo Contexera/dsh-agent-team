@@ -155,6 +155,8 @@ import type {
   AgentTeamThreadAttentionResult,
   AgentTeamMainAttentionResult,
   AgentTeamThreadAttentionStatus,
+  AgentTeamMainAttentionStatus,
+  AgentTeamProjectRef,
   AgentTeamThreadHistory,
   AgentTeamThreadHistoryRequest,
   AgentTeamThreadReadRequest,
@@ -1755,6 +1757,13 @@ export default class AgentTeam extends TypertRemoteService {
     const actor = this.memberActor(agent)
     this.requireAgentWorkspace(actor, request.workspaceId)
     return this.requireLedger().attentionStatus(actor, request)
+  }
+
+  /** The Agent's own Main stream Attention on one Project, answered without writing. */
+  mainAttentionStatusForAgent(agent: Agent, request: { workspaceId: AgentTeamViewRequest['workspaceId']; projectRef: AgentTeamProjectRef }): AgentTeamMainAttentionStatus {
+    const actor = this.memberActor(agent)
+    this.requireAgentWorkspace(actor, request.workspaceId)
+    return this.requireLedger().mainAttentionStatus(actor, request)
   }
 
   /** Agent-only Claim mutation. */

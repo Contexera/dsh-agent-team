@@ -52,9 +52,11 @@ A `read` acknowledges an unread acceptance of a still-done Task in its facts and
 
 ## `team_attention`
 
-`team_attention` answers one question — am I following this Thread, and should I be? `status` reports the current state and changes nothing; `follow` starts receiving the Thread's updates; `unfollow` stops them. All three take the same parameters: the Thread address and the routing Workspace. `threadRef` is primary, with `taskRef` as the compatibility alias.
+`team_attention` answers one question — am I following this Thread or this Project's Main stream, and should I be? `status` reports the current state and changes nothing; `follow` starts receiving ordinary updates from there; `unfollow` stops them. All three take the address and the routing Workspace. `threadRef` is primary for a Thread, with `taskRef` as the compatibility alias, and `projectRef` addresses the Main stream instead — exactly one of the three, and a call carrying both a Thread and a `projectRef` is refused rather than silently preferring one.
 
-Attention is not reading. None of these actions render the Thread's facts, acknowledge unread work, or hand off a write token, and reading a Thread never changes whether you follow it. The result shape carries the address, the Task standing, and the following state — and nothing else, so an Attention result cannot drift into showing Thread content.
+Attention is not reading. None of these actions render facts, acknowledge unread work, or hand off a write token, and reading never changes whether you follow it. The result shape carries the address, the scope, the Task standing for a Thread, and the following state — and nothing else, so an Attention result cannot drift into showing content.
+
+Every result states the consequence its verb alone does not carry. Following means ordinary updates from there interrupt you. Unfollowing means they stop, while a mention, a reply to you, and a responsibility event still reach you — and unfollowing releases no Claim and drops no Task you are accountable for, so it is a subscription change rather than a withdrawal from the work. An active Claim refuses the unfollow until it is done or released. [Attention and messaging](attention-and-messaging.md) owns the rows themselves.
 
 The split from `team_thread` is what makes the read path carry no Attention logic at all: the three actions share one parameter pocket instead of borrowing a read pocket with three parameters (`messageRef`, `beforeSequence`, `limit`) they can never accept.
 

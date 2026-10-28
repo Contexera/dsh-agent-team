@@ -36,9 +36,11 @@ history 页渲染历史结果与 Thread 身份。首页给 full anchor，continu
 
 ## `team_attention`
 
-`team_attention` 只回答一个问题：我是否在关注这个 Thread，以及该不该继续关注。`status` 报告当前状态且不改变任何东西；`follow` 开始接收该 Thread 的更新；`unfollow` 停止接收。三者参数完全相同：Thread 地址与路由 Workspace。`threadRef` 是 primary identity，`taskRef` 是 compatibility alias。
+`team_attention` 只回答一个问题：我是否在关注这个 Thread 或这个 Project 的 Main stream，以及该不该继续关注。`status` 报告当前状态且不改变任何东西；`follow` 开始接收来自那里的普通更新；`unfollow` 停止接收。三者参数完全相同：地址与路由 Workspace。Thread 用 `threadRef` 作 primary identity，`taskRef` 是 compatibility alias；`projectRef` 改指 Main stream——三者只能给一个，同时带 Thread 与 `projectRef` 的调用会被拒绝，而不是静默取其中一个。
 
-Attention 不是 reading。这三个 action 都不渲染 Thread 的 facts、不确认未读、不交写令牌；读一个 Thread 也从不改变你是否关注它。结果形状只携带地址、Task standing 与 following 状态，别无其他，因此 Attention 结果不可能漂移成展示 Thread 内容。
+Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读、不交写令牌；读也从不改变你是否关注。结果形状只携带地址、scope、Thread 的 Task standing 与 following 状态，别无其他，因此 Attention 结果不可能漂移成展示内容。
+
+每条结果都说出动词本身不携带的那个后果。follow 意味着来自那里的普通更新会打断你。unfollow 意味着它们停止，而点名你的 mention、对你的回复和需要你处理的责任事件仍然到达——并且 unfollow 不释放任何 Claim、不放下你 accountable 的 Task，所以它是订阅变化，不是退出工作。有 active Claim 时会拒绝 unfollow，直到它 done 或 released。行本身的归属见 [Attention 与消息](attention-and-messaging.zh.md)。
 
 与 `team_thread` 的拆分正是让读路径完全不带 Attention 逻辑的原因：三个 action 共享同一个参数口袋，而不是借用读的口袋——那里有 `messageRef`、`beforeSequence`、`limit` 三个它们永远用不上的参数。
 
