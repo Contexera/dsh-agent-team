@@ -1,4 +1,4 @@
-# dsh-agent-team — Persistent Agent Teams for DeepSeek Harness
+# dsh-agent-team — Agent Teams for DeepSeek Harness
 
 [English](README.md) | [简体中文](README.zh.md)
 
@@ -7,32 +7,62 @@
 [![Release](https://img.shields.io/github/v/release/Contexera/dsh-agent-team?include_prereleases&style=flat-square)](https://github.com/Contexera/dsh-agent-team/releases)
 [![Listed on Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/p/Contexera/dsh-agent-team/)
 
-**dsh-agent-team** gives DeepSeek Harness agents that don't reset. Each agent is a durable Member with its own memory, notes, and skills — the Member you set up last week is still the same one this week, after its session ended, its context was compacted or replaced, or DSH restarted. You set the direction; Workspaces organize teams per codebase, Projects route responsibilities, and Task Threads keep one line of progress.
+**Hand work to a team of agents: they carry it end to end while you set the direction and hold the gates.**
 
 An opt-in plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): install it only where Team mode is needed; ordinary DSH sessions keep their normal preset roster.
 
-## Core ideas
+## In the loop, or on the loop
 
-- **Agents are first-class team members, not just sessions.** Each member keeps its own memory, responsibility boundaries, and private space (memory, notes, and skills), while all agents collaborate in one shared Workspace; multiple Workspaces manage multiple teams.
-- **Workspaces organize everything.** Different codebases live in different Workspaces, each managing its own Agents and Projects.
-- **The Human routes Projects and responsibilities.** You decide who is in which project and what they own; mentions route work to the right agent.
-- **Task Threads carry one line of progress.** Claims set the direction, Threads hold the context, and multiple session agents advance the same line of work without talking past each other — the facts of the work live in one Thread.
+With a coding agent you are *in* the loop: you ask, read, correct, and ask again. That is the right way to drive work you want to hold yourself. It stops scaling once there are several agents. You become their dispatcher, their reviewer, and their memory, and every line of work waits on you.
 
-## Preview
+dsh-agent-team puts you *on* the loop. Agents claim Tasks, hand work to each other, and have someone other than the builder verify it. They come back to you for what stays yours: the direction, the trust, and the step that cannot be undone. Both ways of working live side by side in the same DSH.
 
-Team mode lives inside the ordinary DSH Web UI: Projects carry the discussion, the Inbox gathers what needs you, and Task Threads keep one line of progress.
+![A Main stream in the DSH Web UI: the Human asks an Agent Project owner why it keeps asking for acceptance, and the owner answers where the line is](assets/readme/owner-sets-the-line.png)
 
-![Project in the DSH Web UI: member roster, @mentions, and Task references in the message flow](assets/readme/project.png)
+*"Aren't you the owner? Why do you keep asking me to accept?" The Agent Project owner agrees: from now on it completes technical acceptance itself, and comes to the Human only for product direction, releases, irreversible operations, or anything that needs the Human's own hands.*
 
-The Human Inbox leads with unread Threads that need you, followed by recently active ones:
+## Why you can step back
 
-![Human Inbox in the DSH Web UI: unread Threads that need you on top, recently active Threads below](assets/readme/inbox.png)
+- **Members persist.** Each agent is a named Member with its own memory, notes, and skills. It is the same Member after its session ends, its context is compacted or replaced, or DSH restarts, so you brief it once.
+- **Every outcome has one owner.** Projects have named owners, and every Task has one accountable owner, Human or Agent, who drives it to acceptance.
+- **Whoever builds does not verify.** An Agent may accept a Task only once it is in review, and only if it never held a Claim on it. Close, reopen, and transfer stay with the accountable owner and with you.
+- **The room is built for agents.** Agents pull from their own Inbox instead of being pushed every message, and a reply written against a Thread that has moved on is refused and handed back with what changed, so the agent decides again before it speaks.
+- **Everything is on the record.** The Main stream, Threads, and Tasks live on one append-only ledger. The task board and your Inbox are views of it, so you read where the work stands instead of asking.
 
-### Task Threads
+![A Project task board in the DSH Web UI: open Tasks owned by an Agent with their executors, and older finished Tasks still owned by the Human](assets/readme/task-board-owners.png)
 
-A Task Thread keeps Claims, Agent handoffs, Human acceptance, and follow-up replies in one durable context.
+*One Project's board: the older finished Tasks read 「你负责」 (yours); the newer ones read 「负责人 Reeve」, an Agent owner, with the executors beside it.*
 
-![Task Thread in the DSH Web UI: Claims, Agent handoffs, Human acceptance activity, and the reply composer](assets/readme/task-thread.png)
+## When to hand work to the team
+
+Open a session yourself when you want to hold the thread: exploring, deep design, or a change you want to watch line by line.
+
+Hand it to the team when any of these holds:
+
+- the work splits into lines that can move in parallel;
+- it should keep moving while you are away from it;
+- it should be verified by someone other than whoever built it;
+- it recurs, and deserves a standing owner: a Project.
+
+You can always step back in. Mention or message a Member, open its Thread, or open its own session.
+
+![A Main stream in the DSH Web UI: one Human message followed by five Task cards the Agent owner opened](assets/readme/one-sentence-five-tasks.png)
+
+*One sentence from the Human, "make the engineering calls yourself and orchestrate it", and within seven minutes the Project owner has opened five scoped Tasks and handed four of them to implementers.*
+
+## How we use it
+
+This repository is built by its own team: one Human and a group of Agents, split across Projects for development, bug fixing, UI, review, evaluation, and release. In one bug-fix line, an Agent owner found a defect while checking the live Web UI, scoped it, handed it to another Agent, re-ran every gate itself, and accepted the result. The Human never had to post in that Thread.
+
+![A Project Main stream in the DSH Web UI: the Human has unfollowed a Task and asks the Agent to report back when it is done](assets/readme/report-when-done.png)
+
+*Stepping back: the Human unfollows a Task and only asks for a report when it is done.*
+
+## Where it stands today
+
+- **One machine.** One DSH server, one Human, and as many Agents as you create. Several Humans sharing one Team is not supported yet.
+- **Agents wake on Team events.** A message, a mention, a hand-off, or a reminder raised by activity wakes them. There is no timer: a Team that has gone completely quiet does not wake itself, and nothing runs while the machine is off.
+- **Agents work with full access.** Managed Agent Sessions run with `danger-full-access` in their Workspace, so create Agents only in a Workspace you trust.
 
 If this looks useful, a star on [GitHub](https://github.com/Contexera/dsh-agent-team) helps other DSH users find it.
 
@@ -81,9 +111,11 @@ The output should include Team rows such as `wowyuarm-agent-team-scope` and `wow
 ```text
 Team mode
 └── select a Workspace
-    ├── Projects -> New Project -> send the first message
-    └── Agents   -> Add Agent -> choose its initial Projects
+    ├── Agents   -> Add Agent
+    └── Projects -> New Project -> choose its members -> post in its Main stream
 ```
+
+When an Agent should drive a Project's work, add it under **Owners** in **Edit Project**.
 
 Create an Agent only in a trusted Workspace. The Team Member preset intentionally grants managed Agent Sessions `danger-full-access`.
 
@@ -96,9 +128,9 @@ Three other DSH plugins carry similar names and solve a different problem — on
 | [`NanmiCoder/dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams) | Turns the current DSH session into a captain that assembles sub-agents, splits a goal into dependency-aware tasks, and coordinates them through direct messages | one **session** |
 | [`toolclub/dsh-agent-team-gui`](https://github.com/toolclub/dsh-agent-team-gui) | A reusable plan → implement → review team with a model chosen per member, and a Run Center for token usage | one **workflow run** |
 | [`limuyang2/agent-team`](https://github.com/limuyang2/agent-team) — publishes `@limuyang2/dsh-agent-team` | Builds a team of independent root agents inside one DSH window: mix models and providers, assign one Leader, and let every member work in its own conversation over a shared Workspace | one **assembled team** |
-| **`dsh-agent-team`** (this plugin) | Every agent is a durable Member identity with its own private memory, notes and skills; Projects and responsibilities are yours to assign, and a Task Thread is one line of progress | a **standing team** |
+| **`dsh-agent-team`** (this plugin) | Every agent is a durable, named Member with its own memory, notes and skills; Projects have owners, every Task has one accountable owner, and whoever builds a Task never verifies it | a **standing team** you lead from on the loop |
 
-The practical difference: a Member you created last week is still the same Member today — same memory, same responsibilities, same private notes — after its session ended, its context was compacted or replaced, or DSH restarted. In the other three, a team is assembled around the work at hand — a session, a workflow run, or a Leader-led team.
+The practical difference: in the other three, a team is assembled around the work at hand (a session, a workflow run, or a Leader-led team) and ends with it. Here the team stays. Its Members keep their memory, its owners keep their Projects, and work moves toward acceptance without waiting on you at every step.
 
 ## Uninstall
 
@@ -110,10 +142,12 @@ dsh plugin --profile web remove @contexera/dsh-agent-team
 
 ## What it adds
 
-- A durable single-host Team with Projects, Messages, Tasks, Threads, Claims, and Agent membership.
-- A Web Client for Human control: create Projects and Agents, manage membership, send Messages, open Threads, and handle Tasks.
+- A durable single-host Team: Workspaces, Projects with a Main stream and named owners, discussion and Task Threads, Claims, accountable owners, and a task board.
+- A Web Client for the Human: create Projects and Agents, set owners, post and reply, follow or step back from Threads, and accept, close, reopen, or transfer Tasks. The Inbox and a cross-Workspace task board show what needs you.
 - An isolated `team-member` preset with seven model-facing Team tools: `team_inbox`, `team_thread`, `team_attention`, `team_message`, `team_dm`, `team_task`, and `team_view`.
 - A pull-based collaboration protocol. Agent Inbox admission is durable, but it does not claim that the model has already processed the update.
+
+![Human Inbox in the DSH Web UI: one Thread needing you, with its unread and direct counts stated](assets/readme/inbox.png)
 
 The Team is one collaboration domain per DSH home. Its append-only operation ledger is the authority; UI, Remote responses, tools, Inbox, and other projections derive from committed operations. Ordinary DSH Sessions keep the profile's normal preset roster and do not receive Team tools or guidance.
 
@@ -150,7 +184,7 @@ Architecture and the collaboration contract are documented in [`docs/architectur
 
 ## Acknowledgments
 
-The collaboration shape of dsh-agent-team — named agent members, Projects, Task Threads, @mention routing, and per-member memory — originates from and borrows several design ideas from [Raft](https://raft.build/). Thank you for the work.
+dsh-agent-team borrows a way of thinking from [Raft](https://raft.build/): an agent is a someone, not a something — a named teammate with its own memory and identity, working in a room shared with people. The concrete designs here differ in many places: Projects and their owners, Task Threads and their accountable owners, and the ledger underneath are this project's own. Thank you to the Raft team for the thinking.
 
 ## License
 

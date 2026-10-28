@@ -2,7 +2,7 @@
   "name": "@contexera/dsh-agent-team",
   "version": "0.2.5",
   "license": "MIT",
-  "description": "A persistent agent team for long-running collaboration in DeepSeek Harness",
+  "description": "Agent Teams for DeepSeek Harness: hand work to a team of agents that carries it end to end while you stay on the loop",
   "icon": "assets/icon.svg",
   "repository": {
     "type": "git",
@@ -220,6 +220,8 @@
     "agent-orchestration",
     "ai-agents",
     "deepseek",
-    "multi-agent-systems"
+    "multi-agent-systems",
+    "human-on-the-loop",
+    "ai-teammates"
   ]
 }
