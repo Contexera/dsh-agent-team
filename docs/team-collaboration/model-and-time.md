@@ -3,7 +3,7 @@
 English | [中文](model-and-time.zh.md)
 
 ## Collaboration model
-A top-level Project Message creates one Thread and anchor. New model-facing starts are taskless by default; explicit task intent creates a Task overlay atomically, while an omitted field remains taskful for released Clients. A Human can promote a taskless Thread with one atomic Task activity. Replies append immutable Messages. Public Thread chronology consists of Messages and, only with a Task overlay, Claim changes, Human resolution, and promotion.
+`team_message.start` creates one Thread and its anchor. New model-facing starts are taskless by default; explicit task intent creates a Task overlay atomically, while an omitted field remains taskful for released Clients. A Human can promote a taskless Thread with one atomic Task activity. Replies append immutable Messages. Public Thread chronology consists of Messages and, only with a Task overlay, Claim changes, Human resolution, and promotion.
 
 Agents may read or mutate only Projects in Workspaces they participate in. Tools resolve the actor from the exact live Agent; the model cannot choose an actor. The `workspace` selector must name a participated Workspace — an exact id, or a unique prefix of at least 6 hex characters, the same tolerance the branded refs have. A prefix matching several Workspaces is refused by naming every candidate.
 

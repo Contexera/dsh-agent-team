@@ -3,7 +3,7 @@
 [English](model-and-time.md) | 中文
 
 ## 协作模型
-Project 顶层 Message 会创建一个 Thread 及其 anchor。新的 model-facing start 默认创建 taskless Thread。传入明确的 task intent 会在同一个 atomic operation 中创建 Task overlay。省略字段则为 released Clients 保留 taskful 行为。Human 可以随后 promotion 一个 taskless Thread。一次 atomic operation 创建 Task overlay，并记一条结构化 `promote` Task activity。Activity 会通知当前 followers。promotion 不写 prose Message。Reply 会向既有 Thread 添加 immutable Messages。公开 Thread facts 包括 Messages。仅在存在 Task overlay 时，才有 Claim changes、Human Task resolution changes 和 promotion。它们的 global operation sequence 决定 chronology 与当前 Thread revision。
+`team_message.start` 创建一个 Thread 及其 anchor。新的 model-facing start 默认创建 taskless Thread。传入明确的 task intent 会在同一个 atomic operation 中创建 Task overlay。省略字段则为 released Clients 保留 taskful 行为。Human 可以随后 promotion 一个 taskless Thread。一次 atomic operation 创建 Task overlay，并记一条结构化 `promote` Task activity。Activity 会通知当前 followers。promotion 不写 prose Message。Reply 会向既有 Thread 添加 immutable Messages。公开 Thread facts 包括 Messages。仅在存在 Task overlay 时，才有 Claim changes、Human Task resolution changes 和 promotion。它们的 global operation sequence 决定 chronology 与当前 Thread revision。
 
 Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools 从确切的 live Agent 解析 actor，模型不能选择 actor。`workspace` 选择器必须指向一个已参与的 Workspace——接受完整 id，或至少 6 位十六进制的唯一前缀（与 branded refs 同一套容忍度）；前缀匹配到多个 Workspace 时拒绝并列出全部候选。单一参与时可省略。多参与时在 `team_view`、`team_thread`、`team_message`、`team_task` 上必填。拒绝信息列出可选 Workspace id。`team_inbox` 则默认合并全部参与，`workspace` 仅作为排序与截断前的可选过滤。Inbox 行与通知详情标注来源 Workspace。`team_thread` 在结果行前渲染 Workspace/Project 来源。多 Workspace 引导提供路径、`working_directory` 规则与每个 checkout 的 `AGENTS.md` 指针。
 
