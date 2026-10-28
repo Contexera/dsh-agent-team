@@ -1,0 +1,14 @@
+/* The shell glyph steps aside; the mask paints the Team mark in the row's own ink. */
+:global([data-agent-team-settings-icon]) > svg {
+  display: none;
+}
+
+:global([data-agent-team-settings-icon])::before {
+  content: '';
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask: var(--team-settings-mark) center / contain no-repeat;
+  mask: var(--team-settings-mark) center / contain no-repeat;
+}

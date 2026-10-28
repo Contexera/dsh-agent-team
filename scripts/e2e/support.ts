@@ -86,6 +86,7 @@ export const UI06_SHOTS = join(BROWSER_ARTIFACTS, 'ui-06')
 export const UI07_SHOTS = join(BROWSER_ARTIFACTS, 'ui-07')
 export const UI08_SHOTS = join(BROWSER_ARTIFACTS, 'ui-08')
 export const UI09_SHOTS = join(BROWSER_ARTIFACTS, 'ui-09')
+export const SETTINGS_SHOTS = join(BROWSER_ARTIFACTS, 'settings-nav')
 export const MAIN_STREAM_SHOTS = join(BROWSER_ARTIFACTS, 'main-stream')
 /**
  * Wait until no finite animation is running: a screenshot taken mid-collapse
@@ -421,4 +422,5 @@ export async function installLocalBundle(clearArtifacts = true): Promise<void> {
   await mkdir(UI07_SHOTS, { recursive: true })
   await mkdir(UI08_SHOTS, { recursive: true })
   await mkdir(UI09_SHOTS, { recursive: true })
+  await mkdir(SETTINGS_SHOTS, { recursive: true })
 }

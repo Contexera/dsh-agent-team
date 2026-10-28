@@ -55,6 +55,7 @@
 
 ## 团队设置页（团队）
 - 设置面板里 Team 只有这一面：`settings.section` 的 `team-settings` 条目（「团队」），只在普通模式提供。Team 模式接管侧栏后，设置面板不可达。导航轨与内容列由 shell 画，所以本段自己画 18px/600 标题。其余行沿用 shipped 设置语言：16px/0 内边距配 border-l2 发丝线、14px/22px 标题叠 12px/18px tertiary 说明、控件间距 12px。按钮与输入框直接用 shipped `Button` 与 `Input`，不另起一份声明。因为导航轨把这个条目与 Harness 自己的页面排在一起，标题下方加一行 13px tertiary 引言，写明这一页属于谁、改动作用在哪里。这行页头在**每个状态**都渲染。读取失败时也在。页面不会把「这是谁的 Team」晾着不答。脚注写出版本号并链接仓库。升级提示行只在 Host 报告有时才出现。
+- 导航行的图标同样归 shell 所有：`navIcon(id)` 按 section id 画固定的标记，未知 id 落回通用齿轮，而 `settings.section` 没有 icon 选项。所以 Team 这一行靠一个收敛的 DOM 变通拿到本包的标记——在 shell 那个 portal 出来的对话框里给本行打标记，再用 mask 把标记画在 shell 图标之上。它不是受支持的扩展点，故只有一个观察器盯着对话框的开/合，销毁时把每个标记与样式都还原；等 Harness 给 `settings.section` 提供 icon 后即可删除。
 - 这一页写两样东西。身份——显示名与头像——走 Team Remote，由它拥有 Client 本来叫不出名字的 profile 条目。压缩阈值则是 Team Host 行自己的配置组，经共享的配置表单（`configForms.get(<行 id>)`）读写，所以这一页只点名 `memberCompaction.tokens` 这一条子路径，而不是整组重述一遍。
 - 这一组落在身份行与环境检查之间，自带 13px/600 分组标题（shipped 设置卡片的分组标签），以页面的发丝线开场。它的字段与保存都是 shipped 的 `SettingsForm` 与 `SettingsValueField`。阈值按容量书写（`256K`、`1M` 或纯数字）。字段读不懂的草稿（`2GB`）保留原文并阻塞保存。留空则暂存一次 `unset`，让这一组回落到组合层与其 256000 默认值。只写这一条子路径，所以页面从不显示的兄弟 `enabled` 开关在每次保存后都还在。
 - `human-identity.ts` 是这份资料的唯一读取方。`TeamHumanIdentity` 在多个订阅者之间共用一次在途读取。引用未变时复用已经解码好的头像。后续读取失败时保留上一次已接受的值。只有从未加载成功才是 unavailable。这时整面 `role="alert"` 并自带重试。它还在每次写入被接受后刷新。写入走 Team Remote 自己的 `setHumanProfile` 与头像调用，由它们拥有 profile 条目：Client 从不替身份字段写 settings 文档，所以也不必给那些字段起名。

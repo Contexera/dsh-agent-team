@@ -61,6 +61,7 @@ import { TeamPanelIcon } from './TeamPanelIcon.tsx'
 import { TeamConversation } from './TeamConversation.tsx'
 import { TeamWorkspaceBrowser } from './TeamWorkspaceBrowser.tsx'
 import { en, zh, type TeamKey } from './locales.ts'
+import { installSettingsNavIcon } from './settings-nav-icon.ts'
 
 export type { TeamMode, TeamNavigationActions, TeamNavigationSnapshot } from './navigation.ts'
 export type { TeamKey } from './locales.ts'
@@ -312,6 +313,9 @@ function registerModeShadow<T extends object>(
 
 function applyUi(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'agent-team: dictionaries')
+  if (typeof document !== 'undefined') {
+    ctx.effect(() => installSettingsNavIcon(document, () => ctx.locale.bind(NS)('teamSettingsNav')), 'agent-team: settings nav mark')
+  }
 
   const navigation = new TeamNavigation()
   const disposeNavigation = ctx.reflect.provide('teamNavigation', navigation)
