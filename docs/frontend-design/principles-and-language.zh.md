@@ -17,6 +17,10 @@ Team Client 渲染在 shipped DSH 外壳内部，必须讲基础 UI 的设计语
 
 这条基线已在 **0.2.0-rc.1** 线上复核（认证线见 [dsh-release-compatibility.zh.md](../dsh-release-compatibility.zh.md)），并在 **0.2.0-rc.2** 上做了源码级复核：圆角刻度与焦点环链未变，本表镜像的 shipped 样式表逐字节一致，主题文件只增别名。0.2 真正动过的是本契约**不**镜像的 shipped 面：浮层改读新的 frame inset 变量、转录区微光改走 `TextShimmer` 原语、聊天气流间距收紧到 6px（助手回复后 12px）。Team 时间线保持自己的消息节奏、不采用那个间距：它的行是带座位的消息，预留身份位、正文自带 markdown 块级外边距，固定的转录 flow gap 在这里没有对应物。
 
+这条基线又在 **0.2.1-rc.2** 上做了源码级复核：本表镜像的每条规则都仍然成立——圆角刻度、焦点环链、胶囊与行的圆角、模式控件、以及浮层与卡片的配方均未改；`audit-ui-parity.mjs` 在该树上跑过、无违规。
+
+与 0.2.0-rc.2 的差异都落在本契约**不**镜像的状态与面上：Windows 标题栏折叠态的新建会话控件把 50% 圆换成 `--dsw-radius-sm`；侧栏 hover 尾部操作间距 10px→15px；被选中的命令胶囊取 `state-business-tertiary` 底色并隐藏光标；composer 的子会话文件 intake 收窄到仅图片。
+
 | 维度 | 规则 | shipped 参考 |
 | --- | --- | --- |
 | 纯图标控件 | 28×28 圆形，`border-radius: 999px`，`corner-shape: round`，透明底色，hover 用 `--dsw-alias-interactive-bg-hover-solid`（composer）/ `--dsw-alias-interactive-bg-hover`（侧栏） | `InputBar.module.css .add`、`SidebarRoot.module.css .iconButton` |

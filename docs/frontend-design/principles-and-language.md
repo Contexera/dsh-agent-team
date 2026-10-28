@@ -34,6 +34,10 @@ The Team timeline keeps its own rhythm: seat-style rows with reserved identity
 space and Markdown bodies whose margins set the spacing, so a fixed transcript
 gap has no equivalent.
 
+Re-verified once more on **0.2.1-rc.2** at source level: every rule this sheet mirrors still holds — the radius tiers, the focus-ring chain, the chip and row radii, the mode chip, and the floating and card recipes are unchanged, and `audit-ui-parity.mjs` passes on that tree with no violations.
+
+What differs from 0.2.0-rc.2 belongs to states and surfaces this contract does not mirror: the Windows-titlebar collapsed new-session control traded its 50% circle for `--dsw-radius-sm`, sidebar trailing hover actions widened 10px→15px, a selected command chip takes a `state-business-tertiary` tint with the caret suppressed, and the composer's child-prompt file intake narrowed to images.
+
 | Dimension | Rule | Shipped reference |
 | --- | --- | --- |
 | Icon-only control | 28×28 circle, `border-radius: 999px`, `corner-shape: round`, transparent fill, hover `--dsw-alias-interactive-bg-hover-solid` (composer) / `--dsw-alias-interactive-bg-hover` (sidebar) | `InputBar.module.css .add`, `SidebarRoot.module.css .iconButton` |
