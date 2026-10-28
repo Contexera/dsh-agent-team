@@ -157,6 +157,18 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
     sentence: ({ refused }: RecoveryContext) => `Reply target ${refused ?? ''} is not a recorded Message — copy a messageRef rendered by team_thread read, team_view, or an inbox notice.`,
   },
   {
+    kind: 'message_read_unknown',
+    sentence: ({ refused }: RecoveryContext) => `Message ${refused ?? ''} is not a recorded Message — copy a messageRef rendered by team_thread read, team_view, or an inbox notice.`,
+  },
+  {
+    kind: 'message_read_foreign',
+    sentence: ({ refused }: RecoveryContext) => `Message ${refused ?? ''} belongs to another Thread — read that Thread first, or copy a messageRef from this Thread's own read.`,
+  },
+  {
+    kind: 'message_read_foreign_project',
+    sentence: ({ refused }: RecoveryContext) => `Message ${refused ?? ''} belongs to another Project — read that Project's Main stream, or copy a messageRef from this Project's own Main stream read.`,
+  },
+  {
     kind: 'attachment_path_rejected',
     sentence: ({ refused }: RecoveryContext) => `Attachment ${refused ?? ''} was refused — attachments are absolute paths to one existing non-empty file within the byte limit; fix the path or drop the attachment.`,
   },

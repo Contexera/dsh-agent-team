@@ -731,11 +731,13 @@ describe('AgentTeam durable Thread Attention ledger', () => {
       projectRef: project.project.projectRef, body: 'Second thread', actor: agentTeamHumanActor() })).value)
 
     // Each refusal names its own cause, so a reader can tell a wrong ref from a
-    // closed Thread — and none of them returns a substitute body.
+    // closed Thread — and none of them returns a substitute body. Each refusal
+    // also names the way out: a live model passed a fact sequence as a messageRef
+    // and, told only that the Message was not recorded, abandoned the action.
     expect(() => ledger.readMessage(actor, { workspaceId: alpha, threadRef: first.thread.threadRef, messageRef: 'message:missing' as never }))
-      .toThrow(/is not a recorded Message/)
+      .toThrow(/is not a recorded Message — copy a messageRef rendered by/)
     expect(() => ledger.readMessage(actor, { workspaceId: alpha, threadRef: first.thread.threadRef, messageRef: second.message.messageRef }))
-      .toThrow(/belongs to another Thread/)
+      .toThrow(/belongs to another Thread — read that Thread first, or copy a messageRef/)
     expect(() => ledger.readMessage(actor, { workspaceId: alpha, threadRef: 'thread:missing' as never, messageRef: first.message.messageRef }))
       .toThrow(/unknown Thread ref/)
 

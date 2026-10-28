@@ -2236,8 +2236,8 @@ export class AgentTeamLedger {
     // archived all refuse here, and refuse distinguishably.
     const context = this.threadContextForActor(actor, request.workspaceId, { threadRef: request.threadRef! })
     const message = this.state.messagesByRef.get(request.messageRef)
-    if (message === undefined) throw new Error(`Message '${request.messageRef}' is not a recorded Message`)
-    if (message.threadRef !== context.thread.threadRef) throw new Error(`Message '${request.messageRef}' belongs to another Thread`)
+    if (message === undefined) throw new Error(`Message '${request.messageRef}' is not a recorded Message${this.unknownRefHint(request.messageRef, 'message', 'Message')} — ${recoveryFor('message_read_unknown').sentence({ refused: `'${request.messageRef}'` })}`)
+    if (message.threadRef !== context.thread.threadRef) throw new Error(`Message '${request.messageRef}' belongs to another Thread — ${recoveryFor('message_read_foreign').sentence({ refused: `'${request.messageRef}'` })}`)
     return Object.freeze({
       messageRef: message.messageRef,
       threadRef: message.threadRef,
@@ -2256,8 +2256,8 @@ export class AgentTeamLedger {
     const project = this.requireActiveProject(workspaceId, projectRef)
     this.requireProjectMemberActor(authorized, project.projectRef)
     const source = this.state.mainSourceByRef.get(messageRef)
-    if (source?.kind !== 'message') throw new Error(`Message '${messageRef}' is not a recorded Main stream Message`)
-    if (source.message.projectRef !== project.projectRef) throw new Error(`Message '${messageRef}' belongs to another Project`)
+    if (source?.kind !== 'message') throw new Error(`Message '${messageRef}' is not a recorded Main stream Message${this.unknownRefHint(messageRef, 'message', 'Message')} — ${recoveryFor('message_read_unknown').sentence({ refused: `'${messageRef}'` })}`)
+    if (source.message.projectRef !== project.projectRef) throw new Error(`Message '${messageRef}' belongs to another Project — ${recoveryFor('message_read_foreign_project').sentence({ refused: `'${messageRef}'` })}`)
     const { message } = source
     return Object.freeze({ messageRef, projectRef: project.projectRef, sender: message.sender, sequence: message.sequence, occurredAt: message.occurredAt, body: message.body })
   }
