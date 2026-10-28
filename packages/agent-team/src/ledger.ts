@@ -6252,10 +6252,54 @@ export class AgentTeamLedger {
     // cleanup repair sees the same state its validator will.
     const projection = emptyProjection()
     return records.map(([id, operation]) => {
-      const normalized = this.repairLegacyProjectCleanup(this.normalizeOperation(operation, occurrences, instants), projection)
+      const normalized = this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrant(this.normalizeOperation(operation, occurrences, instants), projection), projection), projection)
       this.applyTo(projection, normalized)
       return [id, normalized]
     })
+  }
+
+  /**
+   * An owner grant written before Main stream Attention existed carries the
+   * era's inbox: a Main marker alone, with no `mainAttention` row. That grant
+   * still started its Member's default attention, so the missing row is
+   * re-minted from the grant's own sequence and the record is repaired in
+   * memory. Any other shape — a row already present, or a delta that differs
+   * from the era's in some other way — is left alone, so it still fails
+   * validation and a forgery is not silently accepted.
+   */
+  private repairLegacyMainAttentionGrant(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+    if (operation.kind !== 'team/project-owner-added') return operation
+    const { inbox, memberId, projectRef } = operation.data
+    if (inbox.mainAttention !== undefined) return operation
+    const granted = [this.startMainAttention(memberId, projectRef, operation.sequence)]
+    // The era's delta: the owner-added Main marker and nothing else. A delta
+    // that differs in any other way is a shape this build never wrote, so it
+    // is left alone and still fails validation.
+    const legacy = this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [])
+    if (!isDeepStrictEqual(inbox, legacy)) return operation
+    return { ...operation, data: { ...operation.data, inbox: this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [], [], [], [], granted) } }
+  }
+
+  /**
+   * An Agent's Main stream read written before Main stream Attention existed
+   * carried only the markers it consumed: its watermark lived in a projection
+   * field that no longer exists, so replay alone would lose every byte of read
+   * progress and hand the reader its whole history as unread. The row is
+   * re-minted from the read's own `readThroughSequence`, so the era's progress
+   * survives. Only the era's shape is repaired — a receipt that differs in any
+   * other way is a shape this build never wrote and still fails validation.
+   */
+  private repairLegacyMainStreamRead(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+    if (operation.kind !== 'team/main-stream-read') return operation
+    const { inbox, memberId, projectRef, readThroughSequence } = operation.data
+    if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID || inbox.mainAttention !== undefined) return operation
+    const attention = this.mainAttentionForFrom(projection, memberId, projectRef)
+    if (attention === undefined) return operation
+    // The era's receipt: the markers it consumed and nothing else.
+    if (!isDeepStrictEqual(inbox, this.inboxDelta([], [], [], [], [], [], [], inbox.mainMarkers?.removed ?? []))) return operation
+    const advanced = Object.freeze({ ...attention, readThroughSequence: Math.max(attention.readThroughSequence, readThroughSequence) })
+    return { ...operation, data: { ...operation.data,
+      inbox: this.inboxDelta([], [], [], [], [], [], [], inbox.mainMarkers?.removed ?? [], [], [], [advanced]) } }
   }
 
   /**
