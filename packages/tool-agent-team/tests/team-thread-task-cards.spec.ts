@@ -21,7 +21,7 @@ const HOST_CARD = {
     threadRef: CARD_THREAD,
     anchor: { messageRef: 'message:created', sender: OWNER, preview: 'Ship the importer', sequence: 12, occurredAt: '2026-10-25T03:00:00.000Z' },
     task: { taskRef: TASK, taskNumber: 7, status: 'in_review', resolution: 'open', accountable: OWNER, liveClaimOwners: [] },
-    replyCount: 0, participants: [], newestSequence: 12, newestOccurredAt: '2026-10-25T03:00:00.000Z',
+    replyCount: 0, participants: [], newestSequence: 18, newestOccurredAt: '2026-10-26T09:30:00.000Z',
     newestActor: { memberId: OWNER, name: 'reeve' },
   },
 }
@@ -158,6 +158,11 @@ describe('team_thread carries the derived Task cards from the Host projection', 
     const result = await call(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, host)
     expect(host.threadHistoryForAgent).toHaveBeenCalledTimes(1)
     expect(result.taskCards).toEqual([CARD])
+    // The fixture's newest activity is later than its creation, so the rendered line must carry the creation instant.
+    const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, result)
+    const card = text.split('\n').find(line => line.includes('[task card]'))!
+    expect(card).toContain('12 2026-10-25T11:00:00+08:00 [task card]')
+    expect(card).not.toContain('2026-10-26T17:30:00+08:00')
   })
 
   it('a Task Thread returns no cards, because it has none of its own', async () => {

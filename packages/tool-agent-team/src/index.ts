@@ -163,7 +163,7 @@ function taskCardView(entry: AgentTeamThreadTaskCard): TaskCardView {
   // grow without changing what a tool result declares.
   const card = entry.card
   return { taskRef: card.task.taskRef, taskNumber: card.task.taskNumber, threadRef: card.threadRef, sequence: entry.sequence,
-    occurredAt: card.newestOccurredAt, subject: card.anchor.preview, status: card.task.status, resolution: card.task.resolution,
+    occurredAt: card.anchor.occurredAt, subject: card.anchor.preview, status: card.task.status, resolution: card.task.resolution,
     accountable: card.task.accountable }
 }
 
