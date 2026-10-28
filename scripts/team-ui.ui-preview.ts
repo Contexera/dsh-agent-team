@@ -106,6 +106,16 @@ beforeAll(async () => {
     description: '预览样本：气泡、分组、有人@我、引用回复、长文折叠、Task 条目',
   })
   const projectRef = project.project.projectRef
+  for (const agent of AGENTS) {
+    const member = memberOf(agent.handle)
+    if (member === undefined) throw new Error(`preview Member ${agent.handle} is unavailable`)
+    await team.addProjectOwner({
+      requestId: `ui-preview-owner-${agent.handle}` as never,
+      workspaceId: workspace.id,
+      projectRef,
+      memberId: member.member.memberId,
+    })
+  }
 
   const opener = await team.startThread({
     requestId: 'ui-preview-opener' as never,
