@@ -9,7 +9,7 @@ import { calculateTrialMetrics } from './team-trial-metrics.ts'
 
 const workspaceId = WorkspaceId('workspace:metrics')
 const human = agentTeamHumanActor()
-const actor = (memberId: AgentTeamMemberId) => ({ kind: 'member' as const, memberId, handle: 'worker' })
+const actor = (memberId: AgentTeamMemberId, handle = 'worker') => ({ kind: 'member' as const, memberId, handle })
 const operationId = (sequence: number) => `operation:${sequence}` as AgentTeamOperationId
 const reminder = (sequence: number, memberId: AgentTeamMemberId): AgentTeamOperation => ({ sequence, operationId: operationId(sequence), previousOperationId: null,
   requestId: `metrics:${sequence}` as AgentTeamRequestId, occurredAt: '2026-10-26T00:00:00.000Z', actor: { kind: 'host', handle: 'host' }, kind: 'team/reminder-raised',
@@ -28,9 +28,13 @@ async function main() {
   await ledger.initialize()
   const projectRef = (await ledger.createProject({ requestId: 'metrics:project' as AgentTeamRequestId, actor: human, workspaceId, name: 'metrics', description: '', memberIds: [] })).value.project.projectRef
   const memberId = 'member:worker' as AgentTeamMemberId
+  const observerId = 'member:observer' as AgentTeamMemberId
   await ledger.addMember({ requestId: 'metrics:member' as AgentTeamRequestId, actor: human, workspaceId, handle: 'worker', description: '', presetId: 'team-member',
     member: { memberId, sessionId: SessionId('session:worker'), workspaceId, handle: 'worker', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/worker', state: 'enabled' }, projectRefs: [projectRef] })
+  await ledger.addMember({ requestId: 'metrics:observer' as AgentTeamRequestId, actor: human, workspaceId, handle: 'observer', description: '', presetId: 'team-member',
+    member: { memberId: observerId, sessionId: SessionId('session:observer'), workspaceId, handle: 'observer', description: '', presetId: 'team-member', privateMemoryPath: '/tmp/observer', state: 'enabled' }, projectRefs: [projectRef] })
   await ledger.addProjectOwner({ requestId: 'metrics:owner' as AgentTeamRequestId, actor: human, workspaceId, projectRef, memberId })
+  await ledger.changeAttention({ requestId: 'metrics:observer-follow', actor: actor(observerId, 'observer'), workspaceId, projectRef, action: 'follow' })
   const started = await ledger.startThread({ requestId: 'metrics:thread' as AgentTeamRequestId, actor: actor(memberId), workspaceId, projectRef, kind: 'discussion', body: 'Start' })
   const threadRef = started.value.thread!.threadRef
   await ledger.readThread({ requestId: 'metrics:read' as AgentTeamRequestId, actor: human, workspaceId, threadRef })
@@ -46,6 +50,7 @@ async function main() {
   const result = calculateTrialMetrics(operations.map(operation => [operation.operationId, operation]))
   assert.equal(result.range.utcCalendarDays, 3, JSON.stringify({ range: result.range, operations: operations.map(operation => [operation.sequence, operation.kind, operation.occurredAt]) }))
   assert.equal(result.delivery.allMembers.immediateNotificationFactsByMember[memberId], 3)
+  assert.equal(result.delivery.allMembers.immediateNotificationFactsByMember[observerId], 3)
   assert.deepEqual(result.delivery.owners.byUtcDay, [
     { date: '2026-10-24', memberId, immediateNotificationFacts: 1 },
     { date: '2026-10-26', memberId, immediateNotificationFacts: 2 },

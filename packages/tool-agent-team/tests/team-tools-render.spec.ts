@@ -206,7 +206,9 @@ describe('team_attention renders Attention only', () => {
     kind: 'status', threadRef: THREAD, taskRef: TASK, taskNumber: 7, revision: 8394, status: 'in_progress', resolution: 'open', following: true,
   }
   const follows = 'Ordinary updates from there will interrupt you; mentions, replies and responsibility events already did.'
+  const followResult = 'Ordinary updates from there will interrupt you from now on; earlier content remains available through team_thread read or history. Mentions, replies and responsibility events already did.'
   const stopped = 'Ordinary updates will no longer interrupt you. Mentions, replies and responsibility events still will; follow again to resume.'
+  const statusStopped = 'Ordinary updates do not interrupt you. Mentions, replies and responsibility events still will; follow to resume them.'
 
   it('status renders one Attention outcome line under its Workspace/Project source', () => {
     const text = renderText(teamTools().get('team_attention')!, { action: 'status', threadRef: THREAD }, base)
@@ -215,7 +217,7 @@ describe('team_attention renders Attention only', () => {
 
   it('follow/unfollow render one Attention-changed line; no anchor, Claims, facts, revision label, or token', () => {
     const follow = renderText(teamTools().get('team_attention')!, { action: 'follow', threadRef: THREAD }, { ...base, kind: 'follow' })
-    expect(follow).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention changed — now following Thread ${THREAD} · ${TASK} (#7), in_progress/open.\n${follows}`)
+    expect(follow).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention changed — now following Thread ${THREAD} · ${TASK} (#7), in_progress/open.\n${followResult}`)
     const unfollow = renderText(teamTools().get('team_attention')!, { action: 'unfollow', threadRef: THREAD }, { ...base, kind: 'unfollow', following: false })
     expect(unfollow).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention changed — no longer following Thread ${THREAD} · ${TASK} (#7), in_progress/open.\n${stopped}`)
     for (const text of [follow, unfollow]) {
@@ -229,13 +231,13 @@ describe('team_attention renders Attention only', () => {
       workspaceId: 'workspace:alpha', projectRef: PROJECT,
       kind: 'status', threadRef: THREAD, revision: 8394, following: false,
     })
-    expect(text).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention status — not following Thread ${THREAD}.\n${stopped}`)
+    expect(text).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention status — not following Thread ${THREAD}.\n${statusStopped}`)
   })
 
   it('a Main stream Attention render names the Main stream, not a Thread', () => {
     const main = { workspaceId: 'workspace:alpha', projectRef: PROJECT, kind: 'follow', scope: 'main', following: true }
     const text = renderText(teamTools().get('team_attention')!, { action: 'follow', projectRef: PROJECT }, main)
-    expect(text).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention changed — now following the Main stream.\n${follows}`)
+    expect(text).toBe(`Workspace: workspace:alpha · Project: ${PROJECT}\nAttention changed — now following the Main stream.\n${followResult}`)
     // Unfollowing names what survives it, which is the one thing the verb alone does not say.
     const stoppedText = renderText(teamTools().get('team_attention')!, { action: 'unfollow', projectRef: PROJECT }, { ...main, kind: 'unfollow', following: false })
     expect(stoppedText).toContain('no longer following the Main stream')

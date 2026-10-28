@@ -25,6 +25,7 @@ interface MetricProjection {
   readonly tasks: Map<AgentTeamTaskRef, { readonly threadRef: AgentTeamThreadRef }>
   readonly reminderMarkers: Map<string, AgentTeamReminderMarker>
   readonly attentionByThread: Map<AgentTeamThreadRef, Set<AgentTeamMemberId>>
+  readonly mainAttention: Map<string, { readonly memberId: AgentTeamMemberId; readonly projectRef: AgentTeamProjectRef }>
 }
 interface MetricLedger {
   readonly state: MetricProjection
@@ -65,8 +66,12 @@ function agentReplyMetric(state: { messageSenders: Map<string, AgentTeamMemberId
 
 export function calculateTrialMetrics(records: readonly OperationRecord[]) {
   const ledger = replay(records)
-  const projection = internals(ledger).state
-  projection.ordered.length = 0
+  // Replay once for schema/legacy normalization, then fold the normalized
+  // operations into a genuinely empty projection. Reusing the constructor's
+  // final state here would count historical Attention rows before their
+  // establishing operation and overstate delivery during the trial.
+  const projectionLedger = new AgentTeamLedger({ entries: () => [].values() } as ConstructorParameters<typeof AgentTeamLedger>[0])
+  const projection = internals(projectionLedger).state
   const operations = internals(ledger).sortedRecords().map(([, operation]) => operation)
   const adoption = operations.find(operation => operation.kind === 'team/rules-version-adopted' && operation.data.version >= 2)
   const baselineSequence = adoption?.sequence ?? operations[0]?.sequence ?? 0
@@ -84,7 +89,11 @@ export function calculateTrialMetrics(records: readonly OperationRecord[]) {
   const notify = (memberId: AgentTeamMemberId, operation: AgentTeamOperation, owners: ReadonlySet<string>, amount = 1) => {
     if (memberId === HUMAN || ledger.getMember(memberId) === undefined) return
     increment(immediate, memberId, amount)
-    if (owners.has(memberId)) increment(dailyByMember.get(memberId)!, operation.occurredAt.slice(0, 10), amount)
+    if (owners.has(memberId)) {
+      const byDay = dailyByMember.get(memberId) ?? new Map<string, number>()
+      dailyByMember.set(memberId, byDay)
+      increment(byDay, operation.occurredAt.slice(0, 10), amount)
+    }
   }
   for (const operation of operations) {
     const inTrial = operation.sequence >= baselineSequence
@@ -101,12 +110,17 @@ export function calculateTrialMetrics(records: readonly OperationRecord[]) {
       for (const marker of data.inbox.directMarkers.added) notify(marker.memberId, operation, owners)
       for (const marker of data.inbox.activityMarkers.added) notify(marker.memberId, operation, owners)
       for (const marker of data.inbox.mainMarkers?.added ?? []) notify(marker.memberId, operation, owners)
-      if (operation.kind === 'team/main-message-posted' || (operation.kind === 'team/thread-started' && data.kind === 'discussion')) {
-        for (const memberId of owners) if (memberId !== actor) notify(memberId as AgentTeamMemberId, operation, owners)
+      if (operation.kind === 'team/main-message-posted' || (operation.kind === 'team/thread-started' && data.kind === 'discussion')
+        || operation.kind === 'team/project-owner-added' || operation.kind === 'team/project-owner-removed') {
+        const followers = new Set<AgentTeamMemberId>([HUMAN as AgentTeamMemberId])
+        for (const attention of projection.mainAttention.values()) {
+          if (attention.projectRef === projectRef) followers.add(attention.memberId)
+        }
+        for (const memberId of followers) if (memberId !== actor) notify(memberId, operation, owners)
       }
       if (operation.kind === 'team/thread-replied') {
         for (const memberId of internals(ledger).state.attentionByThread.get(data.thread.threadRef) ?? []) {
-          if (memberId === actor || owners.has(memberId)) continue
+          if (memberId === actor) continue
           notify(memberId, operation, owners)
         }
       }
@@ -173,7 +187,7 @@ export function calculateTrialMetrics(records: readonly OperationRecord[]) {
       staleUnreadSamples: staleUnread.slice(0, 20).map(entry => ({
         ...entry.marker, reminderSequence: entry.operation.sequence, invalidAtSequence: entry.invalid!.sequence })) },
     limitations: [
-      'The ledger has no delivery-attempt or wake receipt. Immediate notification facts are not measured Agent interruptions; threshold-qualified ordinary facts are excluded.',
+      'The ledger has no delivery-attempt or wake receipt. Immediate notification facts are not measured Agent interruptions; ordinary facts are counted when the reader holds the relevant Attention.',
       'Daily buckets are UTC calendar days, including the partial first and last days; owner rows omit zero days.',
       'The owners delivery subset covers Agents who held ownership during the trial; per-day rows count only facts produced while they owned the Project.',
       'A reminder superseded before its marker was consumed is a review lead, not a confirmed false positive. Confirm false positives manually.',

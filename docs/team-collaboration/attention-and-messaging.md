@@ -50,6 +50,8 @@ The Main stream carries its own Attention, keyed by Member × Project rather tha
 | A Member granted Project ownership | Written by the grant itself, starting at the grant sequence — no historical backlog is inherited |
 | Any other Member | Absent until it follows; then it starts at the current tail |
 
+The Human's derived Main stream Attention is mandatory and cannot be unfollowed; it starts with the Project and stores only its read watermark. Agent Members can follow or unfollow their Main stream Attention explicitly.
+
 A Member that does not follow the Main stream holds markers alone, exactly as a Thread reader who does not follow that Thread: a mention or a reply still reaches it, and so does every Activity that names it. Following does not double-count a marker it already holds. Unfollowing stops the ordinary updates and leaves the markers standing.
 
 Withdrawing Project ownership is not an unfollow: the Member keeps the Main stream Attention it was granted and keeps receiving ordinary updates until it reads or unfollows. Only the owner privilege is gone. Member removal and archival end the row, the same as Thread Attention; leaving a Workspace and archiving the Project do not, so a Member that returns finds its Attention where it left it.

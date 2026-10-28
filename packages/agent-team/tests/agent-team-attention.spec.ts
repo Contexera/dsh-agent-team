@@ -2084,4 +2084,26 @@ describe('what established an Attention period', () => {
     expect(sources.length).toBeGreaterThan(0)
     expect([...new Set(sources)]).toEqual(['mention'])
   })
+
+  it('replays a source-less legacy Thread read snapshot using the existing Attention cause', async () => {
+    const test = await harness(storedPool([...rulesV1Ledger.records]))
+    const ledger = ledgerAtBoot(test)
+    const actor: AgentTeamMemberActor = { kind: 'member', memberId: rulesV1Ledger.members.carol as never, handle: 'carol' }
+    const read = (await ledger.readThread({ requestId: requestId('legacy-source-read'), workspaceId: alpha,
+      taskRef: rulesV1Ledger.task.taskRef as AgentTeamTaskRef, actor })).value
+    const records = [...test.facility.get('agent_team')!.table('operations').entries()].map(([id, operation]) => {
+      const typed = operation as AgentTeamOperation
+      if (typed.kind !== 'team/thread-read' || isThreadReadSnapshot(typed.data)) return [id, typed] as [string, unknown]
+      const data = fabricateLegacyThreadReadSnapshot(typed.data, read)
+      const attention = data.attention === undefined ? undefined : { ...data.attention, source: undefined }
+      const inbox = { ...data.inbox, attention: { ...data.inbox.attention,
+        set: data.inbox.attention.set.map(row => ({ ...row, source: undefined })) } }
+      return [id, { ...typed, data: { ...data, ...(attention === undefined ? {} : { attention }), inbox } }] as [string, unknown]
+    })
+    const revived = await harness(storedPool(records))
+    const replayed = ledgerAtBoot(revived)
+    expect(() => replayed.validate()).not.toThrow()
+    expect(replayed.attentionStatus(actor, { workspaceId: alpha, taskRef: rulesV1Ledger.task.taskRef as AgentTeamTaskRef }).attention)
+      .toMatchObject({ source: 'mention' })
+  })
 })

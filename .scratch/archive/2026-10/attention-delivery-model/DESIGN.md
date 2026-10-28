@@ -60,7 +60,7 @@ Attention 统管普通事实的**自动发现与唤醒资格**，不管权限、
 
 Project owner **不默认 follow 项目内全部 Thread，也不因后来新开 Thread 而自动 follow**。Main stream 是它默认的项目级注意力面；具体 Thread 由责任关系或显式选择决定。
 
-Main stream 对非 owner 同样可 follow/unfollow。普通更新的未读与投递不再要求 owner 身份。
+Agent Member 对 Main stream 可 follow/unfollow。Human 的 Main stream Attention 随 Project 派生且强制存在，不能 unfollow。普通更新的未读与投递不再要求 Agent owner 身份。
 
 ## 身份变化与既有 Attention
 
@@ -169,7 +169,7 @@ Attention 是该呈现机制的第一个完整用例，但投递模型不应等�
 ## 验收测试缝
 
 1. 普通投递判定：同一 Member 是否 owner 不再改变结果；follow 即 immediate，不 follow 即无普通未读。
-2. Main stream 对称：owner 与非 owner 都能显式 follow/unfollow，普通更新遵守同一规则。
+2. Main stream 对称：Agent owner 与非 owner 都能显式 follow/unfollow，Human 保持派生的强制 Attention，普通更新遵守同一 Attention 规则。
 3. 默认 Attention：owner 授权只建立 Main stream 默认关注，不批量订阅已有或未来 Thread。
 4. 责任与直接信号：unfollow 后普通更新停止，@、reply、责任 Activity 和 reminder 仍到达。
 5. Claim 边界：active Claim 禁止 unfollow，done/released 后允许。

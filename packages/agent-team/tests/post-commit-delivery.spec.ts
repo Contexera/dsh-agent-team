@@ -207,6 +207,25 @@ describe('post-commit delivery', () => {
     info.mockRestore()
   })
 
+  it('wakes a non-owner Main stream follower for ordinary updates', async () => {
+    const { ctx } = await harness()
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('main-wake-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const follower = await addLiveMember(ctx, project.project.projectRef, 'follower')
+    const ledger = ctx.agentTeam['ledger']!
+    await ledger.changeAttention({ requestId: requestId('main-wake-follow'), workspaceId: alpha, projectRef: project.project.projectRef,
+      action: 'follow', actor: follower })
+    const { agent, state } = wakeSeam()
+    state.fail = false
+    ctx.agentTeam['handles'].set(follower.memberId, { agent, dispose: async () => {} })
+    state.calls.length = 0
+
+    const posted = await ctx.agentTeam.postMainMessage({ requestId: requestId('main-wake-post'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: 'Ordinary Main update' })
+    if (posted.kind !== 'committed') throw new Error('expected a committed Main stream post')
+    expect(state.calls).toHaveLength(1)
+    expect(state.calls[0]!.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('Main stream: 1 unread message') })
+  })
+
   it('spends no second attempt or log line on unread facts a later wake leaves unchanged', async () => {
     const { ctx } = await harness()
     const info = vi.spyOn(ctx.logger, 'info')

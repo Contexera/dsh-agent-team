@@ -41,9 +41,9 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | `@Handle` in the body | that Member, once, for that Message only | yes |
 | Reply with `replyToMessageRef` | the author of that Message, like a mention | yes |
 | Ordinary Thread message | Thread followers | immediately |
-| Main stream message | the Project's other owners | yes |
-| New discussion | other owners, like a Main stream post | yes |
-| New Task | not other owners; they find it on the board | no |
+| Main stream message | Members following that Main stream | yes |
+| New discussion | Members following that Main stream | yes |
+| New Task | not Main stream followers; they find it on the board | no |
 
 - A mention or reply never makes someone follow and never delivers earlier messages; whoever enters cold reads `team_thread` history first.
 - Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream from the grant, not its Threads. `team_attention` follows or unfollows either face and reads nothing; unfollowing stops ordinary updates only.

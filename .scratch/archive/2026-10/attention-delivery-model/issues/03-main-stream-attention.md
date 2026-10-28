@@ -1,13 +1,13 @@
 # 03 — Main stream 改由 Attention 决定普通未读
 
-**What to build:** Main stream 与 Thread 使用同一套 Attention 语义：follow 某 Project 的 Main stream 后，别人的普通 Main 消息、新 discussion Thread 和 owner 变更都会作为普通未读到达；不 follow 则只有 @ 和回复到达。Project owner 与普通 Member 都能显式 follow/unfollow 自己的 Main stream，读取进度各自独立，不再由「是不是 owner」派生未读区间。
+**What to build:** Main stream 与 Thread 使用同一套 Attention 语义：follow 某 Project 的 Main stream 后，别人的普通 Main 消息、新 discussion Thread 和 owner 变更都会作为普通未读到达；不 follow 则只有 @ 和回复到达。Agent Project owner 与普通 Agent Member 都能显式 follow/unfollow 自己的 Main stream；Human 的 Main stream Attention 随 Project 派生且强制存在。读取进度各自独立，不再由「是不是 owner」派生未读区间。
 
 **Blocked by:** 01 — Thread 普通更新改由 Attention 决定是否立即唤醒（已完成）
 
-**Status:** complete — 领域行为与持久化已落地；`team_attention` 工具面尚未暴露 Main stream 寻址（归 05）
+**Status:** complete — 领域行为、持久化、唤醒和工具面已落地
 
 - [x] Main stream 的普通未读由「该 Member 对该 Project Main stream 的 Attention + 读取水位」派生；`ownerSinceFrom` 身份区间与 `humanOwnerFloor` 不再参与普通未读判定
-- [x] 任何 Member 都能 follow/unfollow Main stream，结果持久化、可重放、有读取水位；未 follow 时 Main stream 的普通更新既不进 Inbox 也不唤醒
+- [x] Agent Member 能 follow/unfollow Main stream，结果持久化、可重放、有读取水位；Human 的派生 Attention 不能 unfollow；未 follow 时 Main stream 的普通更新既不进 Inbox 也不唤醒
 - [x] @、回复、Main stream direct marker 与责任 marker 仍独立于 Main stream Attention 到达，unfollow 不阻挡它们
 - [x] 同一 Member 的 Thread Attention 与 Main stream Attention 是两个独立对象，互不影响，读取进度分别记录
 - [x] `standing.owner` 字段改为 `following`；tool 的 Main stream 结果与 Client 的 Main stream 面板不再依赖身份派生未读

@@ -2735,13 +2735,16 @@ export class AgentTeamLedger {
       for (const follower of this.state.attentionByThread.get(threadRef) ?? []) members.add(follower)
     }
     if (operation.kind === 'team/member-workspace-joined' || operation.kind === 'team/member-workspace-left') members.add(operation.data.memberId)
-    // An ordinary Main stream post and a new discussion wake everyone whose
-    // Main stream Attention covers that stream, and nobody else: a new Task
-    // does not — the others read it off the board. Without this the wake only
-    // follows inbox deltas, so an Attention-covered reader's unread grows with
-    // no commit ever notifying them. An owner's row is derived rather than
-    // stored, so the owner ids join the stored rows here.
-    if (operation.kind === 'team/main-message-posted' || (operation.kind === 'team/thread-started' && operation.data.task === undefined)) {
+    // Ordinary Main stream sources wake everyone whose Main stream Attention
+    // covers that stream, and nobody else: a new Task does not — the others
+    // read it off the board. Without this the wake only follows inbox deltas,
+    // so an Attention-covered reader's unread grows with no commit ever
+    // notifying them. An owner's row is derived rather than stored, so the
+    // owner ids join the stored rows here.
+    if (operation.kind === 'team/main-message-posted'
+      || (operation.kind === 'team/thread-started' && operation.data.task === undefined)
+      || operation.kind === 'team/project-owner-added'
+      || operation.kind === 'team/project-owner-removed') {
       const sender = operation.actor.kind === 'host' ? undefined : operation.actor.memberId
       const projectRef = operation.kind === 'team/main-message-posted' ? operation.data.message.projectRef : operation.data.projectRef
       for (const memberId of this.mainStreamRecipientsFrom(this.state, projectRef)) {
@@ -4502,7 +4505,21 @@ export class AgentTeamLedger {
     // replay judges those flags by that rule, not by today's.
     const eraDirect = <T extends { readonly fact: { readonly kind: string }; readonly direct: boolean }>(facts: readonly T[]): readonly T[] =>
       facts.map(entry => (entry.fact.kind === 'activity' && entry.direct ? { ...entry, direct: false } : entry))
-    if (!isDeepStrictEqual({ ...data, facts: eraDirect(data.facts) }, { ...expectedData, facts: eraDirect(expectedData.facts) })) {
+    const stripSource = (snapshot: AgentTeamThreadReadSnapshot): unknown => ({
+      ...snapshot,
+      ...(snapshot.attention === undefined ? {} : { attention: (() => {
+        const { source: _source, ...attention } = snapshot.attention
+        return attention
+      })() }),
+      inbox: { ...snapshot.inbox, attention: { ...snapshot.inbox.attention,
+        set: snapshot.inbox.attention.set.map(attention => {
+          const { source: _source, ...rest } = attention
+          return rest
+        }) } },
+    })
+    const stored = stripSource({ ...data, facts: eraDirect(data.facts) })
+    const derived = stripSource({ ...expectedData, facts: eraDirect(expectedData.facts) })
+    if (!isDeepStrictEqual(stored, derived)) {
       throw new Error('invalid Thread read projection')
     }
   }
@@ -6335,6 +6352,12 @@ export class AgentTeamLedger {
       case 'team/thread-attention-changed':
       case 'team/main-attention-changed':
         return 'self'
+      case 'team/thread-read': {
+        const target = threadReadTargetOf(operation.data)
+        return this.attentionForFrom(projection, operation.data.memberId, target.threadRef)?.source ?? 'self'
+      }
+      case 'team/main-stream-read':
+        return this.mainAttentionForFrom(projection, operation.data.memberId, operation.data.projectRef)?.source ?? 'self'
       case 'team/thread-started':
         return 'thread-author'
       case 'team/task-accountable-changed':

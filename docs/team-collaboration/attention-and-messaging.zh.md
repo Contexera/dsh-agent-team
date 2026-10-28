@@ -49,6 +49,8 @@ Main stream 携带自己的 Attention，按 Member × Project 键而不是 Threa
 | 被授予 Project owner 身份的 Member | 由授权操作本身写入，从授权序列号起算——不继承历史积压 |
 | 其他 Member | follow 之前不存在；follow 时从当前末尾起算 |
 
+Human 的派生 Main stream Attention 是强制的，不能 unfollow；它随 Project 建立，只有读取水位落库。Agent Member 可以显式 follow 或 unfollow 自己的 Main stream Attention。
+
 不 follow Main stream 的 Member 只有 marker，与不 follow 某 Thread 的读者完全一样：mention、回复和点名它的 Activity 仍然到达。follow 不会把它已持有的 marker 重复计数。unfollow 停止普通更新，marker 保持。
 
 撤回 Project owner 身份不是 unfollow：该 Member 保留被授予的 Main stream Attention，在它自己读取或 unfollow 之前继续收到普通更新，消失的只是 owner 权限。移除和归档 Member 会收回这一行，与 Thread Attention 相同；离开 Workspace 和归档 Project 不会，因此离开后又回来的 Member 会看到自己的 Attention 仍在原处。
