@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE v2 — Channel 分流：task 走 thread 页层级，讨论走右侧面板</title>
+<style>
+  :root{
+    --l1:hsl(0 0% 13%); --l2:hsl(0 0% 38%); --l3:hsl(0 0% 55%);
+    --b1:hsl(0 0% 82%); --b2:hsl(0 0% 88%); --b3:hsl(0 0% 93%);
+    --surf:#fff; --side:hsl(0 0% 97.5%); --hover:hsl(0 0% 95%);
+    --biz:hsl(212 90% 52%); --ok:hsl(150 55% 40%); --warn:hsl(35 90% 48%);
+    --link:hsl(212 85% 45%);
+    --r-xs:4px; --r-sm:8px; --r-md:12px; --r-lg:16px;
+    --pin:#e8e6df;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    font:14px/20px -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    color:var(--l1); background:hsl(0 0% 90%);
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit;cursor:pointer}
+
+  /* ── prototype chrome (never part of the design) ───────────────────── */
+  .protoHeader{
+    position:sticky; top:0; z-index:60; background:#1c1c1e; color:#fff;
+    padding:10px 16px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  }
+  .protoHeader strong{background:#e8b24a;color:#1c1c1e;padding:2px 8px;border-radius:4px;font-size:11px;letter-spacing:.06em}
+  .protoHeader .ttl{font-weight:500;font-size:13px}
+  .protoHeader .sub{color:#9a9a9e;font-size:12px}
+  .protoControls{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .protoControls button{background:#2e2e31;border:1px solid #48484c;color:#e6e6e8;padding:5px 10px;border-radius:6px;font-size:12px}
+  .protoControls button[aria-pressed="true"]{background:#e8b24a;border-color:#e8b24a;color:#1c1c1e;font-weight:600}
+
+  .stage{padding:20px; display:flex; justify-content:center}
+
+  /* ── the app shell ─────────────────────────────────────────────────── */
+  .app{
+    display:flex; width:1240px; height:760px; background:var(--surf);
+    border:1px solid var(--b2); border-radius:var(--r-md); overflow:hidden;
+    box-shadow:0 8px 32px hsl(0 0% 0% / .12); position:relative; max-width:100%;
+  }
+  .app[data-mobile="1"]{width:390px;height:760px}
+
+  /* sidebar */
+  .sidebar{width:230px;flex:none;background:var(--side);border-right:1px solid var(--b3);padding:10px 8px;display:flex;flex-direction:column;gap:2px}
+  .app[data-mobile="1"] .sidebar{display:none}
+  .app[data-mobile="1"] #colReadout{display:none}
+  .brand{display:flex;align-items:center;gap:8px;padding:6px 8px 10px;font-weight:600;font-size:13px}
+  .brandMark{width:22px;height:22px;border-radius:6px;background:#1c1c1e;color:#fff;display:grid;place-items:center;font-size:11px}
+  .sideSec{padding:10px 8px 4px;font-size:12px;color:var(--l3)}
+  .sideRow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--r-sm);color:var(--l2);font-size:13px}
+  .sideRow.current{background:var(--hover);color:var(--l1);font-weight:500}
+
+  /* ── channel view: stream + board ──────────────────────────────────── */
+  .stream{flex:1;min-width:0;display:flex;flex-direction:column}
+  .streamHead{padding:12px 20px 0;border-bottom:1px solid var(--b3)}
+  .streamHeadRow{display:flex;align-items:baseline;gap:8px}
+  .streamHead h1{margin:0;font-size:16px;font-weight:600}
+  .streamHead .desc{color:var(--l3);font-size:12px;margin:2px 0 0}
+  .streamHead .meta{display:flex;gap:10px;color:var(--l3);font-size:12px;margin-top:4px}
+  .tabs{display:flex;gap:4px;margin-top:10px}
+  .tab{background:none;border:0;padding:8px 10px;border-radius:var(--r-sm) var(--r-sm) 0 0;color:var(--l2);font-size:13px;position:relative}
+  .tab[aria-selected="true"]{color:var(--l1);font-weight:600}
+  .tab[aria-selected="true"]::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;background:var(--l1);border-radius:2px}
+  .tab .cnt{display:inline-block;min-width:18px;height:18px;line-height:18px;padding:0 5px;margin-left:6px;border-radius:999px;background:var(--hover);color:var(--l2);font-size:11px;font-variant-numeric:tabular-nums}
+  .tab .cnt.needs{background:hsl(212 90% 52% / .12);color:var(--biz);font-weight:600}
+
+  /* The reading column. `reserve` keeps the stream at a constant width whether
+     or not the discussion panel is open — the panel fills space that was already
+     empty, so nothing moves and no line re-wraps. The Thread page (v2) is a
+     different surface with a different job and keeps its own wide column. */
+  .streamBody{flex:1;overflow:auto;padding:16px 20px 24px}
+  .reading{max-width:880px}
+  .app[data-col="center"] .reading{margin:0 auto}
+  .app[data-col="left"] .reading{margin:0 auto 0 0}
+  .app[data-col="reserve"] .reading{margin:0 auto 0 0}
+  /* reserve only holds while the chat tab is the reader's context. The board is
+     a different job (task triage, four columns): the panel stands down and the
+     reserved width is released, because switching tabs replaces the content
+     wholesale — no text re-wraps under the reader's eye. */
+  .app[data-col="reserve"][data-tab="chat"] .stream{padding-right:360px;box-sizing:border-box;position:relative}
+  .app[data-col="reserve"][data-tab="chat"] .panel{position:absolute;top:0;right:0;bottom:0}
+  .app[data-tab="board"] .panel{display:none}
+  .gutter{position:relative}
+  .gutter::after{
+    content:"";position:absolute;top:0;bottom:0;width:1px;
+    background:repeating-linear-gradient(to bottom,hsl(0 0% 70% / .5) 0 4px,transparent 4px 8px);
+    pointer-events:none;
+  }
+  .app[data-col="center"] .gutter::after{left:50%}
+  .app[data-col="left"] .gutter::after{left:880px}
+  .app[data-col="reserve"] .gutter::after{left:880px}
+  .day{display:flex;align-items:center;gap:12px;color:var(--l3);font-size:12px;margin:20px 0 12px}
+  .day::before,.day::after{content:"";height:1px;background:var(--b3);flex:1}
+  .day:first-child{margin-top:4px}
+
+  .msg{display:grid;grid-template-columns:34px minmax(0,1fr);gap:0 10px;margin-bottom:14px}
+  .av{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:14px;font-weight:600;flex:none}
+  .msgHead{display:flex;align-items:baseline;gap:8px;margin-bottom:2px}
+  .msgHead .who{font-weight:600}
+  .msgHead .role{background:var(--pin);color:var(--l2);font-size:10px;padding:1px 5px;border-radius:4px}
+  .msgHead time{color:var(--l3);font-size:11px;font-variant-numeric:tabular-nums}
+  .msgBody{white-space:pre-wrap;overflow-wrap:anywhere}
+  .msgBody .mention{color:var(--link);background:hsl(212 85% 45% / .08);border-radius:4px;padding:0 3px}
+
+  /* ── THE ANCHOR ────────────────────────────────────────────────────── */
+  .anchor{
+    display:flex;align-items:center;gap:10px;width:100%;margin-top:8px;
+    background:var(--surf);border:1px solid var(--b2);border-radius:var(--r-md);
+    padding:9px 12px;text-align:left;
+  }
+  .anchor:hover{background:var(--hover);border-color:var(--b1)}
+  .anchor:focus-visible{outline:2px solid var(--biz);outline-offset:2px}
+  .anchor[data-state="done"]{border-color:var(--b3);background:transparent;padding:6px 12px}
+  .anchor[data-state="done"] .statusWord,.anchor[data-state="done"] .anchorLabel,.anchor[data-state="done"] .anchorTime{color:var(--l3)}
+  .anchor .statusWord{font-size:13px;font-weight:500}
+  .anchor[data-state="done"] .statusWord{font-weight:400}
+  .anchorLabel{color:var(--l2);font-size:13px;font-variant-numeric:tabular-nums}
+  .anchorTime{margin-left:auto;color:var(--l3);font-size:12px;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot[data-s="done"]{background:var(--ok)}
+  .dot[data-s="active"]{background:var(--biz)}
+  .dot[data-s="review"]{background:var(--warn)}
+  .dot[data-s="open"]{background:var(--b1)}
+  .avatars{display:flex}
+  .avatars .av{width:18px;height:18px;font-size:9px;border:2px solid var(--surf);margin-left:-6px}
+  .avatars .av:first-child{margin-left:0}
+  .threadMark{width:18px;height:18px;border-radius:5px;background:hsl(212 85% 45% / .1);color:var(--link);display:grid;place-items:center;font-size:11px;flex:none}
+  .unread{min-width:18px;height:18px;line-height:18px;padding:0 5px;border-radius:999px;background:var(--biz);color:#fff;font-size:11px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums}
+  .needsYou{display:inline-flex;align-items:center;gap:4px;background:hsl(35 90% 48% / .12);color:hsl(28 85% 38%);font-size:11px;font-weight:600;padding:2px 7px;border-radius:999px}
+
+  /* right panel: discussion */
+  .panel{width:360px;flex:none;border-left:1px solid var(--b2);display:flex;flex-direction:column;background:var(--surf)}
+  .app[data-panel="closed"] .panel{display:none}
+  .app[data-mobile="1"] .panel{position:absolute;inset:0;width:100%;z-index:20;border-left:0}
+  .app[data-mobile="1"][data-mobile-panel="drawer"] .panel{
+    inset:auto 0 0 0;height:78%;border-top:1px solid var(--b2);border-radius:var(--r-lg) var(--r-lg) 0 0;
+    box-shadow:0 -8px 28px hsl(0 0% 0% / .16);
+  }
+  .app[data-mobile="1"][data-mobile-panel="drawer"]::before{
+    content:"";position:absolute;inset:0;background:hsl(0 0% 0% / .28);z-index:19;
+  }
+  .app[data-mobile="1"][data-mobile-panel="full"][data-panel="closed"]::before{display:none}
+  .panelHead{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--b3)}
+  .panelHead .t{font-weight:600;font-size:13px}
+  .panelHead .x{margin-left:auto;background:none;border:0;color:var(--l3);font-size:16px;line-height:1;padding:4px 6px;border-radius:var(--r-sm)}
+  .panelHead .x:hover{background:var(--hover);color:var(--l1)}
+  .panelBody{flex:1;overflow:auto;padding:14px}
+  .panelBody .msg{grid-template-columns:28px minmax(0,1fr);margin-bottom:12px}
+  .panelBody .av{width:28px;height:28px;font-size:12px}
+  .panelBody .msgHead{flex-wrap:wrap;font-size:12.5px}
+  .panelBody .msgBody{font-size:13px;line-height:19px}
+  .panelFoot{border-top:1px solid var(--b3);padding:10px 12px}
+  .fakeComposer{border:1px solid var(--b2);border-radius:var(--r-md);padding:9px 12px;color:var(--l3);font-size:13px;background:var(--surf);cursor:text;display:flex;align-items:center;gap:6px}
+  .fakeComposer .caret{display:inline-block;width:1px;height:15px;background:var(--l1);animation:blink 1.1s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* composer mention menu — mirrors the shipped TeamComposer semantics:
+     presence dot + name (+description), ranked in three tiers (this Thread's
+     followers → this Channel's participants → the rest), a candidate outside
+     the conversation being written into stays pickable and is carried by
+     weight alone (name drops to secondary). No per-row text on either surface
+     (Human's #116 ruling). */
+  .mentionMenu{
+    position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:30;
+    background:var(--surf);border:1px solid var(--b2);border-radius:var(--r-lg);
+    box-shadow:0 8px 28px hsl(0 0% 0% / .14);padding:4px;
+  }
+  .mentionOption{display:grid;grid-template-columns:16px minmax(0,auto) minmax(0,1fr);align-items:center;gap:8px;width:100%;min-height:36px;padding:6px 8px;border:0;border-radius:var(--r-md);background:transparent;text-align:left;font-size:13px}
+  .mentionOption[aria-selected='true']{background:var(--hover)}
+  .presence{width:8px;height:8px;border-radius:50%;justify-self:center;background:var(--ok)}
+  .presence.away{background:var(--b1)}
+  .mentionName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+  /* secondary label alias — still readable, one step below the primary name,
+     the same weight the shipped composer drops an outside candidate to */
+  .mentionOption[data-mention-inside='false'] .mentionName{color:var(--l2)}
+  .mentionDesc{color:var(--l3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .composerWrap{position:relative}
+  .promoteBtn{background:none;border:1px solid var(--b2);border-radius:var(--r-sm);color:var(--l2);font-size:12px;padding:3px 9px}
+  .promoteBtn:hover{border-color:var(--b1);color:var(--l1)}
+
+  /* board */
+  .board{flex:1;overflow:auto;padding:16px 20px 24px;display:flex;gap:12px;align-items:flex-start}
+  .board[hidden],[hidden]{display:none !important}
+  .col{flex:1;min-width:0;background:var(--side);border-radius:var(--r-md);padding:10px}
+  .colHead{display:flex;align-items:center;gap:6px;padding:2px 4px 10px;font-size:12px;color:var(--l2);font-weight:600}
+  .colHead .n{margin-left:auto;color:var(--l3);font-weight:400;font-variant-numeric:tabular-nums}
+  .card{background:var(--surf);border:1px solid var(--b2);border-radius:var(--r-sm);padding:10px;margin-bottom:8px;cursor:pointer;display:block;width:100%;text-align:left}
+  .card:hover{border-color:var(--b1);box-shadow:0 2px 8px hsl(0 0% 0% / .06)}
+  .card:focus-visible{outline:2px solid var(--biz);outline-offset:2px}
+  .card.done{opacity:.62}
+  .cardNum{font-size:11px;color:var(--l3);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:6px}
+  .cardTitle{font-size:13px;font-weight:500;margin:5px 0 8px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .cardFoot{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--l3)}
+
+  /* ── thread page (the existing level; NOT new) ─────────────────────── */
+  .threadPage{flex:1;min-width:0;display:none;flex-direction:column}
+  .app[data-view="thread"] .threadPage{display:flex}
+  .app[data-view="thread"] .stream{display:none}
+  .app[data-view="thread"] .panel{display:none}
+  .tpBackRow{padding:10px 20px 0}
+  .tpBack{background:none;border:0;color:var(--l2);font-size:13px;display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:var(--r-sm)}
+  .tpBack:hover{background:var(--hover);color:var(--l1)}
+  .tpBody{flex:1;overflow:auto;padding:12px 20px 24px}
+  .tpCol{max-width:880px;margin:0 auto}
+  .tpCrumb{color:var(--l3);font-size:12px;font-variant-numeric:tabular-nums}
+  .tpTitle{font-size:19px;font-weight:600;margin:6px 0 0;line-height:26px;overflow-wrap:anywhere}
+  .tpHist{color:var(--link);font-size:12px;margin-top:6px;display:inline-block}
+  .tpMeta{display:flex;gap:24px;padding:12px 0;border-bottom:1px solid var(--b3);flex-wrap:wrap}
+  .tpMeta>div{display:flex;flex-direction:column;gap:3px}
+  .tpMeta .k{font-size:11px;color:var(--l3)}
+  .tpMeta .v{font-size:13px;display:flex;align-items:center;gap:6px}
+  .pill{border:1px solid hsl(35 90% 48% / .5);color:hsl(28 85% 38%);border-radius:999px;padding:1px 9px;font-size:12px}
+  .pill.done{border-color:var(--b2);color:var(--l3)}
+  .activityRow{display:flex;align-items:baseline;gap:8px;color:var(--l3);font-size:12px;margin:6px 0}
+  .activityRow .who{color:var(--l2);font-weight:500}
+  .tpActions{display:flex;gap:8px;padding:12px 0}
+  .btnPrimary{background:var(--biz);border:1px solid var(--biz);color:#fff;border-radius:var(--r-sm);font-size:13px;padding:6px 14px}
+  .btnPrimary:hover{filter:brightness(.95)}
+  .btnGhost{background:none;border:1px solid var(--b2);color:var(--l2);border-radius:var(--r-sm);font-size:13px;padding:6px 14px}
+  .btnGhost:hover{border-color:var(--b1);color:var(--l1)}
+  .tpFoot{border-top:1px solid var(--b3);padding:12px 20px}
+
+  .hint{max-width:1240;margin:16px auto 40px;background:#fff;border:1px solid var(--b2);border-radius:var(--r-md);padding:16px 20px;font-size:13px;line-height:20px}
+  .hint h2{margin:0 0 8px;font-size:14px}
+  .hint ul{margin:6px 0 0;padding-left:20px;color:var(--l2)}
+  .hint li{margin-bottom:4px}
+  .hint code{background:var(--hover);padding:1px 5px;border-radius:4px;font-size:12px}
+  .kbd{display:inline-block;border:1px solid var(--b2);border-bottom-width:2px;border-radius:4px;padding:0 5px;font-size:11px;color:var(--l2)}
+</style>
+</head>
+<body>
+
+<header class="protoHeader">
+  <strong>PROTOTYPE v2</strong>
+  <span class="ttl">Channel 分流 · task 走 thread 页层级，讨论走右侧面板</span>
+  <span class="sub">基于 Iris v1 草图调整（Human 拍：task 不做新弹窗）· 丢弃型 · 数据取自本仓真实 Task #112–#118</span>
+  <div class="protoControls">
+    <button id="tCol">消息列：居中 → 靠左 → 预留面板位</button>
+    <button id="tDone" aria-pressed="false">已完成的 chip：瘦 / 胖</button>
+    <button id="tBoard">切到「任务」board</button>
+    <button id="tMobile" aria-pressed="false">移动端 390px</button>
+    <button id="tPanel" aria-pressed="true">右侧讨论面板</button>
+    <button id="tMention" aria-pressed="false">composer @mention 菜单</button>
+  </div>
+</header>
+
+<div class="stage">
+  <div class="app" id="app" data-view="channel" data-tab="chat" data-modal="closed" data-panel="open" data-done-density="slim" data-mobile-panel="full" data-col="center">
+    <aside class="sidebar">
+      <div class="brand"><span class="brandMark">D</span>DSH 本地构建</div>
+      <div class="sideSec">频道</div>
+      <div class="sideRow current"># all</div>
+      <div class="sideRow"># delivery</div>
+      <div class="sideRow"># design</div>
+      <div class="sideSec">Agents</div>
+      <div class="sideRow">aster</div>
+      <div class="sideRow">vera</div>
+      <div class="sideRow">reeve</div>
+    </aside>
+
+    <!-- ── channel view ── -->
+    <main class="stream">
+      <div class="streamHead">
+        <div class="streamHeadRow"><h1># all</h1><span id="colReadout" style="margin-left:auto;font-size:11px;color:var(--l3);font-variant-numeric:tabular-nums"></span></div>
+        <p class="desc">General channel for all members</p>
+        <div class="meta"><span>9 位成员</span><span>9 位在线</span></div>
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" aria-selected="true" data-tab="chat">聊天</button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="board">任务<span class="cnt needs">1</span></button>
+        </div>
+      </div>
+      <div class="streamBody gutter" id="streamBody"><div class="reading" id="streamCol"></div></div>
+      <div class="board" id="board" hidden></div>
+      <div class="panelFoot composerWrap" id="streamFoot">
+        <div class="fakeComposer" data-composer="channel">发送消息至 #all<span class="caret"></span></div>
+      </div>
+    </main>
+
+    <aside class="panel" id="panel">
+      <div class="panelHead">
+        <span class="threadMark">#</span>
+        <span class="t">讨论 · #all</span>
+        <button class="promoteBtn" id="promoteBtn" title="把这条讨论升级为 Task（现有 promote 能力）">升级为任务</button>
+        <button class="x" id="panelX" title="关闭">✕</button>
+      </div>
+      <div class="panelBody" id="panelBody"></div>
+      <div class="panelFoot composerWrap"><div class="fakeComposer" data-composer="panel">发送消息至讨论<span class="caret"></span></div></div>
+    </aside>
+
+    <!-- ── thread page: the level that already exists today ── -->
+    <main class="threadPage" id="threadPage">
+      <div class="tpBackRow"><button class="tpBack" id="tpBack">‹ 返回频道</button></div>
+      <div class="tpBody">
+        <div class="tpCol">
+          <div class="tpCrumb" id="tpCrumb"></div>
+          <h1 class="tpTitle" id="tpTitle"></h1>
+          <a class="tpHyst" id="tpHyst" href="javascript:void 0">历史 ›</a>
+          <div class="tpMeta">
+            <div><span class="k">状态</span><span class="v" id="tpStatus"></span></div>
+            <div><span class="k">负责人</span><span class="v" id="tpOwners"></span></div>
+            <div><span class="k">创建人</span><span class="v" id="tpCreator"></span></div>
+          </div>
+          <div class="tpActions" id="tpActions"></div>
+          <div id="tpTimeline"></div>
+        </div>
+      </div>
+      <div class="tpFoot"><div class="fakeComposer">发送消息至任务</div></div>
+    </main>
+  </div>
+</div>
+
+<div class="hint">
+  <h2>v2 改了什么（对照 Human 的指示与 Iris 的 v1）</h2>
+  <ul>
+    <li><b>Task 不再有新弹窗</b>：点 task 锚点或 board 卡片，进的是<b>现有的 Thread 页层级</b>（全页、带返回、宽列、有验收按钮）——和今天点「回复 ›」去的是同一个地方，不新增表面。</li>
+    <li><b>讨论走右侧面板</b>：channel 流保持可见，随开随关。面板头部带「升级为任务」（对应现有 promote 能力）——分流不等于两条路永不相交。</li>
+    <li><b>reserve 只作用于 channel 页</b>：Thread 页是验收工作区，要宽，保持自己的宽列；两个页面是整页切换，不是同一视野里的重排。</li>
+    <li>锚点读数化、done 瘦身、board tab、移动端抽屉（讨论）与全页（task）均沿用 v1。</li>
+  </ul>
+</div>
+
+<script>
+const MEMBERS = {
+  human:  {name:'YuCreate', hue:212, role:'所有者'},
+  aster:  {name:'aster',    hue:265},
+  vera:   {name:'vera',     hue:150},
+  reeve:  {name:'reeve',    hue:22},
+  tars:   {name:'tars',     hue:190},
+  tome:   {name:'tome',     hue:285},
+};
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const linkify = s => esc(s).replace(/(@[a-zA-Z]+)/g,'<span class="mention">$1</span>');
+const avatar = (k, size) => {
+  const m = MEMBERS[k];
+  const st = size ? `width:${size}px;height:${size}px;font-size:${Math.round(size*0.42)}px` : '';
+  return `<span class="av" style="background:hsl(${m.hue} 52% 48%);${st}">${m.name[0].toLowerCase()}</span>`;
+};
+
+/* status: open | active | review | done  */
+const TASKS = {
+  112:{n:112,status:'done',   owners:['tome'],  creator:'human', resolved:'10-09 17:20',
+      title:'用 better-readme skill 看当前 README 是否适合本项目', last:'10-09'},
+  113:{n:113,status:'done',   owners:['aster'], creator:'human', resolved:'10-09 21:05',
+      title:'审视活跃 scratch 是否是改进方向并推进', last:'10-09'},
+  114:{n:114,status:'done',   owners:['tome'],  creator:'human', resolved:'10-11 19:40',
+      title:'提高文档质量', last:'10-11'},
+  115:{n:115,status:'done',   owners:['tars'],  creator:'human', resolved:'10-12 20:10',
+      title:'Channel 相关 commits 的 bug 与优化', last:'10-12'},
+  116:{n:116,status:'done',   owners:['tars'],  creator:'human', resolved:'10-12 22:30',
+      title:'composer 的 @mention 逻辑：只显示已在 channel 的 member 造成困惑', last:'10-12'},
+  117:{n:117,status:'review', owners:['aster','vera'], creator:'human', resolved:null,
+      title:'Team mode 下侧栏的布局调整（退出入口、成员弹层、与 shipped 对齐）', last:'2 小时前',
+      unread:1},
+  118:{n:118,status:'open',   owners:[],      creator:'human', resolved:null,
+      title:'Channel 页面分流重设计：task / 讨论分开', last:'3 小时前'},
+};
+const STATUS_WORD = {open:'待办',active:'进行中',review:'待验收',done:'已完成'};
+
+const DISCUSSION = [
+  {who:'human', time:'10-14 21:15', body:'我们来交流这个可能比较大的调整。其可能会成为我们重新审视 channel 之于当前 dsh-agent-team 这个项目。我首先想问问你如何看待我们整体这个项目？其中可能的用户旅程？你的一些思考？'},
+  {who:'human', time:'10-14 21:24', body:'其实 tasks 一般不会再次进入；而讨论 thread 则有留下去的可能。task board 也是以前就在我们规划内的'},
+  {who:'reeve', time:'10-14 21:45', body:'看完了，也把代码里的领域模型重新核了一遍。\n\n## 第一性原理：这不是聊天软件\n账本是唯一事实源，UI 只是投影；人浏览、agent 不浏览。推论：channel 页面的首要服务对象是人，它该回答「我不在的这段时间发生了什么、什么在等我」。'},
+  {who:'reeve', time:'10-14 23:10', body:'关键洞察：两种 Thread 的时间形状不同。\nTask Thread 是脉冲（几小时/几天高强度，accept 后基本不再进入，残值是审计轨迹）；讨论 Thread 是长脉冲（跨天跨周低强度，没有终态，残值是「这个地方还在」）。\n现在 UI 用一个列表装两种形状，所以两头不讨好 —— 你发的 channel 页截图就是证明：它成了「● 已完成 Task #11x」的坟场。'},
+  {who:'human', time:'10-15 15:03', body:'@Reeve 你也可以再去审视思考下，@Iris 你们来沟通讨论吧，可以去给我预览。'},
+  {who:'reeve', time:'10-15 15:04', body:'@Iris 欢迎。上面几轮我和 Human 的讨论你先读一遍，我再补三条你落地时最需要的约束……'},
+];
+
+/* What the Thread page shows for one task: the anchor message, the thread's
+   activity rows (the claims/accept facts the page already renders), replies. */
+const THREAD_FACTS = {
+  117:[
+    {kind:'activity', who:'human', time:'10-15 13:40', text:'创建了任务'},
+    {kind:'activity', who:'aster', time:'10-15 13:52', text:'创建了 Claim「重排成员弹层的对齐基准」'},
+    {kind:'activity', who:'vera',  time:'10-15 14:05', text:'创建了 Claim「与 shipped 默认页比对」'},
+    {kind:'reply', who:'aster', time:'10-15 14:31', body:'弹层已按 shipped 对齐，截图见附件。'},
+    {kind:'reply', who:'vera',  time:'10-15 14:40', body:'核过了：退出入口、成员弹层、与 shipped 三处一致。'},
+    {kind:'reply', who:'reeve', time:'10-15 14:55', body:'门禁全绿，等人类验收。'},
+  ],
+  118:[
+    {kind:'activity', who:'human', time:'10-15 15:09', text:'创建了任务'},
+  ],
+  112:[
+    {kind:'activity', who:'human', time:'10-09 09:35', text:'创建了任务'},
+    {kind:'activity', who:'tome',  time:'10-09 17:18', text:'完成了 Claim「逐节比对 README 结构」'},
+    {kind:'reply', who:'tome', time:'10-09 17:20', body:'比对完了，结论写在这里。Human 已 accept。'},
+  ],
+};
+
+const ENTRIES = [
+  {day:'10-09', who:'human', time:'09:35', task:112,
+   body:'@tome https://github.com/tommy0103/better-readme-skill/tree/main/skills/better-readme 如果让你用这个 skill 看看当前 README？是否适合我们这里'},
+  {who:'human', time:'10-09 09:41', task:113,
+   body:'@aster 看当前活跃 scratch，@vera 你们来先深入思考其是否是改进方向，审视看待。最终觉得都没问题。@aster 可以去推进'},
+  {day:'10-11', who:'human', time:'17:22', task:114, body:'@tome 提高文档质量吧'},
+  {day:'10-12', who:'human', time:'15:50', task:115, body:'@reeve 我们在这里继续。@tars 来负责实现。'},
+  {who:'human', time:'16:20', task:116,
+   body:'@tars 我们刚刚做的那个 channel 相关，及其 commits，貌似有些 bug 以及可能的优化：具体在当前 composer 的 @mention 逻辑，我注意到 @mention 只显示已经在 channel 的 member？'},
+  {day:'10-14', who:'human', time:'21:15', discussion:true,
+   body:'我们来交流这个可能比较大的调整。其可能会成为我们重新审视 channel 之于当前 dsh-agent-team 这个项目。我首先想问问你如何看待我们整体这个项目？'},
+  {day:'10-15', who:'human', time:'13:40', task:117,
+   body:'左侧 team mode 下的 sidebar 的布局调整。@Iris 我们先来沟通一下。首先对于左下角当前有「对话」「成员」这两个，返回正常主页面，我觉得可以去放到…'},
+  {who:'human', time:'15:03', discussion:true,
+   body:'@reeve 你也可以再去审视思考下，@iris 你们来沟通讨论吧，可以去给我预览。'},
+];
+
+const app = document.getElementById('app');
+
+function anchorHTML(e){
+  if (e.discussion){
+    const replies = DISCUSSION.length;
+    return `<button class="anchor" data-kind="discussion" data-state="active" data-open="panel">
+      <span class="threadMark">💬</span>
+      <span class="statusWord">讨论</span>
+      <span class="anchorLabel">${replies} 条回复</span>
+      ${e.unread?`<span class="unread">${e.unread}</span>`:''}
+      <span class="anchorTime">reeve · 3 小时前</span>
+    </button>`;
+  }
+  const t = TASKS[e.task];
+  const done = t.status === 'done';
+  const owners = t.owners.length
+    ? `<span class="avatars">${t.owners.map(o=>avatar(o,18)).join('')}</span>` : '';
+  const needs = t.status === 'review'
+    ? `<span class="needsYou">待你验收</span>` : '';
+  return `<button class="anchor" data-kind="task" data-state="${done?'done':t.status}" data-open="thread" data-task="${t.n}">
+    ${done ? '' : owners}
+    <span class="dot" data-s="${t.status}"></span>
+    <span class="statusWord">${STATUS_WORD[t.status]}</span>
+    <span class="anchorLabel">Task #${t.n}</span>
+    ${t.unread?`<span class="unread">${t.unread}</span>`:''}
+    ${needs}
+    <span class="anchorTime">${t.resolved ?? t.last}</span>
+  </button>`;
+}
+
+function renderStream(){
+  let html = '';
+  for (const e of ENTRIES){
+    if (e.day) html += `<p class="day"><span>${e.day}</span></p>`;
+    const m = MEMBERS[e.who];
+    html += `<div class="msg">
+      ${avatar(e.who)}
+      <div>
+        <div class="msgHead">
+          <span class="who">${m.name}</span>
+          ${m.role?`<span class="role">${m.role}</span>`:''}
+          <time>${e.time}</time>
+        </div>
+        <div class="msgBody">${linkify(e.body)}</div>
+        ${anchorHTML(e)}
+      </div>
+    </div>`;
+  }
+  document.getElementById('streamCol').innerHTML = html;
+}
+
+function renderBoard(){
+  const cols = [['open','待办'],['active','进行中'],['review','待验收'],['done','已完成']];
+  document.getElementById('board').innerHTML = cols.map(([s,label])=>{
+    const items = Object.values(TASKS).filter(t=>t.status===s).sort((a,b)=>b.n-a.n);
+    const cards = items.map(t=>`
+      <button class="card ${s==='done'?'done':''}" data-open="thread" data-task="${t.n}">
+        <div class="cardNum"><span class="dot" data-s="${t.status}"></span>Task #${t.n}${t.unread?` <span class="unread">${t.unread}</span>`:''}</div>
+        <div class="cardTitle">${esc(t.title)}</div>
+        <div class="cardFoot">
+          ${t.owners.length?`<span class="avatars">${t.owners.map(o=>avatar(o,18)).join('')}</span>`:'<span>未指派</span>'}
+          <span style="margin-left:auto">${t.resolved ?? t.last}</span>
+        </div>
+      </button>`).join('') || `<p style="color:var(--l3);font-size:12px;padding:4px">（空）</p>`;
+    return `<div class="col"><div class="colHead">${label}<span class="n">${items.length}</span></div>${cards}</div>`;
+  }).join('');
+}
+
+function renderPanel(){
+  document.getElementById('panelBody').innerHTML = DISCUSSION.map(d=>{
+    const m = MEMBERS[d.who];
+    return `<div class="msg">
+      ${avatar(d.who,28)}
+      <div>
+        <div class="msgHead"><span class="who">${m.name}</span>${m.role?`<span class="role">${m.role}</span>`:''}<time>${d.time}</time></div>
+        <div class="msgBody">${linkify(d.body)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openThreadPage(n){
+  const t = TASKS[n];
+  document.getElementById('tpCrumb').textContent = `# all · 任务 #${t.n}`;
+  document.getElementById('tpTitle').textContent = t.title;
+  document.getElementById('tpStatus').innerHTML =
+    `<span class="pill ${t.status==='done'?'done':''}">${STATUS_WORD[t.status]}</span>`;
+  document.getElementById('tpOwners').innerHTML = t.owners.length
+    ? t.owners.map(o=>`<span class="avatars">${avatar(o,18)}</span>${MEMBERS[o].name}`).join('、')
+    : '未指派';
+  document.getElementById('tpCreator').textContent = MEMBERS[t.creator].name;
+  document.getElementById('tpActions').innerHTML =
+    t.status === 'review' ? `<button class="btnPrimary">验收</button><button class="btnGhost">关闭</button>`
+    : t.status === 'done' ? `<button class="btnGhost" disabled>已 accept</button>`
+    : `<button class="btnGhost">指派</button>`;
+  const facts = THREAD_FACTS[n] ?? [{kind:'activity', who:'human', time:'—', text:'创建了任务'}];
+  document.getElementById('tpTimeline').innerHTML = facts.map(f=>{
+    if (f.kind === 'activity') return `<p class="activityRow"><span class="who">${MEMBERS[f.who].name}</span>${f.text}</p>`;
+    return `<div class="msg">${avatar(f.who)}<div>
+      <div class="msgHead"><span class="who">${MEMBERS[f.who].name}</span><time>${f.time}</time></div>
+      <div class="msgBody">${linkify(f.body)}</div></div></div>`;
+  }).join('');
+  app.dataset.view = 'thread';
+}
+document.getElementById('tpBack').onclick = () => { app.dataset.view = 'channel' };
+/* ── composer mention menu (mirrors shipped TeamComposer) ───────────────
+   Candidates = every Workspace participant, ranked in three tiers:
+   0 follows this Thread · 1 participates in this Channel · 2 the rest.
+   A candidate outside the conversation stays pickable and is carried by
+   weight alone — the name drops to secondary. No per-row text (Human's
+   #116 ruling: both surfaces say nothing per-row; the confirmation gate
+   speaks once, in the status line after the send). */
+const MENTION_ROSTER = [
+  {who:'aster',  desc:'Builder',  inside:true},
+  {who:'vera',   desc:'QA',       inside:true},
+  {who:'reeve',  desc:'Lead',     inside:true},
+  {who:'tars',   desc:'Builder',  inside:false},
+  {who:'tome',   desc:'Docs',     inside:false},
+];
+
+function mentionMenuHTML(){
+  return `<div class="mentionMenu" role="listbox">
+    <button class="mentionOption" role="option" aria-selected="true"><span class="presence"></span><span class="mentionName">all</span><span class="mentionDesc">通知本 Channel 全部成员</span></button>
+    ${MENTION_ROSTER.map((m,i)=>`
+    <button class="mentionOption" role="option" data-mention-inside='${m.inside}' ${i===0?'aria-selected="true"':''}>
+      <span class="presence ${m.inside?'':'away'}"></span>
+      <span class="mentionName">${MEMBERS[m.who].name}</span>
+      <span class="mentionDesc">${m.desc}</span>
+    </button>`).join('')}
+  </div>`;
+}
+
+let openComposer = undefined;
+function mountComposer(el){
+  const menu = document.createElement('div');
+  menu.innerHTML = mentionMenuHTML();
+  const node = menu.firstElementChild;
+  el.after(node);
+  el.onclick = () => { node.remove(); openComposer = el; mountComposer(el) };
+  return node;
+}
+
+document.getElementById('promoteBtn').onclick = () => { alert('（草图占位）调用现有 promote：把这条讨论升级为 Task，随后进入其 Thread 页') };
+
+document.addEventListener('click', ev=>{
+  const el = ev.target.closest('[data-open]');
+  if (!el) return;
+  if (el.dataset.open === 'panel'){
+    app.dataset.panel = app.dataset.panel === 'open' ? 'closed' : 'open';
+  } else if (el.dataset.open === 'thread'){
+    openThreadPage(Number(el.dataset.task));
+  }
+});
+document.getElementById('panelX').onclick = () => { app.dataset.panel = 'closed' };
+
+/* tab switch */
+document.querySelectorAll('[data-tab]').forEach(btn => btn.onclick = () => {
+  const board = btn.dataset.tab === 'board';
+  app.dataset.tab = btn.dataset.tab;
+  document.querySelectorAll('[data-tab]').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+  document.getElementById('streamBody').hidden = board;
+  document.getElementById('streamFoot').hidden = board;
+  document.getElementById('board').hidden = !board;
+});
+
+/* prototype-only toggles */
+const tCol = document.getElementById('tCol');
+const COL_MODES = ['center', 'left', 'reserve'];
+tCol.onclick = () => {
+  const next = COL_MODES[(COL_MODES.indexOf(app.dataset.col) + 1) % COL_MODES.length];
+  app.dataset.col = next;
+  tCol.setAttribute('aria-pressed', String(next !== 'center'));
+  reportColumn();
+};
+const tDone = document.getElementById('tDone');
+tDone.onclick = () => {
+  const slim = app.dataset.doneDensity === 'slim';
+  app.dataset.doneDensity = slim ? 'fat' : 'slim';
+  tDone.setAttribute('aria-pressed', String(!slim));
+  document.querySelectorAll('.anchor[data-state="done"]').forEach(a=>{
+    a.style.padding = slim ? '9px 12px' : '6px 12px';
+    a.style.background = slim ? 'var(--surf)' : 'transparent';
+  });
+};
+document.getElementById('tBoard').onclick = () => {
+  document.querySelector('[data-tab="board"]').click();
+  document.getElementById('tBoard').setAttribute('aria-pressed','true');
+};
+const tMobile = document.getElementById('tMobile');
+tMobile.onclick = () => {
+  const on = app.dataset.mobile === '1';
+  app.dataset.mobile = on ? '0' : '1';
+  tMobile.setAttribute('aria-pressed', String(!on));
+  if (!on) app.dataset.panel = 'closed';
+};
+const tPanel = document.getElementById('tPanel');
+tPanel.onclick = () => {
+  const open = app.dataset.panel === 'open';
+  app.dataset.panel = open ? 'closed' : 'open';
+  tPanel.setAttribute('aria-pressed', String(!open));
+};
+const tMention = document.getElementById('tMention');
+tMention.onclick = () => {
+  const on = tMention.getAttribute('aria-pressed') !== 'true';
+  tMention.setAttribute('aria-pressed', String(on));
+  document.querySelectorAll('.mentionMenu').forEach(m => m.remove());
+  /* shown on the channel composer only — the panel's composer behaves the same
+     way and repeating the menu there would only cover the discussion */
+  if (on) document.querySelector('[data-composer="channel"]').closest('.composerWrap').querySelector('[data-composer]') && mountComposer(document.querySelector('[data-composer="channel"]'));
+};
+
+/* The number that settles the layout argument: how far the text moves when the
+   discussion panel opens. Measured from the DOM, never asserted by hand. */
+function reportColumn(){
+  const el = document.getElementById('colReadout');
+  if (!el) return;
+  const col = document.getElementById('streamCol');
+  const body = document.getElementById('streamBody');
+  const b = col.getBoundingClientRect();
+  const h = body.getBoundingClientRect();
+  if (b.width === 0 || h.width === 0) { el.textContent = '（任务 board 视图）'; return }
+  const leftAir = b.x - h.x;
+  const rightAir = h.right - b.right;
+  const mode = app.dataset.col;
+  const note = mode === 'center' ? ' · 面板开合时整列重排（文字会重新折行）'
+    : mode === 'left' ? ' · 左缘不动，但面板打开时列变窄（仍会折行）'
+    : ' · 面板开合时列宽不变（不折行）';
+  el.textContent = `列宽 ${Math.round(b.width)}px · 左 ${Math.round(leftAir)}px · 右 ${Math.round(rightAir)}px` + note;
+}
+new ResizeObserver(reportColumn).observe(document.getElementById('streamBody'));
+
+renderStream(); renderBoard(); renderPanel(); reportColumn();
+/* the mention menu is driven by typing '@' in the real composer; for the
+   preview it mounts on click of the composer bar */
+document.querySelectorAll('[data-composer]').forEach(mountComposer);
+</script>
+</body>
+</html>

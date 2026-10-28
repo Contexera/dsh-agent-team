@@ -2,9 +2,9 @@
 
 > 本工作项是 Channel → Project 的重设计容器：把“参与派生注意力”改成“责任派生注意力”。它不定义当前产品行为——行为以 `packages/` 源码、测试与 `docs/` 双语对为准。
 
-**状态**：01–09 已完成；2026-10-26 复核修复与文档同步已完成，保留 dev profile 试用观察。
+**状态**：01–09 已完成；2026-10-26 复核修复与文档同步已完成。2026-10-28 归档，dev profile 试用观察与 Attention 模型的后续调整转交 `attention-delivery-model`。
 
-**最后核对日期**：2026-10-26
+**最后核对日期**：2026-10-28
 
 ## 入口
 
@@ -16,7 +16,7 @@
 
 ## 当前前沿
 
-- 01–09 均已完成，正式文档双语对、`CHANGELOG.md` 与发布 runbook 已同步。未提交、未推送；后续 commit/push 需 Human 明确要求。
+- 01–09 均已完成，正式文档双语对、`CHANGELOG.md` 与发布 runbook 已同步；交付 commit 已在 master 历史中。2026-10-28 归档。
 - 2026-10-26 复核后落地两项行为修复：新 reopen 用始终存在的 `refollowedMembers`（可为空）记录恢复 accountable 的当前 Thread follow，排除操作者与已 following 者；旧 reopen 缺失字段时仍按 marker-only 重放，不提升 rules version。提醒在读取源头按当前 durable 条件过滤，进展、转交、新 episode 等旧提醒不再进入 Inbox、唤醒计划或剩余未读；不改写 ledger、不重查运行时 idle，suspend 保留。
 - Agent 待验收的 `idle >= 30min` 与 error 清 idle 保持设计，继续试用观察。统计脚本 `scripts/team-trial-metrics.ts` 要求显式传入 SQLite 副本，复用账本投影统计 §11 指标；输出的是候选通知事实而非实测唤醒，失效提醒只供人工复查误报。`scripts/check-team-trial-metrics.ts` 覆盖空账本、非法输入、回复、UTC 自然日及提醒失效/消费。
 - 真实账本仅以在线备份副本验证，原文件未写入。2026-10-26 副本 24625 条 operation 全量重放通过；18 条 reopen 全为 legacy，0 条新判别形状。试用范围为 sequence 24534–24625（2026-10-24T14:27:31.110Z 至 2026-10-26T01:45:36.931Z）：Agent 回复 11 条，Agent 间回复 0 条；accept/close 4 次均由 Human 执行；非 owner Main stream 发言 0 条；提醒 5 条（待验收 2、停滞 3），4 条已消费、1 条未读且仍有效，无失效未读。样本未覆盖完整一周，继续观察。
@@ -47,11 +47,11 @@
 - [x] 09 待验收积压与停滞提醒
 - [x] durable 结论进入正式文档双语对与 `CHANGELOG.md`
 - [x] 面向外部使用者的升级说明：升级后所有项目只有 Human owner，需重新指定 Agent owner；先备份 `agent_team.sqlite`；不承诺降级
-- [ ] dev profile 积累完整试用周期，按 `spec.md` §11 与统计脚本复盘提醒误报和 Agent idle 条件
+- [ ] dev profile 积累完整试用周期，按 `spec.md` §11 与统计脚本复盘提醒误报和 Agent idle 条件 —— 归档时未完成，试用与复盘转交 `attention-delivery-model` 接续
 
 ## 正式文档出口
 
-`docs/domain-model.zh.md`（Project、Project member、owner、accountable、Main stream）、`docs/team-collaboration/boundaries.zh.md`（权限与 fence）、`docs/team-collaboration/attention-and-messaging.zh.md`（Inbox、投递等级、mention 与回复）、`docs/team-collaboration/tools.zh.md`（七工具，含 `team_task`）、`docs/team-collaboration/model-and-time.zh.md`（事件评估的时间条件）、`docs/architecture/tools-and-preset.zh.md`（persona 与 core skill）、`docs/frontend-design/components.zh.md`（composer、卡片、看板）的双语对，以及 `CHANGELOG.md`。九张工单交付后，本目录移入 `.scratch/archive/<完成月份>/`，并按 `.scratch/AGENTS.md` 把该移动 amend 进交付它的 commit。
+`docs/domain-model.zh.md`（Project、Project member、owner、accountable、Main stream）、`docs/team-collaboration/boundaries.zh.md`（权限与 fence）、`docs/team-collaboration/attention-and-messaging.zh.md`（Inbox、投递等级、mention 与回复）、`docs/team-collaboration/tools.zh.md`（七工具，含 `team_task`）、`docs/team-collaboration/model-and-time.zh.md`（事件评估的时间条件）、`docs/architecture/tools-and-preset.zh.md`（persona 与 core skill）、`docs/frontend-design/components.zh.md`（composer、卡片、看板）的双语对，以及 `CHANGELOG.md`。九张工单交付后，本目录于 2026-10-28 移入 `.scratch/archive/2026-10/`；交付它的 commit 已在 master 历史中，移动单独记入 `docs:` 提交。
 
 ## 调研证据
 
@@ -60,4 +60,4 @@
 
 ## 与其它工作项的关系
 
-`channel-page-redesign` 的 issue 04（看板的数据源与归属）由本模型取代：看板改读 Host 的 Task board 投影（工单 03）。该工作项其余三张票已合入 master，作为本模型的 UI 前提保留。
+`channel-page-redesign` 的 issue 04（看板的数据源与归属）由本模型取代：看板改读 Host 的 Task board 投影（工单 07）。该工作项其余三张票已合入 master，作为本模型的 UI 前提保留。
