@@ -26,16 +26,17 @@ The control says its standing before it says its action. A followed Thread shows
 While that write runs, the accessible name takes the long pending phrase rather than the idle one: the shortened visible word is not what a screen reader reads, so an unchanged name would leave the write's progress unannounced.
 
 ## Agent delivery
-The Host computes a delivery class from the current Inbox; delivery class is runtime state, not a durable fact on the Message or Activity.
+The Host computes delivery from the current Inbox; delivery class is runtime state, not a durable fact on the Message or Activity. There is one delivery class: every unread fact interrupts.
 
 | Unread fact | Agent recipient | Delivery |
 | --- | --- | --- |
 | Thread mention or reply, responsibility Activity, Main stream marker, or live Task reminder | Any | Immediate |
-| Main stream ordinary fact, including a new discussion | Project owner | Immediate |
-| Thread ordinary fact | Project owner or Task accountable | Threshold |
-| Thread ordinary fact | Other follower | Immediate |
+| Thread ordinary fact | A follower of that Thread | Immediate |
+| Main stream ordinary fact, including a new discussion | A reader whose Attention covers it | Immediate |
 
-Threshold counts undelivered ordinary facts per Member × Thread. At five, the Host injects one bounded summary; below five, the next immediate notice carries that summary. Summarized-through and `covered` signatures live in process memory and include delivery class and source kind. Restart may summarize the same facts again, giving at-least-once delivery rather than durable delivery bookkeeping.
+Attention decides whether ordinary work exists at all, never how fast it travels: an ordinary Thread update reaches a reader only because it follows that Thread, and an ordinary Main stream update only because its Attention covers that Main stream. Owning a Project does not choose a slower class, so a reader that follows a Thread is interrupted by its first ordinary update, and a reader that stops following it stops accumulating ordinary unread there.
+
+A `covered` signature keeps an unchanged rederivation from spending a second attempt on the same durable facts. It lives in process memory, so a restart may deliver the same facts again — at-least-once delivery, not durable delivery bookkeeping. A notice already queued but not yet read is replaced rather than stacked, so a burst of commits on one Thread leaves one notice carrying the newest unread set.
 
 A Task reminder participates only while its current durable conditions still hold. Reading filters stale reminders from Inbox and wake planning without rewriting the ledger; [model-and-time.md](model-and-time.md) owns the conditions and read-time rules.
 

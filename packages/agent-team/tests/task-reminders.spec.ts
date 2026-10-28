@@ -112,8 +112,7 @@ describe('event-evaluated Task reminders', () => {
     expect(after.facts).toEqual(before.facts)
     const notice = team.ledger.notificationFacts(team.owner.memberId).find(entry => entry.item.task?.taskRef === started.task.taskRef)
     expect(notice).toBeUndefined()
-    expect(planInboxDelivery({ threads: inbox.items.map(item => ({ item, facts: [], reminders: item.reminders })), main: [], owns: () => true,
-      summarizedThrough: new Map(), covered: undefined }).trigger).toBe('immediate')
+    expect(planInboxDelivery({ threads: inbox.items.map(item => ({ item, facts: [], reminders: item.reminders })), main: [], covered: undefined }).trigger).toBe('immediate')
     expect(() => new AgentTeamLedger(team.table, { rulesVersion: 2 }).validate()).not.toThrow()
   })
 
@@ -271,8 +270,7 @@ describe('event-evaluated Task reminders', () => {
     const candidate = evaluate(team, NOW + STALLED_PUBLIC_MS + 1)[0]!
     await raise(team, candidate)
     const reminders = () => team.ledger.notificationFacts(team.owner.memberId)[0]?.reminders ?? []
-    const delivery = () => planInboxDelivery({ threads: team.ledger.notificationFacts(team.owner.memberId), main: [], owns: () => true,
-      summarizedThrough: new Map(), covered: undefined })
+    const delivery = () => planInboxDelivery({ threads: team.ledger.notificationFacts(team.owner.memberId), main: [], covered: undefined })
     expect(reminders()).toHaveLength(1)
     expect(delivery().trigger).toBe('immediate')
     await team.ledger.suspendMember({ requestId: requestId('suspend'), actor: human, memberId: team.owner.memberId })

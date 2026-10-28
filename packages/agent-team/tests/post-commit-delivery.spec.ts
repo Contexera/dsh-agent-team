@@ -243,7 +243,7 @@ describe('post-commit delivery', () => {
     expect(state.calls).toEqual([])
   })
 
-  it('holds an owner\'s ordinary Thread updates until the fifth, then summarizes them once', async () => {
+  it('wakes an owner for its own Thread\'s first ordinary update, because it follows the Thread it started', async () => {
     const { ctx } = await harness()
     const project = await ctx.agentTeam.createProject({ requestId: requestId('threshold-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const projectRef = project.project.projectRef
@@ -264,13 +264,10 @@ describe('post-commit delivery', () => {
       if (result.kind !== 'committed') throw new Error(`expected a committed reply, got ${result.kind}`)
       revision = result.thread.revision
     }
-    for (let index = 1; index <= 4; index += 1) await reply(index)
-    expect(state.calls).toEqual([])
-    await reply(5)
+    await reply(1)
     expect(state.calls).toHaveLength(1)
-    expect(state.calls[0]!.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('Delivery: threshold — 5 ordinary update(s)') })
-    expect(state.calls[0]!.content[0]).toMatchObject({ text: expect.stringContaining('Your role: owner of this Project') })
-    await reply(6)
-    expect(state.calls).toHaveLength(1)
+    expect(state.calls[0]!.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('Your role: follower of this Thread') })
+    await reply(2)
+    expect(state.calls).toHaveLength(2)
   })
 })

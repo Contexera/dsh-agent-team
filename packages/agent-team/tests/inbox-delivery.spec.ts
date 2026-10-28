@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { INBOX_THRESHOLD_UPDATES, planInboxDelivery, type InboxDeliveryInput, type InboxThreadUnread } from '../src/inbox-delivery.ts'
+import { planInboxDelivery, type InboxDeliveryInput, type InboxThreadUnread } from '../src/inbox-delivery.ts'
 import type { AgentTeamProjectRef, AgentTeamThreadRef } from '../src/types/entities.ts'
 import type { AgentTeamMainTimelineEntry } from '../src/types/requests-results.ts'
 
@@ -16,41 +16,62 @@ function thread(threadRef: AgentTeamThreadRef, projectRef: AgentTeamProjectRef, 
 }
 
 function plan(input: Partial<InboxDeliveryInput>) {
-  return planInboxDelivery({ threads: [], main: [], owns: projectRef => projectRef === owned, summarizedThrough: new Map(), covered: undefined, ...input })
+  return planInboxDelivery({ threads: [], main: [], covered: undefined, ...input })
 }
 
 const range = (from: number, count: number) => Array.from({ length: count }, (_, index) => from + index)
 
-describe('an owner is not interrupted by ordinary Thread updates below the threshold', () => {
-  it('waits at four ordinary updates and fires on the fifth', () => {
-    expect(plan({ threads: [thread(threadA, owned, range(1, INBOX_THRESHOLD_UPDATES - 1))] }).trigger).toBeUndefined()
-    expect(plan({ threads: [thread(threadA, owned, range(1, INBOX_THRESHOLD_UPDATES))] }).trigger).toBe('threshold')
+describe('every unread Thread fact interrupts, whatever the reader owns', () => {
+  it('a Project owner gets one ordinary update immediately', () => {
+    const result = plan({ threads: [thread(threadA, owned, [1])] })
+    expect(result.trigger).toBe('immediate')
+    expect(result.threads[0]).toMatchObject({ role: 'follower', delivery: 'immediate' })
   })
 
-  it('counts per Thread, never across Threads', () => {
-    expect(plan({ threads: [thread(threadA, owned, range(1, 4)), thread(threadB, owned, range(11, 4))] }).trigger).toBeUndefined()
+  it('a reader who owns no Project gets the same result', () => {
+    const result = plan({ threads: [thread(threadA, other, [1])] })
+    expect(result.trigger).toBe('immediate')
+    expect(result.threads[0]).toMatchObject({ role: 'follower', delivery: 'immediate' })
   })
 
-  it('counts only updates after the last summary, even while the earlier ones stay unread', () => {
-    const summarized = plan({ threads: [thread(threadA, owned, range(1, 5))] }).summarizedThrough
-    expect(summarized.get(threadA)).toBe(5)
-    expect(plan({ threads: [thread(threadA, owned, range(1, 9))], summarizedThrough: summarized }).trigger).toBeUndefined()
-    expect(plan({ threads: [thread(threadA, owned, range(1, 10))], summarizedThrough: summarized }).trigger).toBe('threshold')
-  })
-
-  it('lets ordinary updates ride along with a mention without re-firing for them later', () => {
-    const first = plan({ threads: [thread(threadA, owned, [1, 2, 3], { direct: [3] })] })
+  it('one ordinary update is enough, so no count accumulates across reads', () => {
+    const first = plan({ threads: [thread(threadA, owned, [1])] })
     expect(first.trigger).toBe('immediate')
-    expect(first.threads[0]).toMatchObject({ role: 'owner', delivery: 'immediate', thresholdCount: 2 })
-    expect(plan({ threads: [thread(threadA, owned, [1, 2, 3, 4], { direct: [3] })], covered: first.signature, summarizedThrough: first.summarizedThrough }).trigger).toBeUndefined()
+    expect(plan({ threads: [thread(threadA, owned, [2])], covered: first.signature }).trigger).toBe('immediate')
+  })
+
+  it('carries an ordinary update alongside a mention instead of waiting for it', () => {
+    const result = plan({ threads: [thread(threadA, owned, [1, 2], { direct: [2] })] })
+    expect(result.trigger).toBe('immediate')
+    expect(result.threads[0]).toMatchObject({ role: 'follower', delivery: 'immediate' })
   })
 })
 
-describe('everything else interrupts immediately', () => {
-  it('a follower who does not own the Project gets each ordinary update', () => {
-    const result = plan({ threads: [thread(threadA, other, [1])] })
-    expect(result.trigger).toBe('immediate')
-    expect(result.threads[0]).toMatchObject({ role: 'follower', delivery: 'immediate', thresholdCount: 0 })
+describe('an unchanged unread set spends no second attempt', () => {
+  it('the same Thread facts already have a delivery attempt', () => {
+    const first = plan({ threads: [thread(threadA, owned, [1, 2, 3])] })
+    expect(plan({ threads: [thread(threadA, owned, [1, 2, 3])], covered: first.signature }).trigger).toBeUndefined()
+  })
+
+  it('a new fact on the same Thread rederives', () => {
+    const first = plan({ threads: [thread(threadA, owned, [1, 2, 3])] })
+    expect(plan({ threads: [thread(threadA, owned, [1, 2, 3, 4])], covered: first.signature }).trigger).toBe('immediate')
+  })
+
+  it('an unchanged set across two Threads is not delivered twice', () => {
+    const threads = [thread(threadA, owned, [1]), thread(threadB, owned, [2])]
+    const first = plan({ threads })
+    expect(plan({ threads, covered: first.signature }).trigger).toBeUndefined()
+  })
+})
+
+describe('the scope role names why the Thread is in scope, not how fast the notice travels', () => {
+  it('a reader holding Attention is a follower', () => {
+    expect(plan({ threads: [thread(threadA, owned, [1])] }).threads[0]!.role).toBe('follower')
+  })
+
+  it('a reader addressed only by a marker is a Project member named here', () => {
+    expect(plan({ threads: [thread(threadA, owned, [1], { following: false })] }).threads[0]!.role).toBe('member')
   })
 
   it('Main stream unread is immediate, and an unchanged set is not delivered twice', () => {

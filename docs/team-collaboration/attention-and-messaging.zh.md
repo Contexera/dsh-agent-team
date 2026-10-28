@@ -25,16 +25,17 @@ Inbox 调用返回有界队列：最多 `limit` 个未读 Thread（1–100，默
 History paging 永远不确认新 work。Thread 打开期间到达的 updates 无论读者滚动位置一律自动确认。滚离底部的读者只会看到无读取语义的纯跳转提示。
 
 ## Agent 投递
-Host 根据当前 Inbox 计算投递等级。投递等级是运行时状态，不是写在 Message 或 Activity 上的 durable 事实。
+Host 根据当前 Inbox 计算投递等级。投递等级是运行时状态，不是写在 Message 或 Activity 上的 durable 事实。现在只有一个投递等级：每条未读事实都会打断。
 
 | 未读事实 | Agent 接收者 | 投递等级 |
 | --- | --- | --- |
 | Thread mention 或回复、责任 Activity、Main stream marker、有效的 Task reminder | 任意 | immediate |
-| Main stream ordinary fact，包括新讨论 | Project owner | immediate |
-| Thread ordinary fact | Project owner 或 Task accountable | threshold |
-| Thread ordinary fact | 其他 follower | immediate |
+| Thread ordinary fact | 该 Thread 的 follower | immediate |
+| Main stream ordinary fact，包括新讨论 | Attention 覆盖它的读者 | immediate |
 
-threshold 按 Member × Thread 统计未投递的 ordinary facts。达到 5 条时注入一次有界摘要；不足 5 条时随下一次 immediate notice 带出。已摘要位置和 `covered` 签名只保存在进程内，签名包含投递等级与来源类型。Host 重启后同一批 facts 可能再次摘要，因此保证 at-least-once，而不是 durable 的投递记录。
+Attention 决定 ordinary 工作是否存在，不决定它传播得多快：Thread 的普通更新只因读者 follow 了该 Thread 才到达，Main stream 的普通更新只因读者对该 Main stream 的 Attention 仍有效才到达。Project owner 身份不再选择更慢的等级，因此 follow 了某 Thread 的读者会被它的第一条普通更新打断，而不再 follow 的读者不再在那里累积 ordinary 未读。
+
+`covered` 签名保证同一批 durable facts 的重复派生不会花掉第二次尝试。它只保存在进程内，因此 Host 重启后同一批 facts 可能再次送达——保证 at-least-once，而不是 durable 的投递记录。已入队但尚未被读取的通知会被替换而不是叠加，因此同一 Thread 上的一串提交只留下一条携带最新未读集合的通知。
 
 Task reminder 只在当前 durable 条件仍成立时参与投递。读取会从 Inbox 和唤醒计划中过滤已失效提醒，但不改写 ledger；具体条件与读取规则见 [model-and-time.zh.md](model-and-time.zh.md)。
 

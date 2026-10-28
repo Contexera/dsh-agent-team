@@ -53,7 +53,7 @@ import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type Sto
 import { agentTeamDomainSpec } from './spec.ts'
 import { SqliteStorageBackend } from './vendor/storage-sqlite/index.ts'
 import { formatTeamTimestamp } from './time-format.ts'
-import { INBOX_THRESHOLD_UPDATES, planInboxDelivery, type InboxDeliveryPlan } from './inbox-delivery.ts'
+import { planInboxDelivery, type InboxDeliveryPlan } from './inbox-delivery.ts'
 import { MemberIdleTracker } from './member-idle.ts'
 import type {
   AgentTeamAddMemberRequest,
@@ -220,8 +220,6 @@ type NotificationCause =
 interface InboxNoticeDelivery {
   readonly covered: string
   readonly attempt: number
-  /** Per Thread, the newest ordinary sequence an owner's threshold updates were delivered through; runtime only, so a restart may summarize a batch twice. */
-  readonly summarizedThrough: ReadonlyMap<AgentTeamThreadRef, number>
 }
 
 function sameChangeScope(left: AgentTeamChangeScope, right: AgentTeamChangeScope): boolean {
@@ -2693,12 +2691,10 @@ export default class AgentTeam extends TypertRemoteService {
     return 'running transition'
   }
 
-  private inboxDeliveryPlan(memberId: AgentTeamMemberId, notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
+  private inboxDeliveryPlan(notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
     main: ReturnType<AgentTeamLedger['mainNotificationFacts']>, previous?: InboxNoticeDelivery): InboxDeliveryPlan {
-    const ledger = this.requireLedger()
     return planInboxDelivery({ threads: notifications, main: main.map(({ project, entries }) => ({ projectRef: project.projectRef, entries })),
-      owns: projectRef => ledger.projectOwnerIds(projectRef).includes(memberId),
-      summarizedThrough: previous?.summarizedThrough ?? new Map(), covered: previous?.covered })
+      covered: previous?.covered })
   }
 
   private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): string {
@@ -2774,14 +2770,14 @@ export default class AgentTeam extends TypertRemoteService {
       sequenced = agent.inbox.nextTurn.some(message => message.source.kind === 'user')
     }
     const previous = this.inboxNoticeDeliveries.get(member.memberId)
-    const plan = this.inboxDeliveryPlan(member.memberId, notifications, mainNotifications, previous)
+    const plan = this.inboxDeliveryPlan(notifications, mainNotifications, previous)
     const facts = this.notificationIdentity(notifications, mainNotifications)
     // An unchanged rederivation spends no attempt: the delivery already made
     // for these facts stands, which is what keeps a repeated commit's logging
     // bounded.
     if (plan.trigger === undefined) {
       this.ctx.logger.debug(`agent-team: Team Inbox notice not attempted for ${scope} cause ${causeText}: ${plan.signature === ''
-        ? `only ordinary Thread updates below the threshold of ${INBOX_THRESHOLD_UPDATES} remain (${facts})`
+        ? 'the Member has no unread Team facts'
         : `the same unread facts (${facts}) already have a delivery attempt`}`)
       return
     }
@@ -2801,8 +2797,7 @@ export default class AgentTeam extends TypertRemoteService {
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY },
     })
     this.trackTeamWake(agent, hint)
-    const recordedPlan: InboxDeliveryPlan = { ...plan, summarizedThrough: new Map([...plan.summarizedThrough].filter(([threadRef]) => notice.renderedThreads.has(threadRef))) }
-    const attempt = this.beginInboxDelivery(member.memberId, recordedPlan)
+    const attempt = this.beginInboxDelivery(member.memberId, plan)
     try {
       // Steer normally claims the nearest step boundary — which would
       // preempt carried input that a swap or crash recovery queued as
@@ -2812,7 +2807,7 @@ export default class AgentTeam extends TypertRemoteService {
       if (sequenced) agent.followup(hint)
       else agent.steer(hint)
     } catch (error) {
-      this.dropInboxCoverage(member.memberId, previous?.summarizedThrough ?? new Map())
+      this.dropInboxCoverage(member.memberId)
       if (error instanceof AgentTeamInvariantError) throw error
       this.ctx.logger.warn(`agent-team: Team Inbox notice delivery failed for ${scope} cause ${causeText} attempt ${attempt} (${facts}): ${failureDetail(error)}; the operation is committed and stands, and the failed delivery stands as an attempt so the next fact touching this Member rederives and retries it`)
       return
@@ -2916,19 +2911,15 @@ export default class AgentTeam extends TypertRemoteService {
       characterCount += section.length + 2
       return true
     }
-    const plan = readerId === undefined ? undefined : this.inboxDeliveryPlan(readerId, notifications, main)
-    // Only sections the notice actually renders may consume a Thread's
-    // threshold: `plan.summarizedThrough` advances for every Thread with
-    // waiting facts, but the section cap and the character budget can drop
-    // some, and a dropped Thread's ordinary updates must stay undelivered.
+    const plan = readerId === undefined ? undefined : this.inboxDeliveryPlan(notifications, main)
     const rendered = new Set<AgentTeamThreadRef>()
     const roleText = { owner: 'owner of this Project', follower: 'follower of this Thread', member: 'Project member named here' } as const
     for (const { item, facts, reminders } of notifications.slice(0, 8)) {
       const scoped = plan?.threads.find(thread => thread.threadRef === item.thread.threadRef)
       const scopeText = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef} (Thread ${item.thread.threadRef})`
-      const deliveryText = scoped === undefined ? [] : [`Your role: ${roleText[scoped.role]}`, scoped.delivery === 'immediate'
-        ? `Delivery: immediate${scoped.thresholdCount === 0 ? '' : `; ${scoped.thresholdCount} ordinary update(s) ride along`}`
-        : `Delivery: threshold — ${scoped.thresholdCount} ordinary update(s); owners are interrupted every ${INBOX_THRESHOLD_UPDATES} or with the next immediate notice`]
+      // The role states why this Thread is in scope at all; with one delivery
+      // class it no longer says anything about how fast the notice arrived.
+      const deliveryText = scoped === undefined ? [] : [`Your role: ${roleText[scoped.role]}`]
       if (!append([`Workspace: ${item.workspaceId}`, `Project: ${item.projectRef}`, `Scope: ${scopeText}`, ...deliveryText,
         `Read: team_thread read with workspace ${item.workspaceId} and threadRef ${item.thread.threadRef}`].join('\n'))) break
       rendered.add(item.thread.threadRef)
@@ -2967,7 +2958,7 @@ export default class AgentTeam extends TypertRemoteService {
     for (const { project, entries } of main) {
       const owner = readerId !== undefined && this.requireLedger().projectOwnerIds(project.projectRef).includes(readerId)
       if (!append([`Workspace: ${project.workspaceId}`, `Project: ${project.projectRef} — Main stream`, 'Scope: Main stream',
-        ...(readerId === undefined ? [] : [`Your role: ${owner ? 'owner of this Project' : 'Project member named here'}`, 'Delivery: immediate']),
+        ...(readerId === undefined ? [] : [`Your role: ${owner ? 'owner of this Project' : 'Project member named here'}`]),
         `Read: team_thread read with workspace ${project.workspaceId} and projectRef ${project.projectRef}`].join('\n'))) break
       for (const entry of entries.filter(candidate => candidate.direct || candidate.kind === 'thread-card')) {
         if (detailedFactCount >= 20) {
@@ -3081,25 +3072,23 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Record that the queued notice now answers these facts, keeping the attempt count. */
   private coverInboxFacts(memberId: AgentTeamMemberId, plan: InboxDeliveryPlan): void {
-    this.inboxNoticeDeliveries.set(memberId, { covered: plan.signature, attempt: this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0,
-      summarizedThrough: plan.summarizedThrough })
+    this.inboxNoticeDeliveries.set(memberId, { covered: plan.signature, attempt: this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0 })
   }
 
   /** Spend one delivery attempt and mark the facts it covers; the count rises first so a failed wake still reports the attempt it spent. */
   private beginInboxDelivery(memberId: AgentTeamMemberId, plan: InboxDeliveryPlan): number {
     const attempt = (this.inboxNoticeDeliveries.get(memberId)?.attempt ?? 0) + 1
-    this.inboxNoticeDeliveries.set(memberId, { covered: plan.signature, attempt, summarizedThrough: plan.summarizedThrough })
+    this.inboxNoticeDeliveries.set(memberId, { covered: plan.signature, attempt })
     return attempt
   }
 
   /**
    * Drop the fact coverage but keep the attempt count, so the next commit retries the same facts as the next attempt.
-   * `summarizedThrough` rolls back with it when a failed attempt had advanced it.
    */
-  private dropInboxCoverage(memberId: AgentTeamMemberId, summarizedThrough?: ReadonlyMap<AgentTeamThreadRef, number>): void {
+  private dropInboxCoverage(memberId: AgentTeamMemberId): void {
     const delivery = this.inboxNoticeDeliveries.get(memberId)
     if (delivery !== undefined) {
-      this.inboxNoticeDeliveries.set(memberId, { covered: '', attempt: delivery.attempt, summarizedThrough: summarizedThrough ?? delivery.summarizedThrough })
+      this.inboxNoticeDeliveries.set(memberId, { covered: '', attempt: delivery.attempt })
     }
   }
 
