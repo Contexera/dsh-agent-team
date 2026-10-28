@@ -49,9 +49,8 @@ async function harness(): Promise<{ readonly ctx: Context }> {
 }
 
 /** One durable, enabled Member in the project, added through the live ledger so the Host's own state carries it. */
-async function addLiveMember(ctx: Context, projectRef: AgentTeamProjectRef): Promise<AgentTeamMemberActor> {
+async function addLiveMember(ctx: Context, projectRef: AgentTeamProjectRef, handle = 'reader'): Promise<AgentTeamMemberActor> {
   const memberId = `member:agent-${crypto.randomUUID()}` as AgentTeamMemberActor['memberId']
-  const handle = 'reader'
   await ctx.agentTeam['ledger']!.addMember({
     requestId: requestId(`ledger-member-${memberId}`), workspaceId: alpha, handle, description: 'Reads work', presetId: 'team-member',
     projectRefs: [projectRef], actor: agentTeamHumanActor(),
@@ -148,6 +147,64 @@ describe('post-commit delivery', () => {
     expect(queued).toContain('not yet read by the model')
     info.mockRestore()
     warn.mockRestore()
+  })
+
+  it('retries a failed wake over ordinary Thread unread alone, which no marker explains', async () => {
+    const { ctx } = await harness()
+    const info = vi.spyOn(ctx.logger, 'info')
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('ordinary-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const projectRef = project.project.projectRef
+    const owner = await addLiveMember(ctx, projectRef, 'owner')
+    await ctx.agentTeam.addProjectOwner({ requestId: requestId('ordinary-owner'), workspaceId: alpha, projectRef, memberId: owner.memberId })
+    const reader = await addLiveMember(ctx, projectRef, 'writer')
+    const ledger = ctx.agentTeam['ledger']!
+    const { agent, state } = wakeSeam()
+    state.fail = false
+    ctx.agentTeam['handles'].set(owner.memberId, { agent, dispose: async () => {} })
+    const lines = (spy: typeof info): string[] => spy.mock.calls.map(args => String(args[0]))
+
+    // The Human starts the Thread, so it belongs to nobody's Attention yet; the
+    // owner's grant left it Main stream unread, which this read drains so the
+    // Thread notice is the only thing the next wake has to carry.
+    const drained = await ctx.agentTeam.readMainStream({ requestId: requestId('ordinary-drain'), workspaceId: alpha, projectRef })
+    expect(drained.standing.unreadCount).toBe(0)
+    const started = await ctx.agentTeam.startThread({ requestId: requestId('ordinary-start'), workspaceId: alpha, projectRef, kind: 'discussion', body: 'Plan the release' })
+    if (started.kind !== 'committed') throw new Error('expected a started Thread')
+    const followed = await ledger.changeAttention({ requestId: requestId('ordinary-follow'), actor: owner, workspaceId: alpha,
+      threadRef: started.thread.threadRef, action: 'follow' })
+    expect(followed.committed).toBe(true)
+    state.calls.length = 0
+    // Everything so far — the grant, the Thread start, the follow — is setup;
+    // the notices this test counts start after it.
+    const baseline = info.mock.calls.length
+
+    // The reader's reply carries no mention, so the owner's unread is ordinary
+    // work and nothing else.
+    const replied = await ctx.agentTeam.reply({ requestId: requestId('ordinary-reply'), workspaceId: alpha,
+      threadRef: started.thread.threadRef, baseRevision: started.thread.revision, body: 'First ordinary update' })
+    if (replied.kind !== 'committed') throw new Error('expected a committed reply')
+    expect(state.calls).toHaveLength(1)
+    const notice = state.calls[0]!.content[0]
+    expect(notice).toMatchObject({ type: 'text', text: expect.stringContaining('1 unread update') })
+    // No direct marker is involved, so nothing in the notice quotes a body.
+    expect(notice).not.toMatchObject({ text: expect.stringContaining('Direct Team mention') })
+
+    // A second ordinary update on an unread Thread spends its own attempt: the
+    // queued notice is replaced rather than stacked, so the count rises with
+    // the commits that touched the Member and never with the facts themselves.
+    const again = await ctx.agentTeam.reply({ requestId: requestId('ordinary-reply-2'), workspaceId: alpha,
+      threadRef: started.thread.threadRef, baseRevision: replied.thread.revision, body: 'Second ordinary update' })
+    if (again.kind !== 'committed') throw new Error('expected a committed reply')
+    expect(state.calls).toHaveLength(2)
+    const queued = lines(info).slice(baseline).filter(line => line.includes('Team Inbox notice queued'))
+    expect(queued).toHaveLength(2)
+    // The attempt count is the Member's own, carried across every commit that
+    // touched it, so it keeps rising where the notice count starts fresh.
+    expect(queued.map(line => /attempt (\d+)/.exec(line)?.[1])).toEqual(['2', '3'])
+    // The reader is a Member who never followed the Thread, so nothing woke it.
+    expect(ctx.agentTeam['handles'].get(reader.memberId)).toBeUndefined()
+    expect(ledger.notificationFacts(reader.memberId)).toEqual([])
+    info.mockRestore()
   })
 
   it('spends no second attempt or log line on unread facts a later wake leaves unchanged', async () => {
