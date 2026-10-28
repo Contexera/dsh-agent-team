@@ -37,7 +37,7 @@ export interface InboxDeliveryInput {
    * rederivation would look identical to the delivered one — but the facts the
    * last attempt actually answered are the ones `covered` may match.
    */
-  readonly undelivered?: readonly AgentTeamThreadRef[]
+  readonly undelivered?: readonly AgentTeamThreadRef[] | undefined
 }
 
 export interface InboxThreadPlan {
