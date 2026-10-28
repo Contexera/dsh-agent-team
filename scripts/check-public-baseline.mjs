@@ -3,8 +3,9 @@
 // Source of truth: the `@deepseek-ai/dsh-*` entries of `peerDependencies`, which must reduce to ONE range
 // (the invariant `packages/agent-team/tests/shipping.spec.ts` asserts); its lower bound is the baseline.
 // A surface that cannot be PARSED is a FAILURE, never a skip: a vanished marker or a split line must go red.
-// The anchor rule is shared with `check-version-consistency.mjs` through `public-baseline-statement.mjs`;
-// words inserted inside the marker phrase stop the match, so fix the pattern together with the prose.
+// The marker phrases are also anchored by `check-version-consistency.mjs`'s own per-file patterns (no shared
+// code: this gate parses through `public-baseline-statement.mjs`, that one matches per-spot regexes); words
+// inserted inside a marker phrase stop both, so fix the patterns there together with the prose here.
 // Needs authenticated `gh` for the discussion body; `--offline` skips it for local iteration only, never before a publish.
 // Usage: npm run check:public-baseline (or node scripts/check-public-baseline.mjs [repoRoot] [--offline]); exit 0 = current, 1 = drift.
 import { readFileSync } from 'node:fs'
