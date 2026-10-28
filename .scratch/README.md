@@ -62,6 +62,7 @@
 | 2026-09 | team-perf | Team 性能 01–06：削减账本 replay、读与 Thread 渲染成本，07 另立。 | [README](archive/2026-09/team-perf/README.md) |
 | 2026-09 | ui-parity-0.1.7 | 0.1.7 UI 设计语言再基线：重锚 audit needles、B 类可读性与半径分档。 | [README](archive/2026-09/ui-parity-0.1.7/README.md) |
 | 2026-09 | windows-e2e-validation | Windows 原生 e2e 排查：#7 回归与 Windows 路径语义，F1–F11 归因并修复 F11。 | [README](archive/2026-09/windows-e2e-validation/README.md) |
+| 2026-10 | attention-delivery-model | Attention 决定普通更新的未读与唤醒资格：身份只建立默认关注，删 owner 阈值，Main stream 并入同一体系，工具结果说明 follow 来源。 | [README](archive/2026-10/attention-delivery-model/README.md) |
 | 2026-10 | auto-compaction-migration | 自动压缩迁移：改用 DSH 默认压缩引擎与模板，删 Team 摘要副本与旧写入口。 | [README](archive/2026-10/auto-compaction-migration/README.md) |
 | 2026-10 | channel-page-redesign | Channel 页面分流重设计：切片 1–3 合入，看板归属由 project-ownership-model 取代。 | [README](archive/2026-10/channel-page-redesign/README.md) |
 | 2026-10 | comment-audit | 全量注释审查：删 1145 行复述代码的注释，A/B/C 档处理。 | [README](archive/2026-10/comment-audit/README.md) |
