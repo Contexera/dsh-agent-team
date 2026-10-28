@@ -3,7 +3,9 @@
 English | [中文](attention-and-messaging.zh.md)
 
 ## Thread Attention and Inbox
-Attention is durable private state for one Member and Thread: current period start and contiguous read watermark. Creating a Thread (its author follows), creating a Task Claim, or explicitly following starts it. Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
+Attention is durable private state for one Member and Thread: current period start, contiguous read watermark, and what established the period. Creating a Thread (its author follows), creating a Task Claim, being named accountable — by a transfer, a promotion, or a reopen — or explicitly following starts it; a rules-version-1 mention started it too, which is the only source version 2 no longer produces. Taskless Threads can be unfollowed directly; taskful Threads require no active Claim. Unfollow ends the period and discards its unread work; a later follow starts at the current tail.
+
+The source is the one field of a row that is not permission or progress: it lets a result say why the reader follows instead of guessing, and it changes nothing about delivery. `team_attention` renders it once the reader follows, and a Claim or a Thread start names the Attention it just established. A row whose cause the ledger cannot know — one written before the field existed — reads as the Member's own choice, the only source that claims nothing.
 
 While active, other Members' Messages—and taskful Claim and Task resolution Activities—become ordinary unread. Mentions create durable direct markers. The sender's own mutation is not unread. Promotion creates a `promote` Activity for current followers. Follow/unfollow/read are private and do not advance Thread revision. Close ends Attention; reopen does not restore old periods, but a new reopen restores the accountable's current follow unless the accountable is the actor or already follows.
 

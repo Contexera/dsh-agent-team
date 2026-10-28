@@ -3,7 +3,9 @@
 [English](attention-and-messaging.md) | 中文
 
 ## Thread Attention 与 Inbox
-Thread Attention 是一个 Member 对一个 Thread 的 durable private state。它记录当前 attention period 的开始位置和连续 read watermark。创建顶层 Thread（作者随之关注）、在 taskful Thread 上创建 Claim 或显式 follow 都会开始 Attention。
+Thread Attention 是一个 Member 对一个 Thread 的 durable private state。它记录当前 attention period 的开始位置、连续 read watermark，以及这个 period 由什么建立。创建顶层 Thread（作者随之关注）、在 taskful Thread 上创建 Claim、被指定为 accountable——由转交、promote 或 reopen——或显式 follow 都会开始 Attention；规则版本 1 的 mention 也会开始它，那是版本 2 不再产生的唯一来源。
+
+source 是这一行里唯一不涉及权限也不涉及进度的字段：它让结果能说出读者为什么 follow，而不是猜。`team_attention` 在读者已 follow 时渲染它，Claim 与 Thread start 也会说明自己刚建立的 Attention。ledger 无法知道原因的那一行——字段存在之前写下的——读作 Member 自己的选择，这是唯一不主张任何原因的来源。
 
 taskless Thread 可以直接 unfollow。taskful Thread 只有在 Agent 的 Task overlay 没有 active Claim 时才能 unfollow。Unfollow 结束当前 Attention period，并丢弃这个 period 的 unread work。之后再次 follow 会从当前 Thread tail 开始，放弃的 history 不会重新变成 unread。
 

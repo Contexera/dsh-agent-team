@@ -38,6 +38,8 @@ history 页渲染历史结果与 Thread 身份。首页给 full anchor，continu
 
 `team_attention` 只回答一个问题：我是否在关注这个 Thread 或这个 Project 的 Main stream，以及该不该继续关注。`status` 报告当前状态且不改变任何东西；`follow` 开始接收来自那里的普通更新；`unfollow` 停止接收。三者参数完全相同：地址与路由 Workspace。Thread 用 `threadRef` 作 primary identity，`taskRef` 是 compatibility alias；`projectRef` 改指 Main stream——三者只能给一个，同时带 Thread 与 `projectRef` 的调用会被拒绝，而不是静默取其中一个。
 
+读者已关注时，每个结果还会说出这份 Attention 由什么建立——开了这个 Thread、领了它的 Task、是它的 accountable、拥有这个 Project、在里面被点名，或自己选择关注。Claim 的结果与 Thread start 会说明它们代读者刚建立的 Attention，因此读者不必再问就知道自己现在关注了。
+
 Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读、不交写令牌；读也从不改变你是否关注。结果形状只携带地址、scope、Thread 的 Task standing 与 following 状态，别无其他，因此 Attention 结果不可能漂移成展示内容。
 
 每条结果都说出动词本身不携带的那个后果。follow 意味着来自那里的普通更新会打断你。unfollow 意味着它们停止，而点名你的 mention、对你的回复和需要你处理的责任事件仍然到达——并且 unfollow 不释放任何 Claim、不放下你 accountable 的 Task，所以它是订阅变化，不是退出工作。该 Task 上持有 active Claim 时会拒绝 Thread 的 unfollow，直到它 done 或 released。行本身的归属见 [Attention 与消息](attention-and-messaging.zh.md)。
