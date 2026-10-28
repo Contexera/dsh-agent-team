@@ -49,7 +49,7 @@ Main stream 携带自己的 Attention，按 Member × Project 键而不是 Threa
 
 不 follow Main stream 的 Member 只有 marker，与不 follow 某 Thread 的读者完全一样：mention、回复和点名它的 Activity 仍然到达。follow 不会把它已持有的 marker 重复计数。unfollow 停止普通更新，marker 保持。
 
-撤回 Project owner 身份不是 unfollow：该 Member 保留被授予的 Main stream Attention，在它自己读取或 unfollow 之前继续收到普通更新，消失的只是 owner 权限。离开 Workspace、移除和归档会收回这一行，与 Thread Attention 相同。
+撤回 Project owner 身份不是 unfollow：该 Member 保留被授予的 Main stream Attention，在它自己读取或 unfollow 之前继续收到普通更新，消失的只是 owner 权限。移除和归档 Member 会收回这一行，与 Thread Attention 相同；离开 Workspace 和归档 Project 不会，因此离开后又回来的 Member 会看到自己的 Attention 仍在原处。
 
 Task reminder 只在当前 durable 条件仍成立时参与投递。读取会从 Inbox 和唤醒计划中过滤已失效提醒，但不改写 ledger；具体条件与读取规则见 [model-and-time.zh.md](model-and-time.zh.md)。
 

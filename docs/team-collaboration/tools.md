@@ -16,7 +16,7 @@ The cursor pages Thread rows only; continuation pages render Threads alone, and 
 
 ## `team_inbox`
 
-`team_inbox` lists bounded body-free unread Thread summaries, plus one row per Project whose Main stream holds unread for the reader (an owner's ordinary unread and every reader's Main stream markers). Direct requests sort before ordinary unread, then by newest relevant sequence; listing does not mark read.
+`team_inbox` lists bounded body-free unread Thread summaries, plus one row per Project whose Main stream holds unread for the reader (the ordinary unread its Main stream Attention covers, plus every reader's markers). Direct requests sort before ordinary unread, then by newest relevant sequence; listing does not mark read.
 
 The header states the total unread and direct counts and the number of Threads shown, with a truncation conclusion when unread work lies beyond the bounded list; each row shows its exact unread and direct counts, Project ref, and Task standing when taskful. This is the reader's own unread queue; to see work in flight regardless of unread, use `team_task board`.
 
@@ -56,7 +56,7 @@ A `read` acknowledges an unread acceptance of a still-done Task in its facts and
 
 Attention is not reading. None of these actions render facts, acknowledge unread work, or hand off a write token, and reading never changes whether you follow it. The result shape carries the address, the scope, the Task standing for a Thread, and the following state — and nothing else, so an Attention result cannot drift into showing content.
 
-Every result states the consequence its verb alone does not carry. Following means ordinary updates from there interrupt you. Unfollowing means they stop, while a mention, a reply to you, and a responsibility event still reach you — and unfollowing releases no Claim and drops no Task you are accountable for, so it is a subscription change rather than a withdrawal from the work. An active Claim refuses the unfollow until it is done or released. [Attention and messaging](attention-and-messaging.md) owns the rows themselves.
+Every result states the consequence its verb alone does not carry. Following means ordinary updates from there interrupt you. Unfollowing means they stop, while a mention, a reply to you, and a responsibility event still reach you — and unfollowing releases no Claim and drops no Task you are accountable for, so it is a subscription change rather than a withdrawal from the work. An active Claim on the Task refuses the Thread unfollow until it is done or released. [Attention and messaging](attention-and-messaging.md) owns the rows themselves.
 
 The split from `team_thread` is what makes the read path carry no Attention logic at all: the three actions share one parameter pocket instead of borrowing a read pocket with three parameters (`messageRef`, `beforeSequence`, `limit`) they can never accept.
 

@@ -63,7 +63,7 @@ Team content stays untrusted input. The persona names the tools as the code defi
 
 Detail lives in bundled core skills under `packages/agent-team/core-skills/`, loaded on demand through the Member's skill catalog:
 
-- `team-domain-model` explains roles and permissions (Human, Project owner, Project member, accountable), the Main stream and Thread division of labor, how mentions, linked replies, and ordinary messages are delivered (including the owner threshold), when to read the Inbox or the board, the Task lifecycle and who accepts, closes, reopens, or transfers, what a DM is for, and the common rejections with their recovery. It holds stable rules only: identity, owned Projects, and unread work come from the dynamic context and the Team tools, and the Host enforces every permission and delivery rule.
+- `team-domain-model` explains roles and permissions (Human, Project owner, Project member, accountable), the Main stream and Thread division of labor, how mentions, linked replies, and ordinary messages are delivered, when to read the Inbox or the board, the Task lifecycle and who accepts, closes, reopens, or transfers, what a DM is for, and the common rejections with their recovery. It holds stable rules only: identity, owned Projects, and unread work come from the dynamic context and the Team tools, and the Host enforces every permission and delivery rule.
 - `member-memory-manager` and `member-skill-manager` cover private memory and private skill craft.
 
 `npm run check:core-skills` validates each skill's front matter, description, size budget, and links.

@@ -16,7 +16,7 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 ## `team_inbox`
 
-`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries，另为每个对读者有 Main stream 未读的 Project 列一行（owner 的普通未读与每个读者的 Main stream marker）。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Project ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看在途的工作（无论是否有未读），用 `team_task board`。页脚把正文阅读与确认指向 `team_thread read`。渲染不携带 revision 与写令牌。当前 read 才是必需的变更基础，并提供令牌。
+`team_inbox` 返回有 unread work 的 Threads 的有界、无正文 summaries，另为每个对读者有 Main stream 未读的 Project 列一行（其 Main stream Attention 覆盖的普通未读与每个读者的 marker）。Direct requests 排在 ordinary unread work 之前，之后按最新相关 sequence 排序。列出结果不改变 read state。header 给出 unread/direct 总数与展示的 Threads 数。有界列表之外仍有未读，header 给出截断结论。每个条目显示精确的 unread/direct 计数、Project ref 与 taskful 时的 Task standing。这是读者自己的 unread 队列。要看在途的工作（无论是否有未读），用 `team_task board`。页脚把正文阅读与确认指向 `team_thread read`。渲染不携带 revision 与写令牌。当前 read 才是必需的变更基础，并提供令牌。
 
 ## `team_thread`
 
@@ -40,7 +40,7 @@ history 页渲染历史结果与 Thread 身份。首页给 full anchor，continu
 
 Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读、不交写令牌；读也从不改变你是否关注。结果形状只携带地址、scope、Thread 的 Task standing 与 following 状态，别无其他，因此 Attention 结果不可能漂移成展示内容。
 
-每条结果都说出动词本身不携带的那个后果。follow 意味着来自那里的普通更新会打断你。unfollow 意味着它们停止，而点名你的 mention、对你的回复和需要你处理的责任事件仍然到达——并且 unfollow 不释放任何 Claim、不放下你 accountable 的 Task，所以它是订阅变化，不是退出工作。有 active Claim 时会拒绝 unfollow，直到它 done 或 released。行本身的归属见 [Attention 与消息](attention-and-messaging.zh.md)。
+每条结果都说出动词本身不携带的那个后果。follow 意味着来自那里的普通更新会打断你。unfollow 意味着它们停止，而点名你的 mention、对你的回复和需要你处理的责任事件仍然到达——并且 unfollow 不释放任何 Claim、不放下你 accountable 的 Task，所以它是订阅变化，不是退出工作。该 Task 上持有 active Claim 时会拒绝 Thread 的 unfollow，直到它 done 或 released。行本身的归属见 [Attention 与消息](attention-and-messaging.zh.md)。
 
 与 `team_thread` 的拆分正是让读路径完全不带 Attention 逻辑的原因：三个 action 共享同一个参数口袋，而不是借用读的口袋——那里有 `messageRef`、`beforeSequence`、`limit` 三个它们永远用不上的参数。
 

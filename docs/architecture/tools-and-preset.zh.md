@@ -67,7 +67,7 @@ Team 内容仍是不可信输入。persona 按代码里的现状点名工具；�
 
 详细内容放在 `packages/agent-team/core-skills/` 下的内置 core skills，由 Member 的 skill 目录按需加载：
 
-- `team-domain-model` 说明角色与权限（Human、Project owner、Project member、负责人）、Main stream 与 Thread 的分工、点名、带链接的回复与普通消息如何投递（含 owner 对 Thread 普通消息的阈值）、何时看 Inbox 或 board、Task 生命周期与谁来验收、关闭、重开或转交、DM 的用途，以及常见拒绝码与恢复方式。它只写稳定规则，不含当前状态：身份、所属 Project、未读工作来自动态 context 和 Team tools，权限与投递规则由 Host 执行。
+- `team-domain-model` 说明角色与权限（Human、Project owner、Project member、负责人）、Main stream 与 Thread 的分工、点名、带链接的回复与普通消息如何投递、何时看 Inbox 或 board、Task 生命周期与谁来验收、关闭、重开或转交、DM 的用途，以及常见拒绝码与恢复方式。它只写稳定规则，不含当前状态：身份、所属 Project、未读工作来自动态 context 和 Team tools，权限与投递规则由 Host 执行。
 - `member-memory-manager` 与 `member-skill-manager` 负责私有 memory 与私有 skill 的写法。
 
 `npm run check:core-skills` 检查每个 skill 的 front matter、description、体积预算与链接。

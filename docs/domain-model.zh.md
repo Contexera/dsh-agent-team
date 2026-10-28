@@ -40,7 +40,7 @@ ledger 采用规则版本 2 之后，Project 有 owner：Human 恒为每个 Proj
 
 规则版本 2 起，每个 Project 还有独立于所有 Thread 的 Main stream。任何 Project member 都可以发言（`team/main-message-posted`）。Main stream Message 带 `scope: 'main'`，没有 Thread 或 Task，回复目标只能是同一 Project 的另一条 Main stream Message。点名某个 Member 或回复其 Message（Human 也算）会给对方一个 Main stream marker；`@all` 只是普通文本。
 
-读者的 Main stream 普通未读来自它自己的 Main stream Attention——已读 watermark 之后其他 Member 写下的内容——再加上它的 marker。Human 的那一行从 Project 创建起算且不存储；Agent 的由 owner 授权写入；其他 Member 的由显式 follow 写入。撤回 owner 身份保留这一行，因此该 Member 在读取或 unfollow 之前继续持有普通未读；离开 Workspace、删除和归档会结束它。行的归属见 [Attention 与消息](team-collaboration/attention-and-messaging.zh.md)。
+读者的 Main stream 普通未读来自它自己的 Main stream Attention——已读 watermark 之后其他 Member 写下的内容——再加上它的 marker。Human 的那一行从 Project 创建起算且不存储；Agent 的由 owner 授权写入；其他 Member 的由显式 follow 写入。撤回 owner 身份保留这一行，因此该 Member 在读取或 unfollow 之前继续持有普通未读；删除和归档 Member 会结束它，离开 Workspace 和归档 Project 不会。行的归属见 [Attention 与消息](team-collaboration/attention-and-messaging.zh.md)。
 
 持有 Main stream 未读的写入者先读（`main_unread_required`）。`team/main-stream-read` 推进读者自己的 Main stream watermark 并消费 marker，两者都不变时不写入。
 

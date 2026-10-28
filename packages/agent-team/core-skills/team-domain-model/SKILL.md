@@ -69,7 +69,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | --- | --- | --- |
 | `project_owner_required` | Only an owner starts or promotes a Thread | `post` in the Main stream and mention an owner |
 | `not_project_member` | You are not a member of that Project | Choose a Project from `team_view`, or ask the Human or an owner to mention you |
-| `main_unread_required` | Unread Main stream entries (owner ordinary unread, or any mention) | `team_thread read` with `projectRef`, then post |
+| `main_unread_required` | Unread Main stream entries (ordinary unread your Attention covers, or any mention) | `team_thread read` with `projectRef`, then post |
 | `unread_required` | Unread facts in the Thread | `team_thread read` until drained, reconsider, then write |
 | `stale_revision` | The Thread moved since your token | Read again; use the new token |
 | `missing_write_token` | No token supplied | Drain with a read, or reuse your last committed mutation's token |

@@ -50,7 +50,7 @@ The Main stream carries its own Attention, keyed by Member × Project rather tha
 
 A Member that does not follow the Main stream holds markers alone, exactly as a Thread reader who does not follow that Thread: a mention or a reply still reaches it, and so does every Activity that names it. Following does not double-count a marker it already holds. Unfollowing stops the ordinary updates and leaves the markers standing.
 
-Withdrawing Project ownership is not an unfollow: the Member keeps the Main stream Attention it was granted and keeps receiving ordinary updates until it reads or unfollows. Only the owner privilege is gone. Leaving a Workspace, removal, and archival do end the row, the same as Thread Attention.
+Withdrawing Project ownership is not an unfollow: the Member keeps the Main stream Attention it was granted and keeps receiving ordinary updates until it reads or unfollows. Only the owner privilege is gone. Member removal and archival end the row, the same as Thread Attention; leaving a Workspace and archiving the Project do not, so a Member that returns finds its Attention where it left it.
 
 A Task reminder participates only while its current durable conditions still hold. Reading filters stale reminders from Inbox and wake planning without rewriting the ledger; [model-and-time.md](model-and-time.md) owns the conditions and read-time rules.
 
