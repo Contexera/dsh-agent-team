@@ -356,6 +356,7 @@ export interface AgentTeamLedgerOptions {
    * only: nothing is persisted, no watermark advances, no marker is consumed.
    */
   readonly areFactsVisible?: ((memberId: AgentTeamMemberId, facts: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef) => boolean) | undefined
+  readonly areMainEntriesVisible?: ((memberId: AgentTeamMemberId, entries: readonly AgentTeamMainTimelineEntry[], projectRef: AgentTeamProjectRef) => boolean) | undefined
   /** Highest rules version to adopt and accept; defaults to `AGENT_TEAM_RULES_VERSION`. */
   readonly rulesVersion?: number
 }
@@ -640,6 +641,7 @@ export class AgentTeamLedger {
   private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
   /** Host-supplied surface visibility probe; absent means no write is ever exempt. */
   private readonly areFactsVisible?: ((memberId: AgentTeamMemberId, facts: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef) => boolean) | undefined
+  private readonly areMainEntriesVisible: AgentTeamLedgerOptions['areMainEntriesVisible']
   private readonly rulesVersion: number
   private operationTail: Promise<void> = Promise.resolve()
   /**
@@ -675,6 +677,7 @@ export class AgentTeamLedger {
     this.createOccurredAt = options.occurredAt ?? (() => new Date().toISOString())
     this.createRef = options.ref ?? (kind => `${kind}:${randomUUID()}`)
     this.areFactsVisible = options.areFactsVisible
+    this.areMainEntriesVisible = options.areMainEntriesVisible
     this.rulesVersion = options.rulesVersion ?? AGENT_TEAM_RULES_VERSION
     this.replay()
     const head = this.state.ordered.at(-1)
@@ -1274,7 +1277,10 @@ export class AgentTeamLedger {
       this.requireProjectMemberActor(actor, project.projectRef)
       this.assertMentionTargets(project, recipients)
       const unread = this.mainUnreadFrom(this.state, actor.memberId, project.projectRef)
-      if (unread.length > 0) return this.resolved(this.mainUnreadRequired(project.projectRef, unread))
+      if (unread.length > 0 && !this.areMainEntriesVisible?.(actor.memberId,
+        this.mainEntries(unread.map(item => item.source), unread), project.projectRef)) {
+        return this.resolved(this.mainUnreadRequired(project.projectRef, unread))
+      }
       const sequence = this.nextSequence()
       const base = this.operationBase(request, sequence)
       const message: AgentTeamMainMessage = Object.freeze({

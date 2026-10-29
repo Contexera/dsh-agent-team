@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
+import { visibleTeamSurface } from '../src/surface-visibility.ts'
 import { cleanups, realHarness, ScriptedAdapter, textResponse, toolCallResponse, requestId, waitFor } from './helpers/member-harness.ts'
 
 afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
@@ -16,6 +17,7 @@ async function mainStream() {
   const agent = test.ctx.agents.get(member.status.member.sessionId)!
   await test.ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('follow'), workspaceId: test.workspaceId, projectRef, action: 'follow' })
   async function post(body: string) {
+    await test.ctx.agentTeam.readMainStream({ requestId: requestId(`human-read-${adapter.requests.length}`), workspaceId: test.workspaceId, projectRef })
     const before = adapter.requests.length
     adapter.enqueue(textResponse('Noted.'))
     const result = await test.ctx.agentTeam.postMainMessage({ requestId: requestId(`post-${before}`), workspaceId: test.workspaceId, projectRef, body })
@@ -24,9 +26,11 @@ async function mainStream() {
     await agent.whenIdle()
     return result.message
   }
-  async function call(action: 'read' | 'message', messageRef?: string) {
+  async function call(action: 'read' | 'history' | 'message' | 'post', messageRef?: string) {
     const before = adapter.requests.length
-    adapter.enqueue(toolCallResponse(`call-${before}`, 'team_thread', { action, projectRef, ...(messageRef === undefined ? {} : { messageRef }) }))
+    adapter.enqueue(toolCallResponse(`call-${before}`, action === 'post' ? 'team_message' : 'team_thread', { action, projectRef,
+      ...(action === 'post' ? { body: 'I will verify the signed installer in a path with spaces.' } : {}),
+      ...(messageRef === undefined ? {} : { messageRef }) }))
     adapter.enqueue(textResponse('Context checked.'))
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Check the Project Main stream.' }], source: { kind: 'user' } }))
     await waitFor(() => adapter.requests.length === before + 2 ? true : undefined)
@@ -38,6 +42,82 @@ async function mainStream() {
 }
 
 describe('Main read uses the current Session context', () => {
+  it('reconsiders a complete Main rejection but stops for a new missing Message', async () => {
+    const { ctx, agent, workspaceId, projectRef, post, call } = await mainStream()
+    await post('Ordinary change not included in the automatic notice.')
+    const rejected = await call('post')
+    expect(rejected).toContain('Not committed — main_unread_required')
+    expect(rejected).toContain('Reconsider')
+    expect(rejected).not.toContain('baseRevision')
+    expect(await call('post')).toContain('Committed — Main stream message posted.')
+    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing.unreadCount).toBe(1)
+    await post('A new ordinary update needs another review.')
+    expect(await call('post')).toContain('Not committed — main_unread_required')
+    const read = await call('read')
+    expect(read).toContain('acknowledged 2 unread update(s)')
+  })
+
+  it('posts after a complete ownership notice without marking the Activity read', async () => {
+    const { ctx, adapter, agent, workspaceId, projectRef, call } = await mainStream()
+    const memberId = ctx.agentTeam.members().find(item => item.member.sessionId === agent.id)!.member.memberId
+    adapter.enqueue(textResponse('Noted the ownership change.'))
+    await ctx.agentTeam.addProjectOwner({ requestId: requestId('grant-owner'), workspaceId, projectRef, memberId })
+    await waitFor(() => adapter.requests.length === 1 ? true : undefined)
+    await agent.whenIdle()
+    expect(await call('post')).toContain('Committed — Main stream message posted.')
+    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing.unreadCount).toBe(1)
+  })
+
+  it.each(['history', 'post'] as const)('recovers an ownership Activity through %s, then acknowledges without reattesting omitted content', async action => {
+    const { ctx, adapter, agent, workspaceId, projectRef, call } = await mainStream()
+    const memberId = ctx.agentTeam.members().find(item => item.member.sessionId === agent.id)!.member.memberId
+    adapter.enqueue(textResponse('Noted ownership.'))
+    await ctx.agentTeam.addProjectOwner({ requestId: requestId('grant'), workspaceId, projectRef, memberId })
+    await waitFor(() => adapter.requests.length === 1 ? true : undefined)
+    await agent.whenIdle()
+    const nodes = agent.session.surface.nodes.slice(1)
+    agent.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Summary: review the Project.' }], source: { kind: 'user' } }), {
+      surfaceOp: { op: 'replace', startSeq: SessionSeq(nodes[0]!), endSeq: SessionSeq(nodes.at(-1)!) }, sourceEventSeqs: [...nodes],
+    })
+    const context = await call(action)
+    expect(context).toContain(`owner-added Member ${memberId}`)
+    expect(context).toContain(projectRef)
+    expect(context).toContain('activity:')
+    if (action === 'post') expect(context).toContain('Not committed — main_unread_required')
+    expect(await call('post')).toContain('Committed — Main stream message posted.')
+    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing.unreadCount).toBe(1)
+    const completeNodes = [...agent.session.surface.nodes].slice(1)
+    const read = await call('read')
+    expect(read).toContain('acknowledged 1 unread update(s)')
+    expect(read).toContain('complete event already in current context; omitted')
+    expect(read).not.toContain('owner-added Member')
+    agent.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'Earlier context removed.' }], source: { kind: 'user' } }), {
+      surfaceOp: { op: 'replace', startSeq: SessionSeq(completeNodes[0]!), endSeq: SessionSeq(completeNodes.at(-1)!) }, sourceEventSeqs: completeNodes,
+    })
+    expect(visibleTeamSurface(agent).flatMap(surface => surface.activities)).toHaveLength(0)
+  })
+
+  it('bounds a long Main rejection and keeps the Message unread until explicitly read', async () => {
+    const { ctx, agent, workspaceId, projectRef, post, call } = await mainStream()
+    await post('Very long pending Main content. '.repeat(2000))
+    const result = await call('post')
+    expect(result.length).toBeLessThanOrEqual(16 * 1024)
+    expect(result).toContain('truncated')
+    expect(await call('post')).toContain('Not committed — main_unread_required')
+    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing.unreadCount).toBe(1)
+  })
+
+  it('posts after a complete direct notice without acknowledging it, then reads to confirm', async () => {
+    const { ctx, agent, workspaceId, projectRef, post, call } = await mainStream()
+    const direct = await post('@builder verify the signed installer in a path with spaces.')
+    expect(await call('post')).toContain('Committed — Main stream message posted.')
+    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing).toMatchObject({ unreadCount: 1, directCount: 1 })
+    const read = await call('read')
+    expect(read).toContain('acknowledged 1 unread update(s)')
+    expect(read).not.toContain(direct.body)
+    expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing.unreadCount).toBe(0)
+  })
+
   it('stops without acknowledging when a Message exceeds the available context capacity', async () => {
     const { ctx, adapter, agent, workspaceId, projectRef, post, call } = await mainStream()
     adapter.resolveModelWindow = () => 32_000

@@ -1,15 +1,19 @@
 import { createHash } from 'node:crypto'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
+import { activityFact, activityFactDigest, activityIdentity, type ActivityFact, type ActivityIdentity } from './activity-facts.ts'
 import { isAgentTeamSource } from './context-source.ts'
 import type { AgentTeamMainTimelineEntry, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamThreadReadFact, AgentTeamThreadRef } from './types.ts'
 
 export const NOTIFICATION_TRUNCATION_MARKER = '[Message body truncated; use team_thread read for the full Message.]'
 export const NOTIFICATION_BODY_MAX_CHARACTERS = 8 * 1024
 
+export type SurfaceActivityBinding = ActivityIdentity & { readonly factDigest: string }
+
 export type TeamMessageSurface = {
   readonly textDigest: string
   readonly messages: readonly (MessageAddress & { readonly messageRef: string; readonly bodyDigest: string; readonly start?: number; readonly end?: number; readonly total?: number })[]
+  readonly activities: readonly SurfaceActivityBinding[]
 }
 
 type MessageAddress = { readonly threadRef: string; readonly projectRef?: never }
@@ -24,12 +28,13 @@ export type RenderedTeamMessage = MessageAddress & {
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex')
 
 /** Bind rendered bodies or exact parts to the producer's complete output text. */
-export function teamMessageSurface(text: string, messages: readonly RenderedTeamMessage[]) {
+export function teamMessageSurface(text: string, messages: readonly RenderedTeamMessage[], activities: readonly ActivityFact[] = []) {
+  const boundActivities = activities.map(fact => ({ ...activityIdentity(fact), factDigest: activityFactDigest(fact) }))
   return { textDigest: digest(text), messages: messages.map(message => ({
     ...(message.threadRef === undefined ? { projectRef: message.projectRef } : { threadRef: message.threadRef }),
     messageRef: message.messageRef, bodyDigest: digest(message.body),
     ...(message.part === undefined ? {} : { ...message.part, total: message.body.length }),
-  })) }
+  })), activities: boundActivities }
 }
 
 /** A live projection, not a read receipt. Cropped text cannot attest through retained metadata. */
@@ -64,24 +69,51 @@ export function visibleTeamSurface(agent: Pick<Agent, 'session'>): readonly Team
 
 function surfaceOf(value: unknown): TeamMessageSurface | undefined {
   if (typeof value !== 'object' || value === null) return undefined
-  const surface = value as Partial<TeamMessageSurface>
+  const surface = value as Partial<TeamMessageSurface> & { readonly activities?: unknown }
   if (typeof surface.textDigest !== 'string' || !Array.isArray(surface.messages)) return undefined
   if (!surface.messages.every(message => message !== null && typeof message === 'object'
     && ((typeof message.threadRef === 'string' && message.projectRef === undefined)
       || (typeof message.projectRef === 'string' && message.threadRef === undefined))
     && typeof message.messageRef === 'string' && typeof message.bodyDigest === 'string')) return undefined
-  return surface as TeamMessageSurface
+  const activities = surface.activities
+  if (activities !== undefined && (!Array.isArray(activities) || !activities.every(isSurfaceActivityBinding))) return undefined
+  return { ...(surface as TeamMessageSurface), activities: (activities ?? []) as readonly SurfaceActivityBinding[] }
+}
+
+function isSurfaceActivityBinding(value: unknown): value is SurfaceActivityBinding {
+  if (typeof value !== 'object' || value === null) return false
+  const item = value as { readonly scope?: unknown; readonly activityRef?: unknown; readonly threadRef?: unknown; readonly projectRef?: unknown; readonly factDigest?: unknown }
+  if (typeof item.activityRef !== 'string' || typeof item.factDigest !== 'string') return false
+  return (item.scope === 'thread' && typeof item.threadRef === 'string' && item.projectRef === undefined)
+    || (item.scope === 'main' && typeof item.projectRef === 'string' && item.threadRef === undefined)
 }
 
 export function isFactOnSurface(entries: readonly TeamMessageSurface[], fact: AgentTeamThreadReadFact, threadRef: AgentTeamThreadRef): boolean {
+  if (fact.fact.kind === 'activity') {
+    return fact.fact.activity.threadRef === threadRef && isActivityOnSurface(entries, activityFact(fact.fact.activity))
+  }
   if (fact.fact.kind !== 'message' || fact.fact.message.body === '') return false
   const { messageRef, body } = fact.fact.message
   return missingMessageRange(entries, { threadRef, messageRef, body }) === undefined
 }
 
 export function isMainEntryOnSurface(entries: readonly TeamMessageSurface[], entry: AgentTeamMainTimelineEntry, projectRef: AgentTeamProjectRef): boolean {
+  if (entry.kind === 'activity') {
+    return entry.activity.projectRef === projectRef && isActivityOnSurface(entries, activityFact(entry.activity))
+  }
   if (entry.kind !== 'message' || entry.message.body === '') return false
   return missingMessageRange(entries, { projectRef, messageRef: entry.message.messageRef, body: entry.message.body }) === undefined
+}
+
+/** A Command or Remote projection is not a Session output: only the bound activity text attests. */
+export function isActivityOnSurface(entries: readonly TeamMessageSurface[], fact: ActivityFact): boolean {
+  const identity = activityIdentity(fact)
+  const factDigest = activityFactDigest(fact)
+  return entries.some(entry => entry.activities.some(activity => activity.factDigest === factDigest
+    && activity.activityRef === identity.activityRef
+    && (identity.scope === 'thread'
+      ? activity.scope === 'thread' && activity.threadRef === identity.threadRef
+      : activity.scope === 'main' && activity.projectRef === identity.projectRef)))
 }
 
 export function missingMessageRange(entries: readonly TeamMessageSurface[], target: RenderedTeamMessage): { start: number; end: number } | undefined {

@@ -43,7 +43,9 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'main_unread_required',
-    sentence: ({ projectRef }: RecoveryContext) => `Read the pending Main stream updates with team_thread read and projectRef${projectRef === undefined ? '' : ` ${projectRef}`} before reconsidering this post.`,
+    sentence: ({ projectRef, completeFacts }: RecoveryContext) => completeFacts
+      ? 'Reconsider the complete Main stream updates above before posting; this did not mark them read. New updates, permissions and Project state are checked again.'
+      : `Read the pending Main stream updates with team_thread read and projectRef${projectRef === undefined ? '' : ` ${projectRef}`} before reconsidering this post.`,
   },
   {
     kind: 'project_owner_required',

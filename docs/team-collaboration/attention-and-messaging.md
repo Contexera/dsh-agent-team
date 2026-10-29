@@ -40,6 +40,8 @@ Attention decides whether ordinary work exists at all, never how fast it travels
 
 A `covered` signature keeps an unchanged rederivation from spending a second attempt on the same durable facts. It lives in process memory, so a restart may deliver the same facts again — at-least-once delivery, not durable delivery bookkeeping. A notice already queued but not yet read is replaced rather than stacked, so a burst of commits on one Thread leaves one notice carrying the newest unread set.
 
+An Activity notice renders the event's immutable fields — actor, object, and the recorded Claim refs or transfer endpoints — never current Task or Claim state. Delivering or reading it is context, not acknowledgment: unread remains until an explicit `team_thread read`. A notice the character budget or fact cap shortens keeps every complete entry it still renders; only an entry it truncated or omitted is orientation alone and satisfies no write's context check.
+
 ## Main stream Attention
 
 The Main stream carries its own Attention, keyed by Member × Project rather than by a Thread ref: it is a conversation outside every Thread, so giving it a synthetic Thread ref would put it in the Thread indexes. Thread Attention and Main stream Attention are two independent rows for the same Member, each with its own read watermark.

@@ -105,7 +105,7 @@ export function budgetReading<V extends Reading>(agent: Agent, value: V, render:
     if (end === start && missing !== undefined) throw new Error('Message reading cannot fit its identity and one character in the output budget; nothing acknowledged.')
     candidate = make(selected, [{ messageRef: first.messageRef, start, end, complete: complete(end) }])
   }
-  if (!fits(candidate)) throw new Error('Current reading metadata exceeds the output budget; nothing acknowledged. Use team_thread message with a Message ref for its body.')
+  if (!fits(candidate)) throw new Error('A single fact or its required context exceeds the fixed reading output budget; nothing acknowledged. Activity events cannot be split. Repeating this call or changing models cannot remove this limit; ask the Human to inspect the event and decide how to continue.')
   if (value.kind !== 'message' && (candidate.messageParts?.length ?? 0) === 0) {
     for (const entry of background) {
       if (selected.includes(entry)) continue

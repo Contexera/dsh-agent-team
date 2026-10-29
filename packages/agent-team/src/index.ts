@@ -46,6 +46,8 @@ import { installMemberCompaction, DEFAULT_MEMBER_COMPACTION, type MemberCompacti
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { surfaceVisibilityProbe, teamMessageSurface, visibleTeamSurface, isFactOnSurface, isMainEntryOnSurface, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER, type RenderedTeamMessage } from './surface-visibility.ts'
 export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './surface-visibility.ts'
+import { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
+export { activityFact, activityText, type ActivityFact } from './activity-facts.ts'
 import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
@@ -69,6 +71,7 @@ import type {
   AgentTeamChangesRequest,
   AgentTeamChangesResult,
   AgentTeamActivity,
+  AgentTeamActivityRef,
   AgentTeamClaimList,
   AgentTeamClaimRequest,
   AgentTeamClaimResult,
@@ -774,6 +777,12 @@ export default class AgentTeam extends TypertRemoteService {
     this.domain = domain
     const ledger = new AgentTeamLedger(domain.table('operations'), {
       areFactsVisible: surfaceVisibilityProbe(memberId => this.handles.get(memberId)?.agent),
+      areMainEntriesVisible: (memberId, entries, projectRef) => {
+        const agent = this.handles.get(memberId)?.agent
+        if (agent === undefined) return false
+        const surface = visibleTeamSurface(agent)
+        return entries.every(entry => isMainEntryOnSurface(surface, entry, projectRef))
+      },
     })
     this.ledger = ledger
     // A live Config edit in the constructor's window may have arrived before
@@ -1313,7 +1322,7 @@ export default class AgentTeam extends TypertRemoteService {
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_RECOVERY_NOTICE_SUMMARY,
-        teamFacts: teamMessageSurface(body, notice?.messages ?? []) },
+        teamFacts: teamMessageSurface(body, notice?.messages ?? [], notice?.activities ?? []) },
     })
     for (const pending of [...handle.agent.inbox.nextStep, ...handle.agent.inbox.nextTurn]) {
       if (this.isInboxNotice(pending)) this.removeExpectedTeamWake(handle.agent, pending)
@@ -1736,8 +1745,8 @@ export default class AgentTeam extends TypertRemoteService {
 
   /** Agent-only Main stream read; a read with nothing to acknowledge commits nothing. */
   async readMainStreamForAgent(agent: Agent, request: AgentTeamMainStreamReadRequest,
-    select?: (read: AgentTeamMainStreamReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }) => number,
-  ): Promise<AgentTeamMainStreamReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }> {
+    select?: (read: AgentTeamMainStreamReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[]; readonly visibleActivityRefs: readonly AgentTeamActivityRef[] }) => number,
+  ): Promise<AgentTeamMainStreamReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[]; readonly visibleActivityRefs: readonly AgentTeamActivityRef[] }> {
     const actor = this.memberCall(agent, request.workspaceId)
     const result = await this.requireLedger().readMainStream({ ...request, actor }, select === undefined ? undefined
       : preview => select(this.mainReadContext(agent, actor, request, preview)))
@@ -1756,7 +1765,9 @@ export default class AgentTeam extends TypertRemoteService {
       .map(entry => ({ ...entry, unread: false, direct: false }))
     const visibleMessageRefs = unread.flatMap(entry => entry.kind === 'message'
       && isMainEntryOnSurface(surface, entry, read.projectRef) ? [entry.message.messageRef] : [])
-    return { ...read, entries: [...background, ...unread].sort((left, right) => left.sequence - right.sequence), visibleMessageRefs }
+    const visibleActivityRefs = unread.flatMap(entry => entry.kind === 'activity'
+      && isMainEntryOnSurface(surface, entry, read.projectRef) ? [entry.activity.activityRef] : [])
+    return { ...read, entries: [...background, ...unread].sort((left, right) => left.sequence - right.sequence), visibleMessageRefs, visibleActivityRefs }
   }
 
   mainStreamHistoryForAgent(agent: Agent, request: AgentTeamMainStreamHistoryRequest): AgentTeamMainStreamHistory {
@@ -1849,8 +1860,8 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   async readThreadForAgent(agent: Agent, request: AgentTeamThreadReadRequest,
-    select?: (read: AgentTeamThreadReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }) => number,
-  ): Promise<AgentTeamThreadReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }> {
+    select?: (read: AgentTeamThreadReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[]; readonly visibleActivityRefs: readonly AgentTeamActivityRef[] }) => number,
+  ): Promise<AgentTeamThreadReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[]; readonly visibleActivityRefs: readonly AgentTeamActivityRef[] }> {
     const actor = this.memberCall(agent, request.workspaceId)
     const result = await this.requireLedger().readThread({ ...request, actor }, select === undefined ? undefined
       : preview => select(this.threadReadContext(agent, actor, request, preview)))
@@ -1877,7 +1888,9 @@ export default class AgentTeam extends TypertRemoteService {
     const read = this.withReplyContexts({ ...snapshot, facts }, request.workspaceId)
     const visibleMessageRefs = unread.flatMap(entry => entry.fact.kind === 'message'
       && isFactOnSurface(surface, entry, read.thread.threadRef) ? [entry.fact.message.messageRef] : [])
-    return { ...read, visibleMessageRefs }
+    const visibleActivityRefs = unread.flatMap(entry => entry.fact.kind === 'activity'
+      && isFactOnSurface(surface, entry, read.thread.threadRef) ? [entry.fact.activity.activityRef] : [])
+    return { ...read, visibleMessageRefs, visibleActivityRefs }
   }
 
   /**
@@ -2855,7 +2868,7 @@ export default class AgentTeam extends TypertRemoteService {
     const notice = this.notificationText(notifications, member.memberId, mainNotifications)
     const hint = createUserMessage({
       content: [{ type: 'text', text: notice.text }],
-      source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, teamFacts: teamMessageSurface(notice.text, notice.messages) },
+      source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, teamFacts: teamMessageSurface(notice.text, notice.messages, notice.activities) },
     })
     this.trackTeamWake(agent, hint)
     const attempt = this.beginInboxDelivery(member.memberId, plan, notice.undelivered)
@@ -2957,10 +2970,11 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
+  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly activities: readonly ActivityFact[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
     const maxCharacters = 32 * 1024
     const sections: string[] = [TEAM_INBOX_NOTICE_SUMMARY]
     const messages: RenderedTeamMessage[] = []
+    const activities: ActivityFact[] = []
     let characterCount = sections[0]!.length
     let detailedFactCount = 0
     let omitted = notifications.length > 8
@@ -3012,8 +3026,14 @@ export default class AgentTeam extends TypertRemoteService {
             }
           }
         } else if (fact.kind === 'activity') {
-          const detail = `${this.activityNotification(fact.activity, readerId)}\nOccurred at: ${formatTeamTimestamp(fact.occurredAt)}\nThread: ${item.thread.threadRef}`
-          if (append(detail)) detailedFactCount += 1
+          const activity = activityFact(fact.activity)
+          const acceptance = this.acceptanceNotification(fact.activity, readerId)
+          const detail = ['Team Task update', activityText(activity), `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`,
+            ...(acceptance === undefined ? [] : [acceptance])].join('\n')
+          if (append(detail)) {
+            detailedFactCount += 1
+            activities.push(activity)
+          }
         }
       }
       const ordinary = facts.filter(entry => entry.fact.kind === 'message' && !entry.direct)
@@ -3036,6 +3056,8 @@ export default class AgentTeam extends TypertRemoteService {
           detailedFactCount += 1
           if (entry.kind === 'message' && entry.message.body.length <= NOTIFICATION_BODY_MAX_CHARACTERS) {
             messages.push({ projectRef: project.projectRef, messageRef: entry.message.messageRef, body: entry.message.body })
+          } else if (entry.kind === 'activity') {
+            activities.push(activityFact(entry.activity))
           }
         }
       }
@@ -3045,13 +3067,13 @@ export default class AgentTeam extends TypertRemoteService {
       }
     }
     if (omitted) sections.push('More unread work remains in team_inbox; the automatic context is bounded.')
-    if (notifications.length > 0) sections.push('Use team_thread read with workspace and threadRef for missing context and to acknowledge unread updates. Complete Message facts shown here need not be fetched again just to reconsider a write. Use team_inbox to triage remaining Threads.')
-    if (main.length > 0) sections.push('Use team_thread read with the relevant workspace and projectRef to read the Project Main stream before answering there.')
+    if (notifications.length > 0) sections.push('Use team_thread read with workspace and threadRef for missing context and to acknowledge unread updates. Complete Message facts shown here need not be fetched again just to reconsider a write; complete Activity facts shown here are equally sufficient. Use team_inbox to triage remaining Threads.')
+    if (main.length > 0) sections.push('Use team_thread read with the relevant workspace and projectRef for missing Main stream context and to acknowledge updates. Complete facts shown here can support a post, but do not mark them read.')
     // The Threads this notice named nothing of, because the section cap or the
     // character budget dropped them. Their facts were never delivered, so the
     // next plan must keep them out of `covered`.
     const undelivered = notifications.map(({ item }) => item.thread.threadRef).filter(threadRef => !rendered.has(threadRef))
-    return { text: sections.join('\n\n'), messages, renderedThreads: rendered, undelivered }
+    return { text: sections.join('\n\n'), messages, activities, renderedThreads: rendered, undelivered }
   }
 
   private mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: AgentTeamProject): string {
@@ -3060,7 +3082,7 @@ export default class AgentTeam extends TypertRemoteService {
       const text = activity.kind === 'owner-added'
         ? `@human made you an owner of Project ${project.name} (${project.projectRef}). Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
         : `@human removed you as an owner of Project ${project.name} (${project.projectRef}). You can still take part in it.`
-      return ['Team Project ownership changed', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, `Project: ${project.projectRef}`, text].join('\n')
+      return ['Team Project ownership changed', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, activityText(activityFact(activity)), text].join('\n')
     }
     if (entry.kind === 'thread-card') {
       const { card } = entry
@@ -3081,7 +3103,7 @@ export default class AgentTeam extends TypertRemoteService {
     return body.length <= limit ? body : `${body.slice(0, limit)}\n${NOTIFICATION_TRUNCATION_MARKER}`
   }
 
-  private activityNotification(activity: AgentTeamActivity, readerId?: AgentTeamMemberId): string {
+  private acceptanceNotification(activity: AgentTeamActivity, readerId?: AgentTeamMemberId): string | undefined {
     const actor = activity.actor === AGENT_TEAM_HUMAN_MEMBER_ID
       ? 'human' : this.requireLedger().getMember(activity.actor)?.handle ?? activity.actor
     // An acceptance concludes the reader's own Claims two ways: already finished before the accept (work stands), or still open and completed atomically by it.
@@ -3092,27 +3114,16 @@ export default class AgentTeam extends TypertRemoteService {
       // An early-accept-only reader holds no finished Claim; render the completed semantics alone rather than a dangling empty list.
       const finishedOwn = acceptedOwn.filter(claimRef => !completedOwn.includes(claimRef))
       if (completedOwn.length > 0 && finishedOwn.length > 0) {
-        return `Team Task update\n${actor} accepted Task ${activity.taskRef}. Your Claim ${completedOwn.join(', ')} was completed with the acceptance, and your finished Claim ${finishedOwn.join(', ')} was accepted. No further work is needed.`
+        return `${actor} accepted Task ${activity.taskRef}. Your Claim ${completedOwn.join(', ')} was completed with the acceptance, and your finished Claim ${finishedOwn.join(', ')} was accepted. No further work is needed.`
       }
       if (completedOwn.length > 0) {
-        return `Team Task update\n${actor} accepted Task ${activity.taskRef} and your open Claim ${completedOwn.join(', ')} was completed with it. No further work is needed.`
+        return `${actor} accepted Task ${activity.taskRef} and your open Claim ${completedOwn.join(', ')} was completed with it. No further work is needed.`
       }
       if (acceptedOwn.length > 0) {
-        return `Team Task update\n${actor} accepted Task ${activity.taskRef}; your finished Claim ${acceptedOwn.join(', ')} was accepted. No further work is needed.`
+        return `${actor} accepted Task ${activity.taskRef}; your finished Claim ${acceptedOwn.join(', ')} was accepted. No further work is needed.`
       }
     }
-    if (activity.kind === 'claim' || activity.kind === 'done' || activity.kind === 'release') {
-      return `Team Task update\n${actor} ${activity.kind} Claim ${activity.claimRef} on Task ${activity.taskRef}.`
-    }
-    if (activity.kind === 'claims_released') {
-      return `Team Task update\n${actor}'s Claims ${activity.claimRefs.join(', ')} were released on Task ${activity.taskRef}.`
-    }
-    if (activity.kind === 'promote') {
-      return `Team Task update\n${actor} created Task ${activity.taskRef} from Thread ${activity.threadRef}; it is open for claims.`
-    }
-    const released = 'releasedClaimRefs' in activity && activity.releasedClaimRefs !== undefined && activity.releasedClaimRefs.length > 0
-      ? ` Released Claims: ${activity.releasedClaimRefs.join(', ')}.` : ''
-    return `Team Task update\n${actor} ${activity.kind} Task ${activity.taskRef}.${released}`
+    return undefined
   }
 
   private async disposeMemberSession(memberId: AgentTeamMemberId, member: Pick<AgentTeamAgentMember, 'memberId' | 'sessionId'>): Promise<void> {

@@ -329,10 +329,10 @@ describe('team_thread read orients by structured facts', () => {
       kind: 'read', threadRef: THREAD, taskRef: TASK, revision: 8190, status: 'done', resolution: 'accepted', following: true,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor body', sequence: 1 },
       claims: [],
-      facts: [{ sequence: 8190, kind: 'activity', activity: 'accept', actor: 'human', taskRef: TASK, completedClaimRefs: [CLAIM], acceptedClaimRefs: [CLAIM], unread: true, direct: false }],
+      facts: [{ sequence: 8190, kind: 'activity', activity: 'accept', activityRef: 'activity:accept', actor: 'human', taskRef: TASK, threadRef: THREAD, completedClaimRefs: [CLAIM], acceptedClaimRefs: [CLAIM], unread: true, direct: false }],
       readThroughSequence: 8190, remainingUnreadCount: 0,
     })
-    expect(text).toContain(`8190 human accept Task ${TASK} completed claims ${CLAIM} accepted claims ${CLAIM} [unread]`)
+    expect(text).toContain(`8190 human accept Task ${TASK} · Thread ${THREAD} · activity:accept · completed claims ${CLAIM} · accepted claims ${CLAIM} [unread]`)
     expect(text).not.toContain('…')
     expect(text).not.toContain('(unread activity)')
   })
@@ -729,13 +729,13 @@ describe('team tools render absolute event instants in UTC+8', () => {
       facts: [
         { sequence: 101, kind: 'message', messageRef: 'message:anchor', body: 'Investigate startup failure', sender: 'human', mentions: [], occurredAt: '2026-08-20T03:11:00.000Z', unread: false, direct: false },
         { sequence: 118, kind: 'message', messageRef: 'message:118', body: 'Reproduced on Windows', sender: 'member:builder', mentions: [], occurredAt: '2026-08-20T04:06:12.000Z', unread: false, direct: false },
-        { sequence: 126, kind: 'activity', activity: 'accept', actor: 'human', taskRef: TASK, occurredAt: '2026-08-21T01:30:44.000Z', unread: true, direct: false },
+        { sequence: 126, kind: 'activity', activity: 'accept', activityRef: 'activity:accept', actor: 'human', taskRef: TASK, threadRef: THREAD, occurredAt: '2026-08-21T01:30:44.000Z', unread: true, direct: false },
       ],
       readThroughSequence: 126, remainingUnreadCount: 0,
     })
     expect(withInstants).toContain('101 2026-08-20T11:11:00+08:00 [human]')
     expect(withInstants).toContain('118 2026-08-20T12:06:12+08:00 [member:builder] Reproduced on Windows')
-    expect(withInstants).toContain('126 human accept Task task:3245ad40-43fd-4191-a416-7dcaf3a340f2 2026-08-21T09:30:44+08:00 [unread]')
+    expect(withInstants).toContain(`126 human accept Task ${TASK} · Thread ${THREAD} · activity:accept 2026-08-21T09:30:44+08:00 [unread]`)
     // No relative time text: the render carries absolute instants only.
     expect(withInstants).not.toContain('ago')
     expect(withInstants).not.toContain('yesterday')
@@ -756,7 +756,7 @@ describe('team tools render absolute event instants in UTC+8', () => {
     const facts = [
       { ...anchor, kind: 'message', mentions: [], unread: false, direct: false },
       { sequence: 118, kind: 'message', messageRef: 'message:118', body: 'Reproduced on Windows', sender: 'member:builder', mentions: [], occurredAt: '2026-08-20T04:06:12.000Z', unread: false, direct: false },
-      { sequence: 126, kind: 'activity', activity: 'accept', actor: 'human', taskRef: TASK, occurredAt: '2026-08-21T01:30:44.000Z', unread: false, direct: false },
+      { sequence: 126, kind: 'activity', activity: 'accept', activityRef: 'activity:accept', actor: 'human', taskRef: TASK, threadRef: THREAD, occurredAt: '2026-08-21T01:30:44.000Z', unread: false, direct: false },
     ] as never
     const read = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, {
       kind: 'read', threadRef: THREAD, revision: 9010, following: true, anchor, claims: [], facts,
@@ -768,8 +768,8 @@ describe('team tools render absolute event instants in UTC+8', () => {
     })
     expect(read).toContain('118 2026-08-20T12:06:12+08:00 [member:builder] Reproduced on Windows')
     expect(history).toContain('118 2026-08-20T12:06:12+08:00 [member:builder] Reproduced on Windows')
-    expect(read).toContain('126 human accept Task task:3245ad40-43fd-4191-a416-7dcaf3a340f2 2026-08-21T09:30:44+08:00')
-    expect(history).toContain('126 human accept Task task:3245ad40-43fd-4191-a416-7dcaf3a340f2 2026-08-21T09:30:44+08:00')
+    expect(read).toContain(`126 human accept Task ${TASK} · Thread ${THREAD} · activity:accept 2026-08-21T09:30:44+08:00`)
+    expect(history).toContain(`126 human accept Task ${TASK} · Thread ${THREAD} · activity:accept 2026-08-21T09:30:44+08:00`)
     expect(read).toContain('101 2026-08-20T11:11:00+08:00 [human]')
     expect(history).toContain('101 2026-08-20T11:11:00+08:00 [human]')
   })

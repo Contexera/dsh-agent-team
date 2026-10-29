@@ -7,13 +7,13 @@
 
 既有 Thread 上的 public mutation 必须在 `baseRevision` 中携带当前 next-write token。原样复制最近显式渲染的值，不推导、递增、比较或将它作为 Thread 事实引用。令牌来自未读清零的 `team_thread read`、自己的已提交 public mutation，或满足条件的完整 Thread 拒绝。浏览结果、通知和未读完的 read 不提供令牌。
 
-Host 先检查未读事实，再检查令牌新鲜度。写入者的 live Session 也可完整提供每条待处理 Thread Message：Team 通知或 `team_thread`、`team_message`、`team_task` 结果必须把准确的 Thread、Message 和正文绑定到实际投影文本。只有保留的 metadata、摘要、截断正文、模型复述、DM 或另一条 Message 的同文都不满足条件。Activity 事实仍须 `read`。
+Host 先检查未读事实，再检查令牌新鲜度。写入者的 live Session 也可完整提供每条待处理 Thread Message 与 Activity：Team 通知或 `team_thread`、`team_message`、`team_task` 结果必须把准确事件绑定到实际投影文本。Message 需要准确的 Thread、Message ref 和正文；Activity 需要它记录的不可变事件字段——actor、kind、对象，以及该事件记录的 Claim refs 或 transfer 两端。只有保留的 metadata、摘要、截断正文、模型复述、DM、另一条 Message 的同文，或用当前 Task/Claim 状态顶替旧事件，都不满足条件。
 
 上下文检查不改变持久状态，也不建立第二份已读数据库。缺一条事实、投影被改写或没有 live Session，都继续拒绝未读写入。即使事实齐全，Host 仍检查当前 revision、权限和 Task 状态；拿到令牌不保证下一次写入成功。
 
-`unread_required` 与 `stale_revision` 以 `Not committed` 开头，展示有界的待处理事实。当所需事实都是完整、身份明确的 Message，且之前的 revision 可识别时，结果提供当前令牌：先据此重新考虑写入，不强制中间再 read 一次。早前讨论背景缺失时仍应读取。期间有新事实到达，重新考虑后的写入仍可能被拒绝。
+`unread_required` 与 `stale_revision` 以 `Not committed` 开头，展示有界的待处理事实。当所需事实都是完整、身份明确的 Message 或 Activity，且之前的 revision 可识别时，结果提供当前令牌：先据此重新考虑写入，不强制中间再 read 一次。早前讨论背景缺失时仍应读取。期间有新事实到达，重新考虑后的写入仍可能被拒绝。
 
-事实截断或省略、含 Activity、revision 基线未知或无法识别时，不提供重试令牌，并指向 `team_thread read`。无法识别的令牌不证明发生了并发变更。Main stream 拒绝仍须使用 `projectRef` 执行 `read`。这些是正常协作结果，不是基础设施故障；没有 force-send。
+事实截断或省略、revision 基线未知或无法识别时，不提供重试令牌，并指向 `team_thread read`。无法识别的令牌不证明发生了并发变更。Main stream 拒绝遵循同样的规则，只是没有 revision 令牌：完整的待处理 Message 与 Activity 可以直接重新考虑，任何部分或缺失事实则指向带 `projectRef` 的 `read`。这些是正常协作结果，不是基础设施故障；没有 force-send。
 
 Closed Task 拒绝回复、Claim 和新的 Attention；taskless Thread 没有 Claim 或 Task-resolution mutation。
 

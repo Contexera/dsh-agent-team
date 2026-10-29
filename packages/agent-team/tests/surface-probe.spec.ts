@@ -2,13 +2,22 @@ import { describe, expect, it } from 'vitest'
 import { createToolResultMessage, createUserMessage, freezeMessage, ToolCallId, type Message } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionMessageProjection } from '@deepseek-ai/dsh-session/surface'
+import { activityFact, activityText } from '../src/activity-facts.ts'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
-import { isFactOnSurface, teamMessageSurface, visibleTeamSurface } from '../src/surface-visibility.ts'
-import type { AgentTeamThreadReadFact, AgentTeamThreadRef } from '../src/types.ts'
+import { isFactOnSurface, isMainEntryOnSurface, teamMessageSurface, visibleTeamSurface } from '../src/surface-visibility.ts'
+import type {
+  AgentTeamActivity,
+  AgentTeamMainActivity,
+  AgentTeamMainTimelineEntry,
+  AgentTeamProjectRef,
+  AgentTeamThreadReadFact,
+  AgentTeamThreadRef,
+} from '../src/types.ts'
 import { teamTools } from '../../tool-agent-team/tests/render-text.ts'
 
 const THREAD = 'thread:alpha' as AgentTeamThreadRef
 const OTHER_THREAD = 'thread:beta' as AgentTeamThreadRef
+const PROJECT = 'project:alpha' as AgentTeamProjectRef
 
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
@@ -49,6 +58,39 @@ function result(target: Session, body: string, threadRef = THREAD, messageRef = 
 
 function sees(target: Session, body: string, threadRef = THREAD, messageRef = 'message:a') {
   return isFactOnSurface(visibleTeamSurface({ session: target }), factOf(body, messageRef), threadRef)
+}
+
+function threadClaim(overrides: Record<string, unknown> = {}): AgentTeamActivity {
+  return {
+    activityRef: 'activity:shared', taskRef: 'task:a', threadRef: THREAD, actor: 'member:builder',
+    sequence: 12, kind: 'claim', claimRef: 'claim:a', ...overrides,
+  } as unknown as AgentTeamActivity
+}
+
+function mainOwnerActivity(overrides: Record<string, unknown> = {}): AgentTeamMainActivity {
+  return {
+    activityRef: 'activity:shared', projectRef: PROJECT, kind: 'owner-added', memberId: 'member:b',
+    actor: 'human', sequence: 5, occurredAt: '2026-10-14T00:00:00.000Z', ...overrides,
+  } as unknown as AgentTeamMainActivity
+}
+
+function activityReadFact(activity: AgentTeamActivity): AgentTeamThreadReadFact {
+  return ({ fact: { kind: 'activity', sequence: activity.sequence, activity, occurredAt: '2026-10-14T00:00:00.000Z' }, unread: true, direct: false } as AgentTeamThreadReadFact)
+}
+
+function mainActivityEntry(activity: AgentTeamMainActivity): AgentTeamMainTimelineEntry {
+  return { kind: 'activity', sequence: activity.sequence, activity, occurredAt: activity.occurredAt, unread: true, direct: false }
+}
+
+function activityResult(target: Session, activity: AgentTeamActivity | AgentTeamMainActivity, name = 'team_thread') {
+  const fact = activityFact(activity)
+  const text = activityText(fact)
+  const callId = ToolCallId(`call:${target.snapshotEvents().length}`)
+  const call = target.append('tool/call', { turn: 1, step: 1, callId, name, arguments: '{}' })
+  return target.append('tool/result', { turn: 1, step: 1,
+    message: createToolResultMessage({ callId, content: [{ type: 'text', text }], isError: false }),
+    meta: { teamFacts: teamMessageSurface(text, [], [fact]) },
+  }, { surfaceOp: 'append', sourceEventSeqs: [call.seq] })
 }
 
 describe('only complete Team-sourced facts on the current Session surface satisfy the gate', () => {
@@ -154,5 +196,79 @@ describe('only complete Team-sourced facts on the current Session surface satisf
       teamFacts: teamMessageSurface(text, [{ threadRef: OTHER_THREAD, messageRef: 'message:b', body: text }]) },
       content: [{ type: 'text', text }] }), { surfaceOp: 'append' })
     expect(sees(target, 'ok')).toBe(false)
+  })
+})
+
+describe('only complete Activity formatter output on the current Session surface satisfies the gate', () => {
+  it('recognizes a complete Thread Activity with its identity and fields', () => {
+    const target = session()
+    const activity = threadClaim()
+    activityResult(target, activity)
+    const entries = visibleTeamSurface({ session: target })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.activities).toMatchObject([{ scope: 'thread', activityRef: 'activity:shared', threadRef: THREAD }])
+    expect(isFactOnSurface(entries, activityReadFact(activity), THREAD)).toBe(true)
+    expect(isFactOnSurface(entries, activityReadFact(activity), OTHER_THREAD)).toBe(false)
+  })
+
+  it('separates the same activityRef by complete fields, not by object identity', () => {
+    const target = session()
+    activityResult(target, threadClaim())
+    const entries = visibleTeamSurface({ session: target })
+    expect(isFactOnSurface(entries, activityReadFact(threadClaim()), THREAD)).toBe(true)
+    expect(isFactOnSurface(entries, activityReadFact(threadClaim({ claimRef: 'claim:b' })), THREAD)).toBe(false)
+    expect(isFactOnSurface(entries, activityReadFact(threadClaim({ actor: 'member:other' })), THREAD)).toBe(false)
+  })
+
+  it('normalizes absent and empty Activity arrays, and changes the formatter when they fill', () => {
+    const absent = { activityRef: 'activity:accept', taskRef: 'task:a', threadRef: THREAD, actor: 'human', sequence: 20, kind: 'accept' } as unknown as AgentTeamActivity
+    const empty = { ...absent, completedClaimRefs: [] } as unknown as AgentTeamActivity
+    expect(activityText(activityFact(absent))).toBe(activityText(activityFact(empty)))
+    const target = session()
+    activityResult(target, absent)
+    const entries = visibleTeamSurface({ session: target })
+    expect(isFactOnSurface(entries, activityReadFact(empty), THREAD)).toBe(true)
+    const filled = { ...absent, completedClaimRefs: ['claim:b'] } as unknown as AgentTeamActivity
+    expect(isFactOnSurface(entries, activityReadFact(filled), THREAD)).toBe(false)
+  })
+
+  it('rejects a cropped Activity result that retains its metadata', () => {
+    const target = session()
+    const activity = threadClaim()
+    const original = activityResult(target, activity)
+    target.append('test/prune-team-fact', { seq: original.seq, text: 'Summary: claim' })
+    expect(isFactOnSurface(visibleTeamSurface({ session: target }), activityReadFact(activity), THREAD)).toBe(false)
+  })
+
+  it('keeps a complete Activity binding through Session restore', () => {
+    const target = session()
+    const activity = threadClaim()
+    activityResult(target, activity)
+    const restored = Session.fromRestore(target.id, [...target.snapshotEvents()], target.header,
+      target.inheritedEventCount, 'shared-frozen', [prune])
+    expect(isFactOnSurface(visibleTeamSurface({ session: restored }), activityReadFact(activity), THREAD)).toBe(true)
+  })
+
+  it('does not lend Thread Activity identity to Main, or Main identity to a Thread', () => {
+    const threadTarget = session()
+    const thread = threadClaim()
+    activityResult(threadTarget, thread)
+    const main = mainOwnerActivity({ activityRef: 'activity:shared' })
+    expect(isMainEntryOnSurface(visibleTeamSurface({ session: threadTarget }), mainActivityEntry(main), PROJECT)).toBe(false)
+
+    const mainTarget = session()
+    activityResult(mainTarget, main)
+    const mainEntries = visibleTeamSurface({ session: mainTarget })
+    expect(isMainEntryOnSurface(mainEntries, mainActivityEntry(main), PROJECT)).toBe(true)
+    expect(isMainEntryOnSurface(mainEntries, mainActivityEntry(main), 'project:other' as AgentTeamProjectRef)).toBe(false)
+    expect(isFactOnSurface(mainEntries, activityReadFact(thread), THREAD)).toBe(false)
+  })
+
+  it('never proves a Main thread-card from an Activity surface', () => {
+    const target = session()
+    activityResult(target, mainOwnerActivity())
+    const card = { kind: 'thread-card', sequence: 3, occurredAt: '2026-10-14T00:00:00.000Z', unread: false, direct: false,
+      card: { threadRef: THREAD } } as unknown as AgentTeamMainTimelineEntry
+    expect(isMainEntryOnSurface(visibleTeamSurface({ session: target }), card, PROJECT)).toBe(false)
   })
 })

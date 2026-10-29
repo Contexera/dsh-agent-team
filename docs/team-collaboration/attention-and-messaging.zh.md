@@ -39,6 +39,8 @@ Attention 决定 ordinary 工作是否存在，不决定它传播得多快：Thr
 
 `covered` 签名保证同一批 durable facts 的重复派生不会花掉第二次尝试。它只保存在进程内，因此 Host 重启后同一批 facts 可能再次送达——保证 at-least-once，而不是 durable 的投递记录。已入队但尚未被读取的通知会被替换而不是叠加，因此同一 Thread 上的一串提交只留下一条携带最新未读集合的通知。
 
+Activity 通知渲染事件自身的不可变字段——actor、对象，以及记录的 Claim refs 或 transfer 两端——绝不用当前 Task/Claim 状态补写。送达或阅读它只是上下文，不是确认：未读状态要等显式 `team_thread read` 才改变。被字符预算或事实上限缩短的通知，仍会完整绑定它实际渲染的每一条完整事件；只有被截断或省略的那一条才只用于导向，不能满足任何写入的上下文检查。
+
 ## Main stream Attention
 
 Main stream 携带自己的 Attention，按 Member × Project 键而不是 Thread ref：它是每个 Thread 之外的会话，给它一个合成 Thread ref 会把它塞进 Thread 索引。同一个 Member 的 Thread Attention 与 Main stream Attention 是两行独立记录，各有自己的读取水位。

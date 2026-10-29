@@ -1,4 +1,6 @@
+import { activityText } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
+import { activityFromView } from './activity-view.ts'
 import type { AgentTeamMainStreamStanding, AgentTeamMainTimelineEntry } from '@contexera/dsh-agent-team/types'
 
 /** Model-facing view of one Main stream entry: the Host's timeline entry with identities as plain strings. */
@@ -16,6 +18,9 @@ export interface MainEntryView {
   readonly replyToMessageRef?: string
   readonly replyTo?: { readonly sender: string; readonly excerpt: string }
   readonly activity?: string
+  readonly activityRef?: string
+  readonly projectRef?: string
+  readonly activityOmitted?: boolean
   readonly actor?: string
   readonly memberId?: string
   readonly threadRef?: string
@@ -37,7 +42,7 @@ export const MAIN_ENTRY_SCHEMA = {
     sender: { type: 'string' }, messageRef: { type: 'string' }, body: { type: 'string' }, bodyOmitted: { type: 'boolean' }, mentions: { type: 'array', items: { type: 'string' } },
     replyToMessageRef: { type: 'string' },
     replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } },
-    activity: { type: 'string' }, actor: { type: 'string' }, memberId: { type: 'string' },
+    activity: { type: 'string' }, activityRef: { type: 'string' }, projectRef: { type: 'string' }, activityOmitted: { type: 'boolean' }, actor: { type: 'string' }, memberId: { type: 'string' },
     threadRef: { type: 'string' }, preview: { type: 'string' }, taskRef: { type: 'string' }, taskNumber: { type: 'number' },
     status: { type: 'string' }, resolution: { type: 'string' }, accountable: { type: 'string' }, replyCount: { type: 'number' },
     participants: { type: 'array', items: { type: 'string' } }, liveClaimOwners: { type: 'array', items: { type: 'string' } },
@@ -60,7 +65,8 @@ export function mainEntryView(entry: AgentTeamMainTimelineEntry): MainEntryView 
       ...(entry.replyTo === undefined ? {} : { replyTo: { sender: entry.replyTo.sender, excerpt: entry.replyTo.excerpt } }) }
   }
   if (entry.kind === 'activity') {
-    return { ...flags, kind: 'activity', activity: entry.activity.kind, actor: entry.activity.actor, memberId: entry.activity.memberId }
+    return { ...flags, kind: 'activity', activity: entry.activity.kind, activityRef: entry.activity.activityRef, projectRef: entry.activity.projectRef,
+      actor: entry.activity.actor, memberId: entry.activity.memberId }
   }
   const { card } = entry
   return { ...flags, kind: 'thread-card', threadRef: card.threadRef, preview: card.anchor.preview, sender: card.anchor.sender,
@@ -86,7 +92,11 @@ export function mainEntryLine(entry: MainEntryView): string {
     return `${entry.sequence}${at} [${entry.sender}]${markers(entry)}${replies} ${entry.messageRef} ${entry.bodyOmitted ? '— body already in current context; omitted.' : entry.body}`
   }
   if (entry.kind === 'activity') {
-    return `${entry.sequence}${at} ${entry.actor} ${entry.activity === 'owner-added' ? 'made' : 'removed'} ${entry.memberId} ${entry.activity === 'owner-added' ? 'an owner' : 'as an owner'}${markers(entry)}`
+    const fact = activityFromView(entry, entry.projectRef)
+    if (fact === undefined) throw new Error(`Main Activity at sequence ${entry.sequence} lacks its immutable identity`)
+    return entry.activityOmitted === true
+      ? `${entry.sequence}${at} Activity ${entry.activityRef}${markers(entry)} — complete event already in current context; omitted.`
+      : `${activityText(fact)}${at}${markers(entry)}`
   }
   const subject = entry.taskRef === undefined
     ? `Discussion ${entry.threadRef}`

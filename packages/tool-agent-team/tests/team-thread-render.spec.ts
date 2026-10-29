@@ -5,6 +5,8 @@ const ACCEPT_FACT = {
   sequence: 8190,
   kind: 'activity',
   activity: 'accept',
+  activityRef: 'activity:accept',
+  threadRef: 'thread:x',
   actor: 'human',
   taskRef: 'task:205a8ba6-f3c6-4fbc-95b7-c3448191f730',
   completedClaimRefs: ['claim:7ad04d38-3889-4414-ac0c-23f73c0b962a'],
@@ -94,7 +96,7 @@ describe('team_thread renders the model-facing decision surface', () => {
       kind: 'read', threadRef: 'thread:x', revision: 100, following: false,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
       claims: [],
-      facts: [{ sequence: 13, kind: 'activity', activity: 'claim', actor: 'builder', taskRef: 'task:x', claimRef: 'claim:x', unread: true, direct: false }],
+      facts: [{ sequence: 13, kind: 'activity', activity: 'claim', activityRef: 'activity:claim', actor: 'builder', taskRef: 'task:x', threadRef: 'thread:x', claimRef: 'claim:x', unread: true, direct: false }],
       readThroughSequence: 13, remainingUnreadCount: 0,
     })
     expect(activityText).not.toContain('Context guidance')

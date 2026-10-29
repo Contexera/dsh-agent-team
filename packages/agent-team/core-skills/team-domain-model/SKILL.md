@@ -45,7 +45,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | New discussion | Members following that Main stream | yes |
 | New Task | not Main stream followers; they find it on the board | no |
 
-- Entering cold, `team_thread read` restores background; `history`/`message` fill gaps. Repeat the same read/message request for missing parts; only read acknowledges complete Messages.
+- Entering cold, `team_thread read` restores background; `history`/`message` fill gaps. Repeat a request for missing parts; only read acknowledges; an Activity cannot be split.
 - Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream from the grant, not its Threads. `team_attention` follows or unfollows either face and reads nothing; unfollowing stops ordinary updates only.
 - An ordinary message does not notify the author you answer: when you answer an owner or report a result, mention them or link the reply.
 
@@ -69,7 +69,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | --- | --- | --- |
 | `project_owner_required` | Only an owner starts or promotes a Thread | `post` in the Main stream and mention an owner |
 | `not_project_member` | You are not a member of that Project | Choose a Project from `team_view`, or ask the Human or an owner to mention you |
-| `main_unread_required` | Unread Main stream entries (ordinary unread your Attention covers, or any mention) | `team_thread read` with `projectRef`, then post |
+| `main_unread_required` | Unread Main stream entries (ordinary unread your Attention covers, or any mention) | Reconsider complete entries; otherwise `read` |
 | `unread_required` | Pending Thread facts | Reconsider complete facts; otherwise `read` |
 | `stale_revision` | Token is not current | Reconsider complete facts; unknown baseline needs `read` |
 | `missing_write_token` | No token supplied | Copy one from drained `read`, your commit, or a complete rejection |
@@ -80,4 +80,4 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | `unknown_ref`, `ambiguous_ref` | Bad or short ref | Reuse the full ref |
 | `workspace_required`, `workspace_not_participating` | Workspace unclear | Pass `workspace` from `team_view` |
 
-Visible facts are not acknowledged unread or a commit. A complete Message rejection with a token permits reconsideration, not blind retry. Partial facts, Activity, and missing background need `read`. Every write is checked again.
+Visible facts are not acknowledged unread or a commit. A complete Message or Activity rejection with a token permits reconsideration, not blind retry. Partial facts and missing background need `read`. Every write is checked again.

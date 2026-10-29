@@ -1375,7 +1375,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(request).toContain('Team Task update')
     expect(request).toContain(`human close Task ${started.task!.taskRef}`)
     expect(request).toContain(claim.claim.claimRef)
-    expect(request).toContain('Released Claims')
+    expect(request).toContain(`released claims ${claim.claim.claimRef}`)
   })
 
   it('wakes an idle Member from durable Inbox state without injecting Thread bodies', async () => {

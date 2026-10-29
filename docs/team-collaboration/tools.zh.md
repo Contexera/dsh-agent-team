@@ -56,8 +56,8 @@ read 按顺序渲染以下部分，最后是页脚：
 4. 只含 active Claims：当前 collision surface，每 Claim 一行（claim ref、owner、direction）；
 5. 本次 read 携带的已确认 Task reminders；
 6. `Background — not newly acknowledged` 下的 Host 提供的背景：anchor 缺失时补上，再加此前最多四条 fact 中筛出的 Message，当前 Session 已可见的不再重复；
-7. 按 sequence 排列的已确认 facts，带行内 unread/direct 标记。正文已完整出现在当前上下文中的已确认 Message，用 `body already in current context; omitted` 代替正文。派生 Task 卡在 `Current Task cards — not Thread reading` 下按创建 sequence 渲染，带当前 status 与 accountable owner；卡片是当前状态，不是 Thread reading；
-8. `Incomplete Message — not acknowledged`：未读或背景 Message 放不下时返回的有界片段。未读 Message 要等先前可见片段加后续输出覆盖整段正文后才不再未读；背景仍只是背景，不是本次新确认的内容。
+7. 按 sequence 排列的已确认 facts，带行内 unread/direct 标记。正文已完整可见的已确认 Message，用 `body already in current context; omitted` 代替正文。完整事件已在当前上下文中的已确认 Activity 只显示身份和 `complete event already in current context; omitted`。派生 Task 卡在 `Current Task cards — not Thread reading` 下按创建 sequence 渲染，带当前 status 与 accountable owner；卡片是当前状态，不是 Thread reading；
+8. `Incomplete Message — not acknowledged`：未读或背景 Message 放不下时返回的有界片段。未读 Message 要等先前可见片段加后续输出覆盖整段正文后才不再未读；背景仍只是背景，不是本次新确认的内容。Activity 只有一行且不能分段：超出固定输出上限的 Activity 不确认任何内容，换更大的上下文模型也无法让它装入；结果会说明这个边界，请 Human 直接检查该事件。
 
 页脚给出 read-through sequence 与剩余 unread 计数。若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量。重返的读者借此看到自己没在看的跨度有多大，不把本次 batch 当成整个 Thread。
 
@@ -65,7 +65,7 @@ Main stream 的 `read` 渲染同样的结果与背景规则。页面先选最早
 
 Thread 卡渲染在 `Thread cards — Main entry acknowledged, not its Thread` 下：卡片是它所指向 Thread 的当前状态，确认卡片的 Main 条目绝不等于该 Thread 已读。Main stream 的 `message` 按 ref 读回一条条目，分段与续读规则相同。Human 对 Main stream 的读取不变。
 
-history 页渲染历史结果与 Thread 身份。首页给 full anchor，continuation 页给 bounded subject。渲染选中的 facts、该 sequence 窗口内的派生 Task 卡与 cursor/hasMore 页脚，绝无当前 Claims 或上下文建议。每条 activity fact 都是结构化的：actor、Task ref，以及这条 activity claim、完成、接受或 release 的 Claim refs。绝不是裸 kind。当一次 `read` 确认的是一个仍处于 done 状态 Task 的未读验收时，这些事实就写在 facts 里，read 不对读取者的上下文给出任何建议：没有 rollover 工具，也没有代际选择，就没有动作可陈述。
+history 页渲染历史结果与 Thread 身份。首页给 full anchor，continuation 页给 bounded subject。渲染选中的 facts、该 sequence 窗口内的派生 Task 卡与 cursor/hasMore 页脚，绝无当前 Claims 或上下文建议。每条 activity fact 都只从该事件本身得出结构：activity ref、actor、Task 与 Thread refs，以及这条 activity 记录的 Claim refs 或 transfer 两端。绝不是裸 kind，也不用当前 Task/Claim 状态补历史。当一次 `read` 确认的是一个仍处于 done 状态 Task 的未读验收时，这些事实就写在 facts 里，read 不对读取者的上下文给出任何建议：没有 rollover 工具，也没有代际选择，就没有动作可陈述。
 
 ## `team_attention`
 
@@ -83,13 +83,13 @@ Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读
 
 `team_message.start` 创建 Project 顶层 Thread。默认 taskless，也接受明确 task intent 以原子创建 Task。`team_message.reply` 向既有 Thread 追加明确的 reply。二者都接受 `attachments` 中的可选 absolute file paths。Host 验证每个 path，把 bytes 复制到 attachment cache。收件人看到 thumbnails/chips 与一行 cached path。任一 path 验证失败都会拒绝整个 send。commit 的 start/reply 渲染一个 committed-verb 结果：Thread created 或 reply added。结果携带 Message ref、新 Thread ref（taskful 时含 Task ref），以及恰好一个 next-write token hand-off。新建 Thread 立即可寻址，下一次变更也拿到了基础。
 
-规则版本 2 起，`team_message` 还有 `post`，在 Project 的 Main stream 发言（`projectRef`、`body`，可选 `replyToMessageRef`，须为同一 Project 的 Main stream Message）。它不需要写入 token；持有未读 Main stream 的写入者得到 `main_unread_required`，须先读。
+规则版本 2 起，`team_message` 还有 `post`，在 Project 的 Main stream 发言（`projectRef`、`body`，可选 `replyToMessageRef`，须为同一 Project 的 Main stream Message）。它不需要写入 token。持有未读 Main stream 条目的写入者，必须在当前上下文中完整持有每一条——Team 通知或绑定实际渲染 Message/Activity 的工具结果——或者带 `projectRef` 显式 read；否则得到 `main_unread_required`。
 
 `start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；非 member 得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
 
 `team_thread` 的 `read`、`history`、`message` 接受 `threadRef` 或 `projectRef`（Main stream），二选一。Main stream 的行为与确认规则见上文 `team_thread` 一节。
 
-类型化拒绝（`unread_required`、`stale_revision`）以 `Not committed` 开头，保留 refs、计数和有界的待处理事实。结果完整、只含身份明确的 Message，且 revision 基线可识别时，会提供当前令牌供重新考虑；部分结果与未知基线指向 `read`。这既不确认未读，也不保证下一次写入成功。完整规则见 [Mutation fences](boundaries.zh.md#mutation-fences)。
+类型化拒绝（`unread_required`、`stale_revision`、`main_unread_required`）以 `Not committed` 开头，保留 refs、计数和有界的待处理事实。Message 与 Activity 结果完整，且 revision 基线可识别时，会提供令牌供重新考虑；Main stream 结果不提供令牌（它本来就没有）。部分结果与未知基线指向 `read`。这既不确认未读，也不保证下一次写入成功。完整规则见 [Mutation fences](boundaries.zh.md#mutation-fences)。
 
 mention 一个该 Thread 从未承载过的 Member 同样不是拒绝：规则版本 2 下 Message 照常提交，每个可寻址的收件人都会收到，没有未送达余量需要报告，也没有邀请步骤。（规则版本 1 下同一次写入会报告它无法送达的名字；该路径只为 replay 旧账本而存在。）
 

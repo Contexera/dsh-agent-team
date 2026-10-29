@@ -36,6 +36,19 @@ describe('unread_required renders the facts it is gating on', () => {
     expect(text).not.toContain('Next write — baseRevision')
   })
 
+  it('omits an oversized Activity without binding it or returning a write token', () => {
+    const tool = teamTools().get('team_task')!
+    const args = { action: 'claim', taskRef: TASK, direction: 'Review the release', baseRevision: 1 }
+    const value = { kind: 'unread_required', threadRef: THREAD, taskRef: TASK, revision: 2, unreadCount: 1, directCount: 0,
+      facts: [{ sequence: 2, kind: 'activity', activity: 'close', activityRef: 'activity:close', actor: MEMBER,
+        taskRef: TASK, threadRef: THREAD, releasedClaimRefs: Array.from({ length: 1000 }, (_, i) => `${CLAIM}-${i}`), unread: true }] }
+    const text = renderText(tool, args, value)
+    expect(text.length).toBeLessThanOrEqual(16 * 1024)
+    expect(text).not.toContain('Next write — baseRevision')
+    expect(text).toContain('0 of 1 pending fact(s) included')
+    expect(tool.output.presentationMeta?.(args, value as never)).toMatchObject({ teamFacts: { activities: [] } })
+  })
+
   it('renders every unread fact body, keeps the counts, and hands back the current revision', () => {
     const text = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8000, body: 'x' }, {
       kind: 'unread_required', threadRef: THREAD, taskRef: TASK, revision: 8394, unreadCount: 2, directCount: 1,
@@ -59,13 +72,14 @@ describe('unread_required renders the facts it is gating on', () => {
   it('renders activity facts, not just messages', () => {
     const text = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8000, body: 'x' }, {
       kind: 'unread_required', threadRef: THREAD, revision: 8400, unreadCount: 1, directCount: 0,
-      facts: [{ sequence: 8400, kind: 'activity', activity: 'claim', actor: 'builder', taskRef: TASK,
-        claimRef: CLAIM, unread: true, direct: false }],
+      facts: [{ sequence: 8400, kind: 'activity', activity: 'claim', activityRef: 'activity:claim', actor: 'builder', taskRef: TASK,
+        threadRef: THREAD, claimRef: CLAIM, unread: true, direct: false }],
     })
     expect(text).toContain('8400 builder claim')
     expect(text).toContain(`Task ${TASK}`)
     expect(text).toContain(`Claim ${CLAIM}`)
-    expect(text).not.toContain('Next write — baseRevision: 8400')
+    // A complete Activity fact is as good as a complete Message: the token is offered.
+    expect(text).toContain('Next write — baseRevision: 8400')
   })
 
   it('a rejection carrying no facts still renders the token and the read route', () => {
