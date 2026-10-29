@@ -305,6 +305,13 @@ export interface AgentTeamAuthorizedThreadAttentionRequest extends AgentTeamThre
 
 export interface AgentTeamAuthorizedThreadReadRequest extends AgentTeamThreadReadRequest {
   readonly actor: AgentTeamHumanActor | AgentTeamMemberActor
+  /**
+   * Host-internal confirmation bound: acknowledge only the default unread
+   * batch's prefix through this Thread sequence. `0` acknowledges no fact and
+   * consumes no marker or Task reminder. Absent means the default batch, and a
+   * stored receipt without the field keeps that same meaning on replay.
+   */
+  readonly selectedThroughSequence?: number | undefined
 }
 
 export interface AgentTeamAuthorizedRemoveMemberRequest extends AgentTeamRemoveMemberRequest {
@@ -386,7 +393,12 @@ export type { AgentTeamDurableMemberResult }
 interface PreparedReadReceipt {
   readonly task?: AgentTeamTask | undefined
   readonly thread: AgentTeamThread
+  /** Every fact unread for this reader, used to keep unread bodies out of the background window. */
   readonly unread: readonly AgentTeamThreadReadFact[]
+  /** The default first 20 unread facts, or their prefix through a Host-selected bound: what this read answers with and acknowledges. */
+  readonly batch: readonly AgentTeamThreadReadFact[]
+  /** The Host-selected bound this receipt stores, when the caller gave one. Absent means the default batch. */
+  readonly selectedThroughSequence?: number | undefined
   readonly reminders: readonly import('./types/requests-results.ts').AgentTeamInboxReminder[]
   readonly attentionBefore?: AgentTeamThreadAttention | undefined
   readonly readThroughSequence: number
@@ -1285,7 +1297,7 @@ export class AgentTeamLedger {
    * Acknowledge the Main stream through one sequence (default the head): an owner's watermark advances and the reader's
    * markers up to it are consumed. A read that changes neither writes nothing, like a Thread read.
    */
-  readMainStream(request: AgentTeamAuthorizedMainStreamReadRequest): Promise<AgentTeamLedgerResult<AgentTeamMainStreamReadResult>> {
+  readMainStream(request: AgentTeamAuthorizedMainStreamReadRequest, select?: (preview: AgentTeamMainStreamReadResult) => number): Promise<AgentTeamLedgerResult<AgentTeamMainStreamReadResult>> {
     return this.enqueue(async () => {
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
       const project = this.requireActiveProject(request.workspaceId, request.projectRef)
@@ -1297,9 +1309,14 @@ export class AgentTeamLedger {
       this.requireRulesVersion2('the Main stream')
       this.requireProjectMemberActor(actor, project.projectRef)
       const head = this.mainHeadFrom(this.state, project.projectRef)
+      // Selection runs inside the queue against the state this write will
+      // actually see, so an entry queued ahead of it is never skipped.
+      const selected = select === undefined ? undefined : select(this.previewMainStreamRead({ ...request, actor }))
       // Without an explicit bound a read acknowledges only the first page of unread, so a backlog is read page by page, never skipped.
-      const backlog = request.readThroughSequence === undefined ? this.mainUnreadFrom(this.state, actor.memberId, project.projectRef) : []
-      const readThrough = request.readThroughSequence ?? (backlog.length > MAIN_READ_PAGE_SIZE ? backlog[MAIN_READ_PAGE_SIZE - 1]!.source.sequence : head)
+      const backlog = selected === undefined && request.readThroughSequence === undefined
+        ? this.mainUnreadFrom(this.state, actor.memberId, project.projectRef) : []
+      const readThrough = selected ?? request.readThroughSequence
+        ?? (backlog.length > MAIN_READ_PAGE_SIZE ? backlog[MAIN_READ_PAGE_SIZE - 1]!.source.sequence : head)
       if (!Number.isInteger(readThrough) || readThrough < 0 || readThrough > head) {
         throw new Error(`readThroughSequence must be an integer from 0 to the Main stream head ${head}`)
       }
@@ -1319,6 +1336,34 @@ export class AgentTeamLedger {
       return this.committed(Object.freeze({ receipt: this.receipt(operation), projectRef: project.projectRef, readThroughSequence: readThrough,
         entries: picture, consumedMarkers: prepared.consumed, standing: this.mainStandingFrom(this.state, actor.memberId, project.projectRef) }))
     })
+  }
+
+  /**
+   * Answer what a Main stream read would return right now without committing
+   * or acknowledging anything: the same page, consumed markers and post-read
+   * standing the read would produce.
+   */
+  previewMainStreamRead(request: AgentTeamAuthorizedMainStreamReadRequest): AgentTeamMainStreamReadResult {
+    const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+    const project = this.requireActiveProject(request.workspaceId, request.projectRef)
+    this.requireRulesVersion2('the Main stream')
+    this.requireProjectMemberActor(actor, project.projectRef)
+    const head = this.mainHeadFrom(this.state, project.projectRef)
+    const backlog = request.readThroughSequence === undefined ? this.mainUnreadFrom(this.state, actor.memberId, project.projectRef) : []
+    const readThrough = request.readThroughSequence ?? (backlog.length > MAIN_READ_PAGE_SIZE ? backlog[MAIN_READ_PAGE_SIZE - 1]!.source.sequence : head)
+    if (!Number.isInteger(readThrough) || readThrough < 0 || readThrough > head) {
+      throw new Error(`readThroughSequence must be an integer from 0 to the Main stream head ${head}`)
+    }
+    const prepared = this.prepareMainReadFrom(this.state, actor.memberId, project.projectRef, readThrough)
+    const noOp = !prepared.advances && isEmptyInboxDelta(prepared.inbox)
+    const consumed = noOp ? [] : prepared.consumed
+    const unread = this.mainUnreadFrom(this.state, actor.memberId, project.projectRef)
+    const entries = new Map(this.mainReadPage(actor.memberId, project.projectRef, consumed, readThrough).map(entry => [entry.sequence, entry]))
+    for (const entry of this.mainEntries(unread.filter(item => item.source.sequence <= readThrough).map(item => item.source), unread)) entries.set(entry.sequence, entry)
+    return Object.freeze({ projectRef: project.projectRef, readThroughSequence: readThrough,
+      entries: Object.freeze([...entries.values()].sort((left, right) => left.sequence - right.sequence)), consumedMarkers: consumed,
+      standing: noOp ? this.mainStandingFrom(this.state, actor.memberId, project.projectRef)
+        : this.mainStandingAfterRead(actor.memberId, project.projectRef, readThrough) })
   }
 
   /** Start a discussion or Task Thread: a Project owner's act. Mentions deliver a direct marker only; the creator alone follows. */
@@ -2143,16 +2188,34 @@ export class AgentTeamLedger {
       facts: this.unreadFor(memberId, item.thread.threadRef), reminders: item.reminders })))
   }
 
-  readThread(request: AgentTeamAuthorizedThreadReadRequest): Promise<AgentTeamThreadReadOutcome> {
+  /**
+   * Answer what a read would return right now without committing or
+   * acknowledging anything. The Host uses this to see the bounded batch it can
+   * deliver before deciding which prefix it actually did deliver.
+   */
+  previewThreadRead(request: AgentTeamAuthorizedThreadReadRequest): AgentTeamThreadReadResult {
+    const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+    return this.readPicture(this.prepareRead(actor.memberId, request.workspaceId, request))
+  }
+
+  readThread(request: AgentTeamAuthorizedThreadReadRequest, select?: (preview: AgentTeamThreadReadResult) => number): Promise<AgentTeamThreadReadOutcome> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
         this.assertSameThreadRead(existing, request)
-        const current = this.prepareRead(existing.data.memberId, existing.data.workspaceId, request)
-        return Object.freeze({ value: Object.freeze({ receipt: this.receipt(existing), ...this.readPicture(current) }), committed: false })
+        const selectedThroughSequence = isThreadReadSnapshot(existing.data) ? undefined : existing.data.selectedThroughSequence
+        const current = this.prepareRead(existing.data.memberId, existing.data.workspaceId, { ...request,
+          ...(selectedThroughSequence === undefined ? {} : { selectedThroughSequence: 0 }) })
+        return Object.freeze({ value: Object.freeze({ receipt: this.receipt(existing), ...this.readPicture(current),
+          ...(selectedThroughSequence === undefined ? {} : { readThroughSequence: existing.data.readThroughSequence }) }), committed: false })
       }
       const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
-      const prepared = this.prepareRead(actor.memberId, request.workspaceId, request)
+      // Selection runs inside the queue against the state this write will
+      // actually see, so a fact queued ahead of it is never skipped.
+      const selectedThroughSequence = select === undefined
+        ? request.selectedThroughSequence
+        : select(this.previewThreadRead({ ...request, actor }))
+      const prepared = this.prepareRead(actor.memberId, request.workspaceId, { ...request, selectedThroughSequence })
       // A read whose Inbox delta is empty writes nothing: the watermark does
       // not advance and no marker is consumed. It answers with the same picture
       // and no receipt, so the caller learns "no operation" from the result's
@@ -2163,7 +2226,9 @@ export class AgentTeamLedger {
       // already holds.
       const data: AgentTeamThreadReadReceipt = Object.freeze({ workspaceId: request.workspaceId, memberId: actor.memberId,
         threadRef: prepared.thread.threadRef, ...(prepared.task === undefined ? {} : { taskRef: prepared.task.taskRef }),
-        readThroughSequence: prepared.readThroughSequence, inbox: prepared.inbox })
+        readThroughSequence: prepared.readThroughSequence,
+        ...(prepared.selectedThroughSequence === undefined ? {} : { selectedThroughSequence: prepared.selectedThroughSequence }),
+        inbox: prepared.inbox })
       const operation: AgentTeamThreadReadOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/thread-read', data,
       })
@@ -4283,8 +4348,16 @@ export class AgentTeamLedger {
     }
   }
 
-  private prepareRead(memberId: AgentTeamMemberId, workspaceId: WorkspaceId, request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined }): PreparedRead {
+  private prepareRead(memberId: AgentTeamMemberId, workspaceId: WorkspaceId, request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined; selectedThroughSequence?: number | undefined }): PreparedRead {
     return this.prepareReadFrom(this.state, memberId, workspaceId, request)
+  }
+
+  /** Validate one Host-selected confirmation bound against the Thread it targets. */
+  private threadReadSelection(revision: number, selected: number | undefined): number | undefined {
+    if (selected === undefined) return undefined
+    if (!Number.isInteger(selected) || selected < 0) throw new Error('selectedThroughSequence must be a non-negative integer')
+    if (selected > revision) throw new Error(`selectedThroughSequence ${selected} exceeds Thread revision ${revision}`)
+    return selected
   }
 
   /**
@@ -4295,7 +4368,7 @@ export class AgentTeamLedger {
    * one; the picture derivation below builds on the same result, so the two can
    * never drift.
    */
-  private prepareReadReceiptFrom(projection: Projection, memberId: AgentTeamMemberId, workspaceId: WorkspaceId, request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined }): PreparedReadReceipt {
+  private prepareReadReceiptFrom(projection: Projection, memberId: AgentTeamMemberId, workspaceId: WorkspaceId, request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined; selectedThroughSequence?: number | undefined }): PreparedReadReceipt {
     const { task, thread, projectRef } = this.threadContextFrom(projection, workspaceId, request)
     if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID) {
       const member = projection.members.get(memberId)
@@ -4305,26 +4378,37 @@ export class AgentTeamLedger {
       // Version-1 read receipts predate Project membership as a read gate.
       if (projection.rulesVersion >= 2) this.requireProjectMemberActorFrom(projection, { kind: 'member', memberId, handle: member.handle }, projectRef)
     }
+    const selectedThroughSequence = this.threadReadSelection(thread.revision, request.selectedThroughSequence)
     const attention = this.attentionForFrom(projection, memberId, thread.threadRef)
     const unread = this.unreadForFrom(projection, memberId, thread.threadRef)
-    const unreadFacts = unread.slice(0, 20)
+    // The default batch is fixed at 20. A Host selection only takes a prefix of
+    // that batch, so a continuing reader can never skip an incomplete fact or
+    // reach past the bounded batch in one read.
+    const batch = selectedThroughSequence === undefined
+      ? unread.slice(0, 20)
+      : unread.slice(0, 20).filter(item => item.fact.sequence <= selectedThroughSequence)
     // Direct markers are sparse acknowledgements, not part of the contiguous
     // follower watermark. Consuming an old marker after a later follow must
     // never move that watermark backwards.
-    const ordinaryUnread = unreadFacts.filter(item => item.fact.sequence >= (attention?.startSequence ?? Number.MAX_SAFE_INTEGER)
+    const ordinaryUnread = batch.filter(item => item.fact.sequence >= (attention?.startSequence ?? Number.MAX_SAFE_INTEGER)
       && this.visibleToFollower(item.fact, memberId))
     const readThroughSequence = Math.max(attention?.readThroughSequence ?? 0, ordinaryUnread.at(-1)?.fact.sequence ?? 0)
     const nextAttention = attention === undefined || readThroughSequence === attention.readThroughSequence ? []
       : [Object.freeze({ ...attention, readThroughSequence })]
-    const consumedDirectMarkers = new Set(unreadFacts.flatMap(item => item.direct && item.fact.kind === 'message'
+    const consumedDirectMarkers = new Set(batch.flatMap(item => item.direct && item.fact.kind === 'message'
       ? [this.directMarkerKey({ memberId, threadRef: thread.threadRef, messageRef: item.fact.message.messageRef })] : []))
     const consumed = this.frozenMarkerSnapshot(projection, memberId, thread.threadRef)
       .filter(marker => consumedDirectMarkers.has(this.directMarkerKey(marker)))
     const activityMarkers = this.activityMarkersForFrom(projection, memberId, thread.threadRef)
-      .filter(marker => unreadFacts.some(item => item.fact.kind === 'activity' && item.fact.activity.activityRef === marker.activityRef))
-    const reminderMarkers = this.reminderMarkersForFrom(projection, memberId, thread.threadRef)
+      .filter(marker => batch.some(item => item.fact.kind === 'activity' && item.fact.activity.activityRef === marker.activityRef))
+    // A selection that confirms no fact must not spend a Task reminder it never
+    // reached. An unread-free read still confirms reminders as before, and a
+    // selection that reaches at least one fact confirms them normally.
+    const withholdsMarkers = selectedThroughSequence !== undefined && batch.length === 0 && unread.length > 0
+    const reminderMarkers = withholdsMarkers ? [] : this.reminderMarkersForFrom(projection, memberId, thread.threadRef)
     const inbox = this.inboxDelta(nextAttention, [], [], consumed, [], activityMarkers, [], [], [], reminderMarkers)
-    return Object.freeze({ ...(task === undefined ? {} : { task }), thread, unread,
+    return Object.freeze({ ...(task === undefined ? {} : { task }), thread, unread, batch,
+      ...(selectedThroughSequence === undefined ? {} : { selectedThroughSequence }),
       reminders: this.remindersFor(memberId, thread.threadRef),
       ...(attention === undefined ? {} : { attentionBefore: attention }), readThroughSequence,
       ...(attention === undefined ? {} : { attention: nextAttention[0] ?? attention }),
@@ -4332,7 +4416,7 @@ export class AgentTeamLedger {
   }
 
   /** Derive the only legal durable result of one Thread read from a prior projection. */
-  private prepareReadFrom(projection: Projection, memberId: AgentTeamMemberId, workspaceId: WorkspaceId, request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined }): PreparedRead {
+  private prepareReadFrom(projection: Projection, memberId: AgentTeamMemberId, workspaceId: WorkspaceId, request: { threadRef?: AgentTeamThreadRef | undefined; taskRef?: AgentTeamTaskRef | undefined; selectedThroughSequence?: number | undefined }): PreparedRead {
     const receipt = this.prepareReadReceiptFrom(projection, memberId, workspaceId, request)
     const { task, thread } = receipt
     const anchor = this.threadAnchorFrom(projection, thread.threadRef)
@@ -4349,7 +4433,7 @@ export class AgentTeamLedger {
           occurredAt: this.occurredAtForFactFrom(projection, fact.sequence, fact.message.occurredAt) }))
         .filter(fact => !unreadFactKeys.has(this.threadFactKey(fact))).slice(-12)
       : []
-    const combined = [...background.map(fact => this.readFactFrom(projection, memberId, fact, false)), ...receipt.unread.slice(0, 20)]
+    const combined = [...background.map(fact => this.readFactFrom(projection, memberId, fact, false)), ...receipt.batch]
       .sort((left, right) => left.fact.sequence - right.fact.sequence)
     const remainingUnreadCount = this.remainingUnreadAfter(projection, memberId, receipt)
     // What this bounded read leaves behind it: the Thread facts that precede the
@@ -4476,10 +4560,15 @@ export class AgentTeamLedger {
     projection: Projection,
     target: { readonly threadRef?: AgentTeamThreadRef | undefined; readonly taskRef?: AgentTeamTaskRef | undefined },
   ): void {
-    const expected = this.prepareReadReceiptFrom(projection, data.memberId, data.workspaceId, target)
+    const expected = this.prepareReadReceiptFrom(projection, data.memberId, data.workspaceId, {
+      ...target,
+      ...(data.selectedThroughSequence === undefined ? {} : { selectedThroughSequence: data.selectedThroughSequence }),
+    })
     const expectedData = Object.freeze({ workspaceId: data.workspaceId, memberId: data.memberId, threadRef: data.threadRef,
       ...(expected.task === undefined ? {} : { taskRef: expected.task.taskRef }),
-      readThroughSequence: expected.readThroughSequence, inbox: expected.inbox })
+      readThroughSequence: expected.readThroughSequence,
+      ...(expected.selectedThroughSequence === undefined ? {} : { selectedThroughSequence: expected.selectedThroughSequence }),
+      inbox: expected.inbox })
     if (!isDeepStrictEqual(data, expectedData)) throw new Error('invalid Thread read receipt')
   }
 
@@ -4992,6 +5081,20 @@ export class AgentTeamLedger {
       head: this.mainHeadFrom(projection, projectRef), unreadCount: unread.length,
       directCount: unread.filter(item => item.direct).length,
       markers: Object.freeze([...projection.mainMarkersByMember.get(memberId)?.get(projectRef) ?? []]) })
+  }
+
+  /**
+   * Standing as it will read once a Main stream read through `readThrough`
+   * commits, derived without materializing the committed delta. Only this
+   * reader's ordinary unread and markers up to the bound can change.
+   */
+  private mainStandingAfterRead(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, readThrough: number): AgentTeamMainStreamStanding {
+    const remaining = this.mainUnreadFrom(this.state, memberId, projectRef).filter(item => item.source.sequence > readThrough)
+    return Object.freeze({ following: this.isFollowingMainFrom(this.state, projectRef, memberId),
+      head: this.mainHeadFrom(this.state, projectRef), unreadCount: remaining.length,
+      directCount: remaining.filter(item => item.direct).length,
+      markers: Object.freeze([...this.state.mainMarkersByMember.get(memberId)?.get(projectRef) ?? []]
+        .filter(marker => marker.sequence > readThrough)) })
   }
 
   /**
@@ -6075,6 +6178,10 @@ export class AgentTeamLedger {
       || operation.data.workspaceId !== request.workspaceId
       || (request.threadRef !== undefined && threadReadTargetOf(operation.data).threadRef !== request.threadRef)
       || (request.taskRef !== undefined && threadReadTargetOf(operation.data).taskRef !== request.taskRef)
+      // A computed selection is not part of the request payload; only an
+      // explicit one has to match the stored receipt.
+      || (request.selectedThroughSequence !== undefined
+        && request.selectedThroughSequence !== (isThreadReadSnapshot(operation.data) ? undefined : operation.data.selectedThroughSequence))
       || (request.threadRef === undefined && request.taskRef === undefined)) this.throwRequestCollision(request.requestId)
   }
 

@@ -359,6 +359,7 @@ const threadReadReceiptDataSchema = z.object({
   threadRef: threadRefSchema,
   taskRef: taskRefSchema.optional(),
   readThroughSequence: z.number().int().nonnegative(),
+  selectedThroughSequence: z.number().int().nonnegative().optional(),
   inbox: inboxDeltaSchema,
 }).strict().transform(omitUndefined)
 

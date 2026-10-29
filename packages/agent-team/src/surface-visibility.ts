@@ -2,34 +2,39 @@ import { createHash } from 'node:crypto'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import { isAgentTeamSource } from './context-source.ts'
-import type { AgentTeamMemberId, AgentTeamThreadReadFact, AgentTeamThreadRef } from './types.ts'
+import type { AgentTeamMainTimelineEntry, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamThreadReadFact, AgentTeamThreadRef } from './types.ts'
 
 export const NOTIFICATION_TRUNCATION_MARKER = '[Message body truncated; use team_thread read for the full Message.]'
 export const NOTIFICATION_BODY_MAX_CHARACTERS = 8 * 1024
 
-export type ThreadMessageSurface = {
+export type TeamMessageSurface = {
   readonly textDigest: string
-  readonly messages: readonly { readonly threadRef: string; readonly messageRef: string; readonly bodyDigest: string }[]
+  readonly messages: readonly (MessageAddress & { readonly messageRef: string; readonly bodyDigest: string; readonly start?: number; readonly end?: number; readonly total?: number })[]
 }
 
-export interface RenderedThreadMessage {
-  readonly threadRef: string
+type MessageAddress = { readonly threadRef: string; readonly projectRef?: never }
+  | { readonly projectRef: string; readonly threadRef?: never }
+
+export type RenderedTeamMessage = MessageAddress & {
   readonly messageRef: string
   readonly body: string
+  readonly part?: { readonly start: number; readonly end: number }
 }
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex')
 
-/** Bind only messages the producer rendered in full, to the exact text it emitted. */
-export function threadMessageSurface(text: string, messages: readonly RenderedThreadMessage[]) {
+/** Bind rendered bodies or exact parts to the producer's complete output text. */
+export function teamMessageSurface(text: string, messages: readonly RenderedTeamMessage[]) {
   return { textDigest: digest(text), messages: messages.map(message => ({
-    threadRef: message.threadRef, messageRef: message.messageRef, bodyDigest: digest(message.body),
+    ...(message.threadRef === undefined ? { projectRef: message.projectRef } : { threadRef: message.threadRef }),
+    messageRef: message.messageRef, bodyDigest: digest(message.body),
+    ...(message.part === undefined ? {} : { ...message.part, total: message.body.length }),
   })) }
 }
 
 /** A live projection, not a read receipt. Cropped text cannot attest through retained metadata. */
-export function visibleTeamSurface(agent: Pick<Agent, 'session'>): readonly ThreadMessageSurface[] {
-  const entries: ThreadMessageSurface[] = []
+export function visibleTeamSurface(agent: Pick<Agent, 'session'>): readonly TeamMessageSurface[] {
+  const entries: TeamMessageSurface[] = []
   for (const sequence of agent.session.surface.nodes) {
     const event = agent.session.snapshotEvents(SessionLogOffset(sequence), SessionLogOffset(sequence + 1))[0]
     if (event === undefined) continue
@@ -37,7 +42,7 @@ export function visibleTeamSurface(agent: Pick<Agent, 'session'>): readonly Thre
     if (message === null) continue
     let binding: unknown
     if (event.type === 'user/message' && message.role === 'user' && isAgentTeamSource(message.source) && message.source.form === 'notice') {
-      binding = message.source.threadFacts
+      binding = message.source.teamFacts
     } else if (event.type === 'tool/result' && message.role === 'tool' && !message.isError) {
       const ownCall = event.sourceEventSeqs?.some(sequence => {
         const call = agent.session.snapshotEvents(SessionLogOffset(sequence), SessionLogOffset(sequence + 1))[0]
@@ -47,7 +52,7 @@ export function visibleTeamSurface(agent: Pick<Agent, 'session'>): readonly Thre
       if (!ownCall) continue
       const meta = event.data.meta
       if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) continue
-      binding = meta['threadFacts']
+      binding = meta['teamFacts']
     }
     const surface = surfaceOf(binding)
     if (surface === undefined || message.content.some(part => part.type !== 'text')) continue
@@ -57,21 +62,44 @@ export function visibleTeamSurface(agent: Pick<Agent, 'session'>): readonly Thre
   return entries
 }
 
-function surfaceOf(value: unknown): ThreadMessageSurface | undefined {
+function surfaceOf(value: unknown): TeamMessageSurface | undefined {
   if (typeof value !== 'object' || value === null) return undefined
-  const surface = value as Partial<ThreadMessageSurface>
+  const surface = value as Partial<TeamMessageSurface>
   if (typeof surface.textDigest !== 'string' || !Array.isArray(surface.messages)) return undefined
   if (!surface.messages.every(message => message !== null && typeof message === 'object'
-    && typeof message.threadRef === 'string' && typeof message.messageRef === 'string' && typeof message.bodyDigest === 'string')) return undefined
-  return surface as ThreadMessageSurface
+    && ((typeof message.threadRef === 'string' && message.projectRef === undefined)
+      || (typeof message.projectRef === 'string' && message.threadRef === undefined))
+    && typeof message.messageRef === 'string' && typeof message.bodyDigest === 'string')) return undefined
+  return surface as TeamMessageSurface
 }
 
-export function isFactOnSurface(entries: readonly ThreadMessageSurface[], fact: AgentTeamThreadReadFact, threadRef: AgentTeamThreadRef): boolean {
+export function isFactOnSurface(entries: readonly TeamMessageSurface[], fact: AgentTeamThreadReadFact, threadRef: AgentTeamThreadRef): boolean {
   if (fact.fact.kind !== 'message' || fact.fact.message.body === '') return false
   const { messageRef, body } = fact.fact.message
-  const bodyDigest = digest(body)
-  return entries.some(entry => entry.messages.some(message => message.threadRef === threadRef
-    && message.messageRef === messageRef && message.bodyDigest === bodyDigest))
+  return missingMessageRange(entries, { threadRef, messageRef, body }) === undefined
+}
+
+export function isMainEntryOnSurface(entries: readonly TeamMessageSurface[], entry: AgentTeamMainTimelineEntry, projectRef: AgentTeamProjectRef): boolean {
+  if (entry.kind !== 'message' || entry.message.body === '') return false
+  return missingMessageRange(entries, { projectRef, messageRef: entry.message.messageRef, body: entry.message.body }) === undefined
+}
+
+export function missingMessageRange(entries: readonly TeamMessageSurface[], target: RenderedTeamMessage): { start: number; end: number } | undefined {
+  const bodyDigest = digest(target.body)
+  const ranges = entries.flatMap(entry => entry.messages.filter(message => message.threadRef === target.threadRef
+    && message.projectRef === target.projectRef && message.messageRef === target.messageRef && message.bodyDigest === bodyDigest)
+    .flatMap(message => message.start === undefined && message.end === undefined && message.total === undefined
+      ? [{ start: 0, end: target.body.length }]
+      : Number.isInteger(message.start) && Number.isInteger(message.end) && message.total === target.body.length
+        && message.start! >= 0 && message.end! > message.start! && message.end! <= target.body.length
+        ? [{ start: message.start!, end: message.end! }] : []))
+    .sort((left, right) => left.start - right.start)
+  let start = 0
+  for (const range of ranges) {
+    if (range.start > start) return { start, end: range.start }
+    start = Math.max(start, range.end)
+  }
+  return start >= target.body.length ? undefined : { start, end: target.body.length }
 }
 
 export function surfaceVisibilityProbe(agentFor: (memberId: AgentTeamMemberId) => Agent | undefined) {

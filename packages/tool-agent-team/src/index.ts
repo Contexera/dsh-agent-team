@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset, threadMessageSurface } from '@contexera/dsh-agent-team/host'
+import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset, teamMessageSurface } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
 import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
@@ -19,6 +19,7 @@ import type {
 } from '@contexera/dsh-agent-team/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { MAIN_ENTRY_SCHEMA, MAIN_STANDING_SCHEMA, mainEntryLine, mainEntryView, standingView } from './main-stream.ts'
+import { budgetReading, readingCapacity, messagePartText, MESSAGE_PART_SCHEMA, type MessagePart } from './reading-budget.ts'
 import type { MainEntryView } from './main-stream.ts'
 
 export const name = 'wowyuarm-agent-team-tools'
@@ -509,7 +510,7 @@ function attentionResult(
 
 const teamThread = defineTool({
   name: 'team_thread',
-  description: `Read one Thread's facts, or a Project's Main stream (pass projectRef instead of threadRef — exactly one). read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A Thread read restores missing anchor and a few recent original Messages from current context, including after compaction with no unread. Already visible bodies are omitted with an explicit acknowledgement; missing bodies are supplied. Background, acknowledged facts and current Task cards are separate, and history/message provide anything still missing. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit page history and are ignored by read, whose batch is bounded by design and names how much remains — message rejects them — ${recoveryFor('history_only_arguments').sentence({ action: 'message' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here. On the Main stream, read answers with its newest entries (plus any entry carrying a mention of you) and acknowledges through them — ordinary entries covered by your Main stream Attention and the mentions of every Member; a backlog longer than one page is read oldest first, one page per read, until none remains; history pages older entries; Thread cards in it name the Thread to read.`,
+  description: `Read one Thread's facts, or a Project's Main stream (pass projectRef instead of threadRef — exactly one). read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. Thread/Main read restores missing recent originals, plus the Thread anchor, including after compaction with no unread. Already visible bodies are omitted with an explicit acknowledgement; missing bodies are supplied. Background, acknowledged facts and current Task cards are separate, and history/message provide anything still missing. history pages older facts without changing read state. read/message outputs are capped at 32768 UTF-16 units including framing. Long Messages return parts: repeat the same request to fill the first gap in current context. read confirms only after all parts are present; message never confirms. A capacity error needs shorter Messages or a larger-context model, not retries. [attachment] paths are reading locators, not attachment contents. message reads one Message by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit page history and are ignored by read, whose batch is bounded by design and names how much remains — message rejects them — ${recoveryFor('history_only_arguments').sentence({ action: 'message' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here. On the Main stream, read answers with the oldest pending entries and missing recent background; it acknowledges only the delivered prefix — ordinary entries covered by your Main stream Attention and your direct markers; a backlog longer than one page is read oldest first, one page per read, until none remains; history pages older entries; Thread cards in it name the Thread to read.`,
   parameters: {
     action: { type: 'string', required: true, enum: ['read', 'history', 'message'] },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
@@ -523,6 +524,7 @@ const teamThread = defineTool({
       workspaceId: { type: 'string', required: true }, projectRef: { type: 'string', required: true },
       kind: { type: 'string', required: true }, scope: { type: 'string' }, threadRef: { type: 'string' }, taskRef: { type: 'string' },
       entries: { type: 'array', items: MAIN_ENTRY_SCHEMA }, standing: MAIN_STANDING_SCHEMA,
+      messageParts: { type: 'array', items: MESSAGE_PART_SCHEMA }, continuation: { type: 'string' },
       message: { type: 'object', additionalProperties: false, properties: {
         messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' }, body: { type: 'string', required: true },
       } },
@@ -555,7 +557,8 @@ const teamThread = defineTool({
           `Message ${message.messageRef}`,
           `${message.sequence}${at} [${message.sender}]`,
           '',
-          message.body,
+          messagePartText(message.body, value.messageParts?.find(part => part.messageRef === message.messageRef)),
+          ...(value.continuation === undefined ? [] : [value.continuation]),
         ].join('\n') }]
       }
       if (value.kind === 'history') {
@@ -578,13 +581,16 @@ const teamThread = defineTool({
             // kind === 'read': outcome → context → orientation → collision surface → facts → watermark → token (iff nothing unread remains).
       const facts = value.facts as FactView[]
       const reminders = value.reminders ?? []
-      const acknowledged = facts.filter(fact => fact.unread === true).length + reminders.length
+      const incomplete = (fact: FactView) => fact.kind === 'message' && value.messageParts?.some(part => part.messageRef === fact.messageRef && !part.complete)
+      const renderedFact = (fact: FactView) => factLine(fact.kind === 'message'
+        ? { ...fact, body: messagePartText(fact.body, value.messageParts?.find(part => part.messageRef === fact.messageRef)) } : fact)
+      const acknowledged = facts.filter(fact => fact.unread === true && !incomplete(fact)).length + reminders.length
       const remaining = value.remainingUnreadCount ?? 0
             // A read with nothing unread writes no durable operation, so the opening line claims a commit only when unread facts were acknowledged.
       const lines = [
         source,
         acknowledged === 0
-          ? `Read — no unread updates on ${value.threadRef}; nothing remains.`
+          ? remaining === 0 ? `Read — no unread updates on ${value.threadRef}; nothing remains.` : `Read — no facts acknowledged; ${remaining} unread update(s) remain.`
           : `Read committed — acknowledged ${acknowledged} unread update(s) on ${value.threadRef}; ${remaining} remain.`,
         `${value.threadRef}${standing === '' ? '' : ` · ${standing}`} · ${value.following ? 'following' : 'not following'}`,
         // Reading is not following: the one consequence a reader cannot infer
@@ -604,12 +610,15 @@ const teamThread = defineTool({
         for (const reminder of reminders) lines.push(`${reminder.kind === 'review-backlog' ? 'Review backlog' : 'Stalled Task'} · ${reminder.taskRef} · baseline ${reminder.baselineSequence} · raised ${formatTeamTimestamp(reminder.occurredAt)}`)
       }
       const background = facts.filter(fact => fact.unread === false)
-      if (background.length > 0) lines.push('', 'Background — not newly acknowledged', ...background.map(factLine),
+      if (background.length > 0) lines.push('', 'Background — not newly acknowledged', ...background.map(renderedFact),
         'Background is bounded; use team_thread history for older facts or message with messageRef for an original reply target.')
-      const acknowledgedFacts = facts.filter(fact => fact.unread !== false)
+      const acknowledgedFacts = facts.filter(fact => fact.unread !== false && !incomplete(fact))
       lines.push('', 'Acknowledged facts')
       if (acknowledgedFacts.length === 0) lines.push('No new facts to acknowledge.')
-      lines.push(...acknowledgedFacts.map(factLine))
+      lines.push(...acknowledgedFacts.map(renderedFact))
+      const partial = facts.filter(fact => fact.unread === true && incomplete(fact))
+      if (partial.length > 0) lines.push('', 'Incomplete Message — not acknowledged', ...partial.map(renderedFact))
+      if (value.continuation !== undefined) lines.push('', value.continuation)
       if ((value.taskCards?.length ?? 0) > 0) lines.push('', 'Current Task cards — not Thread reading', ...value.taskCards!.map(taskCardLine))
       lines.push('', `Read through sequence ${value.readThroughSequence}; ${remaining} unread update(s) remaining${remaining > 0 ? ` — ${recoveryFor('unread_remaining').sentence({})}` : '.'}`)
             // The bounded read answered with the newest batch; the span before the watermark is orientation it did not supply, and rendering its count shows the returning reader the size of that span.
@@ -618,9 +627,16 @@ const teamThread = defineTool({
       if (remaining === 0) lines.push('', nextWriteLine(value.revision))
       return [{ type: 'text', text: lines.join('\n') }]
     },
-    presentationMeta: (args, value): { threadFacts: ReturnType<typeof threadMessageSurface> } => {
+    presentationMeta: (args, value): { teamFacts: ReturnType<typeof teamMessageSurface> } => {
       const text = teamThread.output.render(args, value).flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
-      if (value.scope === 'main') return { threadFacts: threadMessageSurface(text, []) }
+      if (value.scope === 'main') {
+        const messages = value.kind === 'message' ? value.message === undefined ? [] : [value.message]
+          : (value.entries ?? []).filter(entry => entry.kind === 'message' && !entry.bodyOmitted)
+        return { teamFacts: teamMessageSurface(text, messages.flatMap(message => message.messageRef === undefined || message.body === undefined
+          ? [] : [{ projectRef: value.projectRef, messageRef: message.messageRef, body: message.body,
+            ...(value.messageParts?.find(part => part.messageRef === message.messageRef) === undefined ? {}
+              : { part: value.messageParts!.find(part => part.messageRef === message.messageRef)! }) }])) }
+      }
       const facts = value.kind === 'message'
         ? value.message === undefined ? [] : [{ ...value.message, kind: 'message' as const }]
         : [...value.facts ?? []]
@@ -629,7 +645,9 @@ const teamThread = defineTool({
       if (value.kind !== 'message' && !anchorInFacts && fullAnchor && value.anchor !== undefined) {
         facts.push({ ...value.anchor, kind: 'message' })
       }
-      return { threadFacts: threadMessageSurface(text, messageIdentities(value.threadRef, facts.filter(fact => !('bodyOmitted' in fact && fact.bodyOmitted)))) }
+      return { teamFacts: teamMessageSurface(text, messageIdentities(value.threadRef, facts.filter(fact => !('bodyOmitted' in fact && fact.bodyOmitted)))
+        .map(message => { const part = value.messageParts?.find(part => part.messageRef === message.messageRef)
+          return { ...message, ...(part === undefined ? {} : { part: { start: part.start, end: part.end } }) } })) }
     },
   },
   async execute(rawArgs, exec) {
@@ -637,7 +655,8 @@ const teamThread = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_thread requires an Agent session')
     const host = service(agent)
-    if (args.projectRef !== undefined) return mainStreamOutcome(host, agent, args, requestId(agent.id, exec.callId))
+    const capacity = await readingCapacity(agent, exec.signal)
+    if (args.projectRef !== undefined) return mainStreamOutcome(host, agent, args, requestId(agent.id, exec.callId), capacity)
     if (args.threadRef === undefined && args.taskRef === undefined) throw new Error(`team_thread needs threadRef (or taskRef on a Taskful Thread) — ${recoveryFor('missing_thread_identity').sentence({})}`)
     const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
     const taskNumberOf = (task: { taskRef: AgentTeamTaskRef } | undefined): { taskNumber?: number } => {
@@ -669,21 +688,33 @@ const teamThread = defineTool({
             // The ordinary orientation is still returned so every action answers with one shape; the Message read back rides alongside.
       const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
       const status = host.attentionStatusForAgent(agent, base)
-      return threadResult('message', base.workspaceId, snapshot, status.attention, [], {
+      const value = threadResult('message', base.workspaceId, snapshot, status.attention, [], {
         message: { messageRef: readBack.messageRef, sender: readBack.sender, sequence: readBack.sequence, ...(readBack.occurredAt === undefined ? {} : { occurredAt: readBack.occurredAt }), body: readBack.body },
         ...taskNumberOf(snapshot.task),
       })
+      return budgetReading(agent, value, (candidate): string => teamThread.output.render(args, candidate as never).map((part: { type: string; text?: string }) => part.type === 'text' ? part.text : '').join('\n'), capacity).value
     }
         // `read` is the one action that returns a bounded batch by design — its Host request carries neither paging field, so a page size here cannot be honored. Refusing the whole call taught the model nothing: one real session retried the identical arguments twice. The batch it did get names what remains, which is the route to more.
     if (args.action !== 'read' && (args.beforeSequence !== undefined || args.limit !== undefined)) {
       throw new Error(recoveryFor('history_only_arguments').sentence({ action: args.action }))
     }
-    const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base })
-    // Only a discussion needs the extra history projection for its derived cards.
-    const cards = read.task === undefined
-      ? (host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 }).taskCards ?? []).map(taskCardView)
-      : []
-    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry, entry.fact.kind === 'message' && read.visibleMessageRefs.includes(entry.fact.message.messageRef))), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, reminders: [...read.reminders], ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), taskCards: cards, ...taskNumberOf(read.task) })
+    const view = (read: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>) => {
+      const cards = read.task === undefined
+        ? (host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 }).taskCards ?? []).map(taskCardView) : []
+      return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry,
+        entry.fact.kind === 'message' && read.visibleMessageRefs.includes(entry.fact.message.messageRef))), {
+        readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, reminders: [...read.reminders],
+        ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), taskCards: cards, ...taskNumberOf(read.task) })
+    }
+    let selected: ReturnType<typeof view> | undefined
+    const read = await host.readThreadForAgent(agent, { requestId: requestId(agent.id, exec.callId), ...base }, preview => {
+      const budget = budgetReading(agent, view(preview), value => teamThread.output.render(args, value as never).map(part => part.type === 'text' ? part.text : '').join('\n'), capacity)
+      selected = budget.value
+      return budget.through
+    })
+    if (selected === undefined) return budgetReading(agent, view(read),
+      (value): string => teamThread.output.render(args, value as never).map((part: { type: string; text?: string }) => part.type === 'text' ? part.text : '').join('\n'), capacity).value
+    return { ...selected, readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount }
   },
 })
 
@@ -699,6 +730,7 @@ function mainStreamLines(action: string, value: {
   readonly workspaceId: string; readonly projectRef: string; readonly kind: string
   readonly entries?: readonly MainEntryView[] | undefined; readonly cursor?: number | undefined; readonly hasMore?: boolean | undefined
   readonly readThroughSequence?: number | undefined; readonly remainingUnreadCount?: number | undefined
+  readonly messageParts?: readonly MessagePart[] | undefined; readonly continuation?: string | undefined
   readonly standing?: { following: boolean } | undefined
   readonly message?: { readonly messageRef: string; readonly sender: string; readonly sequence: number; readonly occurredAt?: string | undefined; readonly body: string } | undefined
 }): string[] {
@@ -710,19 +742,32 @@ function mainStreamLines(action: string, value: {
     : 'Attention: not following — ordinary updates here will not interrupt you. team_attention follow with projectRef starts them.']
   if (value.kind === 'message') {
     const message = value.message!
-    return [source, `Message ${message.messageRef}`, `${message.sequence}${message.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(message.occurredAt)}`} [${message.sender}]`, '', message.body]
+    return [source, `Message ${message.messageRef}`, `${message.sequence}${message.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(message.occurredAt)}`} [${message.sender}]`, '', messagePartText(message.body, value.messageParts?.find(part => part.messageRef === message.messageRef)),
+      ...(value.continuation === undefined ? [] : [value.continuation])]
   }
   const entries = value.entries ?? []
   if (value.kind === 'history') {
     return [source, `History for ${value.projectRef}`, '', 'Entries', ...(entries.length === 0 ? ['No entries before this cursor.'] : entries.map(mainEntryLine)), '',
       `History cursor ${value.cursor}; hasMore=${value.hasMore ? 'true' : 'false'}${value.hasMore ? ' — older entries exist; page again with beforeSequence set to the cursor.' : ' — no older entries remain.'}`]
   }
-  const acknowledged = entries.filter(entry => entry.unread).length
+  const incomplete = (entry: MainEntryView) => value.messageParts?.some(part => part.messageRef === entry.messageRef && !part.complete)
+  const renderedEntry = (entry: MainEntryView) => mainEntryLine(entry.body === undefined ? entry
+    : { ...entry, body: messagePartText(entry.body, value.messageParts?.find(part => part.messageRef === entry.messageRef)) })
+  const acknowledged = entries.filter(entry => entry.unread && !incomplete(entry)).length
   const remaining = value.remainingUnreadCount ?? 0
+  const background = entries.filter(entry => !entry.unread && entry.kind !== 'thread-card')
+  const facts = entries.filter(entry => entry.unread && entry.kind !== 'thread-card' && !incomplete(entry))
+  const partial = entries.filter(entry => entry.unread && incomplete(entry))
+  const cards = entries.filter(entry => entry.kind === 'thread-card')
   return [source, ...attention,
-    acknowledged === 0 ? `Read — no unread updates on the Main stream of ${value.projectRef}.`
+    acknowledged === 0 ? remaining === 0 ? `Read — no unread updates on the Main stream of ${value.projectRef}.` : `Read — no facts acknowledged; ${remaining} unread update(s) remain.`
       : `Read committed — acknowledged ${acknowledged} unread update(s) on the Main stream of ${value.projectRef}; ${remaining} remain.`,
-    '', 'Entries', ...(entries.length === 0 ? ['The Main stream is empty.'] : entries.map(mainEntryLine)), '',
+    ...(background.length === 0 ? [] : ['', 'Background — not newly acknowledged', ...background.map(renderedEntry),
+      'Background is bounded; use team_thread history for older entries or message with messageRef for an original reply target.']),
+    '', 'Acknowledged facts', ...(facts.length === 0 ? ['No new Message or Activity facts to acknowledge.'] : facts.map(renderedEntry)),
+    ...(partial.length === 0 ? [] : ['', 'Incomplete Message — not acknowledged', ...partial.map(renderedEntry)]),
+    ...(value.continuation === undefined ? [] : ['', value.continuation]),
+    ...(cards.length === 0 ? [] : ['', 'Thread cards — Main entry acknowledged, not its Thread', ...cards.map(mainEntryLine)]), '',
     `Read through sequence ${value.readThroughSequence}; ${remaining} unread update(s) remaining${remaining > 0 ? ' — read again for the next page before you post.' : '.'} Speak here with team_message post; read a Thread card's Thread with team_thread read.`]
 }
 
@@ -732,6 +777,7 @@ async function mainStreamOutcome(
   args: { readonly action: string; readonly projectRef?: string | undefined; readonly threadRef?: string | undefined; readonly taskRef?: string | undefined
     readonly messageRef?: string | undefined; readonly beforeSequence?: number | undefined; readonly limit?: number | undefined; readonly workspace?: string | undefined },
   readRequestId: AgentTeamRequestId,
+  capacity: number,
 ) {
   if (args.threadRef !== undefined || args.taskRef !== undefined) throw new Error(recoveryFor('main_stream_addressing').sentence({ refused: 'threadRef and projectRef' }))
   const workspaceId = workspaceOf(args, agent)
@@ -744,8 +790,9 @@ async function mainStreamOutcome(
     if (args.messageRef === undefined) throw new Error(recoveryFor('missing_message_ref').sentence({ refused: 'for action message' }))
     if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'message' }))
     const read = host.readMessageForAgent(agent, { workspaceId, projectRef, messageRef: args.messageRef as AgentTeamMessageRef })
-    return { ...base, projectRef: read.projectRef, kind: 'message', message: { messageRef: read.messageRef, sender: read.sender, sequence: read.sequence,
+    const value = { ...base, projectRef: read.projectRef, kind: 'message', message: { messageRef: read.messageRef, sender: read.sender, sequence: read.sequence,
       ...(read.occurredAt === undefined ? {} : { occurredAt: read.occurredAt }), body: read.body } }
+    return budgetReading(agent, value, candidate => mainStreamLines(args.action, candidate).join('\n'), capacity).value
   }
   if (args.action === 'history') {
     const history = host.mainStreamHistoryForAgent(agent, { workspaceId, projectRef,
@@ -754,9 +801,18 @@ async function mainStreamOutcome(
       hasMore: history.hasMore, standing: standingView(history.standing) }
   }
   if (args.action !== 'read' && (args.beforeSequence !== undefined || args.limit !== undefined)) throw new Error(recoveryFor('history_only_arguments').sentence({ action: args.action }))
-  const read = await host.readMainStreamForAgent(agent, { requestId: readRequestId, workspaceId, projectRef })
-  return { ...base, projectRef: read.projectRef, kind: 'read', entries: read.entries.map(mainEntryView), readThroughSequence: read.readThroughSequence,
-    remainingUnreadCount: read.standing.unreadCount, standing: standingView(read.standing) }
+  const view = (read: Awaited<ReturnType<AgentTeam['readMainStreamForAgent']>>) => ({ ...base, projectRef: read.projectRef, kind: 'read',
+    entries: read.entries.map(entry => ({ ...mainEntryView(entry),
+      ...(entry.kind === 'message' && read.visibleMessageRefs.includes(entry.message.messageRef) ? { bodyOmitted: true } : {}) })),
+    readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.standing.unreadCount, standing: standingView(read.standing) })
+  let selected: ReturnType<typeof view> | undefined
+  const read = await host.readMainStreamForAgent(agent, { requestId: readRequestId, workspaceId, projectRef }, preview => {
+    const budget = budgetReading(agent, view(preview), candidate => mainStreamLines(args.action, candidate).join('\n'), capacity)
+    selected = budget.value
+    return preview.entries.some(entry => entry.unread) ? budget.through : preview.readThroughSequence
+  })
+  return selected === undefined ? budgetReading(agent, view(read), candidate => mainStreamLines(args.action, candidate).join('\n'), capacity).value
+    : { ...selected, readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.standing.unreadCount, standing: standingView(read.standing) }
 }
 
 /** What a Message answers, as one bracketed clause: resolved context when the reader's window reaches it, otherwise the bare ref, which the reader can hand to `team_thread message` for the original text. */
@@ -926,13 +982,13 @@ const teamMessage = markAgentTeamPreset(defineTool({
       return [{ type: 'text', text: renderRejection(value).text }]
     },
         // Minimal durable projection for the Host's context timeline: the structured outcome identity, never render text. The effect-anchor fold reads `kind === 'committed'` + threadRef from the persisted tool/result meta; a start's Thread is born in the result.
-    presentationMeta: (_args, value): { kind: string; threadRef?: string; taskRef?: string; threadFacts?: ReturnType<typeof threadMessageSurface> } => {
+    presentationMeta: (_args, value): { kind: string; threadRef?: string; taskRef?: string; teamFacts?: ReturnType<typeof teamMessageSurface> } => {
       if (value.kind === 'committed' && value.threadRef !== undefined) {
         return { kind: value.kind, threadRef: value.threadRef, ...(value.taskRef === undefined ? {} : { taskRef: value.taskRef }) }
       }
       if (value.kind === 'unread_required' || value.kind === 'stale_revision') {
         const rendered = renderRejection(value)
-        return { kind: value.kind, threadFacts: threadMessageSurface(rendered.text, rendered.messages) }
+        return { kind: value.kind, teamFacts: teamMessageSurface(rendered.text, rendered.messages) }
       }
       return { kind: value.kind }
     },
@@ -1193,10 +1249,10 @@ const teamTask = defineTool({
       return [{ type: 'text', text: renderRejection(value).text }]
     },
     // A Claim or Task rejection can carry the same complete Thread facts; binding them lets a reconsidered write pass without a second read. Non-rejection results carry only the outcome kind.
-    presentationMeta: (_args, value): { kind: string; threadRef?: string; taskRef?: string; threadFacts?: ReturnType<typeof threadMessageSurface> } => {
+    presentationMeta: (_args, value): { kind: string; threadRef?: string; taskRef?: string; teamFacts?: ReturnType<typeof teamMessageSurface> } => {
       if ((value.kind === 'unread_required' || value.kind === 'stale_revision') && value.threadRef !== undefined) {
         const rendered = renderRejection(value)
-        return { kind: value.kind, threadFacts: threadMessageSurface(rendered.text, rendered.messages) }
+        return { kind: value.kind, teamFacts: teamMessageSurface(rendered.text, rendered.messages) }
       }
       return { kind: value.kind }
     },

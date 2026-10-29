@@ -3,7 +3,7 @@ import { createToolResultMessage, createUserMessage, freezeMessage, ToolCallId, 
 import { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionMessageProjection } from '@deepseek-ai/dsh-session/surface'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
-import { isFactOnSurface, threadMessageSurface, visibleTeamSurface } from '../src/surface-visibility.ts'
+import { isFactOnSurface, teamMessageSurface, visibleTeamSurface } from '../src/surface-visibility.ts'
 import type { AgentTeamThreadReadFact, AgentTeamThreadRef } from '../src/types.ts'
 import { teamTools } from '../../tool-agent-team/tests/render-text.ts'
 
@@ -108,7 +108,7 @@ describe('only complete Team-sourced facts on the current Session surface satisf
     const target = session()
     const text = 'Direct Team mention\nThread: thread:alpha\nMessage ref: message:a\nMessage: ok'
     const source = { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice' as const, summary: 'Team Inbox',
-      threadFacts: threadMessageSurface(text, [{ threadRef: THREAD, messageRef: 'message:a', body: 'ok' }]) } as const
+      teamFacts: teamMessageSurface(text, [{ threadRef: THREAD, messageRef: 'message:a', body: 'ok' }]) } as const
     const original = target.append('user/message', createUserMessage({ source, content: [{ type: 'text', text }] }), { surfaceOp: 'append' })
     expect(sees(target, 'ok')).toBe(true)
     target.append('test/prune-team-fact', { seq: original.seq, text: 'Summary: ok' })
@@ -119,11 +119,39 @@ describe('only complete Team-sourced facts on the current Session surface satisf
     expect(sees(target, 'ok')).toBe(false)
   })
 
+  it('requires every exact part after restore and rejects a clipped part with retained metadata', () => {
+    const target = session()
+    const tool = teamTools().get('team_thread')!
+    const args = { action: 'message', threadRef: THREAD, messageRef: 'message:a' }
+    const appendPart = (start: number, end: number) => {
+      const value = { kind: 'message', workspaceId: 'workspace:alpha', projectRef: 'project:alpha', threadRef: THREAD,
+        message: { messageRef: 'message:a', sequence: 12, sender: 'human', body: 'abcdef' },
+        messageParts: [{ messageRef: 'message:a', start, end, complete: false }] }
+      const callId = ToolCallId(`part:${start}`)
+      const call = target.append('tool/call', { turn: 1, step: 1, callId, name: 'team_thread', arguments: JSON.stringify(args) })
+      return target.append('tool/result', { turn: 1, step: 1,
+        message: createToolResultMessage({ callId, content: tool.output.render(args, value), isError: false }),
+        meta: tool.output.presentationMeta!(args, value),
+      }, { surfaceOp: 'append', sourceEventSeqs: [call.seq] })
+    }
+    appendPart(4, 6)
+    expect(sees(target, 'abcdef')).toBe(false)
+    appendPart(0, 2)
+    expect(sees(target, 'abcdef')).toBe(false)
+    const middle = appendPart(2, 4)
+    const restored = Session.fromRestore(target.id, [...target.snapshotEvents()], target.header,
+      target.inheritedEventCount, 'shared-frozen', [prune])
+    expect(sees(restored, 'abcdef')).toBe(true)
+    restored.append('test/prune-team-fact', { seq: middle.seq, text: 'Summary: cd' })
+    expect(sees(restored, 'abcdef')).toBe(false)
+    expect(sees(restored, 'abcdef', OTHER_THREAD)).toBe(false)
+  })
+
   it('does not parse nested notification syntax in another message body', () => {
     const target = session()
     const text = 'Direct Team mention\nThread: thread:alpha\nMessage ref: message:a\nMessage: ok'
     target.append('user/message', createUserMessage({ source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox',
-      threadFacts: threadMessageSurface(text, [{ threadRef: OTHER_THREAD, messageRef: 'message:b', body: text }]) },
+      teamFacts: teamMessageSurface(text, [{ threadRef: OTHER_THREAD, messageRef: 'message:b', body: text }]) },
       content: [{ type: 'text', text }] }), { surfaceOp: 'append' })
     expect(sees(target, 'ok')).toBe(false)
   })

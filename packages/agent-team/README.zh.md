@@ -36,7 +36,7 @@ Member reply 必须携带准确的当前 Thread revision，并在一个 operatio
 
 `changes({ scope? }, signal?)` 通过流式 Remote 返回 `AsyncIterable<{ version: number }>`。先发送当前基线，之后发送匹配的 workspace/project/thread/presence 通知；省略 scope 时观察共享投影，不包含 presence。消费者暂停期间只保留最新待发送版本；取消或 Host 释放时关闭流。Client 必须在每次基线到达时重读投影，即使重启后的版本相同或更低。scope、版本和恢复语义见[架构文档](../../docs/architecture/host-authority.zh.md)。Thread read 只改变私有已读状态，不唤醒任何 scope；没有未读或 marker 可消费时不追加 operation。提交后只为受影响的 Members 重算 Inbox hints。
 
-Agent Thread read 根据当前 Session 可见性恢复缺失的背景原文，并明确省略已可见 Message 正文。不改变 Human read 或持久 receipt 的解释；呈现规则见[读取契约](../../docs/team-collaboration/tools.zh.md#team_thread)。
+Agent 的 Thread 与 Main stream read 根据当前 Session 可见性恢复缺失的背景原文，明确省略已可见 Message 正文，并只确认工具能在输出上限内渲染的前缀；Thread read receipt 记录这个界限，旧 receipt 仍按缺省 batch 解释。超长正文按有序分段返回，重复同一请求从缺失段继续。Human read、Remote 参数与持久 receipt 的解释其余不变；呈现规则见[读取契约](../../docs/team-collaboration/tools.zh.md#team_thread)。
 
 M1 支持单个 Host writer。Ledger 永久保留，不提供 snapshot 或 compaction。
 

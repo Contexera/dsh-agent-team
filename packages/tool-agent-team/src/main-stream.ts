@@ -11,6 +11,7 @@ export interface MainEntryView {
   readonly sender?: string
   readonly messageRef?: string
   readonly body?: string
+  readonly bodyOmitted?: boolean
   readonly mentions?: string[]
   readonly replyToMessageRef?: string
   readonly replyTo?: { readonly sender: string; readonly excerpt: string }
@@ -33,7 +34,7 @@ export const MAIN_ENTRY_SCHEMA = {
   type: 'object', additionalProperties: false, properties: {
     sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, occurredAt: { type: 'string', required: true },
     unread: { type: 'boolean', required: true }, direct: { type: 'boolean', required: true },
-    sender: { type: 'string' }, messageRef: { type: 'string' }, body: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } },
+    sender: { type: 'string' }, messageRef: { type: 'string' }, body: { type: 'string' }, bodyOmitted: { type: 'boolean' }, mentions: { type: 'array', items: { type: 'string' } },
     replyToMessageRef: { type: 'string' },
     replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } },
     activity: { type: 'string' }, actor: { type: 'string' }, memberId: { type: 'string' },
@@ -82,7 +83,7 @@ export function mainEntryLine(entry: MainEntryView): string {
   if (entry.kind === 'message') {
     const replies = entry.replyToMessageRef === undefined ? ''
       : entry.replyTo === undefined ? ` (replies to ${entry.replyToMessageRef})` : ` (replies to @${entry.replyTo.sender} — "${entry.replyTo.excerpt}")`
-    return `${entry.sequence}${at} [${entry.sender}]${markers(entry)}${replies} ${entry.messageRef} ${entry.body}`
+    return `${entry.sequence}${at} [${entry.sender}]${markers(entry)}${replies} ${entry.messageRef} ${entry.bodyOmitted ? '— body already in current context; omitted.' : entry.body}`
   }
   if (entry.kind === 'activity') {
     return `${entry.sequence}${at} ${entry.actor} ${entry.activity === 'owner-added' ? 'made' : 'removed'} ${entry.memberId} ${entry.activity === 'owner-added' ? 'an owner' : 'as an owner'}${markers(entry)}`

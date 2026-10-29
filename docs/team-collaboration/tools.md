@@ -26,17 +26,31 @@ The footer routes body reading and acknowledgement to `team_thread read`; the re
 
 `team_thread` reads one Thread. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads.
 
-`read` returns one chronological unread batch and advances the watermark. Its acknowledgement covers that batch; an unread Message whose body is already fully visible in the current context may omit the body and still counts as acknowledged. A read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer.
+`read` returns one chronological unread batch and advances the watermark. The batch defaults to at most 20 facts. Its acknowledgement covers only what the call delivers: the tool selects fewer facts when the rendered result would exceed the output ceiling, and the Host commits that selected prefix. An unread Message whose body is already fully visible in the current context may omit the body and still counts as acknowledged.
 
-A Thread `read` also supplies background for a reader whose context no longer holds the discussion: the anchor when it is missing, plus the Message facts among up to four facts immediately before the unread batch — before the tail when nothing is unread. Background already fully visible in the current Session is not repeated.
+A read that selects no fact and carries no reminder advances nothing and writes no operation; a reminder-only read can still confirm its reminders. An identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer.
 
-Background is orientation, not newly acknowledged work, and it can appear on any read; no permanent “already read” mark decides it. Read first when background is missing; use `history` for older facts and `message` for one Message read back verbatim, including a quote whose original sits outside the page you hold. Neither acknowledges unread work.
+The selection bound is durable for a Thread: the receipt stores `selectedThroughSequence`, so replay reconstructs the same acknowledgement and facts after it stay unread. An identical retry returns that receipt with the current unread picture; it does not acknowledge again. A receipt written before the field existed keeps the default batch. Human reads, Remote parameters, and their read semantics are unchanged.
 
-`beforeSequence` and `limit` page `history`, where the Host bounds `limit` to 1–100 with a default of 20. `message` rejects them. A `read` ignores them: its batch is bounded by design — the Host read request carries neither field — and refusing a read that carried one only cost the call, since a model filling every optional slot reaches for a page size it does not need. What a read wants is the next page of unread, and its footer names how much remains.
+A Thread `read` also supplies background for a reader whose context no longer holds the discussion: the anchor when it is missing, plus the Message facts among up to four facts immediately before the unread batch — before the tail when nothing is unread. A Main stream `read` supplies the same recent Message background, without an anchor. Background already fully visible in the current Session is not repeated, and there is no separate persistent read cache: visibility is the current Session surface alone.
+
+Background is orientation, not newly acknowledged work, and it can appear on any read; no permanent “already read” mark decides it. Read first when background is missing on either read; use `history` for older facts and `message` for one Message read back verbatim, including a quote whose original sits outside the page you hold. Neither acknowledges unread work.
+
+`beforeSequence` and `limit` page `history`, where the Host bounds `limit` to 1–100 with a default of 20. `message` rejects them. A `read` ignores them: its batch is bounded by design — the Host read request carries neither field — and refusing a read that carried one only cost the call, since a model filling every optional slot reaches for a page size it does not need. What a read wants is the next page of unread, and its footer names how much remains. The output ceiling applies to `read` and `message`, not to `history` paging.
+
+`read` and `message` share one total result ceiling of 32768 UTF-16 units, wrappers included. A single Message body may exceed that and still continue while it fits the reading capacity: `min(262144, model contextWindow − 16384)` UTF-16 units. That capacity is a deliberately conservative unit-for-token limit, not a token count; when the model capacity is unknown it is 262144.
+
+A body beyond the total ceiling but within that capacity returns in ordered parts. A body beyond the capacity acknowledges nothing: the result asks the sender to split it into shorter Messages or the reader to use a larger-context model, and repeating the call cannot complete it. Continuation is bounded by that capacity, not unlimited.
 
 The three actions share no maximal render: reading shows the Thread, and only reading does. There is no Attention action here, because Attention is a different question with a different parameter pocket — see `team_attention`.
 
-`message` renders the ref, the sequence with its instant and sender, and then the body whole: this one action exists so a reader can answer a Message it did not receive, so nothing is trimmed and the orientation is unchanged.
+`message` renders the ref, the sequence with its instant and sender, and then the body. A body that fits renders complete and untrimmed; this one action exists so a reader can answer a Message it did not receive, and an oversized body follows the part rule below.
+
+A result that would exceed the output ceiling carries a bounded part of the body instead: ordered character ranges of the same Message, each saying whether the current context now holds the whole body. `message` never acknowledges unread work.
+
+The only continuation is repeating the same `message` request with the same address and `messageRef`; the Host resumes at the first missing segment on the current surface and adds no offset parameter.
+
+`read` follows the same rule: it stops before an incomplete Message rather than acknowledging past it, and a Message counts as acknowledged only when earlier visible parts plus this output cover its whole body. Session trimming or compaction invalidates those parts, so repeating the read or message refills them. `[attachment]` paths in a body remain file-reading locators; a complete Message does not prove that its attachments were read.
 
 A read renders these parts in order, then a footer:
 
@@ -46,11 +60,16 @@ A read renders these parts in order, then a footer:
 4. active Claims only — the current collision surface, one line per Claim (claim ref, owner, direction);
 5. acknowledged Task reminders, when the read carried any;
 6. Host-supplied background under `Background — not newly acknowledged` — the anchor when missing, plus the Message facts among up to four preceding facts, none already visible in the current Session;
-7. the acknowledged facts in sequence with inline unread/direct markers. An acknowledged Message whose body is fully visible in the current context shows `body already in current context; omitted` in place of the body. Derived Task cards render under `Current Task cards — not Thread reading`, at their creation sequence with current status and accountable owner; a card is current state, not Thread reading.
+7. the acknowledged facts in sequence with inline unread/direct markers. An acknowledged Message whose body is fully visible in the current context shows `body already in current context; omitted` in place of the body. Derived Task cards render under `Current Task cards — not Thread reading`, at their creation sequence with current status and accountable owner; a card is current state, not Thread reading;
+8. `Incomplete Message — not acknowledged` — the bounded part returned when an unread or background Message does not fit. An unread Message stays unread until earlier visible parts plus later output cover its whole body; background remains background, not newly acknowledged.
 
 The footer states the read-through sequence and the remaining unread count.
 
 When the read left Thread facts behind it, a further line states how many those are, so a returning reader sees the size of the span it is not looking at instead of assuming the batch is the Thread.
+
+A Main stream `read` renders the same outcome and background rules. It selects the oldest unread entries before adding missing recent background, and acknowledges only the delivered prefix. Task cards or the reader's own Messages cannot hide earlier unread content.
+
+Thread cards render under `Thread cards — Main entry acknowledged, not its Thread`: a card is the current state of the Thread it names, and acknowledging its Main entry never marks that Thread read. `message` on the Main stream reads one entry back by ref with the same part and continuation rule. Human reads of the Main stream are unchanged.
 
 A history page renders a historical outcome with Thread identity, the full anchor on a first page and the bounded subject on continuation pages, the selected facts and any derived Task cards in that sequence window, and the cursor/hasMore footer — never current Claims or a context recommendation. Every activity fact is structured — actor, Task ref, and the Claim refs an activity claimed, completed, accepted, or released — never a bare kind.
 
@@ -76,7 +95,7 @@ Behind rules version 2 `team_message` also has `post`, which speaks in a Project
 
 `start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A non-member gets `not_project_member`. A Task start also takes `accountable` and `sourceThreadRefs`; both are refused on a discussion start and on `post`/`reply` rather than dropped, and the committed start reports the accountable owner it recorded.
 
-`team_thread` `read`, `history` and `message` take either a `threadRef` or a `projectRef` (the Main stream), exactly one. A Main stream read renders the newest entries plus any entry that mentions the reader, acknowledges the stream through its head, and renders Thread cards as current state.
+`team_thread` `read`, `history` and `message` take either a `threadRef` or a `projectRef` (the Main stream), exactly one. The Main stream behavior and its acknowledgement rules are described under `team_thread` above.
 
 Typed rejection results (`unread_required`, `stale_revision`) begin `Not committed` and retain refs and counts with a bounded selection of pending facts. A complete, identified Message-only result with a recognized revision baseline supplies a current token for reconsideration; partial results and unknown baselines route to `read`. This neither acknowledges unread facts nor guarantees the next write. [Mutation fences](boundaries.md#mutation-fences) defines the complete rule.
 

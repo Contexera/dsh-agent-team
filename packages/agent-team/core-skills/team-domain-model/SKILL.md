@@ -5,7 +5,7 @@ description: Reference for how a Project, its owners and members, the Main strea
 
 # Team Domain Model
 
-Stable rules; current state comes from context and Team tools. The Host enforces these rules.
+Stable rules; Team tools provide current state. The Host enforces permissions.
 
 ## Roles and permissions
 
@@ -45,7 +45,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | New discussion | Members following that Main stream | yes |
 | New Task | not Main stream followers; they find it on the board | no |
 
-- A mention or reply never makes someone follow and never delivers earlier messages; entering cold, read `team_thread` first, then `history`/`message` only if needed.
+- Entering cold, `team_thread read` restores background; `history`/`message` fill gaps. Repeat the same read/message request for missing parts; only read acknowledges complete Messages.
 - Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream from the grant, not its Threads. `team_attention` follows or unfollows either face and reads nothing; unfollowing stops ordinary updates only.
 - An ordinary message does not notify the author you answer: when you answer an owner or report a result, mention them or link the reply.
 

@@ -22,17 +22,31 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 `team_thread` 只负责 Thread reading。`threadRef` 是 primary identity。`taskRef` 仅是 released Clients 在 taskful Threads 上使用的 compatibility alias。
 
-`read` 返回一个按 chronology 排列的 unread batch，推进 durable watermark。确认范围就是这一批；正文已完整出现在当前上下文中的未读 Message 可以省略正文，仍计入本次确认。读者没有 unread 时，read 什么都不推进，不追加 operation，也不携带 receipt。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面，重试展示的就是此刻的未读。
+`read` 返回一个按 chronology 排列的 unread batch，推进 durable watermark。batch 缺省最多 20 条 fact。确认范围只覆盖这次调用真正交付的内容：渲染结果会超过输出上限时，工具少选几条 fact，Host 只提交这个被选中的前缀。正文已完整出现在当前上下文中的未读 Message 可以省略正文，仍计入本次确认。
 
-Thread 的 `read` 还会为上下文已不再持有讨论的读者补背景：anchor 缺失时补上，再加未读批次之前最多四条 fact 中筛出的 Message——没有未读时取 tail 之前。当前 Session 中已完整可见的背景不重复。
+没有选中任何 fact 且没有 reminder 可确认的 read 什么都不推进，不追加 operation；只有 reminder 的 read 仍会确认这些 reminders。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面。
 
-背景只用于定位，不是本次新确认的工作，任何一次 read 都可能补；判断不依赖永久的“曾读过”标记。缺少背景时先 read；`history` 用于更旧的 public facts，不改变 read state；`message` 按 ref 逐字读回一条 Message，包括原文不在你手上这一页里的引用。二者都不确认未读。
+Thread 的选择界限是持久的：receipt 存储 `selectedThroughSequence`，replay 据此重建同一次确认，界限之后的 facts 保持未读。相同重试只返回该 receipt 与当前未读画面，不会再次确认。写入该字段之前的 receipt 仍按缺省 batch 解释。Human 的读取、Remote 参数与读取语义都不变。
 
-`beforeSequence` 与 `limit` 为 `history` 翻页，Host 把 `limit` 约束在 1–100、缺省 20。`message` 拒绝它们。`read` 忽略它们：读的批次本就有界——Host 的读请求里没有这两个字段——而拒绝一次带着它们的读只是白费那次调用，因为把每个可选槽位都填满的模型会去要一个它并不需要的页大小。读想要的是下一页未读，页脚会说明还剩多少。
+Thread 的 `read` 还会为上下文已不再持有讨论的读者补背景：anchor 缺失时补上，再加未读批次之前最多四条 fact 中筛出的 Message——没有未读时取 tail 之前。Main stream 的 `read` 补同样的近期 Message 背景，但没有 anchor。当前 Session 中已完整可见的背景不重复，也不存在独立的持久已读库：可见性只来自当前 Session surface。
+
+背景只用于定位，不是本次新确认的工作，任何一次 read 都可能补；判断不依赖永久的“曾读过”标记。缺少背景时先 read（Thread 与 Main stream 同理）；`history` 用于更旧的 public facts，`message` 按 ref 逐字读回一条 Message，包括原文不在你手上这一页里的引用。二者都不确认未读。
+
+`beforeSequence` 与 `limit` 为 `history` 翻页，Host 把 `limit` 约束在 1–100、缺省 20。`message` 拒绝它们。`read` 忽略它们：读的批次本就有界——Host 的读请求里没有这两个字段——而拒绝一次带着它们的读只是白费那次调用，因为把每个可选槽位都填满的模型会去要一个它并不需要的页大小。读想要的是下一页未读，页脚会说明还剩多少。输出上限只约束 `read` 与 `message`，不约束 `history` 分页。
+
+`read` 与 `message` 共用一个结果总上限：32768 个 UTF-16 单位，含包装。单条 Message 正文可以超过该总上限继续分段，只要不超过读取容量：`min(262144, model contextWindow − 16384)` 个 UTF-16 单位。该容量是刻意保守的“一单位对一 token”限制，不是实际 token 计数；模型容量未知时取 262144。
+
+超过总上限但不超过该容量的正文按有序分段返回。超过容量的正文不确认任何内容：结果要求发送者拆成更短的 Messages，或让读者换用更大上下文的模型；重复调用也无法补完。续读受该容量限制，不是无限的。
 
 三个 action 不共享一个最大化渲染：读展示 Thread，也只有读展示 Thread。这里没有任何 Attention action，因为 Attention 是另一个问题、另一套参数口袋——见 `team_attention`。
 
-`message` 渲染 ref、带时刻与发送者的 sequence，然后是整段正文。这个 action 存在的意义就是让读者回答一条它没有收到的 Message，所以一个字都不裁剪，导向语也不变。
+`message` 渲染 ref、带时刻与发送者的 sequence，然后是正文。放得下的正文完整、不裁剪地渲染；这个 action 存在的意义就是让读者回答一条它没有收到的 Message，超长正文按下面的分段规则处理。
+
+会超过输出上限的结果改为携带正文的一段：同一条 Message 的有序字符区间，每段说明当前上下文是否已持有整段正文。`message` 从不确认未读。
+
+唯一的续读方式是重复同一个 `message` 请求，地址与 `messageRef` 不变；Host 从当前 surface 的第一个缺失段继续，不新增 offset 参数。
+
+`read` 遵循同一规则：遇到未完整的 Message 就停下，不越过它确认；只有先前可见片段加本次输出覆盖整段正文时，这条 Message 才计入确认。Session 裁剪或压缩会使片段失效，因此重复 read 或 message 会重新补齐。正文中的 `[attachment]` 路径只提供文件读取入口；Message 完整不代表附件已读。
 
 read 按顺序渲染以下部分，最后是页脚：
 
@@ -42,9 +56,14 @@ read 按顺序渲染以下部分，最后是页脚：
 4. 只含 active Claims：当前 collision surface，每 Claim 一行（claim ref、owner、direction）；
 5. 本次 read 携带的已确认 Task reminders；
 6. `Background — not newly acknowledged` 下的 Host 提供的背景：anchor 缺失时补上，再加此前最多四条 fact 中筛出的 Message，当前 Session 已可见的不再重复；
-7. 按 sequence 排列的已确认 facts，带行内 unread/direct 标记。正文已完整出现在当前上下文中的已确认 Message，用 `body already in current context; omitted` 代替正文。派生 Task 卡在 `Current Task cards — not Thread reading` 下按创建 sequence 渲染，带当前 status 与 accountable owner；卡片是当前状态，不是 Thread reading。
+7. 按 sequence 排列的已确认 facts，带行内 unread/direct 标记。正文已完整出现在当前上下文中的已确认 Message，用 `body already in current context; omitted` 代替正文。派生 Task 卡在 `Current Task cards — not Thread reading` 下按创建 sequence 渲染，带当前 status 与 accountable owner；卡片是当前状态，不是 Thread reading；
+8. `Incomplete Message — not acknowledged`：未读或背景 Message 放不下时返回的有界片段。未读 Message 要等先前可见片段加后续输出覆盖整段正文后才不再未读；背景仍只是背景，不是本次新确认的内容。
 
 页脚给出 read-through sequence 与剩余 unread 计数。若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量。重返的读者借此看到自己没在看的跨度有多大，不把本次 batch 当成整个 Thread。
+
+Main stream 的 `read` 渲染同样的结果与背景规则。页面先选最早的未读条目，再补缺失的近期背景；read 只确认实际交付的前缀，并报告 read-through sequence。Task 卡或读者自己的消息不能遮住更早的未读内容。
+
+Thread 卡渲染在 `Thread cards — Main entry acknowledged, not its Thread` 下：卡片是它所指向 Thread 的当前状态，确认卡片的 Main 条目绝不等于该 Thread 已读。Main stream 的 `message` 按 ref 读回一条条目，分段与续读规则相同。Human 对 Main stream 的读取不变。
 
 history 页渲染历史结果与 Thread 身份。首页给 full anchor，continuation 页给 bounded subject。渲染选中的 facts、该 sequence 窗口内的派生 Task 卡与 cursor/hasMore 页脚，绝无当前 Claims 或上下文建议。每条 activity fact 都是结构化的：actor、Task ref，以及这条 activity claim、完成、接受或 release 的 Claim refs。绝不是裸 kind。当一次 `read` 确认的是一个仍处于 done 状态 Task 的未读验收时，这些事实就写在 facts 里，read 不对读取者的上下文给出任何建议：没有 rollover 工具，也没有代际选择，就没有动作可陈述。
 
@@ -68,7 +87,7 @@ Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读
 
 `start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；非 member 得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
 
-`team_thread` 的 `read`、`history`、`message` 接受 `threadRef` 或 `projectRef`（Main stream），二选一。Main stream 的 read 渲染最新条目及点名读者的条目，确认整条流直到头部，并把 Thread 卡片渲染为当前状态。
+`team_thread` 的 `read`、`history`、`message` 接受 `threadRef` 或 `projectRef`（Main stream），二选一。Main stream 的行为与确认规则见上文 `team_thread` 一节。
 
 类型化拒绝（`unread_required`、`stale_revision`）以 `Not committed` 开头，保留 refs、计数和有界的待处理事实。结果完整、只含身份明确的 Message，且 revision 基线可识别时，会提供当前令牌供重新考虑；部分结果与未知基线指向 `read`。这既不确认未读，也不保证下一次写入成功。完整规则见 [Mutation fences](boundaries.zh.md#mutation-fences)。
 

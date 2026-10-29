@@ -44,8 +44,8 @@ import { decideWakeRecycle, DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig, type W
 import { createAcceptanceReminder, planAcceptanceContext } from './acceptance-context.ts'
 import { installMemberCompaction, DEFAULT_MEMBER_COMPACTION, type MemberCompactionConfig } from './member-compaction.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
-import { surfaceVisibilityProbe, threadMessageSurface, visibleTeamSurface, isFactOnSurface, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER, type RenderedThreadMessage } from './surface-visibility.ts'
-export { threadMessageSurface } from './surface-visibility.ts'
+import { surfaceVisibilityProbe, teamMessageSurface, visibleTeamSurface, isFactOnSurface, isMainEntryOnSurface, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER, type RenderedTeamMessage } from './surface-visibility.ts'
+export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './surface-visibility.ts'
 import { CONTEXT_CONTINUITY_PROJECTION_KEY, carriedInputOf, createTeamContextProjectionDefinition, foldTeamContextProjection, isAcceptanceNotice, TEAM_INBOX_NOTICE_SUMMARY, TEAM_RECOVERY_NOTICE_SUMMARY } from './context-projection.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from './ledger.ts'
 import { AGENT_TEAM_TOOL_NAMES, deepCopyCapabilities, memberMemoryDirectoryName, MemberRuntime, type TurnBoundary } from './member-runtime.ts'
@@ -1313,7 +1313,7 @@ export default class AgentTeam extends TypertRemoteService {
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_RECOVERY_NOTICE_SUMMARY,
-        threadFacts: threadMessageSurface(body, notice?.messages ?? []) },
+        teamFacts: teamMessageSurface(body, notice?.messages ?? []) },
     })
     for (const pending of [...handle.agent.inbox.nextStep, ...handle.agent.inbox.nextTurn]) {
       if (this.isInboxNotice(pending)) this.removeExpectedTeamWake(handle.agent, pending)
@@ -1735,8 +1735,28 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /** Agent-only Main stream read; a read with nothing to acknowledge commits nothing. */
-  async readMainStreamForAgent(agent: Agent, request: AgentTeamMainStreamReadRequest): Promise<AgentTeamMainStreamReadResult> {
-    return this.readMainStreamAs(this.memberCall(agent, request.workspaceId), request)
+  async readMainStreamForAgent(agent: Agent, request: AgentTeamMainStreamReadRequest,
+    select?: (read: AgentTeamMainStreamReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }) => number,
+  ): Promise<AgentTeamMainStreamReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }> {
+    const actor = this.memberCall(agent, request.workspaceId)
+    const result = await this.requireLedger().readMainStream({ ...request, actor }, select === undefined ? undefined
+      : preview => select(this.mainReadContext(agent, actor, request, preview)))
+    if (result.committed && result.value.receipt !== undefined) this.emitCommitted(result.value.receipt)
+    return this.mainReadContext(agent, actor, request, result.value)
+  }
+
+  private mainReadContext(agent: Agent, actor: AgentTeamMemberActor, request: AgentTeamMainStreamReadRequest, read: AgentTeamMainStreamReadResult) {
+    const surface = visibleTeamSurface(agent)
+    const unread = read.entries.filter(entry => entry.unread)
+    const history = this.requireLedger().mainStreamHistory(actor, { ...request,
+      beforeSequence: unread[0]?.sequence ?? read.standing.head + 1, limit: 4 })
+    const background = history.entries.filter(entry => entry.kind === 'message'
+      && !unread.some(fact => fact.sequence === entry.sequence)
+      && !isMainEntryOnSurface(surface, entry, read.projectRef))
+      .map(entry => ({ ...entry, unread: false, direct: false }))
+    const visibleMessageRefs = unread.flatMap(entry => entry.kind === 'message'
+      && isMainEntryOnSurface(surface, entry, read.projectRef) ? [entry.message.messageRef] : [])
+    return { ...read, entries: [...background, ...unread].sort((left, right) => left.sequence - right.sequence), visibleMessageRefs }
   }
 
   mainStreamHistoryForAgent(agent: Agent, request: AgentTeamMainStreamHistoryRequest): AgentTeamMainStreamHistory {
@@ -1828,14 +1848,21 @@ export default class AgentTeam extends TypertRemoteService {
     return this.requireLedger().inbox(actor, { ...request, workspaceId: request.workspaceId })
   }
 
-  async readThreadForAgent(agent: Agent, request: AgentTeamThreadReadRequest): Promise<AgentTeamThreadReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }> {
+  async readThreadForAgent(agent: Agent, request: AgentTeamThreadReadRequest,
+    select?: (read: AgentTeamThreadReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }) => number,
+  ): Promise<AgentTeamThreadReadResult & { readonly visibleMessageRefs: readonly AgentTeamMessageRef[] }> {
     const actor = this.memberCall(agent, request.workspaceId)
-    const result = await this.requireLedger().readThread({ ...request, actor })
-    const surface = visibleTeamSurface(agent)
-    // A read that made no progress commits no operation and carries no receipt.
+    const result = await this.requireLedger().readThread({ ...request, actor }, select === undefined ? undefined
+      : preview => select(this.threadReadContext(agent, actor, request, preview)))
     const receipt = result.committed ? result.value.receipt : undefined
     if (receipt !== undefined) this.emitCommitted(receipt)
-    const snapshot = result.value
+    const read = this.threadReadContext(agent, actor, request, result.committed ? result.value : { ...result.value, reminders: [] })
+    if (receipt !== undefined) this.afterAcceptanceRead(agent, actor.memberId, read)
+    return read
+  }
+
+  private threadReadContext(agent: Agent, actor: AgentTeamMemberActor, request: AgentTeamThreadReadRequest, snapshot: AgentTeamThreadReadResult) {
+    const surface = visibleTeamSurface(agent)
     const unread = snapshot.facts.filter(entry => entry.unread)
     const history = this.requireLedger().threadHistory(actor, { ...request,
       beforeSequence: unread[0]?.fact.sequence ?? snapshot.thread.revision + 1, limit: 4 })
@@ -1848,7 +1875,6 @@ export default class AgentTeam extends TypertRemoteService {
         && !isFactOnSurface(surface, entry, snapshot.thread.threadRef))
     const facts = [...background, ...unread].sort((left, right) => left.fact.sequence - right.fact.sequence)
     const read = this.withReplyContexts({ ...snapshot, facts }, request.workspaceId)
-    if (receipt !== undefined) this.afterAcceptanceRead(agent, actor.memberId, read)
     const visibleMessageRefs = unread.flatMap(entry => entry.fact.kind === 'message'
       && isFactOnSurface(surface, entry, read.thread.threadRef) ? [entry.fact.message.messageRef] : [])
     return { ...read, visibleMessageRefs }
@@ -2829,7 +2855,7 @@ export default class AgentTeam extends TypertRemoteService {
     const notice = this.notificationText(notifications, member.memberId, mainNotifications)
     const hint = createUserMessage({
       content: [{ type: 'text', text: notice.text }],
-      source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, threadFacts: threadMessageSurface(notice.text, notice.messages) },
+      source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, teamFacts: teamMessageSurface(notice.text, notice.messages) },
     })
     this.trackTeamWake(agent, hint)
     const attempt = this.beginInboxDelivery(member.memberId, plan, notice.undelivered)
@@ -2931,10 +2957,10 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): { readonly text: string; readonly messages: readonly RenderedThreadMessage[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
+  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
     const maxCharacters = 32 * 1024
     const sections: string[] = [TEAM_INBOX_NOTICE_SUMMARY]
-    const messages: RenderedThreadMessage[] = []
+    const messages: RenderedTeamMessage[] = []
     let characterCount = sections[0]!.length
     let detailedFactCount = 0
     let omitted = notifications.length > 8
@@ -3006,7 +3032,12 @@ export default class AgentTeam extends TypertRemoteService {
           omitted = true
           break
         }
-        if (append(this.mainNotificationDetail(entry, project))) detailedFactCount += 1
+        if (append(this.mainNotificationDetail(entry, project))) {
+          detailedFactCount += 1
+          if (entry.kind === 'message' && entry.message.body.length <= NOTIFICATION_BODY_MAX_CHARACTERS) {
+            messages.push({ projectRef: project.projectRef, messageRef: entry.message.messageRef, body: entry.message.body })
+          }
+        }
       }
       const ordinary = entries.filter(entry => !entry.direct && entry.kind === 'message')
       if (ordinary.length > 0) {

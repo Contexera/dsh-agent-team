@@ -416,6 +416,13 @@ export interface AgentTeamThreadReadReceipt {
   readonly threadRef: AgentTeamThreadRef
   readonly taskRef?: AgentTeamTaskRef | undefined
   readonly readThroughSequence: number
+  /**
+   * The Host-selected prefix bound this read acknowledged, when the caller
+   * bounded one. It is not the watermark: replay re-derives the acknowledged
+   * batch from the projection plus this bound. Absent means the default batch,
+   * which also keeps every older receipt's meaning.
+   */
+  readonly selectedThroughSequence?: number | undefined
   readonly inbox: AgentTeamInboxDelta
 }
 

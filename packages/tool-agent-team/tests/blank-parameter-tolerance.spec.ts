@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { teamTools } from './render-text.ts'
 
 /**
@@ -66,7 +67,7 @@ function messageHost(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 async function call(tool: ToolDefinition, args: Record<string, unknown>, host: Record<string, unknown>): Promise<unknown> {
-  const agent = { id: 'agent:tool-test', ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
+  const agent = { id: 'agent:tool-test', options: {}, session: Session.create(SessionId('session:tool-test')), ctx: { get: (name: string) => name === 'agentTeam' ? host : undefined } }
   return await tool.execute(args, { agent, callId: 'call:1', signal: new AbortController().signal } as never)
 }
 

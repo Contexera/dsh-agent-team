@@ -32,9 +32,9 @@ async function discussion(kind: 'discussion' | 'task' = 'discussion') {
     await agent.whenIdle()
     return result
   }
-  async function read() {
+  async function read(action: 'read' | 'message' = 'read', messageRef?: string) {
     const before = adapter.requests.length
-    adapter.enqueue(toolCallResponse(`read-${before}`, 'team_thread', { action: 'read', threadRef: started.thread.threadRef }))
+    adapter.enqueue(toolCallResponse(`read-${before}`, 'team_thread', { action, threadRef: started.thread.threadRef, ...(messageRef === undefined ? {} : { messageRef }) }))
     adapter.enqueue(textResponse('Context checked.'))
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'Check this discussion.' }], source: { kind: 'user' } }))
     await waitFor(() => adapter.requests.length === before + 2 ? true : undefined)
@@ -46,6 +46,53 @@ async function discussion(kind: 'discussion' | 'task' = 'discussion') {
 }
 
 describe('Thread read uses the current Session context', () => {
+  it('recovers a missing middle part after compaction and confirms only when all parts are visible', async () => {
+    const { ctx, agent, threadRef, reply, read } = await discussion()
+    const message = await reply('多段正文🙂需要全部仍在上下文。'.repeat(7000) + '正文结束。')
+    const parts: string[] = []
+    for (let index = 0; index < 6; index += 1) {
+      const part = await read('message', message.message.messageRef)
+      parts.push(part)
+      if (part.includes('complete in current context')) break
+    }
+    expect(parts.length).toBeGreaterThanOrEqual(3)
+    expect(parts.at(-1)).toContain('complete in current context')
+    expect(ctx.agentTeam.inboxForAgent(agent, {}).items.find(item => item.thread.threadRef === threadRef)?.unreadCount).toBe(1)
+    const results = agent.session.snapshotEvents().filter(event => event.type === 'tool/result')
+    const middle = results[1]!
+    agent.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'A middle part was summarized.' }], source: { kind: 'user' } }), {
+      surfaceOp: { op: 'replace', startSeq: middle.seq, endSeq: middle.seq }, sourceEventSeqs: [middle.seq],
+    })
+    const recovery = [await read()]
+    if (ctx.agentTeam.inboxForAgent(agent, {}).items.some(item => item.thread.threadRef === threadRef)) recovery.push(await read())
+    expect(recovery.at(-1)).toContain('acknowledged 1 unread update(s)')
+    const missingBody = /<message-part[^>]*>\n([\s\S]*?)\n<\/message-part>/.exec(parts[1]!)![1]!
+    const recoveredBody = recovery.flatMap(text => [...text.matchAll(/<message-part[^>]*>\n([\s\S]*?)\n<\/message-part>/g)].map(match => match[1]!)).join('')
+    expect(recoveredBody).toBe(missingBody)
+    expect(ctx.agentTeam.inboxForAgent(agent, {}).items.find(item => item.thread.threadRef === threadRef)).toBeUndefined()
+  })
+
+  it('continues a long Message without acknowledging it or a later Message before all parts are supplied', async () => {
+    const { ctx, agent, threadRef, reply, read } = await discussion()
+    const long = '安装路径🙂保留空格。'.repeat(5000) + '最后一段必须保留。'
+    await reply(long)
+    const later = await reply('A later update must not pass the incomplete Message.')
+    const first = await read()
+    expect(first.length).toBeLessThanOrEqual(32 * 1024)
+    expect(first).toContain('Message part')
+    expect(first).toContain('not acknowledged')
+    expect(first).not.toContain(later.message.body)
+    expect(ctx.agentTeam.inboxForAgent(agent, {}).items.find(item => item.thread.threadRef === threadRef)?.unreadCount).toBe(2)
+    const parts = [first]
+    for (let index = 0; index < 8 && ctx.agentTeam.inboxForAgent(agent, {}).items.some(item => item.thread.threadRef === threadRef); index += 1) parts.push(await read())
+    expect(parts.every(part => part.length <= 32 * 1024)).toBe(true)
+    expect(parts.some(part => part.includes('最后一段必须保留。'))).toBe(true)
+    expect(parts.some(part => part.includes(later.message.body))).toBe(true)
+    expect(ctx.agentTeam.inboxForAgent(agent, {}).items.find(item => item.thread.threadRef === threadRef)).toBeUndefined()
+    const bodyParts = parts.flatMap(text => [...text.matchAll(/<message-part[^>]*>\n([\s\S]*?)\n<\/message-part>/g)].map(match => match[1]!))
+    expect(bodyParts.join('')).toBe(long)
+  })
+
   it('provides the Task and discussion before the Member checks the board and claims a direction', async () => {
     const { ctx, workspaceId, adapter, agent, threadRef, taskRef, anchor, reply, read } = await discussion('task')
     await reply('Verify installation from the signed package, not the source checkout.')
@@ -67,6 +114,23 @@ describe('Thread read uses the current Session context', () => {
     expect(results.at(-1)).toContain('Claim created')
     expect(ctx.agentTeam.threadHistoryForAgent(agent, { workspaceId, threadRef }).claims)
       .toEqual(expect.arrayContaining([expect.objectContaining({ direction: 'Reproduce Windows installation from the signed package', state: 'active' })]))
+  })
+
+  it('budgets long background once without turning it into a new acknowledgement', async () => {
+    const { ctx, workspaceId, agent, threadRef, reply, read } = await discussion()
+    const message = await reply('Background body with Unicode🙂. '.repeat(2400))
+    await ctx.agentTeam.readThreadForAgent(agent, { requestId: requestId('already-read'), workspaceId, threadRef })
+    const operations = ctx.agentTeam.status().operationCount
+    const parts: string[] = []
+    for (let index = 0; index < 5; index += 1) {
+      const text = await read()
+      expect(text.length).toBeLessThanOrEqual(32 * 1024)
+      expect(text).not.toContain('Read committed')
+      parts.push(...[...text.matchAll(/<message-part[^>]*>\n([\s\S]*?)\n<\/message-part>/g)].map(match => match[1]!))
+      if (text.includes('complete in current context')) break
+    }
+    expect(parts.join('')).toBe(message.message.body)
+    expect(ctx.agentTeam.status().operationCount).toBe(operations)
   })
 
   it('restores recent discussion after compaction with no unread, then avoids repeating that background', async () => {
