@@ -61,6 +61,10 @@ function optionTexts(ui: ReturnType<typeof render>): readonly string[] {
   return [...ui.container.querySelectorAll('[role="option"]')].map(row => row.textContent ?? '')
 }
 
+function groups(ui: ReturnType<typeof render>): readonly (string | null)[] {
+  return [...ui.container.querySelectorAll('[role="option"][data-mention-group]')].map(row => row.getAttribute('data-mention-group'))
+}
+
 afterEach(cleanup)
 
 describe('TeamComposer mention menu', () => {
@@ -70,41 +74,49 @@ describe('TeamComposer mention menu', () => {
 
   it('offers every Workspace participant, not only the Project roster', () => {
     const drafts = new TeamDraftStore()
-    const ui = render(<TeamComposer members={[inside, outsider]} projectPeerMemberIds={new Set([inside.member.memberId])} drafts={drafts}
+    const ui = render(<TeamComposer members={[inside, outsider]} projectMemberIds={new Set([inside.member.memberId])} drafts={drafts}
       draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@')
     const texts = optionTexts(ui)
     expect(texts.some(text => text.includes('insider'))).toBe(true)
     expect(texts.some(text => text.includes('outsider'))).toBe(true)
+    // The Project member sorts before the Workspace peer a pick would enroll.
+    expect(groups(ui)).toEqual(['project', 'other'])
   })
 
-  it('ranks this Thread\'s followers above other Project participants and the rest', () => {
+  it('lists a Thread\'s follower above another Project member and a Workspace peer', () => {
     const drafts = new TeamDraftStore()
     const ui = render(<TeamComposer members={[outsider, inside, follower]}
       followerMemberIds={new Set([follower.member.memberId])}
-      projectPeerMemberIds={new Set([inside.member.memberId])}
-      drafts={drafts} draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
+      projectMemberIds={new Set([inside.member.memberId, follower.member.memberId])}
+      drafts={drafts} draftKey={'thread:thread:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@')
     const memberRows = optionTexts(ui).filter(text => /insider|outsider|follower/u.test(text))
     expect(memberRows[0]).toContain('follower')
     expect(memberRows[1]).toContain('insider')
     expect(memberRows[2]).toContain('outsider')
-    // One source of truth for the row's visual weight: the tier is a row
-    // attribute — the tier's rank, the numeric form the browser journey reads —
-    // so styling cannot disagree with the sort order.
-    const tiers = [...ui.container.querySelectorAll('[role="option"][data-mention-tier]')].map(row => row.getAttribute('data-mention-tier'))
-    expect(tiers).toEqual(['0', '1', '2'])
+    expect(groups(ui)).toEqual(['thread', 'project', 'other'])
   })
 
   it('offers no @all and keeps a typed @all as plain text', () => {
     const drafts = new TeamDraftStore()
-    const ui = render(<TeamComposer members={[inside]} projectPeerMemberIds={new Set([inside.member.memberId])} drafts={drafts}
+    const ui = render(<TeamComposer members={[inside]} projectMemberIds={new Set([inside.member.memberId])} drafts={drafts}
       draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@')
     expect(optionTexts(ui).some(text => text.includes('通知所有成员'))).toBe(false)
     expect(optionTexts(ui).some(text => text.includes('@insider'))).toBe(true)
+  })
+
+  it('shows an empty-state line when a query matches nobody, rather than closing', () => {
+    const drafts = new TeamDraftStore()
+    const ui = render(<TeamComposer members={[inside]} projectMemberIds={new Set([inside.member.memberId])} drafts={drafts}
+      draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
+
+    openMenu(ui, '@zzz')
+    expect(optionTexts(ui)).toEqual([])
+    expect(ui.container.textContent).toContain(zh.mentionNoMatch)
   })
 })

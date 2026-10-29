@@ -33,6 +33,7 @@ interface TeamMainStreamProps {
   readonly humanMemberId?: AgentTeamMemberId | undefined
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly projectMemberIds: ReadonlySet<AgentTeamMemberId>
+  readonly projectOwnerIds: ReadonlySet<AgentTeamMemberId>
   readonly drafts: TeamDraftStore
   readonly mainStreamHistory: TeamConversationProps['mainStreamHistory']
   readonly readMainStream: TeamConversationProps['readMainStream']
@@ -58,7 +59,7 @@ type MessageEntry = Extract<AgentTeamMainTimelineEntry, { readonly kind: 'messag
 
 /** Rules version 2 Project reading: the Main stream timeline and its composer. Message, activity and card entries arrive from the Host already ordered. */
 export function TeamMainStream({
-  workspaceId, projectRef, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts,
+  workspaceId, projectRef, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, projectOwnerIds, drafts,
   mainStreamHistory, readMainStream, postMainMessage, startThread, putAttachment, getAttachment, subscribeChanges,
   openRef, onResolveTaskRefs, onResolveThreadRefs, projectNameOf, memberOf, openMemberSession, onOpenDiscussion, onOpenTask, onTaskStarted, t,
 }: TeamMainStreamProps) {
@@ -280,7 +281,8 @@ export function TeamMainStream({
     <TeamComposer
       key={draftKey}
       members={members}
-      projectPeerMemberIds={projectMemberIds}
+      projectMemberIds={projectMemberIds}
+      ownerMemberIds={projectOwnerIds}
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}

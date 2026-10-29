@@ -46,6 +46,7 @@ interface TeamProjectPanelProps {
   /** The Project page's roster: the panel reads it instead of pulling its own copy. */
   readonly members: readonly AgentTeamClientMemberStatus[]
   readonly projectMemberIds: ReadonlySet<AgentTeamMemberId>
+  readonly projectOwnerIds: ReadonlySet<AgentTeamMemberId>
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -79,7 +80,7 @@ const factSender = (fact: AgentTeamThreadFact): AgentTeamMemberId | undefined =>
 const factOccurredAt = (fact: AgentTeamThreadFact): string | undefined => fact.kind === 'message' ? fact.message.occurredAt : undefined
 
 /** A taskless Thread's whole face beside its feed. Claims and acceptance stay on the Thread page. */
-export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, anchor, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, subscribeChanges, selectThread, selectDiscussion, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
+export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, anchor, projectName, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, projectOwnerIds, drafts, getAttachment, putAttachment, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, subscribeChanges, selectThread, selectDiscussion, selectProject, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, projectNameOf, memberOf, taskNumberOf, onRead, onPromoted, onClose, t }: TeamProjectPanelProps) {
   const [openCard, setOpenCard] = useState<AgentTeamMessageRef>()
   // The promote button's own label: a reply send also raises the shared `pending` gate, and must not retitle it.
   const [mutating, setMutating] = useState<'promote' | undefined>()
@@ -309,7 +310,8 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       key={draftKey}
       members={members}
       followerMemberIds={followerIds}
-      projectPeerMemberIds={projectMemberIds}
+      projectMemberIds={projectMemberIds}
+      ownerMemberIds={projectOwnerIds}
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}

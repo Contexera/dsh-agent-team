@@ -195,6 +195,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   const taskClaims = activeProjection?.claims ?? []
   const effectiveProjectRef = task?.projectRef ?? projectRef
   const projectMemberIds = useMemo(() => new Set(projectView?.members.filter(item => item.projectRef === effectiveProjectRef).map(item => item.memberId) ?? []), [projectView, effectiveProjectRef])
+  const projectOwnerIds = useMemo(() => new Set((projectView?.owners ?? []).filter(item => item.projectRef === effectiveProjectRef).map(item => item.memberId)), [projectView, effectiveProjectRef])
   const projectMembers = members.filter(status => projectMemberIds.size === 0 || projectMemberIds.has(status.member.memberId))
   const mentionHandlesMap = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
   const humanIdentity: TeamAvatarHuman | undefined = projectView?.humanMemberId === undefined
@@ -633,7 +634,8 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
       key={draftKey}
       members={members}
       followerMemberIds={followerIds}
-      projectPeerMemberIds={projectMemberIds}
+      projectMemberIds={projectMemberIds}
+      ownerMemberIds={projectOwnerIds}
       drafts={drafts}
       draftKey={draftKey}
       pending={pending}

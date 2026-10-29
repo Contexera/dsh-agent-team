@@ -46,8 +46,9 @@ function status(handle: string, memberId: string): AgentTeamClientMemberStatus {
   }
 }
 
-// One Member per tier: follows this Thread, takes part in the Project only,
-// and the rest of the Workspace.
+// One Member per relation: a Project owner, a follower of this Thread, another
+// Project member, and a Workspace peer the Project does not carry.
+const owner = status('@owner', 'member:owner')
 const follower = status('@follower', 'member:follower')
 const projectPeer = status('@projectpeer', 'member:projectpeer')
 const stranger = status('@stranger', 'member:stranger')
@@ -62,7 +63,7 @@ function openMenu(ui: ReturnType<typeof render>, text: string): void {
 }
 
 function rows(ui: ReturnType<typeof render>): readonly HTMLElement[] {
-  return [...ui.container.querySelectorAll<HTMLElement>('[role="option"][data-mention-tier]')]
+  return [...ui.container.querySelectorAll<HTMLElement>('[role="option"][data-mention-group]')]
 }
 
 function rowOf(ui: ReturnType<typeof render>, handle: string): HTMLElement {
@@ -73,37 +74,50 @@ function rowOf(ui: ReturnType<typeof render>, handle: string): HTMLElement {
 
 function renderComposer(draftKey: string): ReturnType<typeof render> {
   const drafts = new TeamDraftStore()
-  return render(<TeamComposer members={[stranger, projectPeer, follower]}
+  return render(<TeamComposer members={[stranger, projectPeer, follower, owner]}
     followerMemberIds={new Set([follower.member.memberId])}
-    projectPeerMemberIds={new Set([projectPeer.member.memberId])}
+    projectMemberIds={new Set([owner.member.memberId, follower.member.memberId, projectPeer.member.memberId])}
+    ownerMemberIds={new Set([owner.member.memberId])}
     drafts={drafts} draftKey={draftKey as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 }
 
 afterEach(cleanup)
 
-describe('mention row weight', () => {
+describe('mention row grouping and weight', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', storage())
   })
 
-  it('dims a name by whether the Member is in the conversation being written into', () => {
+  it('puts each Member in the group its relation names, with the owner leading', () => {
     const ui = renderComposer('thread:thread:one')
     openMenu(ui, '@')
 
-    // Weight reads whether the Member is in this Thread. A Project peer takes
-    // part in the Project yet not in this Thread, so its name drops a weight
-    // even though the Project counts it as a participant.
+    expect(rows(ui).map(row => row.getAttribute('data-mention-group'))).toEqual(['owner', 'thread', 'project', 'other'])
+    expect(rowOf(ui, 'owner').getAttribute('data-mention-group')).toBe('owner')
+    expect(rowOf(ui, 'follower').getAttribute('data-mention-group')).toBe('thread')
+    expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-group')).toBe('project')
+    expect(rowOf(ui, 'stranger').getAttribute('data-mention-group')).toBe('other')
+    // Each heading names its relation in words, so the grouping is readable, not colour-only.
+    for (const label of [zh.mentionGroupOwner, zh.mentionGroupThread, zh.mentionGroupProject, zh.mentionGroupOther]) {
+      expect(ui.container.textContent).toContain(label)
+    }
+  })
+
+  it('dims only a Member outside the conversation being written into', () => {
+    const ui = renderComposer('thread:thread:one')
+    openMenu(ui, '@')
+
+    expect(rowOf(ui, 'owner').getAttribute('data-mention-inside')).toBe('true')
     expect(rowOf(ui, 'follower').getAttribute('data-mention-inside')).toBe('true')
-    expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-inside')).toBe('false')
+    expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-inside')).toBe('true')
     expect(rowOf(ui, 'stranger').getAttribute('data-mention-inside')).toBe('false')
   })
 
-  it('keeps a Project peer at full weight on a Project send, where it is inside', () => {
+  it('treats every Project member as inside on a Project send', () => {
     const ui = renderComposer('project:project:one')
     openMenu(ui, '@')
 
-    // The two surfaces disagree about the same tier: the Project is the
-    // conversation here, so taking part in it is taking part in this.
+    // A follower is still a Project member here, so only the Workspace peer is outside.
     expect(rowOf(ui, 'follower').getAttribute('data-mention-inside')).toBe('true')
     expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-inside')).toBe('true')
     expect(rowOf(ui, 'stranger').getAttribute('data-mention-inside')).toBe('false')

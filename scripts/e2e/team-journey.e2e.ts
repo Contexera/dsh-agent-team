@@ -315,20 +315,23 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await rampComposer.fill('@')
   const rampMenu = page.getByRole('listbox', { name: '提及成员建议' })
   await rampMenu.waitFor()
-  const rampWide = await rampMenu.evaluate((element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-tier]')]
+  const rampWide = await rampMenu.evaluate((element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-group]')]
     .map(row => {
       const name = row.querySelector<HTMLElement>('[class*="mentionName"]')!
       return {
-        tier: row.getAttribute('data-mention-tier') ?? '',
+        group: row.getAttribute('data-mention-group') ?? '',
         inside: row.getAttribute('data-mention-inside') ?? '',
         nameColor: getComputedStyle(name).color,
       }
     }))
   expect(rampWide.length).toBeGreaterThan(0)
+  // A brand-new Project carries no Member yet, so every Workspace candidate is
+  // a peer a pick would enroll — the 'other' group, dimmed and named as such.
   for (const row of rampWide) {
-    expect(row.tier).toBe('2')
+    expect(row.group).toBe('other')
     expect(row.inside).toBe('false')
   }
+  expect(await rampMenu.textContent()).toContain('选择后加入本项目')
   // Resolve the alias the rule names so the expectation follows a theme swap.
   const labelSecondary = await resolveAliasColor(page, '--dsw-alias-label-secondary')
   expect([...new Set(rampWide.map(row => row.nameColor))]).toEqual([labelSecondary])
@@ -338,7 +341,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   // Measure used values: the element never answers a container query about its
   // own visibility.
   const rampNarrow = await rampMenu
-    .evaluate((element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-tier]')]
+    .evaluate((element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-group]')]
       .map(row => ({
         nameColor: getComputedStyle(row.querySelector<HTMLElement>('[class*="mentionName"]')!).color,
         descriptionDisplay: getComputedStyle(row.querySelector<HTMLElement>('[class*="mentionDescription"]')!).display,
@@ -548,19 +551,19 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   expect(menuSurface.fill).toContain('rgba(')
   expect(menuSurface.radius).toBe(menuSurface.surfaceTier)
   expect(menuSurface.rowRadius).toBe(shippedRowRadius)
-  // Weight is the row's only distinction between a Member already in this Project
-  // and one the Project never carried.
+  // Each row states its relation to this Project on `data-mention-group`; only a
+  // Member the Project does not carry is dimmed (the 'other' group).
   const projectMentionRows = await page.getByRole('listbox', { name: '提及成员建议' })
-    .evaluate((element: Element) => [...element.querySelectorAll('[role="option"][data-mention-tier]')].map(row => ({
-      tier: row.getAttribute('data-mention-tier') ?? '',
+    .evaluate((element: Element) => [...element.querySelectorAll('[role="option"][data-mention-group]')].map(row => ({
+      group: row.getAttribute('data-mention-group') ?? '',
       inside: row.getAttribute('data-mention-inside') ?? '',
       text: row.textContent ?? '',
     })))
   expect(projectMentionRows.length).toBeGreaterThan(1)
   // Every candidate already takes part in this Project, so none is dimmed; the
-  // outside tier is driven by the ramp case and the component spec.
+  // outside group is driven by the ramp case and the component spec.
   for (const row of projectMentionRows) {
-    expect(row.inside).toBe(String(row.tier !== '2'))
+    expect(row.inside).toBe(String(row.group !== 'other'))
     expect(row.text).not.toContain('需确认')
   }
   expect([...new Set(projectMentionRows.map(row => row.inside))]).toEqual(['true'])
@@ -1297,49 +1300,50 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('消息内容')
   // Authored with '@': a bare name is prose the Host does not deliver to.
   await invitationComposer.fill('@')
-  // reviewer does not follow Task #1's Thread, so its row is the outside one.
-  // Weight is the only distinction, so this measures each name's resolved colour
-  // at both widths. Read the unfiltered menu: a query would leave one row, which
-  // cannot show that two groups differ.
+  // reviewer does not follow Task #1's Thread, so it lands outside the Thread
+  // group. Read the unfiltered menu: a query would leave one row, which cannot
+  // show that two groups differ.
   const invitationMenu = page.getByRole('listbox', { name: '提及成员建议' })
   await invitationMenu.waitFor()
-  const invitationRowState = (element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-tier]')]
+  const invitationRowState = (element: Element) => [...element.querySelectorAll<HTMLElement>('[role="option"][data-mention-group]')]
     .map(row => {
       const name = row.querySelector<HTMLElement>('[class*="mentionName"]')!
       const description = row.querySelector<HTMLElement>('[class*="mentionDescription"]')
       return {
-        tier: row.getAttribute('data-mention-tier') ?? '',
+        group: row.getAttribute('data-mention-group') ?? '',
         inside: row.getAttribute('data-mention-inside') ?? '',
         nameColor: getComputedStyle(name).color,
         text: row.textContent ?? '',
         descriptionDisplay: description === null ? 'missing' : getComputedStyle(description).display,
       }
     })
-  // Follower ranking arrives with the page's observation read, so the menu may
-  // open before the ranking lands; poll until both weights exist.
-  await expect.poll(() => invitationMenu.evaluate((element: Element) => [...element.querySelectorAll('[role="option"][data-mention-tier]')].some(row => row.getAttribute('data-mention-tier') === '0')
-    && [...element.querySelectorAll('[role="option"][data-mention-tier]')].some(row => row.getAttribute('data-mention-tier') !== '0')), { timeout: 10_000 }).toBe(true)
+  // The follower set arrives with the page's observation read, so the menu may
+  // open before grouping lands; poll until a Thread group and a sibling exist.
+  await expect.poll(() => invitationMenu.evaluate((element: Element) => [...element.querySelectorAll('[role="option"][data-mention-group]')].some(row => row.getAttribute('data-mention-group') === 'thread')
+    && [...element.querySelectorAll('[role="option"][data-mention-group]')].some(row => row.getAttribute('data-mention-group') !== 'thread')), { timeout: 10_000 }).toBe(true)
   const invitationRows = await invitationMenu.evaluate(invitationRowState)
 
-  expect(invitationRows.some(row => row.tier !== '0')).toBe(true)
+  expect(invitationRows.some(row => row.group !== 'thread')).toBe(true)
   const invitationSecondary = await resolveAliasColor(page, '--dsw-alias-label-secondary')
   const invitationPrimary = await resolveAliasColor(page, '--dsw-alias-label-primary')
   for (const row of invitationRows) {
-    expect(row.inside).toBe(String(row.tier === '0'))
-    expect(row.nameColor).toBe(row.tier === '0' ? invitationPrimary : invitationSecondary)
+    // Only a Member the Project does not carry ('other') drops a weight; a Project
+    // member outside this Thread is grouped apart, not dimmed.
+    expect(row.inside).toBe(String(row.group !== 'other'))
+    expect(row.nameColor).toBe(row.group === 'other' ? invitationSecondary : invitationPrimary)
     expect(row.text).not.toContain('需确认')
   }
   await page.screenshot({ path: join(UI04_SHOTS, 'thread-mention-weight.png'), fullPage: true })
-  // The narrow branch drops the description, not the weight. Measure used values:
+  // The narrow branch drops the description, not the grouping. Measure used values:
   // the element never answers a container query about its own visibility.
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   const invitationNarrow = await invitationMenu.evaluate(invitationRowState)
   expect(invitationNarrow.every(row => row.descriptionDisplay === 'none')).toBe(true)
-  expect(invitationNarrow.some(row => row.tier === '0')).toBe(true)
-  expect(invitationNarrow.some(row => row.tier !== '0')).toBe(true)
+  expect(invitationNarrow.some(row => row.group === 'thread')).toBe(true)
+  expect(invitationNarrow.some(row => row.group !== 'thread')).toBe(true)
   for (const row of invitationNarrow) {
-    expect(row.nameColor).toBe(row.tier === '0' ? invitationPrimary : invitationSecondary)
+    expect(row.nameColor).toBe(row.group === 'other' ? invitationSecondary : invitationPrimary)
   }
   await page.screenshot({ path: join(UI04_SHOTS, 'thread-mention-weight-narrow.png'), fullPage: true })
   await page.setViewportSize({ width: 1440, height: 960 })
@@ -2161,15 +2165,14 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.screenshot({ path: join(UI05_SHOTS, 'active-thread.png'), fullPage: true })
 
   const threadComposer = page.getByRole('textbox', { name: '消息内容' })
-  // On a Thread, weight tracks following: a Member taking part in the Project
-  // through another Thread is outside. It is the row's only distinction.
+  // Both Members here follow this Thread, so every row sits in the Thread group.
   await threadComposer.fill('@')
   const mentionMenu = page.getByRole('listbox', { name: '提及成员建议' })
   await mentionMenu.waitFor()
-  const rowState = (element: Element) => [...element.querySelectorAll('[role="option"][data-mention-tier]')].map(row => {
+  const rowState = (element: Element) => [...element.querySelectorAll('[role="option"][data-mention-group]')].map(row => {
     const description = row.querySelector('[class*="mentionDescription"]')
     return {
-      tier: row.getAttribute('data-mention-tier') ?? '',
+      group: row.getAttribute('data-mention-group') ?? '',
       inside: row.getAttribute('data-mention-inside') ?? '',
       text: row.textContent ?? '',
       descriptionDisplay: description === null ? 'missing' : getComputedStyle(description).display,
@@ -2178,15 +2181,15 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   const threadRows = await mentionMenu.evaluate(rowState)
   expect(threadRows.length).toBeGreaterThan(1)
   for (const row of threadRows) {
-    expect(row.inside).toBe(String(row.tier === '0'))
+    expect(row.inside).toBe(String(row.group !== 'other'))
     expect(row.text).not.toContain('需确认')
   }
-  // Both Members follow this Thread, so none is dimmed; the outside case needs a
-  // Member the Thread does not carry (invitation step above, component spec).
-  expect([...new Set(threadRows.map(row => row.tier))]).toEqual(['0'])
+  // Both Members follow this Thread, so all sit in one group; the outside case
+  // needs a Member the Thread does not carry (invitation step above, component spec).
+  expect([...new Set(threadRows.map(row => row.group))]).toEqual(['thread'])
   expect(new Set(threadRows.map(row => row.inside))).toEqual(new Set(['true']))
   await page.screenshot({ path: join(UI05_SHOTS, 'thread-mention-rows.png'), fullPage: true })
-  // Below 600px the description drops but the weight must survive; both groups
+  // Below 600px the description drops but the grouping must survive; both groups
   // were covered at the invitation step.
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('[data-sidebar-collapsed="true"]').waitFor()

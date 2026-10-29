@@ -91,6 +91,30 @@
   box-shadow: var(--dsw-elevation-prominent);
 }
 
+/* A relation group's heading names why its rows sit together, so the ranking is
+   legible instead of an invisible sort. Weight (name colour) still carries the
+   only per-row fact: whether the Member is already inside this conversation. */
+.mentionGroupLabel {
+  margin: 0;
+  padding: 6px 10px 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.mentionGroup + .mentionGroup .mentionGroupLabel {
+  padding-top: 8px;
+}
+
+/* Shown only while a typed query matches nobody; the menu never just disappears. */
+.mentionEmpty {
+  margin: 0;
+  padding: 12px 10px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .mentionOption {
   align-items: center;
   display: grid;
@@ -338,6 +362,11 @@
   margin: 0;
   overflow-wrap: anywhere;
   padding: 0 16px;
+}
+
+/* The mention that also changes Project membership: same quiet voice, joined to the notify line. */
+.notifyJoin {
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-tertiary));
 }
 
 .error {

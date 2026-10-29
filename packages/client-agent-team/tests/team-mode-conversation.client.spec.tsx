@@ -698,11 +698,13 @@ describe('Team conversation surfaces', () => {
       const replyMenu = await b.view.findByRole('listbox')
       // The seeded Project has no membership rows, so the Thread composer sees
       // the whole roster; the follower ranks above that roster order once the
-      // observation read from the first paint round lands.
+      // observation read from the first paint round lands. An offline Member is
+      // kept (a durable mention waits for them), sorted to the end of its group.
       await waitFor(() => expect(within(replyMenu).getAllByRole('option').map(option => option.textContent)).toEqual([
         expect.stringContaining('@worker'),
         expect.stringContaining('@builder'),
         expect.stringContaining('@failed'),
+        expect.stringContaining('@offline'),
       ]))
       fireEvent.keyDown(replyInput, { key: 'ArrowDown' })
       expect(within(replyMenu).getAllByRole('option')[1]?.getAttribute('aria-selected')).toBe('true')

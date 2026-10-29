@@ -5,7 +5,7 @@ import { IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchore
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
-import { mentionSurfaceOf, mentionTierIsParticipant } from './mention-presentation.ts'
+import { buildMentionGroups, enrollmentIds, mentionSurfaceOf, type MentionGroupKey } from './mention-presentation.ts'
 import { HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
@@ -16,11 +16,6 @@ interface MentionMatch {
   readonly query: string
 }
 
-/** How directly a mention reaches a Member: thread follower (delivers at once), Project peer, or the rest of the workspace. Ranking and row styling both read it. */
-export type MentionTier = 'thread-follower' | 'project-peer' | 'workspace'
-
-const MENTION_TIER_RANK = { 'thread-follower': 0, 'project-peer': 1, workspace: 2 } as const satisfies Record<MentionTier, number>
-
 function findMention(draft: string, caret: number): MentionMatch | undefined {
   const beforeCaret = draft.slice(0, caret)
   if (beforeCaret.length === 0 || /\s/u.test(beforeCaret.at(-1) ?? '')) return undefined
@@ -30,28 +25,6 @@ function findMention(draft: string, caret: number): MentionMatch | undefined {
   if (at < tokenStart) return undefined
   if (at > 0 && /[\p{L}\p{N}_]/u.test(beforeCaret[at - 1]!)) return undefined
   return { start: at, end: caret, query: beforeCaret.slice(at + 1) }
-}
-
-function mentionCandidates(members: readonly AgentTeamClientMemberStatus[], query: string): readonly AgentTeamClientMemberStatus[] {
-  const normalized = query.toLocaleLowerCase()
-  return members.filter(status => status.presence !== 'unavailable'
-    && status.member.state !== 'inactive'
-    && status.member.state !== 'archived'
-    && status.member.handle.toLocaleLowerCase().startsWith(normalized))
-}
-
-/** A hint for the picker only: every tier stays eligible, but a lower tier only ranks lower. */
-function mentionTier(status: AgentTeamClientMemberStatus, followers: ReadonlySet<AgentTeamMemberId> | undefined,
-  projectPeers: ReadonlySet<AgentTeamMemberId> | undefined): MentionTier {
-  if (followers?.has(status.member.memberId) === true) return 'thread-follower'
-  if (projectPeers?.has(status.member.memberId) === true) return 'project-peer'
-  return 'workspace'
-}
-
-function rankMentionCandidates(candidates: readonly AgentTeamClientMemberStatus[], followers: ReadonlySet<AgentTeamMemberId> | undefined,
-  projectPeers: ReadonlySet<AgentTeamMemberId> | undefined): readonly AgentTeamClientMemberStatus[] {
-  if ((followers === undefined || followers.size === 0) && (projectPeers === undefined || projectPeers.size === 0)) return candidates
-  return [...candidates].sort((left, right) => MENTION_TIER_RANK[mentionTier(left, followers, projectPeers)] - MENTION_TIER_RANK[mentionTier(right, followers, projectPeers)])
 }
 
 /** The Human is excluded from delivery, so a quote naming them joins no notify row. */
@@ -92,12 +65,14 @@ function deliverableRecipients(
   ])].sort()
 }
 
-export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds, drafts, draftKey, pending, notice, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, toolbarExtra, t }: {
+export function TeamComposer({ members, followerMemberIds, projectMemberIds, ownerMemberIds, drafts, draftKey, pending, notice, error, onEdit, onSubmit, placeholder, pendingFiles, onFilesChange, replyTo, onCancelReply, toolbarExtra, t }: {
   readonly members: readonly AgentTeamClientMemberStatus[]
-  /** Current Thread followers; the Thread surface passes them so they rank above other candidates. */
+  /** Current Thread followers; the Thread surface passes them so they form this Thread's group. */
   readonly followerMemberIds?: ReadonlySet<AgentTeamMemberId>
-  /** Members taking part in the Project but not following this Thread; they rank above the rest of the Workspace. */
-  readonly projectPeerMemberIds?: ReadonlySet<AgentTeamMemberId>
+  /** Every Member taking part in the Project; the rest of the roster is a Workspace peer a pick would enroll. */
+  readonly projectMemberIds?: ReadonlySet<AgentTeamMemberId>
+  /** The Project's Agent owners; they lead the list. */
+  readonly ownerMemberIds?: ReadonlySet<AgentTeamMemberId>
   /** Subscribing here, not in the hosting page, keeps a keystroke from re-rendering the timeline. */
   readonly drafts: TeamDraftStore
   readonly draftKey: TeamDraftKey
@@ -127,11 +102,14 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   const { draft } = useSyncExternalStore(drafts.subscribe, () => drafts.getSnapshot(draftKey))
   const [mention, setMention] = useState<MentionMatch>()
   const [highlight, setHighlight] = useState(0)
-  const memberCandidates = mention === undefined ? [] : rankMentionCandidates(mentionCandidates(members, mention.query), followerMemberIds, projectPeerMemberIds)
-  const options = memberCandidates.map(status => ({ status, tier: mentionTier(status, followerMemberIds, projectPeerMemberIds) }))
-  const menuOpen = mention !== undefined && options.length > 0
-  const activeOption = options[highlight]
   const mentionSurface = mentionSurfaceOf(draftKey)
+  const groups = mention === undefined
+    ? []
+    : buildMentionGroups(members, mention.query, mentionSurface, { followers: followerMemberIds, projectMembers: projectMemberIds, owners: ownerMemberIds })
+  const options = groups.flatMap(group => group.options)
+  const optionIndexById = new Map(options.map((status, index) => [status.member.memberId, index]))
+  const menuOpen = mention !== undefined
+  const activeOption = options[highlight]
   const listId = 'team-mention-suggestions'
   const menuMaxHeight = useAnchoredMaxHeight(menuRef, 320, menuOpen ? draft : null)
 
@@ -157,7 +135,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     if (!menuOpen) return
     // Optional call: jsdom renders the menu without a layout engine.
     activeOptionRef.current?.scrollIntoView?.({ block: 'nearest' })
-  }, [menuOpen, highlight, activeOption?.status.member.memberId])
+  }, [menuOpen, highlight, activeOption?.member.memberId])
 
   // Team data can load after navigation, so another control may already own focus; do not steal it.
   useEffect(() => {
@@ -175,6 +153,14 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
   const memberHandles = new Map(members.map(status => [status.member.memberId, status.member.handle]))
 
   const notifiedIds = deliverableRecipients(draft, members, replyTo)
+  // A name typed outside the Project's roster makes that Member a Project member on send; say so before the send.
+  const enrollment = enrollmentIds(notifiedIds, projectMemberIds)
+
+  const groupLabel = (key: MentionGroupKey): string =>
+    key === 'owner' ? t('mentionGroupOwner')
+      : key === 'thread' ? t('mentionGroupThread')
+        : key === 'project' ? t('mentionGroupProject')
+          : t('mentionGroupOther')
 
   const updateMention = (nextDraft: string, caret: number): void => {
     const match = findMention(nextDraft, caret)
@@ -202,10 +188,9 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
     })
   }
 
-  const selectOption = (option: (typeof options)[number]): void => {
+  const selectOption = (status: AgentTeamClientMemberStatus): void => {
     if (mention === undefined) return
-    const member = option.status
-    const inserted = `@${member.member.handle} `
+    const inserted = `@${status.member.handle} `
     const nextDraft = `${draft.slice(0, mention.start)}${inserted}${draft.slice(mention.end)}`
     const nextCaret = mention.start + inserted.length
     commitMention(nextDraft, nextCaret)
@@ -225,12 +210,12 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     const composing = composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229
-    if (menuOpen && event.key === 'ArrowDown') {
+    if (menuOpen && options.length > 0 && event.key === 'ArrowDown') {
       event.preventDefault()
       setHighlight(current => (current + 1) % options.length)
       return
     }
-    if (menuOpen && event.key === 'ArrowUp') {
+    if (menuOpen && options.length > 0 && event.key === 'ArrowUp') {
       event.preventDefault()
       setHighlight(current => (current - 1 + options.length) % options.length)
       return
@@ -240,9 +225,9 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
       setMention(undefined)
       return
     }
-    if (menuOpen && event.key === 'Tab' && !event.shiftKey) {
+    if (menuOpen && activeOption !== undefined && event.key === 'Tab' && !event.shiftKey) {
       event.preventDefault()
-      if (activeOption !== undefined) selectOption(activeOption)
+      selectOption(activeOption)
       return
     }
     if (event.key !== 'Enter' || event.shiftKey || composing || event.repeat) return
@@ -271,33 +256,41 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
       </div>}
       <div className={css.inputArea}>
         {menuOpen && <div id={listId} ref={menuRef} className={css.mentionMenu} role="listbox" aria-label={t('mentionSuggestions')} style={{ maxHeight: menuMaxHeight }}>
-          {options.map((option, index) => {
-            const selected = index === highlight
-            return <button
-              key={option.status.member.memberId}
-              id={`${listId}-${option.status.member.memberId}`}
-              type="button"
-              role="option"
-              aria-selected={selected}
-              className={css.mentionOption}
-              ref={selected ? activeOptionRef : undefined}
-              onMouseDown={event => { event.preventDefault() }}
-              onClick={() => { selectOption(option) }}
-              data-mention-tier={MENTION_TIER_RANK[option.tier]}
-              data-mention-inside={String(mentionTierIsParticipant(option.tier, mentionSurface))}
-            >
-              <TeamPresenceDot status={option.status} t={t} />
-              <span className={css.mentionName}>@{option.status.member.handle}</span>
-              <span className={css.mentionDescription}>{option.status.member.description}</span>
-            </button>
-          })}
+          {options.length === 0
+            ? <p className={css.mentionEmpty} role="presentation">{t('mentionNoMatch')}</p>
+            : groups.map(group => (
+              <div key={group.key} className={css.mentionGroup} role="group" aria-label={groupLabel(group.key)}>
+                <p className={css.mentionGroupLabel} aria-hidden="true">{groupLabel(group.key)}</p>
+                {group.options.map(status => {
+                  const index = optionIndexById.get(status.member.memberId) ?? 0
+                  const selected = index === highlight
+                  return <button
+                    key={status.member.memberId}
+                    id={`${listId}-${status.member.memberId}`}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    className={css.mentionOption}
+                    ref={selected ? activeOptionRef : undefined}
+                    onMouseDown={event => { event.preventDefault() }}
+                    onClick={() => { selectOption(status) }}
+                    data-mention-group={group.key}
+                    data-mention-inside={String(group.key !== 'other')}
+                  >
+                    <TeamPresenceDot status={status} t={t} />
+                    <span className={css.mentionName}>@{status.member.handle}</span>
+                    <span className={css.mentionDescription}>{status.member.description}</span>
+                  </button>
+                })}
+              </div>
+            ))}
         </div>}
         <textarea
           ref={inputRef}
           aria-label={t('messageDraft')}
           aria-autocomplete="list"
           aria-controls={menuOpen ? listId : undefined}
-          aria-activedescendant={menuOpen && activeOption !== undefined ? `${listId}-${activeOption.status.member.memberId}` : undefined}
+          aria-activedescendant={menuOpen && activeOption !== undefined ? `${listId}-${activeOption.member.memberId}` : undefined}
           aria-expanded={menuOpen}
           value={draft}
           readOnly={pending}
@@ -311,7 +304,7 @@ export function TeamComposer({ members, followerMemberIds, projectPeerMemberIds,
           onCompositionEnd={() => { setTimeout(() => { composingRef.current = false }, 10) }}
         />
       </div>
-      {notifiedIds.length > 0 && <p className={css.notifyRow} data-team-notify>{t('composerNotify', { ids: notifiedIds.map(memberId => `@${memberHandles.get(memberId) ?? memberId}`).join(', ') })}</p>}
+      {notifiedIds.length > 0 && <p className={css.notifyRow} data-team-notify>{t('composerNotify', { ids: notifiedIds.map(memberId => `@${memberHandles.get(memberId) ?? memberId}`).join(', ') })}{enrollment.length > 0 && <span className={css.notifyJoin}>{' '}{t('composerNotifyJoin', { ids: enrollment.map(memberId => `@${memberHandles.get(memberId) ?? memberId}`).join(', ') })}</span>}</p>}
       {onFilesChange !== undefined && pendingFiles !== undefined && pendingFiles.length > 0 && (
         <ul className={css.fileChips} aria-label={t('attachFiles')}>
           {pendingFiles.map((file, index) => {

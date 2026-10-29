@@ -272,6 +272,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   }, [panelSurface, discussionRef])
   const project = view?.projects.find(item => item.projectRef === projectRef)
   const projectMemberIds = new Set(view?.members.filter(item => item.projectRef === projectRef).map(item => item.memberId) ?? [])
+  const projectOwnerIds = new Set((view?.owners ?? []).filter(item => item.projectRef === projectRef).map(item => item.memberId))
 
   const refresh = async (clearError = false) => {
     if (!mountedRef.current) return false
@@ -395,6 +396,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         humanMemberId={view.humanMemberId}
         members={members}
         projectMemberIds={projectMemberIds}
+        projectOwnerIds={projectOwnerIds}
         drafts={drafts}
         mainStreamHistory={mainStreamHistory}
         readMainStream={readMainStream}
@@ -435,6 +437,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       {...(view?.humanMemberId === undefined ? {} : { humanMemberId: view.humanMemberId })}
       members={members}
       projectMemberIds={projectMemberIds}
+      projectOwnerIds={projectOwnerIds}
       drafts={drafts}
       getAttachment={getAttachment}
       putAttachment={putAttachment}
