@@ -7,6 +7,11 @@ English | [中文](memory-and-context.zh.md)
 
 Upkeep craft (what earns a line, the three tiers, compaction and demotion) is owned by the bundled `member-memory-manager` core skill, on the same pattern as skill craft in `member-skill-manager`. The persona carries only the resident rule that the index stays bounded and that detail lives in the note it names, and a Member's first-run `memory.md` scaffold states the same sections.
 
+## Member context injection
+A Member's per-step context is assembled as four classified blocks: identity, Project ownership, Workspace participation, and private memory. Each block is a separate surface message; a later block of the same class supersedes the earlier one semantically — the earlier message stays in the Session log and surface until compaction — and an unchanged class appends nothing. Ownership and participation are always stated in full, including an empty ownership list and a participation list that shrank from several Workspaces to one.
+
+Private memory has two shapes. The complete index is the baseline. After `memory.md` changes, the Member gets one compact notice that the earlier copy is stale, where the file is, and its current budget use. The newest memory event is compared with the file's current state, so an older matching notice cannot hide a later change. A notice is not an index: a compaction that leaves only the notice still triggers the latest complete baseline. A missing, unreadable, or over-budget index states that condition and its path instead of injecting content.
+
 ## Context lifecycle ownership
 A Member's context has exactly two mechanisms, and neither is the model's to invoke.
 
@@ -38,7 +43,7 @@ A generation holding unprocessed non-Team input keeps its continuity. While a qu
 
 What crosses a generation is inbox input at and after the recorded boundary, carried as Message ids: replay is bounded by that offset, deduplicated against what the successor already holds, and is not a general carry of working context.
 
-A swap leaves no mark on what the successor is told. Its first model-facing context is the same per-step injection every turn carries — identity, `memory.md`, the Workspace list — followed by the message that woke it. Continuity across a generation is not a briefing: it is `memory.md` being maintained while the work happens and read back afterwards.
+A swap leaves no mark on what the successor is told. Its first model-facing context is the same classified per-step injection every turn carries — identity, Project ownership, Workspace participation, and private memory — followed by the message that woke it. Continuity across a generation is not a briefing: it is `memory.md` being maintained while the work happens and read back afterwards.
 
 Because both mechanisms are Host-controlled, the model has no context tool at all: no rollover, no checkpoint, no status, and no advice riding a Thread read. Nothing a Member can say starts, prevents, or steers a swap.
 

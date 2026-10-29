@@ -30,6 +30,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Changed**
 
+- Member context updates identity, Project ownership, Workspace participation, and private memory separately. Editing `memory.md` produces a short stale-copy notice instead of repeating the full index and unrelated background; missing context restores the relevant current blocks. Empty ownership and reduced Workspace participation remain explicit.
 - The Team settings nav row now carries the Team mark instead of the shell's generic gear. The shell draws nav glyphs by section id and `settings.section` offers no icon, so the row is tagged inside the settings dialog and the mark is painted over the shell glyph with a mask — the same contained workaround installed third-party themes use; it releases itself on dispose.
 - The Client drops its version 1 paths: the old Project feed, `@all` expansion, and the invitation confirmation flow are gone. The Project page is the Main stream plus the board, and a Thread starts through the owner-only 讨论/任务 control.
 - Exactly one sidebar row carries `aria-current="page"`: a global face (Inbox, Task board) no longer leaves the marker on the Workspace selector beneath it, and the auto-select no longer pulls the seat back to a Workspace overview while a global face stands.

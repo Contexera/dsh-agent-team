@@ -29,7 +29,7 @@ Member 没有 context 工具。preset 的 `compaction-basic` 行挂载 Team 的�
 
 maintenance 是这次 commit 能安全面对换窗中途新输入的原因：loop 停在那里，新消息留在 durable inbox，不会落到正在被退役的那一代。commit 失败则 maintenance 放行，旧代继续运行；commit 成功就退役它，崩溃则留给启动或恢复补完尚未重放的换代。
 
-新代第一眼看到的就是它每步的常规注入——身份、`memory.md`、workspace 列表——加上唤醒它的那条消息。没有 handoff 信封，也没有换代公告：被告知「你收到了交接」的新代，会去执行交接仪式，而不是读自己的记忆。
+新代首先收到身份、Project ownership、Workspace 参与和私有记忆索引，加上唤醒它的消息。后续步骤只追加变化或缺失的类别；记忆更新与恢复规则见 [Member 上下文注入](../team-collaboration/memory-and-context.zh.md#member-上下文注入)。不提供 handoff 信封或换代公告。
 
 折叠是 Team 自己的 `contextContinuity` projection unit，在 Team service init 时按 host 注册一次。`context-projection.ts` 拥有 durable checkpoint ref 命名、Team notice 规则、fork cut，以及一代读回的那份折叠状态：带 turn-end 投递状态的 checkpoints、至多一条 legacy rollover 意图、continuation 投递记录，以及被退役那代从未消费的非 Team 输入。它仍然解码的工具名（`context_rollover`、`new_context`、`context_checkpoint`）是给早先版本日志用的解码器，不是 tool alias。
 

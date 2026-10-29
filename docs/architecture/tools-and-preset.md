@@ -29,7 +29,7 @@ The generation swap is owned by `team-context-management.ts`, Team's own coordin
 
 Maintenance is what makes the commit safe against input arriving mid-swap: the loop is parked there, so a new message waits in the durable inbox instead of reaching the generation being retired. A failed commit releases maintenance and the old generation continues; a committed one retires it, and startup or recovery finishes a swap interrupted before the replay.
 
-The successor's first model-facing context is its ordinary per-step injection — identity, `memory.md`, the workspace list — plus the message that woke it. There is no handoff envelope and no generation announcement: a successor told it received a handoff performs a handoff instead of reading its memory.
+The successor first receives identity, Project ownership, Workspace participation, and its private-memory index, plus the message that woke it. Later steps append only changed or missing categories; [Member context injection](../team-collaboration/memory-and-context.md#member-context-injection) defines memory updates and recovery. There is no handoff envelope or generation announcement.
 
 The fold is Team's own `contextContinuity` projection unit, registered once per host at Team service init. `context-projection.ts` owns the durable checkpoint-ref naming, the Team-notice rule, the fork cut, and the folded state a generation reads back: its checkpoints with their turn-end delivery state, at most one legacy rollover intent, the continuation delivery records, and the unconsumed non-Team input the retired generation never consumed. The tool names it still decodes (`context_rollover`, `new_context`, `context_checkpoint`) are decoders for logs written by earlier builds, not tool aliases.
 
