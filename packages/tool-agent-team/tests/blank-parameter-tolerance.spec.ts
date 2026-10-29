@@ -87,11 +87,53 @@ describe('blank optional parameters count as not passed', () => {
     expect(reply.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD, baseRevision: 20 })
   })
 
+  it('a reply carrying the start default kind and empty collections commits instead of being read as a missing token', async () => {
+    // The observed 6.1-sol shape: kind: 'discussion' and sourceThreadRefs: []
+    // on a reply. The old guard folded kind into the token check and reported
+    // "requires threadRef and a positive baseRevision" even though both were
+    // present, sending the model to fix the wrong parameter.
+    const host = messageHost()
+    await call(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 20, body: 'x',
+      kind: 'discussion', accountable: '', attachments: [], sourceThreadRefs: [], projectRef: '', replyToMessageRef: '', taskRef: '' }, host)
+    const reply = host.replyForAgent as ReturnType<typeof vi.fn>
+    expect(reply).toHaveBeenCalledTimes(1)
+    expect(reply.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD, baseRevision: 20, body: 'x' })
+    expect(reply.mock.calls[0]![1]).not.toHaveProperty('kind')
+    expect(reply.mock.calls[0]![1]).not.toHaveProperty('sourceThreadRefs')
+  })
+
+  it('a reply that really asks for kind: task is still told kind belongs to start', async () => {
+    const host = messageHost()
+    const refusal = await call(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 20, body: 'x', kind: 'task' }, host)
+      .then(() => { throw new Error('the refusal was not thrown') }, (error: Error) => error)
+    expect(refusal.message).toContain('kind')
+    expect(refusal.message).toContain('action: start')
+    expect(host.replyForAgent).not.toHaveBeenCalled()
+  })
+
   it('a board with blanked numeric and boolean slots lists instead of refusing the whole board', async () => {
     const board = vi.fn((_agent: unknown, _request: Record<string, unknown>) => ({ open: [], finished: [], finishedTruncated: false }))
     const host = threadHost({ taskBoardForAgent: board })
     await call(teamTools().get('team_task')!, { action: 'board', projectRef: '', mine: false, taskRef: '', threadRef: '', baseRevision: 0 }, host)
     expect(board).toHaveBeenCalledTimes(1)
+  })
+
+  it('a board with a blanked direction slot lists instead of demanding direction', async () => {
+    // The observed 6.1-sol shape: every optional slot filled, including the
+    // claim-only `direction`; it retried this identical shape three times.
+    const board = vi.fn((_agent: unknown, _request: Record<string, unknown>) => ({ open: [], finished: [], finishedTruncated: false }))
+    const host = threadHost({ taskBoardForAgent: board })
+    await call(teamTools().get('team_task')!, { action: 'board', accountable: '', baseRevision: 0, claimRef: '', direction: '',
+      mine: false, projectRef: '', target: '', taskRef: '', threadRef: '', workspace: 'workspace:alpha' }, host)
+    expect(board).toHaveBeenCalledTimes(1)
+  })
+
+  it('a claim with a blank direction still reports the missing direction rather than writing', async () => {
+    const change = vi.fn()
+    const host = threadHost({ changeClaimForAgent: change })
+    await expect(call(teamTools().get('team_task')!, { action: 'claim', taskRef: 'task:missing', baseRevision: 20, direction: '' }, host))
+      .rejects.toThrow(/direction/i)
+    expect(change).not.toHaveBeenCalled()
   })
 })
 

@@ -201,21 +201,25 @@ function requestId(agentId: string, callId: string): AgentTeamRequestId {
  * of omitting it, and every guard below asks `!== undefined`. Normalizing blanks to
  * "not passed" at the entry keeps those guards honest and the address parameters
  * resolvable, without weakening the guards for genuinely malformed values. Only
- * address/selection parameters are normalized — `body` and `direction` are content,
- * where an empty string is a real error the tool must report, not a missing field.
+ * address/selection parameters are normalized — `body` is content, where an empty
+ * string is a real error the tool must report, not a missing field. An empty
+ * collection names nothing to honor, exactly as an empty address names no target.
  */
 function blankToAbsent<T extends { readonly [key: string]: unknown }>(args: T, keys: readonly string[]): T {
   const copy: Record<string, unknown> = { ...args }
   for (const key of keys) {
     const value = copy[key]
-    if (value === '' || value === 0 || value === false) delete copy[key]
+    if (value === '' || value === 0 || value === false || (Array.isArray(value) && value.length === 0)) delete copy[key]
   }
   return copy as T
 }
 
 /** The address/selection parameters every Team tool treats as optional presence. */
-const OPTIONAL_ADDRESS_KEYS = ['projectRef', 'threadRef', 'taskRef', 'messageRef', 'replyToMessageRef',
+const OPTIONAL_ADDRESS_KEYS = ['workspace', 'projectRef', 'threadRef', 'taskRef', 'messageRef', 'replyToMessageRef',
   'claimRef', 'memberRef', 'accountable', 'target', 'beforeSequence', 'limit', 'cursor', 'mine', 'baseRevision'] as const
+
+/** Optional collection parameters where `[]` names nothing and must not be read as a real argument. */
+const OPTIONAL_COLLECTION_KEYS = ['attachments', 'sourceThreadRefs'] as const
 
 /** One fact as a rejection render receives it: the read fields with tag fields widened to plain strings, because the tool's output schema types `kind` as a string rather than a literal union. */
 type RejectedFact = {
@@ -882,7 +886,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
       : { kind: value.kind },
   },
   async execute(rawArgs, exec) {
-    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
+    const args = blankToAbsent(rawArgs, [...OPTIONAL_ADDRESS_KEYS, ...OPTIONAL_COLLECTION_KEYS])
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_message requires an Agent session')
     const host = service(agent)
@@ -920,9 +924,15 @@ const teamMessage = markAgentTeamPreset(defineTool({
     }
     const baseRevision = args.baseRevision
     if (args.projectRef !== undefined) throw new Error(`reply does not take projectRef — ${recoveryFor('main_stream_addressing').sentence({ refused: 'projectRef on reply' })}`)
-    if ((args.threadRef === undefined && args.taskRef === undefined) || args.kind !== undefined || typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
-      throw new Error(`reply requires threadRef and a positive baseRevision — ${recoveryFor('missing_write_token').sentence({})}`)
+    if (args.threadRef === undefined && args.taskRef === undefined) throw new Error(`reply needs threadRef or taskRef — ${recoveryFor('missing_thread_identity').sentence({})}`)
+    if (typeof baseRevision !== 'number' || !Number.isSafeInteger(baseRevision) || baseRevision < 1) {
+      throw new Error(`reply requires a positive baseRevision — ${recoveryFor('missing_write_token').sentence({})}`)
     }
+    // `kind` belongs to `start`; a model filling every optional slot sends the
+    // start default `kind: 'discussion'` on a reply. That value changes nothing
+    // about the reply, so it must not be reported as a missing token; a genuine
+    // `task` kind still gets named.
+    if (args.kind !== undefined && args.kind !== 'discussion') throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'reply', parameter: 'kind', owner: 'start' }))
     if (args.accountable !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'reply', parameter: 'accountable', owner: 'start' }))
     if (args.sourceThreadRefs !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'reply', parameter: 'sourceThreadRefs', owner: 'start' }))
     const result = await host.replyForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId: workspaceOf(args, agent),
@@ -1132,7 +1142,11 @@ const teamTask = defineTool({
     },
   },
   async execute(rawArgs, exec) {
-    const args = blankToAbsent(rawArgs, OPTIONAL_ADDRESS_KEYS)
+    // `direction` is meaningful only for `claim`; a model that fills every slot
+    // sends `direction: ""` on board/list/resolution actions too. Treat that empty
+    // slot as absent here, while the claim guard still refuses a genuinely missing
+    // direction with its own route.
+    const args = blankToAbsent(rawArgs, [...OPTIONAL_ADDRESS_KEYS, 'direction'])
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_task requires an Agent session')
     const host = service(agent)
