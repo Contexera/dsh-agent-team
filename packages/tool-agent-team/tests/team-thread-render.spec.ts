@@ -191,8 +191,9 @@ describe('team_thread shows what a reply answers', () => {
       ...READ_BASE,
       anchor: { messageRef: 'message:anchor', sender: 'member:builder', body: 'anchor body', sequence: 1,
         replyToMessageRef: 'message:parent', replyTo: ANSWER },
-      // Background already read is what makes the render orient on the anchor.
-      facts: [{ sequence: 2, kind: 'message', sender: 'human', body: 'earlier context', mentions: [], unread: false, direct: false }],
+      facts: [{ sequence: 1, kind: 'message', messageRef: 'message:anchor', sender: 'member:builder', body: 'anchor body',
+        mentions: [], replyToMessageRef: 'message:parent', replyTo: ANSWER, unread: false, direct: false },
+      { sequence: 2, kind: 'message', sender: 'human', body: 'earlier context', mentions: [], unread: false, direct: false }],
     })
     expect(text).toContain('(replies to @architect — "The stored schema never named the field")')
   })

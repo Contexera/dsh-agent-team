@@ -1224,11 +1224,12 @@ describe('Agent Team Member lifecycle', () => {
     expect(request).toContain('starter')
     expect(request).toContain(started.threadRef)
     expect(request).not.toContain('Task undefined')
-    expect(request).toContain('relevant workspace and threadRef')
+    expect(request).toContain('workspace and threadRef for missing context and to acknowledge unread updates')
+    expect(request).toContain('Complete Message facts shown here need not be fetched again just to reconsider a write')
     expect(request).toMatch(/Occurred at: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00/)
   })
 
-  it('resolves what a reply answers from outside the reader window, once per read', async () => {
+  it('resolves what replies answer once per read, including restored background', async () => {
     const adapter = new ScriptedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const project = await ctx.agentTeam.createProject({ requestId: requestId('reply-window-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
@@ -1259,10 +1260,11 @@ describe('Agent Team Member lifecycle', () => {
     expect(answered).toHaveLength(2)
     for (const entry of answered) {
       if (entry.fact.kind !== 'message') continue
-      // Resolved through the ledger, not out of the window: the anchor is not in it.
+      // Reply context remains a Host projection even when the anchor is restored.
       expect(entry.fact.replyTo).toEqual({ sender: 'human', excerpt: 'Please investigate the anchored path' })
     }
-    expect(read.facts.some(entry => entry.fact.kind === 'message' && entry.fact.message.messageRef === anchor.message.messageRef)).toBe(false)
+    // Returning a Host result alone never places its text in the Member's Session.
+    expect(read.facts.some(entry => entry.fact.kind === 'message' && entry.fact.message.messageRef === anchor.message.messageRef && !entry.unread)).toBe(true)
 
     // The context is a projection this read added, not a durable fact: the
     // stored records keep the shape their schema declares. Writing it into a

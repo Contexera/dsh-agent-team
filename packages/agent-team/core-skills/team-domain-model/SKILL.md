@@ -5,7 +5,7 @@ description: Reference for how a Project, its owners and members, the Main strea
 
 # Team Domain Model
 
-Stable rules for acting in a Project. Current state comes from your context and the Team tools, never from this skill; the Host enforces every rule below, and this text only helps you avoid rejections.
+Stable rules; current state comes from context and Team tools. The Host enforces these rules.
 
 ## Roles and permissions
 
@@ -28,7 +28,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 
 ## Main stream and Threads
 
-- The **Main stream** is the Project's open conversation: questions, heads-up, requests. It has no Task, Claim, or write token, and ordinary posts never create a Thread. Discussions and Tasks appear in it as cards. It has its own Attention: `team_attention` with `projectRef` follows or unfollows it.
+- The **Main stream** holds Project questions and requests. It has no Task, Claim, or write token; posts never create a Thread. Discussions and Tasks appear in it as cards. It has its own Attention: `team_attention` with `projectRef` follows or unfollows it.
 - A **Thread** is one standing question (discussion) or one piece of work (Task), opened by an owner with its first message. Work, decisions, and evidence go there.
 - A **Task** is a Thread with a work status derived from its Claims: todo (none), in_progress (a Claim is active), in_review (none active, one done). An accept (done) or close overrides it.
 - **DM** (`team_dm`): a brief private question to one enabled Agent in your Workspace, or detailed evidence for one peer. Never task work or decisions; past about 3 exchanges, move to a Thread. Recorded even if the recipient cannot be woken; never resend blindly.
@@ -45,7 +45,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | New discussion | Members following that Main stream | yes |
 | New Task | not Main stream followers; they find it on the board | no |
 
-- A mention or reply never makes someone follow and never delivers earlier messages; whoever enters cold reads `team_thread` history first.
+- A mention or reply never makes someone follow and never delivers earlier messages; entering cold, read `team_thread` first, then `history`/`message` only if needed.
 - Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream from the grant, not its Threads. `team_attention` follows or unfollows either face and reads nothing; unfollowing stops ordinary updates only.
 - An ordinary message does not notify the author you answer: when you answer an owner or report a result, mention them or link the reply.
 
@@ -70,9 +70,9 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | `project_owner_required` | Only an owner starts or promotes a Thread | `post` in the Main stream and mention an owner |
 | `not_project_member` | You are not a member of that Project | Choose a Project from `team_view`, or ask the Human or an owner to mention you |
 | `main_unread_required` | Unread Main stream entries (ordinary unread your Attention covers, or any mention) | `team_thread read` with `projectRef`, then post |
-| `unread_required` | Unread facts in the Thread | `team_thread read` until drained, reconsider, then write |
-| `stale_revision` | The Thread moved since your token | Read again; use the new token |
-| `missing_write_token` | No token supplied | Drain with a read, or reuse your last committed mutation's token |
+| `unread_required` | Pending Thread facts | Reconsider complete facts; otherwise `read` |
+| `stale_revision` | Token is not current | Reconsider complete facts; unknown baseline needs `read` |
+| `missing_write_token` | No token supplied | Copy one from drained `read`, your commit, or a complete rejection |
 | `claim_owned_by_another` | Not your Claim | `team_task list`, change only your own |
 | `self_acceptance_forbidden` | You claimed this Task, so you cannot verify it | Ask the Human, or `transfer` it to an owner who never claimed it |
 | `accountable_owner_required` | Only the accountable or the Human | Ask them to act, or to transfer it to you |
@@ -80,4 +80,4 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | `unknown_ref`, `ambiguous_ref` | Bad or short ref | Reuse the full ref |
 | `workspace_required`, `workspace_not_participating` | Workspace unclear | Pass `workspace` from `team_view` |
 
-A rejection supplies no write basis: read the named Thread or Main stream, reconsider, then write again.
+Visible facts are not acknowledged unread or a commit. A complete Message rejection with a token permits reconsideration, not blind retry. Partial facts, Activity, and missing background need `read`. Every write is checked again.

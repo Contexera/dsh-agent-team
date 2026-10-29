@@ -32,15 +32,17 @@ Skills 是 Member 私有的：preset 不带共享 skill-filesystem row，Host �
 
 把 Member 加入 Project 只授予之后的 read/send/claim authority，不向 Member session 注入历史 Message。Thread 由 `startThread` 创建，Main stream 消息从不创建 Thread：启动的 Thread 是 discussion，`kind: 'task'` 时才同时带上 Task；Human 可之后 promotion taskless Thread，原子附加 Task overlay 与结构化 `promote` Task activity。创建 Thread、创建 Claim 或显式 follow 会开始 Thread Attention——mention 与回复都不开始：它们只投递一个 direct marker，不动 Attention。普通未读从 Attention 派生，structured mention 形成持久 direct marker；终止 Task 的状态变化会为受影响关注者保留稀疏 Activity marker，即使 Attention 已结束仍可读取。`team_inbox` 和 Thread read 是 Host projection，不是 Session inbox 内容。Direct mention context 包含消息正文和来源，Task/Claim 变化（含 promotion）包含简短状态事实，普通未读提供无正文的 Thread-first 路由。提示会合并，忽略提示不会形成循环，resume/runtime error recovery 会从持久未读状态重新判断是否提示。对于可恢复的服务错误，Host 会在连续 `agent/error` occurrence 的前两次后唤醒 Member；第 3 次错误则交给 operator，只有 clean turn 才会重置这段连续错误。
 
-Member reply 必须携带准确的当前 Thread revision，并在一个 operation 内更新 Message 和 Thread facts。`threadRef` 是协作主身份；released task-only Client 可为 taskful Thread 传入 Host-resolved `taskRef` alias，而 Task/Claim 操作仍以 Task ref 为准。未读工作必须先 read；但当每条未读 Message 的正文都已完整出现在写入者的 model-visible surface 上时（direct mention 或 DM 的 notice 带上了正文），这次阅读由 notice 本身充当：它不落任何账，durable 已读状态不变；revision 过期时拒绝写入。Closed Task 拒绝 reply 和新的 Attention；reopen 恢复 Task，但不恢复之前的 Attention。taskless Thread 仍支持 reply、follow、mention、Inbox、read 和 history，但没有 Claim 或 Task resolution path。规则版本 2 下，mention 只投递一个 direct marker 且绝不开始 Attention；回复以同样方式把父消息作者并入收件人集合。每个可寻址的收件人都会送达——包括该 Thread 从未承载过的 Member——且不因此开始任何 Attention；没有邀请环节，也没有未送达的残余需要报告。mention 在 Message 正文里以 `@Handle` 撰写，由 Host 按 Project 的可寻址名字解析；请求也可携带显式的 `recipients` 列表，Host 按同一套可寻址集合把它与正文 mention 取并集。Message fact 携带解析后的 refs，Client 只为这些 Member 渲染 mention chip。claim/done/release 和 Task change 是有序的 host-authored Activity。Active Claim 只排斥相同的 normalized Direction；不同 Direction 可以并行。Task status 从 Claims 派生，Human accept/close 是覆盖事实。Close 原子释放 active Claims 并清除 Thread Attention。Member remove 原子标记 inactive、释放 owned active Claims、清除该成员的 Attention 和 direct markers，再归档 session。Message 与 Activity facts 共用一个有界 sequence cursor。
+Member reply 必须携带准确的当前 Thread revision，并在一个 operation 内更新 Message 和 Thread facts。`threadRef` 是协作主身份；released task-only Client 可为 taskful Thread 传入 Host-resolved `taskRef` alias，而 Task/Claim 操作仍以 Task ref 为准。[Mutation fences](../../docs/team-collaboration/boundaries.zh.md#mutation-fences) 定义未读与 revision 检查：Team 通知或工具结果中完整、身份准确的 Thread Message 可满足上下文条件，但不确认未读。DM 不能提供 Thread 凭据。完整拒绝可支持重新考虑，部分结果仍须读取。Closed Task 拒绝 reply 和新的 Attention；reopen 恢复 Task，但不恢复之前的 Attention。taskless Thread 仍支持 reply、follow、mention、Inbox、read 和 history，但没有 Claim 或 Task resolution path。规则版本 2 下，mention 只投递一个 direct marker 且绝不开始 Attention；回复以同样方式把父消息作者并入收件人集合。每个可寻址的收件人都会送达——包括该 Thread 从未承载过的 Member——且不因此开始任何 Attention；没有邀请环节，也没有未送达的残余需要报告。mention 在 Message 正文里以 `@Handle` 撰写，由 Host 按 Project 的可寻址名字解析；正文是唯一的送达依据，请求不携带收件人列表。Message fact 携带解析后的 refs，Client 只为这些 Member 渲染 mention chip。claim/done/release 和 Task change 是有序的 host-authored Activity。Active Claim 只排斥相同的 normalized Direction；不同 Direction 可以并行。Task status 从 Claims 派生，Human accept/close 是覆盖事实。Close 原子释放 active Claims 并清除 Thread Attention。Member remove 原子标记 inactive、释放 owned active Claims、清除该成员的 Attention 和 direct markers，再归档 session。Message 与 Activity facts 共用一个有界 sequence cursor。
 
 `changes({ scope? }, signal?)` 通过流式 Remote 返回 `AsyncIterable<{ version: number }>`。先发送当前基线，之后发送匹配的 workspace/project/thread/presence 通知；省略 scope 时观察共享投影，不包含 presence。消费者暂停期间只保留最新待发送版本；取消或 Host 释放时关闭流。Client 必须在每次基线到达时重读投影，即使重启后的版本相同或更低。scope、版本和恢复语义见[架构文档](../../docs/architecture/host-authority.zh.md)。Thread read 只改变私有已读状态，不唤醒任何 scope；没有未读或 marker 可消费时不追加 operation。提交后只为受影响的 Members 重算 Inbox hints。
+
+Agent Thread read 根据当前 Session 可见性恢复缺失的背景原文，并明确省略已可见 Message 正文。不改变 Human read 或持久 receipt 的解释；呈现规则见[读取契约](../../docs/team-collaboration/tools.zh.md#team_thread)。
 
 M1 支持单个 Host writer。Ledger 永久保留，不提供 snapshot 或 compaction。
 
 ## Composition
 
-Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默认模型选择、`tools`、`fs`、`sandboxPolicy`、Session store/persistence、或 Workspace registry 的替代实现。私有 SQLite DomainFacility 不替换 Host 的全局 storage service，因此开关 bundle 不会重建无关的 storage consumers。Host services 只挂载一次，再挂载本 Service 及 invariant companion。`/team` 等 Human control 是独立 Consumer。
+Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默认模型选择、`tools`、`fs`、`sandboxPolicy`、Session store/persistence、或 Workspace registry 的替代实现。私有 SQLite DomainFacility 不替换 Host 的全局 storage service，因此开关 bundle 不会重建无关的 storage consumers。Host services 只挂载一次，再挂载本 Service 及 invariant companion。Team Web Client 是唯一的 Human 控制面。
 
 Team-enabled preset 在自身 Agent scope 注册七个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
 
@@ -52,7 +54,7 @@ Member 上下文只有两个机制，且没有模型工具。preset 的 `member-
 
 #### What the model sees
 
-启用的 Member 在持久未读工作出现后，可能收到一次有界、合并的 context 通知。Structured direct mention 包含消息正文和来源；Task/Claim Activity 包含简短状态变化；普通未读只包含 Thread-first 路由、数量和 revision，存在时附带 Task overlay。通知通过 Agent 的安全 step 边界排队，正在执行的模型请求和工具不会被中断。常见路径可以直接调用 `team_thread.read`；只有需要跨 Thread 分流时才调用 `team_inbox`。
+启用的 Member 在持久未读工作出现后，可能收到一次有界、合并的 context 通知。Structured direct mention 包含消息正文和来源；Task/Claim Activity 包含简短状态变化；普通未读只包含 Thread-first 路由与数量，存在时附带 Task overlay。通知通过 Agent 的安全 step 边界排队，正在执行的模型请求和工具不会被中断。常见路径可以直接调用 `team_thread.read`；只有需要跨 Thread 分流时才调用 `team_inbox`。
 
 #### Token effect
 

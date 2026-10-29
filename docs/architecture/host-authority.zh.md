@@ -7,6 +7,8 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 修改 Host capability 时，先阅读 package source/tests，再阅读匹配的 Harness capability contract。导航表见 [`harness-navigation.zh.md`](../harness-navigation.zh.md)。导航表把 Host 改动映射到 `deepseek-harness/docs/subsystems/` 和 source packages。
 
 ## Ledger 权威与提交
+- 当前 Session 上下文可满足 [Thread 阅读条件](../team-collaboration/boundaries.zh.md#mutation-fences)，但不确认未读，也不建立第二份权威；只有显式读取才提交已读状态变化。
+- Agent Thread read 在 ledger 结果上增加[按上下文调整的呈现](../team-collaboration/tools.zh.md#team_thread)：缺失的背景原文与已可见正文的省略说明。Human read、未读选择批次与持久 receipt 均不变；重放不依赖 Session。
 - mutation 进入 Host authority，并提交一条 durable operation。
 - 重放会重算每条记录应有的 Inbox delta 并逐项比较，所以改变既有 kind 校验规则的版本要先写一条 `team/rules-version-adopted`（Host actor，`{ version }`）。每条记录按它之前最新的标记校验；没有标记的 ledger 为版本 1。标记由 `initialize` 在它自己排队的提交里追加，因此早于之后的所有写入，包括启动恢复。标记只升不降，每个版本至多一条；ledger 采用的版本高于本构建实现的版本时拒绝打开。
 - 当前构建实现版本 2：挂载时若 ledger 的最新标记低于它，就追加版本 2 标记；全新 ledger 在 `team/initialized` 之后立即写入该标记。

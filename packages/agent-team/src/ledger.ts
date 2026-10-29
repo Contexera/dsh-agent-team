@@ -348,7 +348,7 @@ export interface AgentTeamLedgerOptions {
    * Returning false refuses the write. A true answer exempts this one write
    * only: nothing is persisted, no watermark advances, no marker is consumed.
    */
-  readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
+  readonly areFactsVisible?: ((memberId: AgentTeamMemberId, facts: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef) => boolean) | undefined
   /** Highest rules version to adopt and accept; defaults to `AGENT_TEAM_RULES_VERSION`. */
   readonly rulesVersion?: number
 }
@@ -627,7 +627,7 @@ export class AgentTeamLedger {
   private readonly createOccurredAt: () => string
   private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
   /** Host-supplied surface visibility probe; absent means no write is ever exempt. */
-  private readonly isFactVisible?: ((memberId: AgentTeamMemberId, fact: AgentTeamThreadReadFact) => boolean) | undefined
+  private readonly areFactsVisible?: ((memberId: AgentTeamMemberId, facts: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef) => boolean) | undefined
   private readonly rulesVersion: number
   private operationTail: Promise<void> = Promise.resolve()
   /**
@@ -662,7 +662,7 @@ export class AgentTeamLedger {
     this.createOperationId = options.operationId ?? (() => `operation:${randomUUID()}` as AgentTeamOperationId)
     this.createOccurredAt = options.occurredAt ?? (() => new Date().toISOString())
     this.createRef = options.ref ?? (kind => `${kind}:${randomUUID()}`)
-    this.isFactVisible = options.isFactVisible
+    this.areFactsVisible = options.areFactsVisible
     this.rulesVersion = options.rulesVersion ?? AGENT_TEAM_RULES_VERSION
     this.replay()
     const head = this.state.ordered.at(-1)
@@ -5322,7 +5322,7 @@ export class AgentTeamLedger {
    */
   private deferredThreadWrite(actorMemberId: AgentTeamMemberId, task: AgentTeamTask | undefined, thread: AgentTeamThread, baseRevision: number): AgentTeamUnreadRequired | AgentTeamStaleRevision | undefined {
     const unread = this.unreadFor(actorMemberId, thread.threadRef)
-    if (unread.length > 0 && !this.visibleSurfaceExempts(actorMemberId, unread)) return this.unreadRequired(task, thread, unread)
+    if (unread.length > 0 && !this.visibleSurfaceExempts(actorMemberId, unread, thread.threadRef)) return this.unreadRequired(task, thread, unread)
     if (baseRevision !== thread.revision) return this.staleRevision(actorMemberId, task, thread, baseRevision)
     return undefined
   }
@@ -5333,10 +5333,10 @@ export class AgentTeamLedger {
    * fact the surface cannot show means the write is not exempt. The probe is
    * the Host's, because the surface is runtime state the ledger never holds.
    */
-  private visibleSurfaceExempts(memberId: AgentTeamMemberId, unread: readonly AgentTeamThreadReadFact[]): boolean {
-    const probe = this.isFactVisible
+  private visibleSurfaceExempts(memberId: AgentTeamMemberId, unread: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef): boolean {
+    const probe = this.areFactsVisible
     if (probe === undefined) return false
-    return unread.every(fact => probe(memberId, fact))
+    return probe(memberId, unread, threadRef)
   }
 
   /** Commit projections shared by the Message-sent and Thread-replied results. */

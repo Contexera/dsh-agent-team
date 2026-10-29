@@ -3,15 +3,19 @@
 English | [中文](boundaries.zh.md)
 
 ## Mutation fences
-Existing-Thread public mutations require the current next-write token in `baseRevision` — an opaque copy-through value, not a fact about the Thread. The model copies the latest explicitly rendered value verbatim and never increments, derives, compares, or cites it. The token appears on exactly two surfaces: a `team_thread read` that leaves no unread remaining, and a committed public mutation (`team_message` start/reply, `team_task` mutation) whose result returns the resulting Thread state.
+Three states are separate: facts supplied in full in the current context, unread facts explicitly acknowledged by `team_thread read`, and a mutation committed by the Host. A notification, rejection, `history`/`message` lookup, or reply never advances a read watermark or consumes a direct marker.
 
-It is absent from `team_view`, `team_inbox`, `team_thread status/follow/unfollow/history`, `team_task list`, partial reads, and every typed rejection — a fresh-looking token there would invite a blind retry.
+Existing-Thread public mutations require the current next-write token in `baseRevision`. Copy the latest explicitly rendered value verbatim; never derive, increment, compare, or cite it as a Thread fact. A token comes from a fully drained `team_thread read`, your own committed public mutation, or an eligible complete Thread rejection. Browsing results, notices, and partial reads carry no token.
 
-Host checks: (1) relevant unread must be read, otherwise `unread_required`; (2) the token must match the current Thread revision, otherwise `stale_revision`; (3) closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation. These are normal collaboration outcomes, not infrastructure failures; there is no force-send or unread bypass.
+The Host checks unread facts before token freshness. Every pending Thread Message may instead be supplied in full in the writer's live Session: a Team notice or a `team_thread`, `team_message`, or `team_task` result must bind the exact Thread, Message, and body to the actual projected text. Retained metadata alone, summaries, truncated bodies, model paraphrases, a DM, or identical text from another Message do not qualify. Activity facts still require `read`.
 
-An exemption sits inside check (1) and only there. When every unread fact is already on the writer's model-visible surface in full, the write is allowed without a read — the notice that carried the body is itself the reading.
+This context check changes no durable state and keeps no second read database. One missing fact, a changed projection, or no live Session keeps the unread refusal. Even when all facts qualify, the Host still checks the current revision, permissions, and Task state; receiving a token never guarantees that the next write commits.
 
-The exemption persists nothing: no attention watermark advances, no direct marker is consumed, and the durable "has this been read" answer stays exactly what it was. One fact off the surface keeps the write refused, and a Member with no live Session is never exempt. A rejected mutation still renders no bypass: it carries the facts that gated the write and the current revision to retry with, and recovery is read the Thread and reconsider.
+`unread_required` and `stale_revision` begin `Not committed` and render a bounded selection of pending facts. When every required fact is a complete, identified Message and the prior revision is recognized, the result supplies a current token: reconsider the proposed write using those facts, without a mandatory intervening read. Read if earlier discussion context is missing. New arrivals can refuse that reconsidered write again.
+
+Partial or omitted facts, Activity facts, and an unknown or unrecognized revision baseline supply no retry token and route to `team_thread read`. An unrecognized token does not establish that the Thread changed concurrently. Main stream refusals still require `read` with `projectRef`. These are normal collaboration outcomes, not infrastructure failures; there is no force-send.
+
+Closed Tasks reject replies, Claims, and new Attention. Taskless Threads have no Claim or Task-resolution mutation.
 
 Close releases active Claims and ends Attention. Reopen restores an open Task, not previous Attention periods; a new reopen restores the accountable's current Thread follow unless the accountable is the actor or already follows. Older reopen records keep their marker-only replay semantics.
 
@@ -46,7 +50,7 @@ The explicit `team-member` preset contains coding tools, background jobs, the sk
 
 Do not store credentials, sensitive data, guesses, chat logs, or facts already owned by the ledger.
 
-The Member's working directory is not a preset row: Harness mounts `working_directory` globally, outside every preset, and the Host unions it over any tool allow-list. A Member therefore enters a Workspace it has joined with `working_directory({cd})` instead of reaching into that checkout by absolute path, which is what loads the checkout's own `AGENTS.md`. Participation, Claims, and write permissions stay bound to the creation Workspace; only the directory moves.
+The Member's working directory is not a preset row: Harness mounts `working_directory` globally, outside every preset, and the Host unions it over any tool allow-list. A Member therefore enters a Workspace it has joined with `working_directory({cd})` instead of reaching into that checkout by absolute path, which is what loads the checkout's own `AGENTS.md`. Directory changes grant no participation, Claim, or write permission; each operation is authorized in the selected Workspace. [Memory and context](memory-and-context.md) describes category updates and memory baselines.
 
 The persona states the private-space physical facts (the injected absolute paths, never cwd-relative ones, the memory/notes discipline, and the reusable-assets boundary). It says nothing about managing context: the preset's engine compacts and the Host swaps a generation, so there is no instruction a Member could act on. Anything worth keeping across a generation belongs in private memory while the work happens, not in a farewell before it.
 

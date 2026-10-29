@@ -40,7 +40,7 @@ const BASE = {
 }
 
 describe('team_thread renders a discussion\'s derived Task cards', () => {
-  it('a read draws the card at its creation point with current state and accountable', () => {
+  it('a read separates current cards from acknowledged facts and background', () => {
     const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, {
       ...BASE, kind: 'read', facts: [
         { sequence: 5, kind: 'message', body: 'before the Task', sender: 'member:reeve', mentions: [], unread: false, direct: false },
@@ -55,9 +55,8 @@ describe('team_thread renders a discussion\'s derived Task cards', () => {
     expect(card).toContain(`accountable ${OWNER}`)
     expect(card).toContain('Ship the importer')
     expect(card).toContain(CARD_THREAD)
-    // It sits at its creation sequence: after the earlier fact, before the later one.
-    expect(lines.indexOf(card)).toBeGreaterThan(lines.findIndex(line => line.includes('before the Task')))
-    expect(lines.indexOf(card)).toBeLessThan(lines.findIndex(line => line.includes('after the Task')))
+    expect(text).toContain('Current Task cards — not Thread reading')
+    expect(lines.indexOf(card)).toBeGreaterThan(lines.findIndex(line => line.includes('after the Task')))
     // A card is not a fact: it carries no unread/direct marker and changes no count.
     expect(card).not.toContain('[unread]')
     expect(card).not.toContain('[direct]')

@@ -26,7 +26,11 @@ The footer routes body reading and acknowledgement to `team_thread read`; the re
 
 `team_thread` reads one Thread. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads.
 
-`read` returns one chronological unread batch and advances the watermark. A read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer. `history` pages older facts. `message` reads one Message back verbatim by its ref, which is the way to answer a quote whose original sits outside the page you hold.
+`read` returns one chronological unread batch and advances the watermark. Its acknowledgement covers that batch; an unread Message whose body is already fully visible in the current context may omit the body and still counts as acknowledged. A read with nothing unread for its reader advances nothing and writes no operation, and an identical retry of a committed read returns that read's original receipt with a picture derived from the current projection, because a read has never promised a frozen answer.
+
+A Thread `read` also supplies background for a reader whose context no longer holds the discussion: the anchor when it is missing, plus the Message facts among up to four facts immediately before the unread batch — before the tail when nothing is unread. Background already fully visible in the current Session is not repeated.
+
+Background is orientation, not newly acknowledged work, and it can appear on any read; no permanent “already read” mark decides it. Read first when background is missing; use `history` for older facts and `message` for one Message read back verbatim, including a quote whose original sits outside the page you hold. Neither acknowledges unread work.
 
 `beforeSequence` and `limit` page `history`, where the Host bounds `limit` to 1–100 with a default of 20. `message` rejects them. A `read` ignores them: its batch is bounded by design — the Host read request carries neither field — and refusing a read that carried one only cost the call, since a model filling every optional slot reaches for a page size it does not need. What a read wants is the next page of unread, and its footer names how much remains.
 
@@ -34,13 +38,15 @@ The three actions share no maximal render: reading shows the Thread, and only re
 
 `message` renders the ref, the sequence with its instant and sender, and then the body whole: this one action exists so a reader can answer a Message it did not receive, so nothing is trimmed and the orientation is unchanged.
 
-A read renders five parts in order, then a footer:
+A read renders these parts in order, then a footer:
 
 1. the outcome — acknowledged and remaining unread counts;
 2. Thread identity and following state;
-3. orientation — the full anchor when the returned facts carry Host-supplied background, the bounded anchor subject otherwise, and never a duplicate when the anchor is itself a returned fact;
+3. orientation — the bounded anchor subject when the anchor is not a returned fact;
 4. active Claims only — the current collision surface, one line per Claim (claim ref, owner, direction);
-5. the chronological facts with inline unread/direct markers. A discussion also renders each derived Task card at its creation sequence, with current status and accountable owner; a card is a projection, not an unread fact.
+5. acknowledged Task reminders, when the read carried any;
+6. Host-supplied background under `Background — not newly acknowledged` — the anchor when missing, plus the Message facts among up to four preceding facts, none already visible in the current Session;
+7. the acknowledged facts in sequence with inline unread/direct markers. An acknowledged Message whose body is fully visible in the current context shows `body already in current context; omitted` in place of the body. Derived Task cards render under `Current Task cards — not Thread reading`, at their creation sequence with current status and accountable owner; a card is current state, not Thread reading.
 
 The footer states the read-through sequence and the remaining unread count.
 
@@ -72,9 +78,9 @@ Behind rules version 2 `team_message` also has `post`, which speaks in a Project
 
 `team_thread` `read`, `history` and `message` take either a `threadRef` or a `projectRef` (the Main stream), exactly one. A Main stream read renders the newest entries plus any entry that mentions the reader, acknowledges the stream through its head, and renders Thread cards as current state.
 
-Typed rejection results (`unread_required`, `stale_revision`) begin `Not committed` and keep the structured refs and counts needed to reread and retry deliberately. They also render the facts that gated the write — the unread batch for `unread_required`, the increment past the obsolete token for `stale_revision` — in the same shape a `team_thread read` returns them, and hand back the current revision as the next write token. A rejected writer learns what changed and which token to use from the rejection itself, and the retry commits with no intervening read.
+Typed rejection results (`unread_required`, `stale_revision`) begin `Not committed` and retain refs and counts with a bounded selection of pending facts. A complete, identified Message-only result with a recognized revision baseline supplies a current token for reconsideration; partial results and unknown baselines route to `read`. This neither acknowledges unread facts nor guarantees the next write. [Mutation fences](boundaries.md#mutation-fences) defines the complete rule.
 
-Recovery is still read-and-reconsider: the rejection's facts are the gate, not a substitute for acknowledging them. A mention of a Member the Thread has never carried is not a rejection either: under rules version 2 the Message commits and every addressable recipient is delivered, so there is no undelivered remainder to report and no invitation step. (Under rules version 1 the same write reported the names it could not deliver; that path exists for replaying old ledgers only.)
+A mention of a Member the Thread has never carried is not a rejection either: under rules version 2 the Message commits and every addressable recipient is delivered, so there is no undelivered remainder to report and no invitation step. (Under rules version 1 the same write reported the names it could not deliver; that path exists for replaying old ledgers only.)
 
 Every rejection — a typed result, a thrown parameter-shape error, or a Host refusal — names the next action and the value that action takes, and those words come from one registry (`packages/agent-team/src/recovery-hints.ts`) rather than from each call site. The registry is enforced, not advisory: a test walks the model-facing sources of both the Host and the tool package and refuses a route sentence written outside the registry, so a new rejection cannot ship with a fault the model has no way out of.
 
@@ -108,9 +114,9 @@ The board is current state, not unread: reading it changes no read state and car
 
 `promote` turns a discussion Thread into a Task; it takes `threadRef`, the Thread's `baseRevision`, and optionally `accountable`, and only a Project owner may do it (`project_owner_required` otherwise).
 
-`list`, `claim`, `done`, and `release` manage only the Agent's own Direction Claims on real Tasks. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token, because a current `team_thread read` remains the required mutation basis.
+`list`, `claim`, `done`, and `release` manage only the Agent's own Direction Claims on real Tasks. Taskless Threads have no Claim mutation. A Direction is one sentence describing the Agent's angle; plans and acceptance checklists belong in Thread messages. A successful Claim starts Attention. `list` renders the Task/Thread identity with the active collision surface — active Claims only, or an explicit none — and no write token; it supplies neither Thread facts nor a mutation basis.
 
-A committed mutation names its action (Claim created, completed, or released), renders the authoritative affected Claim first — ref, resulting state, owner, direction — then Task/Thread identity, and exactly one next-write token hand-off. Rejection results (`unread_required`, `stale_revision`) share the message rejection form: `Not committed`, local refs/counts, the facts that gated the write, read-before-retry recovery, and the current revision as the next write token.
+A committed mutation names its action (Claim created, completed, or released), renders the authoritative affected Claim first — ref, resulting state, owner, direction — then Task/Thread identity, and exactly one next-write token hand-off. Rejections share the message rejection form and the same [completeness and token rules](boundaries.md#mutation-fences); Task permissions are checked again on each attempt.
 
 `accept`, `close`, `reopen`, and `transfer` resolve a Task rather than a Claim, and the Host decides who may call them.
 

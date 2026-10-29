@@ -6,6 +6,7 @@
  */
 
 import type { ContextFormed, ContextSnapshotSection, MessageSource, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ThreadMessageSurface } from './surface-visibility.ts'
 
 /** The producer kind attributing every Agent Team message source. */
 export const AGENT_TEAM_PLUGIN_ID = '@wowyuarm/dsh-agent-team'
@@ -16,9 +17,9 @@ export const AGENT_TEAM_V3_RENAMED_KIND = `plugin:${AGENT_TEAM_PLUGIN_ID}`
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     /** The kind this plugin writes now; V4 admission requires a producer-owned kind. */
-    [AGENT_TEAM_PLUGIN_ID]: { kind: typeof AGENT_TEAM_PLUGIN_ID } & ContextFormed
+    [AGENT_TEAM_PLUGIN_ID]: { kind: typeof AGENT_TEAM_PLUGIN_ID; readonly threadFacts?: ThreadMessageSurface } & ContextFormed
     /** The converted shape of this plugin's released V3 history; read-side only. */
-    [AGENT_TEAM_V3_RENAMED_KIND]: { kind: typeof AGENT_TEAM_V3_RENAMED_KIND } & ContextFormed
+    [AGENT_TEAM_V3_RENAMED_KIND]: { kind: typeof AGENT_TEAM_V3_RENAMED_KIND; readonly threadFacts?: ThreadMessageSurface } & ContextFormed
   }
 }
 

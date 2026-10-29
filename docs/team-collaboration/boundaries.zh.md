@@ -3,17 +3,19 @@
 [English](boundaries.md) | 中文
 
 ## Mutation fences
-既有 Thread 上的 public mutation 必须在 `baseRevision` 中携带当前的 next-write token。它是不透明的 copy-through 值，不是关于 Thread 的事实：模型原样复制最近一次显式渲染的值。绝不递增、推导、比较或引用它。令牌只出现在两个位置。第一，一次未读清零的 `team_thread read`。第二，一次结果返回结果 Thread 状态的已提交 public mutation（`team_message` start/reply、`team_task` mutation）。它不出现在 `team_view`、`team_inbox`、`team_thread status/follow/unfollow/history`、`team_task list`、未读完的 read，以及所有类型化拒绝中——这些位置一个看似新鲜的令牌反而会诱导盲重试。
+三个状态必须分开：当前上下文完整提供事实、`team_thread read` 显式确认未读事实、Host 提交变更。通知、拒绝、`history`/`message` 查询和回复都不推进已读水位，也不消费 direct marker。
 
-Host 按以下顺序检查 fences：
+既有 Thread 上的 public mutation 必须在 `baseRevision` 中携带当前 next-write token。原样复制最近显式渲染的值，不推导、递增、比较或将它作为 Thread 事实引用。令牌来自未读清零的 `team_thread read`、自己的已提交 public mutation，或满足条件的完整 Thread 拒绝。浏览结果、通知和未读完的 read 不提供令牌。
 
-1. 相关 unread work 必须先读完；失败返回带当前 unread counts 的 `unread_required`。
-2. 令牌必须匹配当前 Thread revision；失败返回 `stale_revision`。
-3. Closed Task 拒绝 replies、Claims 和 new Attention；taskless Threads 没有 Claim 或 Task-resolution mutation path。
+Host 先检查未读事实，再检查令牌新鲜度。写入者的 live Session 也可完整提供每条待处理 Thread Message：Team 通知或 `team_thread`、`team_message`、`team_task` 结果必须把准确的 Thread、Message 和正文绑定到实际投影文本。只有保留的 metadata、摘要、截断正文、模型复述、DM 或另一条 Message 的同文都不满足条件。Activity 事实仍须 `read`。
 
-第 (1) 条内部有一个豁免，且只在这一条内。当每条 unread fact 的正文都已经完整出现在写入者的 model-visible surface 上时，写入可以不经过 read 直接放行——把正文带上去的那条 notice 本身就是这次阅读。该豁免不落任何账：attention 水位不推进、direct marker 不消耗，durable 的「是否已读」答案保持原样。只要有一条 fact 不在 surface 上，写入继续被挡；没有活 Session 的 Member 永远不豁免。被拒的 mutation 同样不提供 bypass：它带回挡住这次写入的 facts 和可用于重试的当前 revision，恢复动作是 read 这个 Thread 再重新考虑。
+上下文检查不改变持久状态，也不建立第二份已读数据库。缺一条事实、投影被改写或没有 live Session，都继续拒绝未读写入。即使事实齐全，Host 仍检查当前 revision、权限和 Task 状态；拿到令牌不保证下一次写入成功。
 
-这些结果属于正常协作结果，不是 infrastructure failures。被拒绝的 mutation 仍不提供 bypass：它带回挡住这次写入的事实与重试所用的当前 revision。恢复永远是读取 Thread 并重新考虑。不存在 force-send 或 unread bypass。
+`unread_required` 与 `stale_revision` 以 `Not committed` 开头，展示有界的待处理事实。当所需事实都是完整、身份明确的 Message，且之前的 revision 可识别时，结果提供当前令牌：先据此重新考虑写入，不强制中间再 read 一次。早前讨论背景缺失时仍应读取。期间有新事实到达，重新考虑后的写入仍可能被拒绝。
+
+事实截断或省略、含 Activity、revision 基线未知或无法识别时，不提供重试令牌，并指向 `team_thread read`。无法识别的令牌不证明发生了并发变更。Main stream 拒绝仍须使用 `projectRef` 执行 `read`。这些是正常协作结果，不是基础设施故障；没有 force-send。
+
+Closed Task 拒绝回复、Claim 和新的 Attention；taskless Thread 没有 Claim 或 Task-resolution mutation。
 
 close 会 release active Claims、结束 Attention 并停止 ordinary delivery。reopen 恢复 open Task，但不恢复旧 Attention periods；新的 reopen 会为 accountable 恢复当前 Thread follow，accountable 是操作者或已经 follow 时除外。旧 reopen 记录保持只加 marker 的回放语义。
 
@@ -44,8 +46,8 @@ Human Client 使用 `readThread`、`threadHistory`、`threadObservations` 和 `c
 ## Team Member context boundary
 显式的 `team-member` preset 是完整 coding composition。它有 shell、filesystem/search、web search 与 fetch、background-job controls。它有 skill 加载工具、compaction、七个 Team tools。它有 Workspace instruction discovery 和 private-memory context plugin。Host 拥有 Web service/provider。Team preset 只增加面向模型的 web tools。普通 Sessions 不会继承这些 Team rows。skill 发现本身是 Member 私有的。Host 在每个 Member 的 agent scope 上注册 provider。provider 只扫两个 root：插件内置只读 core skills，与该 Member 私有目录。catalog 以内置集起始。
 
-Member 的 Session `cwd` 保持在 Workspace path，但它工作的目录可以移动：Harness 在 `dsh-base` 全局挂载 `working_directory`，位于任何 preset 之外，Host 把它并进任何 tool allow-list。Member 用 `working_directory({cd})` 进入已加入的 Workspace，而不是用绝对路径伸进去——切换目录才会加载该 checkout 自己的 `AGENTS.md`。参与关系、Claim 与写权限仍绑定创建 Workspace。
+Member 的 Session `cwd` 保持在 Workspace path，但它工作的目录可以移动：Harness 在 `dsh-base` 全局挂载 `working_directory`，位于任何 preset 之外，Host 把它并进任何 tool allow-list。Member 用 `working_directory({cd})` 进入已加入的 Workspace，而不是用绝对路径伸进去——切换目录才会加载该 checkout 自己的 `AGENTS.md`。目录切换不授予参与关系、Claim 或写权限；每次操作仍在选定的 Workspace 中鉴权。
 
-Harness `agent-instructions` 仍是加载 `AGENTS.md`/`CLAUDE.md` guidance 的唯一 loader。Team 不重新实现或迁移这套 discovery。 每个 Member 的 private root 包含三样东西：小写的 `memory.md` index、按需读取的 `notes/`、Member 私有 skill 的 `skills/`。 每个 safe pre-step 最多向 Member 提供自身发生变化的 index。它包装为 escaped、typed reference context。 Index 上限为 16 KiB，注入块常驻用量刻度（已用 X. X KiB / 16 KiB 及百分比）。超出预算会产生 maintenance warning，而不是静默截断、删除或 summarization。 Notes 不会自动注入。 Suspend/resume 保留这些 files，永久 removal 删除 private root。
+Harness `agent-instructions` 仍是加载 `AGENTS.md`/`CLAUDE.md` guidance 的唯一 loader。Team 不重新实现或迁移这套 discovery。 每个 Member 的 private root 包含三样东西：小写的 `memory.md` index、按需读取的 `notes/`、Member 私有 skill 的 `skills/`。 分类背景与 memory 基线更新见 [Memory 与上下文](memory-and-context.zh.md)。index 包装为 escaped、typed reference context；修改后的短提示不重新注入全文。 Index 上限为 16 KiB，注入块常驻用量刻度（已用 X. X KiB / 16 KiB 及百分比）。超出预算会产生 maintenance warning，而不是静默截断、删除或 summarization。 Notes 不会自动注入。 Suspend/resume 保留这些 files，永久 removal 删除 private root。
 
 persona 陈述私有空间的物理事实。事实有四样：注入的绝对路径、绝不 cwd 相对路径、memory/notes 纪律、可复用资产边界。它不讲上下文管理：压缩由 preset 的引擎做，换代由 Host 做，没有任何指令可供 Member 执行。值得跨代保留的东西，在工作过程中就写进私有 memory，而不是在换代前写一段告别。 全部 skill 写作指引都在内置的 `member-skill-manager` meta skill 里。指引管四样事：什么值得成为 skill、目录形态布局、写作质量、credentials 约定。它的 description 负责"涉及 skill 管理工作时先读我"。用不用任何 skill 由 Member 按任务自行判断。

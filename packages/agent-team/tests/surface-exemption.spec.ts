@@ -29,7 +29,7 @@ vi.setConfig({ testTimeout: 30_000 })
 /** A ledger over the same durable table, with an injected surface probe. */
 function ledgerWithProbe(facility: DomainFacility, probe: (memberId: string, fact: AgentTeamThreadReadFact) => boolean): AgentTeamLedger {
   return new AgentTeamLedger(facility.get('agent_team')!.table('operations') as unknown as KvTable<AgentTeamOperationId, AgentTeamOperation>, {
-    isFactVisible: (memberId, fact) => probe(memberId, fact),
+    areFactsVisible: (memberId, facts) => facts.every(fact => probe(memberId, fact)),
   })
 }
 

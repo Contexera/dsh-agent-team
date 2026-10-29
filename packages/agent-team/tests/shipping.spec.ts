@@ -205,11 +205,10 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('compaction: true')
     expect(preset).toContain('toolResultPruner: true')
     expect(preset).toContain('team_inbox, team_thread, team_attention, team_message, team_dm, team_task, and team_view')
-    // The one token story has exactly two legal surfaces: a fully drained
-    // read hands off the next-write token, and a committed public mutation's
-    // returned token may serve as the basis for the next deliberate mutation.
-    expect(preset).toContain('copy the next-write token that fully drained read renders')
-    expect(preset).toContain("a successful public mutation's returned token may serve as the basis for the next deliberate mutation")
+    expect(preset).toContain('from a fully drained team_thread read, your own committed mutation, or a complete Thread rejection that provides one')
+    expect(preset).toContain('A rejection is not a commit')
+    expect(preset).toContain('only read does that')
+    expect(preset).not.toContain('a rejection supplies no write basis')
     expect(preset).toContain('reply in plain text')
     expect(preset).toContain('not a reply channel for it')
     expect(preset).toContain('Lead with the conclusion or state; put mechanical detail')
@@ -260,10 +259,10 @@ describe('Agent Team shipping contract', () => {
     const toolSource = await readFile(resolve(root, 'packages/tool-agent-team/src/index.ts'), 'utf8')
     expect([...toolSource.matchAll(/name: '(team_[a-z]+)'/g)].map(match => match[1])).toEqual([
       'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view',
-    ])    // Validation errors teach the same two token surfaces as the descriptions,
+    ])
     expect(toolSource).toContain("from '@contexera/dsh-agent-team/recovery-hints'")
     const recoverySource = await readFile(resolve(root, 'packages/agent-team/src/recovery-hints.ts'), 'utf8')
-    expect(recoverySource).toContain('or reuse the one your own last committed mutation rendered')
+    expect(recoverySource).toContain('your own last committed mutation, or a complete Thread rejection that explicitly provides one')
     expect(toolSource).not.toContain('the revision is not shown anywhere else')
     // The body parameter restates the opening rule where the model composes the
     // message, so the contract is visible at composition time, not only in the

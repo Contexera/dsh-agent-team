@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import AgentTeam from '../src/index.ts'
@@ -11,7 +11,7 @@ import { agentTeamHumanActor } from '../src/ledger.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamProjectRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
-import { isFactOnSurface } from '../src/surface-visibility.ts'
+import { isFactOnSurface, visibleTeamSurface } from '../src/surface-visibility.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
 
 /**
@@ -72,8 +72,9 @@ async function addLiveMember(ctx: Context, projectRef: AgentTeamProjectRef): Pro
 /** One fake live Agent whose wake records what the Host really delivered. */
 function wakeSeam(): { readonly agent: Agent; readonly state: { readonly calls: UserMessage[] } } {
   const state = { calls: [] as UserMessage[] }
-  const wake = (message: UserMessage): void => { state.calls.push(message) }
-  const agent = { id: SessionId('session:agreement'), status: 'idle', inbox: { nextTurn: [], nextStep: [], remove: () => {} }, steer: wake, followup: wake } as unknown as Agent
+  const session = Session.create(SessionId('session:agreement'))
+  const wake = (message: UserMessage): void => { state.calls.push(message); session.append('user/message', message, { surfaceOp: 'append' }) }
+  const agent = { id: session.id, session, status: 'idle', inbox: { nextTurn: [], nextStep: [], remove: () => {} }, steer: wake, followup: wake } as unknown as Agent
   return { agent, state }
 }
 
@@ -101,7 +102,7 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     const unread = ctx.agentTeam['ledger']!.notificationFacts(member.memberId).flatMap(entry => entry.facts)
     expect(unread).toHaveLength(1)
     const text = noticeText!.type === 'text' ? noticeText!.text : ''
-    expect(isFactOnSurface([text], unread[0]!)).toBe(true)
+    expect(isFactOnSurface(visibleTeamSurface(agent), unread[0]!, sent.thread.threadRef)).toBe(true)
     // And the notice really does carry the body verbatim — the agreement is
     // about content, not about a marker that happens to be present.
     expect(text).toContain(body)
@@ -143,6 +144,6 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     const ordinaryText = 'Task task:abc: 1 unread update · newest at 2026-10-14T00:00:00.000Z.'
     const ordinaryBody = ordinary[0]!.fact.kind === 'message' ? ordinary[0]!.fact.message.body : ''
     expect(ordinaryText).not.toContain(ordinaryBody)
-    expect(isFactOnSurface([ordinaryText], ordinary[0]!)).toBe(false)
+    expect(isFactOnSurface(visibleTeamSurface(agent), ordinary[0]!, anchor.thread.threadRef)).toBe(false)
   })
 })

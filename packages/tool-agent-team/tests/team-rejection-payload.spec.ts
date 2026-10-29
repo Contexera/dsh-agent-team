@@ -1,20 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { occurrences, renderText, teamTools } from './render-text.ts'
 
-/**
- * Discriminating render tests for Project C: a rejected write renders the new
- * facts and the next write token in the SAME tool result, so the model never
- * pays a separate `team_thread read` round-trip to learn what changed.
- *
- * These lock the presence AND absence of exactly the fields the next decision
- * needs. The old contract — "a rejection carries no changed facts, so it never
- * renders a numeric revision or a next-write token" — is what this file
- * overturns, so the former `.not.toContain('8394')` assertions are gone here on
- * purpose and live inverted in `team-tools-render.spec.ts`.
- *
- * Absence assertions still target labels, never bare numbers: fact sequences,
- * read-through watermarks, and cursors legitimately render everywhere.
- */
+// Token absence targets the hand-off label, not bare numbers: sequences and cursors are valid without a write token.
 
 const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
 const TASK = 'task:3245ad40-43fd-4191-a416-7dcaf3a340f2'
@@ -23,11 +10,32 @@ const MEMBER = 'member:6e8a5b10-df16-4ec0-943a-63738010953f'
 
 /** One unread message fact, shaped exactly as `read` returns it. */
 function messageFact(sequence: number, body: string, options: { direct?: boolean; sender?: string } = {}) {
-  return { sequence, kind: 'message', body, sender: options.sender ?? 'human', mentions: [],
+  return { sequence, messageRef: `message:${sequence}`, kind: 'message', body, sender: options.sender ?? 'human', mentions: [],
     unread: true, direct: options.direct ?? false }
 }
 
 describe('unread_required renders the facts it is gating on', () => {
+  it('withholds a token when the bounded selection omits facts', () => {
+    const text = renderText(teamTools().get('team_message')!, { action: 'reply' }, {
+      kind: 'unread_required', threadRef: THREAD, revision: 8394, unreadCount: 21, directCount: 0,
+      facts: Array.from({ length: 21 }, (_, i) => messageFact(i + 1, `Pending fact ${i + 1}.`)),
+    })
+    expect(text).toContain('20 of 21 pending fact(s) included')
+    expect(text).not.toContain('Pending fact 21.')
+    expect(text).not.toContain('Next write — baseRevision')
+    expect(text).toContain('team_thread read')
+  })
+
+  it('bounds the complete result, including fact headers and recovery instructions', () => {
+    const text = renderText(teamTools().get('team_message')!, { action: 'reply' }, {
+      kind: 'unread_required', threadRef: THREAD, revision: 8394, unreadCount: 3, directCount: 0,
+      facts: [1, 2, 3].map(sequence => messageFact(sequence, 'x'.repeat(5000), { sender: 'sender'.repeat(300) })),
+    })
+    expect(text.length).toBeLessThanOrEqual(16 * 1024)
+    expect(text).toContain('team_thread read')
+    expect(text).not.toContain('Next write — baseRevision')
+  })
+
   it('renders every unread fact body, keeps the counts, and hands back the current revision', () => {
     const text = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8000, body: 'x' }, {
       kind: 'unread_required', threadRef: THREAD, taskRef: TASK, revision: 8394, unreadCount: 2, directCount: 1,
@@ -57,7 +65,7 @@ describe('unread_required renders the facts it is gating on', () => {
     expect(text).toContain('8400 builder claim')
     expect(text).toContain(`Task ${TASK}`)
     expect(text).toContain(`Claim ${CLAIM}`)
-    expect(text).toContain('Next write — baseRevision: 8400')
+    expect(text).not.toContain('Next write — baseRevision: 8400')
   })
 
   it('a rejection carrying no facts still renders the token and the read route', () => {
@@ -74,6 +82,16 @@ describe('unread_required renders the facts it is gating on', () => {
 })
 
 describe('stale_revision renders the increment it rejected against', () => {
+  it.each(['unknown', 'unrecognized'])('routes a %s revision baseline to read without a token', staleTokenKind => {
+    const text = renderText(teamTools().get('team_message')!, { action: 'reply' }, {
+      kind: 'stale_revision', threadRef: THREAD, revision: 8394, staleTokenKind,
+      facts: [messageFact(8394, 'Current fact')],
+    })
+    expect(text).not.toContain('Next write — baseRevision')
+    expect(text).not.toContain('the Thread changed after your last read')
+    expect(text).toContain('team_thread read')
+  })
+
   it('renders the facts added since the stale baseRevision and the current revision', () => {
     const text = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8387, body: 'x' }, {
       kind: 'stale_revision', threadRef: THREAD, expectedRevision: 8387, revision: 8394,

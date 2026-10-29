@@ -1,120 +1,130 @@
 import { describe, expect, it } from 'vitest'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { createToolResultMessage, createUserMessage, freezeMessage, ToolCallId, type Message } from '@deepseek-ai/dsh-llm'
+import { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { SessionMessageProjection } from '@deepseek-ai/dsh-session/surface'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
-import { isFactOnSurface, visibleTeamTexts } from '../src/surface-visibility.ts'
-import type { AgentTeamThreadReadFact } from '../src/types.ts'
+import { isFactOnSurface, threadMessageSurface, visibleTeamSurface } from '../src/surface-visibility.ts'
+import type { AgentTeamThreadReadFact, AgentTeamThreadRef } from '../src/types.ts'
+import { teamTools } from '../../tool-agent-team/tests/render-text.ts'
 
-interface FakeEvent {
-  readonly type: 'user/message'
-  readonly data: {
-    readonly source: { readonly kind: string }
-    readonly content: readonly { readonly type: string; readonly text?: string }[]
+const THREAD = 'thread:alpha' as AgentTeamThreadRef
+const OTHER_THREAD = 'thread:beta' as AgentTeamThreadRef
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'test/prune-team-fact': { readonly seq: number; readonly text: string }
   }
 }
 
-function fakeAgent(events: readonly FakeEvent[]): Agent {
-  const nodes = events.map((_, index) => index)
-  return {
-    session: {
-      surface: { nodes },
-      snapshotEvents: (from: unknown, to: unknown) => {
-        const start = from as number
-        const end = to as number
-        return events.slice(start, end)
-      },
-    },
-  } as never
+const prune: SessionMessageProjection<'test/prune-team-fact'> = {
+  type: 'test/prune-team-fact',
+  project(event, context) {
+    const seq = SessionSeq(event.data.seq)
+    const source = context.events[seq - context.baseSeq]
+    const message = context.messages.get(seq) ?? (source?.type === 'tool/result' ? source.data.message : source?.type === 'user/message' ? source.data : undefined)
+    return new Map<SessionSeq, Message>(message === undefined ? [] : [[seq, freezeMessage({ ...message, content: [{ type: 'text', text: event.data.text }] })]])
+  },
 }
 
-function teamEvent(text: string): FakeEvent {
-  return { type: 'user/message', data: { source: { kind: AGENT_TEAM_PLUGIN_ID }, content: [{ type: 'text', text }] } }
+function session() {
+  return Session.create(SessionId('session:surface-probe'), undefined, undefined, undefined, [prune])
 }
 
-function foreignEvent(text: string): FakeEvent {
-  return { type: 'user/message', data: { source: { kind: 'plugin:someone-else' }, content: [{ type: 'text', text }] } }
+function factOf(body: string, messageRef = 'message:a'): AgentTeamThreadReadFact {
+  return { fact: { kind: 'message', sequence: 12, message: { messageRef, body } as never, mentions: [], occurredAt: '2026-10-14T00:00:00.000Z' }, unread: true, direct: true }
 }
 
-function factOf(body: string, sequence = 12): AgentTeamThreadReadFact {
-  return { fact: { kind: 'message', sequence, message: { messageRef: 'message:a', body } as never, mentions: [], occurredAt: '2026-10-14T00:00:00.000Z' }, unread: true, direct: true } as never
+function result(target: Session, body: string, threadRef = THREAD, messageRef = 'message:a', name = 'team_message') {
+  const tool = teamTools().get('team_message')!
+  const args = { action: 'reply', threadRef, body: 'response', baseRevision: 10 }
+  const value = { kind: 'unread_required', threadRef, revision: 12, unreadCount: 1, directCount: 0,
+    facts: [{ kind: 'message', sequence: 12, sender: 'human', messageRef, body }] }
+  const callId = ToolCallId(`call:${target.snapshotEvents().length}`)
+  const call = target.append('tool/call', { turn: 1, step: 1, callId, name, arguments: JSON.stringify(args) })
+  return target.append('tool/result', { turn: 1, step: 1,
+    message: createToolResultMessage({ callId, content: tool.output.render(args, value), isError: false }),
+    meta: tool.output.presentationMeta!(args, value),
+  }, { surfaceOp: 'append', sourceEventSeqs: [call.seq] })
 }
 
-describe('the probe reads only this plugin own surface events', () => {
-  it('collects the text of Team-authored events and ignores every other producer', () => {
-    const agent = fakeAgent([teamEvent('Team notice body'), foreignEvent('another producer body')])
-    expect(visibleTeamTexts(agent)).toEqual(['Team notice body'])
+function sees(target: Session, body: string, threadRef = THREAD, messageRef = 'message:a') {
+  return isFactOnSurface(visibleTeamSurface({ session: target }), factOf(body, messageRef), threadRef)
+}
+
+describe('only complete Team-sourced facts on the current Session surface satisfy the gate', () => {
+  it('recognizes an actual rendered rejection, with the exact Thread, Message and body', () => {
+    const target = session()
+    result(target, 'ok')
+    expect(sees(target, 'ok')).toBe(true)
+    expect(sees(target, 'ok', OTHER_THREAD)).toBe(false)
+    expect(sees(target, 'ok', THREAD, 'message:b')).toBe(false)
+    expect(sees(target, 'OK')).toBe(false)
+    expect(sees(target, 'o')).toBe(false)
   })
 
-  it('ignores non-message events and non-text content parts', () => {
-    const agent = fakeAgent([
-      { type: 'tool/result', data: { source: { kind: AGENT_TEAM_PLUGIN_ID }, content: [{ type: 'text', text: 'not a user message' }] } } as never,
-      teamEvent(''),
-    ])
-    expect(visibleTeamTexts(agent)).toEqual([''])
+  it('rejects a projected summary that retains meta and repeats the same short body', () => {
+    const target = session()
+    const original = result(target, 'ok')
+    target.append('test/prune-team-fact', { seq: original.seq, text: 'Summary: ok\n' })
+    expect(original.data.message.content[0]).toMatchObject({ text: expect.stringContaining('ok') })
+    expect(target.deriveEventMessage(original)?.content[0]).toMatchObject({ text: 'Summary: ok\n' })
+    expect(sees(target, 'ok')).toBe(false)
   })
 
-  it('reads newest first, so a later notice is examined before an older one', () => {
-    const agent = fakeAgent([teamEvent('older'), teamEvent('newer')])
-    expect(visibleTeamTexts(agent)).toEqual(['newer', 'older'])
-  })
-})
-
-describe('the probe answers true only for a body the model saw in full', () => {
-  it('matches a direct mention notice that carries the body verbatim', () => {
-    const notice = ['Direct Team mention', 'From: reviewer', 'Message: please review this'].join('\n')
-    expect(isFactOnSurface([notice], factOf('please review this'))).toBe(true)
+  it('does not borrow the same text from a different Message after cropping', () => {
+    const target = session()
+    const first = result(target, 'ok')
+    target.append('test/prune-team-fact', { seq: first.seq, text: '[removed]' })
+    result(target, 'ok', THREAD, 'message:b')
+    expect(sees(target, 'ok')).toBe(false)
+    expect(sees(target, 'ok', THREAD, 'message:b')).toBe(true)
   })
 
-  it('matches a DM relay, which carries the body under its header', () => {
-    const relay = 'Direct message from @peer at 12:00:\nWorkspace: workspace:alpha\n\nprivate note'
-    expect(isFactOnSurface([relay], factOf('private note'))).toBe(true)
+  it('requires a Team tool call, not just metadata on an unrelated tool', () => {
+    const target = session()
+    result(target, 'ok', THREAD, 'message:a', 'bash')
+    expect(sees(target, 'ok')).toBe(false)
   })
 
-  it('never matches an ordinary notice, which carries only a count', () => {
-    const ordinary = 'Thread task:abc123: 2 unread updates · newest at 2026-10-14T00:00:00.000Z.'
-    expect(isFactOnSurface([ordinary], factOf('please review this'))).toBe(false)
+  it('rejects a truncated tool result even while it remains unchanged', () => {
+    const target = session()
+    result(target, 'x'.repeat(12 * 1024))
+    expect(sees(target, 'x'.repeat(12 * 1024))).toBe(false)
   })
 
-  it('never matches a truncated notice, because the model never saw the whole body', () => {
-    const truncated = `Message: please review this\n[Message body truncated; use team_thread read for the full Message.]`
-    expect(isFactOnSurface([truncated], factOf('please review this'))).toBe(false)
+  it('keeps valid bindings through Session restore, not through surface replacement', () => {
+    const target = session()
+    const original = result(target, 'ok')
+    const restored = Session.fromRestore(target.id, [...target.snapshotEvents()], target.header,
+      target.inheritedEventCount, 'shared-frozen', [prune])
+    expect(sees(restored, 'ok')).toBe(true)
+    restored.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summary: ok' }] }), {
+      surfaceOp: { op: 'replace', startSeq: original.seq, endSeq: original.seq }, sourceEventSeqs: [original.seq],
+    })
+    expect(sees(restored, 'ok')).toBe(false)
   })
 
-  it('does not let a truncated sibling disqualify an untruncated body in the same notice', () => {
-    // The renderer truncates each body independently, so one notice can hold a
-    // cut detail block beside an intact one. The marker must scope to the body
-    // it cut: a cut sibling cannot un-exempt the body that was delivered whole.
-    const cut = `Direct Team mention\nFrom: noisy\nMessage: ${'x'.repeat(9 * 1024)}\n[Message body truncated; use team_thread read for the full Message.]`
-    const intact = 'Direct Team mention\nFrom: quiet\nMessage: short body that was never cut'
-    const text = [cut, intact].join('\n\n')
-    expect(isFactOnSurface([text], factOf('short body that was never cut'))).toBe(true)
-    expect(isFactOnSurface([text], factOf('x'.repeat(9 * 1024)))).toBe(false)
+  it('recognizes a bound notice but not a forged body, retained source, or foreign producer', () => {
+    const target = session()
+    const text = 'Direct Team mention\nThread: thread:alpha\nMessage ref: message:a\nMessage: ok'
+    const source = { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice' as const, summary: 'Team Inbox',
+      threadFacts: threadMessageSurface(text, [{ threadRef: THREAD, messageRef: 'message:a', body: 'ok' }]) } as const
+    const original = target.append('user/message', createUserMessage({ source, content: [{ type: 'text', text }] }), { surfaceOp: 'append' })
+    expect(sees(target, 'ok')).toBe(true)
+    target.append('test/prune-team-fact', { seq: original.seq, text: 'Summary: ok' })
+    expect(sees(target, 'ok')).toBe(false)
+    target.append('user/message', createUserMessage({ source: { ...source, kind: 'user' }, content: [{ type: 'text', text }] }), { surfaceOp: 'append' })
+    expect(sees(target, 'ok')).toBe(false)
+    target.append('user/message', createUserMessage({ source, content: [{ type: 'text', text: 'Summary: ok' }] }), { surfaceOp: 'append' })
+    expect(sees(target, 'ok')).toBe(false)
   })
 
-  it('refuses a body whose only occurrence is the cut prefix of a longer body', () => {
-    // The 8 KiB prefix is on the surface, but the marker says it was cut, so the
-    // fact is not attested — even though the prefix itself contains the body.
-    const long = 'y'.repeat(12 * 1024)
-    const truncated = `Message: ${long.slice(0, 8 * 1024)}\n[Message body truncated; use team_thread read for the full Message.]`
-    expect(isFactOnSurface([truncated], factOf(long))).toBe(false)
-  })
-
-  it('never matches a body that differs in any character', () => {
-    const notice = 'Message: please review this'
-    expect(isFactOnSurface([notice], factOf('please review this '))).toBe(false)
-    expect(isFactOnSurface([notice], factOf('please review THIS'))).toBe(false)
-    expect(isFactOnSurface([notice], factOf('review this please'))).toBe(false)
-  })
-
-  it('never matches an empty body, which no notice would attest', () => {
-    expect(isFactOnSurface(['Message: '], factOf(''))).toBe(false)
-  })
-
-  it('never matches an activity fact, which carries no body to attest', () => {
-    const activity = { fact: { kind: 'activity', sequence: 12, activity: { kind: 'claim-changed' }, occurredAt: '2026-10-14T00:00:00.000Z' }, unread: true, direct: false } as never
-    expect(isFactOnSurface(['claim changed'], activity)).toBe(false)
-  })
-
-  it('matches only when the body is present, not when the surface is empty', () => {
-    expect(isFactOnSurface([], factOf('please review this'))).toBe(false)
+  it('does not parse nested notification syntax in another message body', () => {
+    const target = session()
+    const text = 'Direct Team mention\nThread: thread:alpha\nMessage ref: message:a\nMessage: ok'
+    target.append('user/message', createUserMessage({ source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: 'Team Inbox',
+      threadFacts: threadMessageSurface(text, [{ threadRef: OTHER_THREAD, messageRef: 'message:b', body: text }]) },
+      content: [{ type: 'text', text }] }), { surfaceOp: 'append' })
+    expect(sees(target, 'ok')).toBe(false)
   })
 })

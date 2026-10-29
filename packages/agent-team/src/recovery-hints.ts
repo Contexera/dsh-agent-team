@@ -18,6 +18,7 @@ export interface RecoveryContext {
   readonly parameter?: string | undefined
   /** The action that parameter does belong to, when the fault is that one. */
   readonly owner?: string | undefined
+  readonly completeFacts?: boolean | undefined
 }
 
 /** One registered way out: the situation it answers, and its words. */
@@ -32,8 +33,10 @@ export interface RecoveryEntry {
 export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   {
     kind: 'unread_required',
-    sentence: ({ threadRef, taskRef }: RecoveryContext) => [
-      'Read the pending updates with team_thread read before reconsidering this write.',
+    sentence: ({ threadRef, taskRef, completeFacts }: RecoveryContext) => [
+      completeFacts
+        ? 'Reconsider the pending updates above before writing; this did not mark them read. Use team_thread read if earlier context is missing. New updates, permissions and Task state are checked again.'
+        : 'Read the pending updates with team_thread read before reconsidering this write.',
       ...(threadRef === undefined ? [] : [threadRef]),
       ...(taskRef === undefined ? [] : [taskRef]),
     ].join(' '),
@@ -76,14 +79,16 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'stale_revision',
-    sentence: () => 'Read the Thread, reconsider the new facts, then retry with the token that read returns.',
+    sentence: ({ threadRef, completeFacts }: RecoveryContext) => completeFacts
+      ? 'Reconsider the new facts above before using the current token; this did not mark them read. Use team_thread read if earlier context is missing. The next write is checked again.'
+      : `Read ${threadRef ?? 'the Thread'} with team_thread read to obtain the required context and current token before reconsidering this write.`,
   },
   {
     // Same refusal as `stale_revision` with a different cause: the token was never a revision this Thread reached. The race sentence would send the model hunting for a nonexistent insertion. A distinct kind keeps exact-kind lookup reachable.
     kind: 'stale_revision_token_unrecognized',
     sentence: ({ threadRef }: RecoveryContext) => [
-      'That write token is not a revision this Thread reached — nobody inserted anything, so there is nothing to go and re-read.',
-      `Take a current token from ${threadRef === undefined ? 'the Thread' : threadRef} with team_thread read, or reuse the one your own last committed mutation rendered.`,
+      'That write token is not a revision this Thread reached; this does not establish what context you have seen.',
+      `Read ${threadRef ?? 'the Thread'} with team_thread read for context and a current token.`,
     ].join(' '),
   },
   {
@@ -106,7 +111,7 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
   },
   {
     kind: 'missing_write_token',
-    sentence: () => 'Drain the Thread with team_thread read and copy the next-write token it renders, or reuse the one your own last committed mutation rendered.',
+    sentence: () => 'Copy a next-write token from a fully drained team_thread read, your own last committed mutation, or a complete Thread rejection that explicitly provides one; reconsider the facts before writing.',
   },
   {
     kind: 'start_requires_project',

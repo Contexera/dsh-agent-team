@@ -85,7 +85,7 @@ describe('team_view renders one address book', () => {
       kind: 'read', threadRef: THREAD, revision: 9010, following: true,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: longBody, sequence: 8888 },
       claims: [],
-      facts: [{ sequence: 9010, kind: 'message', body: 'one new fact', sender: 'human', mentions: [], unread: true, direct: true }],
+      facts: [{ sequence: 9010, kind: 'message', messageRef: 'message:9010', body: 'one new fact', sender: 'human', mentions: [], unread: true, direct: true }],
       readThroughSequence: 9010, remainingUnreadCount: 0,
     })
     expect(text).toContain('  — Systematically review the five model-facing Team tool ')
@@ -269,8 +269,8 @@ describe('team_thread read orients by structured facts', () => {
       anchor,
       claims: [{ claimRef: CLAIM, direction: 'renderer fidelity', state: 'active', owner: 'member:6e8a5b10-df16-4ec0-943a-63738010953f' }],
       facts: [
-        { sequence: 8888, kind: 'message', body: anchor.body, sender: 'human', mentions: [], unread: false, direct: false },
-        { sequence: 9004, kind: 'message', body: 'Trace audit is ready', sender: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5', mentions: [], unread: true, direct: true },
+        { sequence: 8888, kind: 'message', messageRef: 'message:8888', body: anchor.body, sender: 'human', mentions: [], unread: false, direct: false },
+        { sequence: 9004, kind: 'message', messageRef: 'message:9004', body: 'Trace audit is ready', sender: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5', mentions: [], unread: true, direct: true },
       ],
       readThroughSequence: 9004, remainingUnreadCount: 0,
     })
@@ -284,7 +284,7 @@ describe('team_thread read orients by structured facts', () => {
     expect(text).toContain('Next write — baseRevision: 9004 (copy exactly; never derive or cite).')
   })
 
-  it('branch B: unread===false background facts precede a full anchor; done Claims stay out of current context', () => {
+  it('background does not repeat a visible anchor; done Claims stay out of current context', () => {
     const text = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, {
       kind: 'read', threadRef: THREAD, taskRef: TASK, revision: 8402, status: 'in_progress', resolution: 'open', following: true,
       anchor,
@@ -293,14 +293,14 @@ describe('team_thread read orients by structured facts', () => {
         { claimRef: CLAIM, direction: 'renderer fidelity', state: 'active', owner: 'member:6e8a5b10-df16-4ec0-943a-63738010953f' },
       ],
       facts: [
-        { sequence: 8387, kind: 'message', body: 'already-read background', sender: 'human', mentions: [], unread: false, direct: false },
-        { sequence: 8402, kind: 'message', body: 'decision', sender: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5', mentions: [], unread: true, direct: true },
+        { sequence: 8387, kind: 'message', messageRef: 'message:8387', body: 'already-read background', sender: 'human', mentions: [], unread: false, direct: false },
+        { sequence: 8402, kind: 'message', messageRef: 'message:8402', body: 'decision', sender: 'member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5', mentions: [], unread: true, direct: true },
       ],
       readThroughSequence: 8402, remainingUnreadCount: 3,
     })
-    // Full anchor renders before the facts.
-    expect(text).toContain(`Anchor ${anchor.sequence} [human]`)
-    expect(text).toContain(anchor.body)
+    expect(text).not.toContain(`Anchor ${anchor.sequence} [human]`)
+    expect(text).toContain(`  — ${anchor.body}`)
+    expect(text).toContain('Background — not newly acknowledged')
     // Only the active Claim is current collision surface.
     expect(text).toContain(CLAIM)
     expect(text).not.toContain('claim:old')
@@ -315,7 +315,7 @@ describe('team_thread read orients by structured facts', () => {
       anchor,
       claims: [],
       facts: [
-        { sequence: 9010, kind: 'message', body: 'Show me the expected result, not a field table.', sender: 'human', mentions: [], unread: true, direct: true },
+        { sequence: 9010, kind: 'message', messageRef: 'message:9010', body: 'Show me the expected result, not a field table.', sender: 'human', mentions: [], unread: true, direct: true },
       ],
       readThroughSequence: 9010, remainingUnreadCount: 0,
     })
@@ -359,8 +359,8 @@ describe('team_thread history renders deep orientation only', () => {
       anchor,
       claims: [{ claimRef: CLAIM, direction: 'd', state: 'active', owner: 'member:x' }],
       facts: [
-        { sequence: 8973, kind: 'message', body: 'Compared the two complete interface families.', sender: 'member:reeve', mentions: [] },
-        { sequence: 8990, kind: 'message', body: 'Added an independent trace sample.', sender: 'member:tars', mentions: [] },
+        { sequence: 8973, kind: 'message', messageRef: 'message:8973', body: 'Compared the two complete interface families.', sender: 'member:reeve', mentions: [] },
+        { sequence: 8990, kind: 'message', messageRef: 'message:8990', body: 'Added an independent trace sample.', sender: 'member:tars', mentions: [] },
       ],
       cursor: 8973, hasMore: true,
     })
@@ -377,7 +377,7 @@ describe('team_thread history renders deep orientation only', () => {
       kind: 'history', threadRef: THREAD, revision: 9100, following: true,
       anchor,
       claims: [],
-      facts: [{ sequence: 8888, kind: 'message', body: anchor.body, sender: 'member:reeve', mentions: [] }],
+      facts: [{ sequence: 8888, kind: 'message', messageRef: 'message:8888', body: anchor.body, sender: 'member:reeve', mentions: [] }],
       cursor: 8888, hasMore: true,
     })
     expect(occurrences(withAnchor, anchor.body)).toBe(1)
@@ -389,7 +389,7 @@ describe('team_thread history renders deep orientation only', () => {
       kind: 'history', threadRef: THREAD, revision: 9100, following: true,
       anchor,
       claims: [],
-      facts: [{ sequence: 8900, kind: 'message', body: 'An older fact.', sender: 'human', mentions: [] }],
+      facts: [{ sequence: 8900, kind: 'message', messageRef: 'message:8900', body: 'An older fact.', sender: 'human', mentions: [] }],
       cursor: 8900, hasMore: false,
     })
     expect(text).toContain(`  — ${anchor.body.slice(0, 60)}`)
@@ -493,7 +493,8 @@ describe('team_message renders its outcome', () => {
   it('typed rejections begin Not committed, keep refs/counts/recovery, and hand back the current revision', () => {
     const unread = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8000, body: 'x' }, {
       kind: 'unread_required', threadRef: THREAD, taskRef: TASK, revision: 8394, unreadCount: 2, directCount: 1,
-      facts: [{ sequence: 8394, kind: 'message', body: 'the gated fact', sender: 'human', mentions: [], unread: true, direct: true }],
+      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the gated fact', sender: 'human', mentions: [], unread: true, direct: true },
+        { sequence: 8395, kind: 'message', messageRef: 'message:8395', body: 'another update', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(unread).toContain('Not committed — unread_required.')
     expect(unread).toContain(`${THREAD} · ${TASK} · 2 unread, 1 direct`)
@@ -506,10 +507,10 @@ describe('team_message renders its outcome', () => {
 
     const stale = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8387, body: 'x' }, {
       kind: 'stale_revision', threadRef: THREAD, expectedRevision: 8387, revision: 8394,
-      facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
+      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(stale).toContain('Not committed — the Thread changed after your last read (stale_revision).')
-    expect(stale).toContain('Read the Thread, reconsider the new facts')
+    expect(stale).toContain('Reconsider the new facts above')
     expect(stale).toContain('the increment')
     expect(stale).toContain('Next write — baseRevision: 8394')
 
@@ -519,16 +520,16 @@ describe('team_message renders its outcome', () => {
     // which would otherwise present facts as missed when none were.
     const copied = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 4711, body: 'x' }, {
       kind: 'stale_revision', threadRef: THREAD, expectedRevision: 4711, revision: 8394, staleTokenKind: 'unrecognized',
-      facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
+      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
     expect(copied).toContain('not a revision this Thread reached')
     // The headline must not contradict the way out: the first line can no
     // longer claim the Thread changed, and the race sentence is gone with it.
     expect(copied).not.toContain('the Thread changed')
-    expect(copied).not.toContain('Read the Thread, reconsider the new facts')
+    expect(copied).not.toContain('Reconsider the new facts above')
     expect(copied).not.toContain('the increment')
-    expect(copied).toContain('Next write — baseRevision: 8394')
+    expect(copied).not.toContain('Next write — baseRevision: 8394')
 
     // member_not_following is a version-1 result the Host can no longer produce
     // for a tool call: the fallback render names the kind and the Thread without
@@ -605,7 +606,8 @@ describe('team_task renders the affected Claim', () => {
     const unread = renderText(teamTools().get('team_task')!, { action: 'claim', taskRef: TASK, baseRevision: 8000, direction: 'd' }, {
       kind: 'unread_required', taskRef: TASK, threadRef: THREAD, revision: 8394, status: 'in_progress', unreadCount: 2, directCount: 1,
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
-      facts: [{ sequence: 8394, kind: 'message', body: 'the gated fact', sender: 'human', mentions: [], unread: true, direct: true }],
+      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the gated fact', sender: 'human', mentions: [], unread: true, direct: true },
+        { sequence: 8395, kind: 'message', messageRef: 'message:8395', body: 'another update', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(unread).toContain('Not committed — unread_required.')
     expect(unread).toContain(`${THREAD} · ${TASK} · 2 unread, 1 direct`)
@@ -619,7 +621,7 @@ describe('team_task renders the affected Claim', () => {
     const stale = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 8387, claimRef: CLAIM }, {
       kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 8387, revision: 8394, status: 'in_progress',
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
-      facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
+      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(stale).toContain('Not committed — the Thread changed after your last read (stale_revision).')
     expect(stale).toContain('the increment')
@@ -631,12 +633,12 @@ describe('team_task renders the affected Claim', () => {
     const copied = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
       kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', staleTokenKind: 'unrecognized',
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
-      facts: [{ sequence: 8394, kind: 'message', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
+      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
     expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
     expect(copied).not.toContain('the Thread changed')
     expect(copied).not.toContain('the increment')
-    expect(copied).toContain('Next write — baseRevision: 8394')
+    expect(copied).not.toContain('Next write — baseRevision: 8394')
   })
 })
 
@@ -687,7 +689,7 @@ describe('team_task renders Task resolutions and transfers', () => {
     const text = renderText(teamTools().get('team_task')!, { action: 'accept', taskRef: TASK, baseRevision: 8000 }, {
       kind: 'unread_required', taskRef: TASK, threadRef: THREAD, revision: 8394, status: 'in_review', accountable,
       unreadCount: 1, directCount: 1,
-      facts: [{ sequence: 8394, kind: 'message', body: 'the work is ready for review', sender: 'human', mentions: [], unread: true, direct: true }],
+      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the work is ready for review', sender: 'human', mentions: [], unread: true, direct: true }],
     })
     expect(text).toContain('Not committed — unread_required.')
     expect(text).toContain('the work is ready for review')
@@ -712,8 +714,9 @@ describe('descriptions state the cross-tool workflow', () => {
     expect(tools.get('team_thread')!.description).toContain('committed public mutations hand off the token as well')
     expect(tools.get('team_view')!.description).toContain('address book')
     expect(tools.get('team_inbox')!.description).toContain('without marking anything read')
-    expect(tools.get('team_task')!.description).toContain('collision surface')
-    expect(tools.get('team_task')!.description).toContain('or your own last committed mutation')
+    expect(tools.get('team_task')!.description).toContain('list only refreshes active Claims')
+    expect(tools.get('team_task')!.description).toContain('from a drained read, your own commit, or a complete rejection that provides one')
+    expect(tools.get('team_message')!.description).toContain('never acknowledge unread')
   })
 })
 
@@ -724,12 +727,13 @@ describe('team tools render absolute event instants in UTC+8', () => {
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'Investigate startup failure', sequence: 101, occurredAt: '2026-08-20T03:11:00.000Z' },
       claims: [],
       facts: [
-        { sequence: 118, kind: 'message', body: 'Reproduced on Windows', sender: 'member:builder', mentions: [], occurredAt: '2026-08-20T04:06:12.000Z', unread: false, direct: false },
+        { sequence: 101, kind: 'message', messageRef: 'message:anchor', body: 'Investigate startup failure', sender: 'human', mentions: [], occurredAt: '2026-08-20T03:11:00.000Z', unread: false, direct: false },
+        { sequence: 118, kind: 'message', messageRef: 'message:118', body: 'Reproduced on Windows', sender: 'member:builder', mentions: [], occurredAt: '2026-08-20T04:06:12.000Z', unread: false, direct: false },
         { sequence: 126, kind: 'activity', activity: 'accept', actor: 'human', taskRef: TASK, occurredAt: '2026-08-21T01:30:44.000Z', unread: true, direct: false },
       ],
       readThroughSequence: 126, remainingUnreadCount: 0,
     })
-    expect(withInstants).toContain('Anchor 101 2026-08-20T11:11:00+08:00 [human]')
+    expect(withInstants).toContain('101 2026-08-20T11:11:00+08:00 [human]')
     expect(withInstants).toContain('118 2026-08-20T12:06:12+08:00 [member:builder] Reproduced on Windows')
     expect(withInstants).toContain('126 human accept Task task:3245ad40-43fd-4191-a416-7dcaf3a340f2 2026-08-21T09:30:44+08:00 [unread]')
     // No relative time text: the render carries absolute instants only.
@@ -740,7 +744,7 @@ describe('team tools render absolute event instants in UTC+8', () => {
       kind: 'read', threadRef: THREAD, revision: 9010, following: false,
       anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
       claims: [],
-      facts: [{ sequence: 12, kind: 'message', body: 'plain message', sender: 'human', mentions: [] }],
+      facts: [{ sequence: 12, kind: 'message', messageRef: 'message:12', body: 'plain message', sender: 'human', mentions: [] }],
       readThroughSequence: 12, remainingUnreadCount: 0,
     })
     expect(withoutInstants).toContain('12 [human] plain message')
@@ -749,10 +753,9 @@ describe('team tools render absolute event instants in UTC+8', () => {
 
   it('history renders the same fact instants as read — the cache invariant at the render layer', () => {
     const anchor = { messageRef: 'message:anchor', sender: 'human', body: 'Investigate startup failure', sequence: 101, occurredAt: '2026-08-20T03:11:00.000Z' }
-    // The read carries positive unread === false markers so it renders the
-    // full anchor (branch B); history always orients on the full anchor.
     const facts = [
-      { sequence: 118, kind: 'message', body: 'Reproduced on Windows', sender: 'member:builder', mentions: [], occurredAt: '2026-08-20T04:06:12.000Z', unread: false, direct: false },
+      { ...anchor, kind: 'message', mentions: [], unread: false, direct: false },
+      { sequence: 118, kind: 'message', messageRef: 'message:118', body: 'Reproduced on Windows', sender: 'member:builder', mentions: [], occurredAt: '2026-08-20T04:06:12.000Z', unread: false, direct: false },
       { sequence: 126, kind: 'activity', activity: 'accept', actor: 'human', taskRef: TASK, occurredAt: '2026-08-21T01:30:44.000Z', unread: false, direct: false },
     ] as never
     const read = renderText(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD }, {
@@ -767,8 +770,8 @@ describe('team tools render absolute event instants in UTC+8', () => {
     expect(history).toContain('118 2026-08-20T12:06:12+08:00 [member:builder] Reproduced on Windows')
     expect(read).toContain('126 human accept Task task:3245ad40-43fd-4191-a416-7dcaf3a340f2 2026-08-21T09:30:44+08:00')
     expect(history).toContain('126 human accept Task task:3245ad40-43fd-4191-a416-7dcaf3a340f2 2026-08-21T09:30:44+08:00')
-    expect(read).toContain('Anchor 101 2026-08-20T11:11:00+08:00 [human]')
-    expect(history).toContain('Anchor 101 2026-08-20T11:11:00+08:00 [human]')
+    expect(read).toContain('101 2026-08-20T11:11:00+08:00 [human]')
+    expect(history).toContain('101 2026-08-20T11:11:00+08:00 [human]')
   })
 
   it('inbox rows carry the newest unread instant; view rows carry last activity', () => {

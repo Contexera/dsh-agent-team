@@ -11,7 +11,7 @@ taskless Thread 可以直接 unfollow。taskful Thread 只有在 Agent 的 Task 
 
 Attention active 时，三类事实会成为 ordinary unread facts。第一，其他 Members 的 Messages。第二，taskful Thread 上的 Claim changes。第三，Task accept/close/reopen activities。Mention 为收件人创建 durable direct marker。发送者自己的 mutation 不会成为自己的 unread。Promotion 为当前 followers 携带 durable Activity markers。Promotion 的 `promote` activity 像其他 Task transitions 一样作为 follower unread fact 到达。由 `team_thread.read` 渲染。Follow、unfollow 和 read operations 不是 public Thread facts，不推进 Thread revision。close 结束 Attention；reopen 不恢复旧 periods，但新的 reopen 会为 accountable 恢复当前 Thread follow，accountable 是操作者或已经 follow 时除外。
 
-一个 Attention period 的首次 read 返回 Thread anchor、可选的 current Task 与 Claim snapshot。外加有限的 recent background 和有界 unread batch。Background 只用于定位，并标记为已读。`team_thread.history` 是唯一用于翻页查看更旧 Thread facts 的 tool。重新进入一个自己读过的 Thread 的 Member 拿不到 background。Member 在那里的定位只有 anchor 加本次 batch。中间那些 facts 要靠自己往回翻。
+`read` 既返回未读工作，也补定位背景。读者当前上下文已不再持有讨论时，它补上缺失的 anchor，并给出未读窗口之前最多四条 fact 中筛出的 Message，当前已完整可见的背景不重复；任何一次 read 都可能补，不只是首次。背景只用于定位，不是本次新确认的工作。`history` 是唯一翻查更旧 facts 的入口，`message` 逐字读回一条 Message；二者都不确认未读。完整读取规则见 [tools.zh.md](tools.zh.md)。
 
 Human Client 默认打开 Projects workspace。Human navigation 沿 Workspace → Project → Thread 进行。Task 是 taskful Thread 上的 card/header overlay，不是独立的 navigation level。Inbox（收件箱）是 Team 内的一个全局页。由侧栏卡片/窄轨图标进入，合并各 Workspace 的 Inbox 调用。读者看到整片未读，mention 只在其中计数。打开 Inbox 页不执行 Thread read。只有打开 Thread 才推进水位，并清除 direct marker 与私有 reminder marker。私有 Task 提醒是直接通知，不是 mention 或公开 Activity；查看 Inbox 或看板不会消费它。打开 Thread 会执行 durable Human Thread read 并滚动到最后一条。有界 read 后若仍有 unread facts，Client 自动续读清零。不存在显式的 continue-reading action。
 

@@ -7,6 +7,8 @@ Team is one collaboration domain per DSH home. Its append-only operation ledger 
 When changing a Host capability, read package source/tests first and then the matching Harness contract. [`harness-navigation.md`](../harness-navigation.md) maps the route to `deepseek-harness/docs/subsystems/` and source packages.
 
 ## Ledger authority and commits
+- Current Session context may satisfy the [Thread reading requirement](../team-collaboration/boundaries.md#mutation-fences), but never confirms unread or creates another authority. Only explicit reads commit read-state changes.
+- Agent Thread reads add [context-aware presentation](../team-collaboration/tools.md#team_thread) to the ledger result: missing original background and references to already-visible bodies. Human reads, the selected unread batch, and stored receipts remain unchanged; replay never depends on a Session.
 - Mutations enter Host authority and commit one durable operation. Projections, Inbox, tools, commands, Remote responses, and UI derive from committed operations; Client code never interprets ledger records or creates parallel authority.
 
 - Replay re-derives each record's expected Inbox delta and compares it exactly, so a release that changes how an existing kind is validated first records `team/rules-version-adopted` (Host actor, `{ version }`). Each record validates under the newest marker before it; a ledger with none is version 1. `initialize` appends the marker inside its own queued commit, so it precedes every later write, startup recovery included. Markers only ascend, at most one per version, and a build refuses a ledger adopted at a version above its own.

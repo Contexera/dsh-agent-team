@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset } from '@contexera/dsh-agent-team/host'
+import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset, threadMessageSurface } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
 import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
@@ -48,7 +48,9 @@ interface ActivityFactView {
 interface MessageFactView {
   readonly sequence: number
   readonly kind: 'message'
+  readonly messageRef: string
   readonly body: string
+  readonly bodyOmitted?: boolean
   readonly sender: string
   readonly occurredAt?: string
   readonly mentions: string[]
@@ -127,7 +129,7 @@ function activityLine(fact: ActivityFactView): string {
   return segments.join(' ')
 }
 
-/** The one hand-off line a fully drained read or a committed public mutation may render. */
+/** The single explicit hand-off of a usable write token. */
 function nextWriteLine(revision: number): string {
   return `Next write — baseRevision: ${revision} (copy exactly; never derive or cite).`
 }
@@ -188,7 +190,7 @@ function factTimelineLines(facts: readonly FactView[], cards: readonly TaskCardV
 /** The one model-facing schema for a Thread fact, shared by the read result and by the facts a rejected write carries back. */
 const FACT_SCHEMA = {
   type: 'object', additionalProperties: false, properties: {
-    sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, body: { type: 'string' }, sender: { type: 'string' }, occurredAt: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } }, replyToMessageRef: { type: 'string' }, replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } }, activity: { type: 'string' }, actor: { type: 'string' }, taskRef: { type: 'string' }, claimRef: { type: 'string' }, claimRefs: { type: 'array', items: { type: 'string' } }, completedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } }, releasedClaimRefs: { type: 'array', items: { type: 'string' } }, unread: { type: 'boolean' }, direct: { type: 'boolean' },
+    sequence: { type: 'number', required: true }, kind: { type: 'string', required: true }, messageRef: { type: 'string' }, body: { type: 'string' }, bodyOmitted: { type: 'boolean' }, sender: { type: 'string' }, occurredAt: { type: 'string' }, mentions: { type: 'array', items: { type: 'string' } }, replyToMessageRef: { type: 'string' }, replyTo: { type: 'object', additionalProperties: false, properties: { sender: { type: 'string', required: true }, excerpt: { type: 'string', required: true } } }, activity: { type: 'string' }, actor: { type: 'string' }, taskRef: { type: 'string' }, claimRef: { type: 'string' }, claimRefs: { type: 'array', items: { type: 'string' } }, completedClaimRefs: { type: 'array', items: { type: 'string' } }, acceptedClaimRefs: { type: 'array', items: { type: 'string' } }, releasedClaimRefs: { type: 'array', items: { type: 'string' } }, unread: { type: 'boolean' }, direct: { type: 'boolean' },
   },
 } as const
 
@@ -225,6 +227,7 @@ const OPTIONAL_COLLECTION_KEYS = ['attachments', 'sourceThreadRefs'] as const
 type RejectedFact = {
   readonly sequence: number
   readonly kind: string
+  readonly messageRef?: string
   readonly body?: string
   readonly sender?: string
   readonly occurredAt?: string
@@ -243,48 +246,74 @@ type RejectedFact = {
   readonly direct?: boolean
 }
 
-/** The typed-rejection renderer shared by team_message and team_task: outcome, action-local recovery facts, the facts that gated the write, and the single recovery route. The current revision is written back as the next write token, so a rejected writer needs no separate read round-trip. */
-function rejectionLines(
-  value: { readonly kind: string; readonly threadRef?: string; readonly taskRef?: string; readonly unreadCount?: number; readonly directCount?: number; readonly memberIds?: string[]; readonly revision?: number; readonly staleTokenKind?: 'unknown' | 'unrecognized'; readonly facts?: readonly RejectedFact[] },
-): string[] {
-  const identity = [
-    value.threadRef === undefined ? '' : value.threadRef,
-    value.taskRef === undefined ? '' : value.taskRef,
-  ].filter(part => part !== '').join(' · ')
-  if (value.kind === 'unread_required') {
-    const facts = value.facts ?? []
-    return [
-      'Not committed — unread_required.',
-      `${identity}${identity === '' ? '' : ' · '}${value.unreadCount ?? 0} unread, ${value.directCount ?? 0} direct`,
-      ...rejectedFactLines(facts),
-      recoveryFor('unread_required').sentence({ threadRef: value.threadRef, taskRef: value.taskRef }),
-      ...(value.revision === undefined ? [] : [nextWriteLine(value.revision)]),
-    ]
-  }
-  if (value.kind === 'stale_revision') {
-    const facts = value.facts ?? []
-        // A token this Thread never reached is not a race (it was copied from another Thread or invented), so the way out and the headline say that instead of claiming the Thread changed and then saying nothing was inserted.
-    const unrecognized = value.staleTokenKind === 'unrecognized'
-    return [
-      ...(unrecognized ? ['Not committed — that write token was never a revision this Thread reached (stale_revision).']
-        : ['Not committed — the Thread changed after your last read (stale_revision).']),
-      identity,
-      ...(unrecognized ? [] : rejectedFactLines(facts)),
-      recoveryFor(unrecognized ? 'stale_revision_token_unrecognized' : 'stale_revision')
-        .sentence({ threadRef: value.threadRef, taskRef: value.taskRef }),
-      ...(value.revision === undefined ? [] : [nextWriteLine(value.revision)]),
-    ]
-  }
-  return [
-    `Not committed — ${value.kind}.`,
-    identity === '' ? 'No message was added.' : `${identity} — no message was added.`,
-  ]
+const REJECTION_FACT_LIMIT = 20
+const REJECTION_BODY_MAX_CHARACTERS = 8 * 1024
+const REJECTION_MAX_CHARACTERS = 16 * 1024
+const REJECTION_BODY_TRUNCATION_MARKER = '[Message body truncated; the full change is not shown here.]'
+
+function messageIdentities(threadRef: string | undefined, facts: readonly RejectedFact[]) {
+  return threadRef === undefined ? [] : facts.flatMap(fact => fact.kind === 'message' && fact.messageRef !== undefined && fact.body !== undefined
+    ? [{ threadRef, messageRef: fact.messageRef, body: fact.body }]
+    : [])
 }
 
-/** The facts a rejection carries, rendered by the same `factLine` as a Thread read. Nothing to show stays silent, and the count states the span so a truncated batch never reads as the whole increment. */
-function rejectedFactLines(facts: readonly RejectedFact[]): string[] {
-  if (facts.length === 0) return []
-  return ['', `${facts.length} new fact(s) since your last write:`, ...facts.map(fact => factLine(fact as FactView))]
+interface ThreadRejection {
+  readonly kind: string
+  readonly threadRef?: string
+  readonly taskRef?: string
+  readonly unreadCount?: number
+  readonly directCount?: number
+  readonly revision?: number
+  readonly staleTokenKind?: 'unknown' | 'unrecognized'
+  readonly facts?: readonly RejectedFact[]
+}
+
+/** Selection, recovery guidance and the surface binding describe the same bounded result. */
+function renderRejection(value: ThreadRejection) {
+  const identity = [value.threadRef, value.taskRef].filter(part => part !== undefined).join(' · ')
+  if (value.kind !== 'unread_required' && value.kind !== 'stale_revision') {
+    return { text: [`Not committed — ${value.kind}.`, identity === '' ? 'No message was added.' : `${identity} — no message was added.`].join('\n'), messages: [] }
+  }
+  const facts = value.facts ?? []
+  const unrecognized = value.staleTokenKind === 'unrecognized'
+  const shown: RejectedFact[] = []
+  const completeMessages: RejectedFact[] = []
+  let truncated = false
+  const lines = () => {
+    const allShown = !unrecognized && !truncated && shown.length === facts.length
+      && (value.kind !== 'unread_required' || facts.length === value.unreadCount)
+    const canReconsider = allShown && value.staleTokenKind === undefined
+      && facts.every(fact => fact.kind === 'message' && fact.messageRef !== undefined)
+    const headline = value.kind === 'unread_required' ? 'Not committed — unread_required.'
+      : unrecognized ? 'Not committed — that write token was never a revision this Thread reached (stale_revision).'
+        : value.staleTokenKind === 'unknown' ? 'Not committed — the write token does not establish a known Thread baseline (stale_revision).'
+          : 'Not committed — the Thread changed after your last read (stale_revision).'
+    return [headline,
+      value.kind === 'unread_required' ? `${identity} · ${value.unreadCount ?? 0} unread, ${value.directCount ?? 0} direct` : identity,
+      ...(unrecognized || facts.length === 0 ? [] : ['', allShown
+        ? `${facts.length} pending fact(s), shown in full:`
+        : `${shown.length} of ${facts.length} pending fact(s) included; some content is truncated or omitted:`,
+      ...shown.map(fact => factLine(fact as FactView))]),
+      recoveryFor(unrecognized ? 'stale_revision_token_unrecognized' : value.kind)
+        .sentence({ threadRef: value.threadRef, taskRef: value.taskRef, completeFacts: canReconsider }),
+      ...(canReconsider && value.revision !== undefined ? [nextWriteLine(value.revision)]
+        : ['No write token is provided; the required reading is not satisfied by this result.']),
+    ]
+  }
+  if (!unrecognized) {
+    for (const fact of facts.slice(0, REJECTION_FACT_LIMIT)) {
+      const cut = fact.kind === 'message' && (fact.body?.length ?? 0) > REJECTION_BODY_MAX_CHARACTERS
+      const rendered = cut ? { ...fact, body: `${fact.body!.slice(0, REJECTION_BODY_MAX_CHARACTERS)}\n${REJECTION_BODY_TRUNCATION_MARKER}` } : fact
+      shown.push(rendered)
+      truncated ||= cut
+      if (lines().join('\n').length > REJECTION_MAX_CHARACTERS) {
+        shown.pop()
+        break
+      }
+      if (!cut && fact.kind === 'message') completeMessages.push(fact)
+    }
+  }
+  return { text: lines().join('\n'), messages: messageIdentities(value.threadRef, completeMessages) }
 }
 
 const REMINDER_SCHEMA = { type: 'object', additionalProperties: false, properties: {
@@ -480,7 +509,7 @@ function attentionResult(
 
 const teamThread = defineTool({
   name: 'team_thread',
-  description: `Read one Thread's facts, or a Project's Main stream (pass projectRef instead of threadRef — exactly one). read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A read orients on the Thread anchor and that batch, never the whole Thread: a Member re-entering one it has read before gets no background at all, so the facts between are its own to page back to. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit page history and are ignored by read, whose batch is bounded by design and names how much remains — message rejects them — ${recoveryFor('history_only_arguments').sentence({ action: 'message' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here. On the Main stream, read answers with its newest entries (plus any entry carrying a mention of you) and acknowledges through them — ordinary entries covered by your Main stream Attention and the mentions of every Member; a backlog longer than one page is read oldest first, one page per read, until none remains; history pages older entries; Thread cards in it name the Thread to read.`,
+  description: `Read one Thread's facts, or a Project's Main stream (pass projectRef instead of threadRef — exactly one). read acknowledges one chronological batch of unread facts and is the only read-side source of a next-write token — and only once no unread remains; your own committed public mutations hand off the token as well. A Thread read restores missing anchor and a few recent original Messages from current context, including after compaction with no unread. Already visible bodies are omitted with an explicit acknowledgement; missing bodies are supplied. Background, acknowledged facts and current Task cards are separate, and history/message provide anything still missing. history pages older facts without changing read state. message reads one Message back verbatim by ref — the way to answer a \`Replies to:\` line or a \`(replies to …)\` marker whose original sits outside the facts you have. beforeSequence and limit page history and are ignored by read, whose batch is bounded by design and names how much remains — message rejects them — ${recoveryFor('history_only_arguments').sentence({ action: 'message' })} Prefer threadRef; taskRef is a compatibility alias when the Thread has a Task. Attention — whether you follow this Thread — is team_attention, and never changes here. On the Main stream, read answers with its newest entries (plus any entry carrying a mention of you) and acknowledges through them — ordinary entries covered by your Main stream Attention and the mentions of every Member; a backlog longer than one page is read oldest first, one page per read, until none remains; history pages older entries; Thread cards in it name the Thread to read.`,
   parameters: {
     action: { type: 'string', required: true, enum: ['read', 'history', 'message'] },
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
@@ -562,11 +591,9 @@ const teamThread = defineTool({
         // from the verb, stated where it can act on it.
         ...(value.following ? [] : ['Not following — ordinary updates here will not interrupt you. team_attention follow with threadRef starts them.']),
       ]
-            // Orientation: A) the anchor is a returned fact (renders once, no separate anchor); B) a Host-supplied background fact carries `unread === false`, so the full anchor renders before the facts; C) otherwise (continuation or unfollowed ad-hoc read) the shared bounded subject, never the full anchor.
+      // The Host includes a missing anchor as background; the subject alone is enough when it is already visible.
       const anchorInFacts = facts.some(fact => fact.sequence === value.anchor.sequence)
-      const hasBackground = facts.some(fact => fact.unread === false)
-      if (!anchorInFacts && hasBackground) lines.push('', `Anchor ${value.anchor.sequence}${value.anchor.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(value.anchor.occurredAt)}`} [${value.anchor.sender}]${repliesToClause(value.anchor.replyToMessageRef, value.anchor.replyTo)}`, value.anchor.body)
-      if (!anchorInFacts && !hasBackground) lines.push(`  — ${boundedSubject(value.anchor.body)}`)
+      if (!anchorInFacts) lines.push(`  — ${boundedSubject(value.anchor.body)}`)
       const activeClaims = value.claims.filter(claim => claim.state === 'active')
       if (activeClaims.length > 0) {
         lines.push('', 'Active Claims')
@@ -576,16 +603,33 @@ const teamThread = defineTool({
         lines.push('', 'Acknowledged Task reminders')
         for (const reminder of reminders) lines.push(`${reminder.kind === 'review-backlog' ? 'Review backlog' : 'Stalled Task'} · ${reminder.taskRef} · baseline ${reminder.baselineSequence} · raised ${formatTeamTimestamp(reminder.occurredAt)}`)
       }
-      lines.push('', 'Facts')
-      if (facts.length === 0) lines.push('No new facts to acknowledge.')
-      // Read orients on current derived Tasks; cards are projections, never unread facts.
-      lines.push(...factTimelineLines(facts, value.taskCards ?? []))
+      const background = facts.filter(fact => fact.unread === false)
+      if (background.length > 0) lines.push('', 'Background — not newly acknowledged', ...background.map(factLine),
+        'Background is bounded; use team_thread history for older facts or message with messageRef for an original reply target.')
+      const acknowledgedFacts = facts.filter(fact => fact.unread !== false)
+      lines.push('', 'Acknowledged facts')
+      if (acknowledgedFacts.length === 0) lines.push('No new facts to acknowledge.')
+      lines.push(...acknowledgedFacts.map(factLine))
+      if ((value.taskCards?.length ?? 0) > 0) lines.push('', 'Current Task cards — not Thread reading', ...value.taskCards!.map(taskCardLine))
       lines.push('', `Read through sequence ${value.readThroughSequence}; ${remaining} unread update(s) remaining${remaining > 0 ? ` — ${recoveryFor('unread_remaining').sentence({})}` : '.'}`)
             // The bounded read answered with the newest batch; the span before the watermark is orientation it did not supply, and rendering its count shows the returning reader the size of that span.
       const earlier = value.earlierFactCount ?? 0
       if (earlier > 0) lines.push(`Earlier facts: ${earlier} — read older ones with team_thread.history.`)
       if (remaining === 0) lines.push('', nextWriteLine(value.revision))
       return [{ type: 'text', text: lines.join('\n') }]
+    },
+    presentationMeta: (args, value): { threadFacts: ReturnType<typeof threadMessageSurface> } => {
+      const text = teamThread.output.render(args, value).flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
+      if (value.scope === 'main') return { threadFacts: threadMessageSurface(text, []) }
+      const facts = value.kind === 'message'
+        ? value.message === undefined ? [] : [{ ...value.message, kind: 'message' as const }]
+        : [...value.facts ?? []]
+      const anchorInFacts = facts.some(fact => fact.sequence === value.anchor?.sequence)
+      const fullAnchor = value.kind === 'history' && args.beforeSequence === undefined
+      if (value.kind !== 'message' && !anchorInFacts && fullAnchor && value.anchor !== undefined) {
+        facts.push({ ...value.anchor, kind: 'message' })
+      }
+      return { threadFacts: threadMessageSurface(text, messageIdentities(value.threadRef, facts.filter(fact => !('bodyOmitted' in fact && fact.bodyOmitted)))) }
     },
   },
   async execute(rawArgs, exec) {
@@ -609,7 +653,7 @@ const teamThread = defineTool({
       const history = host.threadHistoryForAgent(agent, { ...base, ...(args.beforeSequence === undefined ? {} : { beforeSequence: args.beforeSequence }), ...(args.limit === undefined ? {} : { limit: args.limit }) })
       const status = host.attentionStatusForAgent(agent, base)
       return threadResult('history', base.workspaceId, history, status.attention, history.facts.map(fact => fact.kind === 'message'
-          ? { sequence: fact.sequence, kind: 'message', body: fact.message.body, sender: fact.message.sender, mentions: [...fact.mentions], ...(fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: fact.message.replyToMessageRef }), ...(fact.replyTo === undefined ? {} : { replyTo: fact.replyTo }), occurredAt: fact.occurredAt }
+          ? { sequence: fact.sequence, kind: 'message', messageRef: fact.message.messageRef, body: fact.message.body, sender: fact.message.sender, mentions: [...fact.mentions], ...(fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: fact.message.replyToMessageRef }), ...(fact.replyTo === undefined ? {} : { replyTo: fact.replyTo }), occurredAt: fact.occurredAt }
           : activityFactView(fact.sequence, fact.activity, undefined, fact.occurredAt)), { cursor: history.cursor, hasMore: history.hasMore, taskCards: (history.taskCards ?? []).map(taskCardView), ...taskNumberOf(history.task) })
     }
     if (args.action === 'message') {
@@ -639,7 +683,7 @@ const teamThread = defineTool({
     const cards = read.task === undefined
       ? (host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 }).taskCards ?? []).map(taskCardView)
       : []
-    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry)), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, reminders: [...read.reminders], ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), taskCards: cards, ...taskNumberOf(read.task) })
+    return threadResult('read', base.workspaceId, read, read.attention, read.facts.map(entry => readFactView(entry, entry.fact.kind === 'message' && read.visibleMessageRefs.includes(entry.fact.message.messageRef))), { readThroughSequence: read.readThroughSequence, remainingUnreadCount: read.remainingUnreadCount, reminders: [...read.reminders], ...(read.earlierFactCount === undefined ? {} : { earlierFactCount: read.earlierFactCount }), taskCards: cards, ...taskNumberOf(read.task) })
   },
 })
 
@@ -728,9 +772,10 @@ function readFactView(entry: {
   readonly fact: AgentTeamThreadFact
   readonly unread: boolean
   readonly direct: boolean
-}): FactView {
+}, bodyOmitted = false): FactView {
   return entry.fact.kind === 'message'
-    ? { sequence: entry.fact.sequence, kind: 'message', body: entry.fact.message.body, sender: entry.fact.message.sender,
+    ? { sequence: entry.fact.sequence, kind: 'message', messageRef: entry.fact.message.messageRef, body: entry.fact.message.body, sender: entry.fact.message.sender,
+      ...(bodyOmitted ? { bodyOmitted: true } : {}),
       mentions: [...entry.fact.mentions],
       ...(entry.fact.message.replyToMessageRef === undefined ? {} : { replyToMessageRef: entry.fact.message.replyToMessageRef }),
       ...(entry.fact.replyTo === undefined ? {} : { replyTo: entry.fact.replyTo }),
@@ -742,7 +787,7 @@ function readFactView(entry: {
 function factLine(fact: FactView): string {
   const at = fact.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(fact.occurredAt)}`
   return fact.kind === 'message'
-    ? `${fact.sequence}${at} [${fact.sender ?? 'unknown sender'}]${factMarkers(fact)}${repliesToClause(fact.replyToMessageRef, fact.replyTo)} ${fact.body}`
+    ? `${fact.sequence}${at} [${fact.sender ?? 'unknown sender'}]${factMarkers(fact)}${repliesToClause(fact.replyToMessageRef, fact.replyTo)} ${fact.bodyOmitted ? `${fact.messageRef} — body already in current context; omitted.` : fact.body}`
     : `${activityLine(fact)}${at}${factMarkers(fact)}`
 }
 
@@ -822,7 +867,7 @@ const teamDm = defineTool({
 
 const teamMessage = markAgentTeamPreset(defineTool({
   name: 'team_message',
-  description: 'Post to a Project\'s Main stream, start a Thread, or reply to one. post speaks in the Project\'s Main stream — the conversation outside every Thread — and any Project member may: pass projectRef and body, mention with `@Handle`, and optionally replyToMessageRef (a Main stream Message of the same Project, whose author is delivered to). A reader whose Main stream Attention covers the Project, or any Member holding a mention, reads it first (team_thread read with projectRef); post has no write token. start opens a discussion or a Task (kind) and only a Project owner may — a Thread starts from a standing question or piece of work, not from conversation. Read the Thread first: a reply needs the current next-write token from a fully drained team_thread read (or your own last committed mutation), and unread work rejects before staleness is even checked — and a mention only delivers its Message, never the Thread\'s earlier facts, so entering a Thread whose facts have left your context means reading back through it first. start takes kind discussion (default) or task. A mention in a start or a reply delivers its Message to that Member once and never makes them follow. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` is plain text under version 2 — it delivers to no one, so name each Member you need to reach. A private note to one Member is team_dm, not a reply.',
+  description: 'Post to a Project\'s Main stream, start a Thread, or reply to one. post speaks in the Project\'s Main stream — the conversation outside every Thread — and any Project member may: pass projectRef and body, mention with `@Handle`, and optionally replyToMessageRef (a Main stream Message of the same Project, whose author is delivered to). A reader whose Main stream Attention covers the Project, or any Member holding a mention, reads it first (team_thread read with projectRef); post has no write token. start opens a discussion or a Task (kind) and only a Project owner may — a Thread starts from a standing question or piece of work, not from conversation. Understand the Thread before replying: copy a current token from a drained read, your own commit, or a complete rejection that provides one. Complete Message facts in context can satisfy reading, but never acknowledge unread; new facts, revision, permissions and Task state are checked on every write. A mention supplies its Message, not earlier discussion; read missing background first. start takes kind discussion (default) or task. A mention in a start or a reply delivers its Message to that Member once and never makes them follow. Mention by writing `@Handle` in body — the `@` is required, matching ignores case, and each named Member is delivered to and renders as a mention chip; `@all` is plain text under version 2 — it delivers to no one, so name each Member you need to reach. A private note to one Member is team_dm, not a reply.',
   parameters: {
     action: { type: 'string', required: true, enum: ['start', 'reply', 'post'] },
     projectRef: { type: 'string', description: "Full branded Project ref exactly as returned by Team tools, including the 'project:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves. Required by start and post." },
@@ -832,7 +877,7 @@ const teamMessage = markAgentTeamPreset(defineTool({
     threadRef: { type: 'string', description: "Full branded Thread ref exactly as returned by Team tools, including the 'thread:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     taskRef: { type: 'string', description: "Optional Task ref alias for reply on a Taskful Thread. Prefer threadRef; an unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     replyToMessageRef: { type: 'string', description: "Optional: the full branded Message ref you are answering (for post: a Main stream Message of the same Project) (as rendered by team_thread or an inbox notice). Reply on the Thread you are already replying to; the Message must be one this Thread recorded. The Host links the reply to it, and its author is then delivered to like a mention, so answering a peer reaches them without typing their handle. Use it when the link is the point — the reader needs to know which Message you are answering. A Message that only continues the Thread's conversation needs neither this nor a mention: the Thread already delivers to the Members on it, so the link would announce a delivery that was going to happen anyway." },
-    body: { type: 'string', required: true, description: "Markdown body. Lead with the conclusion or state. Mention the Human only when they must know or decide; when a decision is owed, say plainly what needs deciding and what happens by default if nobody answers — no fixed template. Keep it the shortest useful message for the recipients; mechanical detail follows below. Cite Team refs exactly as returned, as bare text with one colon (e.g. task:0f0a…) — never a double colon, never inside backticks or quotes. Unambiguous UUID abbreviations (first 6+ hex chars) also resolve. Mention a Member by writing `@Handle` (`@` required, case-insensitive) in the prose: that is what delivers the Message to them and renders the mention chip; `@all` is plain text under version 2 and delivers to no one — name each Member instead." }, baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Thread." },
+    body: { type: 'string', required: true, description: "Markdown body. Lead with the conclusion or state. Mention the Human only when they must know or decide; when a decision is owed, say plainly what needs deciding and what happens by default if nobody answers — no fixed template. Keep it the shortest useful message for the recipients; mechanical detail follows below. Cite Team refs exactly as returned, as bare text with one colon (e.g. task:0f0a…) — never a double colon, never inside backticks or quotes. Unambiguous UUID abbreviations (first 6+ hex chars) also resolve. Mention a Member by writing `@Handle` (`@` required, case-insensitive) in the prose: that is what delivers the Message to them and renders the mention chip; `@all` is plain text under version 2 and delivers to no one — name each Member instead." }, baseRevision: { type: 'number', description: "The next-write token from a fully drained team_thread read, your own last committed mutation, or a complete rejection that explicitly provides one on this Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Thread." },
     attachments: { type: 'array', items: { type: 'string' }, description: 'Absolute file paths to share, e.g. screenshots or generated artifacts; images render as thumbnails for recipients. The Host validates each path and copies the file into the attachment cache, and members also receive one cached path per attachment; if any path fails validation the whole send is rejected.' },
     workspace: workspaceParam,
   },
@@ -878,12 +923,19 @@ const teamMessage = markAgentTeamPreset(defineTool({
           nextWriteLine(value.revision),
         ].join('\n') }]
       }
-      return [{ type: 'text', text: rejectionLines(value).join('\n') }]
+      return [{ type: 'text', text: renderRejection(value).text }]
     },
         // Minimal durable projection for the Host's context timeline: the structured outcome identity, never render text. The effect-anchor fold reads `kind === 'committed'` + threadRef from the persisted tool/result meta; a start's Thread is born in the result.
-    presentationMeta: (_args, value): Record<string, string> => value.kind === 'committed' && value.threadRef !== undefined
-      ? { kind: value.kind, threadRef: value.threadRef, ...(value.taskRef === undefined ? {} : { taskRef: value.taskRef }) }
-      : { kind: value.kind },
+    presentationMeta: (_args, value): { kind: string; threadRef?: string; taskRef?: string; threadFacts?: ReturnType<typeof threadMessageSurface> } => {
+      if (value.kind === 'committed' && value.threadRef !== undefined) {
+        return { kind: value.kind, threadRef: value.threadRef, ...(value.taskRef === undefined ? {} : { taskRef: value.taskRef }) }
+      }
+      if (value.kind === 'unread_required' || value.kind === 'stale_revision') {
+        const rendered = renderRejection(value)
+        return { kind: value.kind, threadFacts: threadMessageSurface(rendered.text, rendered.messages) }
+      }
+      return { kind: value.kind }
+    },
   },
   async execute(rawArgs, exec) {
     const args = blankToAbsent(rawArgs, [...OPTIONAL_ADDRESS_KEYS, ...OPTIONAL_COLLECTION_KEYS])
@@ -1057,14 +1109,14 @@ function accountableTarget(host: AgentTeam, raw: string): AgentTeamMemberId {
 
 const teamTask = defineTool({
   name: 'team_task',
-  description: 'Work with Tasks. board lists the Task board of the Projects you can see — every open Task with its status, who is accountable for it, and the Members on it, plus each Project\'s newest finished Tasks — filtered by projectRef or to your own responsibility with mine; it is current state, not unread, so check it before you claim or when a Workspace change surprises you. promote turns a discussion Thread into a Task (Project owners only) and takes accountable to name the owner responsible for it; a Task started with team_message start takes the same field. list, claim, done and release manage your Direction Claims. A Claim is your one-sentence direction statement on a Task — "the angle I am taking" — so others can spot collisions and track progress: Tasks define scope, Claims declare the angle (owned by you). Good direction: "Unify the four form dialogs on shared field components before wiring submits." Bad direction: a multi-paragraph plan with step order, file lists, or acceptance criteria — those belong in Thread messages, not the Claim. Every Task has one accountable owner: the Human, or an Agent Project owner. accept finishes a Task as verified work; close ends it without acceptance; reopen returns it to open work; transfer hands accountability to another Project owner or back to the Human. Who may do which is the Host\'s call, not yours to reason around: accept belongs to the Human or to a Project owner who never held a Claim on this Task (an Agent may accept only an in_review Task), while close, reopen and transfer belong to the Human or the current accountable. Acceptance, closing, and reopening are three separate decisions: finishing your own Claim is not acceptance, and an Agent that executed a Task cannot verify it. transfer moves responsibility only — Claims and their owners stay where they are. Mutations require the current next-write token from a fully drained team_thread read (or your own last committed mutation); list refreshes the collision surface only and authorizes no mutation.',
+  description: 'Work with Tasks. board lists the Task board of the Projects you can see — every open Task with its status, who is accountable for it, and the Members on it, plus each Project\'s newest finished Tasks — filtered by projectRef or to your own responsibility with mine; it is current state, not unread, so check it before you claim or when a Workspace change surprises you. promote turns a discussion Thread into a Task (Project owners only) and takes accountable to name the owner responsible for it; a Task started with team_message start takes the same field. list, claim, done and release manage your Direction Claims. A Claim is your one-sentence direction statement on a Task — "the angle I am taking" — so others can spot collisions and track progress: Tasks define scope, Claims declare the angle (owned by you). Good direction: "Unify the four form dialogs on shared field components before wiring submits." Bad direction: a multi-paragraph plan with step order, file lists, or acceptance criteria — those belong in Thread messages, not the Claim. Every Task has one accountable owner: the Human, or an Agent Project owner. accept finishes a Task as verified work; close ends it without acceptance; reopen returns it to open work; transfer hands accountability to another Project owner or back to the Human. Who may do which is the Host\'s call, not yours to reason around: accept belongs to the Human or to a Project owner who never held a Claim on this Task (an Agent may accept only an in_review Task), while close, reopen and transfer belong to the Human or the current accountable. Acceptance, closing, and reopening are three separate decisions: finishing your own Claim is not acceptance, and an Agent that executed a Task cannot verify it. transfer moves responsibility only — Claims and their owners stay where they are. Mutations need a current token from a drained read, your own commit, or a complete rejection that provides one. Reconsider the facts first; each attempt rechecks them and Task permissions. list only refreshes active Claims.',
   parameters: {
     action: { type: 'string', required: true, enum: ['board', 'list', 'claim', 'done', 'release', 'promote', 'accept', 'close', 'reopen', 'transfer'] },
     projectRef: { type: 'string', description: 'board only: limit the board to one Project.' },
     mine: { type: 'boolean', description: 'board only: only Tasks you are accountable for or hold a live Claim on.' },
     threadRef: { type: 'string', description: 'promote only: the discussion Thread to turn into a Task.' },
     taskRef: { type: 'string', description: "Full branded Task ref exactly as returned by Team tools, including the 'task:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
-    baseRevision: { type: 'number', description: "The next-write token from your latest fully drained team_thread read (or your own last committed mutation) on this Task's Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Task." }, direction: { type: 'string' },
+    baseRevision: { type: 'number', description: "The next-write token from a fully drained team_thread read, your own last committed mutation, or a complete rejection that explicitly provides one on this Task's Thread. Copy the explicitly rendered value verbatim; never increment, derive, compare, or cite it — it is an opaque concurrency token, not a fact about the Task." }, direction: { type: 'string' },
     claimRef: { type: 'string', description: "Full branded Claim ref exactly as returned by team_task, including the 'claim:' prefix. An unambiguous abbreviation of the first 6+ UUID hex characters also resolves." },
     accountable: { type: 'string', description: "promote only: the Member who becomes accountable for the new Task — a current Project owner's memberRef or @Handle, or 'human'. Omit it and the promoting owner is accountable, or the Human when the Human promotes." },
     target: { type: 'string', description: "transfer only: the Member who becomes accountable — a current Project owner of this Task's Project, as a memberRef, @Handle, or a unique 6+ hex prefix, or 'human' to return responsibility to the Human." },
@@ -1138,7 +1190,15 @@ const teamTask = defineTool({
           nextWriteLine(value.revision!),
         ].join('\n') }]
       }
-      return [{ type: 'text', text: rejectionLines(value as Parameters<typeof rejectionLines>[0]).join('\n') }]
+      return [{ type: 'text', text: renderRejection(value).text }]
+    },
+    // A Claim or Task rejection can carry the same complete Thread facts; binding them lets a reconsidered write pass without a second read. Non-rejection results carry only the outcome kind.
+    presentationMeta: (_args, value): { kind: string; threadRef?: string; taskRef?: string; threadFacts?: ReturnType<typeof threadMessageSurface> } => {
+      if ((value.kind === 'unread_required' || value.kind === 'stale_revision') && value.threadRef !== undefined) {
+        const rendered = renderRejection(value)
+        return { kind: value.kind, threadFacts: threadMessageSurface(rendered.text, rendered.messages) }
+      }
+      return { kind: value.kind }
     },
   },
   async execute(rawArgs, exec) {

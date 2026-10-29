@@ -22,7 +22,11 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 `team_thread` 只负责 Thread reading。`threadRef` 是 primary identity。`taskRef` 仅是 released Clients 在 taskful Threads 上使用的 compatibility alias。
 
-`read` 原子返回一个按 chronology 排列的 unread batch，推进 durable watermark。读者没有 unread 时，read 什么都不推进，不追加 operation，也不携带 receipt。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面，重试展示的就是此刻的未读。`history` 返回有界的旧 public facts，不改变 read state。`message` 按 ref 逐字读回一条 Message，用来回答那些原文不在你手上这一页里的引用。
+`read` 返回一个按 chronology 排列的 unread batch，推进 durable watermark。确认范围就是这一批；正文已完整出现在当前上下文中的未读 Message 可以省略正文，仍计入本次确认。读者没有 unread 时，read 什么都不推进，不追加 operation，也不携带 receipt。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面，重试展示的就是此刻的未读。
+
+Thread 的 `read` 还会为上下文已不再持有讨论的读者补背景：anchor 缺失时补上，再加未读批次之前最多四条 fact 中筛出的 Message——没有未读时取 tail 之前。当前 Session 中已完整可见的背景不重复。
+
+背景只用于定位，不是本次新确认的工作，任何一次 read 都可能补；判断不依赖永久的“曾读过”标记。缺少背景时先 read；`history` 用于更旧的 public facts，不改变 read state；`message` 按 ref 逐字读回一条 Message，包括原文不在你手上这一页里的引用。二者都不确认未读。
 
 `beforeSequence` 与 `limit` 为 `history` 翻页，Host 把 `limit` 约束在 1–100、缺省 20。`message` 拒绝它们。`read` 忽略它们：读的批次本就有界——Host 的读请求里没有这两个字段——而拒绝一次带着它们的读只是白费那次调用，因为把每个可选槽位都填满的模型会去要一个它并不需要的页大小。读想要的是下一页未读，页脚会说明还剩多少。
 
@@ -30,7 +34,17 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 `message` 渲染 ref、带时刻与发送者的 sequence，然后是整段正文。这个 action 存在的意义就是让读者回答一条它没有收到的 Message，所以一个字都不裁剪，导向语也不变。
 
-read 先渲染结果：确认与剩余的 unread 计数。再渲染 Thread 身份与 following 状态。再导向：返回 facts 携带 Host 提供的 background，给 full anchor；否则给 bounded anchor subject。anchor 本身在返回 fact 时绝不重复渲染。read 接着只渲染 active Claims：当前 collision surface，每 Claim 一行（claim ref、owner、direction）。然后是带行内 unread/direct 标记、按时间排列的 facts。讨论还在 Task 创建 sequence 处渲染派生 Task 卡，带当前 status 与 accountable owner；卡片是 projection，不是 unread fact。页脚给出 read-through sequence 与剩余 unread 计数。若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量。重返的读者借此看到自己没在看的跨度有多大，不把本次 batch 当成整个 Thread。
+read 按顺序渲染以下部分，最后是页脚：
+
+1. 结果：确认与剩余的 unread 计数；
+2. Thread 身份与 following 状态；
+3. 导向：anchor 不是返回 fact 时，给 bounded anchor subject；
+4. 只含 active Claims：当前 collision surface，每 Claim 一行（claim ref、owner、direction）；
+5. 本次 read 携带的已确认 Task reminders；
+6. `Background — not newly acknowledged` 下的 Host 提供的背景：anchor 缺失时补上，再加此前最多四条 fact 中筛出的 Message，当前 Session 已可见的不再重复；
+7. 按 sequence 排列的已确认 facts，带行内 unread/direct 标记。正文已完整出现在当前上下文中的已确认 Message，用 `body already in current context; omitted` 代替正文。派生 Task 卡在 `Current Task cards — not Thread reading` 下按创建 sequence 渲染，带当前 status 与 accountable owner；卡片是当前状态，不是 Thread reading。
+
+页脚给出 read-through sequence 与剩余 unread 计数。若这次 read 身后仍留有 Thread facts，再补一句那些 facts 的数量。重返的读者借此看到自己没在看的跨度有多大，不把本次 batch 当成整个 Thread。
 
 history 页渲染历史结果与 Thread 身份。首页给 full anchor，continuation 页给 bounded subject。渲染选中的 facts、该 sequence 窗口内的派生 Task 卡与 cursor/hasMore 页脚，绝无当前 Claims 或上下文建议。每条 activity fact 都是结构化的：actor、Task ref，以及这条 activity claim、完成、接受或 release 的 Claim refs。绝不是裸 kind。当一次 `read` 确认的是一个仍处于 done 状态 Task 的未读验收时，这些事实就写在 facts 里，read 不对读取者的上下文给出任何建议：没有 rollover 工具，也没有代际选择，就没有动作可陈述。
 
@@ -56,7 +70,9 @@ Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读
 
 `team_thread` 的 `read`、`history`、`message` 接受 `threadRef` 或 `projectRef`（Main stream），二选一。Main stream 的 read 渲染最新条目及点名读者的条目，确认整条流直到头部，并把 Thread 卡片渲染为当前状态。
 
- 类型化拒绝结果（`unread_required`、`stale_revision`）以 `Not committed` 开头。保留重读与审慎重试所需的结构化 refs 与计数，并渲染挡住这次写入的事实——`unread_required` 是未读批次，`stale_revision` 是过期令牌之后的增量——形状与 `team_thread read` 返回的完全一致，同时把当前 revision 作为下次写入的写令牌交回。因此被拒的写入方在拒绝本身里就知道什么变了、该用哪个令牌，重试无需中间再读一次即可提交。恢复路径仍是 read-and-reconsider：拒绝里的事实是那道门，不是替代确认的手段。mention 一个该 Thread 从未承载过的 Member 同样不是拒绝：规则版本 2 下 Message 照常提交，每个可寻址的收件人都会收到，没有未送达余量需要报告，也没有邀请步骤。（规则版本 1 下同一次写入会报告它无法送达的名字；该路径只为 replay 旧账本而存在。）
+类型化拒绝（`unread_required`、`stale_revision`）以 `Not committed` 开头，保留 refs、计数和有界的待处理事实。结果完整、只含身份明确的 Message，且 revision 基线可识别时，会提供当前令牌供重新考虑；部分结果与未知基线指向 `read`。这既不确认未读，也不保证下一次写入成功。完整规则见 [Mutation fences](boundaries.zh.md#mutation-fences)。
+
+mention 一个该 Thread 从未承载过的 Member 同样不是拒绝：规则版本 2 下 Message 照常提交，每个可寻址的收件人都会收到，没有未送达余量需要报告，也没有邀请步骤。（规则版本 1 下同一次写入会报告它无法送达的名字；该路径只为 replay 旧账本而存在。）
 
 每一处拒绝——类型化结果、抛出的参数形状错误、Host 拒绝——都点名下一步动作与该动作要传的值，且这些措辞来自唯一一份注册表（`packages/agent-team/src/recovery-hints.ts`），不是每个调用点各写一遍。注册表是被强制的，不是建议：一个测试遍历 Host 与 tool 包两侧面向模型的源码，拒绝写在注册表之外的路由句，因此新加的拒绝不可能带着一个模型无路可走的故障上线。
 
@@ -90,8 +106,8 @@ DM 只用于快速澄清与状态同步。任务工作、决策和任何需要�
 
 `promote` 把讨论 Thread 转为 Task，需要 `threadRef` 与该 Thread 的 `baseRevision`，可选 `accountable`，只有 Project owner 可以执行（否则 `project_owner_required`）。
 
-`list`、`claim`、`done`、`release` 只管理 Agent 自己在真实 Task 上的 Direction Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，因为当前 `team_thread read` 仍是必需的变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
+`list`、`claim`、`done`、`release` 只管理 Agent 自己在真实 Task 上的 Direction Claims。taskless Threads 没有 Claim mutation path。Direction 是一句说明 Agent 工作角度的话，帮助其他人发现冲突并追踪进展。execution plans 和 acceptance checklists 应写在 Thread messages 中。Claim 成功后会自动开始 Attention。`list` 渲染 Task/Thread 身份与当前 collision surface：只有 active Claims，或显式的空。渲染结果不带写令牌，也不提供 Thread 事实或变更基础。commit 的 mutation 点名动作（Claim created、completed 或 released）。先渲染权威的受影响 Claim：ref、结果 state、owner、direction。再渲染 Task/Thread 身份，以及恰好一个 next-write token hand-off。
 
-拒绝结果（`unread_required`、`stale_revision`）与 message 拒绝共享同一形式：`Not committed`、本地 refs/计数、挡住这次写入的事实、先读后重试的恢复路径，以及当前 revision 作为下次写入的写令牌。
+拒绝与 message 拒绝使用相同形式及[完整性与令牌规则](boundaries.zh.md#mutation-fences)；每次尝试仍重新检查 Task 权限。
 
 `accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 属于 Human，或从未在该 Task 上持有过 Claim 的 Project owner，且仅在 in_review 时；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。`transfer` 取 `target`——当前 Project owner 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。
