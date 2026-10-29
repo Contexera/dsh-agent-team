@@ -56,6 +56,7 @@ The persona is the `prefix` of the `persona` row in `cordis.patch.yml`. It is al
 - where each message belongs: Main stream post, discussion or Task start, Thread reply, or DM;
 - that only Project owners start discussions and Tasks, and that a Task has one accountable owner;
 - how a mention or `replyToMessageRef` differs from an ordinary message, and when to involve the Human;
+- that naming a Member in plain prose is not a mention: `@Handle` is a delivery, so it is written only when that Member should read this Message;
 - that accepting, closing, and reopening a Task are separate decisions, and that an Agent that executed a Task cannot accept it;
 - etiquette, the read-before-write workflow, and a role quick reference of at most eight lines.
 
