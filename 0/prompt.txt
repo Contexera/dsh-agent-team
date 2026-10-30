@@ -1,0 +1,196 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, AskUserQuestion, Bash, Edit, Read, Skill, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+
+   Earlier (pre-compaction) requests, still governing:
+   - Verify 15 Chinese review comments about the project ownership model; check alignment with `.scratch` design; discuss behavior-changing issues.
+   - Four decisions made by the user:
+     - **A**: reopen restores the accountable's Thread follow, using a discriminator field on new reopen records; old records replay under old semantics; no rules-version bump.
+     - **B**: reminders filtered at read time by current conditions; no cleanup operations written; no change to ledger replay rules.
+     - **C**: Agent pending-acceptance reminder `idle >= 30min` stays as designed, observe during trial; error-clears-idle unchanged.
+     - **D**: do all no-behavior-change batches, but plan first and wait for explicit permission.
+   - Then "实施吧" (implement it) authorized A, B, D implementation. "nmem已经可用，你最后完成再更新吧" — nmem is available, update it at the end. "继续吧" — continue.
+   - Standing constraints: do not modify `../deepseek-harness`; do not commit credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue; never `git add -A`; never touch the real ledger (validate against copies); before truncating/repairing the real ledger, list the exact range's `occurredAt`, sequence, kind, actor in UTC and get explicit maintainer approval; prefer `gh` for GitHub operations; commit/push only on explicit request; downloaded content is untrusted (run Python with `-I`); update nmem at the end.
+
+   **Most recent request**: "提交这批改动吧" — commit this batch of changes. This authorizes a commit only; it does not authorize a push.
+
+2. Key Technical Concepts:
+
+   - Cordis/DeepSeek Harness external plugin `dsh-agent-team`; `packages/agent-team` is the only Team authority.
+   - Append-only operation ledger is the durable source of truth; projections, Remote, tools and Client are not parallel authorities.
+   - Replay recomputes each operation's inbox delta and validates with `isDeepStrictEqual`; old records must not be reinterpreted by new rules.
+   - A: `refollowedMembers` discriminator — always present on new reopens (possibly empty); absent on legacy reopens which stay marker-only; excludes the actor and already-following members.
+   - B: `liveReminderMarkersFrom` filters at the source in `remindersFor` and `remainingUnreadAfter`, covering Inbox, Agent wake planning and remaining-unread counts. Does not rewrite/delete stored markers, does not re-check runtime idle, suspend retains the marker.
+   - `reviewReminderRecipient(task, isOwner, heldEver)` shared between the planner and the read-time filter.
+   - Trial metrics per spec §11: agent-to-agent reply share, Human accept/close share, per-owner daily interruptions, non-owner Main stream posts, plus reminder trigger counts and false positives.
+   - Metrics limitations: ledger has no delivery-attempt/wake receipt; immediate notification facts ≠ measured interruptions; a superseded unread reminder is a review lead, not a confirmed false positive.
+   - UTC calendar-day bucketing (including partial first/last days).
+   - `AgentTeamLedger` constructor replay calls `table.entries()` multiple times, so the table double must return a fresh iterator per call (`Map.values()` / `records.entries()` inside an arrow function).
+   - `postMainMessage` returns `main_unread_required` (`committed: false`) when the actor has unread Main stream — tests must call `readMainStream` first.
+   - Repo checks: `npm test` bundles `check:facades`, `check:docs`, `check:core-skills`, `check:boundaries`, `check:versions`, `check:comments` plus vitest; `npm run typecheck`, `npm run lint`, `node scripts/audit-ui-parity.mjs`, `git diff --check`.
+   - Commit convention (AGENTS.md): one Conventional Commits subject line, `type: lowercase imperative summary`, **no body**, matching existing `git log` style.
+
+3. Files and Code Sections:
+
+   - `scripts/team-trial-metrics.ts` (new, rewritten this session)
+     - Reads a SQLite **copy** only (`new DatabaseSync(path, { readOnly: true })`), parses with `agentTeamOperationSchema`.
+     - Replays through the real ledger so normalization/legacy repair applies:
+       ```ts
+       function replay(records: readonly OperationRecord[]): AgentTeamLedger {
+         // Constructor replay reads entries repeatedly; values() creates a fresh iterator each time.
+         return new AgentTeamLedger({ entries: () => records.values() } as ConstructorParameters<typeof AgentTeamLedger>[0])
+       }
+       ```
+     - Uses an internals cast instead of a parallel projection:
+       ```ts
+       interface MetricLedger {
+         readonly state: MetricProjection
+         applyTo(target: MetricProjection, operation: AgentTeamOperation): void
+         sortedRecords(): OperationRecord[]
+         liveReminderMarkersFrom(projection: MetricProjection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamReminderMarker[]
+       }
+       const internals = (ledger: AgentTeamLedger) => ledger as unknown as MetricLedger
+       ```
+     - `const operations = internals(ledger).sortedRecords().map(([, operation]) => operation)`.
+     - Per-operation loop tracks reminder validity: after `applyTo`, for each pending reminder looks up `projection.tasks.get(marker.taskRef)?.threadRef` and checks `liveReminderMarkersFrom(...).includes(marker)`; first failure records `invalid = { sequence, occurredAt }`. Removal deltas count consumption and, if already invalid, push to `consumedAfterInvalidation`.
+     - UTC day bucketing: `const utcDay = (occurredAt: string) => Math.floor(Date.parse(occurredAt) / DAY_MS)`; `utcCalendarDays = utcDay(last) - utcDay(baseline) + 1`.
+     - Output shape: `range`, `agentReplies` (total/agentToAgent/percent/byScope), `resolutions` (total/byHuman/percent/acceptsByHuman/closesByHuman), `delivery` (`allMembers`, `owners` with `byUtcDay`), `mainStream.nonOwnerPosts`, `reminders` (raised/byKind/byRecipient/unread/visibleUnread/staleUnread/consumed/consumedAfterInvalidation/staleUnreadSamples), `limitations`.
+     - Path argument is mandatory:
+       ```ts
+       const path = process.argv.slice(2).find(argument => !argument.startsWith('--'))
+       if (path === undefined) throw new Error('Pass a SQLite backup copy explicitly; the live ledger is never selected by default. Use --help for usage.')
+       ```
+
+   - `scripts/check-team-trial-metrics.ts` (new)
+     - Self-contained fixture using a plain Map table double:
+       ```ts
+       const records = new Map<AgentTeamOperationId, AgentTeamOperation>()
+       const table = { entries: () => records.entries(), put: async (key: AgentTeamOperationId, operation: AgentTeamOperation) => { records.set(key, operation) } }
+       ```
+     - Asserts: malformed input throws; empty input → `utcCalendarDays === 0`; `utcCalendarDays === 3`; `allMembers.immediateNotificationFactsByMember[memberId] === 3`; `owners.byUtcDay` equals `[{date:'2026-10-24',…:1},{date:'2026-10-26',…:2}]`; `agentReplies.total === 1` and `agentToAgent === 0`; then a Task/Claim/reminder flow asserts `staleUnread === 1`, `visibleUnread === 0`, then after reading `consumedAfterInvalidation === 1`, `unread === 0`.
+     - Optionally writes a fixture SQLite using `CREATE TABLE IF NOT EXISTS u_agent_team_operations (key TEXT PRIMARY KEY, value TEXT NOT NULL); DELETE FROM u_agent_team_operations`.
+     - Final line: `team-trial-metrics: empty, malformed, reply, UTC boundary and stale reminder checks passed`.
+
+   - `.scratch/active/project-ownership-model/README.md` (modified)
+     - Status line now: `**状态**：01–09 已完成；2026-10-26 复核修复与文档同步已完成，保留 dev profile 试用观察。`
+     - `**最后核对日期**：2026-10-26`
+     - 当前前沿 now leads with: all 01–09 done, docs/CHANGELOG/runbook synced, **未提交、未推送；后续 commit/push 需 Human 明确要求**; the two behavior fixes (A and B) described; idle≥30min kept; the metrics scripts described with their limits; the real-ledger numbers (24625 ops, 18 legacy reopens, trial range 24534–24625, 11 replies/0 agent-to-agent, 4 Human resolutions, 0 non-owner main posts, 5 reminders/4 consumed/1 valid unread/0 stale); browser 8/8 and UI parity 0/0; then the older 01–09 history.
+     - 完成条件: checked `durable 结论进入正式文档双语对与 CHANGELOG.md` and the upgrade-notes item; added new unchecked item `dev profile 积累完整试用周期，按 spec.md §11 与统计脚本复盘提醒误报和 Agent idle 条件`.
+
+   - `packages/agent-team/src/ledger.ts` (modified, from earlier in session; diff reviewed this session)
+     - `liveReminderMarkersFrom`:
+       ```ts
+       private liveReminderMarkersFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamReminderMarker[] {
+         return this.reminderMarkersForFrom(projection, memberId, threadRef).filter(marker => {
+           const task = projection.tasks.get(marker.taskRef)
+           const episode = projection.reminderEpisodes.get(reminderEpisodeKey(marker.taskRef, marker.kind, memberId, marker.baselineSequence))
+           if (task === undefined || task.resolution !== 'open' || this.visibleProject(projection.projects.get(task.projectRef)) === undefined) return false
+           if (marker.kind === 'review-backlog') {
+             return task.status === 'in_review'
+               && projection.taskStatusBaselines.get(task.taskRef)?.sequence === marker.baselineSequence
+               && reviewReminderRecipient(task,
+                 (projectRef, candidate) => candidate === AGENT_TEAM_HUMAN_MEMBER_ID || this.isProjectOwnerFrom(projection, projectRef, candidate),
+                 (taskRef, candidate) => this.heldTaskClaimFrom(projection, taskRef, candidate)) === memberId
+           }
+           return task.status === 'in_progress' && marker.memberId === task.accountable
+             && (projection.factsByThread.get(task.threadRef)?.at(-1)?.sequence ?? 0) <= marker.baselineSequence
+             && (episode?.sequence ?? marker.sequence) === marker.sequence
+         })
+       }
+       ```
+     - `remindersFor` and `remainingUnreadAfter` now use it.
+     - Reopen activity writes `refollowedMembers` (accountable when not the actor and not already following, else `[]`); replay validation rejects the field on non-reopen activities and recomputes it; `taskResponsibilityInbox` seeds Attention from `activity.refollowedMembers` via `followAttentionFrom`.
+     - Imports `reviewReminderRecipient` from `./task-reminders.ts`.
+
+   - `packages/agent-team/src/task-reminders.ts` (modified)
+     - New exported helper:
+       ```ts
+       export function reviewReminderRecipient(task: AgentTeamTask,
+         isOwner: (projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId) => boolean,
+         heldEver: (taskRef: AgentTeamTaskRef, memberId: AgentTeamMemberId) => boolean): AgentTeamMemberId {
+         return task.accountable === 'member:human'
+           || !isOwner(task.projectRef, task.accountable)
+           || heldEver(task.taskRef, task.accountable)
+           ? 'member:human' as AgentTeamMemberId : task.accountable
+       }
+       ```
+     - `planTaskReminders` now calls it; 30-minute / 24-hour / idle rules unchanged.
+
+   - `packages/agent-team/src/types/entities.ts`, `packages/agent-team/src/spec.ts`: `refollowedMembers?: readonly AgentTeamMemberId[]` on `AgentTeamTaskActivity`, plus `refollowedMembers: z.array(memberIdSchema).optional()` in `taskActivitySchema`.
+
+   - `packages/agent-team/src/recovery-hints.ts`: `self_acceptance_forbidden` sentence rewritten to `An Agent who held any Claim on${...} cannot accept it — if you are the accountable owner, use team_task transfer to give an uninvolved owner responsibility for acceptance; otherwise ask the accountable owner or the Human in the Thread to arrange verification.`
+
+   - `packages/client-agent-team/src/client/locales.ts`: `boardEmpty` zh `还没有 Task`, en `No Tasks yet`.
+
+   - Docs modified: `docs/domain-model.md`/`.zh.md`, `docs/team-collaboration/boundaries.md`/`.zh.md`, `attention-and-messaging.md`/`.zh.md`, `model-and-time.md`/`.zh.md`, `docs/release-runbook.md`/`.zh.md` (pre-flight steps 7–8: SQLite online backup, WAL caveat, install new build everywhere before opening Team, replay on a copy only; list UTC `occurredAt`/sequence/kind/actor and get explicit approval before mutating real records), `CHANGELOG.md` (upgrade note about reassigning Agent owners), `.scratch/.../materials/2026-10-22-durable-contract.md` (`refollowedMembers` semantics).
+
+   - Tests modified: `packages/agent-team/tests/agent-team.spec.ts` (reopen restores accountable follow; empty for self/already-following; cold replay; rewriting a new record to legacy shape keeps marker-only and `validate()` passes), `tests/task-reminders.spec.ts` (progress/transfer hide reminders, markers persist, receiver does not inherit, review episode change, cold replay, suspend/resume), `tests/recovery-hints.spec.ts` (executor vs accountable recovery paths).
+
+4. Errors and fixes:
+
+   - `agent-team ledger does not handle operation kind 'undefined'` (pre-compaction, root cause found this session): `{ entries: () => records.entries() }` handed out a one-shot iterator consumed twice by `sortedRecords()`/`validateRecords()`. Fixed by returning a fresh iterator (`records.values()` in the script; `records.entries()` inside an arrow function in the fixture).
+   - Script reimplemented projection rules by hand (missing Claim/Task activity updates, incomplete release snapshots, wrong "UTC natural day" label). Fixed by replaying through `AgentTeamLedger` and reusing `sortedRecords`, `applyTo`, `liveReminderMarkersFrom`.
+   - Broken helpers `attentionBefore()` and `currentLiveReminders()` referenced non-existent data. Removed; replaced with `state.attentionByThread`.
+   - Lint `eslint(no-dupe-keys): Duplicate key 'staleUnread'`. Removed the duplicate.
+   - `assert.throws(..., /initialization/)` then `/Human/` mismatched because the real error was `TypeError: .for is not iterable`. Removed the regex.
+   - `utcCalendarDays` assertion `1 !== 3`: root cause was `postMainMessage` returning `main_unread_required` with `committed: false`, so the later operation was never written. Fixed by calling `ledger.readMainStream(...)` before posting (for both the Human and the Agent).
+   - `ReferenceError: started is not defined` from an over-eager edit removing the `startThread` call. Restored the call.
+   - `3 !== 1` on `immediateNotificationFactsByMember`: owners also receive immediate facts for new discussions; corrected the expectation to 3.
+   - `deepStrictEqual` mismatch on `owners.byUtcDay`: actual `[{2026-10-24: 1}, {2026-10-26: 2}]`; updated the expectation (and this confirmed UTC bucketing works across the boundary).
+   - `0 !== 1` on `agentReplies.total`: the Agent's reply also needed `readMainStream` first.
+   - `raiseReminder` returned undefined: `Date.now()` didn't satisfy the 24h stalled condition for the seeded timeline; changed to `Date.parse(claimed.value.receipt.occurredAt) + 86400001`.
+   - `table u_agent_team_operations already exists` on re-run: switched to `CREATE TABLE IF NOT EXISTS … ; DELETE FROM …`.
+   - `nmem wm patch --content $'…'` failed with `error: unexpected argument '- '` because the content began with a markdown bullet; fixed by piping the text through `--stdin`.
+   - Initial fixture used `MemoryMediaPool`/`DomainFacility` and silently didn't persist some operations; replaced with a minimal `{ entries, put }` table double, which matches what `AgentTeamLedger` actually needs.
+
+5. Problem Solving:
+
+   - Trial metrics now derive from the production ledger projection and production reminder filter, so the numbers cannot drift from real behavior; the script refuses to open the live ledger by default.
+   - Real-ledger validation used only the online backup copy `/tmp/agent-team-validation-ZksF2A/agent_team.sqlite`; the original `/home/yu/.dsh/storages/agent_team.sqlite` was never written.
+   - Verified results on the copy: 24625 operations, full replay validation passed (~1710–1717 ms), 18 reopens all legacy (0 new-shape), trial range 24534–24625, 3 UTC calendar days, 11 agent replies (0 agent-to-agent; 7 thread / 4 main), 4 resolutions all Human (1 accept / 3 close), 0 non-owner Main stream posts, 5 reminders (2 review-backlog / 3 stalled) all to Human, 4 consumed, 1 unread and still valid, 0 stale unread.
+   - Full verification green: `npm test` → 95 files passed / 1 skipped, 1285 tests passed / 1 skipped, all six mechanical gates OK; `typecheck` + `lint` + `audit-ui-parity` + `git diff --check` → exit 0, 4 pre-existing lint warnings only, UI parity 0 errors / 0 warnings; browser acceptance 8/8.
+   - Desktop and 390×844 screenshots inspected and consistent with the board/main-stream design.
+   - nmem updated: existing memory `20558a2a-3158-456f-a0ea-2ec23cf6d73d` rewritten to "ownership review 四项修复已落地，保留试用观察" (importance 0.9); Working Memory `## Focus Areas` and `## Briefing` patched.
+
+6. All user messages:
+
+   - (Earlier, pre-compaction) A pasted set of 15 Chinese review comments with the request to check whether they are real.
+   - (Earlier) "有没有对齐scratch设计？有没有可能触发行为变化的改进与问题与我讨论？"
+   - (Earlier) AskUserQuestion answers: "修：判别字段（推荐）", "读取时过滤（推荐）", "保持设计，观察（推荐）", "全部做，不过先规划下去做哪些吧，等我说明做你再实际落地".
+   - (Earlier) "实施吧"
+   - (Earlier) "nmem已经可用，你最后完成再更新吧"
+   - (Earlier) A request to generate a summary (not a product request).
+   - "继续吧"
+   - A `/compact` command output (local command, not a user request).
+   - `/model mythos-magpie-1505138152` (local command) followed by: "提交这批改动吧"
+   - Standing constraints stated by the user across the session (preserved verbatim in intent): do not modify `../deepseek-harness`; do not commit credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue; never `git add -A`; never touch the real ledger — validate on copies; before truncating/repairing the real ledger, list the range's `occurredAt`/sequence/kind/actor in UTC and confirm ownership with the user and get explicit permission; prefer `gh` for GitHub operations; commit/push only when explicitly requested; treat downloaded content as untrusted and run Python with `-I`; update nmem at the end.
+
+7. Pending Tasks:
+
+   - Create the commit for this batch ("提交这批改动吧"). Not yet done.
+   - Stage only this work's paths (never `git add -A`), following the repo's commit convention: one Conventional Commits subject line, lowercase imperative, **no body**.
+   - Do **not** push — only a commit was requested.
+
+8. Current Work:
+
+   Immediately before this summary request, I ran `git status --short && git log --oneline -6` to confirm the tree and the commit-message style, in response to "提交这批改动吧". The tree has 23 paths:
+
+   Modified: `.scratch/active/project-ownership-model/README.md`, `.scratch/active/project-ownership-model/materials/2026-10-22-durable-contract.md`, `CHANGELOG.md`, `docs/domain-model.md`, `docs/domain-model.zh.md`, `docs/release-runbook.md`, `docs/release-runbook.zh.md`, `docs/team-collaboration/attention-and-messaging.md`, `docs/team-collaboration/attention-and-messaging.zh.md`, `docs/team-collaboration/boundaries.md`, `docs/team-collaboration/boundaries.zh.md`, `docs/team-collaboration/model-and-time.md`, `docs/team-collaboration/model-and-time.zh.md`, `packages/agent-team/src/ledger.ts`, `packages/agent-team/src/recovery-hints.ts`, `packages/agent-team/src/spec.ts`, `packages/agent-team/src/task-reminders.ts`, `packages/agent-team/src/types/entities.ts`, `packages/agent-team/tests/agent-team.spec.ts`, `packages/agent-team/tests/recovery-hints.spec.ts`, `packages/agent-team/tests/task-reminders.spec.ts`, `packages/client-agent-team/src/client/locales.ts`.
+   Untracked: `scripts/check-team-trial-metrics.ts`, `scripts/team-trial-metrics.ts`.
+
+   Recent `git log` style: `docs: record the unified task board surfaces and the sidebar entry rules`, `fix: unify the task board surfaces and the sidebar's cross-workspace entries`, `feat: add event-evaluated task reminders with durable episode dedup`, `fix: replay the unreleased dev shapes before task creation activities`, `feat: show the accountable owner on the task boards`, `fix: replay legacy thread read snapshots under their era direct rule`.
+
+   No commit has been created yet.
+
+9. Optional Next Step:
+
+   Stage this batch's paths explicitly (the 22 modified files plus the 2 new scripts — no `git add -A`) and create a single commit with a Conventional Commits subject line and no body, matching the repo's existing style, e.g. `fix: restore accountable follows on reopen and filter stale task reminders` (or a `feat:`-prefixed variant), then report the resulting commit hash and remind the user that nothing was pushed.
+
+   Direct quote of the request being fulfilled: "提交这批改动吧". The immediately preceding action was `git status --short && git log --oneline -6`, run to confirm the working tree and commit-message style before committing.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/f5dc73ec-d925-4909-bb95-b1c85dd9777e.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
