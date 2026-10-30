@@ -1,0 +1,339 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, AskUserQuestion, Bash, Edit, Read</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+
+   - 最初用户要求核验 project ownership model 的 15 条审查意见，随后要求检查是否对齐 `.scratch` 设计，并讨论可能触发行为变化的问题。
+   - 用户已作出四项决策：
+     - A：reopen 恢复 accountable 的 Thread follow，采用新 reopen 记录中的判别字段；旧记录按旧语义回放，不提升 rules version。
+     - B：提醒在读取时按当前条件过滤；不写清理操作、不改变 ledger 重放规则。
+     - C：Agent 待验收提醒的 `idle >= 30min` 保持设计，试用期观察；error 清 idle 也不改。
+     - D：无行为变化批次全部做，但先规划，等用户明确许可后实施。
+   - 用户本次明确说“实施吧”，因此已获授权开始 A、B、D 的实际落地。
+   - 用户随后明确：“nmem已经可用，你最后完成再更新吧”。因此本轮不中途更新 nmem，完成后再统一更新。
+   - 既定 D 批次：
+     - 更新 scratch README 状态和过期信息。
+     - 修正 CHANGELOG 看板描述，补充升级后需重新指定 Agent owner。
+     - release runbook 增加 SQLite 备份和真实账本操作前按 `occurredAt` 与用户核对数据归属的程序。
+     - 更新 domain model、boundaries、attention/messaging 双语文档。
+     - 修正 `boardEmpty` 文案。
+     - 新增 §11 试用指标和提醒统计脚本。
+     - 改进 `self_acceptance_forbidden` recovery 文案及测试。
+     - 更新提醒模型文档，说明读取时有效性过滤。
+   - 明确不做：claim 9 的看板 fallback 修复（不存在该代码路径）；claims 6、7 所涉设计不变；C 不改。
+
+2. Key Technical Concepts:
+
+   - Cordis/DeepSeek Harness 外部插件 `dsh-agent-team`，唯一 Team authority 是 `packages/agent-team`。
+   - append-only operation ledger 是持久事实来源，投影、Remote、工具、Client 都不是平行 authority。
+   - 重放会重新计算每条 operation 的 inbox delta，并用 `isDeepStrictEqual` 校验。因此改变旧 operation 的 inbox 推导会破坏真实账本回放。
+   - `acceptedClaimRefs` 是已有判别字段先例：新记录显式保存新语义所需信息，旧记录无字段时走旧规则。
+   - A 新增 `refollowedMembers`：
+     - 新 reopen 必须携带，哪怕为空数组。
+     - 旧 reopen 无此字段，继续 marker-only、不恢复 follow。
+     - 不提升 rules version。
+   - `Thread Attention` 控制普通 Thread 更新；activity/reminder marker 独立承担直接通知。
+   - close 清空 Thread Attention 和 reminder/activity/direct markers；accept 不清 Attention。
+   - reopen 恢复 accountable follow 时必须排除 actor 自身，并检查当前是否已经 following，避免重复添加。
+   - `planInboxDelivery` 的提醒输入来自 `notificationFacts` → `memberInbox` → `remindersFor`。因此在 `remindersFor` 源头过滤，可同时覆盖 Inbox 显示和 Agent 唤醒，不需要另改 `inbox-delivery.ts`。
+   - `reviewReminderRecipient` 统一待验收接收者规则：Human accountable、accountable 不再是 owner、accountable 曾持有 Claim 时由 Human 验收，否则由 accountable 验收。
+   - 提醒过滤只判断持久事实可确认的当前有效性，不重新要求当前仍满足 Agent idle 30 分钟，避免 Host 重启丢失运行时 idle 观测后误删有效提醒。
+   - 暂停成员不是失效条件：spec 明确 suspended 时保留 owner/accountable，提醒留在 Inbox，恢复后投递。曾加入 enabled 过滤，已撤回。
+   - 持久 marker 不过滤删除；仍在 Task Thread read、accept、close、生命周期清理时按原规则消费。
+   - 真实账本位置已确认：`/home/yu/.dsh/storages/agent_team.sqlite`，大小约 89 MB；尚未复制或回放。
+   - `.scratch/active/` 被 gitignore；scratch README 修改不会进入 git。
+   - 提交必须单行 Conventional Commits，无 body；不要 `git add -A`。
+   - UI 变化必须运行适用组件检查、`npm run test:browser`，并查看 desktop 和 390×844 截图。
+   - 不修改 `../deepseek-harness`；文档必须中英成对且标题结构一致；维护文档遵循 `docs/AGENTS.md`。
+
+3. Files and Code Sections:
+
+   - `packages/agent-team/src/types/entities.ts`
+     - 在 `AgentTeamTaskActivity` 中新增 reopen 判别字段：
+       ```ts
+       /** Members whose Task Attention reopened. Always present on new reopens (possibly empty); older records keep their marker-only semantics. */
+       readonly refollowedMembers?: readonly AgentTeamMemberId[] | undefined
+       ```
+     - 原有 `acceptedClaimRefs` 保持不变。
+
+   - `packages/agent-team/src/spec.ts`
+     - `taskActivitySchema` 增加：
+       ```ts
+       refollowedMembers: z.array(memberIdSchema).optional(),
+       ```
+
+   - `packages/agent-team/src/ledger.ts`
+     - import 改为：
+       ```ts
+       import { planTaskReminders, reviewReminderRecipient } from './task-reminders.ts'
+       ```
+     - `changeTask` 的 activity 构造现在为新 reopen 写入判别字段：
+       ```ts
+       ...(request.action === 'reopen' && task.accountable !== request.actor.memberId && !this.isFollowing(thread.threadRef, task.accountable)
+         ? { refollowedMembers: Object.freeze([task.accountable]) }
+         : request.action === 'reopen' ? { refollowedMembers: Object.freeze([]) } : {})
+       ```
+     - `reopenThreadInboxFrom` 保留原 recipients/activity marker 逻辑，仅在新字段存在时添加 Attention：
+       ```ts
+       const attention = activity.refollowedMembers === undefined ? []
+         : activity.refollowedMembers.map(memberId => this.followAttentionFrom(projection, memberId, threadRef))
+       return this.inboxDelta(attention, [], [], [], markers)
+       ```
+     - replay 的 Task 状态校验新增：
+       - 非 reopen 不得携带 `refollowedMembers`。
+       - 有字段时必须与重放投影按旧状态计算出的结果一致：
+         ```ts
+         priorTask.accountable !== actor
+           && !this.isFollowingFrom(projection, thread.threadRef, priorTask.accountable)
+           ? [priorTask.accountable] : []
+         ```
+     - 新增 `liveReminderMarkersFrom`，由 `remindersFor` 调用：
+       ```ts
+       private liveReminderMarkersFrom(
+         projection: Projection,
+         memberId: AgentTeamMemberId,
+         threadRef: AgentTeamThreadRef,
+       ): readonly AgentTeamReminderMarker[] {
+         return this.reminderMarkersForFrom(projection, memberId, threadRef).filter(marker => {
+           const task = projection.tasks.get(marker.taskRef)
+           const episode = projection.reminderEpisodes.get(
+             reminderEpisodeKey(marker.taskRef, marker.kind, memberId, marker.baselineSequence),
+           )
+           if (task === undefined || task.resolution !== 'open'
+             || this.visibleProject(projection.projects.get(task.projectRef)) === undefined) return false
+           if (marker.kind === 'review-backlog') {
+             return task.status === 'in_review'
+               && projection.taskStatusBaselines.get(task.taskRef)?.sequence === marker.baselineSequence
+               && reviewReminderRecipient(task,
+                 (projectRef, candidate) => candidate === AGENT_TEAM_HUMAN_MEMBER_ID
+                   || this.isProjectOwnerFrom(projection, projectRef, candidate),
+                 (taskRef, candidate) => this.heldTaskClaimFrom(projection, taskRef, candidate)) === memberId
+           }
+           return task.status === 'in_progress' && marker.memberId === task.accountable
+             && (projection.factsByThread.get(task.threadRef)?.at(-1)?.sequence ?? 0) <= marker.baselineSequence
+             && (episode?.sequence ?? marker.sequence) === marker.sequence
+         })
+       }
+       ```
+     - `remindersFor` 改为从 `liveReminderMarkersFrom(...)` 映射返回值。
+     - `remainingUnreadAfter` 的初始提醒数量也改用 `liveReminderMarkersFrom`，避免同一 Thread 有其他 unread 时把已失效提醒算入剩余数。
+     - `prepareReadReceiptFrom` 的持久 reminder marker 消费逻辑未改；失效 marker 留到 read/lifecycle cleanup。
+     - 没有修改 `planInboxDelivery`，因为显示和唤醒共用上述过滤后的数据。
+
+   - `packages/agent-team/src/task-reminders.ts`
+     - 新增共享函数：
+       ```ts
+       export function reviewReminderRecipient(
+         task: AgentTeamTask,
+         isOwner: (projectRef: AgentTeamProjectRef, memberId: AgentTeamMemberId) => boolean,
+         heldEver: (taskRef: AgentTeamTaskRef, memberId: AgentTeamMemberId) => boolean,
+       ): AgentTeamMemberId {
+         return task.accountable === 'member:human'
+           || !isOwner(task.projectRef, task.accountable)
+           || heldEver(task.taskRef, task.accountable)
+           ? 'member:human' as AgentTeamMemberId : task.accountable
+       }
+       ```
+     - `planTaskReminders` 的 in-review 分支改为调用该函数，避免 planner 与读取时过滤器各写一套接收者规则。
+     - `REVIEW_BACKLOG_IDLE_MS`、`STALLED_PUBLIC_MS`、`STALLED_IDLE_MS` 和 idle 评估逻辑未改。
+
+   - `packages/agent-team/tests/agent-team.spec.ts`
+     - 修改 `closes an unclaimed todo Task through the close path, not acceptance`：
+       - reopen actor 即 accountable 时 `refollowedMembers` 为 `[]`。
+       - 显式 follow 后 accept，再从 accepted 状态 reopen，已经为 `[]`，不重复添加 follow。
+       - 冷重放后 Attention 仍在。
+     - 原 `releases Claims and clears Attention on close without restoring it on reopen` 改为：
+       `releases Claims on close and restores only the accountable follow on reopen`。
+     - 测试先把 Agent 设为 owner 并 transfer 为 accountable，close 清 follow，reopen 断言：
+       ```ts
+       expect(reopened.activity.refollowedMembers).toEqual([actor.memberId])
+       ```
+     - 冷重放确认 follow 恢复。
+     - 测试中把该 reopen operation 改成旧形状：移除 `refollowedMembers`，并把 `inbox.attention.set` 改为 `[]`；冷加载后断言不恢复 follow，`validate()` 通过。
+     - 测试 fixture 因 transfer/claim/read 的 unread fence 和 revision 多次调整，最终通过。
+
+   - `packages/agent-team/tests/task-reminders.spec.ts`
+     - 新增 `hides a stalled reminder after progress or transfer without rewriting its marker`：
+       - 初始 stalled reminder 能显示并触发 immediate。
+       - 新 progress 后 reminder 消失，delivery signature 不再包含 reminder。
+       - 新一轮 stalled reminder 在 transfer 后不再属于旧 accountable。
+       - 新 accountable 不会收到旧接收者的私有 reminder。
+       - 持久 `team/reminder-raised` 记录仍保留。
+       - `new AgentTeamLedger(...).validate()` 通过。
+     - 新增 `hides a review reminder when its status episode or eligible reviewer changes`：
+       - 转交后旧接收者不再显示 review reminder。
+       - 新接收者不会继承旧接收者的 reminder。
+       - close/reopen 后创建新 Claim、状态轮次变化，旧 review reminder 不再显示。
+       - 冷重放验证通过。
+     - 测试中间曾短暂加入 suspend 过滤断言，后来按 spec 改为“suspended 提醒保留、恢复后继续投递”，并已在生产代码中撤回 enabled 过滤。
+
+   - 已读取、尚未修改：
+     - `docs/domain-model.md`
+       - 当前 Project owner、Main stream、权限等已有部分内容；Task 段仍主要描述 Human acceptance，需要补 accountable、Agent 验收限制、转交和生命周期。
+     - `docs/team-collaboration/boundaries.md`
+       - 第 16 行当前写 `Reopen restores an open Task but not previous Attention periods.`，A 落地后需要改为“不恢复旧 Attention period，但新 reopen 可恢复 accountable 的当前 follow”。
+       - 需要补 owner/accountable 权限表。
+     - `docs/team-collaboration/attention-and-messaging.md`
+       - 需要补 immediate/threshold 表、每 Member × Thread 5 条阈值、运行时投递计算、不持久化，以及提醒读取时过滤。
+     - `docs/release-runbook.md`
+       - 目前没有 ledger 备份和 occurredAt 核对程序。
+     - `CHANGELOG.md`
+       - Unreleased upgrade note 已有备份提醒，但缺“升级后所有 Project 只有 Human owner，需要重新指定 Agent owner”。
+       - 看板条目目前已描述 Host projection，不是此前审查中的旧错误句；需要核对后只补必要内容，避免重复或错误改写。
+     - `packages/client-agent-team/src/client/locales.ts`
+       - `boardEmpty` 中英文仍为：
+         - `已加载的消息里还没有 Task`
+         - `No Task in the loaded messages yet`
+       - 尚未修改。
+     - `.scratch/active/project-ownership-model/README.md`
+       - 尚未修改。
+     - `packages/agent-team/src/recovery-hints.ts`
+       - 尚未修改。
+
+4. Errors and fixes:
+
+   - nmem 初次检索：
+     - `nmem --json m search ...` 返回 `/memories/search returned 502`。
+     - 告知用户检索不可用，但上下文已有决策，继续实施。
+     - 用户随后明确 nmem 已可用，要求最后统一更新；目前尚未写入。
+   - import 编辑失败：
+     - 最初用带缩进的 `  import { planTaskReminders } ...` 未匹配。
+     - 用 `rg` 找到实际顶层 import 后改为无缩进匹配，成功加入 `reviewReminderRecipient`。
+   - 编辑 `reopenThreadInboxFrom` 时曾误删函数边界，导致 `promoteThreadInbox` 声明残缺。
+     - 多次精确匹配失败后用 Python 只读检查 `repr` 找到实际文本，再恢复：
+       ```ts
+       private promoteThreadInbox(...) {
+         return this.promoteThreadInboxFrom(...)
+       }
+       ```
+     - 最终 typecheck 和 focused tests 均通过。
+   - 测试 fixture 曾错误插入两遍 `makeOwner` / `changeTaskAccountable`，且 `changeTaskAccountable` 不存在。
+     - 删除重复段，改用实际 API `transferTask`。
+   - TypeScript 报错：
+     - legacy records map 被推断为 `unknown[][]`，不能传给 `storedPool`。
+     - 为 map 两个返回分支显式加 `as [string, unknown]` 后解决。
+   - A 测试多次出现 `unread_required`、`stale_revision`：
+     - transfer 会留下责任事件和推进 revision；Agent claim 前也必须先读自己的责任通知。
+     - 添加相应 Human/Agent reads，并使用返回的当前 `thread.revision`，不再手工推算 sequence。
+     - close 后 Agent 未读数需要把 claim 活动等事实与 close marker 区分开，修正了过严的计数断言。
+   - 曾错误评论说“旧 read receipt 因新 follow 导致回放计数不一致”。
+     - 随后核实这是测试未读数断言问题，不是 replay 缺陷，并明确向用户撤回该判断。
+     - 旧 reopen 回放测试最终实际通过。
+   - B 测试问题：
+     - progress 后 Thread 仍有其他 direct/activity unread，不能简单要求整个 Thread delivery 非 immediate；改为检查 signature 不含 `reminder`。
+     - 暂停后 `notificationFacts` 本身会因 enabled authority 拒绝读取；这不是 reminder filter 的问题。
+     - 最初想改测试观察暂停状态，后来根据 spec 纠正生产逻辑：暂停不应过滤提醒，提醒恢复后仍应可见。
+     - transfer-back 的 base revision 不能写成 `done.receipt.sequence + 1`；改为使用 transfer 结果的实际 revision。
+     - 测试流程中一次错误 multi-edit 留下残缺代码和未定义 `returned`，已修正为一次 `return-review` transfer 并使用其结果。
+     - 最后一次失败是“Member is already following Thread”；删除多余 follow 后 focused tests 全通过。
+   - 真实账本尚未回放，因此不能宣称 24565 条真实记录已验证。
+
+5. Problem Solving:
+
+   - A 已按判别字段方案落地：
+     - 新 reopen 恢复 accountable follow。
+     - actor 自身或已 following 时不添加。
+     - 旧 reopen 保持原语义。
+     - 不需要 rules version bump。
+   - B 已把失效提醒过滤集中到 `remindersFor` 的数据源头，覆盖 Human/Agent Inbox、delivery planning 和剩余 unread 计数。
+   - 发现 spec 对 suspended 的明确要求后，纠正了“暂停即过滤”的实现，避免把成员暂停误当成提醒失效。
+   - review reminder 的接收者规则已提取为 planner 和 read filter 共用函数，避免两套规则漂移。
+   - stalled reminder 除了 Task 状态/接收者外，还检查最新公开事实是否已超过 baseline，避免有进展后旧提醒继续唤醒；同 episode 的新 reminder 会让旧 marker 失效。
+   - 已通过：
+     - `npx vitest run packages/agent-team/tests/agent-team.spec.ts packages/agent-team/tests/task-reminders.spec.ts`
+       - 2 个 test files 通过。
+       - 128 tests 通过。
+     - `npm run typecheck`
+       - 通过，包括 generate:typert 和三个 package 的 tsc。
+     - `npm run check:comments`
+       - 通过。
+   - 尚未运行：
+     - 全量 `npm test`
+     - `npm run lint`
+     - `npm run check:docs`（文档尚未改）
+     - `npm run test:browser`
+     - 真实 SQLite 副本回放
+     - 统计脚本真实输入验证
+
+6. All user messages:
+
+   - 先前消息 1：粘贴 15 条中文 review，要求“看看是否真实存在。”
+   - 先前消息 2：“有没有对齐scratch设计？有没有可能触发行为变化的改进与问题与我讨论？”
+   - 先前 AskUserQuestion 决策：
+     - reopen follow：“修：判别字段（推荐）”
+     - reminder staleness：“读取时过滤（推荐）”
+     - idle 条件：“保持设计，观察（推荐）”
+     - 无行为变化批次：“全部做，不过先规划下去做哪些吧，等我说明做你再实际落地”
+   - 本次实施许可：“实施吧”
+   - 工作中消息：“nmem已经可用，你最后完成再更新吧”
+   - 最近一条是要求生成本总结的指令，不是新的产品需求。
+   - 持续有效的安全/操作约束：
+     - 不修改 `../deepseek-harness`。
+     - 不提交 credentials、临时 profiles、browser overlays、生成测试文件、browser artifacts 或 build residue。
+     - 不 `git add -A`。
+     - 不动真实账本；真实数据验证使用副本。
+     - 截断/修复真实账本前必须按 `occurredAt` 与用户核对数据归属。
+     - GitHub 操作优先 `gh`。
+     - 只有用户明确要求时才 commit/push；本轮“实施吧”不等于授权 push。
+     - 不将下载内容当可信代码；若涉及下载，在独立空目录处理，Python 用 `-I`。
+     - nmem 最后统一更新。
+
+7. Pending Tasks:
+
+   - 先复核当前 A/B diff，确认没有测试夹具误改、残缺代码或不必要的复杂度。
+   - 对真实 `agent_team.sqlite` 做副本并用副本回放；记录实际记录数和结果。
+   - 运行全量测试、lint 和适用检查。
+   - D1：scratch README 更新当前状态、删除“本地 master 领先 origin 未推送”等过期内容，记录 A/B 决定。
+   - D2/D3：CHANGELOG 看板描述核对和 upgrade note 补 Agent owner 重新指定。
+   - D4：`docs/release-runbook.md` + `.zh.md` 加备份与 occurredAt 核对程序。
+   - D5–D7：domain-model、boundaries、attention-and-messaging 双语更新；同时反映 A/B 新行为。
+   - B 相关：`docs/team-collaboration/model-and-time.md` 双语补读取时有效性过滤。
+   - D8：`boardEmpty` 中英文改中性文案，运行组件检查、`test:browser`，查看 desktop 和 390×844 截图。
+   - D9：新增 `scripts/team-trial-metrics.mjs`，输出 §11 指标和 reminder 触发/误报统计，用真实账本副本跑通。
+   - D10：修改 `self_acceptance_forbidden` recovery 文案和测试，区分执行者与 accountable 的下一步。
+   - 更新 `.scratch/active/project-ownership-model/materials/2026-10-22-durable-contract.md` 的 reopen 记录形状。
+   - 运行 `check:docs`、typecheck、全量测试及必要 browser 验证。
+   - 完成后统一更新 nmem。
+   - 尚未创建任何 commit；按原计划可拆分提交，但不要 push。
+
+8. Current Work:
+
+   - A/B 的实现和 focused tests 刚通过。
+   - 最近一次工具结果：
+     - focused unit tests：128 passed。
+     - typecheck：通过。
+     - check:comments：通过。
+   - 随后并行读取了 D 批次的主要文档：
+     - `docs/domain-model.md`
+     - `docs/team-collaboration/attention-and-messaging.md`
+     - `docs/team-collaboration/boundaries.md`
+     - `docs/release-runbook.md`
+   - 尚未对这些文档做任何修改。
+   - 工作树当前已知修改文件为：
+     - `packages/agent-team/src/ledger.ts`
+     - `packages/agent-team/src/spec.ts`
+     - `packages/agent-team/src/task-reminders.ts`
+     - `packages/agent-team/src/types/entities.ts`
+     - `packages/agent-team/tests/agent-team.spec.ts`
+     - `packages/agent-team/tests/task-reminders.spec.ts`
+   - 无新增文件、无提交、无真实账本写入。
+   - 当前最合适的工作顺序是先完成 A/B 的全量及真实账本验证，再开始 D 的文档/文案/脚本批次，避免在未验证的行为改动上继续堆文档。
+
+9. Optional Next Step:
+
+   - 直接继续用户已授权的“实施吧”：
+     1. 查看并审查当前 diff。
+     2. 运行全量 `npm test`、`npm run lint`。
+     3. 复制真实账本到临时位置，从新代码只读打开副本并执行全量 replay validation，确认旧 reopen 和旧 reminder 记录不受影响。
+     4. 验证通过后按已读文档开始 D 批次。
+   - 与最近工作直接对应的原话：
+     - 用户：“实施吧”
+     - 用户：“nmem已经可用，你最后完成再更新吧”
+     - 助手最近进度：“A、B 的行为测试现在都只剩测试流程最后一个‘重复关注’的非法操作；核心过滤和重开回放已通过。去掉这步后，会跑完整测试和真实账本副本回放，再进入文档批次。”
+   - focused tests 现已通过，因此下一步就是兑现“完整测试和真实账本副本回放，再进入文档批次”。
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/f5dc73ec-d925-4909-bb95-b1c85dd9777e.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
