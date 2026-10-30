@@ -1,0 +1,55 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M65DAWJS2XW1E5J1CH1KE8B5",
+  "strategy": "manual-commit",
+  "branch": "feat/agent-context-reading",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/domain-model.md",
+    "docs/domain-model.zh.md",
+    "docs/team-collaboration/tools.md",
+    "docs/team-collaboration/tools.zh.md",
+    "packages/agent-team/README.md",
+    "packages/agent-team/README.zh.md",
+    "packages/tool-agent-team/README.md",
+    "packages/tool-agent-team/README.zh.md",
+    "scripts/check-docs.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 204422,
+    "cache_creation_tokens": 4767524,
+    "cache_read_tokens": 143763769,
+    "output_tokens": 345873,
+    "api_call_count": 971,
+    "subagent_tokens": {
+      "input_tokens": 4445754,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 179920640,
+      "output_tokens": 1243307,
+      "api_call_count": 1516
+    }
+  },
+  "redaction": {
+    "replacements": 172,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 6,
+      "credentialed_uri": 0,
+      "entropy": 166,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}

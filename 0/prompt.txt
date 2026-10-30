@@ -1,0 +1,59 @@
+<task-notification>
+<task-id>a995c34bc8877a0d8</task-id>
+<tool-use-id>call_e6EbyDmiz6qV1wYoTj0yqeYq</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/d97bd4b9-910f-416b-aa21-0dcce0083c36/tasks/a995c34bc8877a0d8.output</output-file>
+<status>completed</status>
+<summary>Agent "Review context refactor documentation" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**审查结论**
+
+共发现 2 个高把握问题，都是文档与当前源码/测试不一致。其余重点契约已核对，未发现问题：32,768 输出上限与 262,144 读取容量、默认 20 条批次、通知排序与 8/20 上限、四类 Member context 注入及 memory baseline/update/unavailable、Thread/Main 的未读门禁、reply 送达 Human、`undeliveredMentions` 从模型结果移除。
+
+**发现 1：无未读但有 Task reminder 的 read 并非无操作**
+
+- 文件：`/home/yu/projects/dsh-agent-team/packages/tool-agent-team/README.md:10`、`/home/yu/projects/dsh-agent-team/packages/tool-agent-team/README.zh.md:10`
+- 错误说法：“A read with nothing to acknowledge — nothing unread, or nothing selected within the output ceiling — advances nothing, writes no operation, and renders `Read — no unread updates …`”。
+- 实际行为：没有未读、但有 Task reminder 时，read 会确认 reminder 并提交一条 `team/thread-read`。证据：`packages/agent-team/src/ledger.ts:4444` 的 `withholdsMarkers` 只在“有 selection、batch 为空且仍有未读”时成立；同处注释写明 “An unread-free read still confirms reminders as before”。`ledger.ts:2256-2258` 只在 Inbox delta 为空时不写 operation，而 reminder marker 会让 delta 非空。工具渲染侧 `packages/tool-agent-team/src/index.ts:628-634` 把 reminders 计入 `acknowledged`，因此 reminder-only read 渲染的是 `Read committed — acknowledged N unread update(s)`，不是 README 说的 `Read — no unread updates`。同仓库的 `docs/team-collaboration/tools.md:31` 已经正确写成 “a reminder-only read can still confirm its reminders”。
+- 影响：README 与维护文档互相矛盾；维护者或调用方会误以为无未读的 read 一定不落盘，也可能漏掉“用 read 清掉 reminder”这条路径。
+- 最小修正：把该句改成“没有选中 fact 且没有 reminder 可确认的 read 不推进、不写 operation；只有 reminder 的 read 仍会确认并报告提交”，并把 `Read — no unread updates` 只对应到“无未读且无 reminder”的情况。
+
+**发现 2：`taskRef` 别名的 “released Client” 旧说法残留**
+
+- 文件：`/home/yu/projects/dsh-agent-team/docs/team-collaboration/tools.md:27`、`/home/yu/projects/dsh-agent-team/docs/team-collaboration/tools.zh.md:23`
+- 错误说法：EN “`taskRef` is a compatibility alias for released task-only Clients on taskful Threads”；ZH “`taskRef` 仅是 released Clients 在 taskful Threads 上使用的 compatibility alias”。
+- 实际行为：当前对所有调用方都接受 `taskRef` 作为 read/history 的 Thread 地址，只要与 `threadRef` 指向同一个 Thread。证据：同文件 `tools.md:98`（b1af731 更新）写的是 “or `taskRef`, its compatibility alias for a taskful Thread”，没有 Client 限制；`packages/tool-agent-team/src/index.ts:554,559` 的参数说明是 “Optional Task ref alias for read and history when this Thread has a Task”；`packages/agent-team/src/ledger.ts:5686` 的 `threadContextFrom` 只检查同 Thread，不检查调用方；`packages/tool-agent-team/tests/team-addressing.spec.ts:47` 验证两种 ref 指向同一 Thread 可接受。旧框架还出现在 `packages/agent-team/README.md:35`/`.zh.md:35`、`docs/domain-model.md:75`/`.zh.md:69`，这几处是 “released ... may use” 的宽松写法，同样没有说明当前所有调用方都能用。
+- 影响：同一文件第 27 行与第 98 行自相矛盾，读者会把 `taskRef` 当成只服务旧 Client 的兼容路径，与模型侧参数说明不一致。
+- 最小修正：第 27 行/第 23 行改为“taskful Thread 上 `taskRef` 是 `read`/`history` 的可用别名；Thread 上的 `message` 需要 `threadRef`（Main stream 用 `projectRef`）”，并同步 README 与 domain-model 的旧框架。该句早于本工作项，但 b1af731 放宽第 98 行时未同步。
+
+**其他观察（未列为高把握发现）**
+
+- `docs/team-collaboration/tools.md:64` 与 `.zh.md:60` 第 8 条说“未读或背景 Message 放不下时返回有界分段”。`packages/tool-agent-team/src/reading-budget.ts:78-119` 只为第一个被选中的 entry 生成分段；批次中后续超长 Message 会被整体留到下一次 read。影响有限，但严格读会误以为同一次 read 会返回任意超长 Message 的分段。
+- `docs/architecture/host-authority.zh.md` 比英文版少若干条目，但该差异在 56e5a92 之前已存在，未计入本次发现。
+
+**已查与未覆盖**
+
+- 已查：六个提交涉及的维护文档、package README、`team-domain-model` core skill 和 persona；对照了 `ledger.ts`、Host/工具 `index.ts`、`member-context.ts`、`reading-budget.ts` 及相关测试（通知、读选择、读上下文、Main stream、Member context、address、surface probe）。
+- 未覆盖：未运行全量测试/build、`check:docs`、`check:core-skills`、`test:browser`；未审 Client/UI、CHANGELOG 全文、发布文档、`.scratch` 和历史中间版本；`reading-budget` 的分段渲染没有找到专门的工具级测试。
+- 未修改任何文件。当前未提交的 Host/ledger 性能改动未纳入判定，上述发现不依赖这些改动。</result>
+<usage><subagent_tokens>109451</subagent_tokens><tool_uses>135</tool_uses><duration_ms>1172705</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bf0v3sh7x</task-id>
+<tool-use-id>call_ZpHAYgH5lt4e0TNPw0dLmXJN</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/d97bd4b9-910f-416b-aa21-0dcce0083c36/tasks/bf0v3sh7x.output</output-file>
+<status>failed</status>
+<summary>Background command "Check bilingual docs and affected read/addressing behavior" failed with exit code 1</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b76418ue2</task-id>
+<tool-use-id>call_hHQ0Z81GzcHCcV7oEbcnnbUW</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/d97bd4b9-910f-416b-aa21-0dcce0083c36/tasks/b76418ue2.output</output-file>
+<status>completed</status>
+<summary>Background command "Validate corrected document length and targeted regressions" completed (exit code 0)</summary>
+</task-notification>
