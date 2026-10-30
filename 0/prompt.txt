@@ -1,0 +1,5 @@
+我知道是设计相关。但是我们与此也单独有follow这一机制。participant与follow，是分离的
+
+对于owner如果follow thread的话会一直收到消息。我在考虑，在这种情况下，如owner自己claim task或者任务进入review状态后，host可以自动让owner follow thread？（如果没有的话；且prompt可以提醒）
+
+你觉得这样呢？
