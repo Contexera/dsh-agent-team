@@ -1,0 +1,1 @@
+嗯就是这个方案了。同时可以在system prompt指导说明unfollow的应用场景，这样我们让attention作用更大；在各个agent 因为不同方式follow main stream/task/thread等不同场景时，当时的工具返回可以额外说明follow的作用；以及说明unfollow提醒；同时在unfollow成功时result返回也是说明unfollow以及如果要收到所有消息可以follow。等等，本质就在context中给出更多信息让agent利用、管理好attention
