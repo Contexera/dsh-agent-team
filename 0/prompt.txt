@@ -1,0 +1,57 @@
+<task-notification>
+<task-id>a82218787eea90f4c</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/d97bd4b9-910f-416b-aa21-0dcce0083c36/tasks/a82218787eea90f4c.output</output-file>
+<status>completed</status>
+<summary>Agent "核对通知展示与确认边界" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>已按指示先读 `docs/README.md`，并按需只读取了相关行段。注意：`packages/agent-team/src/index.ts` 在当前工作区有未提交修改（`git status` 显示 `M`），下列行号是**当前工作副本**的行号，提交他人性能改动后可能偏移。
+
+## 源码事实
+
+1. **通知的统一渲染与上限**
+   `notificationText` 位于 `/home/yu/projects/dsh-agent-team/packages/agent-team/src/index.ts:2916`。每次通知以 `Team Inbox has unread work.` 开头（2918），最多渲染 8 个 Thread（2921、2934），详细事实最多 20 条（2950、2981），字符预算 32 KiB（2917、2922-2929）。超限时追加 `More unread work remains in team_inbox; the automatic context is bounded.`（2992）。结尾按是否存在 Thread/Main 分别给出 `team_thread read` 的读取指引（2993-2994）。每个 Thread 的外层块固定带 `Workspace`、`Project`、`Scope`、`Your role`、`Read`（2940-2941）；Main 块带 `Workspace`、`Project … Main stream`、`Scope: Main stream`、角色（2977-2979）。
+
+2. **direct mention 提供的信息**
+   `/home/yu/projects/dsh-agent-team/packages/agent-team/src/index.ts:2954-2963`：`Direct Team mention`、`Occurred at`、`From`、`Project`、可选 `Task`、`Thread`、`Message ref`、可选 `Replies to`，以及经 `boundedNotificationBody` 处理的 `Message` 正文。正文上限 8 KiB，超出后截断并加标记（3024-3026；常量见 `/home/yu/projects/dsh-agent-team/packages/agent-team/src/surface-visibility.ts:14,17`）。`Replies to` 由 `repliesToLine` 解析，测试要求包含作者、首行摘要和完整 ref（见测试一节的 `member-lifecycle-core.spec.ts:1278-1306`）。
+
+3. **普通更新只给路由与计数，不给正文**
+   `index.ts:2969-2973`：对非 direct 的 message 汇成一行 `${route}: N unread update(s) · newest at &lt;timestamp&gt;.`，route 是 `Task &lt;taskRef&gt;` 或 `Thread &lt;threadRef&gt;`；Main 的普通消息同理（2987-2989）。这与 `docs/team-collaboration/memory-and-context.md:46` 的“body-free Thread-first route with unread count”一致。
+
+4. **Task/Claim activity 提供的信息**
+   `notificationText` 在 `index.ts:2964-2966` 为 activity 包上 `Occurred at` 和 `Thread`，正文来自 `activityNotification`（3029-3061）：actor、动作（claim/done/release/claims_released/promote/close 等）、`Claim` ref、`Task` ref；`promote` 额外给源 `Thread` ref；`close` 末尾追加 `Released Claims` 列表（3058-3060）。`accept` 且读者是被接受 Claim 的所有者时有三条专门文案（3034-3047），区分“随接受被原子完成”和“已完成 Claim 被接受”。此路径不携带 Message 正文。
+
+5. **Task reminder 提供的信息**
+   `index.ts:2943-2948`：`review-backlog` 与 `stalled` 两种固定说明，附 `Occurred at`、`Task`、`Thread`；reminder 即使 Thread 没有普通未读也会投递（`/home/yu/projects/dsh-agent-team/packages/agent-team/src/inbox-delivery.ts:65-71`）。
+
+6. **Main 流通知提供的信息**
+   `index.ts:3002-3022`：
+   - `owner-added/owner-removed`：`Team Project ownership changed` + Project ref + 角色说明（3005-3008）。
+   - `thread-card`：`New discussion Thread in the Main stream`、`From`、`Project`、`Thread`、`Opening` 预览（3010-3014）。
+   - direct Main mention：`Direct Main stream mention`、`Occurred at`、`From`、`Project`、`Message ref`、可选 `Replies to`（含摘要）、正文（3015-3021）。
+   - 普通 Main 消息只出计数行（2987-2989）。
+   只有 direct 或 `thread-card` 走详细渲染（2980）。
+
+7. **DM 提供的信息，以及它不属于 Inbox**
+   `dmRelayText` 位于 `index.ts:1961-1967`：`Direct message from @&lt;handle&gt; at &lt;time&gt;:`、`Workspace: …`、正文、可选 `[most recent prior DM between you: …]`。投递用 `source: { kind, form: 'relay' }` 的 user message（1938-1941）。DM 是审计性消息，不进入 Thread/Project，也不增加任何一方的 Inbox 未读——测试明确断言 `view.threads/items` 为空且收件人 `totalUnreadCount: 0`（`/home/yu/projects/dsh-agent-team/packages/agent-team/tests/member-lifecycle-core.spec.ts:973-978`）。
+
+8. **收到通知本身不确认已读**
+   通知的数据源是 ledger 的未读视图：`notificationFacts` / `mainNotificationFacts`（`index.ts:1308-1309`、2774-2775；ledger 侧 `ledger.ts:1396`、`2133`）。投递仅把文本作为 `form: 'notice'` 的 user message steer/followup 给 Agent（2811-2825、1310-1319），**没有调用任何 ledger 读操作**。去重/覆盖状态保存在内存 `inboxNoticeDeliveries`（3090-3107），`beginInboxDelivery` 只记录本次投递覆盖的签名（3101-3106），Session 销毁时清空（3086-3092）。日志和注释都明确把投递定义为“queued/not yet read by the model”（1320、2806、2832；注释 2724-2727）。因此“已读”仍必须由后续 `team_thread read` 等显式读取推进 watermark；surface 豁免也不写读状态（测试见下）。
+
+## 现有测试验证到哪一步
+
+- **direct mention**：真实 Agent loop 验证正文、`From: human`、Task ref、UTC+8 时间戳（`member-lifecycle-core.spec.ts:1163-1189`）；无 Task 的 Thread mention 不出现 `Task undefined`（1191-1229）；`Replies to` 的作者/摘要/ref（1278-1306）；surface 探针与真实通知字节一致（`/home/yu/projects/dsh-agent-team/packages/agent-team/tests/surface-agreement.spec.ts:81-108`）。
+- **普通更新 body-free 与合并**：两条更新合并为 `2 unread updates` 且正文不出现（`member-lifecycle-core.spec.ts:1128-1161`）；同一 Thread 持续普通更新（1379-1402）；重试路径 attempts 2/3 且只出计数（`/home/yu/projects/dsh-agent-team/packages/agent-team/tests/post-commit-delivery.spec.ts:152-208`）；普通通知不带正文、不让 surface 豁免（`surface-agreement.spec.ts:110-147`）。
+- **Task/Claim activity**：close + `Released Claims` 文案（`member-lifecycle-core.spec.ts:1343-1377`）；accept 对“已完成 Claim”和“随接受原子完成”的两类 Claim ref 命名（`/home/yu/projects/dsh-agent-team/packages/agent-team/tests/member-acceptance.spec.ts:271-295`，以及 297 起的空 finished 子句用例）。
+- **Main**：owner 授予、direct Main mention、普通 Main 计数、`thread-card` 正文、Task 新建不唤醒（`post-commit-delivery.spec.ts:277-320`）。
+- **DM**：投递到 live session、header/正文、prior DM 上下文两个方向、Inbox 零未读（`member-lifecycle-core.spec.ts:940-1010`）。
+- **“未读不被通知消费”**：目前找到的是日志断言 `not yet read by the model`（`post-commit-delivery.spec.ts:147`；`member-lifecycle-core.spec.ts:1494,1603,1675`）和 surface 豁免测试“不持久化读状态”（`/home/yu/projects/dsh-agent-team/packages/agent-team/tests/surface-exemption.spec.ts:81-102`）。**未找到**一条测试在通知投递后断言 `notificationFacts`/`totalUnreadCount` 仍保持未读；这是测试覆盖的空白点，而不是代码事实上的缺口。
+- **边界/截断**：9 个 direct 提及只详细渲染前 5 个、末条正文不出现、Inbox 仍可读出（`member-lifecycle-core.spec.ts:1308-1341`）；探针拒绝截断正文（`/home/yu/projects/dsh-agent-team/packages/agent-team/tests/surface-probe.spec.ts:77-98`）。
+
+## 不确定之处
+
+- `index.ts` 是共享工作区中的未提交修改文件，行号可能随后变动；我未触碰任何性能改动。
+- 未单独核查 `notificationFacts` 如何挑选 Thread（follow/attention/direct marker 的组合），因此“某条 Task/Claim activity 在什么条件下会进入通知”只能从渲染层确认，不能从本次读取确认筛选规则。
+- docs `memory-and-context.md:67` 声称集成测试覆盖 “direct, Activity, and body-free ordinary notification forms”，与上述测试一致；但 docs 未声称有“通知不消费未读”的显式测试。</result>
+<usage><subagent_tokens>66789</subagent_tokens><tool_uses>35</tool_uses><duration_ms>109072</duration_ms></usage>
+</task-notification>
