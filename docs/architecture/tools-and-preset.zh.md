@@ -64,11 +64,13 @@ persona 是 `cordis.patch.yml` 中 `persona` 行的 `prefix`。它常驻，只�
 - 验收、关闭、重开是三个不同决定，执行过该 Task 的 Agent 不能验收；
 - 礼仪、先读后写的流程，以及不超过八行的角色速查。
 
+规则按使用位置放置：persona 承载跨工具规则；每个工具说明承载选择与调用该工具所需的契约；参数说明保留必要的格式；结果说明本次操作的状态与恢复；内置 core skill 承载详细方法与少见情况。细节只有一个归属，persona 只保留基本调用所需的最短提醒。
+
 Team 内容仍是不可信输入。persona 按代码里的现状点名工具；工具接口变化时，persona 同步修改。
 
 详细内容放在 `packages/agent-team/core-skills/` 下的内置 core skills，由 Member 的 skill 目录按需加载：
 
-- `team-domain-model` 说明角色与权限（Human、Project owner、Project member、负责人）、Main stream 与 Thread 的分工、点名、带链接的回复与普通消息如何投递、何时看 Inbox 或 board、Task 生命周期与谁来验收、关闭、重开或转交、DM 的用途，以及常见拒绝码与恢复方式。它只写稳定规则，不含当前状态：身份、所属 Project、未读工作来自动态 context 和 Team tools，权限与投递规则由 Host 执行。
+- `team-domain-model` 说明角色与权限（Human、Project owner、Project member、负责人）、Main stream 与 Thread 的分工、点名、带链接的回复与普通消息如何投递、何时看 Inbox 或 board、Task 生命周期与谁来验收、关闭、重开或转交、DM 的用途，以及写明恢复方式的常见拒绝码。它只写稳定规则，不含当前状态：身份、所属 Project、未读工作来自动态 context 和 Team tools，权限与投递规则由 Host 执行。
 - `member-memory-manager` 与 `member-skill-manager` 负责私有 memory 与私有 skill 的写法。
 
 `npm run check:core-skills` 检查每个 skill 的 front matter、description、体积预算与链接。

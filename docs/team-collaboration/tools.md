@@ -77,13 +77,13 @@ A `read` acknowledges an unread acceptance of a still-done Task in its facts and
 
 ## `team_attention`
 
-`team_attention` answers one question — am I following this Thread or this Project's Main stream, and should I be? `status` reports the current state and changes nothing; `follow` starts receiving ordinary updates from there; `unfollow` stops them. All three take the address and the routing Workspace. `threadRef` is primary for a Thread, with `taskRef` as the compatibility alias, and `projectRef` addresses the Main stream instead — exactly one of the three, and a call carrying both a Thread and a `projectRef` is refused rather than silently preferring one.
+`team_attention` answers whether you follow this Thread or this Project's Main stream, and whether you should. `status` reports the current state and changes nothing; `follow` starts receiving ordinary updates from there; `unfollow` stops them. All three take the address and the routing Workspace. A Thread takes `threadRef`, or `taskRef` as the compatibility alias, and the two may appear together only when they name the same Thread; `projectRef` addresses the Main stream and is refused together with either Thread field rather than silently preferred.
 
 Once the reader follows, every result also names what established that Attention — starting the Thread, claiming its Task, being accountable for it, owning the Project, being named in it, or choosing to follow. A Claim result and a Thread start state the Attention they just established on the reader's behalf, so the reader learns it now follows without having to ask.
 
 Attention is not reading. None of these actions render facts, acknowledge unread work, or hand off a write token, and reading never changes whether you follow it. The result shape carries the address, the scope, the Task standing for a Thread, and the following state — and nothing else, so an Attention result cannot drift into showing content.
 
-Every result states the consequence its verb alone does not carry. Following means ordinary updates from there interrupt you. Unfollowing means they stop, while a mention, a reply to you, and a responsibility event still reach you — and unfollowing releases no Claim and drops no Task you are accountable for, so it is a subscription change rather than a withdrawal from the work. An active Claim on the Task refuses the Thread unfollow until it is done or released. [Attention and messaging](attention-and-messaging.md) owns the rows themselves.
+Every result states the consequence its verb alone does not carry. Following means ordinary updates from there interrupt you. Unfollowing means they stop, while a mention, a reply to you, and a responsibility event still reach you — and unfollowing releases no Claim and drops no Task you are accountable for, so it is a subscription change rather than a withdrawal from the work. Your active Claim prevents unfollowing that Thread until done or released. [Attention and messaging](attention-and-messaging.md) owns the rows themselves.
 
 The split from `team_thread` is what makes the read path carry no Attention logic at all: the three actions share one parameter pocket instead of borrowing a read pocket with three parameters (`messageRef`, `beforeSequence`, `limit`) they can never accept.
 
@@ -95,19 +95,17 @@ Behind rules version 2 `team_message` also has `post`, which speaks in a Project
 
 `start` takes `kind: 'discussion' | 'task'` (the removed `asTask` spelling is refused with the parameter route to `kind`, never dropped), and only a Project owner may start: others get `project_owner_required`, which names `post`. A non-member gets `not_project_member`. A Task start also takes `accountable` and `sourceThreadRefs`; both are refused on a discussion start and on `post`/`reply` rather than dropped, and the committed start reports the accountable owner it recorded.
 
-`team_thread` `read`, `history` and `message` take either a `threadRef` or a `projectRef` (the Main stream), exactly one. The Main stream behavior and its acknowledgement rules are described under `team_thread` above.
+`team_thread` `read`, `history` and `message` address one scope: a Thread through `threadRef` (or `taskRef`, its compatibility alias for a taskful Thread) or a Project's Main stream through `projectRef`; both scopes at once are refused. `message` must carry `threadRef` or `projectRef` — a `taskRef` alone does not read a Message back. The Main stream behavior and its acknowledgement rules are described under `team_thread` above.
 
 Typed rejection results (`unread_required`, `stale_revision`, `main_unread_required`) begin `Not committed` and retain refs and counts with a bounded selection of pending facts. A complete Message and Activity result with a recognized revision baseline supplies a token for reconsideration; a Main stream result supplies none (it has no token). Partial results and unknown baselines route to `read`. This neither acknowledges unread facts nor guarantees the next write. [Mutation fences](boundaries.md#mutation-fences) defines the complete rule.
 
-A mention of a Member the Thread has never carried is not a rejection either: under rules version 2 the Message commits and every addressable recipient is delivered, so there is no undelivered remainder to report and no invitation step. (Under rules version 1 the same write reported the names it could not deliver; that path exists for replaying old ledgers only.)
+A mention of a Member the Thread has never carried is not a rejection either: under rules version 2 the Message commits and every addressable recipient is delivered, so there is no undelivered remainder to report and no invitation step. Rules version 1 recorded the names it could not deliver; that record survives only as the Host's historical explanation when replaying old ledgers, and the model-facing result no longer reports it.
 
-Every rejection — a typed result, a thrown parameter-shape error, or a Host refusal — names the next action and the value that action takes, and those words come from one registry (`packages/agent-team/src/recovery-hints.ts`) rather than from each call site. The registry is enforced, not advisory: a test walks the model-facing sources of both the Host and the tool package and refuses a route sentence written outside the registry, so a new rejection cannot ship with a fault the model has no way out of.
+Recovery wording with a next step comes from one registry (`packages/agent-team/src/recovery-hints.ts`), not from each call site, so a route names the value it takes. The registry does not claim that every error has a next step: a fault with no recovery path states what is missing instead of inventing a route. A test enforces it — it walks the model-facing sources of both the Host and the tool package and refuses a route sentence written outside the registry.
 
 `reply` also takes `replyToMessageRef`, which names the Message on this Thread being answered. The Host resolves it against the ledger and refuses a ref that is unknown or belongs to another Thread, so a stored reply always has a parent a reader can be taken to.
 
-The link is recorded on the Message, renders as a quote the reader can follow back, and adds the parent's author to the recipients — answering a peer reaches them the way a mention does, without repeating their handle. The Human is never added, because they read the Thread directly.
-
-The switch on the Team row's settings decides whether the parameter is available at all; with it off, a reply that carries a ref is refused.
+The link is recorded on the Message and renders as a quote the reader can follow back. It also notifies the parent's author, including the Human, without repeating their handle; replying to your own Message does not add you as a recipient. See [Attention and messaging](attention-and-messaging.md) for delivery rules.
 
 ## `team_dm`
 

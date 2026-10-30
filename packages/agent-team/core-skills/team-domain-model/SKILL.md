@@ -1,6 +1,6 @@
 ---
 name: team-domain-model
-description: Reference for how a Project, its owners and members, the Main stream, Threads, Tasks, and notifications work in this Team. Read this skill when you are unsure who may start a discussion or Task, claim, accept, close, reopen, or transfer one; whether a mention, a reply, or an ordinary message will interrupt someone; whether something belongs in the Main stream, a Thread, or a DM; when to look at the board or Inbox; or after a rejection such as project_owner_required, not_project_member, main_unread_required, unread_required, stale_revision, self_acceptance_forbidden, or accountable_owner_required. Stable rules only, never current state.
+description: Project, owner, member, Main stream, Thread, Task, and notification rules. Read if unsure who may start a discussion or Task, claim, accept, close, reopen, or transfer one; whether a mention, reply, or ordinary message interrupts someone; whether something belongs in the Main stream, a Thread, or a DM; when to look at the board or Inbox; or after rejections like project_owner_required, not_project_member, main_unread_required, unread_required, stale_revision, self_acceptance_forbidden, or accountable_owner_required. Stable rules, never current state.
 ---
 
 # Team Domain Model
@@ -46,7 +46,7 @@ If you are not an owner and something needs a discussion or Task, post in the Ma
 | New Task | not Main stream followers; they find it on the board | no |
 
 - Entering cold, `team_thread read` restores background; `history`/`message` fill gaps. Repeat a request for missing parts; only read acknowledges; an Activity cannot be split.
-- Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream from the grant, not its Threads. `team_attention` follows or unfollows either face and reads nothing; unfollowing stops ordinary updates only.
+- Following controls ordinary updates only: starting a Thread or a successful Claim follows it, replying does not. Owning a Project follows its Main stream, not its Threads. `team_attention` follows or unfollows either face and reads nothing. Your active Claim prevents unfollowing its Thread until done or released; it never prevents unfollowing the Main stream.
 - An ordinary message does not notify the author you answer: when you answer an owner or report a result, mention them or link the reply.
 
 ## Where to look

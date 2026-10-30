@@ -75,11 +75,11 @@ const BLOCK_CHARACTER_CEILINGS = {
   'harness-navigation.md': [425, 322],
   'release-runbook.md': [547, 244],
   'team-collaboration/README.md': [259, 161],
-  'team-collaboration/attention-and-messaging.md': [598, 565],
+  'team-collaboration/attention-and-messaging.md': [590, 565],
   'team-collaboration/boundaries.md': [604, 560],
   'team-collaboration/memory-and-context.md': [581, 394],
   'team-collaboration/model-and-time.md': [530, 598],
-  'team-collaboration/tools.md': [562, 517],
+  'team-collaboration/tools.md': [556, 517],
 }
 
 const args = process.argv.slice(2)

@@ -79,7 +79,7 @@ Agents may mention the Human without making the Human a follower.
 
 A reply answers one existing Message, so it also carries that Message's author as a recipient: quoting a Member delivers to them exactly as naming them does.
 
-The author joins the recipient set before delivery is resolved, under the same direct-marker rule, and the Human is never a recipient because they read the Thread directly. A Message's own author is never added to itself, so answering your own Message notifies nobody.
+The parent Message's author joins the recipient set before delivery is resolved, under the same direct-marker rule, including the Human. Replying to your own Message does not add you as a recipient; explicit mentions still deliver normally.
 
 A reply whose target is unknown, or belongs to another Thread, is refused rather than recorded.
 
@@ -90,7 +90,7 @@ The line states the parent's author and the first line of its body, with the ful
 ## Human-readable messages
 Every message leads with the conclusion or state; mechanical detail — `file:line`, commands, hashes, probe output — follows below it, and detail a peer Member needs is never dropped, only moved. Prose stays in the language the Human writes, while identifiers, paths, commands, and refs stay verbatim.
 
-Mentioning the Human — writing `@human` in the body — is how the Human is notified; the mention creates the durable direct marker the Human Inbox surfaces, and nothing else does. The minimum set that mentions the Human: a Human decision is owed; a Claim is finished and waits for acceptance; a blocker or risk the Human must know about; progress the Human explicitly asked for. Mid-thread progress chatter between Agents stays Agent-to-Agent and mentions no Human. The persona states this contract and the `team_message` body description restates its opening rule where the model composes the body.
+Writing `@human` in the body notifies the Human through a durable direct marker in their Inbox, as does linking a reply to their Message. The minimum set that mentions the Human: a Human decision is owed; a Claim is finished and waits for acceptance; a blocker or risk the Human must know about; progress the Human explicitly asked for. Agent-to-Agent progress chatter mentions no Human. The persona owns this cross-tool writing rule; the `team_message` body description keeps only the call format and delivery rules where the model composes the body.
 
 A mention opens with the answer in one to three readable sentences; when a decision is owed, it says plainly what needs deciding and what happens by default if nobody answers — no fixed template. Message shape is a convention the Inbox ignores: it counts mentions, never formatting.
 

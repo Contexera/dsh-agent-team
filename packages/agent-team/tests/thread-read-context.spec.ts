@@ -94,12 +94,31 @@ describe('Thread read uses the current Session context', () => {
   })
 
   it('provides the Task and discussion before the Member checks the board and claims a direction', async () => {
-    const { ctx, workspaceId, adapter, agent, threadRef, taskRef, anchor, reply, read } = await discussion('task')
-    await reply('Verify installation from the signed package, not the source checkout.')
+    const { ctx, workspaceId, adapter, agent, threadRef, taskRef, anchor, read } = await discussion('task')
+    const projectRef = anchor.projectRef
+    const peer = await ctx.agentTeam.addMember({ requestId: requestId('peer'), workspaceId,
+      handle: 'packager', description: 'Builds the signed package', presetId: 'team-member', projectRefs: [projectRef] })
+    const peerAgent = ctx.agents.get(peer.status.member.sessionId)!
+    await ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('pause-follow'), workspaceId, threadRef, action: 'unfollow' })
+    const peerRead = await ctx.agentTeam.readThreadForAgent(peerAgent, { requestId: requestId('peer-read'), workspaceId, threadRef })
+    const peerClaim = await ctx.agentTeam.changeClaimForAgent(peerAgent, { requestId: requestId('peer-claim'), workspaceId,
+      taskRef: taskRef!, action: 'claim', direction: 'Build the signed release package', baseRevision: peerRead.thread.revision })
+    if (peerClaim.kind !== 'committed') throw new Error('peer Claim failed')
+    await ctx.agentTeam.suspendMember({ requestId: requestId('pause-peer'), memberId: peer.status.member.memberId })
+    await ctx.agentTeam.changeAttentionForAgent(agent, { requestId: requestId('resume-follow'), workspaceId, threadRef, action: 'follow' })
+    await ctx.agentTeam.readThread({ requestId: requestId('human-read-claim'), workspaceId, threadRef })
+    adapter.enqueue(textResponse('Checking current work.'))
+    const update = await ctx.agentTeam.reply({ requestId: requestId('package-check'), workspaceId, threadRef,
+      body: 'Verify installation from the signed package, not the source checkout.', baseRevision: peerClaim.thread.revision })
+    if (update.kind !== 'committed') throw new Error('ordinary update failed')
+    await waitFor(() => adapter.requests.length > 0 ? true : undefined)
+    await agent.whenIdle()
     const context = await read()
     expect(context).toContain(anchor.body)
     expect(context).toContain(taskRef)
     expect(context).toContain('Verify installation from the signed package')
+    expect(context).toContain('Build the signed release package')
+    expect(context).toContain(peerClaim.claim.claimRef)
     const token = Number(/Next write — baseRevision: (\d+)/.exec(context)?.[1])
     const before = adapter.requests.length
     adapter.enqueue(toolCallResponse('inspect-board', 'team_task', { action: 'board' }))

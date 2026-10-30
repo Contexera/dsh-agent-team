@@ -451,18 +451,23 @@ describe('team_message renders its outcome', () => {
     expect(occurrences(text, 'baseRevision')).toBe(1)
   })
 
-  it('reply: an undelivered mention is reported beside the commit, never instead of it', () => {
-    const text = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8201, body: 'x' }, {
+  it('a committed reply ignores the retired v1 undeliveredMentions field', () => {
+    const tool = teamTools().get('team_message')!
+    const text = renderText(tool, { action: 'reply', threadRef: THREAD, baseRevision: 8201, body: 'x' }, {
       kind: 'committed', action: 'reply', messageRef: 'message:9a1e', threadRef: THREAD, revision: 8203,
+      // A Host replay of an old v1 receipt can still carry this field; the
+      // model-facing surface must not turn it back into a current instruction.
       undeliveredMentions: ['member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5'],
     })
     expect(text).toContain('Committed — reply added.')
     expect(text).toContain(`message:9a1e · ${THREAD}`)
-    expect(text).toContain('Mention not delivered — member:6d5ac10d-3ef6-4466-a1f7-d105ca1b6da5 never took part in this Thread')
-    expect(text).toContain('ask the Human')
-    // The Message committed, so the next-write token is still handed over.
+    expect(text).not.toContain('Mention not delivered')
+    expect(text).not.toContain('never took part')
+    expect(text).not.toContain('ask the Human')
     expect(occurrences(text, 'baseRevision')).toBe(1)
     expect(text).toContain('Next write — baseRevision: 8203')
+    const schema = tool.output.schema as { properties?: Record<string, unknown> }
+    expect(schema.properties?.undeliveredMentions).toBeUndefined()
   })
 
   it('dm: Delivered vs Recorded-not-delivered with the no-blind-duplicate warning', () => {
@@ -717,6 +722,39 @@ describe('descriptions state the cross-tool workflow', () => {
     expect(tools.get('team_task')!.description).toContain('list only refreshes active Claims')
     expect(tools.get('team_task')!.description).toContain('from a drained read, your own commit, or a complete rejection that provides one')
     expect(tools.get('team_message')!.description).toContain('never acknowledge unread')
+  })
+
+  it('address guidance keeps scopes exclusive and requires threadRef for a Thread Message', () => {
+    const tools = teamTools()
+    const attention = tools.get('team_attention')!
+    expect(attention.description).toContain('never both a Thread and projectRef')
+    expect(attention.description).toContain('active Claim')
+    expect(attention.description).toContain('finish the work or release the Claim first')
+    const attentionParameters = (attention.parameters as { properties?: Record<string, { description?: string }> }).properties
+    expect(attentionParameters?.taskRef?.description).toContain('must identify the same Thread')
+    expect(attentionParameters?.projectRef?.description).toContain('Never with threadRef or taskRef')
+
+    const thread = tools.get('team_thread')!
+    expect(thread.description).toContain('for a Thread it requires threadRef')
+    expect(thread.description).toContain('if taskRef is also given, it must identify the same Thread')
+    expect(thread.description).toContain('projectRef addresses the Main stream')
+    const threadParameters = (thread.parameters as { properties?: Record<string, { description?: string }> }).properties
+    expect(threadParameters?.taskRef?.description).toContain('taskRef alone does not address a Message')
+    expect(threadParameters?.taskRef?.description).toContain('projectRef addresses the Main stream')
+    expect(threadParameters?.projectRef?.description).toContain('Never with threadRef or taskRef')
+  })
+
+  it('team_dm body says mentions do not notify anyone else', () => {
+    const body = (teamTools().get('team_dm')!.parameters as { properties?: Record<string, { description?: string }> }).properties?.body
+    expect(body?.description).toContain('@mentions in the text do not notify')
+    expect(body?.description).not.toContain('Mention the Human only when')
+  })
+
+  it('team_task keeps the one-sentence Claim rule in the direction parameter', () => {
+    const tool = teamTools().get('team_task')!
+    expect(tool.description).not.toContain('Good direction:')
+    const direction = (tool.parameters as { properties?: Record<string, { description?: string }> }).properties?.direction
+    expect(direction?.description).toContain('one-sentence direction')
   })
 })
 

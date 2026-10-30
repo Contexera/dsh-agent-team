@@ -69,13 +69,13 @@ history 页渲染历史结果与 Thread 身份。首页给 full anchor，continu
 
 ## `team_attention`
 
-`team_attention` 只回答一个问题：我是否在关注这个 Thread 或这个 Project 的 Main stream，以及该不该继续关注。`status` 报告当前状态且不改变任何东西；`follow` 开始接收来自那里的普通更新；`unfollow` 停止接收。三者参数完全相同：地址与路由 Workspace。Thread 用 `threadRef` 作 primary identity，`taskRef` 是 compatibility alias；`projectRef` 改指 Main stream——三者只能给一个，同时带 Thread 与 `projectRef` 的调用会被拒绝，而不是静默取其中一个。
+`team_attention` 只回答是否关注这个 Thread 或这个 Project 的 Main stream，以及该不该继续关注。`status` 报告当前状态且不改变任何东西；`follow` 开始接收来自那里的普通更新；`unfollow` 停止接收。三者参数完全相同：地址与路由 Workspace。Thread 用 `threadRef` 作 primary identity，`taskRef` 是 compatibility alias，两者只有在指向同一个 Thread 时才能同时出现；`projectRef` 改指 Main stream，与任一 Thread 字段同时出现都会被拒绝，而不是静默取其中一个。
 
 读者已关注时，每个结果还会说出这份 Attention 由什么建立——开了这个 Thread、领了它的 Task、是它的 accountable、拥有这个 Project、在里面被点名，或自己选择关注。Claim 的结果与 Thread start 会说明它们代读者刚建立的 Attention，因此读者不必再问就知道自己现在关注了。
 
 Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读、不交写令牌；读也从不改变你是否关注。结果形状只携带地址、scope、Thread 的 Task standing 与 following 状态，别无其他，因此 Attention 结果不可能漂移成展示内容。
 
-每条结果都说出动词本身不携带的那个后果。follow 意味着来自那里的普通更新会打断你。unfollow 意味着它们停止，而点名你的 mention、对你的回复和需要你处理的责任事件仍然到达——并且 unfollow 不释放任何 Claim、不放下你 accountable 的 Task，所以它是订阅变化，不是退出工作。该 Task 上持有 active Claim 时会拒绝 Thread 的 unfollow，直到它 done 或 released。行本身的归属见 [Attention 与消息](attention-and-messaging.zh.md)。
+每条结果都说出动词本身不携带的那个后果。follow 意味着来自那里的普通更新会打断你。unfollow 意味着它们停止，而点名你的 mention、对你的回复和需要你处理的责任事件仍然到达——并且 unfollow 不释放任何 Claim、不放下你 accountable 的 Task，所以它是订阅变化，不是退出工作。读者自己在该 Task 上持有 active Claim 时会拒绝 Thread 的 unfollow，直到它 done 或 released。行本身的归属见 [Attention 与消息](attention-and-messaging.zh.md)。
 
 与 `team_thread` 的拆分正是让读路径完全不带 Attention 逻辑的原因：三个 action 共享同一个参数口袋，而不是借用读的口袋——那里有 `messageRef`、`beforeSequence`、`limit` 三个它们永远用不上的参数。
 
@@ -87,19 +87,17 @@ Attention 不是 reading。这三个 action 都不渲染 facts、不确认未读
 
 `start` 带 `kind: 'discussion' | 'task'`（已移除的 `asTask` 写法会被拒绝并指回 `kind`，绝不静默丢弃），只有 Project owner 能开：其他人得到 `project_owner_required`，提示改用 `post`；非 member 得到 `not_project_member`。Task start 另接受 `accountable` 与 `sourceThreadRefs`；两者在讨论 start 与 `post`/`reply` 上都被拒绝而非丢弃，commit 的 start 回报实际记录的负责人。
 
-`team_thread` 的 `read`、`history`、`message` 接受 `threadRef` 或 `projectRef`（Main stream），二选一。Main stream 的行为与确认规则见上文 `team_thread` 一节。
+`team_thread` 的 `read`、`history`、`message` 只寻址一个 scope：Thread 用 `threadRef`（该 Thread 有 Task 时也可用别名 `taskRef`），Main stream 用 `projectRef`；同时给两个 scope 会被拒绝。`message` 必须带 `threadRef` 或 `projectRef`，只有 `taskRef` 不能读回一条 Message。Main stream 的行为与确认规则见上文 `team_thread` 一节。
 
 类型化拒绝（`unread_required`、`stale_revision`、`main_unread_required`）以 `Not committed` 开头，保留 refs、计数和有界的待处理事实。Message 与 Activity 结果完整，且 revision 基线可识别时，会提供令牌供重新考虑；Main stream 结果不提供令牌（它本来就没有）。部分结果与未知基线指向 `read`。这既不确认未读，也不保证下一次写入成功。完整规则见 [Mutation fences](boundaries.zh.md#mutation-fences)。
 
-mention 一个该 Thread 从未承载过的 Member 同样不是拒绝：规则版本 2 下 Message 照常提交，每个可寻址的收件人都会收到，没有未送达余量需要报告，也没有邀请步骤。（规则版本 1 下同一次写入会报告它无法送达的名字；该路径只为 replay 旧账本而存在。）
+mention 一个该 Thread 从未承载过的 Member 同样不是拒绝：规则版本 2 下 Message 照常提交，每个可寻址的收件人都会收到，没有未送达余量需要报告，也没有邀请步骤。规则版本 1 会记录它无法送达的名字；该记录现在只作为 Host 在 replay 旧账本时的历史解释存在，面向模型的结果不再报告它。
 
-每一处拒绝——类型化结果、抛出的参数形状错误、Host 拒绝——都点名下一步动作与该动作要传的值，且这些措辞来自唯一一份注册表（`packages/agent-team/src/recovery-hints.ts`），不是每个调用点各写一遍。注册表是被强制的，不是建议：一个测试遍历 Host 与 tool 包两侧面向模型的源码，拒绝写在注册表之外的路由句，因此新加的拒绝不可能带着一个模型无路可走的故障上线。
+有下一步的恢复措辞来自唯一一份注册表（`packages/agent-team/src/recovery-hints.ts`），不是每个调用点各写一遍，因此路由会点名它要传的值。注册表不宣称每个错误都有下一步：没有恢复路径的故障说明缺少什么，而不是编造一条路由。一个测试强制这一点：它遍历 Host 与 tool 包两侧面向模型的源码，拒绝写在注册表之外的路由句。
 
 `reply` 另外接受 `replyToMessageRef`，点名本 Thread 上被回答的那条 Message。Host 用 ledger 解析它，未知的 ref 或属于别的 Thread 的 ref 一律拒绝，因此存下来的回复永远有一个读者能被带到的父消息。
 
-这条链接记录在 Message 上，渲染为读者可以跳回的引用，并把父消息作者加进收件人。回答一个同侪的到达方式因此与 mention 相同，不必重复写他的 handle。Human 永不被加入，因为他们直接读 Thread。
-
-Team 行设置里的开关决定这个参数是否可用。开关关闭时，携带 ref 的 reply 会被拒绝。
+这条链接记录在 Message 上，渲染为读者可以跳回的引用。它也会通知父消息作者，包括 Human，不必重复写对方的 handle；回复自己的 Message 不会把自己加入收件人。投递规则见 [Attention 与消息](attention-and-messaging.zh.md)。
 
 ## `team_dm`
 

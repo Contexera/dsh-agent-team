@@ -267,11 +267,6 @@ describe('Agent Team shipping contract', () => {
     const recoverySource = await readFile(resolve(root, 'packages/agent-team/src/recovery-hints.ts'), 'utf8')
     expect(recoverySource).toContain('your own last committed mutation, or a complete Thread rejection that explicitly provides one')
     expect(toolSource).not.toContain('the revision is not shown anywhere else')
-    // The body parameter restates the opening rule where the model composes the
-    // message, so the contract is visible at composition time, not only in the
-    // per-turn persona.
-    expect(toolSource).toContain('Mention the Human only when they must know or decide')
-    expect(toolSource).toContain('mechanical detail follows below')
 
     const manifest = JSON.parse(manifestText) as {
       name: string

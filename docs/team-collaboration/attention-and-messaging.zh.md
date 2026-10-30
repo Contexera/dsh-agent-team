@@ -72,9 +72,9 @@ Message 在自己的正文里指定收件人。写出 `@Handle` 才算 mention�
 
 mention——在开 Thread、回复或 Main stream 发言中——只把这条 Message 送达被点名的 Member 一次，绝不开始或恢复 Attention：是否 follow 是 Member 自己的显式决定。Project 内每个可寻址的 Member 都可以被点名，不存在邀请环节。Agent 可以 mention Human，但不会因此让 Human 成为 follower。
 
-回复是回答一条已存在的 Message，因此也把那条 Message 的作者带成收件人：引用一个 Member，与点名他一样会送达。
+回复是回答一条已存在的 Message，因此也把那条 Message 的作者带成收件人：引用一个 Member，与点名对方一样会送达。
 
-作者在投递集合解析之前就加入，适用同一条 direct-marker 规则；Human 永远不是收件人，因为他们直接读 Thread。Message 的作者绝不会被加给自己，所以回答自己的 Message 不通知任何人。
+父 Message 的作者在投递集合解析之前就加入收件人，适用同一条 direct-marker 规则，包括 Human。回复自己的 Message 不会把自己加入收件人；正文中的显式 mention 仍正常投递。
 
 回复的目标未知、或属于别的 Thread 时，这条回复被拒绝，而不是被记录。
 
@@ -85,7 +85,7 @@ direct-mention 通知点名它携带的 Message，并在这条 Message 回答另
 ## 面向人类的可读消息
 每条消息都以结论或状态开头。机械细节（`file:line`、命令、哈希、探针输出）放在结论之后。同行 Member 需要的细节绝不删除，只下沉。叙述使用 Human 所用的语言，标识符、路径、命令与 ref 保持原文。
 
-在正文里 mention Human（写出 `@human`）就是通知 Human 的方式。mention 产生 Human Inbox 呈现的 durable direct marker，此外没有别的机制。mention Human 的最小集合：需要 Human 决策；Claim 收工等待验收；Human 必须知道的阻塞或风险；Human 点名要的进度。中途 Agent 之间的进度互聊保持 Agent 对 Agent，不 mention Human。persona 陈述这条契约。`team_message` 的 body description 在模型撰写消息处复述契约开头规则。
+正文中的 `@human` 会通过 Human Inbox 的 durable direct marker 通知 Human；链接回复 Human 的 Message 也会产生这类通知。mention Human 的最小集合：需要 Human 决策；Claim 收工等待验收；Human 必须知道的阻塞或风险；Human 点名要的进度。中途 Agent 之间的进度互聊保持 Agent 对 Agent，不 mention Human。persona 承载这条跨工具写作规则；`team_message` 的 body description 只在模型撰写消息处保留调用格式与投递规则。
 
 mention 以一到三句可读的话开头并先给答案。需要决策时，用平实的语言说清两件事：需要决定什么，无人应答时默认发生什么。不设固定模板。消息形态只是约定。Inbox 从不看消息形态。Inbox 计数的是 mention，绝不是排版。
 
