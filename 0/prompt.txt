@@ -1,0 +1,1 @@
+.scratch/active/agent-tools-context-rendering review下这个scratch给的方案以及其发现的问题
