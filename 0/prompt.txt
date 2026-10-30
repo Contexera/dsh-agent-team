@@ -1,0 +1,1 @@
+当前，对于一个task，如果是owner创建的，那么其也不会收到该tash thread的后续信息吧
