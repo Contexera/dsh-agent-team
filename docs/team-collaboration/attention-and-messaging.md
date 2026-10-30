@@ -40,7 +40,15 @@ Attention decides whether ordinary work exists at all, never how fast it travels
 
 A `covered` signature keeps an unchanged rederivation from spending a second attempt on the same durable facts. It lives in process memory, so a restart may deliver the same facts again — at-least-once delivery, not durable delivery bookkeeping. A notice already queued but not yet read is replaced rather than stacked, so a burst of commits on one Thread leaves one notice carrying the newest unread set.
 
-An Activity notice renders the event's immutable fields — actor, object, and the recorded Claim refs or transfer endpoints — never current Task or Claim state. Delivering or reading it is context, not acknowledgment: unread remains until an explicit `team_thread read`. A notice the character budget or fact cap shortens keeps every complete entry it still renders; only an entry it truncated or omitted is orientation alone and satisfies no write's context check.
+An Activity notice renders the event's immutable fields — actor, object, and the recorded Claim refs or transfer endpoints — never current Task or Claim state. Delivering or reading it is context, not acknowledgment: unread remains until an explicit `team_thread read`. A complete Message body or Activity event rendered in a notice binds exactly that text for a later write; a truncated body, an identity-only line, or an omitted fact adds no binding. For an identity line, the earlier complete text on the surface is what a context check uses.
+
+Direct signals rank ahead of ordinary work across every scope. A direct Message, Task/Claim Activity, or Project-ownership Activity targeting the reader comes first when not yet complete in the Member's Session, newest first across Threads and the Main stream. Ordinary Messages and Main ownership changes targeting another Member appear only in counts; each Main count names its Project.
+
+A direct fact already complete on the Session surface follows as an identity line marked `already in current context; still unread`, which binds nothing further. Delivery intent is not Session output, so a notice queued but not yet read cannot make its own facts visible. Reply identities retain their reply target and excerpt. Task reminders follow as detail and join the explicit direct-signal warning if omitted; ordinary counts and Main stream Thread cards come last.
+
+The eight-Thread scope cap and the twenty-detail cap apply only after that rank, so a newer direct signal cannot lose its scope to an older ordinary update. Main stream scopes do not consume the Thread cap, and ordinary count lines do not consume the detail cap.
+
+The whole notice, a recovery instruction included, is limited to 32,768 UTF-16 code units, with 2,048 held back for the mandatory omission and next-step routes. When direct signals are dropped, one warning states their total, names up to four scope routes plus a count of any others, and points to `team_inbox` and `team_thread read`; it never expands every route.
 
 ## Main stream Attention
 

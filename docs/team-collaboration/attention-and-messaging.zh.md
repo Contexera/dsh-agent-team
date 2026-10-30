@@ -39,7 +39,15 @@ Attention 决定 ordinary 工作是否存在，不决定它传播得多快：Thr
 
 `covered` 签名保证同一批 durable facts 的重复派生不会花掉第二次尝试。它只保存在进程内，因此 Host 重启后同一批 facts 可能再次送达——保证 at-least-once，而不是 durable 的投递记录。已入队但尚未被读取的通知会被替换而不是叠加，因此同一 Thread 上的一串提交只留下一条携带最新未读集合的通知。
 
-Activity 通知渲染事件自身的不可变字段——actor、对象，以及记录的 Claim refs 或 transfer 两端——绝不用当前 Task/Claim 状态补写。送达或阅读它只是上下文，不是确认：未读状态要等显式 `team_thread read` 才改变。被字符预算或事实上限缩短的通知，仍会完整绑定它实际渲染的每一条完整事件；只有被截断或省略的那一条才只用于导向，不能满足任何写入的上下文检查。
+Activity 通知渲染事件自身的不可变字段——actor、对象，以及记录的 Claim refs 或 transfer 两端——绝不用当前 Task/Claim 状态补写。送达或阅读它只是上下文，不是确认：未读状态要等显式 `team_thread read` 才改变。通知中完整渲染的 Message 正文或 Activity 事件，正好绑定那段文本供之后的写入使用；被截断的正文、只有身份的行和省略的事实都不增加绑定。只有身份的行，上下文检查用的是 surface 上先前那段完整文本。
+
+Direct 信号在所有 scope 之间排在普通工作之前。尚未完整出现在 Member Session 里的 direct Message、Task/Claim Activity，以及以读者为目标的 Project ownership Activity，最先出现，跨 Thread 与 Main stream 按最新优先。普通 Message 与以其他 Member 为目标的 Main ownership 变化只计入数量；每条 Main 计数标明所属 Project。
+
+已经完整出现在 Session surface 上的 direct 事实随后只显示一行身份，标记 `already in current context; still unread`，不再增加绑定。投递意图不是 Session 输出，已排队但尚未读取的通知不能让自身的事实变成可见。回复的身份信息仍保留回复对象与引用摘要。Task reminder 作为详细内容排在其后，被省略时计入明确的 direct 信号警告；普通计数与 Main stream Thread 卡片最后。
+
+八个 Thread scope 上限与二十条详细事实上限只在这个排序之后生效，所以较新的 direct 信号不会因较早的普通更新失去自己的 scope。Main stream scope 不占用 Thread 名额，普通计数行不占用详细事实名额。
+
+整条通知连同 recovery 指令不超过 32,768 个 UTF-16 代码单元，其中预留 2,048 个给必有的省略说明与下一步入口。有 direct 信号被丢弃时，一条警告给出其总数、最多四个 scope 路由加上其余 scope 的数量，并指向 `team_inbox` 与 `team_thread read`；它不会展开全部路由。
 
 ## Main stream Attention
 

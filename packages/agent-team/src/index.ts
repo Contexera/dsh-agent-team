@@ -1317,7 +1317,7 @@ export default class AgentTeam extends TypertRemoteService {
     if (handle === undefined) throw new Error(`member '${member.handle}' has no active session`)
     const notifications = this.requireLedger().notificationFacts(member.memberId)
     const mainNotifications = this.requireLedger().mainNotificationFacts(member.memberId)
-    const notice = notifications.length === 0 && mainNotifications.length === 0 ? undefined : this.notificationText(notifications, member.memberId, mainNotifications)
+    const notice = notifications.length === 0 && mainNotifications.length === 0 ? undefined : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, text)
     const body = notice === undefined ? text : `${text}\n\n${notice.text}`
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
@@ -2865,7 +2865,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
     if (existingInboxHint !== undefined) this.removeExpectedTeamWake(agent, existingInboxHint)
-    const notice = this.notificationText(notifications, member.memberId, mainNotifications)
+    const notice = this.notificationText(agent, notifications, member.memberId, mainNotifications)
     const hint = createUserMessage({
       content: [{ type: 'text', text: notice.text }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, teamFacts: teamMessageSurface(notice.text, notice.messages, notice.activities) },
@@ -2970,16 +2970,21 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly activities: readonly ActivityFact[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
+  private notificationText(agent: Agent, notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], prefix = ''): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly activities: readonly ActivityFact[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
     const maxCharacters = 32 * 1024
+    // The recovery instruction shares this budget, and footers state what was
+    // omitted; hold both back so a full notice still fits 32K of UTF-16.
+    const budget = prefix === '' ? maxCharacters : maxCharacters - prefix.length - 2
+    const footerReserve = 2 * 1024
+    const contentBudget = budget - footerReserve
     const sections: string[] = [TEAM_INBOX_NOTICE_SUMMARY]
     const messages: RenderedTeamMessage[] = []
     const activities: ActivityFact[] = []
     let characterCount = sections[0]!.length
     let detailedFactCount = 0
     let omitted = notifications.length > 8
-    const append = (section: string): boolean => {
-      if (characterCount + section.length + 2 > maxCharacters) {
+    const append = (section: string, limit = contentBudget): boolean => {
+      if (characterCount + section.length + 2 > limit) {
         omitted = true
         return false
       }
@@ -2989,86 +2994,170 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const plan = readerId === undefined ? undefined : this.inboxDeliveryPlan(notifications, main)
     const rendered = new Set<AgentTeamThreadRef>()
+    // The notice that is being built is delivery intent, not Session output:
+    // only facts already on the live surface may be collapsed to an identity.
+    const surface = visibleTeamSurface(agent)
     const roleText = { follower: 'follower of this Thread', member: 'Project member named here' } as const
-    for (const { item, facts, reminders } of notifications.slice(0, 8)) {
+    type NoticeScope = { readonly key: string; readonly header: string; readonly threadRef?: AgentTeamThreadRef }
+    type NoticeCandidate = {
+      readonly scope: NoticeScope
+      readonly priority: number
+      readonly order: number
+      readonly sequence: number
+      readonly detail: boolean
+      readonly direct: boolean
+      readonly text: () => string
+      readonly message?: RenderedTeamMessage
+      readonly activity?: ActivityFact
+    }
+    const candidates: NoticeCandidate[] = []
+    let order = 0
+    let omittedDirectCount = 0
+    const omittedDirectRoutes = new Set<string>()
+    const scopeRoute = (scope: NoticeScope): string => scope.threadRef === undefined ? `Main stream ${scope.key}` : `Thread ${scope.threadRef}`
+    for (const { item, facts, reminders } of notifications) {
       const scoped = plan?.threads.find(thread => thread.threadRef === item.thread.threadRef)
       const scopeText = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef} (Thread ${item.thread.threadRef})`
       // The role states why this Thread is in scope at all; with one delivery
       // class it no longer says anything about how fast the notice arrived.
       const deliveryText = scoped === undefined ? [] : [`Your role: ${roleText[scoped.role]}`]
-      if (!append([`Workspace: ${item.workspaceId}`, `Project: ${item.projectRef}`, `Scope: ${scopeText}`, ...deliveryText,
-        `Read: team_thread read with workspace ${item.workspaceId} and threadRef ${item.thread.threadRef}`].join('\n'))) break
-      rendered.add(item.thread.threadRef)
+      const scope: NoticeScope = { key: item.thread.threadRef, threadRef: item.thread.threadRef,
+        header: [`Workspace: ${item.workspaceId}`, `Project: ${item.projectRef}`, `Scope: ${scopeText}`, ...deliveryText,
+          `Read: team_thread read with workspace ${item.workspaceId} and threadRef ${item.thread.threadRef}`].join('\n') }
       for (const reminder of reminders) {
         const detail = reminder.kind === 'review-backlog'
           ? 'Team Task reminder\nThis Task has been waiting for acceptance for at least 30 minutes. Review the work and accept it, or record what still needs to change.'
           : 'Team Task reminder\nThis Task has stalled: its public Thread has had no progress for 24 hours, or an active Claim owner has been idle for more than 24 hours. Check the current state and move it forward.'
-        if (append(`${detail}\nOccurred at: ${formatTeamTimestamp(reminder.occurredAt)}\nTask: ${reminder.taskRef}\nThread: ${item.thread.threadRef}`)) detailedFactCount += 1
+        candidates.push({ scope, priority: 2, order: order++, sequence: reminder.sequence, detail: true, direct: true,
+          text: () => `${detail}\nOccurred at: ${formatTeamTimestamp(reminder.occurredAt)}\nTask: ${reminder.taskRef}\nThread: ${item.thread.threadRef}` })
       }
-      for (const { fact, direct } of facts) {
-        if (detailedFactCount >= 20) {
-          omitted = true
-          break
-        }
+      for (const entry of facts) {
+        const { fact, direct } = entry
         if (direct && fact.kind === 'message') {
-          const sender = fact.message.sender === AGENT_TEAM_HUMAN_MEMBER_ID
-            ? 'human' : this.requireLedger().getMember(fact.message.sender)?.handle ?? fact.message.sender
-          const repliesTo = this.repliesToLine(fact.message, item.workspaceId)
-          const detail = ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Project: ${item.projectRef}`,
-            ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
-            `Thread: ${item.thread.threadRef}`, `Message ref: ${fact.message.messageRef}`,
-            ...(repliesTo === undefined ? [] : [repliesTo]),
-            `Message: ${this.boundedNotificationBody(fact.message.body)}`].join('\n')
-          if (append(detail)) {
-            detailedFactCount += 1
-            if (fact.message.body.length <= NOTIFICATION_BODY_MAX_CHARACTERS) {
-              messages.push({ threadRef: item.thread.threadRef, messageRef: fact.message.messageRef, body: fact.message.body })
-            }
-          }
+          const onSurface = isFactOnSurface(surface, entry, item.thread.threadRef)
+          candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: fact.sequence, detail: true, direct: true,
+            text: () => {
+              const sender = fact.message.sender === AGENT_TEAM_HUMAN_MEMBER_ID
+                ? 'human' : this.requireLedger().getMember(fact.message.sender)?.handle ?? fact.message.sender
+              const repliesTo = this.repliesToLine(fact.message, item.workspaceId)
+              if (onSurface) {
+                return ['Direct Team mention — already in current context; still unread', `From: ${sender}`, `Project: ${item.projectRef}`,
+                  ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]), `Thread: ${item.thread.threadRef}`,
+                  `Message ref: ${fact.message.messageRef}`,
+                  ...(repliesTo === undefined ? [] : [repliesTo])].join('\n')
+              }
+              return ['Direct Team mention', `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`, `From: ${sender}`, `Project: ${item.projectRef}`,
+                ...(item.task === undefined ? [] : [`Task: ${item.task.taskRef}`]),
+                `Thread: ${item.thread.threadRef}`, `Message ref: ${fact.message.messageRef}`,
+                ...(repliesTo === undefined ? [] : [repliesTo]),
+                `Message: ${this.boundedNotificationBody(fact.message.body)}`].join('\n')
+            },
+            ...(onSurface || fact.message.body.length > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
+              threadRef: item.thread.threadRef, messageRef: fact.message.messageRef, body: fact.message.body } }) })
         } else if (fact.kind === 'activity') {
           const activity = activityFact(fact.activity)
-          const acceptance = this.acceptanceNotification(fact.activity, readerId)
-          const detail = ['Team Task update', activityText(activity), `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`,
-            ...(acceptance === undefined ? [] : [acceptance])].join('\n')
-          if (append(detail)) {
-            detailedFactCount += 1
-            activities.push(activity)
-          }
+          const onSurface = isFactOnSurface(surface, entry, item.thread.threadRef)
+          candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: fact.sequence, detail: true, direct: true,
+            text: () => {
+              if (onSurface) {
+                return ['Team Task update', `${activity.activityRef} (Task ${activity.taskRef}, Thread ${activity.threadRef}) — already in current context; still unread`].join('\n')
+              }
+              const acceptance = this.acceptanceNotification(fact.activity, readerId)
+              return ['Team Task update', activityText(activity), `Occurred at: ${formatTeamTimestamp(fact.occurredAt)}`,
+                ...(acceptance === undefined ? [] : [acceptance])].join('\n')
+            },
+            ...(onSurface ? {} : { activity }) })
         }
       }
       const ordinary = facts.filter(entry => entry.fact.kind === 'message' && !entry.direct)
       if (ordinary.length > 0) {
         const route = item.task === undefined ? `Thread ${item.thread.threadRef}` : `Task ${item.task.taskRef}`
-        append(`${route}: ${ordinary.length} unread update${ordinary.length === 1 ? '' : 's'} · newest at ${formatTeamTimestamp(ordinary.at(-1)!.fact.occurredAt)}.`)
+        const count = ordinary.length
+        const newestAt = formatTeamTimestamp(ordinary.at(-1)!.fact.occurredAt)
+        candidates.push({ scope, priority: 3, order: order++, sequence: ordinary.at(-1)!.fact.sequence, detail: false, direct: false,
+          text: () => `${route}: ${count} unread update${count === 1 ? '' : 's'} · newest at ${newestAt}.` })
       }
     }
     for (const { project, entries } of main) {
       const owner = readerId !== undefined && this.requireLedger().projectOwnerIds(project.projectRef).includes(readerId)
-      if (!append([`Workspace: ${project.workspaceId}`, `Project: ${project.projectRef} — Main stream`, 'Scope: Main stream',
-        ...(readerId === undefined ? [] : [`Your role: ${owner ? 'owner of this Project' : 'Project member named here'}`]),
-        `Read: team_thread read with workspace ${project.workspaceId} and projectRef ${project.projectRef}`].join('\n'))) break
-      for (const entry of entries.filter(candidate => candidate.direct || candidate.kind === 'thread-card')) {
-        if (detailedFactCount >= 20) {
-          omitted = true
-          break
-        }
-        if (append(this.mainNotificationDetail(entry, project))) {
-          detailedFactCount += 1
-          if (entry.kind === 'message' && entry.message.body.length <= NOTIFICATION_BODY_MAX_CHARACTERS) {
-            messages.push({ projectRef: project.projectRef, messageRef: entry.message.messageRef, body: entry.message.body })
-          } else if (entry.kind === 'activity') {
-            activities.push(activityFact(entry.activity))
-          }
+      const scope: NoticeScope = { key: project.projectRef,
+        header: [`Workspace: ${project.workspaceId}`, `Project: ${project.projectRef} — Main stream`, 'Scope: Main stream',
+          ...(readerId === undefined ? [] : [`Your role: ${owner ? 'owner of this Project' : 'Project member named here'}`]),
+          `Read: team_thread read with workspace ${project.workspaceId} and projectRef ${project.projectRef}`].join('\n') }
+      for (const entry of entries) {
+        if (entry.kind === 'message' && entry.direct) {
+          const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
+          candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: entry.sequence, detail: true, direct: true,
+            text: () => this.mainNotificationDetail(entry, project, onSurface),
+            ...(onSurface || entry.message.body.length > NOTIFICATION_BODY_MAX_CHARACTERS ? {} : { message: {
+              projectRef: project.projectRef, messageRef: entry.message.messageRef, body: entry.message.body } }) })
+        } else if (entry.kind === 'activity' && entry.direct) {
+          const onSurface = isMainEntryOnSurface(surface, entry, project.projectRef)
+          candidates.push({ scope, priority: onSurface ? 1 : 0, order: order++, sequence: entry.sequence, detail: true, direct: true,
+            text: () => this.mainNotificationDetail(entry, project, onSurface), ...(onSurface ? {} : { activity: activityFact(entry.activity) }) })
+        } else if (entry.kind === 'thread-card') {
+          candidates.push({ scope, priority: 3, order: order++, sequence: entry.sequence, detail: true, direct: false,
+            text: () => this.mainNotificationDetail(entry, project) })
         }
       }
-      const ordinary = entries.filter(entry => !entry.direct && entry.kind === 'message')
+      // Ownership changes for another Member are ordinary unread for a follower
+      // that does not hold the marker; count them with ordinary Messages so the
+      // fact keeps an entry without claiming the reader is the new owner.
+      const ordinary = entries.filter(entry => !entry.direct && (entry.kind === 'message' || entry.kind === 'activity'))
       if (ordinary.length > 0) {
-        append(`Main stream: ${ordinary.length} unread message${ordinary.length === 1 ? '' : 's'} · newest at ${formatTeamTimestamp(ordinary.at(-1)!.occurredAt)}.`)
+        const count = ordinary.length
+        const newest = ordinary.at(-1)!
+        const newestAt = formatTeamTimestamp(newest.occurredAt)
+        candidates.push({ scope, priority: 3, order: order++, sequence: newest.sequence, detail: false, direct: false,
+          text: () => `Main stream: ${count} unread update${count === 1 ? '' : 's'} · Project ${project.projectRef} · newest at ${newestAt}.` })
       }
     }
-    if (omitted) sections.push('More unread work remains in team_inbox; the automatic context is bounded.')
-    if (notifications.length > 0) sections.push('Use team_thread read with workspace and threadRef for missing context and to acknowledge unread updates. Complete Message facts shown here need not be fetched again just to reconsider a write; complete Activity facts shown here are equally sufficient. Use team_inbox to triage remaining Threads.')
-    if (main.length > 0) sections.push('Use team_thread read with the relevant workspace and projectRef for missing Main stream context and to acknowledge updates. Complete facts shown here can support a post, but do not mark them read.')
+    // Missing direct mentions, replies, and responsibility changes come first
+    // across every scope, newest first; facts already on the surface follow as
+    // short identities. Ordinary counts and cards wait behind them.
+    candidates.sort((left, right) => left.priority - right.priority
+      || (left.priority <= 1 ? right.sequence - left.sequence : left.order - right.order))
+    const emittedScopes = new Set<string>()
+    for (const candidate of candidates) {
+      const scopeFull = candidate.scope.threadRef !== undefined && !rendered.has(candidate.scope.threadRef) && rendered.size >= 8
+      if (scopeFull || (candidate.detail && detailedFactCount >= 20)) {
+        omitted = true
+        if (candidate.direct) {
+          omittedDirectCount += 1
+          omittedDirectRoutes.add(scopeRoute(candidate.scope))
+        }
+        continue
+      }
+      if (!emittedScopes.has(candidate.scope.key)) {
+        if (!append(candidate.scope.header)) {
+          if (candidate.direct) {
+            omittedDirectCount += 1
+            omittedDirectRoutes.add(scopeRoute(candidate.scope))
+          }
+          continue
+        }
+        emittedScopes.add(candidate.scope.key)
+        if (candidate.scope.threadRef !== undefined) rendered.add(candidate.scope.threadRef)
+      }
+      if (!append(candidate.text())) {
+        if (candidate.direct) {
+          omittedDirectCount += 1
+          omittedDirectRoutes.add(scopeRoute(candidate.scope))
+        }
+        continue
+      }
+      if (candidate.detail) detailedFactCount += 1
+      if (candidate.message !== undefined) messages.push(candidate.message)
+      if (candidate.activity !== undefined) activities.push(candidate.activity)
+    }
+    if (omittedDirectCount > 0) {
+      const routes = [...omittedDirectRoutes]
+      const location = routes.slice(0, 4).join(', ') + (routes.length > 4 ? ` and ${routes.length - 4} other scopes` : '')
+      append(`Direct Team signal${omittedDirectCount === 1 ? '' : 's'} not expanded: ${omittedDirectCount} in ${location}. Use team_inbox to find their workspace and Thread/Main address, then team_thread read for the full facts.`, budget)
+    }
+    if (omitted) append('More unread work remains in team_inbox; the automatic context is bounded.', budget)
+    if (notifications.length > 0) append('Use team_thread read with workspace and threadRef for missing context and to acknowledge unread updates. Complete Message facts shown here need not be fetched again just to reconsider a write; complete Activity facts shown here are equally sufficient. Use team_inbox to triage remaining Threads.', budget)
+    if (main.length > 0) append('Use team_thread read with the relevant workspace and projectRef for missing Main stream context and to acknowledge updates. Complete facts shown here can support a post, but do not mark them read.', budget)
     // The Threads this notice named nothing of, because the section cap or the
     // character budget dropped them. Their facts were never delivered, so the
     // next plan must keep them out of `covered`.
@@ -3076,9 +3165,12 @@ export default class AgentTeam extends TypertRemoteService {
     return { text: sections.join('\n\n'), messages, activities, renderedThreads: rendered, undelivered }
   }
 
-  private mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: AgentTeamProject): string {
+  private mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: AgentTeamProject, onSurface = false): string {
     if (entry.kind === 'activity') {
       const { activity } = entry
+      if (onSurface) {
+        return ['Team Project ownership changed', `${activity.activityRef} (Project ${project.projectRef}) — already in current context; still unread`].join('\n')
+      }
       const text = activity.kind === 'owner-added'
         ? `@human made you an owner of Project ${project.name} (${project.projectRef}). Owners answer for the Project: start its discussions and Tasks and keep its work moving.`
         : `@human removed you as an owner of Project ${project.name} (${project.projectRef}). You can still take part in it.`
@@ -3093,6 +3185,11 @@ export default class AgentTeam extends TypertRemoteService {
     const repliesTo = entry.replyTo === undefined
       ? (message.replyToMessageRef === undefined ? undefined : `Replies to: ${message.replyToMessageRef}`)
       : `Replies to: @${entry.replyTo.sender} — "${entry.replyTo.excerpt}" [${message.replyToMessageRef}]`
+    if (onSurface) {
+      return ['Direct Main stream mention — already in current context; still unread', `From: ${this.printableSender(message.sender)}`,
+        `Project: ${project.projectRef}`, `Message ref: ${message.messageRef}`,
+        ...(repliesTo === undefined ? [] : [repliesTo])].join('\n')
+    }
     return ['Direct Main stream mention', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, `From: ${this.printableSender(message.sender)}`,
       `Project: ${project.projectRef}`, `Message ref: ${message.messageRef}`, ...(repliesTo === undefined ? [] : [repliesTo]),
       `Message: ${this.boundedNotificationBody(message.body)}`].join('\n')

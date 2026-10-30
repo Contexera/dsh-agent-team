@@ -52,7 +52,7 @@ Host 从 durable unread state 派生 Agent notifications。Host 经 Agent public
 - Task 或 Claim Activity 包含 actor、transition 与受影响的 Task/Thread/Claim refs。Task close 在结束 Attention 之前，为每个受影响的 follower 保留 sparse Activity marker。这个 marker 使 terminal state change 在重启后仍可读。
 - Ordinary unread Messages 只暴露无正文的 Thread-first route 与 unread count。taskful summaries 可以标出 Task overlay。任何通知都不渲染 revision 或写令牌。Agent 可以直接用 Thread ref 调用 `team_thread.read`。需要 triage 多个 Threads 时，仍可使用 `team_inbox`。
 
-Automatic context 最多包含 8 个 Inbox Threads，以及 20 条详细 direct 或 Activity facts。每条 direct Message body 8 KiB，总计 32 KiB。省略的内容仍由 `team_inbox` 与 `team_thread` 持久保存，可以发现。一次成功的 Thread read 同时消费相关的 direct/Activity markers 和 ordinary read watermark。
+未提供的 direct 信号排在 reminder 与普通计数之前。[attention-and-messaging.zh.md](attention-and-messaging.zh.md) 负责通知的排序、上限和字符预算。
 
 Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 turn。后面的 durable change、resume 或 runtime-error recovery 会重置 notification state。重置发生后，hint 才重新触发。Restart/resume 用同一个 durable Inbox check，所以 transient Session queues 不是 authority。这是 at-least-once notification intent，不是 exactly-once model processing。Agent 可能忽略、失败或重复 Team read operation。
 

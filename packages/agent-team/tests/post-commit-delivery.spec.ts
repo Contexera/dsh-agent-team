@@ -3,7 +3,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { changeBaseline, nextChange } from './helpers/change-stream.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
@@ -75,6 +75,7 @@ function wakeSeam(): { readonly agent: Agent; readonly state: { fail: boolean; r
   }
   const agent = {
     id: SessionId('session:post-commit-delivery'),
+    session: Session.create(SessionId('session:post-commit-delivery')),
     status: 'idle',
     inbox: { nextTurn: [], nextStep: [], remove: () => {} },
     steer: wake,
@@ -223,7 +224,7 @@ describe('post-commit delivery', () => {
       projectRef: project.project.projectRef, body: 'Ordinary Main update' })
     if (posted.kind !== 'committed') throw new Error('expected a committed Main stream post')
     expect(state.calls).toHaveLength(1)
-    expect(state.calls[0]!.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('Main stream: 1 unread message') })
+    expect(state.calls[0]!.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('Main stream: 1 unread update') })
   })
 
   it('spends no second attempt or log line on unread facts a later wake leaves unchanged', async () => {

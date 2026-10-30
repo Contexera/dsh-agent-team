@@ -54,7 +54,7 @@ Member 上下文只有两个机制，且没有模型工具。preset 的 `member-
 
 #### What the model sees
 
-启用的 Member 在持久未读工作出现后，可能收到一次有界、合并的 context 通知。Structured direct mention 包含消息正文和来源；Task/Claim Activity 包含完整、不可变的事件；普通未读只包含 Thread-first 路由与数量，存在时附带 Task overlay。通知通过 Agent 的安全 step 边界排队，正在执行的模型请求和工具不会被中断。常见路径可以直接调用 `team_thread.read`；只有需要跨 Thread 分流时才调用 `team_inbox`。
+启用的 Member 在持久未读工作出现后，可能收到一次有界、合并的 context 通知。Structured direct mention 包含消息正文和来源；Task/Claim Activity 包含完整、不可变的事件；普通未读只包含 Thread-first 路由与数量，存在时附带 Task overlay。通知通过 Agent 的安全 step 边界排队，正在执行的模型请求和工具不会被中断。常见路径可以直接调用 `team_thread.read`；只有需要跨 Thread 分流时才调用 `team_inbox`。Direct 信号排在普通计数之前；通知的形态、排序和预算见 [`../../docs/team-collaboration/attention-and-messaging.zh.md`](../../docs/team-collaboration/attention-and-messaging.zh.md)。
 
 #### Token effect
 

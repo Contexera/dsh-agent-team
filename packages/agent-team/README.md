@@ -54,7 +54,7 @@ Member context has two mechanisms and no model tool. The preset's `member-compac
 
 #### What the model sees
 
-An enabled Member may receive one bounded, coalesced context notification after durable unread work appears. Structured direct mentions include their Message body and source; Task/Claim Activities include their complete immutable event; ordinary unread includes only a Thread-first route and counts, with a Task overlay where present. The notification is queued at the Agent's safe step boundary, so active model requests and tools are not interrupted. It routes the common path directly to `team_thread.read`; the model uses `team_inbox` only when it needs to triage remaining Threads.
+An enabled Member may receive one bounded, coalesced context notification after durable unread work appears. Structured direct mentions include their Message body and source; Task/Claim Activities include their complete immutable event; ordinary unread includes only a Thread-first route and counts, with a Task overlay where present. The notification is queued at the Agent's safe step boundary, so active model requests and tools are not interrupted. It routes the common path directly to `team_thread.read`; the model uses `team_inbox` only when it needs to triage remaining Threads. Missing direct signals are ranked ahead of ordinary counts; [`../../docs/team-collaboration/attention-and-messaging.md`](../../docs/team-collaboration/attention-and-messaging.md) owns the notice shape, order, and budget.
 
 #### Token effect
 
