@@ -1,0 +1,163 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M66PQ5SJZZ5XSYSHY8KRKRAG",
+  "session_id": "1b356f1e-6e34-4e7f-b66c-0db56d20615b",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-30T15:26:49.437390459Z",
+  "branch": "perf/team-performance-closure",
+  "checkpoints_count": 5,
+  "save_step_count": 6,
+  "files_touched": [
+    "CHANGELOG.md",
+    "docs/README.md",
+    "docs/README.zh.md",
+    "docs/architecture/host-authority.md",
+    "docs/architecture/host-authority.zh.md",
+    "docs/development/README.md",
+    "docs/development/README.zh.md",
+    "docs/development/start-and-checks.md",
+    "docs/development/start-and-checks.zh.md",
+    "docs/development/team-performance.md",
+    "docs/development/team-performance.zh.md",
+    "package.json",
+    "packages/agent-team/README.md",
+    "packages/agent-team/README.zh.md",
+    "packages/agent-team/src/index.ts",
+    "packages/agent-team/src/ledger.ts",
+    "packages/agent-team/tests/performance-scenarios.spec.ts",
+    "packages/agent-team/tests/post-commit-delivery.spec.ts",
+    "packages/agent-team/tests/usage-report.spec.ts",
+    "scripts/README.md",
+    "scripts/check-docs.mjs",
+    "scripts/team-performance/compare-team-performance.mjs",
+    "scripts/team-performance/run-team-browser-performance.mjs",
+    "scripts/team-performance/run-team-performance-matrix.mjs",
+    "scripts/team-performance/team-live-usage.ts",
+    "scripts/team-performance/team-performance-baseline.ts",
+    "scripts/team-performance/team-performance-semantics.ts",
+    "scripts/team-performance/team-performance.e2e.ts",
+    "tsconfig.scripts.json"
+  ],
+  "agent": "Claude Code",
+  "model": "anthropic/magpie-8217178402",
+  "turn_id": "8ce4d9aa2ebc",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 233614,
+    "cache_creation_tokens": 1261704,
+    "cache_read_tokens": 51213627,
+    "output_tokens": 129569,
+    "api_call_count": 298,
+    "subagent_tokens": {
+      "input_tokens": 7635676,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 4697088,
+      "output_tokens": 413295,
+      "api_call_count": 115
+    }
+  },
+  "redaction": {
+    "replacements": 4,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 4,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "prompt-skill-claude-code-scratch-review-2026-10-30T07:26:57.342697888Z",
+      "event_type": "prompt_invocation",
+      "skill": {
+        "name": "scratch-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "prompt_slash_command",
+        "confidence": "explicit"
+      },
+      "turn_id": "860bc612cf3f",
+      "timestamp": "2026-10-30T07:26:57.342697888Z",
+      "native": {
+        "command": "/scratch-review"
+      },
+      "collapse": {
+        "target": "user_message",
+        "label": "/scratch-review",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_3KF4JAKkQzdDkZi0rZi3jhS3",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "nowledge-mem:search-memory"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "8ce4d9aa2ebc",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 861,
+        "end": 862,
+        "entry_ids": [
+          "5eaf76f1-51c4-4690-84f1-e70a0b6d7df5"
+        ],
+        "tool_use_id": "call_3KF4JAKkQzdDkZi0rZi3jhS3"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_3KF4JAKkQzdDkZi0rZi3jhS3"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: nowledge-mem:search-memory",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_u28szKIVxcDEDyds5EhYR9F4",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "nowledge-mem:distill-memory"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "8ce4d9aa2ebc",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1567,
+        "end": 1568,
+        "entry_ids": [
+          "44c762d8-e7a6-490f-82a0-e2e05bf66b7b"
+        ],
+        "tool_use_id": "call_u28szKIVxcDEDyds5EhYR9F4"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_u28szKIVxcDEDyds5EhYR9F4"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: nowledge-mem:distill-memory",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 6
+  }
+}

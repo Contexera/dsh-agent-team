@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "chatcmpl-tool-8410f1789eb4a4c6",
+  "agent_id": "aa7a679dd2460e77f",
+  "subagent_type": "general-purpose",
+  "task_description": "Review standards and simplicity",
+  "token_usage": {
+    "input_tokens": 2085546,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 80069,
+    "api_call_count": 26
+  },
+  "started_at": "2026-10-30T15:29:52.240078916+08:00",
+  "completed_at": "2026-10-30T15:47:43.776641471+08:00"
+}

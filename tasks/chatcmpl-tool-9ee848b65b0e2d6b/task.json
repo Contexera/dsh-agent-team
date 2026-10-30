@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "chatcmpl-tool-9ee848b65b0e2d6b",
+  "agent_id": "a9c230615b3726979",
+  "subagent_type": "general-purpose",
+  "task_description": "Review correctness",
+  "token_usage": {
+    "input_tokens": 1832013,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 138930,
+    "api_call_count": 29
+  },
+  "started_at": "2026-10-30T15:29:27.636303735+08:00",
+  "completed_at": "2026-10-30T15:57:32.80648946+08:00"
+}

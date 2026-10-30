@@ -1,0 +1,19 @@
+{
+  "tool_use_id": "call_LEpw66j5XuEsHqGcafzqptrG",
+  "agent_id": "a7b44b75cc5db1acf",
+  "subagent_type": "general-purpose",
+  "task_description": "修复使用统计状态遗漏",
+  "files": [
+    "packages/agent-team/tests/usage-report.spec.ts",
+    "scripts/team-performance/team-live-usage.ts"
+  ],
+  "token_usage": {
+    "input_tokens": 2804405,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 4697088,
+    "output_tokens": 131725,
+    "api_call_count": 62
+  },
+  "started_at": "2026-10-30T21:12:34.689393601+08:00",
+  "completed_at": "2026-10-30T21:39:59.738127787+08:00"
+}

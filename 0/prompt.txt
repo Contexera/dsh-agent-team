@@ -1,0 +1,471 @@
+先看本地已有的关于pref的相关修改
+
+---
+
+/scratch-review 待会可以review .scratch/active/team-performance-optimization ；最终没问题则跟着修改归档scratch一起commit
+
+---
+
+<task-notification>
+<task-id>aa7a679dd2460e77f</task-id>
+<tool-use-id>chatcmpl-tool-8410f1789eb4a4c6</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/aa7a679dd2460e77f.output</output-file>
+<status>completed</status>
+<summary>Agent "Review standards and simplicity" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Review: standards and simplicity axes
+
+Note on range churn: the tree moved while I was reading. `packages/agent-team/src/ledger.ts` was reverted to HEAD mid-review (`git diff --quiet` on it is now clean), but `index.ts` still calls its new API — see the blocker below. Findings reflect the tree as it stands now.
+
+### Blocker (outside my axes, must report)
+
+| Sev | Location | Evidence | Impact | Basis | Fix |
+| --- | --- | --- | --- | --- | --- |
+| high | `packages/agent-team/src/index.ts:1323, 2877` | `this.requireLedger().notificationSnapshot(member.memberId)`; `AgentTeamLedger` has no such member (`git show HEAD:.../ledger.ts \| grep -c notificationSnapshot` → 0; `lib/types/ledger.d.ts` still has it from an earlier generation). `npx tsc -p packages/agent-team/tsconfig.json` → `error TS2339: Property 'notificationSnapshot' does not exist on type 'AgentTeamLedger'` twice. | The working tree does not typecheck. The ledger half of the change was lost. | root `AGENTS.md`: "Current behavior: source and tests under `packages/`." | Restore the `ledger.ts` hunks (`notificationSnapshot`, `withNotificationReadSet`, `mainUnreadForNotification`, `notificationReadSet`) or drop the `index.ts` callers — one or the other, not the split. |
+
+### A. Docs conventions
+
+| Sev | Location | Evidence | Impact | Basis | Fix |
+| --- | --- | --- | --- | --- | --- |
+| medium | `scripts/check-docs.mjs:66` | `'development/team-performance.md': [594, 520]`, but `--budgets` measures `443 / 594` and `270 / 520`. Every other row sits at or a few chars under its measurement (e.g. `start-and-checks.md` 595/595). | The ceiling is ~150 chars of free drift on a brand-new doc, so the gate cannot see condensation or drift on it. | `docs/AGENTS.md`: "A ceiling ratchets down as a document is condensed and is raised only deliberately, not a side effect." | Record the measured value (`[443, 270]`), or the nearest round number above it. |
+| medium | `docs/development/team-performance.md:77-79` | "Current constraints" states the eight-Member notification deferral and the `zstd` production default — both Host/storage facts, not performance-measurement facts. The code change that introduced the 8-Member threshold (`index.ts:194`) has no row in either owning doc. | A Host behavior contract lives only in a development perf doc. | `docs/AGENTS.md` routing table: "Host authority: ledger, lifecycle, projections, … Agent notifications → `architecture/host-authority.md`" and "Member memory, context pressure ownership, Agent notifications → `team-collaboration/memory-and-context.md`"; maintenance discipline: "One fact has one maintained home; cross-link between documents instead of duplicating the fact." | Move the 8-Member/queue constraint into `memory-and-context.md` § Agent notification boundary (or `host-authority.md` § Lifecycle and notifications) and cross-link; keep only the measurement-relevant residue here. Same for the `zstd` line if a storage doc owns that default. |
+| medium | `docs/README.md:45-52`, `docs/README.zh.md:45-52` | Index rows exist (line 16 in both), but the "Where to start / 从哪里开始" lists contain no path for this doc. | The doc is discoverable by index but not by the "what am I changing" entry point. | `docs/AGENTS.md`: "A new maintained document gets an index row **and a Where to start path** in both `README.md` and `README.zh.md` in the same change." | Add one bullet to both halves, or state why the design/verification bullets already cover it. Undetected by `check:docs`, so it is a real gap. |
+| low | `docs/AGENTS.md:28` routing table | No row routes a "performance-sensitive path / benchmark run" change to `team-performance.md`. | The doc is not reachable from the routing rule that tells a future editor where facts go. | `docs/AGENTS.md` § Routing ("A change that invalidates a documented fact updates the owning document in the same change"). | Add one row, e.g. "Team performance measurement, benchmark scenarios, or result comparison → `development/team-performance.md`". |
+| informational | `docs/development/start-and-checks.md:28-44` | The `bench:team*` family is deliberately absent from the verification gradient; `team-performance.md` owns it and says the suite is opt-in. | Consistent — the gradient lists graded checks, the benches are not graded. | `docs/AGENTS.md` routing: "Setup, the verification gradient, or which check a change needs → `development/start-and-checks.md`". | Keep as is. Optionally one cross-link line in `start-and-checks.md` noting the ungraded bench lane, but not required. |
+
+Bilingual pair: outline match and pairing pass (`check:docs`: "35 pair outlines matched"); both halves state the same 4-area table and the same constraints. No finding.
+
+### B. Script conventions
+
+| Sev | Location | Evidence | Impact | Basis | Fix |
+| --- | --- | --- | --- | --- | --- |
+| low | `scripts/README.md:45` | Row sits in "Browser acceptance, previews, and dev tools", but the suite is mostly Node scenarios; the ~12-name "Does" cell compresses 16 (per `baseline.ts:50-51`) and loses `tool-read-sweep` / `ledger-read-memory` per-variant naming. | Placement mildly misfiles a Node benchmark under browser tooling; the enumeration is approximate. | `scripts/README.md:6-7` ("This page is only the directory map … update it whenever a script is added"). | Either add a "Benchmarks" subsection or reword the cell to name the groups rather than half-enumerate. Only if you want the index exact. |
+
+Trigger column is accurate: `DSH_BENCH_TEAM=1` gates `bench:team` and `bench:team:semantics` (`baseline.ts:26`, `semantics.ts:13`); matrix/compare/browser are not gated, and matrix sets the flag itself (`run-team-performance-matrix.mjs:40`). No finding.
+
+### C. `AGENTS.md` change (committed as `2319945`)
+
+Correct. `packages/agent-team/preset/` no longer exists (`ls` → no such file); the `team-member` row does live in `cordis.patch.yml:24-27` (`id: wowyuarm-agent-team-preset-team-member`, `id: team-member`), and the patch file's own comment at line 21 says the layout replaced "the retired roster". Scope is a one-line doc correction committed on its own; acceptable. No finding.
+
+### D. Simplicity / removable code
+
+| Sev | Location | Evidence | Impact | Basis | Fix |
+| --- | --- | --- | --- | --- | --- |
+| medium | `team-performance-baseline.ts:32` | `const harnessRoot = process.env.DSH_HARNESS_DIR ?? resolve(root, '../deepseek-harness')` — reimplements the pointer that `scripts/harness-dir.mjs` owns, and diverges from it (no `.generated-harness` marker, no fail-fast). The sibling browser runner correctly does `import { harnessDir } from '../harness-dir.mjs'` (`run-team-browser-performance.mjs:9`). | A cert run with the marker set (no env) makes the baseline stamp the wrong `harnessCommit`; the doc's whole point is comparability. | `scripts/README.md:60` ("Single source of truth for which sibling harness checkout scripts … resolve against"); `docs/development/generated-and-seams.md:51`. | `import { harnessDir } from '../harness-dir.mjs'` and drop the local resolution. |
+| medium | `team-performance-baseline.ts:50-51, 916-921` | The 16 scenario names appear three times: the `DSH_BENCH_SCENARIOS` default string, `supportedScenarios`, and the `runners` map keys. | Adding a scenario requires three coordinated edits; a mismatch fails at the wrong place (unknown-scenario throw vs. `runners[scenario]!` undefined). | root `AGENTS.md`: "Keep one authoritative formatter/projection per domain concept. Do not add speculative registries … or duplicate stores." | Derive `supportedScenarios` from `Object.keys(runners)` (or a single `{ name, run }[]` table) and validate the default list against it. |
+| medium | `percentile()` duplicated | Identical bodies at `team-performance-baseline.ts:878-886` and `team-performance.e2e.ts:22-30`; percentile/summary math is the one statistical concept both need. | Two copies drift; a p95 definition change touches two files. | root `AGENTS.md`: "Keep one authoritative formatter/projection per domain concept." | Extract one shared `percentile` (and the summary aggregation) into a small module both entry points import. |
+| medium | `commitOf()` duplicated 3× | `team-performance-baseline.ts:127-134`, `team-performance-semantics.ts:175-179` (dynamic-import variant), and inlined twice in `run-team-browser-performance.mjs:36-37`. | Same fact (git HEAD of a directory, `unknown` on failure) in three spellings. | same "one authoritative formatter" rule. | One shared `commitOf(dir)` helper. |
+| low | run-id + artifact-dir logic duplicated 4× | `new Date().toISOString().replaceAll(/[:.]/g,'-')}-${randomUUID().slice(0,8)}` at `baseline.ts:53`, `semantics.ts:21`, `run-team-performance-matrix.mjs:29`, `team-performance.e2e.ts:85`; each also re-implements `mkdir` + manifest/samples/summary writes. | Run-id format and output layout are a shared contract stated four times. | same rule; `docs/development/team-performance.md` describes the on-disk layout as one contract. | One `newRunId()` / `writeRunArtifacts()` helper in the suite directory. |
+| low | fixture `mount()` duplicated | Near-identical `mountTeamMemberHost({ cleanups, prepare, presetPlugins:[member-context, team-tools], workingDirectory:'stub' })` at `baseline.ts:136-148` and `semantics.ts:24-36`. | Preset wiring for the bench host is stated twice. | "one authoritative formatter/projection per domain concept." | Share one `mount()` between the two TS entry points. |
+| low | dead: `TextAdapter.firstRequest` | `team-performance-baseline.ts:69` declares `firstRequest = Promise.withResolvers&lt;void&gt;()`, resolved at line 74, never awaited or read (`grep firstRequest` → only these two lines). | Unused symbol. | root `AGENTS.md` conventions. | Remove it; nothing replaces it. |
+| low | `waitForFirstModelRequest` | `team-performance-baseline.ts:500-502` is a one-line wrapper over `waitForModelRequest(adapter, 1)`, called once at line 537. | Unused flexibility. | same. | Inline the call. |
+
+Non-findings: hand-rolled CLI parsing (`compare-team-performance.mjs`) and hand-rolled statistics are **not** duplicating a dependency — `package.json` devDependencies have no `cac`/`yargs`/`citty`/stats library, and `session-trace.ts:39` already hand-rolls `parseArgs`. `appendFile`/JSONL writing uses Node built-ins only. No speculative config layer found; the only registry-shaped thing is the three-list scenario table above.
+
+### E. Comment discipline
+
+No violations. `check:comments` passes with wide headroom (`scripts 1408/2800`). The only new comments are the two-line entry-point headers in `baseline.ts:1-2` and `semantics.ts:1-2` — they state the opt-in constraint, not the code. The `index.ts` additions (`:434-437` deferred-effect fields, `:2739-2740` "Durable facts are rederived …") state non-obvious constraints. No comment cites `.scratch/`, a task number, or a path/line that has drifted. No finding.
+
+### F. Test conventions
+
+| Sev | Location | Evidence | Impact | Basis | Fix |
+| --- | --- | --- | --- | --- | --- |
+| informational | `packages/agent-team/tests/check-package-boundaries.spec.ts` (committed in `945b86b`) | Placement matches existing precedent: `harness-dir.spec.ts` and `public-baseline-statement.spec.ts` already test root `scripts/` tools from this directory, all three spawn the script as a child process against a temp root. | Consistent; `check-package-boundaries.mjs` scans `packages/*/src` only, so a test under `tests/` is outside its scope by design (script header: "Only source is scanned; tests … may reach the shared `scripts/` helpers"). | root `AGENTS.md` "Further reading": tests under `packages/`; `vitest.config.ts` `include: ['packages/*/tests/**/*.spec.ts', …]`. | None. |
+
+Premise correction: `vitest.config.ts` contains **no** `scripts/tests/**/*.spec.ts` entry and `scripts/tests/` does not exist. The include list is `packages/*/tests/**/*.spec.ts` + `packages/*/tests/**/*.client.spec.tsx` only, and `vitest.config.ts` is not modified in this change (`git status`). There is nothing stale to remove.
+
+### G. Unrelated / stray changes
+
+- `docs/development/environments-and-install.md` + `.zh.md` CI-report text: **already committed** as `32b8028`, outside the current uncommitted set. Unrelated to this item (per your note, ignore). It is not in the working tree now.
+- `AGENTS.md` preset line: committed `2319945`, correct (§C).
+- Current uncommitted set (`docs/README*`, `docs/development/README*`, `package.json`, `index.ts`, `post-commit-delivery.spec.ts`, `scripts/README.md`, `check-docs.mjs`, plus the untracked `team-performance.*` doc pair and `scripts/team-performance/`) is coherent with the work item — except the `index.ts` / `ledger.ts` split flagged as the blocker. No stray `vitest.config.ts` edit, no test in an odd location, no build residue (all new artifacts land under `artifacts/`, which is gitignored at `.gitignore:6`).</result>
+<usage><subagent_tokens>112443</subagent_tokens><tool_uses>55</tool_uses><duration_ms>1072156</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ad1f9c8c5f3af0d59</task-id>
+<tool-use-id>chatcmpl-tool-aea8217daf9ab14e</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/ad1f9c8c5f3af0d59.output</output-file>
+<status>completed</status>
+<summary>Agent "Review spec compliance" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>The working tree was edited concurrently during my review (ledger.ts reverted to HEAD at 15:39:12). Per your instruction, here is the SPEC-axis report, with the check timeline separated explicitly.
+
+---
+
+# SPEC review — Team 性能优化迭代 (tickets 01/02/03 + spec 验收 seam)
+
+## Review-state caveats (read first)
+
+**Committed vs uncommitted in the reviewed range (`d39ec06..HEAD` + working tree):**
+- Committed: `945b86b` (check-package-boundaries AST rewrite + `check-package-boundaries.spec.ts` + one `scripts/README.md` row), `2319945` (AGENTS.md one-liner). `32b8028` ignored per instruction.
+- Uncommitted tracked: `docs/README.md/.zh.md`, `docs/development/README.md/.zh.md`, `package.json`, `packages/agent-team/src/index.ts`, `packages/agent-team/tests/post-commit-delivery.spec.ts`, `scripts/README.md`, `scripts/check-docs.mjs`.
+- Untracked: `docs/development/team-performance.md/.zh.md`, `scripts/team-performance/` (6 files).
+- **`packages/agent-team/src/ledger.ts` is NOT modified in the current tree** — it was reverted to HEAD at 15:39:12, while `index.ts` (uncommitted) still calls `notificationSnapshot`. The ledger-side read-set work (ticket 02 items 2 and 4) therefore exists **only** in the version of the file I captured in `git diff` at the start of this review, not in the tree now. I read that diff before the revert and cite it below.
+
+**Check timeline (per coordinator request):**
+- **Before 15:39 (unreliable? no — these ran on the intended tree):** targeted vitest run at 15:37:41 (8 files / 150 passed) — this was before the 15:39:12 ledger revert, so ledger.ts still carried the read-set code; valid for the intended design. `check:boundaries` and `check:docs` ran ~15:37–15:38 (both OK); neither depends on the reverted code.
+- **After 15:39 (ran against the half-reverted tree — discard as evidence):** background `npm test` (died at `generate:typert` with TS2339 `notificationSnapshot` on index.ts:1323 and :2877), `check:comments` (OK, but comment-count only), re-run of `post-commit-delivery.spec.ts` (8 failed / 2 passed — failure caused by the dangling call), root `tsc --noEmit`.
+- Nothing I ran after 15:39 should be read as a verdict on the change. The criteria table below is **from reading code**.
+
+---
+
+## Findings
+
+### F1 — Deferred notification path swallows invariant divergences (contract violation)
+- **Severity:** medium
+- **Location:** `packages/agent-team/src/index.ts:2737-2747` (deferred branch) vs `:2758-2763` (synchronous branch); doc contract at `:2729-2733`.
+- **Evidence:** The synchronous `afterCommit` re-raises `AgentTeamInvariantError` (`if (error instanceof AgentTeamInvariantError) throw error`, :2761). The new deferred branch catches **every** error and logs it: `catch (error) { this.ctx.logger.warn('agent-team: post-commit ${label} failed: …') }` (:2742-2743). `deliverInboxNotice` deliberately re-raises `AgentTeamInvariantError` (:2932), and it is reached through `notifyMember` from the deferred effect.
+- **Impact:** For any commit affecting ≥8 Members (`NOTIFICATION_QUEUE_THRESHOLD`, :194), an integrity divergence inside the notification effect is folded into an ordinary warn instead of staying loud. This contradicts the method's own contract comment ("An invariant divergence is the exception: it is re-raised on the caller's frame so a failed integrity check stays loud") and weakens ticket 02 criterion 2/3 ("wake、recovery、generation swap、通知派生失败和 steer 失败的行为保持现有隔离语义").
+- **Basis:** ticket 02 unchecked item "wake、recovery、generation swap、通知派生失败和 steer 失败的行为保持现有隔离语义"; spec "失败隔离逐项一致".
+- **Fix:** In the deferred branch, do not fold `AgentTeamInvariantError` into the generic warn — surface it distinctly (e.g. `this.ctx.logger.error` naming the invariant, or a dedicated handler). Async propagation cannot reach the caller frame, so record the divergence at a level that is not silent.
+
+### F2 — Ticket 01's clean-commit criterion genuinely unmet, and the matrix manifest cannot prove it
+- **Severity:** medium
+- **Location:** `scripts/team-performance/run-team-performance-matrix.mjs:25-28`; `scripts/team-performance/team-performance-baseline.ts:908-911`.
+- **Evidence:** All 182 run manifests under `artifacts/team-perf/runs/*/manifest.json` report `dirty: true`; the baseline records `commits` + `dirty` + `status`, but the **matrix** manifest records only `runId, startedAt, samples, warmups, cases, node` — no commit, no dirty flag. So the minimal-matrix artifact carries no clean-tree evidence at all.
+- **Impact:** Ticket 01's one open item ("在 clean commit 上跑通最小矩阵，并保留复跑命令和限制") is not satisfied, and cannot be satisfied by the matrix runner as written because it never records the tree state.
+- **Basis:** ticket 01 `- [ ] 在 clean commit 上跑通最小矩阵，并保留复跑命令和限制；当前验证工作树包含其他未提交修改`.
+- **Fix:** Have the matrix manifest record `teamCommit`, `harnessCommit`, and `dirty` (mirroring the baseline), then rerun the default 15-case matrix on a clean commit and store it.
+
+### F3 — Ticket 02's "逐项一致" criterion is not verified by any probe
+- **Severity:** medium
+- **Location:** `scripts/team-performance/team-performance-semantics.ts:152-172`; `packages/agent-team/tests/inbox-delivery.spec.ts`.
+- **Evidence:** The semantics runner asserts exactly five checks — failure retry, shutdown-not-throw, shutdown-skips-queued, ordering, client invalidation. It never compares notice text / covered / undelivered / attempt / steer-followup ordering against the old path. `inbox-delivery.spec.ts` tests the pure `planInboxDelivery` function only. The read-set change is *equivalent by construction* — `notificationText` receives the plan and falls back to recomputing it from the same inputs (`plan ?? (readerId === undefined ? undefined : this.inboxDeliveryPlan(notifications, main))`, index.ts:3042), and `deliverInboxNotice` still picks `sequenced ? followup : steer` unchanged (:2928-2929) — but no test proves the item-by-item identity the criterion demands.
+- **Impact:** Criterion "notice text、covered、undelivered、attempt 和 steer/followup 顺序与旧路径逐项一致" stays unverified; a future regression in the reused plan would not be caught.
+- **Basis:** ticket 02 `- [ ] notice text、covered、undelivered、attempt 和 steer/followup 顺序与旧路径逐项一致`; spec seam "旧路径与新路径的 notice text、covered、undelivered、attempt、steer/followup 次序和失败隔离逐项一致".
+- **Fix:** Add a probe (or a golden test) that renders a notice through both the plan-passed and plan-recomputed paths over the same facts and asserts identical `text`, `undelivered`, and the recorded `covered`/`attempt`.
+
+### F4 — Ticket 02's isolation criterion is only partially probed (generation swap / steer failure absent)
+- **Severity:** medium
+- **Location:** `scripts/team-performance/team-performance-semantics.ts` (whole file); probe coverage.
+- **Evidence:** The listed subjects include "generation swap" and "steer 失败"; the probe file exercises a forced wake failure on the first call and a shutdown race, but never a generation swap (`retireMemberGeneration`/`activateMember`) or a `steer`-throw isolation path (the failure probe throws from the overridden `steer`, which is the same seam — but there is no swap-generation case). Compounded by F1.
+- **Impact:** The unchecked isolation criterion remains open.
+- **Basis:** ticket 02 `- [ ] wake、recovery、generation swap、通知派生失败和 steer 失败的行为保持现有隔离语义`.
+- **Fix:** Add a probe that drives a Session swap mid-wake and asserts the successor rederives (no duplicate/lost notice), plus an explicit assertion that an invariant divergence from the deferred path is not swallowed (ties to F1).
+
+### F5 — Ordered post-commit notification queue is beyond ticket 02's stated build (scope note, not an excluded item)
+- **Severity:** low
+- **Location:** `packages/agent-team/src/index.ts:194` (`NOTIFICATION_QUEUE_THRESHOLD = 8`), `:2686-2697`, `:2734-2757`.
+- **Evidence:** Ticket 02's "What to build" is "合并单次通知投递的重复派生" (deduplicate per-delivery derivation). The change additionally defers notification effects for ≥8 affected Members into a per-Member ordered, cross-Member parallel queue after commit. The spec's exclusion list ("跨 commit debounce、长期 read-set 缓存、通知上限调整、Member 激活并行和 Session fold 增量") does **not** name this queue, so it is not a listed prohibition, but it is new delivery-timing/parallelism behavior in a slice that asked only to remove duplicate derivation.
+- **Impact:** The reviewed uncommitted change is larger than tickets 01–03 describe; the extra behavior is documented in the README and covered by four of the five semantic probes, so it is transparent, but it exceeds the ticket scope.
+- **Basis:** ticket 02 "What to build"; spec "第一阶段按三条垂直切片推进 … 2. 把一次通知投递所需的 Thread/Main unread、delivery plan 和文本输入收敛成一次性只读派生结果".
+- **Fix:** Either fold this into ticket 02's description explicitly, or split the queue into its own ticket with the F1 invariant behavior fixed.
+
+### F6 — Acceptance seams for tool-call and collaboration are only partly instrumented
+- **Severity:** low
+- **Location:** `scripts/team-performance/team-performance-baseline.ts:273-345` (tool), `:512-576` (collaboration-agent-turn).
+- **Evidence:** Spec seams list startup including **Session inventory**, tool-call including **queue wait / result render / Session write**, and collaboration including **B notice claimed, B read, B reply committed**. Measured: `host-boot` (total only, `mode: 'process-reused'`), `tool-call` (`toolTotalMs`, `hostViewMs` only), `collaboration-agent-turn` (`triggerCommitMs`, `triggerToNoticeQueuedMs`, `noticeQueuedToModelRequestMs`, `modelRequestToAgentIdleMs`, plus warm mirrors). No Session-inventory metric, no per-tool queue-wait/render/Session-write stages, no B-claimed / B-read / B-reply-committed stages.
+- **Impact:** The declared acceptance seams are partially covered; the ticket checkboxes are honest about `queue/Session/Agent/Client = null`, but the seam list itself is not fully met.
+- **Basis:** spec 验收 seam bullets "启动：storage open、ledger replay/validate、Session inventory、Member activation、Host ready" and "Tool call：… queue wait、ledger/query、结果 render 和 Session 写入" and "协作：A commit ack、B notice queued、B notice claimed、B read、B reply committed、B idle".
+- **Fix:** Either instrument the missing stages, or narrow the seam list in the spec to what is actually measured.
+
+### F7 — Doc states a production default it cannot substantiate from this repo
+- **Severity:** low
+- **Location:** `docs/development/team-performance.md` ("JSONL `zstd` remains the production default.").
+- **Evidence:** `grep -rn "zstd" packages/*/src` returns nothing in this repo; `DSH_BENCH_SESSION_COMPRESSION` defaults to `zstd` only inside the benchmark. The production JSONL default lives in the Harness session-persistence package, not here.
+- **Impact:** A maintained doc states behavior outside the code it sits beside; if the harness default ever moves, the doc goes stale silently.
+- **Basis:** AGENTS.md "it must not define behavior that the code does not implement"; user rule "code wins over prose".
+- **Fix:** Attribute the claim to the Harness (`session-persistence-jsonl`), or drop it from the "Current constraints" list.
+
+### F8 — Checkbox/prose inconsistency on "new-process cold start"
+- **Severity:** informational
+- **Location:** ticket 01 item 2.
+- **Evidence:** The item is `- [x]` but its own prose says "真正新进程 cold start … 仍待补齐"; `host-boot` records `mode: 'process-reused'` (baseline.ts:175).
+- **Impact:** A checked box overstates coverage of a self-declared gap. Not a code defect.
+- **Fix:** Split into a checked "warmup/steady-state samples recorded" and an unchecked "true new-process cold start".
+
+---
+
+## Constraint checks (spec "关键决定")
+
+| Constraint | Verdict | Evidence |
+| --- | --- | --- |
+| 通知 read set 只在单次投递内存在，不建立长期缓存或第二个 durable authority | **Holds** | `withNotificationReadSet` installs a per-call set and restores `previous` in `finally` (ledger diff, capture `@@ -2194,10 +2196,38 @@`); `notificationSnapshot` scopes it to one call; no field survives the call. |
+| `team_inbox`、`team_thread read`、所有写入和所有 wake 副作用继续独占 | **Holds** | `notificationSnapshot` is not `@Remote` (40 `@Remote` methods, none is it) and not a tool; only `index.ts:1323` and `:2877` call it. Tool read paths under `packages/tool-agent-team/src` unchanged. |
+| 不为纯读 tool 增加 `isConcurrencySafe` | **Holds** | `grep -rn isConcurrencySafe packages/ scripts/` → no hits. |
+| Excluded: 跨 commit debounce | **Not implemented** | no `debounce` in `packages/agent-team/src` or the perf scripts. |
+| Excluded: 长期 read-set 缓存 | **Not implemented** | read set is call-scoped (see above). |
+| Excluded: 通知上限调整 | **Not implemented** | `NOTIFICATION_QUEUE_THRESHOLD` is a scheduling threshold, not a notice cap. (But see F5 — it is a delivery-behavior change.) |
+| Excluded: Member 激活并行 | **Not implemented in production** | `member-activation-batch` only *measures* sequential vs concurrent; Host startup remains sequential. |
+| Excluded: Session fold 增量 | **Not implemented in production** | `session-fold` only *measures* cold vs incremental fold. |
+
+---
+
+## Acceptance criteria → status → evidence
+
+### Ticket 01 — baseline &amp; observation
+| Criterion | Status | Evidence (from reading) |
+| --- | --- | --- |
+| bundle/Host/activation/read-sweep/write/fan-out/cold+warm wake/memory read/SQLite replay/Chromium | implemented | `bundleSizeSample, bootSample, memberActivationSample, toolReadSweepSample, toolWriteSample, collaborationSample, collaborationAgentTurnSample, ledgerReadMemorySample, ledgerReplaySqliteSample`, `team-performance.e2e.ts` |
+| Per-scenario warmup + steady-state; new-process cold start &amp; Session/Agent reply stages | partial | `phase: 'warmup'|'measure'`; `host-boot` uses `mode: 'process-reused'`; cold start self-declared pending (F8) |
+| Ledger reply, sync fan-out dispatch, ledger read, SQLite replay recorded; queue/Session/Agent/Client = null | implemented | `stages` include `ledgerReplyMs, fanoutDispatchMs, sqliteReplayMs`; `sessionAgentMs: null, clientMs: null` |
+| callId/requestId/operationId/Agent session correlation; notice id not exposed | implemented | `ids` object on every sample; `noticeMessageId: null` |
+| JSONL raw samples, manifest, summary with p50/p95/p99 + counts + env + scale | implemented | `summarize()` + `manifest.json`/`samples.jsonl`/`summary.json` |
+| Default run silent; `DSH_BENCH_TEAM=1` gate | implemented | both entry points guard on the env var |
+| Compare runs/matrices with `--max-regression` | implemented | `compare-team-performance.mjs` |
+| **Clean-commit minimal matrix + rerun command + limits** | **missing** | all 182 run manifests `dirty: true`; matrix manifest omits commit/dirty (F2) |
+
+### Ticket 02 — merge duplicate derivation
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| `deliverInboxNotice` reuses this delivery's plan | implemented (by construction) | `notificationText(..., plan)` at index.ts:2915; `plan ?? recompute` at :3042 |
+| `notificationFacts` reuses `memberInbox` unread facts, authority unchanged | implemented (was in tree; now reverted) | ledger diff `@@ -2194,10 +2196,38 @@`; `notificationSnapshot` + `withNotificationReadSet` |
+| `running` edge fast-returns on non-empty coverage; empty coverage still retries | implemented | index.ts:2837-2841; `dropInboxCoverage` keeps `covered: ''` |
+| No re-scan of the same facts across Thread/Main unread, plan, text | implemented | read set covers `unreadFor`/`mainUnreadFrom`; plan reused |
+| 1/20/100 Thread and 1/8/32 follower counts recorded; O(follower × thread) still a candidate | implemented | matrix default cases; README states the candidate |
+| **notice text/covered/undelivered/attempt and steer-followup ordering identical to old path** | **unverified** | equivalence by construction only; no probe (F3) |
+| **wake/recovery/generation swap/derivation-failure/steer-failure isolation semantics** | **partial** | 5 probes cover retry/shutdown/ordering/invalidation; no generation swap; invariant swallowed on ≥8 path (F1, F4) |
+| **Relevant Host/ledger/delivery/tool regressions pass** | **unverifiable now** | 150/150 passed pre-revert (15:37:41); current tree fails (dangling call, post-commit 8/10 failed) |
+
+### Ticket 03 — scale acceptance &amp; regression matrix
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| 1/20/100 Thread, 1/8/32 follower, SQLite/memory, 15 cases, activation/Session cases | implemented | matrix `defaultCases` = 15; manifest lists them |
+| Cold wake + warm turn | implemented | `collaborationAgentTurnSample` cold/warm |
+| Member activation measured (p50 22.714ms) | implemented | `memberActivationSample` |
+| Session resume measured (p50 11.794ms) | implemented | `memberResumeSample` |
+| Notification failure, Thread read/reply, Task start, DM | implemented | `notificationRetrySample, threadReadReplySample, toolWriteSample` (post/DM/task-start) |
+| Compare commit ack / notice queued / model request / idle | implemented | `collaborationAgentTurnSample` stages |
+| p50/p95/p99, event-loop lag, bytes, op counts, derivation split, Ledger queue wait/service, JSONL bytes | implemented | `summarize()` + `instrumentLedgerQueue` + counters |
+| Independent semantic probes (5 checks) | implemented | `team-performance-semantics.ts`; latest report all five `true`, risk `false` |
+| Functional regression, typecheck, build, browser/assembled pass | **claim not reproducible now** | README cites 134 files/1528 tests; current tree fails at `generate:typert` |
+| Record sync fan-out blocking + queue total work as follow-up | implemented | README "当前前沿" |
+| Comparator with `--max-regression` | implemented | `compare-team-performance.mjs` |
+
+### Spec 验收 seam
+| Seam | Status | Evidence |
+| --- | --- | --- |
+| 启动 (storage open, replay/validate, Session inventory, activation, Host ready) | partial | boot total + replay/validate measured; **Session inventory not instrumented** (F6) |
+| Tool call (model call, args, Host handler, queue wait, ledger/query, render, Session write) | partial | only `toolTotalMs` + `hostViewMs` (F6) |
+| 协作 (A ack, notice queued, notice claimed, B read, B reply, B idle) | partial | commit/queued/model-request/idle measured; **claimed/read/reply-committed missing** (F6) |
+| 通知 read set item-by-item identity | **unverified** | F3 |
+| 规模 (1/20/100 Thread, 1/8/32 follower, SQLite+memory, warm/cold) | implemented | matrix cases |
+
+---
+
+## Smallest appropriate fixes (priority order)
+1. Surface `AgentTeamInvariantError` from the deferred path instead of folding it into the generic warn (F1).
+2. Record `teamCommit`/`harnessCommit`/`dirty` in the matrix manifest and rerun the 15-case matrix on a clean commit (F2).
+3. Add an equivalence probe for notice text/covered/undelivered/attempt and steer-followup ordering (F3).
+4. Add a generation-swap probe; assert no invariant is swallowed (F4).
+5. Either scope the ordered queue into ticket 02 explicitly or split it out (F5).
+6. Attribute or drop the zstd-default claim (F7); fix the cold-start checkbox (F8).</result>
+<usage><subagent_tokens>123005</subagent_tokens><tool_uses>70</tool_uses><duration_ms>1384165</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a9c230615b3726979</task-id>
+<tool-use-id>chatcmpl-tool-9ee848b65b0e2d6b</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/a9c230615b3726979.output</output-file>
+<status>completed</status>
+<summary>Agent "Review correctness" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Reconciliation first
+
+I made **zero edits** to any file (`git diff --stat` shows only the change's own 51/11 in `index.ts`; I never wrote to the tree).
+
+**Check timeline (times from command output):**
+
+| Check | When | Result |
+|---|---|---|
+| `npm run check:boundaries` | 15:33:21 | OK, 112 files |
+| `npx vitest run …/check-package-boundaries.spec.ts` | 15:33:21 | 10/10 pass |
+| `npx vitest run …/post-commit-delivery.spec.ts` | 15:33:34 | 10/10 pass |
+| `npx tsc -p packages/agent-team/tsconfig.json --noEmit` | ~15:33:34 | exit 0 |
+| `npm run lint` | ~15:34 | warnings only, no errors |
+| `DSH_BENCH_TEAM=1 npm run bench:team:semantics` | 15:33:34 | all 5 checks true, `ranAfterShutdownRequest: 0` |
+| `npm run check:docs` | ~15:35 | OK |
+| `npx tsc` again | **15:52** | 2× TS2339 `notificationSnapshot` missing |
+| `check:boundaries` + boundary spec again | **15:52** | OK / 10 of 10 pass (script half is committed and intact) |
+
+All the substantive runs finished at ~15:33-15:35, i.e. **before** the `index.ts` restore (15:37:33) and the `ledger.ts` revert (15:39:12), and they were all green — which is itself evidence the tree was healthy then. Caveat: because the restore landed at 15:37:33, I cannot rule out that the coordinator's temporary `running`-early-return removal was active during my 15:33:34 run (it breaks no test either way). The green post-commit spec run does prove the deferral was active at that moment (with deferral off that test fails). Everything after 15:39 is unusable for the `index.ts`+`ledger.ts` half — the post-revert `tsc` shows exactly the breakage the coordinator described, and vitest would fail at runtime on the same missing method. **The ledger half is judged from code reading only** (I have its full diff text captured before the revert).
+
+---
+
+## Findings
+
+### 1. MEDIUM — the `running` early return suppresses the retry for `undelivered` threads
+`packages/agent-team/src/index.ts:2837-2841` (`notifyMember`, not `notifyMemberAtWake` as the brief said).
+
+The guard is `cause.kind === 'running' &amp;&amp; delivery?.covered !== undefined &amp;&amp; delivery.covered !== ''`. `covered` is `plan.delivered` from `coverInboxFacts`/`beginInboxDelivery` (`index.ts:3305-3317`), and by construction `delivered` **deliberately excludes threads the notice could not render** (`inbox-delivery.ts:70-78`: `if (now.length &gt; 0 &amp;&amp; !undelivered.has(threadRef)) delivered.push(...)`).
+
+Concrete trace: a single commit mentions member M in 9 Threads. `notificationText` caps rendered scopes at 8 (`index.ts:3169-3177`) and returns `undelivered = [T9]` (`index.ts:3211`). `beginInboxDelivery` records `covered = signature(T1..T8)` — **non-empty** — plus `undelivered: [T9]`. Under the old code, when M's own turn starts the `agent/status → 'running'` edge runs `deliverInboxNotice`, `inboxDeliveryPlan` sees `plan.signature` (includes T9) ≠ `covered` → `trigger === 'immediate'` → T9 is re-attempted. With the early return, the `running` edge returns before `deliverInboxNotice`: `covered !== ''` is true, so T9's facts wait for the next commit/activation touching M.
+
+Impact: M's direct mention in T9 is durably unread but is not re-attempted on the member's own next run edge. No data loss (the facts rederive on the next commit), but the retry surface documented in `inbox-delivery.ts` ("an unchanged rederivation still sees them as owed and re-attempts instead of standing down") is narrowed to commit/activation causes only. Consistent with the coordinator's finding that removing the block changes no test outcome — no test covers the `undelivered` retry.
+Smallest fix: add `&amp;&amp; delivery.undelivered.length === 0` to the guard (or replace the block with `plan.trigger === undefined`, which is exactly the dedup below and makes the new block redundant).
+
+### 2. LOW — "coverage non-empty" is a weaker test than the dedup it pre-empts
+Same block. The existing dedup (`index.ts:2899`) compares the *full* signature against `covered`; the new guard short-circuits before that comparison exists. Any future state where `covered` is stale-but-non-empty (a commit whose notice was skipped — e.g. `notifyMember` returning at the `member.state !== 'enabled'` check at 2830-2833 — while new facts accumulated) now skips a read that the old code would have turned into a delivery. I traced every such path I could find (`state !== enabled`, transition in flight, deferred effect skipped at shutdown, `dropInboxCoverage` on failure) and each is followed by an activation/transition/commit cause that re-delivers, which is why I rate this LOW rather than a live bug.
+
+### 3. LOW — the read set is instance state that assumes a synchronous read
+`packages/agent-team/src/ledger.ts` (`notificationReadSet` field, `withNotificationReadSet`, `unreadFor`, `mainUnreadForNotification`). The cache is only sound because no `await` exists between set and `finally` restore, and ledger mutation happens only inside enqueued operation bodies (`enqueue`/`operationTail`, `ledger.ts:6619`). Correct today; a future `await` inside any of these reads silently turns the cache into cross-task staleness. Informational in nature, worth a one-line constraint comment.
+
+### 4. LOW — benchmark counter is mislabelled
+`scripts/team-performance/team-performance-baseline.ts:649-651`: the wrapper increments `notificationTextMissingPlan` when `args[3] === undefined`, but in the new signature `(agent, notifications, readerId, main, deliveryPlan, prefix)` index 3 is `main`, not the delivery plan. The counter measures "empty Main list", not "missing plan", so before/after comparisons that read it are misleading.
+
+### 5. LOW — fixture assertions that omit the location
+`packages/agent-team/tests/check-package-boundaries.spec.ts`: four cases assert only `toMatchObject({ code: 1 })` with no line/file assertion, so a checker that rejects at the wrong line still passes. Also `.cts` and `import x = require('…')` are not covered (see A/F below for why the latter is only theoretical).
+
+---
+
+## Candidate concerns rejected
+
+- **A (parameter order) — rejected.** Exactly two call sites in `src`: `index.ts:1326` `(handle.agent, notifications, member.memberId, mainNotifications, undefined, text)` and `index.ts:2915` `(…, plan)`. The only other caller is the benchmark wrapper, which forwards `...args` unchanged. `lib/index.js:1279/2832` is the stale compiled copy (gitignored build output).
+- **B (reentrancy) — rejected.** `withNotificationReadSet` saves `previous` and restores it in `finally`; a nested call for a different memberId builds its own set and restores the outer one on exit; a nested call for the *same* memberId returns `read()` with no set swap, which is the intended reuse. Nothing captures the cached arrays into a longer-lived structure: both entry points (`notificationFacts`, `notificationSnapshot`) return only frozen arrays built inside the callback, and the cached values are already-frozen `unreadForFrom` results.
+- **C (stale cache) — rejected.** Both entry points are fully synchronous, and ledger writes only occur inside `enqueue`'s awaited bodies, so no commit can interleave with a read. Also a genuine improvement in this change: `notificationText` now receives the caller's `plan` instead of recomputing it without `previous` (`index.ts:3042`), so the notice and the recorded coverage agree and the duplicate `inboxDeliveryPlan` pass is gone.
+- **D(i) shutdown — rejected.** `accepting = false` is set synchronously at the top of the dispose effect (`index.ts:757`), before any queued `setImmediate` can run, so every queued effect sees `false`. Measured `ranAfterShutdownRequest: 0`.
+- **D(ii) hang — rejected.** The `try/catch/finally` sits *inside* the `setImmediate` callback, so a throwing `effect()` is caught and `resolve()` runs in `finally`; even a throwing `logger.warn` still runs `finally { resolve() }` before escaping the callback. Every `queued` settles, so `await team.notificationEffectTail` is a real drain.
+- **D(iii) premature tail resolution — rejected.** Deletion is guarded by `this.notificationEffectTails.get(id) === queued`, so only the newest chain for a member ever deletes, and `notificationEffectTail` is recomputed on every map mutation. A same-member chain-3 arriving after chain-2 settled makes chain-2's cleanup see the mismatch and skip deletion, and the recomputation already includes chain-3. Nothing is dropped from the aggregate.
+- **E (new suppressible state) — partially confirmed, see finding 1.** The guard *is* reachable in states where the existing dedup would not have returned, and finding 1 gives the concrete case.
+- **F — mostly clean.** (i) The AST walk classifies correctly: `import type {X}` / `export type {X}` (clause `isTypeOnly`), `import {type X}` and `import type * as ns` (all specifiers type-only) are exempt; `import {X, type Y}` is a real reference (default/namespace bindings return `false` early); bare `import '…'`, `export * from`, `export {X} from` and dynamic `import('…')` are recorded; comments and quoted strings can no longer match, which the fixture proves. Unwalked and worth noting: `import x = require('…')` (ImportEqualsDeclaration) would be a false negative — but the tree is ESM with no such usage. (ii) Widening `SOURCE_PATTERN` changes nothing in this repo: the only `.mts`/`.cts` files are three `.d.mts` under `scripts/`, outside `packages/*/src`; `check:boundaries` still reports 112 files and passes (verified post-15:39). (iii) `typescript` is a root **devDependency** (`^5.8.3`, resolved here as 5.9.3) and the script runs from the root; it never ships (`files` only lists `packages/*/lib`), so this is fine — it would only fail under `--omit=dev`, which no workflow uses. (iv) The fixture's 10 cases are well chosen and the "N source file(s) in M package(s)" assertions prove `--root` is honoured rather than the real repo being scanned; the gaps are listed as finding 5.
+- **G (tautology) — rejected.** The deferral defers to `setImmediate`, which cannot run between an `await` continuation and the next statement, so `toEqual([])` right after `await startThread` is deterministic, and the coordinator's mutation probe (deferral off → 8 calls at that assertion) confirms it is load-bearing. Gap worth noting: the test uses exactly 8 members, so it covers the threshold boundary but nothing asserts the sub-threshold path still delivers synchronously, and nothing covers two commits for the same member ordering.
+
+---
+
+## Verification cut short
+
+I did not re-run the post-commit spec, the typecheck's ledger half, or the semantic probes against the final tree — the 15:39 revert left `ledger.ts` without `notificationSnapshot` and `npx tsc` now reports 2× `TS2339` at `index.ts:1323` and `index.ts:2877`, so any such run would fail for reasons unrelated to the review. The only post-cutoff results I report are the two committed-script checks above, both green.</result>
+<usage><subagent_tokens>104389</subagent_tokens><tool_uses>68</tool_uses><duration_ms>1685617</duration_ms></usage>
+</task-notification>
+
+---
+
+Try again
+
+---
+
+改完了，你看看吧。没问题就archive scratch以及commit本次修改
+
+---
+
+让subagent去修了吧。最终没问题你收尾
+
+---
+
+<task-notification>
+<task-id>bgsygf8py</task-id>
+<tool-use-id>call_fJlaSjKZpxFlP8045zseNDJ8</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/bgsygf8py.output</output-file>
+<status>completed</status>
+<summary>Background command "创建收尾分支并运行完整浏览器验收" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>br1asxchx</task-id>
+<tool-use-id>call_NLeFqs7C6fapsHvlFmdN6RIQ</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/br1asxchx.output</output-file>
+<status>completed</status>
+<summary>Background command "运行全部基线场景和通知语义验收" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bp4f5xxcd</task-id>
+<tool-use-id>call_6y9YRY4LYaVOKn1APEb4NdMS</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/bp4f5xxcd.output</output-file>
+<status>completed</status>
+<summary>Background command "运行规模矩阵并复测三次浏览器加载" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+该scratch是否还没有完成？你可以自己独自继续推进
+
+---
+
+<task-notification>
+<task-id>a7b44b75cc5db1acf</task-id>
+<tool-use-id>call_LEpw66j5XuEsHqGcafzqptrG</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/a7b44b75cc5db1acf.output</output-file>
+<status>completed</status>
+<summary>Agent "修复使用统计状态遗漏" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>完成。只改了两个文件，未提交、未切分支，工作树其他改动原样保留。
+
+## 改动
+
+**1. `scripts/team-performance/team-live-usage.ts`**
+- 新增 `memberSnapshotKinds`（added / updated / suspended / **resumed** / archived / removed），统一按 `operation.data.member` 折叠最新 Member 快照，与 ledger replay 同一规则。
+- 修复 `team/member-removed`：原代码 `members.delete(data.memberId)` 读取的字段不存在（该操作载荷是 `data.member`），实际是无操作，被移除的 Member 一直按 enabled 计入。现在按真实 `inactive` 状态折叠。
+- `members.current` 排除 `inactive` 与 `archived`（与 ledger 可见名册规则 `state !== 'inactive' &amp;&amp; state !== 'archived'` 一致）。
+- 同组其余生命周期（`member-session-restarted/renewed/rolled-over/recycled`、workspace join/leave、project-member-*）不改变 Member 状态（session 转换只在 enabled 上发生），折叠与否不影响任何计数，未加处理；未为 `team/channel-*` 历史拼写加兼容层。
+
+**2. 新增 `packages/agent-team/tests/usage-report.spec.ts`**（2 个用例，30s 超时，临时目录 `os.tmpdir()`）
+- 用例 1：真实 `sqliteHarness` 写 SQLite，覆盖 add×4、suspend×2、resume、archive、remove，两个 Agent 关注同一 Thread（一个 resume 后 enabled，一个保持 suspended）；关闭写入端后用 `spawnSync` 以 CLI 子进程 `--json` 跑统计。断言 `operationKinds`、`members = {current:2, enabled:1, byState:{enabled:1,suspended:1,archived:1,inactive:1}}`、`attention.threadCount=1`、`allMembers.max=3`、`enabledMembers.max=1`。
+- 用例 2：同一 fixture 用 `--json` 和文本两种输出，断言不包含消息正文和任何 handle。
+
+## 实际结果与原根因复核
+
+| 命令 | 结果 |
+| --- | --- |
+| 修复前跑新测试 | 2 用例 1 失败：`current 3 ≠ 2`，byState 缺 `inactive`（removed 成员残留为 enabled） |
+| 临时恢复旧折叠再跑（验证红测试有效） | 1 失败 1 通过，`current: 3` vs `2`；随后从保存副本恢复，SHA-256 与修复版一致 |
+| `npx vitest run packages/agent-team/tests/usage-report.spec.ts` | 退出 0，2/2 通过 |
+| `npx tsc -p packages/agent-team/tsconfig.json` | 退出 0 |
+| `node scripts/check-comments.mjs` | 退出 0（scripts 1413/2800） |
+| `node --import tsx artifacts/team-perf/review-final-2026-10-30/usage-state.ts` | 退出 0；`enabled 1`、`byState {enabled:1}`（此前为 enabled 0 / suspended 1），与 ledger 一致 |
+
+## 状态统计口径
+
+- `members.current`：ledger 中既非 `inactive` 也非 `archived` 的 Member（即 enabled + suspended）。
+- `members.enabled`：最新快照状态为 `enabled` 的 Member。
+- `members.byState`：每个 Member 最新提交状态计数，四种状态都可能出现。
+- `attention.allMembers`：每个 Thread 的 Attention 行数（含 Human 行）。
+- `attention.enabledMembers`：关注者中 Member 状态为 enabled 的数量。
+
+## 剩余限制
+
+- Human 不在 `members` 映射中（ledger 的 `state.members` 本就只存 Agent Member），因此 `enabled` 与 enabled follower 计数只描述 Agent Member，`allMembers` 含 Human 行。
+- 报告仍按原始 operation 快照折叠，不做 ledger replay（原有设计）；未被折叠的 operation 中不包含会改变 Member 状态的事实。
+- 未运行全量 `npm test` / build / browser（按约定交给你做全量检查）；`npm run typecheck` 只单独跑了 agent-team 包，未跑另外两个包和 `generate:typert`。
+- 本机未接触任何真实 profile 数据库，测试只用临时 SQLite 并在用例后删除。</result>
+<usage><subagent_tokens>222885</subagent_tokens><tool_uses>108</tool_uses><duration_ms>1645609</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bl23mcfd2</task-id>
+<tool-use-id>call_aJVolaeAQ1BWvriieGdEbM5d</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/bl23mcfd2.output</output-file>
+<status>completed</status>
+<summary>Background command "检查扩展脚本类型并运行完整功能回归" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b4lu8duf4</task-id>
+<tool-use-id>call_R1INIZNMsrFSeqkmuriI1R9Y</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/b4lu8duf4.output</output-file>
+<status>completed</status>
+<summary>Background command "用实际未读负载重启固定版本性能对照" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>bjkkd1flp</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/bjkkd1flp.output</output-file>
+<status>completed</status>
+<summary>Background command "继续未完成的交替版本复测" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>b2rd4y119</task-id>
+<tool-use-id>call_sdzLMPSglpz7dZ9htdaqQLrX</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/1b356f1e-6e34-4e7f-b66c-0db56d20615b/tasks/b2rd4y119.output</output-file>
+<status>completed</status>
+<summary>Background command "运行最后一轮完整交付验证" completed (exit code 0)</summary>
+</task-notification>

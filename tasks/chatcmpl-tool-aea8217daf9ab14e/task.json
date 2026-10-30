@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "chatcmpl-tool-aea8217daf9ab14e",
+  "agent_id": "ad1f9c8c5f3af0d59",
+  "subagent_type": "general-purpose",
+  "task_description": "Review spec compliance",
+  "token_usage": {
+    "input_tokens": 2231119,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 96640,
+    "api_call_count": 27
+  },
+  "started_at": "2026-10-30T15:29:10.127492398+08:00",
+  "completed_at": "2026-10-30T15:52:13.640890528+08:00"
+}
