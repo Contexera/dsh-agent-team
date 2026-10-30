@@ -1,0 +1,31 @@
+看看这份对于我们近期落地project ownership model的review:
+
+```
+**审查对象**：master `4c72362`，对照 `.scratch/active/project-ownership-model` 的 spec 与工单
+
+## 应修：行为和 spec 不一致
+1. **reopen 不恢复 accountable 的 follow**。close 清掉 Thread 的全部 Attention，reopen 只给 accountable 发一条 activity marker，不重新 follow。spec §5 要求 accountable 自动 follow，现在 reopen 后执行者的普通消息到不了负责人，只能靠点名。（`closeThreadInboxFrom` / `reopenThreadInboxFrom`）
+2. **提醒 marker 不随条件失效清理**。只有 accept、close 和成员/Project 生命周期会清。transfer 后旧 accountable 还挂着提醒；Claim done 进入 in_review 后，“停滞”提醒还在；`remindersFor` 也不重新核对条件。建议 transfer 和 Claim 变化时一并移除，或者读取时按当前条件过滤。
+3. **`self_acceptance_forbidden` 的恢复提示走不通**。它让你“transfer 给没认领过的 owner”，但只有 accountable 能 transfer，非 accountable 的执行者照做会再撞 `accountable_owner_required`。提示语要分角色写。
+
+## 设计层面
+4. **试用节奏被跳过**。spec §11 的安排是批次 2 之后先用一周、复盘，再做 3/4。现在 06–09 一起上线，指标很难归因到底是投递规则还是 accountable 的作用。建议先把 §11 的四个指标和提醒触发/误报写成统计脚本，跑出基线。
+5. **Agent 的待验收提醒依赖 idle ≥30 分钟**。身兼多个 Project 的 owner 会被 Main stream 频繁唤醒，可能一直闲不下来，提醒也就永远不触发；error 状态还会清掉 idle。试用时重点看这条有没有触发过。
+6. **Main stream 对 owner 全部 immediate**，而且 Host 不处理循环。有多个 Agent owner 的 Project，第一天就要盯每个 owner 每天被打断的次数。
+7. **threshold 计数和 covered 签名存在内存里**，Host 重启就清零，攒着未读的 owner 重启后会被集中唤醒。符合设计，但要知道这是重启风暴的来源。
+
+## 代码结构
+8. spec §10 说旧版本规则要集中成 replay-only validator。现在 `ledger.ts` 6099 行，`rulesVersion` 分支内联了 41 处，写入路径和 `*From` 回放路径成对重复。建议下一轮把 v1 校验拆成独立模块。
+9. Client 还留着“没有 `taskBoard` Remote 就从已加载窗口推算看板”的回退。既然不支持旧运行时，可以删掉。
+
+## 文档与发布
+10. README、spec 和 08 号工单都链接了 `materials/2026-10-25-final-v2-decisions.md`，但工作区和 git 历史里都没有这个文件。“v3/v4 并入 v2”这个决定目前没有留档。
+11. README 的状态行还写着“01–08 完成；09 未开始”和“本地领先未推送”；01 的分步发布计划实际上没执行（0.2.5 里同时包含了 01 和 02）。
+12. CHANGELOG Unreleased 里写着“Web Client 的看板从有界 project 读取推导”，和 07 的实际做法相反。
+13. 升级说明里缺了“升级后所有 Project 只有 Human owner，需要重新指定 Agent owner”。
+14. 大部分正式文档没更新：`domain-model` 里没有 accountable，`boundaries` 里没有 owner 和权限表，`attention-and-messaging` 里没写 immediate/threshold。双语也不同步，`tools-and-preset` 和 `components` 的英文版都比中文版新。
+15. 10-25 误截的那 32 条真实账本已经恢复了。建议把“截断前必须备份并按 occurredAt 核对归属”写进 release-runbook，不要只留在 README 里。
+```
+
+
+看看是否真实存在。
