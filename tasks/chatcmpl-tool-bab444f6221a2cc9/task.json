@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "chatcmpl-tool-bab444f6221a2cc9",
+  "agent_id": "a310d5ca2cfd1bc51",
+  "subagent_type": "general-purpose",
+  "task_description": "Standards and simplicity axis review",
+  "token_usage": {
+    "input_tokens": 186322,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6633472,
+    "output_tokens": 45883,
+    "api_call_count": 53
+  },
+  "started_at": "2026-10-30T13:38:16.6183909+08:00",
+  "completed_at": "2026-10-30T13:50:12.985032146+08:00"
+}

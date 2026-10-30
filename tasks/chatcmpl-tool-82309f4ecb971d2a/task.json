@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "chatcmpl-tool-82309f4ecb971d2a",
+  "agent_id": "a71a2e31df0f3a5a9",
+  "subagent_type": "general-purpose",
+  "task_description": "Correctness axis review",
+  "token_usage": {
+    "input_tokens": 470242,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 19603328,
+    "output_tokens": 134900,
+    "api_call_count": 143
+  },
+  "started_at": "2026-10-30T13:38:05.930506393+08:00",
+  "completed_at": "2026-10-30T14:14:41.178030324+08:00"
+}

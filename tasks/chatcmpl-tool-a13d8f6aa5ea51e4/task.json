@@ -1,0 +1,15 @@
+{
+  "tool_use_id": "chatcmpl-tool-a13d8f6aa5ea51e4",
+  "agent_id": "a82f454d0fc3085ca",
+  "subagent_type": "general-purpose",
+  "task_description": "Spec axis review",
+  "token_usage": {
+    "input_tokens": 336381,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 19531392,
+    "output_tokens": 98609,
+    "api_call_count": 146
+  },
+  "started_at": "2026-10-30T13:37:55.765599876+08:00",
+  "completed_at": "2026-10-30T14:09:12.972343112+08:00"
+}
