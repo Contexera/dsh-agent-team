@@ -1,0 +1,198 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Bash, Edit, Read, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+
+This session continued a long multi-round design/implementation effort on the Agent Team notification/delivery model in `dsh-agent-team` (an opt-in Cordis bundle for DeepSeek Harness). The earlier rounds (A–H) — reviewing the design, deciding Attention should become the higher-level mechanism, approving the plan, adding agent-facing guidance for follow/unfollow, opening a separate scratch for unified tool rendering, breaking the work into tickets, and implementing it — were already complete and committed (7761537, f821206, 51f58d8, 8a27985) with 1390 tests passing.
+
+**The single new user request in this session is a bug report.** The user ran `pnpm dsh --profile web-dev` and the agent-team host plugin failed to activate:
+
+```
+dsh: warning: 2 entries did not activate
+wowyuarm-agent-team-invariant (@contexera/dsh-agent-team/invariant): pending (waiting for service: agentTeam)
+wowyuarm-agent-team-host (@contexera/dsh-agent-team/host): Error: invalid Project owner inbox projection
+    at AgentTeamLedger.validateOperation (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:2513:23)
+    at AgentTeamLedger.validateRecords (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:2384:22)
+    at AgentTeamLedger.replay (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:2359:14)
+    at new AgentTeamLedger (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:191:14)
+    at [cordis.init] (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/index.js:745:28)
+```
+
+The intent: fix the regression so the dev profile opens the existing ledger.
+
+2. Key Technical Concepts:
+
+- **Main stream Attention** (from the just-shipped work): a new `(memberId, projectRef)` row replacing identity-derived Main stream unread. `standing.owner` → `standing.following`.
+- **Replay validation**: `AgentTeamLedger` validates every stored operation against a re-derived expectation on load. Any divergence throws, so a ledger written by an older build fails to open when a newer build changes what a delta must contain.
+- **In-memory legacy repair**: the established pattern in this codebase (`repairLegacyProjectCleanup`, plus precedent commit `2980d54`). Applied inside `sortedRecords()` — the single replay entry point shared by `replay()` and `validate()` — so it never rewrites stored bytes, and it guards on an exact deep-equal of the legacy shape so a forgery is not silently accepted.
+- **`inboxDelta` positional parameters** (12 params): `set, removed, addedMarkers, removedMarkers, addedActivityMarkers, removedActivityMarkers, addedMainMarkers, removedMainMarkers, addedReminderMarkers, removedReminderMarkers, setMainAttention, removedMainAttention`. mainAttention is positions 11/12 — a frequent source of silent bugs.
+- **The lost watermark problem**: pre-Attention Agent Main stream reads stored their watermark in a `mainWatermarks` projection map that commit `51f58d8` deleted. Without repair, the watermark is unrecoverable from the ledger and the reader would see its entire history as unread. The repair must re-mint it from the read's own `readThroughSequence`.
+- **Storage layout**: `~/.dsh/storages/agent_team.sqlite`, table `u_agent_team_operations (key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT`, 25356 rows. Opened in probes via `SqliteStorageBackend` from `packages/agent-team/src/vendor/storage-sqlite/index.ts`.
+- **Build artifact staleness**: the `team-member` preset resolves `@contexera/dsh-agent-team/tools` from `node_modules` → `lib/`, so source changes to the tool surface require `npm run build` before integration tests pass.
+- **Ledger instance isolation**: each `AgentTeamLedger` instance projects its own writes; a second instance opened on the same table does not see the first instance's in-memory projection.
+
+3. Files and Code Sections:
+
+- **`packages/agent-team/src/ledger.ts`** (the only production file changed; commit `7558dfd`)
+  - Line ~2929 (pre-existing, the failing assertion): `if (!this.sameInboxDelta(operation.data.inbox, expectedInbox, transfers)) throw new Error('invalid Project owner inbox projection')` — inside the `team/project-owner-added`/`team/project-owner-removed` validation block.
+  - Line ~3213 (pre-existing, the second failing assertion): `if (!isDeepStrictEqual(operation.data.inbox, expected.inbox)) throw new Error('invalid Main stream read receipt')`.
+  - **Change 1** — wired the two repairs into `sortedRecords()`:
+    ```ts
+    const normalized = this.repairLegacyProjectCleanup(this.repairLegacyMainStreamRead(this.repairLegacyMainAttentionGrant(this.normalizeOperation(operation, occurrences, instants), projection), projection), projection)
+    ```
+  - **Change 2** — added `repairLegacyMainAttentionGrant` (with doc comment):
+    ```ts
+    /**
+     * An owner grant written before Main stream Attention existed carries the
+     * era's inbox: a Main marker alone, with no `mainAttention` row. That grant
+     * still started its Member's default attention, so the missing row is
+     * re-minted from the grant's own sequence and the record is repaired in
+     * memory. Any other shape — a row already present, or a delta that differs
+     * from the era's in some other way — is left alone, so it still fails
+     * validation and a forgery is not silently accepted.
+     */
+    private repairLegacyMainAttentionGrant(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+      if (operation.kind !== 'team/project-owner-added') return operation
+      const { inbox, memberId, projectRef } = operation.data
+      if (inbox.mainAttention !== undefined) return operation
+      const granted = [this.startMainAttention(memberId, projectRef, operation.sequence)]
+      // The era's delta: the owner-added Main marker and nothing else. A delta
+      // that differs in any other way is a shape this build never wrote, so it
+      // is left alone and still fails validation.
+      const legacy = this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [])
+      if (!isDeepStrictEqual(inbox, legacy)) return operation
+      return { ...operation, data: { ...operation.data, inbox: this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [], [], [], [], granted) } }
+    }
+    ```
+  - **Change 3** — added `repairLegacyMainStreamRead` (with doc comment):
+    ```ts
+    /**
+     * An Agent's Main stream read written before Main stream Attention existed
+     * carried only the markers it consumed: its watermark lived in a projection
+     * field that no longer exists, so replay alone would lose every byte of read
+     * progress and hand the reader its whole history as unread. The row is
+     * re-minted from the read's own `readThroughSequence`, so the era's progress
+     * survives. Only the era's shape is repaired — a receipt that differs in any
+     * other way is a shape this build never wrote and still fails validation.
+     */
+    private repairLegacyMainStreamRead(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+      if (operation.kind !== 'team/main-stream-read') return operation
+      const { inbox, memberId, projectRef, readThroughSequence } = operation.data
+      if (memberId === AGENT_TEAM_HUMAN_MEMBER_ID || inbox.mainAttention !== undefined) return operation
+      const attention = this.mainAttentionForFrom(projection, memberId, projectRef)
+      if (attention === undefined) return operation
+      // The era's receipt: the markers it consumed and nothing else.
+      if (!isDeepStrictEqual(inbox, this.inboxDelta([], [], [], [], [], [], [], inbox.mainMarkers?.removed ?? []))) return operation
+      const advanced = Object.freeze({ ...attention, readThroughSequence: Math.max(attention.readThroughSequence, readThroughSequence) })
+      return { ...operation, data: { ...operation.data,
+        inbox: this.inboxDelta([], [], [], [], [], [], [], inbox.mainMarkers?.removed ?? [], [], [], [advanced]) } }
+    }
+    ```
+
+- **`packages/agent-team/tests/legacy-main-attention.spec.ts`** (new file, 4 tests, all passing). Uses the in-memory backend pattern copied from `task-accountability.spec.ts`. Key helpers:
+    ```ts
+    /** Strip the field a pre-Attention release never wrote, as that release stored it. */
+    function stripMainAttention(delta: AgentTeamInboxDelta): AgentTeamInboxDelta {
+      const { mainAttention: _dropped, ...rest } = delta as AgentTeamInboxDelta & { mainAttention?: unknown }
+      return rest
+    }
+
+    async function rewrite(team: Seeded, kind: string, rewriteInbox: (delta: AgentTeamInboxDelta) => AgentTeamInboxDelta): Promise<void> {
+      const stored = [...team.table.entries()].map(([, operation]) => operation)
+        .filter((operation): operation is Extract<AgentTeamOperation, { readonly data: { readonly inbox: AgentTeamInboxDelta } }> => operation.kind === kind)
+      for (const operation of stored) {
+        await team.table.delete(operation.operationId)
+        const data = { ...operation.data, inbox: rewriteInbox(operation.data.inbox) }
+        await team.table.put(operation.operationId, { ...operation, data } as typeof operation)
+      }
+    }
+
+    /** Reopen the same table the way a Host restart does, against the rewritten records. */
+    async function reopen(team: Seeded): Promise<AgentTeamLedger> {
+      const ledger = new AgentTeamLedger(team.table, { rulesVersion: 2 })
+      await ledger.initialize()
+      ledger.validateAtMount()
+      return ledger
+    }
+
+    const standingOf = (ledger: AgentTeamLedger, projectRef: Seeded['projectRef'], actor: AgentTeamMemberActor | typeof human) =>
+      ledger.mainStreamHistory(actor, { workspaceId: alpha, projectRef }).standing
+    ```
+    The four tests: (a) owner grant without a row reopens and reports `following: true`; (b) an Agent read whose watermark was not a row survives the rewrite — `unreadCount` stays 0, then a Human post on the *reopened* ledger makes it > 0; (c) a forged `mainAttention` receipt still fails validation; (d) a grant that already carries a row is untouched.
+
+- **Read-only / reference files**: `.scratch/active/attention-delivery-model/issues/05-attention-guidance.md` and `04-default-attention.md` (both already marked complete), `docs/domain-model.zh.md` (the confirmed Main stream Attention semantics).
+
+4. Errors and fixes:
+
+- **The reported bug: `invalid Project owner inbox projection` on dev-profile startup.** Root cause: 11 `team/project-owner-added` records (sequences 24535…25235, written 2026-10-24) predate the `mainAttention` field in the grant delta, so the new replay expectation diverges. Fixed with the in-memory repair described above, following the existing `repairLegacyProjectCleanup` precedent rather than relaxing validation permanently.
+
+- **Second failure after the first fix: `invalid Main stream read receipt`.** 56 Agent `main-stream-read` records also lack the row, and their watermarks lived in a projection map that no longer exists. Fixed by `repairLegacyMainStreamRead` re-minting the row from `readThroughSequence`.
+
+- **My own parameter-position bug.** My first repair passed `([], [], [], [], [], [], mainMarkers, [], [], granted)`, so `granted` landed in position 10 (`removedReminderMarkers`). Diagnosed by instrumenting the validator: the "actual" side showed `reminderMarkers.removed` containing a `{startSequence, readThroughSequence}` row — exactly the shape of `startMainAttention` output. Fixed by passing one more empty array so `granted` reaches position 11.
+
+- **Wrong guard comparison.** My first guard compared the stored delta against an empty-mainMarkers delta, but the real legacy delta carries a Main marker, so the guard never matched the real shape. Fixed to `this.inboxDelta([], [], [], [], [], [], inbox.mainMarkers?.added ?? [])`.
+
+- **`json_extract` unreliability**: `json_extract(value,'$.data.inbox.reminderMarkers')` returned empty for a field that the parsed object actually had (and vice versa), because the value returned for a missing key is indistinguishable from an empty one. Switched to reading raw bytes with `substr` and `grep -o`, and to parsing the JSON in Python.
+
+- **Probe script top-level await in CJS**: `node --import tsx/esm /tmp/probe-ledger.ts` failed with "Top-level await is currently not supported with the cjs output format". Fixed by renaming to `.mts`.
+
+- **Probe copy couldn't resolve relative imports**: copying `ledger.ts` to `/tmp` broke `./time-format.ts`. Abandoned that approach and instrumented the real source in place, then removed the instrumentation.
+
+- **Test: `mainAttentionStatus(...).following` was `undefined`.** The method returns `{ project, attention? }`, not a `following` flag. Switched to `mainStreamHistory(...).standing`.
+
+- **Test: `expected 0 to be greater than 0`** after posting a third message. Two causes: (a) a Member never sees its own output as unread, so the Agent's own post can't create unread — switched to posting as Human; (b) `reopened` is a separate ledger instance with its own projection, so the post had to go through `reopened.postMainMessage`, not `team.ledger.postMainMessage`.
+
+- **Typecheck TS2339** `Property 'inbox' does not exist on type ...` in the `rewrite` helper, because `operation.data` is a discriminated union. Fixed with a type predicate narrowing to `Extract<AgentTeamOperation, { readonly data: { readonly inbox: AgentTeamInboxDelta } }>`.
+
+- **`EADDRINUSE: address already in use 127.0.0.1:3080`** on the verification launch. A stale web-dev instance (pid 176000, started before the fix) still held the port. Killed it, then relaunched successfully.
+
+- **curl returned HTTP 502** after the timeout killed the server — not a defect; the process had already exited. Noted explicitly rather than reported as a failure.
+
+5. Problem Solving:
+
+**Solved.** The reported startup failure is fixed at commit `7558dfd`. Both legacy shapes are repaired in memory only (stored bytes are never rewritten), and each repair is guarded by an exact deep-equal against the era's shape so anything else still fails validation — a forgery is not laundered. Verified the tests are load-bearing by temporarily disabling both repairs (2 of 4 tests go red) and restoring them (all green).
+
+**Verification completed:**
+- Probe against a copy of the real 25356-record ledger: `initialize ok`, `validate ok`, `{"sequence":25356,"projectCount":31,"agentMemberCount":31,"rulesVersion":2}`.
+- `npm run typecheck` — clean.
+- Full `npx vitest run` — **121 files passed / 1 skipped, 1394 tests passed / 1 skipped**.
+- `npm run check:docs` — OK (28 maintained documents, 28 bilingual pairs, 356 links resolved, 56 files inside ceiling).
+- `npm run check:comments` — OK. `npm run check:boundaries` — OK (106 files). `git diff --check HEAD` — clean.
+- Real dev profile launch: log contains only the URL line — the two "did not activate" warnings and the `invalid Project owner inbox projection` error are both gone.
+
+6. All user messages:
+
+- (Inherited from prior context, rounds A–H, already completed): "我们先回顾一下当前的整体设计吧。尤其是不同的身份、在不同情况下agent如何收到不同的通知与context" / "很清晰。你怎么想我们转变这种模型？以及是否让attention成为更高层的机制？你有什么建议与想法" / "嗯就是这个方案了。同时可以在system prompt指导说明unfollow的应用场景，这样我们让attention作用更大；在各个agent 因为不同方式follow main stream/task/thread等不同场景时，当时的工具返回可以额外说明follow的作用；以及说明unfollow提醒；同时在unfollow成功时result返回也是说明unfollow以及如果要收到所有消息可以follow。等等，本质就在context中给出更多信息让agent利用、管理好attention" / "全都同意。我这里额外考虑我们这里统一attention渲染，包括render给tool result，那么我们是否可以进一步扩展到其他tools以及其他的状态与通知prompt?" / "这可以开个单独tools render统一并且审视现有tools设计以及提供给agent的prompt与context scratch；你先更新我们上述已经讨论好的关于attention那个scratch（相关设计与讨论都按照你那样的）；然后单独开另外个scratch，也说明好情况" / "对于attention-delivery-model应该没有需要进一步讨论了吧，那么你可以拆tickets然后落地吧" / "去做吧" / "嗯，你继续推进；可以阶段性commits"
+
+- **This session's only user message** (the bug report): "有问题：pnpm dsh --profile web-dev" followed by the terminal output showing `dsh: warning: 2 entries did not activate`, the invariant plugin pending on `agentTeam`, and the host plugin failing with `Error: invalid Project owner inbox projection` plus the stack trace through `AgentTeamLedger.validateOperation` → `validateRecords` → `replay` → constructor → `[cordis.init]`.
+
+Standing instructions from the global CLAUDE.md that remain in effect: 说人话，拒绝行业黑话、互联网黑话；简洁优先；只问真正需要用户拍板的问题；模仿用户的表达方式. For UI/UX changes, show ASCII mockups. When reporting, explain in plain language as if to a smart person not looking at code. 自验 before reporting (run it, check the output). 动手前先想清楚完成标准并列检查清单. Prefer `gh` for GitHub operations. 方案与决策默认规则: pursue the long-term optimal, complete, clean final solution; remove deprecated code paths outright along with compat layers and fallbacks (only keep old interfaces when explicitly asked); evaluate existing project dependencies before adding new ones; research how mature products solve the same problem first; build progressively and modularly; ask when requirements/constraints/intent/boundaries are unclear. Memory/nmem rules: search before continuation work; save durable decisions; read the distill-memory SKILL before writing/updating memories.
+
+From `docs/AGENTS.md`: never `git add -A` in the shared worktree; run `git diff --check HEAD` before committing; commit doc changes as one Conventional Commits subject line. From the root `AGENTS.md`: do not commit credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue.
+
+7. Pending Tasks:
+
+- **Human trial in the dev profile** (`dsh web --profile web-dev`) to confirm the actual feel of follow/unfollow, ordinary updates, and responsibility notifications — the remaining unchecked completion condition in `.scratch/active/attention-delivery-model/README.md`. The startup blocker is now cleared, so this is unblocked.
+- Closing that work item: move durable conclusions into the maintained bilingual docs (largely done), then archive into `.scratch/archive/YYYY-MM/`.
+- The separate new work item `.scratch/active/agent-tools-context-rendering/` is unstarted: its read-only inventory of the seven tools, the Agent context outlets, and its Q1–Q4 decisions (unification seam, information budgets, whether tool-contract fixes are in scope, validation approach) are all still open.
+
+8. Current Work:
+
+The bug fix is complete, verified, and committed. The final state:
+
+- Commit `7558dfd fix: reopen ledgers written before Main stream Attention existed` — 2 files changed, 159 insertions. Working tree is clean (`git status --short` returned nothing).
+- The two repairs (`repairLegacyMainAttentionGrant`, `repairLegacyMainStreamRead`) live in `packages/agent-team/src/ledger.ts` and are wired into `sortedRecords()`.
+- The new test file `packages/agent-team/tests/legacy-main-attention.spec.ts` has 4 passing tests, proven load-bearing by disabling the repairs and watching 2 go red.
+- The real dev profile was launched and confirmed to open the ledger with no activation warnings and no validation error; the stale port-3080 holder was killed first, and the temporary log/probe files under `/tmp` were cleaned up.
+
+The last actions were cleanup and confirmation: `rm -f /tmp/dsh-dev.log`, `git status --short` (empty), and `git log --oneline -1` showing `7558dfd`.
+
+9. Optional Next Step:
+
+Report the fix to the user in plain language per the reporting rules — what the root cause was (the ledger I shipped a week's worth of owner grants and Main stream reads into didn't carry the new Attention rows, so the new replay rule rejected it on open), that it's fixed in memory without rewriting their data, that all checks and 1394 tests pass, and that the dev profile now starts clean. No further code work should start without the user's direction, since the remaining item is their own dev-profile trial, which the work item's README records as "未开始：Human 在 dev profile 试用并确认体感".
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/11ec3561-ad85-46ec-b3f1-281d15e67a46.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
