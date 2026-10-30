@@ -1,0 +1,1 @@
+全都同意。我这里额外考虑我们这里统一attention渲染，包括render给tool result，那么我们是否可以进一步扩展到其他tools以及其他的状态与通知prompt？
