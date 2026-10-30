@@ -3,7 +3,7 @@
   "checkpoint_id": "01M65RNSV3GHXKSZ11Y4KBKDYF",
   "strategy": "manual-commit",
   "branch": "master",
-  "checkpoints_count": 7,
+  "checkpoints_count": 9,
   "files_touched": [
     "packages/agent-team/src/index.ts",
     "packages/agent-team/src/ledger.ts",
@@ -28,14 +28,21 @@
       "compact_transcript": "/1/transcript.jsonl",
       "content_hash": "/1/content_hash.txt",
       "prompt": "/1/prompt.txt"
+    },
+    {
+      "metadata": "/2/metadata.json",
+      "transcript": "/2/full.jsonl",
+      "compact_transcript": "/2/transcript.jsonl",
+      "content_hash": "/2/content_hash.txt",
+      "prompt": "/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 1712830,
+    "input_tokens": 1720024,
     "cache_creation_tokens": 298673,
-    "cache_read_tokens": 60429633,
-    "output_tokens": 109758,
-    "api_call_count": 375,
+    "cache_read_tokens": 60780609,
+    "output_tokens": 113250,
+    "api_call_count": 384,
     "subagent_tokens": {
       "input_tokens": 992945,
       "cache_creation_tokens": 0,
