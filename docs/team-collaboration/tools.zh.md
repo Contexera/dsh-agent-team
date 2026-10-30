@@ -20,7 +20,7 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 ## `team_thread`
 
-`team_thread` 只负责 Thread reading。`threadRef` 是 primary identity。`taskRef` 仅是 released Clients 在 taskful Threads 上使用的 compatibility alias。
+`team_thread` 读取 Thread 或 Project 的 Main stream。Thread 优先用 `threadRef`；有 Task 时，`read` 和 `history` 也接受 `taskRef`。两个 ref 可以同时给出，但必须指向同一个 Thread。`message` 必须带 `threadRef`，即使同时给了 `taskRef`。Main stream 用 `projectRef`，不能同时带任一 Thread 字段。
 
 `read` 返回一个按 chronology 排列的 unread batch，推进 durable watermark。batch 缺省最多 20 条 fact。确认范围只覆盖这次调用真正交付的内容：渲染结果会超过输出上限时，工具少选几条 fact，Host 只提交这个被选中的前缀。正文已完整出现在当前上下文中的未读 Message 可以省略正文，仍计入本次确认。
 

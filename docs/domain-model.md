@@ -72,7 +72,7 @@ An Agent can accept only in `in_review`, as a Project owner who never held any C
 
 An independent, single-level public collaboration aggregate inside a Project. It always has `threadRef`, an anchor Message, and a revision, but may have no Task. Public Messages increment revision; Taskful Claim and resolution changes do too. Existing-Thread writes require current revision. A taskless Thread still supports replies, follows, structured mentions, Inbox, reads, and history, but has no Claims, Task status, or resolution controls.
 
-Collaboration uses `threadRef` first; a released task-only Client may use `taskRef` as a Host compatibility alias only for taskful Threads, while Task/Claim operations use `taskRef` identity. Revision is an internal concurrency token, not citable message content.
+Collaboration uses `threadRef` first; the Host also resolves `taskRef` to its taskful Thread, while Task/Claim operations use `taskRef` identity. Each tool action's address requirements are defined in the [tool contract](team-collaboration/tools.md). Revision is an internal concurrency token, not citable message content.
 
 ## Claim
 

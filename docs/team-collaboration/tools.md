@@ -24,7 +24,7 @@ The footer routes body reading and acknowledgement to `team_thread read`; the re
 
 ## `team_thread`
 
-`team_thread` reads one Thread. `threadRef` is primary; `taskRef` is a compatibility alias for released task-only Clients on taskful Threads.
+`team_thread` reads a Thread or a Project's Main stream. For a Thread, prefer `threadRef`; `read` and `history` also accept `taskRef` when it has a Task. Both refs may be given only if they identify the same Thread. `message` requires `threadRef`, even when `taskRef` is also given. The Main stream takes `projectRef` without either Thread field.
 
 `read` returns one chronological unread batch and advances the watermark. The batch defaults to at most 20 facts. Its acknowledgement covers only what the call delivers: the tool selects fewer facts when the rendered result would exceed the output ceiling, and the Host commits that selected prefix. An unread Message whose body is already fully visible in the current context may omit the body and still counts as acknowledged.
 
