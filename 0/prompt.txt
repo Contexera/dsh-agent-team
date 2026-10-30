@@ -1,0 +1,254 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, Bash, Edit, Read, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+
+This session continued a long multi-round design/implementation effort on the Agent Team notification/delivery model in `dsh-agent-team` (an opt-in Cordis bundle for DeepSeek Harness). Three explicit user requests occurred:
+
+- **Request 1** (`/scratch-review` with args "review这个scratch吧"): Run the scratch-review skill against the `attention-delivery-model` work item. Per the skill: read the work item's README/DESIGN/tickets as the spec, pin the exact code range, run three independent read-only review axes (spec / correctness / standards) as parallel subagents, verify every candidate finding rather than pasting reports together, run the repo's relevant checks, and save a numbered report under `reviews/`. A review produces evidence, not fixes — do not modify implementation code, ticket status, or the work-item continuation README.
+- **Request 2** ("修吧"): Fix the confirmed findings from that review.
+- **Request 3** ("「自动 follow 说明来源」  具体指的是？预期效果？"): Explain what the review's "auto-follow source explanation" finding actually means and what the expected behavior is.
+- **Request 4** ("可以加字段。以及确认是否只要这四种"): Approved adding a field, and asked me to confirm whether there are really only four sources.
+- **Request 5** ("B，mention 也标出来，动手吧"): Chose option B (reopen folds into `accountable` rather than being a sixth kind), said to also label `mention`, and told me to implement.
+- **Request 6** ("让subagent帮你review下"): Have subagents review the newly landed source-field change.
+
+Standing instructions from the global CLAUDE.md that remain in effect: 说人话，拒绝行业黑话、互联网黑话；简洁优先；只问真正需要用户拍板的问题；模仿用户的表达方式. For UI/UX changes, show ASCII mockups. When reporting, explain in plain language as if to a smart person not looking at code. 自验 before reporting (run it, check the output). 动手前先想清楚完成标准并列检查清单. Prefer `gh` for GitHub operations. 方案与决策默认规则: pursue the long-term optimal, complete, clean final solution; remove deprecated code paths outright along with compat layers and fallbacks (only keep old interfaces when explicitly asked); evaluate existing project dependencies before adding new ones; research how mature products solve the same problem first; build progressively and modularly; ask when requirements/constraints/intent/boundaries are unclear. Memory/nmem rules: search before continuation work; save durable decisions; read the distill-memory SKILL before writing/updating memories.
+
+From `docs/AGENTS.md`: never `git add -A` in the shared worktree; run `git diff --check HEAD` before committing; commit doc changes as one Conventional Commits subject line. From the root `AGENTS.md`: do not commit credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue.
+
+2. Key Technical Concepts:
+
+- **Attention-based delivery model**: `Attention` (not identity) decides whether ordinary updates create unread/wake eligibility. Identity only *establishes* default Attention at specific moments.
+- **Two independent Attention faces**: Thread Attention (Member × Thread) and Main stream Attention (Member × Project). The Main stream row is keyed by Member × Project, never given a synthetic Thread ref.
+- **Derived vs stored state**: The Human's Main stream Attention is *derived* from `project.createdAtSequence` (never stored); only its read watermark (`humanMainWatermarks`) is stored. Every other Member's row is durable.
+- **Replay validation**: `AgentTeamLedger` validates every stored operation against a re-derived expectation on load. Any divergence throws, so a ledger written by an older build fails to open when a newer build changes what a delta must contain.
+- **In-memory repairs**: the established pattern (`repairLegacyProjectCleanup`, precedent commit `2980d54`), applied inside `sortedRecords()` — the single replay entry point shared by `replay()` and `validate()`. Never rewrites stored bytes; guards on exact deep-equal so a forgery is not laundered.
+- **`inboxDelta` positional parameters** (12 params): `set, removed, addedMarkers, removedMarkers, addedActivityMarkers, removedActivityMarkers, addedMainMarkers, removedMainMarkers, addedReminderMarkers, removedReminderMarkers, setMainAttention, removedMainAttention`.
+- **`AgentTeamAttentionSource`** (new): `'thread-author' | 'claim' | 'accountable' | 'project-owner' | 'mention' | 'self'`.
+- **`signature` vs `delivered`**: `signature` covers all unread facts; `delivered` covers only what the notice actually rendered. `covered` records `delivered`, so a Thread dropped by the section cap or character budget stays undelivered and retries.
+- **Storage layout**: `~/.dsh/storages/agent_team.sqlite`, table `u_agent_team_operations`.
+- **Build artifact staleness**: `@contexera/dsh-agent-team/tools` resolves from `node_modules` → root `package.json` `"./tools"` → `packages/tool-agent-team/lib/`, so source changes to the tool surface require `npm run build` before integration tests pass.
+- **Typert**: generated Remote artifacts; never hand-edit `packages/agent-team/lib/typert.*`.
+
+3. Files and Code Sections:
+
+- **`packages/agent-team/src/ledger.ts`** (the main production file; heavily modified across all commits)
+  - Replay regression fix in `repairLegacyMainStreamRead`:
+    ```ts
+    // A read that advanced nothing is a shape this build still writes: a read
+    // consuming only markers leaves the watermark alone, so repairing it would
+    // mint a row the current replay expectation refuses.
+    if (!this.prepareMainReadFrom(projection, memberId, projectRef, readThroughSequence).advances) return operation
+    ```
+  - Membership gate in `writeMainAttention` and `mainAttentionStatus`:
+    ```ts
+    const project = this.requireActiveProject(request.workspaceId, request.projectRef!)
+    // Reading and writing the Main stream both require Project membership, so
+    // following one cannot be the door that gets a Member in.
+    this.requireProjectMemberActor(actor, project.projectRef)
+    ```
+  - Derivation filters in `mainNotificationFacts` / `mainInboxItems` (Human exempt, mirroring the Thread loop at `:1910`):
+    ```ts
+    if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.isProjectMemberFrom(this.state, project.projectRef, memberId)) continue
+    ```
+  - New wake helper replacing `projectOwnerIds` in `affectedMembersOf`:
+    ```ts
+    private mainStreamRecipientsFrom(projection: Projection, projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
+      if (!projection.projects.has(projectRef)) return []
+      const found = new Set<AgentTeamMemberId>([AGENT_TEAM_HUMAN_MEMBER_ID])
+      for (const attention of projection.mainAttention.values()) {
+        if (attention.projectRef !== projectRef) continue
+        if (!this.isProjectMemberFrom(projection, projectRef, attention.memberId)) continue
+        found.add(attention.memberId)
+      }
+      return [...found]
+    }
+    ```
+  - Grant no longer overwrites an existing follow:
+    ```ts
+    const grantedMainAttention = kind === 'team/project-owner-added'
+      && this.mainAttentionForFrom(this.state, request.memberId, request.projectRef) === undefined
+      ? [this.startMainAttention(request.memberId, request.projectRef, sequence, 'project-owner')] : []
+    ```
+    plus the mirrored validator condition `alreadyFollowing`, plus a new `repairLegacyMainAttentionGrantOverwrite`.
+  - Human Main stream unfollow refused:
+    ```ts
+    if (actor.memberId === AGENT_TEAM_HUMAN_MEMBER_ID) {
+      throw new Error(`The Human's Main stream Attention follows from owning Project '${projectRef}' and cannot be unfollowed; read the stream to acknowledge its updates`)
+    }
+    ```
+  - Mutual-exclusion guard in `changeAttention`:
+    ```ts
+    if (request.projectRef !== undefined && (request.threadRef !== undefined || request.taskRef !== undefined)) {
+      throw new Error('A Main stream Attention request takes projectRef or a Thread ref, never both')
+    }
+    ```
+  - Collapsed constructors (single anchor convention, `sequence`-based):
+    ```ts
+    private startAttention(memberId, threadRef, startSequence, source: AgentTeamAttentionSource): AgentTeamThreadAttention {
+      return Object.freeze({ memberId, threadRef, startSequence, readThroughSequence: Math.max(0, startSequence - 1), source })
+    }
+    private followAttentionFrom(projection, memberId, threadRef, source) {
+      const tail = this.threadFactsFrom(projection, threadRef).at(-1)?.sequence ?? 1
+      return this.startAttention(memberId, threadRef, tail + 1, source)
+    }
+    private startMainAttention(memberId, projectRef, sequence, source) { ... source }
+    ```
+  - **Source derivation (the key final design)**:
+    ```ts
+    private repairLegacyAttentionSource(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
+      if (!('inbox' in operation.data)) return operation
+      const { inbox } = operation.data
+      const threadRows = inbox.attention.set.filter(attention => attention.source === undefined)
+      const mainRows = (inbox.mainAttention?.set ?? []).filter(attention => attention.source === undefined)
+      if (threadRows.length === 0 && mainRows.length === 0) return operation
+      // The cause is derived from the operation, not guessed from a version: the
+      // validator re-derives the same row, so a repair that guessed would leave
+      // the record failing against it.
+      const fallback = this.legacyAttentionSourceOf(operation, projection)
+      const withThread = (attention: AgentTeamThreadAttention): AgentTeamThreadAttention => (
+        attention.source === undefined ? { ...attention, source: fallback } : attention)
+      const withMain = (attention: AgentTeamMainAttention): AgentTeamMainAttention => (
+        attention.source === undefined ? { ...attention, source: fallback } : attention)
+      const repaired = {
+        ...inbox,
+        attention: { ...inbox.attention, set: inbox.attention.set.map(withThread) },
+        ...(inbox.mainAttention === undefined ? {} : { mainAttention: { ...inbox.mainAttention, set: inbox.mainAttention.set.map(withMain) } }),
+      }
+      return { ...operation, data: { ...operation.data, inbox: repaired } } as typeof operation
+    }
+
+    private legacyAttentionSourceOf(operation: AgentTeamOperation, projection: Projection): AgentTeamAttentionSource {
+      switch (operation.kind) {
+        case 'team/project-owner-added': return 'project-owner'
+        case 'team/claim-created': return 'claim'
+        case 'team/task-changed': return 'accountable'
+        case 'team/message-sent':
+        case 'team/thread-replied':
+          return projection.rulesVersion >= 2 ? 'self' : 'mention'
+        case 'team/thread-attention-changed':
+        case 'team/main-attention-changed': return 'self'
+        case 'team/thread-started': return 'thread-author'
+        case 'team/task-accountable-changed': return 'accountable'
+        default: return 'self'
+      }
+    }
+    ```
+  - Dead code removed: `mainWatermarkKey`, `humanOwnerFloor` (+ its write and projection field), `ownerSinceFrom`, `mainAttentionByMember` (+ its maintenance in `applyInboxDelta`; `dropMainAttention` now scans `mainAttention` keys by `${memberId}|` prefix), `followMainAttention`, `withSource`, `sourcelessDelta`, the bare block in `writeMainAttention`.
+
+- **`packages/agent-team/src/inbox-delivery.ts`**
+  - `InboxScopeRole` narrowed to `'follower' | 'member'`.
+  - New `undelivered` input and `delivered` output:
+    ```ts
+    readonly undelivered?: readonly AgentTeamThreadRef[]
+    ...
+    readonly signature: string
+    /** The signature the next rederivation compares `covered` against: everything the notice can actually render. */
+    readonly delivered: string
+    ```
+    ```ts
+    if (reminders.length > 0) {
+      const reminderFacts = [threadRef, 'reminder', ...reminders.map(r => `${r.kind}:${r.baselineSequence}`)]
+      immediate.push(reminderFacts); delivered.push(reminderFacts)
+    }
+    const now = facts.map(entry => entry.fact.sequence)
+    if (now.length > 0) immediate.push([threadRef, ...now])
+    if (now.length > 0 && !undelivered.has(threadRef)) delivered.push([threadRef, ...now])
+    ...
+    const covered = delivered.length === 0 ? '' : JSON.stringify(delivered)
+    const trigger = signature !== '' && covered !== input.covered ? 'immediate' : undefined
+    ```
+
+- **`packages/agent-team/src/index.ts`**
+  - `InboxNoticeDelivery` gained `readonly undelivered: readonly AgentTeamThreadRef[]`.
+  - `beginInboxDelivery(memberId, plan, undelivered)` records `covered: plan.delivered`.
+  - `notificationText` computes and returns `undelivered`:
+    ```ts
+    const undelivered = notifications.map(({ item }) => item.thread.threadRef).filter(threadRef => !rendered.has(threadRef))
+    ```
+  - `roleText` lost its `owner` entry.
+
+- **`packages/agent-team/src/types/entities.ts`**: added `AgentTeamAttentionSource` and `readonly source` on both `AgentTeamThreadAttention` and `AgentTeamMainAttention`, with doc comments explaining reopen folds into `accountable`.
+
+- **`packages/agent-team/src/spec.ts`**: `attentionSourceSchema` (optional in both `attentionSchema` and `mainAttentionSchema`).
+
+- **`packages/tool-agent-team/src/index.ts`**
+  - `CAUSE_OF_SOURCE: Record<AgentTeamAttentionSource, string>` and a safe `causeOf()` helper returning `''` for absent/unknown values.
+  - `attentionResult` / `mainAttentionResult` / `messageOutcome` / claim result all carry `source?: AgentTeamAttentionSource`.
+  - `team_task` output schema gained `source: { type: 'string' }`.
+  - Render lines: `Attention status — following Thread X (because you claimed its Task).`, `You now follow this Thread (because you claimed its Task). Ordinary updates from here will interrupt you; team_attention unfollow with threadRef stops them and releases no Claim.`
+
+- **`packages/client-agent-team/src/client/slots.ts`**: `changeAttention` return type widened to `AgentTeamThreadAttentionResult | AgentTeamMainAttentionResult`.
+
+- **Tests**: `packages/agent-team/tests/main-stream.spec.ts` (+4 tests), `legacy-main-attention.spec.ts` (+3 tests), `inbox-delivery.spec.ts` (+3 tests), `agent-team-attention.spec.ts` (new `describe('what established an Attention period')` + `openLegacy` helper), `team-tools-render.spec.ts` (+6 tests incl. output-schema validation).
+
+- **Docs**: `docs/team-collaboration/attention-and-messaging.{md,zh.md}`, `tools.{md,zh.md}`, `architecture/host-authority.md`, `architecture/tools-and-preset.{md,zh.md}`, `domain-model.{md,zh.md}`, `packages/agent-team/core-skills/team-domain-model/SKILL.md`, `cordis.patch.yml`, `CHANGELOG.md`.
+
+- **Report**: `.scratch/active/attention-delivery-model/reviews/01-attention-delivery-model.md` — conclusion **Changes needed**, with a 修复记录 table and a 追加修复 section.
+
+4. Errors and fixes:
+
+- **The replay regression I had shipped in `7558dfd`**: a current-format marker-only Main read was indistinguishable from a pre-Attention receipt, so the repair minted a row the validator refused → `invalid Main stream read receipt` on every restart. Fixed by gating on `prepareMainReadFrom(...).advances`.
+- **My own anchor off-by-one**: collapsing `followMainAttention` into `startMainAttention` passed `tail` where `tail + 1` was required. Caught immediately by `main-stream.spec.ts`.
+- **`item.thread` vs `item.item.thread`**: `notificationText`'s `undelivered` computation read `item.thread.threadRef` on a `{ item, facts, reminders }` shape, throwing `Cannot read properties of undefined (reading 'threadRef')`. Diagnosed by instrumenting and printing the actual keys. Fixed to `notifications.map(({ item }) => item.thread.threadRef)`.
+- **Reminders missing from `delivered`**: broke `member-lifecycle-core.spec.ts` ("the private reminder did not wake the accountable Agent"). Fixed by pushing reminder facts into `delivered`.
+- **Lost method tail**: my dedent of `writeMainAttention` removed its closing `return`/`}`, causing a cascade of TS1005 parse errors. Restored.
+- **My own probe bugs** (not product bugs): missing `projectRef` arg; asserting the sender was absent from its own commit's wake list (the generic "any writing Member is a recipient" rule is pre-existing); `changeClaim` missing `baseRevision`; `startThread` requiring an owner actor; `transferTask` parameter is `target` not `accountable`; needing to read before reopen (`unread_required`) and close before reopen.
+- **`mainAttentionByMember` removal assertion failure**: my first patch's `assert` didn't match the real declaration text (which had a doc comment). Re-read and re-applied.
+- **CRITICAL measurement error — typecheck**: I reported typecheck clean using `grep -cE "error TS"`, which returned 0. In reality `npm run typecheck` failed with a `TypertAnalysisError` from the typert generator, because the union-typed `withDefault` mapper produced `(AgentTeamThreadAttention | AgentTeamMainAttention)[]` not assignable to `readonly AgentTeamThreadAttention[]`. **The subagent review caught this.** Lesson recorded in memory: judge typecheck by exit code and full output, never by grepping a count.
+- **`team_task` output schema gap**: `execute` returned `source` but the schema (with `additionalProperties: false`) didn't declare it → runtime `ToolOutputError` on exactly the claim path the feature targets. Caught by `member-lifecycle-core.spec.ts`. Render tests were blind because `renderText` bypasses schema validation.
+- **Old ledgers wouldn't load**: three validators (`team/project-owner-added` `:2947`, `team/claim-created` `:3309`, `team/task-changed` `:3402`) still compared source fully. Reproduced: `THREW: invalid Project owner inbox projection`.
+- **First output-schema test was not load-bearing**: I wrote `expect(() => validateJsonSchemaValue(...)).not.toThrow()` but the function *returns* a violations array. Fixed to `expect(validateJsonSchemaValue(...)).toEqual([])`; re-ablated and confirmed it goes red.
+- **Doc contradiction I introduced**: `host-authority.md` said v1 rows read as `mention` while `attention-and-messaging.md` said unattributable rows read as `self`. Resolved by the derive-from-operation redesign and de-duplicating the render sentence into `tools.md`.
+- **`docs/domain-model.md` block ceiling** (608 chars over 593) after my edit — split the paragraph.
+
+5. Problem Solving:
+
+**Solved.** The review found 3 blockers, 4 majors, and a set of minors/nits; all were fixed and ablation-verified.
+
+The most consequential redesign: instead of "guess the default by rules version + strip the source from replay validation", the missing source is now **derived from the operation kind that wrote the row**. This keeps every validator strictly exact, let me delete both `sourcelessDelta` (over-permissive) and `withSource` (a second, disagreeing defaulting authority), and fixed the reviewers' point that v1 segments were not all mentions (v1 could also write explicit follows and Claims).
+
+**Verification**: full `npx vitest run` — 122 files passed / 1 skipped, **1418 tests passed / 1 skipped** (from 1394 at review time). `npm run typecheck` clean. `check:docs`, `check:comments`, `check:boundaries`, `check:core-skills` all OK. `git diff --check HEAD` clean. Every fix ablation-tested (temporarily revert → target tests go red → restore).
+
+**Commits**: `80a6e0d` (fix: wake/membership/grant/budget/guards/dead code), `fde555a` (docs), `f4c44d4` (changelog), `23ed8ee` (feat: source field), `0a19c52` (docs), `3fb6bed` (fix: derive source + declare schema), `8a23163` (docs).
+
+6. All user messages:
+
+- (Inherited from prior context, rounds A–H, already completed before this session): "我们先回顾一下当前的整体设计吧。尤其是不同的身份、在不同情况下agent如何收到不同的通知与context" / "很清晰。你怎么想我们转变这种模型？以及是否让attention成为更高层的机制？你有什么建议与想法" / "嗯就是这个方案了。同时可以在system prompt指导说明unfollow的应用场景，这样我们让attention作用更大；在各个agent 因为不同方式follow main stream/task/thread等不同场景时，当时的工具返回可以额外说明follow的作用；以及说明unfollow提醒；同时在unfollow成功时result返回也是说明unfollow以及如果要收到所有消息可以follow。等等，本质就在context中给出更多信息让agent利用、管理好attention" / "全都同意。我这里额外考虑我们这里统一attention渲染，包括render给tool result，那么我们是否可以进一步扩展到其他tools以及其他的状态与通知prompt?" / "这可以开个单独tools render统一并且审视现有tools设计以及提供给agent的prompt与context scratch；你先更新我们上述已经讨论好的关于attention那个scratch（相关设计与讨论都按照你那样的）；然后单独开另外个scratch，也说明好情况" / "对于attention-delivery-model应该没有需要进一步讨论了吧，那么你可以拆tickets然后落地吧" / "去做吧" / "嗯，你继续推进；可以阶段性commits"
+- "有问题：pnpm dsh --profile web-dev" (bug report, already fixed in `7558dfd` before this session's work)
+- **This session's user messages:**
+  1. `/scratch-review` skill invocation with args "review这个scratch吧"
+  2. "修吧"
+  3. "「自动 follow 说明来源」  具体指的是？预期效果？"
+  4. "可以加字段。以及确认是否只要这四种"
+  5. "B，mention 也标出来，动手吧"
+  6. "让subagent帮你review下"
+  7. "Try again"
+
+7. Pending Tasks:
+
+No outstanding user request. Items explicitly recorded as **not done** (and deliberately so):
+- Ticket 05's criterion 2 / ticket 04's criterion 7 were satisfied by the source field, but the ticket's "未做" section was updated with a strikethrough rather than the checkbox being re-verified.
+- Ticket 02 criterion 6 (failure-retry test for marker-less ordinary unread) still has no test that injects a delivery failure — recorded in the report as 未做.
+- The three presentation items deferred to the sibling work item `agent-tools-context-rendering`: the `status` verb wording, the Main stream role text ("Project member named here" for a follower), and the `tools.md` Claim-scope sentence.
+- The work item's only unchecked completion condition remains: Human trial in the dev profile (`dsh web --profile web-dev`) to confirm the actual feel of follow/unfollow, ordinary updates, and responsibility notifications.
+
+8. Current Work:
+
+Immediately before this summary request I had just finished the post-review fix cycle for the source field and was closing it out:
+
+- Committed `3fb6bed fix: derive a missing Attention source from its own operation and declare it in every output schema` (5 files, +187/−68) and `8a23163 docs: record how a missing Attention source is derived rather than guessed` (3 files, +4/−3). Working tree clean.
+- Updated `.scratch/active/attention-delivery-model/reviews/01-attention-delivery-model.md` with a "追加修复（2026-10-28 晚，来源字段）" section documenting the three blockers and the redesign, including the explicit lesson: "**教训：`npm run typecheck` 要看退出码和完整输出，不能 grep 计数。**"
+- Saved a memory: "dsh-agent-team：typecheck 失败度量陷阱与旧记录缺省值应按 operation 推导" (type `learning`, importance 0.9).
+
+Final verified state: 1418 tests passing / 1 skipped, typecheck clean, all five repo checks OK, whitespace clean.
+
+9. Optional Next Step:
+
+None. The user's last request ("让subagent帮你review下") has been fully discharged: two subagents reviewed, I verified their findings empirically, fixed all three blockers plus the majors and nits, ablation-verified the fixes, committed, and recorded the lessons. I have not yet reported this second review round back to the user in plain language — that report is the natural next action, and it should state plainly that the review caught three real defects in what I had just shipped (a broken build I had mis-measured as clean, a tool result that errored on exactly the claim path the feature targets, and old ledgers that would not reopen), that all three are fixed and ablation-verified at 1418 tests passing, and that the design changed as a result — the missing source is now derived from the operation that wrote the row rather than guessed by rules version, which let the replay validators stay strictly exact and deleted two patch helpers.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/11ec3561-ad85-46ec-b3f1-281d15e67a46.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
