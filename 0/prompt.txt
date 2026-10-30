@@ -1,0 +1,49 @@
+<task-notification>
+<task-id>afb32f79b39bf2013</task-id>
+<tool-use-id>chatcmpl-tool-be2b23bc608dba90</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/7cf571b6-bccf-4d18-905c-f866eded96e3/tasks/afb32f79b39bf2013.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix member-lifecycle.spec.ts bodies" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All done. Final full-suite run: **95 passed (95)**.
+
+## What I changed
+
+Only `packages/agent-team/tests/member-lifecycle.spec.ts`, 30 insertions / 30 deletions (all removing `recipients:` fields and adding mentions). No source file touched.
+
+Bodies changed (prose preserved, mention prepended):
+
+| Test | New body |
+|---|---|
+| creates a Member with no description… | `'@bare Pinged without joining'` |
+| runs the five-tool pull protocol… | `'@builder Builder, please investigate'` |
+| injects one durable clock snapshot… | `'@builder Drive the clock'` |
+| wakes an idle Member with a direct mention… | `'@builder Please investigate the top-level wake path'` |
+| resolves what a reply answers… | `'@builder Looking now'` and `'@builder One correction'` (anchor body left alone) |
+| names what a reply answers… | `'@builder Answering the anchored path'` (anchor body left alone) |
+| bounds automatic direct context… | `` `@builder ${...}\nDIRECT-END-${index}` `` |
+| answers no parked Client… | `'@builder Unread work'` |
+| generation swap / swap safety / swap input tests (items 9–17) | `'@builder Please pick this up now'`, `'@builder Continue please'`, `'@builder Second message'` |
+
+I kept the original capitalization rather than the guide's lowercase rewrites. Several tests assert substrings verbatim (`toContain('Please pick this up now')` at 3207, `toContain('Continue please')` at 3246, `toContain('Please investigate the top-level wake path')` at 1448); lowercasing would have broken them.
+
+## Assertions updated
+
+One: the protocol test's read-facts assertion now pins the new body —
+`expect.objectContaining({ body: '@builder Builder, please investigate', unread: true, direct: true })`.
+The neighbouring `expect(JSON.stringify(inbox)).not.toContain('Builder, please investigate')` still holds because notices carry no body. All other pinned assertions kept passing unchanged (`DIRECT-END-5`, `Replies to: @human — "…"`, the `replyTo.excerpt` of the anchor, `records).toContain('Looking now')`).
+
+## Reasoning on the reply-based tests (items 5 and 6)
+
+- **Item 5**: the failure was `expect(resolving).toHaveLength(1)` receiving `[]` — with no recipients, the two replies were never unread for the builder, so `read.facts` carried no reply facts to resolve. I could not mention the anchor instead: the test pins the anchor's excerpt as `'Please investigate the anchored path'`. So both reply bodies got the mention; one alone would still leave `answered` at length 1.
+- **Item 6**: `replyToMessageRef` points at the anchor, whose author is the Human — and the reply is also written by the Human, so the answered-recipient set is empty. The mention is the only thing that delivers, and the test asserts `Direct Team mention`, so it is required. The anchor body stays unchanged so the `Replies to: @human — "…"` assertion keeps matching.
+
+## The seven currently-passing sites (diff lines ~487, 548, 2077, 2107, 2149, 2258, 2350)
+
+Left untouched — `shape-task`, `archive-task`, `noauto-task`, `budget-task`, `bystander-task`, `notify-task`, `emptyclause-task`. Each drives its assertions through explicit reads, claims, accepts or follow actions, none of which needs a delivery marker. None regressed.
+
+## One observation for you
+
+`keeps a small cold context on its own generation` (~line 3263, `small-message`) also had its `recipients` removed but was passing, so it is outside my brief and I left it. It now passes vacuously: with no mention there is no wake, so "the session id is unchanged" holds trivially and the test no longer exercises the wake path it is named for. Worth deciding separately whether it should get a mention.</result>
+<usage><subagent_tokens>79410</subagent_tokens><tool_uses>55</tool_uses><duration_ms>782083</duration_ms></usage>
+</task-notification>
