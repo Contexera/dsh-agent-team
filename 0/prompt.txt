@@ -1,0 +1,330 @@
+先合并到master呢？
+
+---
+
+合并吧，分支可以清理
+
+---
+
+/scratch-review 开始吧。比较大的scratch，可以深入去review
+
+---
+
+<task-notification>
+<task-id>bfbmzllmx</task-id>
+<tool-use-id>chatcmpl-tool-b151b9a44ed00333</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/6e40061f-6f69-4701-8bcd-0a97815d2a86/tasks/bfbmzllmx.output</output-file>
+<status>completed</status>
+<summary>Background command "Run full suite on clean baseline" completed (exit code 0)</summary>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a310d5ca2cfd1bc51</task-id>
+<tool-use-id>chatcmpl-tool-bab444f6221a2cc9</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/6e40061f-6f69-4701-8bcd-0a97815d2a86/tasks/a310d5ca2cfd1bc51.output</output-file>
+<status>completed</status>
+<summary>Agent "Standards and simplicity axis review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># 标准与简洁性审查
+
+审查范围：`deaa671..805394f`。未提交的性能改动（`package.json`、`index.ts`、`ledger.ts` 的工作区修改、`scripts/team-performance/`）未纳入判断。已运行 `check:comments`、`check:docs`、`check:core-skills`、`check:boundaries`、`lint`、`duplication`；前四项通过，改动源码无新增 lint warning（`ledger.ts` 的两条 warning 经 blame 确认早于本区间）。
+
+## 确认发现（按优先级）
+
+### 1. 两个提交的 message 带了 body，违反单行提交约定
+- 规则：`/home/yu/projects/dsh-agent-team/AGENTS.md` §Code and documentation conventions：“Write each commit message as one Conventional Commits subject line … with no body. Match the existing `git log` style.”
+- 位置：`805394f`、`4d4cf87`。两者的 message 各多出一行 `Entire-Checkpoint: &lt;id&gt;`。区间内其余 8 个提交以及之前的 50 个提交都没有 body。
+- 替换：去掉 trailer（amend/reword），并关闭写该 trailer 的 checkpoint hook，避免后续提交继续带上。
+- 安全：只改提交 message，不触碰代码或历史内容。
+
+### 2. Main/Thread 读取的“预览”和“提交”各写了一遍同一段推导
+- 规则：`AGENTS.md` 同上第 2 条：“Keep one authoritative formatter/projection per domain concept.”；`docs/architecture/package-ownership.md` 末段：“A module that only re-exports, only forwards props, or only renames a call … keep that call inline or delete the dead side of the contract.”；`.scratch/active/agent-tools-context-rendering/spec.md` §1“选能够长期保留的最简单实现”。
+- 位置（提交内行号）：`/home/yu/projects/dsh-agent-team/packages/agent-team/src/ledger.ts`
+  - `readMainStream` 1306-1345 与 `previewMainStreamRead` 1352-1373 重复了整段前置推导：`assertActorForWorkspace` → `requireActiveProject` → `requireRulesVersion2` → `requireProjectMemberActor` → `mainHeadFrom` → backlog 取页 → `readThrough` 校验 → `prepareMainReadFrom`。选择回调存在时，`readMainStream` 先调 `previewMainStreamRead` 完整推导一次，再自己推导一次。
+  - Thread 路径同样：`previewThreadRead` 2202-2205 与 `readThread` 2218-2224，多一次 `assertActorForWorkspace` 和一次 `prepareRead`。
+  - `npm run duplication` 也把这两段列为 clone；注意行号会随工作区未提交改动偏移，应以方法位置为准。
+- 替换：抽一个私有 planner（例如 `planMainRead(request, actor, project, bound?)`，返回 `head`、`readThrough`、`prepared`、`noOp`），由 `readMainStream` 和 `previewMainStreamRead` 共用；Thread 侧在同一个 queued 闭包里复用已校验的 actor 和已算出的 picture，只在拿到选择界限后按该界限重新 `prepareRead` 一次。选中的 page 本来就需按新界限重算，不需要再重复前置校验。
+- 安全：两处今天调用的都是同一批 helper，校验顺序和错误文本完全一致，属于纯重构；`main-read-context.spec.ts`、`main-stream.spec.ts`、`thread-read-selection.spec.ts`、`thread-read-progress.spec.ts` 覆盖现有行为。
+
+### 3. 新增的导出和默认参数没有任何外部使用者
+- 规则：`spec.md` §1：“不为假设需求引入通用框架、配置开关、备用实现”；`AGENTS.md` 同上第 2 条（不要旁路/重复面）。
+- 位置与替换（全仓 `packages/*/src`、`packages/*/tests`、`scripts` 均无其他引用）：
+  - `/home/yu/projects/dsh-agent-team/packages/tool-agent-team/src/reading-budget.ts:5` `READ_MAX_CHARACTERS` 的 `export`：常量本身在文件内 :68、:97 使用，去掉 `export` 即可，常量保留。
+  - `/home/yu/projects/dsh-agent-team/packages/agent-team/src/surface-visibility.ts:109` `isActivityOnSurface` 的 `export`：只被同文件 :93、:102 调用，改为模块内函数。
+  - `/home/yu/projects/dsh-agent-team/packages/agent-team/src/member-context.ts:229` `renderMemberMemoryUpdate` 的 `export`：只被同文件 :92 调用，改为模块内函数。
+  - 同文件 :215 `renderMemberMemoryState` 和 :229 `renderMemberMemoryUpdate` 的 `privateMemoryPath = '&lt;private-memory-path&gt;'` 默认值：唯一调用点都显式传入 `memoryPath`，可改为必填参数（`renderMemberMemory` 的默认值保留，测试在用）。
+- 安全：删除的是无调用者的导出/默认值，不改行为；TypeScript 会在有遗漏引用时直接报错。
+
+### 4. `activityFact` 的联合重载没有被任何调用点使用
+- 规则：`spec.md` §1“不为假设需求引入 … 备用实现”。
+- 位置：`/home/yu/projects/dsh-agent-team/packages/agent-team/src/activity-facts.ts:60`
+  `activityFact(activity: AgentTeamActivity | AgentTeamMainActivity): ActivityFact`
+- 替换：删除这一行。调用点都已被 `kind === 'activity'`、类型断言或 `AgentTeamMainActivity` 收窄，走 :58 或 :59 的更具体重载；:61 的实现签名仍接受联合类型。
+- 安全：重载只是类型层信息，删除后现有调用点的推断结果不变；`surface-probe.spec.ts`、`activity-tool-recovery.spec.ts` 覆盖渲染和绑定。
+
+### 5. `team_message` 与 `team_task` 的 rejection meta 组合重复（低优先级）
+- 规则：`AGENTS.md` 同上第 2 条；`docs/development/start-and-checks.md` 说明 jscpd “treat its output as a place to look, never as a verdict”，故只作低优先级项。
+- 位置：`/home/yu/projects/dsh-agent-team/packages/tool-agent-team/src/index.ts` 提交内 :1029、:1033、:1295 三处相同的
+  `return { kind: value.kind, teamFacts: teamMessageSurface(rendered.text, rendered.messages, rendered.activities) }`。
+- 替换：抽一个 `rejectionMeta(value, rendered)` 小函数，三处调用。jscpd 在本次报告中把 :1017-1024 / :1286-1293 和 :1032-1039 / :1294-1305 标为 clone。
+- 安全：纯组合，调用的是同一对纯函数；工具输出测试覆盖结果文本和 meta。
+
+## 已考虑并排除
+
+- `.scratch/` 未进入提交历史：符合 `.scratch/AGENTS.md` §Version control（进行中的工作项不进入版本历史）。
+- 无新增依赖：`git diff deaa671..805394f -- package.json` 为空。
+- 未手改 Typert 产物：`packages/agent-team/lib/typert.*` 不在 diff 中。
+- 无凭据、临时 profile、截图或构建残留进入 diff。
+- `check:comments` 在预算内（Host 2473/4150、tools 131/280、Client 1095/2020）；新注释未引用 `.scratch/` 或验收条目。
+- `check:docs` 通过；`scripts/check-docs.mjs` 的 ceiling 只降不升，符合 `docs/AGENTS.md` §Maintenance discipline。
+- `undeliveredMentions` 仍留在 Host 类型和 replay 中：`docs/architecture/host-authority.md` 明确它是 version-1 兼容路径，属于已文档化的保留，不算死代码。
+- Session 里的 `teamFacts` / `memberContext` digest 不是第二套事实库：由 Session surface 派生，符合 `spec.md` §8“复用 Session 记录，不建独立的已读事实库”。
+- Host/tool 边界：工具算文本与预算、Host 提交选中的前缀，符合 `spec.md` §8 和 `docs/architecture/tools-and-preset.md`。
+- `activityText` 放在 Host：Host 通知文本和工具输出都要用，`spec.md` §8 明确允许共享的渲染逻辑，重复实现反而更差。
+- `mainReadContext` 与 `threadReadContext` 的相似结构：两侧条目类型和判定函数不同，硬抽通用 helper 会引入适配层，违背“最简单实现”，不建议改。
+- `mainStandingAfterRead` 与 `mainStandingFrom` 的相似：前者是对过滤后视图的派生，抽公共函数的收益小于复杂度。
+- 导出的 `ActivityViewFields`、`ThreadActivityFact`、`MainActivityFact`、`MentionRoster`：都出现在导出函数的签名里，属于模块契约，保留。
+- `readingCapacity` 中两处 `256 * 1024`：可提常量，但纯外观改动，未列为发现。
+- 可见 UI 改动的浏览器验证：`TeamComposer` 的 mention 分组是可见 UI 改动，e2e journey 已按桌面和 390×844 更新，工作项 README 也记录了相邻提交的 browser 运行；但提交树本身无法证明 `npm run test:browser` 是针对最终 mention 改动跑的。无法确认为违规，建议向操作者确认一次。
+- 提交 subject 本身全部符合 Conventional Commits 且不超过 65 字符，只有第 1 条所述的 trailer 问题。
+
+## 范围说明
+
+`.scratch/active/agent-tools-context-rendering/README.md` 把 `b48f3b5`、`8085867` 记为并行工作项，但它们在指定区间内，本次仍按区间审查；这与工作项自述的范围存在轻微不一致，不影响上述代码结论。</result>
+<usage><subagent_tokens>199079</subagent_tokens><tool_uses>77</tool_uses><duration_ms>716824</duration_ms></usage>
+</task-notification>
+
+---
+
+优化吧
+
+---
+
+<task-notification>
+<task-id>a82f454d0fc3085ca</task-id>
+<tool-use-id>chatcmpl-tool-a13d8f6aa5ea51e4</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/6e40061f-6f69-4701-8bcd-0a97815d2a86/tasks/a82f454d0fc3085ca.output</output-file>
+<status>completed</status>
+<summary>Agent "Spec axis review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## 审查范围与方法
+
+- 代码范围 `deaa671..805394f`，共 10 个提交。逐条核对 7 张票据的验收项，并读取 spec、accepted-flows、acceptance-plan、implementation-progress。
+- 证据行号取自 `HEAD`，即提交范围末端；没有提交的性能改动会让 `index.ts` 和 `ledger.ts` 再偏移几行，但不影响结论。曾按工作树行号引用之处已注明。
+- 复跑了相关套件：`member-context-integration`、`thread-read-context`、`thread-read-selection`、`main-read-context`、`surface-rejection-recovery`、`activity-tool-recovery`、`activity-notice-recovery`、`notification-*`、`surface-probe`、`team-tools-render`、`team-addressing`，并在含性能改动的工作树上复跑其中 8 个套件（60 个用例），全部通过。
+- `git -C ../deepseek-harness status` 干净，未改 Harness。`packages/client-agent-team` 的 325 行改动来自并行提交 `b48f3b5`（README 已声明不属本工作项），未纳入评审。
+
+## 票据 01 member-context-updates
+
+| 验收项 | 结论 | 证据（HEAD） |
+|---|---|---|
+| 真实累积 Session；无变化不追加；memory 改动只提示一次，后续不每步重发 | 已实现 | `packages/agent-team/src/member-context.ts:64-96`；`tests/member-context-integration.spec.ts:434-440` |
+| identity / ownership / Workspace 分别更新，完整列表替代旧列表 | 已实现 | `member-context.ts:76-86`、`146-166` |
+| 不跨类别重发；无第二套注入策略或开关 | 已实现 | `member-context.ts:77-93` 各自独立比较；`apply` 无配置项 |
+| 基线与更新提示分别识别；压缩后仅剩提示时补最新基线 | 已实现 | `member-context.ts:88-94`、`122-144`（`textDigest` 校验在 136） |
+| 删除、不可读、超预算说明异常与入口 | 已实现 | `member-context.ts:38`、`89-92`、`195-243` |
+| 删除动态块中稳定教学 | 已实现（依据 diff，未逐句核） | `renderMemberMemory` 段落收缩 |
+| 正式双语文档、README、CHANGELOG | 已实现 | `docs/team-collaboration/memory-and-context.md:6,10-13,46`（含 zh）、`docs/architecture/host-authority.md` |
+| 同场景量注入次数与占用，覆盖 F1 | 已实现 | `.scratch/local/agent-context-implementation/flows-f1-f6-guidance.log`（9 文件 73 用例）、`context-snapshots.json` |
+
+## 票据 02 thread-rejection-recovery
+
+| 验收项 | 结论 | 证据（HEAD） |
+|---|---|---|
+| 真实工具执行→Session 工具结果→下一次 Host 写入 | 已实现 | `tests/surface-rejection-recovery.spec.ts`（走 `team_thread`/`team_message` 的 execute） |
+| 从 surface 派生来源、事实身份、实际完整文本；通知与工具结果都算 | 已实现 | `surface-visibility.ts:31-68`；`ledger.ts:5446` |
+| 裁剪 metadata、摘要、预览、相同短正文、另一 Thread 同文都不误命中 | 已实现 | `surface-visibility.ts:91-135`（精确身份 + 全文 digest）；`tests/surface-probe.spec.ts:267` |
+| unread_required / stale_revision 结果与恢复句一致；不承诺重试必成 | 已实现 | `ledger.ts:5268-5282`；`packages/tool-agent-team/src/index.ts:287-335`（`canReconsider` 300/341） |
+| 拒绝不写已读、不消费 marker | 已实现 | 拒绝路径不产生 operation；测试断言未读数不变 |
+| 大批或超长拒绝明确说明未提供全部并要求读取 | 已实现 | `tool .../index.ts:265-266`（16 KiB / 8 KiB 上限）、`287-335` |
+| 文档、README、persona、core skill | 已实现 | `docs/team-collaboration/tools.md:29-39`、`boundaries.md:6-14`、`packages/agent-team/README.md`、`team-domain-model/SKILL.md` |
+| 真实组合可核对输出（模型 F4 留最终评测） | 已实现 | 上述两套件 + `team-tools-render.spec.ts` |
+
+## 票据 03 read-and-reentry
+
+| 验收项 | 结论 | 证据（HEAD） |
+|---|---|---|
+| 没有"继续/重入"模式参数 | 已实现 | 工具参数 schema 无该字段；续读靠重复同一请求 `reading-budget.ts:65-67` |
+| 不用永久"曾读过"标记；不新增摘要调用 | 已实现 | `surface-visibility.ts:41-68`（只看当前 Session surface） |
+| read 对完整可见事实只确认不复述；无强制每回复调用 | 已实现 | `tool .../index.ts:751-755`、`853-855`；`tools.md:27-29` |
+| 背景、未读、当前状态、Thread card 分开表示 | 部分 | Thread read 分开（`agent-team/src/index.ts:1875-1900` + `tool:668`）；Main read 在 `index.ts:1757-1770` 用 `[...background, ...unread]` 整体替换 entries，非未读 Thread card 与已确认 Activity 被丢弃，`tool:809-818` 的 `Thread cards` 段对普通 Task card 不可达；`tools.md:72` 仍称其渲染 |
+| Host 批次选择与确认范围一致 | 已实现 | `ledger.ts:2243-2260`（选择在队列内执行） |
+| 真实累计 Session：重复 read 不重发背景；压缩后可恢复且不加 operation | 已实现 | `main-read-context.spec.ts:158-175`；`thread-read-context.spec.ts` |
+| 旧 receipt 可重放；持久范围不依赖 replay 时 Session | 已实现 | `ledger.ts:2214`（幂等路径）、receipt 写入 `selectedThroughSequence`；`spec.ts` 中为可选字段 |
+| F2/F5 端到端 + 文档/CHANGELOG | 已实现 | `thread-read-context.spec.ts`、`main-read-context.spec.ts`；未改 Remote，无需 browser 检查 |
+
+## 票据 04 long-message-continuation
+
+| 验收项 | 结论 | 证据（HEAD） |
+|---|---|---|
+| 尽量全文；先减条数，再单条分段；预算含外层文字 | 已实现 | `packages/tool-agent-team/src/reading-budget.ts:5`、`58-119`（78-81 减条；87-107 分段） |
+| 单一系统续读方式，明确身份、片段、是否结束 | 已实现 | `reading-budget.ts:27-29`、`52-55`、`65-67` |
+| read 续读完整后确认；message 不确认；不跨未完整消息推水位 | 已实现 | `reading-budget.ts:70`、`118-119`；`tool .../index.ts:763-765` |
+| 选择批次时确定确认范围，不依赖 Session replay | 已实现 | `ledger.ts:2243-2260` |
+| 精确覆盖整段正文；截断、末段、缺段不冒充完整 | 已实现 | `reading-budget.ts:90-106`（`missingMessageRange` + 代理对保护 104） |
+| 连续读有进展、可继续；超容量明确限制 | 已实现 | `reading-budget.ts:88`、`105`、`108` |
+| 附件只给读取入口 | 已实现 | `tool .../index.ts:554`（`[attachment]` 为定位符） |
+| F6 真实流程（无未读 message、长消息后新消息、Thread/Main、重启重放） | 已实现 | `thread-read-context.spec.ts`、`main-read-context.spec.ts:121-157` |
+
+## 票据 05 main-and-activity-recovery
+
+| 验收项 | 结论 | 证据（HEAD） |
+|---|---|---|
+| 通知完整提供事实即可 post；不新增 Thread 凭据；新未读仍拦 | 已实现 | `ledger.ts:1280`（`areMainEntriesVisible` + unread）；`main-read-context.spec.ts:110-118` |
+| Activity 按事件定义必要字段；看板/卡片/摘要不等同事件 | 已实现 | `packages/agent-team/src/activity-facts.ts:98-111`；`boundaries.md:6-14` |
+| 通知、read/history/message、拒绝使用同一判断 | 已实现 | `agent-team/src/index.ts:779-781`（`surfaceVisibilityProbe` 单一实现） |
+| 条件满足不写水位、不消费 marker；显式 read 才确认 | 已实现 | `main-read-context.spec.ts:110-119`；`notification-context.spec.ts` |
+| 长内容/多条变化走 04 的读取入口 | 已实现 | `reading-budget.ts`；`tool .../index.ts:843`、`859` |
+| F3 通知→post→read 三态独立；Task 变化→拒绝→重判 | 已实现 | `main-read-context.spec.ts:45-99` |
+| 清理旧恢复句、凭据说法、绕过路径；文档 | 已实现 | `recovery-hints.ts` diff；`tools.md`；`attention-and-messaging.md:47-51` |
+| 真实 Main/Activity ledger/Session + tool 测试 | 已实现 | 上述 + `activity-notice-recovery.spec.ts`、`surface-probe.spec.ts` |
+
+## 票据 06 notification-context
+
+| 验收项 | 结论 | 证据（HEAD） |
+|---|---|---|
+| 沿用现有合并/恢复派发，不建队列、投递库、永久去重 | 已实现 | `agent-team/src/index.ts:3295-3309`（`inboxNoticeDeliveries`，工作树行号） |
+| direct/reply 给来源正文与回复背景；Task/Claim 与 ownership 给变化与读者关系；原因未查明不猜 | 部分 | 事件字段 `activity-facts.ts:99-111`；读者关系只在 accept 显式（`index.ts:3203`），transfer/owner 变化要从 `from`/`to`/Member 推断 |
+| 普通更新只给数量和入口；DM 不进 Inbox | 已实现 | `index.ts:3108-3142`（priority 3 计数）；`notification-attribution.spec.ts` |
+| 上限含包装、计数和入口；直接信号优先；省略重要内容明确说明 | 已实现 | `index.ts:2978-2979`（2048 footer reserve）、排序 3149、省略提示在 3178 附近（工作树） |
+| 全文/截断声明与 05 的可见性一致；完整提供后不机械要求 read | 已实现 | 同一 `onSurface` 判定（3065/3091）；`notification-recovery-context.spec.ts` |
+| 投递前后未数量与 marker 不变 | 已实现 | `notification-context.spec.ts`（直接断言 `standing`） |
+| 覆盖合并、超限、新旧直接信号、running/idle、恢复；请求含预期文本 | 已实现 | 4 个 `notification-*.spec.ts` |
+| 文档、README、CHANGELOG；不改 Human Client 视觉 | 已实现 | `attention-and-messaging.md:47-51`（+zh）、`CHANGELOG.md`；client 无本工作项改动 |
+
+## 票据 07 tool-guidance-and-acceptance
+
+| 验收项 | 结论 | 证据（HEAD） |
+|---|---|---|
+| 逐工具核对 schema→Host→结果→render→错误恢复→文档 | 已实现 | 各 tool 测试 + `docs/team-collaboration/tools.md` |
+| persona、工具及参数说明、结果、core skill 各司其职 | 部分 | `cordis.patch.yml:110` 常驻 persona 复述 `team_thread` 专有的续读/分段/容量规则，`tool .../index.ts:554` 已有同规则，违反 spec §7.3 "规则统一定义" |
+| 已提交、未提交、已记录未送达、无法判定区分 | 已实现 | `tests/post-commit-delivery.spec.ts`；`team_dm` recorded-not-delivered 分支 |
+| 成功结果保留 refs/变化/凭据；恢复只给可执行路径 | 已实现 | `tool .../index.ts:668`、`751-755` 及 `renderRejection`/`renderMainRejection` |
+| F1–F6 真实 Session/Host/tool 组合；普通 Session 隔离、Remote、旧 ledger 重放、通知恢复无回退 | 已实现（F1 有一处替身，见下） | `member-context-integration.spec.ts:424` 以 `ctx.provide('agentTeam', ...)` 替换 Host 服务；其余见 `main-read-context`、`thread-read-selection`、`post-commit-delivery`；隔离由 `cordis.patch.yml:169-170` 只在 team-member preset 挂载 |
+| 复用既有模型评测 harness，运行前核实授权 | 未验证 | 未运行，README 标"待授权" |
+| 比较目标完成、行动改变、误调用、恢复次数并重复样本 | 未验证 | 同上 |
+| 量测脚本区分 Session、日志、surface、累计输出，支持分类注入与分段；删除被替代实现 | 已实现 | `.scratch/active/.../harness/context-volume.mts`、`harness/README.md:20,42`（`.scratch/active/` 被 `.gitignore:10` 忽略，不在提交范围） |
+| 文档、README、core skill、CHANGELOG 对齐；窄检查后按影响面 | 已实现 | docs 改动全套 + `scripts/check-docs.mjs` 上限收紧（未放宽） |
+| 更新完成状态与出口；未做项明确记录 | 已实现 | 工作项 `README.md` 状态行；07 最后两项未勾 |
+
+## 越界检查（spec 明确禁止的构造）
+
+逐项确认均未出现：
+
+| 禁止项 | 结论 | 证据 |
+|---|---|---|
+| 第二套持久已读状态 | 未出现 | 唯一新增是既有 Thread read receipt 上的可选 `selectedThroughSequence`（`ledger.ts:2214` 及 receipt 写入处；`spec.ts` 中可选），不是独立存储 |
+| 通用 context 框架 | 未出现 | `member-context.ts` 仅四类；`apply` 只挂 `agent/pre-step` |
+| continue/re-enter 模式参数 | 未出现 | 工具 schema 无该参数；`reading-budget.ts:65-67` 用重复同一请求 |
+| slash-command 适配器 | 未出现 | 仓库无相关新增 |
+| 通知队列 / 投递库 / 永久去重 | 未出现 | 复用 `inboxNoticeDeliveries` |
+| 修改 Harness | 未出现 | `deepseek-harness` 工作区干净 |
+
+## 发现的问题与偏差
+
+| # | 级别 | 问题 | 证据 | 失败场景 |
+|---|---|---|---|---|
+| 1 | 中 | Agent 的 Main read 丢弃非未读 Thread card 和已确认 Activity。Host 用 `[...background, ...unread]` 整体替换 ledger 已经产出的 entries，`background` 只保留 `kind === 'message'`；ledger 明确"Task cards … are never unread"。因此渲染层 `Thread cards` 段对普通 Task card 不可达，唯一覆盖它的测试直接喂 entries，绕过了 Host。与 spec §4"背景、当前状态、未读事实明确区分"和 `docs/team-collaboration/tools.md:72` 的承诺不一致 | `packages/agent-team/src/index.ts:1757-1770`；`packages/agent-team/src/ledger.ts:5062` 注释与 `5133-5150`；`packages/tool-agent-team/src/index.ts:809-818`；`tests/team-tools-render.spec.ts:863`（render 级） | Member 读一个无未读的 Main stream：结果只有最多 4 条背景 Message 和 "no unread updates"，项目里的 Task card 一行不出现；文档承诺的 card 行永不出现。Thread read 仍正常，两条路径行为不对称 |
+| 2 | 低 | 文档称选择性 read 的幂等重试返回"current unread picture"，实际以 `selectedThroughSequence: 0` 重算，批次恒为空 | `docs/team-collaboration/tools.md:33`；`ledger.ts:2214` | 同一 requestId 重试且期间有新事实：结果报"0 确认、N 未读"，而不是展示新的未读事实 |
+| 3 | 低 | `team_thread history` 也先求解模型容量，history 本不受输出上限约束。模型信息解析抛非 `NO_ADAPTER` 错误时 history 一并失败 | `packages/tool-agent-team/src/index.ts:700`（在 action 分支之前）；`reading-budget.ts:7-19` | 模型配置解析异常时，本应可用的 `history` 也被拒绝；无 `NO_ADAPTER` 时回退 256 KiB 不受影响 |
+| 4 | 低 | 同一续读/分段/容量规则同时写在常驻 persona 与工具说明，两处需人工同步 | `cordis.patch.yml:110`；`packages/tool-agent-team/src/index.ts:554` | 后续只改一处时，模型会收到矛盾规则；违反 spec §7.3 |
+| 5 | 低 | 通知里的"与读者的关系"只对 accept 显式；transfer、owner 变化只有事件字段，关系靠推断 | `packages/agent-team/src/activity-facts.ts:99-111`；`index.ts:3203` | 被转移责任的 Member 收到通知，只看到 `from X · to Y`，没有一句"你是新责任人" |
+| 6 | 低（文档） | 验收计划说表格里的测试"通过 ScriptedAdapter 固定模型行为"，但这些多为 Host/ledger/Session 单元测试，未用 ScriptedAdapter；"F1–F6 真实 Session/Host/tool 组合"中 F1 用替身 Host 服务 | `.scratch/active/agent-tools-context-rendering/materials/2026-10-30-acceptance-plan.md:27`；`tests/member-context-integration.spec.ts:424` | 不影响结论方向（该计划本身是保守表述），但机制描述不准确，读者会高估覆盖范围 |
+
+## 其他说明
+
+- spec §9 的模型评测确未运行，工作项 README、07 两个未勾项、acceptance-plan 三处表述一致，没有把静态测试全绿说成模型验收通过，这一点准确。
+- 未提交的性能改动（`index.ts`、`ledger.ts`、`member-context.ts`、`surface-visibility.ts`、`tool .../index.ts`、`reading-budget.ts`、`post-commit-delivery.spec.ts`）只是少量行号偏移和内部实现调整，相关套件在工作树上复跑通过，不改变上述结论；引用行号已按 `HEAD` 校准。
+- 未修改任何文件。</result>
+<usage><subagent_tokens>88560</subagent_tokens><tool_uses>164</tool_uses><duration_ms>1877714</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a71a2e31df0f3a5a9</task-id>
+<tool-use-id>chatcmpl-tool-82309f4ecb971d2a</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/6e40061f-6f69-4701-8bcd-0a97815d2a86/tasks/a71a2e31df0f3a5a9.output</output-file>
+<status>completed</status>
+<summary>Agent "Correctness axis review" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## 正确性评审报告（`.scratch/active/agent-tools-context-rendering`，deaa671..805394f）
+
+结论：未发现高严重度正确性缺陷。读、写、通知三条主链的关键不变量经探针和现有测试验证成立。已确认 1 个低危缺陷，1 个未确认的低危依赖，1 个测试缺口，1 个只影响显示数字的小问题。未修改任何仓库文件；探针只在 `/tmp/team-review/` 下。
+
+行号均为 HEAD（805394f）行号；工作区里性能工作项给 `packages/tool-agent-team/src/index.ts` 加了约 5 行重构，行号会相应后移。
+
+### 1. [已确认，低] `team_thread message` 读取“已在上下文中的长消息”时返回空 part，或误报容量错误
+
+位置：
+- `packages/tool-agent-team/src/reading-budget.ts:87-107`（长消息分段分支）
+- `packages/tool-agent-team/src/reading-budget.ts:52-55`（`messagePartText`）
+- `packages/tool-agent-team/src/index.ts:720-738`（`message` action 无条件走 `budgetReading`，且没有 `bodyOmitted` 之类的“已在上下文”标记）
+
+原因：分支先判断 `body.length &gt; capacity`（:88），之后才计算 `missingMessageRange`（:90）。当消息已完整出现在当前 surface 上时 `missing === undefined`，于是 `start = gapEnd = body.length`，二分得到 `end = body.length`，产出 `{start: len, end: len, complete: true}`。渲染成“Message part 40000–40000 of 40000 — complete in current context”加一个空的 `&lt;message-part&gt;`。若正文长度超过模型容量，则更早在 :88 抛出容量错误。
+
+证据（真实工具渲染器，`/tmp/team-review/message-query.spec.ts`）：
+
+```
+Message part 40000–40000 of 40000 — complete in current context
+&lt;message-part ref="message:a" start="40000" end="40000"&gt;
+
+&lt;/message-part&gt;
+```
+
+容量变体（`/tmp/team-review/message-query2.spec.ts`，body 400000、capacity 300000）：
+
+```
+Message exceeds the reading capacity (400000 &gt; 300000 UTF-16 units): message:a. Nothing acknowledged.
+Ask the sender for shorter Messages or use a larger-context model; repeating this call cannot complete it.
+```
+
+具体输入 → 错误输出：成员按 `thread-read-context.spec.ts:49` 的方式用多次 `message` 调用把一段 40K 正文拼全（每个 part 都进了 surface），之后再次 `team_thread message` 同一 `messageRef`（例如为了引用）→ 最新结果里没有任何正文，却标注“complete in current context”；正文超过容量时同一调用直接失败，并给出“让发送方改短”的错误建议，而正文本来就在上下文里。
+
+影响面有限：`message` 从不确认已读，账本状态不会错；被误导的是工具返回内容和恢复建议。
+
+最小修复：把 `missingMessageRange` 的计算提到容量判断之前；`missing === undefined` 时不生成 part、也不做容量判断，而是按 `bodyOmitted` 的方式输出一句显式的“body already in current context; omitted”。补一条回归测试（复用 `thread-read-context.spec.ts` 的拼段写法，拼全后再调一次 `message`）。
+
+### 2. [未确认，低] `readingCapacity` 把任何非 `NO_ADAPTER` 的模型信息错误直接抛出，`team_thread` 整体失败
+
+位置：`packages/tool-agent-team/src/reading-budget.ts:7-20`，调用点 `packages/tool-agent-team/src/index.ts:700`（在 read/history/message 分支之前）。
+
+Harness 侧（`../deepseek-harness/packages/llm/llm/src/index.ts:756-780`）的 `resolveModelInfo` 会因 `NO_ADAPTER`、`INVALID_MODEL_INFO`、`INVALID_MODEL_CONTEXT`、`ABORTED` 或适配器 `resolveModel` 自身的错误而 reject；DeepSeek 适配器的 `resolveModel` 内部 `await this.connection(signal)`（`llm-deepseek/src/adapter.ts:39-40,61-63`）。这里只对 `NO_ADAPTER` 回退，其余一律抛出。注意 Harness 会校验 `contextWindow` 必须是正整数，所以“contextWindow 非法”不会变成 NaN 悄悄关掉容量检查，而是变成这里的一次硬失败。
+
+失败场景（未在真实部署中复现）：某个适配器返回非法 context 元数据，或 `resolveModel` 期间连接/凭据短暂失败 → 每次 `team_thread`（包括本不需要模型信息的 `read`/`history`）都失败。
+
+最小修复：只对 `ABORTED` 重新抛出，其余任何解析错误回退到保守的 256K。
+
+### 3. [测试缺口] `reading-budget.ts` 没有直接单元测试
+
+`packages/*/tests` 中没有任何文件 import `budgetReading` / `readingCapacity` / `messagePartText`；覆盖全部来自集成测试（长消息拼段、未完整不确认、background 预算、容量错误）。因此以下行为没有针对性断言：`NO_ADAPTER` 回退与第 2 条的抛出路径、零长度 part（第 1 条）、二分边界上的代理对回退（`end -= 1` 后 `complete` 重算）、`through` 在首批即为不完整消息时为 0 的行为。建议补一个小的纯函数级 spec。
+
+### 4. [未确认，信息级] `Earlier facts: N` 取自提交前的 preview
+
+`packages/tool-agent-team/src/index.ts:744-749` 用 preview 的 `value` 渲染，而 `earlierFactCount` 在 `ledger.ts:4455-4459` 按提交前的水位计算；提交后实际值会多出本次确认的数量。只影响这一行提示的数字，规范未约定该字段，未改动建议。
+
+### 已验证、不是缺陷的候选
+
+- `missingMessageRange`（`surface-visibility.ts:119-135`）：整段、部分、重叠、重复、乱序、`end === start`、`total` 不匹配、空正文调用方排除，均已用探针覆盖；摘要+引用匹配杜绝了短正文/别的 Thread 的假阳性。
+- `budgetReading` 的确认算术：`selected` 始终是未读前缀（尾部弹出），`through = acknowledged.at(-1).sequence`，与 ledger 的 `unread.slice(0,20).filter(seq &lt;= through)` 严格对应；首条未读即不完整时 `through = 0`，ledger 的 `withholdsMarkers`（`ledger.ts:4456-4458`）因此不消耗提醒标记。二分用 `ceil` 中点，`end` 恒 `&gt;= start`，代理对不会被切开。
+- 读操作重放：`readThread` 的 requestId 分支用 `selectedThroughSequence: 0` 只回放背景与存档水位（`ledger.ts:2202-2228`），`validateThreadReadReceipt` 按存档选择重算，选择值被校验为 0..revision 的整数，与 `withholdsMarkers` 语义一致（测试 `thread-read-selection.spec.ts` 已覆盖丢弃/挪动选择的拒绝）。
+- 写门禁：`deferredThreadWrite` + `surfaceVisibilityProbe`（`ledger.ts:5432-5450`、`index.ts:779-786`）要求 `isFactOnSurface` 完整覆盖，部分正文无法豁免；`renderRejection`（`tool-agent-team/src/index.ts:287-332`）只绑定“未截断且真正写进文本”的事实；`bodyOmitted`/`activityOmitted` 的事实被排除在绑定之外；空正文永远不算“在 surface 上”；写入豁免不写任何账本状态。
+- 通知：所有被丢弃的 direct 候选都会累加 `omittedDirectCount` 与路由集合（`index.ts:3180-3197`），省略提示 footer 最先追加并独占 2K 预留；`undelivered` 让未渲染的 Thread 不进入 `covered`（`inbox-delivery.ts:74-77`）。不存在 direct 信号被静默丢弃。
+- 成员 context 的 memory 边界（`member-context.ts:88-93,204-229`）：超出 16 KiB 时显式标记“未注入”，不会截断冒充完整；无可见完整 baseline 时重新注入 baseline。
+- 未提交的性能改动：只删除了 `READ_MAX_CHARACTERS`、`isActivityOnSurface`、`renderMemberMemoryUpdate` 的导出并加了 `rejectionMeta` 这类等价重构；仓库内没有其他消费者引用这些符号（仅生成目录 `lib/types` 里的旧声明），工作区整套测试此前通过，未破坏被评审的已提交行为。</result>
+<usage><subagent_tokens>126279</subagent_tokens><tool_uses>178</tool_uses><duration_ms>2195712</duration_ms></usage>
+</task-notification>
+
+---
+
+提交这些修复
+
+---
+
+那个checkpoint是做什么的？
+
+---
+
+先这样吧，我们用一段entire试一试，你删除的checkpoint要不也恢复吧
