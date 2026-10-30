@@ -46,6 +46,8 @@ A resolved checkout that does not exist aborts immediately with the sibling Harn
 
 Scope guard: no coverage matrix, no release automation, and no `test:browser` — browser acceptance stays a local step. The Windows lane is the regression fence for filesystem-identifier bugs (issues #7/#8). The only adjustable variable is `DSH_HARNESS_TAG`; when certification advances the tag, update the workflow env and this document together with the DSH peer ranges, and `npm run check:versions` refuses a mismatch.
 
+Both lanes report, but neither gates: `master` carries no required status checks, no rulesets, and `enforce_admins` is off, so a green run does not block a merge and nothing server-side refuses a red one. A green workflow is evidence, never permission — whether a change waits for CI is still a matter of discipline.
+
 **Hoplite sandbox.** [`.hoplite/settings.json`](../../.hoplite/settings.json) runs [`scripts/hoplite-setup.sh`](../../scripts/hoplite-setup.sh) for steps 1–5 in every new thread, and exposes step 6 as the `check` script instead of running it during setup. The script checks out `dsh-v<lower bound>` of the DSH peer range, so it follows a peer move without a separate edit. A Hoplite project-level setup override takes precedence over the repository file; keep it unset.
 
 A tag advance that also moves the DSH peers must commit `pnpm-lock.yaml` in the same change: CI installs with `frozen-lockfile`, while a local install rewrites the lockfile in place and hides the mismatch until CI runs.

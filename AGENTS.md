@@ -56,5 +56,5 @@ Release cadence is batched: between releases the operator daily-drives a locally
 ## Further reading
 
 - Domain and Host behavior: `packages/agent-team/src/`, its tests, and `docs/architecture/README.md`.
-- Tools and preset: `packages/tool-agent-team/`, `packages/agent-team/preset/`, and the matching Harness subsystem docs.
+- Tools and preset: `packages/tool-agent-team/`, the `team-member` row in `cordis.patch.yml`, and the matching Harness subsystem docs.
 - Client or UI: `packages/client-agent-team/src/client/`, `docs/architecture/README.md`, and `docs/harness-navigation.md`; consult the relevant `.scratch/archive/` work history only when needed, and verify all behavior in code and tests.
