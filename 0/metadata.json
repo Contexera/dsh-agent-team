@@ -1,0 +1,44 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M635FCX5PGA0Q2W5AP5CRCXE",
+  "session_id": "d97bd4b9-910f-416b-aa21-0dcce0083c36",
+  "strategy": "import",
+  "created_at": "2026-10-29T06:27:36.997Z",
+  "commit_sha": "088126889de0658da9bfb028132dca65e0dc8fae",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "agent": "Claude Code",
+  "model": "gpt-6-astra",
+  "checkpoint_transcript_start": 2019,
+  "transcript_lines_at_start": 2019,
+  "compact_transcript_start": 336,
+  "token_usage": {
+    "input_tokens": 16190,
+    "cache_creation_tokens": 93918,
+    "cache_read_tokens": 465538,
+    "output_tokens": 6917,
+    "api_call_count": 8,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  },
+  "redaction": {
+    "replacements": 172,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 6,
+      "credentialed_uri": 0,
+      "entropy": 166,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "kind": "imported"
+}
