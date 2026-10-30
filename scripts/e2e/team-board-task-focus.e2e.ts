@@ -10,7 +10,7 @@ afterEach(async () => { await closeScenario() })
 // These assertions pin the landing target and the two input modalities apart: a
 // keyboard send rings the card, a mouse send focuses it without a visible ring.
 it('lands a started Task on its board card, keyboard and mouse', async () => {
-  const { page, consoleWatch } = await openTeamPage({ clearArtifacts: false })
+  const { page, consoleWatch } = await openTeamPage()
 
   await page.getByRole('button', { name: '新建项目' }).click()
   const createProject = page.getByRole('dialog', { name: '新建项目' })

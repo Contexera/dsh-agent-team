@@ -1,8 +1,8 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
 import type { Browser } from 'playwright'
-import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, installLocalBundle, launchWebScaffold, scaffold, settleLayout } from './__external-agent-team-support.ts'
-import type { Page } from './__external-agent-team-support.ts'
+import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, installLocalBundle, launchWebScaffold, settleLayout } from './__external-agent-team-support.ts'
+import type { Page, WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined
@@ -14,7 +14,7 @@ afterEach(async () => {
 
 
 it('keeps four same-origin Team pages responsive and independently subscribed', async () => {
-  await installLocalBundle(false)
+  await installLocalBundle()
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   const workspace = await scaffold.ctx.workspaceRegistry.create(scaffold.workspaceCwd, 'multi-web')
   await scaffold.ctx.agentTeam.createProject({ requestId: 'multi-project' as never, workspaceId: workspace.id, name: 'multi-web', description: 'Multi-page regression' })

@@ -1,13 +1,11 @@
 import { afterEach, it, expect } from 'vitest'
-import { chromium } from 'playwright'
-import type { Browser, Page } from 'playwright'
-import { CHROME, HOME, STAGED_BUNDLE, UI02_SHOTS, closeScenario, connectFreshWorkspaceZh, installLocalBundle, launchWebScaffold, openTeamPage, scaffold, settleLayout, watchConsole } from './__external-agent-team-support.ts'
+import { UI02_SHOTS, closeScenario, openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
 
 it('opens a taskless thread from its ref chip in real Web', async () => {
-  const { page, consoleWatch } = await openTeamPage({ clearArtifacts: false })
+  const { page, consoleWatch } = await openTeamPage()
   await page.getByRole('button', { name: '新建项目' }).click()
   const projectDialog = page.getByRole('dialog', { name: '新建项目' })
   await projectDialog.getByLabel('名称').fill('ref-repro')

@@ -1,8 +1,8 @@
 import { afterEach, it, expect } from 'vitest'
 import { chromium } from 'playwright'
-import type { Browser, Page } from 'playwright'
-import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, readCountCapsule, resolveAliasColor, scaffold, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, watchConsole } from './__external-agent-team-support.ts'
-import type { Locator } from './__external-agent-team-support.ts'
+import type { Browser } from 'playwright'
+import { BROWSER_ARTIFACTS, CHROME, HOME, STAGED_BUNDLE, UI01_SHOTS, UI02_SHOTS, UI03_SHOTS, UI04_SHOTS, UI05_SHOTS, UI06_SHOTS, UI07_SHOTS, UI08_SHOTS, acknowledgeReloadConnectionLoss, actionBandGeometry, connectFreshWorkspaceZh, entryClusterEdges, entryUnreadCapsule, focusRing, inkContrast, installLocalBundle, launchWebScaffold, maxHorizontalScroll, readCountCapsule, resolveAliasColor, settleAnimations, settleLayout, taskEntryClusterLefts, taskEntryLineSelector, taskEntryRow, watchConsole } from './__external-agent-team-support.ts'
+import type { Locator, WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined

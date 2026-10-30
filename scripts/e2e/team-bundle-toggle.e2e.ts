@@ -1,7 +1,7 @@
 import { afterEach, it, expect } from 'vitest'
-import { chromium } from 'playwright'
-import type { Browser, Page } from 'playwright'
-import { HOME, STAGED_BUNDLE, installLocalBundle, launchWebScaffold, scaffold } from './__external-agent-team-support.ts'
+import type { Browser } from 'playwright'
+import { HOME, STAGED_BUNDLE, installLocalBundle, launchWebScaffold } from './__external-agent-team-support.ts'
+import type { WebScaffold } from './__external-agent-team-support.ts'
 
 let scaffold: WebScaffold | undefined
 let browser: Browser | undefined

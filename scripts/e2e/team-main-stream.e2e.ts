@@ -1,13 +1,11 @@
 import { afterEach, it, expect } from 'vitest'
-import { chromium } from 'playwright'
-import type { Browser, Page } from 'playwright'
-import { CHROME, HOME, MAIN_STREAM_SHOTS, STAGED_BUNDLE, closeScenario, connectFreshWorkspaceZh, focusRing, installLocalBundle, launchWebScaffold, maxHorizontalScroll, openTeamPage, scaffold, settleAnimations, settleLayout, watchConsole } from './__external-agent-team-support.ts'
+import { MAIN_STREAM_SHOTS, closeScenario, focusRing, maxHorizontalScroll, openTeamPage, scaffold, settleAnimations, settleLayout } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
 
 it('posts, starts a discussion and a Task, and opens cards in the Main stream under rules version 2 in real Web', async () => {
-  const { page, consoleWatch } = await openTeamPage({ clearArtifacts: false })
+  const { page, consoleWatch } = await openTeamPage()
 
   await page.getByRole('button', { name: '新建项目' }).click()
   const createProject = page.getByRole('dialog', { name: '新建项目' })

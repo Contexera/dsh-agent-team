@@ -1,13 +1,11 @@
 import { afterEach, it, expect } from 'vitest'
-import { chromium } from 'playwright'
-import type { Browser, Page } from 'playwright'
-import { CHROME, HOME, STAGED_BUNDLE, UI04_SHOTS, closeScenario, connectFreshWorkspaceZh, installLocalBundle, launchWebScaffold, openTeamPage, scaffold, settleLayout, watchConsole } from './__external-agent-team-support.ts'
+import { UI04_SHOTS, closeScenario, openTeamPage, scaffold, settleLayout } from './__external-agent-team-support.ts'
 
 afterEach(async () => { await closeScenario() })
 
 
 it('edits Project owners from the Project dialog under rules version 2 in real Web', async () => {
-  const { page, consoleWatch } = await openTeamPage({ clearArtifacts: false })
+  const { page, consoleWatch } = await openTeamPage()
 
   await page.getByRole('button', { name: '新建项目' }).click()
   const createProject = page.getByRole('dialog', { name: '新建项目' })

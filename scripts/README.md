@@ -34,7 +34,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 
 | File | Does | Trigger |
 | --- | --- | --- |
-| `run-browser-test.mjs` | Keyless browser acceptance: renders `scripts/e2e/*` into a temporary harness and drives the real journey in Chromium. | `npm run test:browser` |
+| `run-browser-test.mjs` | Keyless browser acceptance: clears the run's screenshot directory once, renders `scripts/e2e/*` into a temporary harness, drives the real journey in Chromium, and afterwards refuses a run whose screenshots are missing or unreadable. | `npm run test:browser` |
 | `run-preview.mjs` | Live-model preview lane: renders `team-ui.preview.ts` into the harness. | `npm run preview` |
 | `run-ui-preview.mjs` | Keyless UI preview lane: renders `team-ui.ui-preview.ts` into the harness. | `npm run preview:ui` |
 | `audit-ui-parity.mjs` | Static design-language audit of the Team Client CSS/TSX against `docs/frontend-design/principles-and-language.md`; run after visible-UI changes and DSH upgrades. | `node scripts/audit-ui-parity.mjs` |
@@ -48,7 +48,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 
 | File | Does | Consumer |
 | --- | --- | --- |
-| `e2e/` (support.ts + 8 `*.e2e.ts`) | The keyless journey scenarios — `team-journey`, `team-main-stream`, `team-multi-page`, `team-page-identity`, `team-project-owners`, `team-thread-ref-chip`, `team-bundle-toggle`, `team-environment-check`; `support.ts` carries the shared staging/boot plumbing. | read and rendered by `run-browser-test.mjs` |
+| `e2e/` (support.ts + 10 `*.e2e.ts`) | The keyless journey scenarios — `team-journey`, `team-main-stream`, `team-multi-page`, `team-page-identity`, `team-project-owners`, `team-thread-ref-chip`, `team-bundle-toggle`, `team-environment-check`, `team-board-task-focus`, `team-settings-nav-icon`; `support.ts` carries the shared staging/boot plumbing and never touches the run's screenshots. | read and rendered by `run-browser-test.mjs` |
 | `team-ui.preview.ts` | Template for the live-preview lane. | read/rendered by `run-preview.mjs` |
 | `team-ui.ui-preview.ts` | Template for the keyless UI-preview lane. | read/rendered by `run-ui-preview.mjs` |
 
@@ -59,6 +59,7 @@ Run through `npm run check:*`; several are also part of `npm test` (see `start-a
 | `harness-dir.mjs` (+ `.d.mts`) | Single source of truth for which sibling harness checkout scripts, tests, and facades resolve against (`DSH_HARNESS_DIR` → `.generated-harness` marker → default `deepseek-harness`). | build-client, generate-typert, sync-paths, run-browser-test, run-preview, run-ui-preview, audit-ui-parity, link-harness-packages, session-trace, `vitest.config.ts`, client `tsdown.config.ts`, and the specs `harness-dir.spec.ts` / `sidebar-panel-list.spec.ts` |
 | `dsh-peers.mjs` (+ `.d.mts`) | The `@deepseek-ai/dsh-*` peer-range predicate: those ranges must reduce to exactly one DSH generation. | `check-public-baseline.mjs`, `packages/agent-team/tests/shipping.spec.ts` |
 | `public-baseline-statement.mjs` (+ `.d.mts`) | Parses the certified-baseline token from one public surface. | `check-public-baseline.mjs` (+ `public-baseline-statement.spec.ts`) |
+| `browser-evidence.mjs` (+ `.d.mts`) | Reads a finished browser run's screenshots and refuses missing, truncated, or empty-directory evidence, including a promised desktop or 390×844 viewport width with no screenshot. | `run-browser-test.mjs` (+ `browser-evidence.spec.ts`) |
 | `standard-decorators.ts` | Vite pre-transform plugin for standard (TC39) decorators before esbuild sees them. | `vitest.config.ts` |
 | `link-harness-packages.mjs` | Symlinks every sibling harness workspace package into `node_modules` so host tests resolve the on-disk layout a real profile install produces. | run manually for local host-test setup |
 | `isolate-dsh-home.setup.ts` | Vitest setup that gives each test file its own throwaway `DSH_HOME`. | `vitest.config.ts` setup files |

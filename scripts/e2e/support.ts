@@ -8,12 +8,14 @@
  * so it lives here once. A scenario owns its own `scaffold`/`browser` handles
  * and its own `afterEach`, because vitest lifecycle is per-file.
  *
- * `installLocalBundle` wipes `HOME`, which is the shared staged profile, so
- * exactly one scenario in a run may clear it: the first one alphabetically that
- * also owns the artifact directories. Every other scenario passes
- * `clearArtifacts = false` and reuses the copy already staged.
+ * `installLocalBundle` wipes `HOME`, which is the shared staged profile, and
+ * every scenario re-stages it because each one boots its own scaffold. The
+ * artifact directories belong to the run instead: `run-browser-test.mjs`
+ * clears them once before the first scenario, and no scenario may remove them,
+ * because vitest decides which scenario runs last and a late clear would delete
+ * screenshots an earlier scenario already produced.
  */
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 import { chromium, type Browser, type Page } from 'playwright'
@@ -47,11 +49,11 @@ export type { WebScaffold } from './scaffold.ts'
  * module-level `scaffold`/`browser` pair each scenario declares is filled in
  * here so its `afterEach` can release them.
  */
-export async function openTeamPage(options: { readonly clearArtifacts?: boolean; readonly stayInOrdinaryMode?: boolean } = {}): Promise<{
+export async function openTeamPage(options: { readonly stayInOrdinaryMode?: boolean } = {}): Promise<{
   readonly page: Page
   readonly consoleWatch: { warnings: string[]; pageErrors: string[] }
 }> {
-  await installLocalBundle(options.clearArtifacts ?? false)
+  await installLocalBundle()
   scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
@@ -380,12 +382,11 @@ export async function entryUnreadCapsule(page: Page, lineSelector: string): Prom
  * Stage this bundle and its dependency closure as `dsh plugin add` installs
  * it. A command-line overlay would shadow the profile document and make the
  * Host row's settings write fail, so every lane mounts the staged copy as a
- * profile package. Only the first case of a run clears the artifacts
- * directory (`clearArtifacts`).
+ * profile package. Nothing here touches the artifact directories: the run owns
+ * them, so a scenario can never delete evidence of the run it belongs to.
  */
-export async function installLocalBundle(clearArtifacts = true): Promise<void> {
+export async function installLocalBundle(): Promise<void> {
   await rm(HOME, { recursive: true, force: true })
-  if (clearArtifacts) await rm(BROWSER_ARTIFACTS, { recursive: true, force: true })
   const scope = `${HOME}/profiles/node_modules/@contexera`
   await mkdir(scope, { recursive: true })
   // Match both separators: on Windows cp walks backslash paths.
