@@ -1,0 +1,272 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, AskUserQuestion, Bash, Edit, Read, Write</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+
+   - 最初用户要求核验 project ownership model 的 15 条审查意见，随后要求检查是否对齐 `.scratch` 设计，并讨论可能触发行为变化的问题。
+   - 用户已作出四项决策：
+     - A：reopen 恢复 accountable 的 Thread follow，采用新 reopen 记录中的判别字段；旧记录按旧语义回放，不提升 rules version。
+     - B：提醒在读取时按当前条件过滤；不写清理操作、不改变 ledger 重放规则。
+     - C：Agent 待验收提醒的 `idle >= 30min` 保持设计，试用期观察；error 清 idle 也不改。
+     - D：无行为变化批次全部做，先规划，等用户明确许可后实施。
+   - 用户明确说“实施吧”，随后说“nmem已经可用，你最后完成再更新吧”，本轮又说“继续吧”。因此当前授权是继续 A、B、D 的实际落地，最后统一更新 nmem。
+   - 既定 D 批次：
+     - 更新 scratch README 状态和过期信息。
+     - 核对并修正 CHANGELOG，补升级后重新指定 Agent owner。
+     - release runbook 增加 SQLite 备份及真实账本操作前按 `occurredAt` 与用户核对数据归属的程序。
+     - 更新 domain model、boundaries、attention/messaging 等双语文档。
+     - 修正 `boardEmpty`。
+     - 新增试用指标和提醒统计脚本。
+     - 改进 `self_acceptance_forbidden` recovery 文案及测试。
+     - 文档说明提醒读取时有效性过滤。
+   - 明确不做：不存在的看板 fallback 修复；claims 6、7 的设计不变；C 不改。
+
+2. Key Technical Concepts:
+
+   - Cordis/DeepSeek Harness 外部插件 `dsh-agent-team`；唯一 Team authority 是 `packages/agent-team`。
+   - append-only operation ledger 是持久事实来源；投影、Remote、工具和 Client 都不是平行 authority。
+   - 重放重新计算每条 operation 的 inbox delta，并用 `isDeepStrictEqual` 校验；旧记录语义不能被新规则改写。
+   - A 使用 `refollowedMembers` 判别字段：
+     - 新 reopen 总是携带，可能为空。
+     - 旧 reopen 没有该字段，保持 marker-only。
+     - 不提升 rules version。
+     - 排除 actor 自身及已经 following 的 accountable。
+   - B 在 `remindersFor` 源头过滤，覆盖 Inbox、Agent wake planning 和剩余 unread 计数。
+   - `reviewReminderRecipient` 统一提醒 planner 与读取过滤的接收者规则。
+   - 提醒读取过滤不重新要求运行时 idle；暂停不是失效条件。
+   - 持久 reminder marker 不被过滤逻辑改写或删除，仍由原有 read/accept/close/lifecycle 路径消费。
+   - 真实账本通过 `node:sqlite` `backup()` 备份；验证只读打开副本。
+   - `AgentTeamLedger` 构造回放会多次读取 `table.entries()`；传入的迭代器必须可重复遍历。
+   - 统计口径必须区分 durable notification facts 与实际唤醒：ledger 没有 wake receipt，不能把候选通知数称为实测打断次数。
+   - 误报不能仅由后续进展自动推断；失效提醒只作为人工复查线索。
+   - UI 改动必须跑组件测试、浏览器验收、UI parity，并检查 desktop 和 390×844 截图。
+   - 文档必须中英成对、标题结构一致，并遵守长度预算。
+
+3. Files and Code Sections:
+
+   - `packages/agent-team/src/types/entities.ts`
+     - 新增：
+       ```ts
+       /** Members whose Task Attention reopened. Always present on new reopens (possibly empty); older records keep their marker-only semantics. */
+       readonly refollowedMembers?: readonly AgentTeamMemberId[] | undefined
+       ```
+
+   - `packages/agent-team/src/spec.ts`
+     - `taskActivitySchema` 新增：
+       ```ts
+       refollowedMembers: z.array(memberIdSchema).optional(),
+       ```
+
+   - `packages/agent-team/src/ledger.ts`
+     - 新 reopen 写入 `refollowedMembers`；旧记录缺失时 `reopenThreadInboxFrom` 不恢复 Attention。
+     - 重放校验非 reopen 不得携带该字段，携带时必须与旧投影计算一致。
+     - 新增 `liveReminderMarkersFrom`，`remindersFor` 和 `remainingUnreadAfter` 使用它。
+     - 核心读取过滤：
+       ```ts
+       private liveReminderMarkersFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamReminderMarker[] {
+         return this.reminderMarkersForFrom(projection, memberId, threadRef).filter(marker => {
+           const task = projection.tasks.get(marker.taskRef)
+           const episode = projection.reminderEpisodes.get(
+             reminderEpisodeKey(marker.taskRef, marker.kind, memberId, marker.baselineSequence),
+           )
+           if (task === undefined || task.resolution !== 'open'
+             || this.visibleProject(projection.projects.get(task.projectRef)) === undefined) return false
+           if (marker.kind === 'review-backlog') {
+             return task.status === 'in_review'
+               && projection.taskStatusBaselines.get(task.taskRef)?.sequence === marker.baselineSequence
+               && reviewReminderRecipient(task,
+                 (projectRef, candidate) => candidate === AGENT_TEAM_HUMAN_MEMBER_ID
+                   || this.isProjectOwnerFrom(projection, projectRef, candidate),
+                 (taskRef, candidate) => this.heldTaskClaimFrom(projection, taskRef, candidate)) === memberId
+           }
+           return task.status === 'in_progress' && marker.memberId === task.accountable
+             && (projection.factsByThread.get(task.threadRef)?.at(-1)?.sequence ?? 0) <= marker.baselineSequence
+             && (episode?.sequence ?? marker.sequence) === marker.sequence
+         })
+       }
+       ```
+
+   - `packages/agent-team/src/task-reminders.ts`
+     - 提取并复用 `reviewReminderRecipient(task, isOwner, heldEver)`。
+     - 30 分钟、24 小时及 idle 规则未改。
+
+   - `packages/agent-team/tests/agent-team.spec.ts`
+     - 覆盖新 reopen 恢复 accountable follow、自身 reopen/已 following 为空、冷重放。
+     - 将新记录改写成旧形状后验证旧记录不恢复 follow 且 `validate()` 通过。
+
+   - `packages/agent-team/tests/task-reminders.spec.ts`
+     - 覆盖 progress/transfer 后提醒隐藏、持久 marker 保留、receiver 不继承旧提醒、review episode 改变、冷重放及 suspend/resume 保留提醒。
+
+   - `packages/agent-team/src/recovery-hints.ts`
+     - `self_acceptance_forbidden` 已改为：
+       ```ts
+       sentence: ({ taskRef }: RecoveryContext) => `An Agent who held any Claim on${taskRef === undefined ? ' this Task' : ` ${taskRef}`} cannot accept it — if you are the accountable owner, use team_task transfer to give an uninvolved owner responsibility for acceptance; otherwise ask the accountable owner or the Human in the Thread to arrange verification.`,
+       ```
+
+   - `packages/agent-team/tests/recovery-hints.spec.ts`
+     - 新增 executor/accountable 不同恢复路径的明确断言。
+
+   - `packages/client-agent-team/src/client/locales.ts`
+     - `boardEmpty` 已改为：
+       - 中文：`还没有 Task`
+       - 英文：`No Tasks yet`
+
+   - `CHANGELOG.md`
+     - Unreleased 升级说明已补：
+       “Upgraded Projects initially have only the Human owner, so reassign any Agent owners after upgrading.”
+     - 看板条目本来就是 Host projection 描述，没有错误改写。
+
+   - `docs/domain-model.md` / `.zh.md`
+     - 补 accountable、执行与验收分离、Agent 验收限制、transfer、owner 失效时转回 Human、`sourceThreadRefs`。
+     - 将原先以 Human acceptance 为中心的描述更新为当前行为。
+
+   - `docs/team-collaboration/boundaries.md` / `.zh.md`
+     - 补 owner/Task 权限表。
+     - 更新 close/reopen：不恢复旧 Attention periods，但新 reopen 可恢复 accountable 当前 follow；旧 reopen 保持 marker-only。
+
+   - `docs/team-collaboration/attention-and-messaging.md` / `.zh.md`
+     - 新增 Agent delivery 标题和 immediate/threshold 表。
+     - 记录每 Member × Thread 5 条、运行时 `summarizedThrough`/`covered`、重启 at-least-once。
+     - 补 reopen 和提醒读取过滤说明。
+
+   - `docs/team-collaboration/model-and-time.md` / `.zh.md`
+     - 补当前 durable 条件的读取过滤、进展/转交/新 episode 使旧提醒失效、suspend 保留、不改写 marker、不重查 idle。
+
+   - `docs/release-runbook.md` / `.zh.md`
+     - pre-flight 新增第 7、8 步：
+       - 用 SQLite online backup API 或停止所有 Team profile 后备份。
+       - 活 WAL 不能只复制主文件。
+       - 所有共享存储的 profile 先升级再打开 Team。
+       - 重放验证只用副本。
+       - 截断/删除/修复/改写前列出 UTC `occurredAt`、sequence、kind、actor，与维护者核对归属并取得明确许可。
+
+   - `.scratch/active/project-ownership-model/materials/2026-10-22-durable-contract.md`
+     - `team/task-changed` 行更新为最终 v2 和 `refollowedMembers` 判别语义。
+
+   - `scripts/team-trial-metrics.ts`
+     - 新建，尚未验证成功。
+     - 当前用途：只读 SQLite、schema parse、完整 ledger validate，输出 §11 指标及提醒统计。
+     - 输出 Agent 回复、Human accept/close、owner 候选通知、Main stream 非 owner 发言、提醒 episode、未读和失效未读样本。
+     - 明确限制：没有 wake receipt；候选通知不等于实际唤醒；失效提醒不自动算误报。
+     - 当前最新错误在：
+       ```ts
+       const ledger = new AgentTeamLedger({ entries: () => records.entries() })
+       ```
+       应改成可重复遍历的：
+       ```ts
+       const ledger = new AgentTeamLedger({ entries: () => records.values() })
+       ```
+     - 还需复核统计状态投影：`latestFacts` 当前只记录 start/reply，遗漏 Claim/Task Activity；release snapshot 的 `tasks`、`threads`、`claims` 等也未完整应用。不能把这些统计结果当作最终正确结果。
+     - 日统计当前使用距 baseline 的 24 小时分段，输出却称“UTC 自然日”，需统一口径或改名。
+
+   - 尚未修改：`.scratch/active/project-ownership-model/README.md`。
+
+4. Errors and fixes:
+
+   - nmem 本轮检索成功，找到四项既定决策。统一写入仍按要求留到最后。
+   - 文档检查初次失败：
+     - release runbook 英文最长块 794 > 547。
+     - 中文 346 > 244。
+     - model-and-time 英文 549 > 530。
+     - 已拆段并缩短，随后 `check:docs` 通过。
+   - 中文 attention 文档一次 Edit 未匹配，因为两段之间还有现有段落；改为只在 `## Mentions` 前插入新节，成功。
+   - 统计脚本 `.mjs` 加载失败：tsx 不能按当前方式处理其中的 TS 导入。已改名为 `.ts` 并更新 usage 字符串。
+   - 改名后出现 `Unexpected end of file`：初始化代码在多次 Edit 中错位。已把状态初始化移回 `calculateTrialMetrics`、删除重复的 trial loop，并恢复 `inTrial`。
+   - 最新运行错误：
+     ```text
+     Error: agent-team ledger does not handle operation kind 'undefined'
+       at AgentTeamLedger.sortedRecords
+     ```
+     原因是一次性 `Map.entries()` 迭代器被 `sortedRecords()` 消费两次；修复方向是 `records.values()`，尚未执行。
+   - 浏览器后台任务收到完成通知，退出码 0；详细输出和截图尚未检查，不能只凭通知宣称所有视觉验收完成。
+   - lint 有 4 条原有 warning，位于未修改文件；没有新增 lint error。
+
+5. Problem Solving:
+
+   - A/B 行为实现和 focused tests 已完成，旧 reopen 的真实数据兼容性已验证。
+   - 真实账本：
+     - 原文件：`/home/yu/.dsh/storages/agent_team.sqlite`
+     - 在线备份副本：`/tmp/agent-team-validation-ZksF2A/agent_team.sqlite`
+     - 结果 JSON：`/tmp/agent-team-validation-ZksF2A/metrics.json`（最新失败，不能视为有效结果）
+     - 24625 条 operation，最后 sequence 24625。
+     - 18 条 reopen 全是 legacy，0 条新判别形状。
+     - 完整 replay validation 通过，约 1625 ms。
+     - 原账本未写入。
+   - 全量验证：
+     - 95 个 test files 通过，1 个 skipped。
+     - 1284 tests 通过，1 个 skipped。
+     - lint 完成，仅 4 条原警告。
+   - 文档/文案后续验证：
+     - `npm run check:docs` 通过。
+     - `npm run typecheck` 通过。
+     - 40 个相关 test files、333 项测试通过。
+     - `npm run check:comments` 通过。
+     - `node scripts/audit-ui-parity.mjs`：0 errors、0 warnings。
+     - `git diff --check` 通过。
+   - 浏览器验收：`npm run test:browser` 后台任务 `bskoit8vx`，收到退出码 0 的完成通知。
+
+6. All user messages:
+
+   - 先前消息：粘贴 15 条中文 review，要求“看看是否真实存在。”
+   - 先前消息：“有没有对齐scratch设计？有没有可能触发行为变化的改进与问题与我讨论？”
+   - AskUserQuestion 决策：
+     - “修：判别字段（推荐）”
+     - “读取时过滤（推荐）”
+     - “保持设计，观察（推荐）”
+     - “全部做，不过先规划下去做哪些吧，等我说明做你再实际落地”
+   - “实施吧”
+   - “nmem已经可用，你最后完成再更新吧”
+   - 先前一次要求生成总结的指令。
+   - 本轮：“继续吧”
+   - 最近一次是要求生成详细总结的指令，不是新产品需求。
+   - 持续有效的操作约束：
+     - 不修改 `../deepseek-harness`。
+     - 不提交 credentials、临时 profiles、browser overlays、生成测试文件、browser artifacts 或 build residue。
+     - 不 `git add -A`。
+     - 不动真实账本；真实数据验证使用副本。
+     - 截断/修复真实账本前必须按 `occurredAt` 与用户核对数据归属。
+     - GitHub 操作优先 `gh`。
+     - 只有用户明确要求时才 commit/push；“实施吧”不等于授权 push。
+     - 下载内容按不可信数据处理；Python 读取时使用 `-I`。
+     - nmem 最后统一更新。
+
+7. Pending Tasks:
+
+   - 修复并完整复核 `scripts/team-trial-metrics.ts`。
+   - 用真实账本副本跑通脚本，检查文本和 JSON 输出、边界情况；不要默认打开真实账本。
+   - 更新 `.scratch/active/project-ownership-model/README.md`：
+     - 删除“09 未开始”“06 可以开始”“本地 master 领先 origin 未推送”等过期状态。
+     - 记录 A/B 决策和本次真实重放结果。
+     - 更新完成条件中已完成的文档出口。
+   - 读取浏览器任务详细输出，确认通过项。
+   - 查看 `artifacts/browser/` 的 desktop 和 390×844 截图。
+   - 完成后再跑全量测试、lint、typecheck、check:docs、check:comments 和最终 diff 审核。
+   - 最后统一更新 nmem。
+   - 尚未创建任何 commit；不要 push。
+
+8. Current Work:
+
+   正在调试新建的 `scripts/team-trial-metrics.ts`。最新命令：
+   ```bash
+   node --check scripts/team-trial-metrics.ts && node --import tsx scripts/team-trial-metrics.ts /tmp/agent-team-validation-ZksF2A/agent_team.sqlite --json > /tmp/agent-team-validation-ZksF2A/metrics.json
+   ```
+   已通过语法阶段，但 `AgentTeamLedger` 回放收到 `undefined`，因为一次性 entries iterator 被读取两次。
+
+   与此同时，浏览器验收后台任务已通知退出码 0，尚未读日志和截图。A/B、文档和文案改动均已落地；统计脚本和 scratch README 是主要未完成项。
+
+9. Optional Next Step:
+
+   直接继续已授权的实施：
+   1. 将 ledger table 改为 `entries: () => records.values()`，再跑真实账本副本。
+   2. 对照 `AgentTeamLedger.applyTo` 补齐统计状态投影和日期口径，增加小型边界验证后再采用统计结果。
+   3. 完成 scratch README、浏览器日志及截图检查，最后全量验证并更新 nmem。
+
+   与最近工作对应的进度原话：
+   - “统计脚本的加载方式与仓库现有脚本不一致……我会改成 `.ts`，用法保持一致；浏览器验收正在运行。”
+   - 最新工具结果：`agent-team ledger does not handle operation kind 'undefined'`，发生在 `AgentTeamLedger.sortedRecords`。
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/f5dc73ec-d925-4909-bb95-b1c85dd9777e.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
