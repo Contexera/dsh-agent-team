@@ -1,0 +1,53 @@
+<task-notification>
+<task-id>a666e82135143bc7c</task-id>
+<tool-use-id>chatcmpl-tool-b2cd5e1caeac5f7e</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/7cf571b6-bccf-4d18-905c-f866eded96e3/tasks/a666e82135143bc7c.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix e2e recipients fields" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All 7 sites handled (the "9" count was off — a grep for `recipients:` finds exactly 7, and 2 of those were a `peerReply` helper parameter and its call site already migrated before my turn). Only `scripts/team-ui.e2e.ts` was touched.
+
+## Changes
+
+| Site | Line (after edit) | Action | Reason |
+|---|---|---|---|
+| 1. `m2-06-reviewer-reply` | 1722 | Deleted line | Body already carries `@human`. Assertions (`agentRefLinks`, `hasText: 'reviewer 已读取邀请'`, threadHistory) pin body text; unchanged. |
+| 2. `m2-07-long-markdown-reply` | 1751 | Deleted line | Nothing reads the Human's unread after this reply. The body is a `hasText` locator target and is checked for `task::` / `**加粗**` rendering — no mention needed and adding `@human` would risk the chip rendering inside the pinned prose. |
+| 3. `m2-08-wide-table-reply-${index}` | 1794 | Deleted line | `variant.body` is driven by the `wideTableCases` table; the only assertion is the table-geometry measurement plus `hasText: variant.marker`. Markers stay byte-identical. |
+| 4. `m2-09-code-axis-reply` | 1872 | Deleted line | Assertions measure `pre` font metrics only. No delivery assertion. |
+| 5. `m2-09-builder-mention` | 2946-2950 | **Mention added**: `'@human 需要你拍板：默认走 A 方案'` | `mentionedInbox.totalUnreadCount` must be `baseUnread + 1`, and the row's capsule asserts `2 条未读，其中 1 条直接通知` — the direct marker is the point of the test. No locator pins this body's text. |
+| 6. `m2-09-stack-task` | 3309 | **Mention added**: `'叠放校验：谁在这个 Task 上 @human'` | See note below. |
+| 7. `m2-11-main-arrival` | 4102-4106 | Deleted line | See note below. |
+
+## Judgment calls
+
+**Site 6 (`m2-09-stack-task`)** — this needs the mention, contrary to the brief's "if it only needs the Thread to exist, delete." The subsequent assertions run in this order:
+
+1. `stackItem` is looked up from `inbox().items.find(item =&gt; item.thread.threadRef === stackThreadRef)` with `!` (non-null assert).
+2. Two follow controls (`inboxRow`, `plainRow`) each assert exactly one count badge, and the page header asserts `需要我` is absent.
+3. `expectSidebarUnread(baseUnread === 0 ? '1' : String(baseUnread + 1))` runs after clicking `inboxRow`.
+
+The taskless Threads of sites 5 and the `plain` one are the two rows already in the queue. If the stack Task did not land in `items`, `stackItem` would be `undefined` and `.liveClaimOwners` would throw. Its claim activities alone produce `activityMarkers` (through `responsibilityActivityRecipientsFrom`), but the Task's accountable is `inboxAgent` itself (an Agent actor defaults to itself in `resolveAccountable`), so it receives no responsibility marker and the Human gets nothing from the claim. The mention in the start body is what puts it in the Human's queue.
+
+Also, `stackRow` uses `hasText: '叠放校验：谁在这个 Task 上'` — a substring match, so the trailing ` @human` does not break it. The rendered preview is `boundedOpeningLine(body, 120)` and the body is far shorter than that, so the marker stays visible and the row still matches.
+
+**Site 7 (`m2-11-main-arrival`)** — `steward` is a Project owner: the test grants it ownership via the 编辑项目 dialog (`添加负责人 @steward`, confirmed by `human 指定 @steward 为项目负责人`), and then reads its Main stream backlog with `readMainStreamForAgent` before posting. The brief's premise is right, so the line is deleted.
+
+The `+1` works via `mainUnreadFrom`: the Human's `ownerSinceFrom` returns `max(createdAtSequence, humanOwnerFloor)` (the Human owns every Project), and the new post is past that floor, so it lands as ordinary unread without any marker. `origin` is `steward`, not the reader. This is exactly what the test's own comment says: "It is written by the Project's own Agent so the unread is a real Host marker, not a Client guess."
+
+One nuance worth recording: `mainMessageInboxDelta` only writes markers for the `mentions` set, so a `recipients`-style owner notification no longer exists on the post path at all. The wake is now derived from the owner watermark, not from an inbox marker.
+
+**The other two sites** — beyond my 7, `git show HEAD:` shows a `peerReply(label, recipients)` helper at 1545-1552. It was already converted before my turn to `peerReply(label, mention: boolean)` that folds `@human` into the body. I did not touch it, but I did verify it: `publishDirectMention` needs the mention for `humanDirect()` to reach 1 after the unfollow, and the flip from `[]`/`[humanMemberId]` to `false`/`true` is correct.
+
+## Verification
+
+- `npm run test:browser` — **8/8 files passed, 8/8 tests passed**, twice (85.97s and 85.11s), so no flake.
+- `npm run typecheck` — exit 0.
+- `npm run lint` — exit 0.
+- `grep -c recipients scripts/team-ui.e2e.ts` → 0.
+
+Note on the typecheck: `tsconfig.json`'s package projects only include `src`/`tests`, and `tsconfig.scripts.json` includes only `scripts/session-trace.ts`. The e2e script is not directly in any tsconfig include, so `npm run typecheck` does not typecheck this file; the browser test is the real gate (it renders through `run-browser-test.mjs` and vitest). The removed `recipients` lines would have been excess-property errors under `exactOptionalPropertyTypes` had it been checked.
+
+The stray untracked directory `/home/yu/projects/deepseek-harness/__TEAM_ROOT__/artifacts/browser` predates this work (dated Oct 26, my runs were Oct 27) — a leftover from an earlier run where `__TEAM_ROOT__` was not substituted. Not mine; I left it alone.</result>
+<usage><subagent_tokens>104890</subagent_tokens><tool_uses>106</tool_uses><duration_ms>1139029</duration_ms></usage>
+</task-notification>
