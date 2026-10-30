@@ -1,0 +1,73 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M65VN1WMPZDYXNDVTG81ZDVC",
+  "session_id": "6e40061f-6f69-4701-8bcd-0a97815d2a86",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-30T07:33:43.541696756Z",
+  "branch": "master",
+  "checkpoints_count": 2,
+  "save_step_count": 3,
+  "files_touched": [
+    "scripts/README.md"
+  ],
+  "agent": "Claude Code",
+  "model": "mythos-magpie-0048819438[1m]",
+  "turn_id": "277003fc25bc",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 4525,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 493824,
+    "output_tokens": 1616,
+    "api_call_count": 6,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  },
+  "redaction": {
+    "replacements": 34,
+    "layers": {
+      "betterleaks": 4,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 30,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "prompt-skill-claude-code-scratch-review-2026-10-30T05:35:10.972800318Z",
+      "event_type": "prompt_invocation",
+      "skill": {
+        "name": "scratch-review"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "prompt_slash_command",
+        "confidence": "explicit"
+      },
+      "turn_id": "a8704dc5242c",
+      "timestamp": "2026-10-30T05:35:10.972800318Z",
+      "native": {
+        "command": "/scratch-review"
+      },
+      "collapse": {
+        "target": "user_message",
+        "label": "/scratch-review",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 10
+  }
+}
