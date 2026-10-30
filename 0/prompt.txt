@@ -1,0 +1,117 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>$AGENT_COMPLETE, Agent, Bash, Edit, Read</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+   The user asked to continue work on the `reports/project-ownership-model-review-2026-10.md` file and assess the current situation. The user then gave explicit autonomy: "自己决定推进。同时也注意实际情况如何。" (Decide yourself how to proceed. Also pay attention to the actual situation.) This authorized independent prioritization and action. The overarching goal is to implement the recommendations from the comprehensive Project ownership model review, specifically tackling remaining work items P2-1 through P3-1.
+
+2. Key Technical Concepts:
+   - Project ownership model for Agent Team
+   - Ledger-based operation system with rules versioning (v1 vs v2)
+   - Mention delivery and recipient resolution
+   - Host authority boundary (single ledger authority principle)
+   - Client UI composition and draft state management
+   - TypeScript strict mode with type safety for request/response contracts
+   - Browser acceptance testing with real DSH Web
+   - Backward compatibility with legacy localStorage format
+
+3. Files and Code Sections:
+
+   **packages/agent-team/src/types/requests-results.ts**
+   - Removed `recipients?: readonly AgentTeamMemberId[]` field from three request interfaces:
+     - `AgentTeamReplyRequest` (line 381)
+     - `AgentTeamPostMainMessageRequest` (line 516)
+     - `AgentTeamStartThreadRequest` (line 587)
+   - Updated comments to reflect that parent message author is delivered to directly (no longer mentions "joins the recipients")
+
+   **packages/agent-team/src/ledger.ts**
+   - Removed `normalizeRecipients()` method entirely (was at line 5556-5560)
+   - Updated `reply()` method to remove explicit recipient normalization: changed from `const explicit = this.normalizeRecipients(actor, request.recipients)` to directly using empty array or just reply parent
+   - Updated `postMainMessage()` to remove `const explicit = this.normalizeRecipients(actor, request.recipients)` line
+   - Updated `startThread()` to remove recipients normalization from line 1345
+   - All three methods now pass empty array `[]` for answered recipients to `mergeBodyMentions()`, allowing only body parsing to drive delivery
+
+   **packages/client-agent-team/src/client/drafts.ts**
+   - Removed `AgentTeamMemberId` import (no longer needed)
+   - Changed `TeamDraftState` interface from `{ draft: string; recipients: ReadonlySet<AgentTeamMemberId> }` to `{ draft: string }`
+   - Changed `StoredDraft` interface from `{ draft: string; recipientIds: AgentTeamMemberId[]; savedAt: number }` to `{ draft: string; savedAt: number }`
+   - Updated `sameDraftEntry()` comparison function to only check draft field
+   - Updated `EMPTY` constant from `{ draft: '', recipients: new Set() }` to `{ draft: '' }`
+   - Updated `readStored()` to ignore legacy `recipientIds` field in localStorage with explicit comment: "Legacy drafts carried `recipientIds`; ignore it — body mentions are now the sole authority."
+   - Removed `writeRecipients()` method entirely
+   - Removed `recipientIds` from `write()` method signature
+
+   **packages/client-agent-team/src/client/TeamComposer.tsx**
+   - Changed destructuring from `const { draft, recipients } = useSyncExternalStore(...)` to `const { draft } = useSyncExternalStore(...)`
+   - Deleted entire `pruneRecipients()` function and its useEffect hook
+   - Simplified `deliverableRecipients()` function signature from `(recipients: ReadonlySet<AgentTeamMemberId>, draft: string, members, replyTo)` to `(draft: string, members, replyTo)` and removed `...recipients` spread from the Set construction
+   - Changed call from `deliverableRecipients(recipients, draft, members, replyTo)` to `deliverableRecipients(draft, members, replyTo)`
+   - Removed `recipients` parameter from `commitMention()` function signature
+   - Removed `drafts.writeRecipients()` call from within `commitMention()`
+   - Updated `selectOption()` to call `commitMention(nextDraft, nextCaret)` instead of `commitMention(nextDraft, nextCaret, new Set(recipients).add(...))`
+   - Removed `pruneRecipients(nextDraft)` call from `onChange()` handler
+
+   **packages/client-agent-team/src/client/TeamMainStream.tsx**
+   - Line 133: Changed from `const { draft, recipients } = drafts.getSnapshot(draftKey)` to `const { draft } = drafts.getSnapshot(draftKey)`
+   - Line 146: Removed `recipients: [...recipients].sort(),` from request body object
+
+   **packages/client-agent-team/src/client/TeamThreadPage.tsx**
+   - Line 784: Changed from `const { draft, recipients } = drafts.getSnapshot(draftKey)` to `const { draft } = drafts.getSnapshot(draftKey)`
+   - Line 797: Removed `recipients: [...recipients].sort(),` from reply request
+   - Line 805: Changed from `const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, projectMembers)])].sort()` to `const optimisticMentions = mentionedMemberIds(draft, projectMembers)`
+   - Updated comment from "A hand-typed `@Handle` delivers like a picked recipient" to "Hand-typed `@Handle` delivers directly"
+
+   **packages/client-agent-team/src/client/TeamProjectPanel.tsx**
+   - Line 432: Changed from `const { draft, recipients } = drafts.getSnapshot(draftKey)` to `const { draft } = drafts.getSnapshot(draftKey)`
+   - Line 445: Removed `recipients: [...recipients].sort(),` from reply request
+   - Line 454: Changed from `const optimisticMentions = [...new Set([...recipients, ...mentionedMemberIds(draft, projectMembers)])].sort()` to `const optimisticMentions = mentionedMemberIds(draft, projectMembers)`
+
+   **packages/client-agent-team/tests/drafts.spec.ts**
+   - Removed import of `AgentTeamMemberId` type
+   - Updated test description from "round-trips drafts and recipients per key" to "round-trips drafts per key"
+   - Removed `store.writeRecipients()` call from first test
+   - Removed all assertions checking `[...snapshot.recipients]`
+   - Updated expectations to check `{ draft: '' }` instead of `{ draft: '', recipients: new Set() }`
+   - Updated test data in "tolerates malformed persisted content" to include `recipientIds: []` in legacy format to verify it's loaded correctly
+   - Added new test "ignores legacy recipientIds when restoring from localStorage" that verifies old stored drafts with `recipientIds` field are loaded but the field is ignored
+
+   **packages/agent-team/tests/** (agent-team.spec.ts, member-lifecycle.spec.ts, operation-protocol.spec.ts, post-commit-delivery.spec.ts)
+   - Batch-removed `recipients: [...]` fields from request construction in test cases across multiple files
+   - Processed with automated script initially, then manually fixed remaining cases
+
+4. Errors and fixes:
+   - Error: `recipients` field remained in test files after initial batch processing
+     - Fix: Used automated script to strip most occurrences, then manually edited remaining cases in operation-protocol.spec.ts lines 1032 and 1043
+   - Error: Test file still referenced non-existent `writeRecipients()` method in drafts.spec.ts
+     - Fix: Removed all `store.writeRecipients()` calls and updated assertions accordingly
+   - Error: `AgentTeamMemberId` import no longer needed
+     - Fix: Removed unused import from drafts.ts and drafts.spec.ts
+
+5. Problem Solving:
+   The core problem being solved is the "second authority" issue identified in the report: `recipients` field allowed Client to specify delivery targets independently of body mentions, creating two separate mention input channels. Solution consolidates all mention/delivery information into the message body text, which Host parses as the sole authority. This eliminates draft state complexity, reduces Client-side logic, and ensures delivery decisions are transparent in the body text. Backward compatibility is preserved by explicitly ignoring legacy `recipientIds` stored in localStorage from previous versions.
+
+6. All user messages:
+   - "reports/project-ownership-model-review-2026-10.md 可以推进把剩余没完成的做了。当前是什么情况？" (Can proceed with implementing the remaining incomplete items from this report. What is the current situation?)
+   - "自己决定推进。同时也注意实际情况如何。" (Decide yourself how to proceed. Also pay attention to the actual situation.)
+   - "不行可以用subagent" (If it won't work, can use subagent)
+
+7. Pending Tasks:
+   - Complete remaining test file cleanup in surface-agreement.spec.ts (delegated to subagent)
+   - Run full `npm run typecheck` to verify all errors are resolved
+   - Run `npm test` to ensure test suite passes with all recipients field removals
+   - Run `npm run test:browser` to verify browser acceptance tests still pass
+   - Implement P2-2 (collect v1 confirmation token path into legacy fixture)
+   - Implement P2-3 (merge Thread controller to reduce duplication)
+   - Implement P2-5 (durable cleanup snapshot builder)
+   - Implement P3-1 (test file restructuring)
+
+8. Current Work:
+   Implementing P2-1 (recipients field consolidation) from the project ownership model review. This involved systematically removing the `recipients?: readonly AgentTeamMemberId[]` parameter from three Host request types and all corresponding Client code that constructed or consumed this field. The implementation ensures that all delivery targeting now comes exclusively from parsing `@Handle` mentions in the message body text, eliminating the dual-authority problem. Updated test expectations across multiple test files to match the new behavior. Added backward compatibility for legacy localStorage drafts that contained `recipientIds` fields.
+
+9. Optional Next Step:
+   After the subagent completes cleanup of surface-agreement.spec.ts, run `npm run typecheck` to verify no compilation errors remain. Then run `npm test -- --runInBand` to ensure all unit tests pass with the recipients field removal. The user's most recent explicit request was "不行可以用subagent" in the context of cleaning remaining test files, so the immediate next step is to wait for subagent completion and verify typecheck passes. After that, proceed to P2-2 or continue with remaining P2-1 verification work unless user provides different direction.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/7cf571b6-bccf-4d18-905c-f866eded96e3.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
