@@ -2,7 +2,7 @@ import { missingMessageRange, teamMessageSurface, visibleTeamSurface } from '@co
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 
-export const READ_MAX_CHARACTERS = 32 * 1024
+const READ_MAX_CHARACTERS = 32 * 1024
 
 export async function readingCapacity(agent: Agent, signal: AbortSignal): Promise<number> {
   const { provider, model } = agent.session.requestHeader()?.config ?? agent.options
@@ -14,8 +14,12 @@ export async function readingCapacity(agent: Agent, signal: AbortSignal): Promis
     // One UTF-16 unit per available token is deliberately conservative, not a tokenizer claim.
     return Math.max(0, Math.min(256 * 1024, (info.context?.contextWindow ?? 320_000) - 16_384))
   } catch (error) {
-    if (error instanceof LlmError && error.code === 'NO_ADAPTER') return 256 * 1024
-    throw error
+    // An abort is the caller's own cancellation and must surface. Anything else
+    // — a missing adapter, unusable model metadata, a transient connection —
+    // falls back to the conservative limit, because a reading action that does
+    // not need the model's capacity should not fail on it.
+    if (error instanceof LlmError && error.code === 'ABORTED') throw error
+    return 256 * 1024
   }
 }
 export interface MessagePart {
@@ -42,7 +46,7 @@ interface Reading {
   readonly kind: string
   readonly facts?: readonly Entry[] | undefined
   readonly entries?: readonly Entry[] | undefined
-  readonly message?: { readonly messageRef: string; readonly body: string; readonly sequence: number } | undefined
+  readonly message?: { readonly messageRef: string; readonly body: string; readonly sequence: number; readonly bodyOmitted?: boolean } | undefined
   readonly remainingUnreadCount?: number | undefined
   readonly reminders?: readonly unknown[] | undefined
   readonly messageParts?: readonly MessagePart[] | undefined
@@ -66,9 +70,9 @@ export function budgetReading<V extends Reading>(agent: Agent, value: V, render:
     ? 'Continue: repeat team_thread message with the same address and messageRef. Missing parts are recovered from current context; this query never acknowledges.'
     : 'Continue: repeat team_thread read with the same address. Missing parts are recovered from current context; incomplete Messages stay unread.'
   const fits = (candidate: V) => render(candidate).length <= READ_MAX_CHARACTERS - 64
-  const make = (entries: readonly Entry[], parts: readonly MessagePart[] = []): V => {
+  const make = (entries: readonly Entry[], parts: readonly MessagePart[] = [], override: Partial<V> = {}): V => {
     const acknowledged = entries.filter(entry => entry.unread && !parts.some(part => part.messageRef === entry.messageRef && !part.complete)).length
-    return { ...value, ...(value.kind === 'message' ? {} : { [key]: entries }), messageParts: parts,
+    return { ...value, ...override, ...(value.kind === 'message' ? {} : { [key]: entries }), messageParts: parts,
       ...(parts.some(part => !part.complete) ? { continuation } : {}),
       ...(value.kind !== 'read' ? {} : { remainingUnreadCount: (value.remainingUnreadCount ?? 0) + unread.length - acknowledged,
         ...(unread.length > 0 && acknowledged === 0 ? { reminders: [] } : {}) }) }
@@ -85,25 +89,40 @@ export function budgetReading<V extends Reading>(agent: Agent, value: V, render:
   }
   const first = selected[0]
   if (first?.kind === 'message' && first.body !== undefined && first.messageRef !== undefined && !first.bodyOmitted && !fits(candidate)) {
-    if (first.body.length > capacity) throw new Error(`Message exceeds the reading capacity (${first.body.length} > ${capacity} UTF-16 units): ${first.messageRef}. Nothing acknowledged. Ask the sender for shorter Messages or use a larger-context model; repeating this call cannot complete it.`)
     const address = value.threadRef === undefined ? { projectRef: value.projectRef } : { threadRef: value.threadRef }
     const missing = missingMessageRange(surface, { ...address, messageRef: first.messageRef, body: first.body })
-    const start = missing?.start ?? first.body.length
-    const gapEnd = missing?.end ?? first.body.length
-    const target = { ...address, messageRef: first.messageRef, body: first.body }
-    const complete = (end: number) => missing === undefined || missingMessageRange([
-      ...surface, teamMessageSurface('', [{ ...target, part: { start, end } }]),
-    ], target) === undefined
-    let low = start, high = Math.min(gapEnd, start + READ_MAX_CHARACTERS)
-    while (low < high) {
-      const end = Math.ceil((low + high) / 2)
-      if (fits(make(selected, [{ messageRef: first.messageRef, start, end, complete: complete(end) }]))) low = end
-      else high = end - 1
+    // The whole body is already on the live surface: there is nothing left to
+    // deliver, so this result says so instead of rendering a zero-length part
+    // where the body should be. A capacity check cannot help either, because
+    // the body reached the context once already.
+    if (missing === undefined) {
+      // Nothing left to deliver, so this result says the body is already here
+      // instead of rendering a zero-length part where the body should be. A
+      // capacity check cannot help either, because the body reached context
+      // once already.
+      const omitted = value.kind === 'message' && value.message !== undefined
+        ? { message: { ...value.message, bodyOmitted: true } }
+        : { [key]: selected.map(entry => entry.messageRef === first.messageRef ? { ...entry, bodyOmitted: true } : entry) }
+      candidate = make(selected, [], omitted as Partial<V>)
+    } else {
+      if (first.body.length > capacity) throw new Error(`Message exceeds the reading capacity (${first.body.length} > ${capacity} UTF-16 units): ${first.messageRef}. Nothing acknowledged. Ask the sender for shorter Messages or use a larger-context model; repeating this call cannot complete it.`)
+      const start = missing.start
+      const gapEnd = missing.end
+      const target = { ...address, messageRef: first.messageRef, body: first.body }
+      const complete = (end: number) => missingMessageRange([
+        ...surface, teamMessageSurface('', [{ ...target, part: { start, end } }]),
+      ], target) === undefined
+      let low = start, high = Math.min(gapEnd, start + READ_MAX_CHARACTERS)
+      while (low < high) {
+        const end = Math.ceil((low + high) / 2)
+        if (fits(make(selected, [{ messageRef: first.messageRef, start, end, complete: complete(end) }]))) low = end
+        else high = end - 1
+      }
+      let end = low
+      if (end > start && end < first.body.length && /[\uD800-\uDBFF]/.test(first.body[end - 1]!)) end -= 1
+      if (end === start) throw new Error('Message reading cannot fit its identity and one character in the output budget; nothing acknowledged.')
+      candidate = make(selected, [{ messageRef: first.messageRef, start, end, complete: complete(end) }])
     }
-    let end = low
-    if (end > start && end < first.body.length && /[\uD800-\uDBFF]/.test(first.body[end - 1]!)) end -= 1
-    if (end === start && missing !== undefined) throw new Error('Message reading cannot fit its identity and one character in the output budget; nothing acknowledged.')
-    candidate = make(selected, [{ messageRef: first.messageRef, start, end, complete: complete(end) }])
   }
   if (!fits(candidate)) throw new Error('A single fact or its required context exceeds the fixed reading output budget; nothing acknowledged. Activity events cannot be split. Repeating this call or changing models cannot remove this limit; ask the Human to inspect the event and decide how to continue.')
   if (value.kind !== 'message' && (candidate.messageParts?.length ?? 0) === 0) {

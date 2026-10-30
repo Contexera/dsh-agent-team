@@ -46,6 +46,29 @@ async function discussion(kind: 'discussion' | 'task' = 'discussion') {
 }
 
 describe('Thread read uses the current Session context', () => {
+  it('advances a long message query to its end and then reports the body already present', async () => {
+    const { ctx, agent, threadRef, reply, read } = await discussion()
+    const message = await reply('A'.repeat(40000))
+    const parts: string[] = []
+    for (let index = 0; index < 6; index += 1) {
+      const part = await read('message', message.message.messageRef)
+      parts.push(part)
+      if (part.includes('complete in current context')) break
+    }
+    // Every step delivers real text, so the query always makes progress.
+    expect(parts.length).toBeGreaterThanOrEqual(2)
+    for (const part of parts) expect(part).not.toMatch(/start="(\d+)" end="\1"/)
+    expect(parts.at(-1)).toContain('complete in current context')
+    // Once the whole body is on the surface, another query says so instead of
+    // rendering a zero-length part where the body should be.
+    const after = await read('message', message.message.messageRef)
+    expect(after).toContain('body already in current context; omitted')
+    expect(after).toContain(message.message.messageRef)
+    expect(after).not.toMatch(/<message-part/)
+    // A query never acknowledges, so the unread count is unchanged throughout.
+    expect(ctx.agentTeam.inboxForAgent(agent, {}).items.find(item => item.thread.threadRef === threadRef)?.unreadCount).toBe(1)
+  })
+
   it('recovers a missing middle part after compaction and confirms only when all parts are visible', async () => {
     const { ctx, agent, threadRef, reply, read } = await discussion()
     const message = await reply('多段正文🙂需要全部仍在上下文。'.repeat(7000) + '正文结束。')

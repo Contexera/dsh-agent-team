@@ -358,6 +358,11 @@ function renderMainRejection(value: { projectRef?: string; unreadCount?: number;
     activities: complete.flatMap(entry => { const fact = activityFromView(entry, value.projectRef); return fact === undefined ? [] : [fact] }) }
 }
 
+/** One rejection's meta: its outcome kind plus the facts its rendered text carries, bound so a reconsidered write needs no second read. */
+function rejectionMeta(value: { kind: string }, rendered: { text: string; messages: Parameters<typeof teamMessageSurface>[1]; activities?: Parameters<typeof teamMessageSurface>[2] }) {
+  return { kind: value.kind, teamFacts: teamMessageSurface(rendered.text, rendered.messages, rendered.activities ?? []) }
+}
+
 const REMINDER_SCHEMA = { type: 'object', additionalProperties: false, properties: {
   taskRef: { type: 'string', required: true }, kind: { type: 'string', required: true }, recipient: { type: 'string', required: true },
   baselineSequence: { type: 'number', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string', required: true },
@@ -567,7 +572,7 @@ const teamThread = defineTool({
       entries: { type: 'array', items: MAIN_ENTRY_SCHEMA }, standing: MAIN_STANDING_SCHEMA,
       messageParts: { type: 'array', items: MESSAGE_PART_SCHEMA }, continuation: { type: 'string' },
       message: { type: 'object', additionalProperties: false, properties: {
-        messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' }, body: { type: 'string', required: true },
+        messageRef: { type: 'string', required: true }, sender: { type: 'string', required: true }, sequence: { type: 'number', required: true }, occurredAt: { type: 'string' }, body: { type: 'string', required: true }, bodyOmitted: { type: 'boolean' },
       } },
       revision: { type: 'number' }, status: { type: 'string' }, resolution: { type: 'string' }, taskNumber: { type: 'number' }, accountable: { type: 'string' },
       following: { type: 'boolean' }, readThroughSequence: { type: 'number' }, remainingUnreadCount: { type: 'number' }, earlierFactCount: { type: 'number' }, cursor: { type: 'number' }, hasMore: { type: 'boolean' },
@@ -598,7 +603,9 @@ const teamThread = defineTool({
           `Message ${message.messageRef}`,
           `${message.sequence}${at} [${message.sender}]`,
           '',
-          messagePartText(message.body, value.messageParts?.find(part => part.messageRef === message.messageRef)),
+          message.bodyOmitted === true
+            ? `${message.messageRef} — body already in current context; omitted.`
+            : messagePartText(message.body, value.messageParts?.find(part => part.messageRef === message.messageRef)),
           ...(value.continuation === undefined ? [] : [value.continuation]),
         ].join('\n') }]
       }
@@ -671,7 +678,7 @@ const teamThread = defineTool({
     presentationMeta: (args, value): { teamFacts: ReturnType<typeof teamMessageSurface> } => {
       const text = teamThread.output.render(args, value).flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
       if (value.scope === 'main') {
-        const messages = value.kind === 'message' ? value.message === undefined ? [] : [value.message]
+        const messages = value.kind === 'message' ? value.message === undefined || value.message.bodyOmitted === true ? [] : [value.message]
           : (value.entries ?? []).filter(entry => entry.kind === 'message' && !entry.bodyOmitted)
         return { teamFacts: teamMessageSurface(text, messages.flatMap(message => message.messageRef === undefined || message.body === undefined
           ? [] : [{ projectRef: value.projectRef, messageRef: message.messageRef, body: message.body,
@@ -697,7 +704,9 @@ const teamThread = defineTool({
     const agent = exec.agent
     if (agent === undefined) throw new Error('team_thread requires an Agent session')
     const host = service(agent)
-    const capacity = await readingCapacity(agent, exec.signal)
+    // Only `read` and `message` need the model's capacity: `history` pages by
+    // count under its own bound, so it never resolves model info.
+    const capacity = args.action === 'history' ? Number.POSITIVE_INFINITY : await readingCapacity(agent, exec.signal)
     if (args.projectRef !== undefined) return mainStreamOutcome(host, agent, args, requestId(agent.id, exec.callId), capacity)
     if (args.threadRef === undefined && args.taskRef === undefined) throw new Error(`team_thread needs threadRef (or taskRef on a Taskful Thread) — ${recoveryFor('missing_thread_identity').sentence({})}`)
     const base = { workspaceId: workspaceOf(args, agent), ...(args.threadRef === undefined ? {} : { threadRef: args.threadRef as AgentTeamThreadRef }), ...(args.taskRef === undefined ? {} : { taskRef: args.taskRef as AgentTeamTaskRef }) }
@@ -731,7 +740,7 @@ const teamThread = defineTool({
       const snapshot = host.threadHistoryForAgent(agent, { ...base, beforeSequence: 1, limit: 1 })
       const status = host.attentionStatusForAgent(agent, base)
       const value = threadResult('message', base.workspaceId, snapshot, status.attention, [], {
-        message: { messageRef: readBack.messageRef, sender: readBack.sender, sequence: readBack.sequence, ...(readBack.occurredAt === undefined ? {} : { occurredAt: readBack.occurredAt }), body: readBack.body },
+        message: { messageRef: readBack.messageRef, sender: readBack.sender, sequence: readBack.sequence, ...(readBack.occurredAt === undefined ? {} : { occurredAt: readBack.occurredAt }), body: readBack.body, bodyOmitted: false },
         ...taskNumberOf(snapshot.task),
       })
       return budgetReading(agent, value, (candidate): string => teamThread.output.render(args, candidate as never).map((part: { type: string; text?: string }) => part.type === 'text' ? part.text : '').join('\n'), capacity).value
@@ -775,7 +784,7 @@ function mainStreamLines(action: string, value: {
   readonly readThroughSequence?: number | undefined; readonly remainingUnreadCount?: number | undefined
   readonly messageParts?: readonly MessagePart[] | undefined; readonly continuation?: string | undefined
   readonly standing?: { following: boolean } | undefined
-  readonly message?: { readonly messageRef: string; readonly sender: string; readonly sequence: number; readonly occurredAt?: string | undefined; readonly body: string } | undefined
+  readonly message?: { readonly messageRef: string; readonly sender: string; readonly sequence: number; readonly occurredAt?: string | undefined; readonly body: string; readonly bodyOmitted?: boolean } | undefined
 }): string[] {
   const source = `Workspace: ${value.workspaceId} · Project: ${value.projectRef} · Main stream`
   // The standing names the reader's own Attention, which is the one fact this
@@ -785,7 +794,10 @@ function mainStreamLines(action: string, value: {
     : 'Attention: not following — ordinary updates here will not interrupt you. team_attention follow with projectRef starts them.']
   if (value.kind === 'message') {
     const message = value.message!
-    return [source, `Message ${message.messageRef}`, `${message.sequence}${message.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(message.occurredAt)}`} [${message.sender}]`, '', messagePartText(message.body, value.messageParts?.find(part => part.messageRef === message.messageRef)),
+    const body = message.bodyOmitted === true
+      ? `${message.messageRef} — body already in current context; omitted.`
+      : messagePartText(message.body, value.messageParts?.find(part => part.messageRef === message.messageRef))
+    return [source, `Message ${message.messageRef}`, `${message.sequence}${message.occurredAt === undefined ? '' : ` ${formatTeamTimestamp(message.occurredAt)}`} [${message.sender}]`, '', body,
       ...(value.continuation === undefined ? [] : [value.continuation])]
   }
   const entries = value.entries ?? []
@@ -834,7 +846,7 @@ async function mainStreamOutcome(
     if (args.beforeSequence !== undefined || args.limit !== undefined) throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'message' }))
     const read = host.readMessageForAgent(agent, { workspaceId, projectRef, messageRef: args.messageRef as AgentTeamMessageRef })
     const value = { ...base, projectRef: read.projectRef, kind: 'message', message: { messageRef: read.messageRef, sender: read.sender, sequence: read.sequence,
-      ...(read.occurredAt === undefined ? {} : { occurredAt: read.occurredAt }), body: read.body } }
+      ...(read.occurredAt === undefined ? {} : { occurredAt: read.occurredAt }), body: read.body, bodyOmitted: false } }
     return budgetReading(agent, value, candidate => mainStreamLines(args.action, candidate).join('\n'), capacity).value
   }
   if (args.action === 'history') {
@@ -905,8 +917,8 @@ function threadResult(
   snapshot: Awaited<ReturnType<AgentTeam['readThreadForAgent']>> | ReturnType<AgentTeam['threadHistoryForAgent']>,
   attention: Awaited<ReturnType<AgentTeam['readThreadForAgent']>>['attention'],
   facts: FactView[],
-  extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; taskNumber?: number; taskCards?: TaskCardView[]; reminders?: AgentTeamInboxReminder[]; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string } } = {},
-): { workspaceId: string; projectRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; taskCards?: TaskCardView[]; reminders?: AgentTeamInboxReminder[]; claims: ClaimView[]; facts: FactView[] } {
+  extra: { cursor?: number; hasMore?: boolean; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; taskNumber?: number; taskCards?: TaskCardView[]; reminders?: AgentTeamInboxReminder[]; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string; bodyOmitted?: boolean } } = {},
+): { workspaceId: string; projectRef: string; anchor: { messageRef: string; sender: string; body: string; sequence: number; occurredAt?: string; replyToMessageRef?: string; replyTo?: ReplyContextView }; message?: { messageRef: string; sender: string; sequence: number; occurredAt?: string; body: string; bodyOmitted?: boolean }; threadRef: string; revision: number; kind: string; following: boolean; taskRef?: string; status?: string; resolution?: string; taskNumber?: number; accountable?: string; readThroughSequence?: number; remainingUnreadCount?: number; earlierFactCount?: number; cursor?: number; hasMore?: boolean; taskCards?: TaskCardView[]; reminders?: AgentTeamInboxReminder[]; claims: ClaimView[]; facts: FactView[] } {
   return {
     workspaceId, projectRef: snapshot.anchor.projectRef,
     kind, threadRef: snapshot.thread.threadRef, revision: snapshot.thread.revision,
@@ -1025,12 +1037,10 @@ const teamMessage = markAgentTeamPreset(defineTool({
         return { kind: value.kind, threadRef: value.threadRef, ...(value.taskRef === undefined ? {} : { taskRef: value.taskRef }) }
       }
       if (value.kind === 'unread_required' || value.kind === 'stale_revision') {
-        const rendered = renderRejection(value)
-        return { kind: value.kind, teamFacts: teamMessageSurface(rendered.text, rendered.messages, rendered.activities) }
+        return rejectionMeta(value, renderRejection(value))
       }
       if (value.kind === 'main_unread_required') {
-        const rendered = renderMainRejection(value)
-        return { kind: value.kind, teamFacts: teamMessageSurface(rendered.text, rendered.messages, rendered.activities) }
+        return rejectionMeta(value, renderMainRejection(value))
       }
       return { kind: value.kind }
     },
@@ -1291,8 +1301,7 @@ const teamTask = defineTool({
     // A Claim or Task rejection can carry the same complete Thread facts; binding them lets a reconsidered write pass without a second read. Non-rejection results carry only the outcome kind.
     presentationMeta: (_args, value): { kind: string; threadRef?: string; taskRef?: string; teamFacts?: ReturnType<typeof teamMessageSurface> } => {
       if ((value.kind === 'unread_required' || value.kind === 'stale_revision') && value.threadRef !== undefined) {
-        const rendered = renderRejection(value)
-        return { kind: value.kind, teamFacts: teamMessageSurface(rendered.text, rendered.messages, rendered.activities) }
+        return rejectionMeta(value, renderRejection(value))
       }
       return { kind: value.kind }
     },

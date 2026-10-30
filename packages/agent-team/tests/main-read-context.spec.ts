@@ -209,4 +209,19 @@ describe('Main read uses the current Session context', () => {
     expect(read).toContain(second.body)
     expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing.unreadCount).toBe(0)
   })
+
+  it('keeps an already-read Thread card once a newer entry arrives', async () => {
+    const { ctx, agent, workspaceId, projectRef } = await mainStream()
+    // The discussion's Main entry is a Thread card: current state, not unread work.
+    await ctx.agentTeam.startThread({ requestId: requestId('discussion'), workspaceId, projectRef, kind: 'discussion', body: 'Fix the importer' })
+    await ctx.agentTeam.readMainStreamForAgent(agent, { requestId: requestId('first'), workspaceId, projectRef })
+    await ctx.agentTeam.postMainMessage({ requestId: requestId('post'), workspaceId, projectRef, body: 'Status check on the importer.' })
+    // The second read answers the new Message; the card it already acknowledged
+    // stays visible, because a card is the Thread's current state.
+    const read = await ctx.agentTeam.readMainStreamForAgent(agent, { requestId: requestId('second'), workspaceId, projectRef })
+    const cards = read.entries.filter(entry => entry.kind === 'thread-card')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]).toMatchObject({ unread: false, card: expect.objectContaining({ anchor: expect.objectContaining({ preview: 'Fix the importer' }) }) })
+    expect(read.entries.filter(entry => entry.unread)).toHaveLength(1)
+  })
 })

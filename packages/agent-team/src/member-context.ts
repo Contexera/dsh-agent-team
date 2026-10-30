@@ -212,7 +212,7 @@ function memoryAnomaly(memory: MemberMemoryState): string {
   return ''
 }
 
-function renderMemberMemoryState(memory: MemberMemoryState, privateMemoryPath = '<private-memory-path>'): string {
+function renderMemberMemoryState(memory: MemberMemoryState, privateMemoryPath: string): string {
   if (memory.kind === 'index') return renderMemberMemory(memory.raw, privateMemoryPath)
   return renderUnavailableMemory(privateMemoryPath, memoryAnomaly(memory))
 }
@@ -226,7 +226,7 @@ export function renderMemberMemory(raw: Buffer, privateMemoryPath = '<private-me
 }
 
 /** A compact stale-copy notice: it supersedes earlier private-memory context without pretending to carry the current index. */
-export function renderMemberMemoryUpdate(memory: MemberMemoryState, privateMemoryPath = '<private-memory-path>'): string {
+function renderMemberMemoryUpdate(memory: MemberMemoryState, privateMemoryPath: string): string {
   const usage = memoryUsage(memory)
   const anomaly = memoryAnomaly(memory)
   const state = anomaly === '' ? usage : anomaly

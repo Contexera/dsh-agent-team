@@ -1314,33 +1314,25 @@ export class AgentTeamLedger {
       }
       this.requireRulesVersion2('the Main stream')
       this.requireProjectMemberActor(actor, project.projectRef)
-      const head = this.mainHeadFrom(this.state, project.projectRef)
       // Selection runs inside the queue against the state this write will
-      // actually see, so an entry queued ahead of it is never skipped.
+      // actually see, so an entry queued ahead of it is never skipped. The
+      // preview derives the same bound without writing anything.
       const selected = select === undefined ? undefined : select(this.previewMainStreamRead({ ...request, actor }))
-      // Without an explicit bound a read acknowledges only the first page of unread, so a backlog is read page by page, never skipped.
-      const backlog = selected === undefined && request.readThroughSequence === undefined
-        ? this.mainUnreadFrom(this.state, actor.memberId, project.projectRef) : []
-      const readThrough = selected ?? request.readThroughSequence
-        ?? (backlog.length > MAIN_READ_PAGE_SIZE ? backlog[MAIN_READ_PAGE_SIZE - 1]!.source.sequence : head)
-      if (!Number.isInteger(readThrough) || readThrough < 0 || readThrough > head) {
-        throw new Error(`readThroughSequence must be an integer from 0 to the Main stream head ${head}`)
-      }
-      const prepared = this.prepareMainReadFrom(this.state, actor.memberId, project.projectRef, readThrough)
-      if (!prepared.advances && isEmptyInboxDelta(prepared.inbox)) {
+      const { readThrough, inbox, noOp, consumed } = this.planMainRead(actor.memberId, project.projectRef, request.readThroughSequence, selected)
+      if (noOp) {
         return this.resolved(this.mainReadResult(actor.memberId, project.projectRef, readThrough, []))
       }
       const operation: AgentTeamMainStreamReadOperation = Object.freeze({
         ...this.operationBase(request, this.nextSequence()), kind: 'team/main-stream-read',
         data: Object.freeze({ workspaceId: request.workspaceId, projectRef: project.projectRef, memberId: actor.memberId,
-          readThroughSequence: readThrough, inbox: prepared.inbox }),
+          readThroughSequence: readThrough, inbox }),
       })
       // The picture shows what the reader saw before this read, so it is taken ahead of the commit.
-      const picture = this.mainReadPage(actor.memberId, project.projectRef, prepared.consumed, readThrough)
+      const picture = this.mainReadPage(actor.memberId, project.projectRef, consumed, readThrough)
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(Object.freeze({ receipt: this.receipt(operation), projectRef: project.projectRef, readThroughSequence: readThrough,
-        entries: picture, consumedMarkers: prepared.consumed, standing: this.mainStandingFrom(this.state, actor.memberId, project.projectRef) }))
+        entries: picture, consumedMarkers: consumed, standing: this.mainStandingFrom(this.state, actor.memberId, project.projectRef) }))
     })
   }
 
@@ -1354,15 +1346,7 @@ export class AgentTeamLedger {
     const project = this.requireActiveProject(request.workspaceId, request.projectRef)
     this.requireRulesVersion2('the Main stream')
     this.requireProjectMemberActor(actor, project.projectRef)
-    const head = this.mainHeadFrom(this.state, project.projectRef)
-    const backlog = request.readThroughSequence === undefined ? this.mainUnreadFrom(this.state, actor.memberId, project.projectRef) : []
-    const readThrough = request.readThroughSequence ?? (backlog.length > MAIN_READ_PAGE_SIZE ? backlog[MAIN_READ_PAGE_SIZE - 1]!.source.sequence : head)
-    if (!Number.isInteger(readThrough) || readThrough < 0 || readThrough > head) {
-      throw new Error(`readThroughSequence must be an integer from 0 to the Main stream head ${head}`)
-    }
-    const prepared = this.prepareMainReadFrom(this.state, actor.memberId, project.projectRef, readThrough)
-    const noOp = !prepared.advances && isEmptyInboxDelta(prepared.inbox)
-    const consumed = noOp ? [] : prepared.consumed
+    const { readThrough, noOp, consumed } = this.planMainRead(actor.memberId, project.projectRef, request.readThroughSequence)
     const unread = this.mainUnreadFrom(this.state, actor.memberId, project.projectRef)
     const entries = new Map(this.mainReadPage(actor.memberId, project.projectRef, consumed, readThrough).map(entry => [entry.sequence, entry]))
     for (const entry of this.mainEntries(unread.filter(item => item.source.sequence <= readThrough).map(item => item.source), unread)) entries.set(entry.sequence, entry)
@@ -1370,6 +1354,27 @@ export class AgentTeamLedger {
       entries: Object.freeze([...entries.values()].sort((left, right) => left.sequence - right.sequence)), consumedMarkers: consumed,
       standing: noOp ? this.mainStandingFrom(this.state, actor.memberId, project.projectRef)
         : this.mainStandingAfterRead(actor.memberId, project.projectRef, readThrough) })
+  }
+
+  /**
+   * The bound one Main stream read acknowledges, and the delta committing it
+   * would write. An explicit bound wins; without one the read acknowledges only
+   * the first page of unread, so a backlog is read page by page, never skipped.
+   * `hasBacklog` distinguishes a bound already chosen from one still defaulted.
+   */
+  private planMainRead(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, requested: number | undefined, selected?: number): {
+    readThrough: number; inbox: AgentTeamInboxDelta; noOp: boolean; consumed: readonly AgentTeamMainMarker[] } {
+    const head = this.mainHeadFrom(this.state, projectRef)
+    const backlog = selected === undefined && requested === undefined
+      ? this.mainUnreadFrom(this.state, memberId, projectRef) : []
+    const readThrough = selected ?? requested
+      ?? (backlog.length > MAIN_READ_PAGE_SIZE ? backlog[MAIN_READ_PAGE_SIZE - 1]!.source.sequence : head)
+    if (!Number.isInteger(readThrough) || readThrough < 0 || readThrough > head) {
+      throw new Error(`readThroughSequence must be an integer from 0 to the Main stream head ${head}`)
+    }
+    const prepared = this.prepareMainReadFrom(this.state, memberId, projectRef, readThrough)
+    const noOp = !prepared.advances && isEmptyInboxDelta(prepared.inbox)
+    return { readThrough, inbox: prepared.inbox, noOp, consumed: noOp ? [] : prepared.consumed }
   }
 
   /** Start a discussion or Task Thread: a Project owner's act. Mentions deliver a direct marker only; the creator alone follows. */

@@ -106,7 +106,7 @@ export function isMainEntryOnSurface(entries: readonly TeamMessageSurface[], ent
 }
 
 /** A Command or Remote projection is not a Session output: only the bound activity text attests. */
-export function isActivityOnSurface(entries: readonly TeamMessageSurface[], fact: ActivityFact): boolean {
+function isActivityOnSurface(entries: readonly TeamMessageSurface[], fact: ActivityFact): boolean {
   const identity = activityIdentity(fact)
   const factDigest = activityFactDigest(fact)
   return entries.some(entry => entry.activities.some(activity => activity.factDigest === factDigest

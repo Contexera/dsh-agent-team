@@ -1767,7 +1767,14 @@ export default class AgentTeam extends TypertRemoteService {
       && isMainEntryOnSurface(surface, entry, read.projectRef) ? [entry.message.messageRef] : [])
     const visibleActivityRefs = unread.flatMap(entry => entry.kind === 'activity'
       && isMainEntryOnSurface(surface, entry, read.projectRef) ? [entry.activity.activityRef] : [])
-    return { ...read, entries: [...background, ...unread].sort((left, right) => left.sequence - right.sequence), visibleMessageRefs, visibleActivityRefs }
+    // The ledger's page keeps its already-read Thread cards: a card is current
+    // state, not unread work, and dropping it hid every Thread the reader had
+    // already acknowledged once a newer entry arrived.
+    const page = read.entries.filter(entry => entry.kind === 'thread-card')
+    const merged = [...page, ...background, ...unread]
+      .filter((entry, index, entries) => entries.findIndex(item => item.sequence === entry.sequence) === index)
+      .sort((left, right) => left.sequence - right.sequence)
+    return { ...read, entries: merged, visibleMessageRefs, visibleActivityRefs }
   }
 
   mainStreamHistoryForAgent(agent: Agent, request: AgentTeamMainStreamHistoryRequest): AgentTeamMainStreamHistory {
