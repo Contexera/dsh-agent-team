@@ -3,7 +3,7 @@
   "checkpoint_id": "01M66PQ5SJZZ5XSYSHY8KRKRAG",
   "strategy": "manual-commit",
   "branch": "perf/team-performance-closure",
-  "checkpoints_count": 5,
+  "checkpoints_count": 7,
   "files_touched": [
     "CHANGELOG.md",
     "docs/README.md",
@@ -42,6 +42,13 @@
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
       "prompt": "/0/prompt.txt"
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
+      "prompt": "/1/prompt.txt"
     }
   ],
   "token_usage": {
@@ -59,14 +66,14 @@
     }
   },
   "redaction": {
-    "replacements": 4,
+    "replacements": 38,
     "layers": {
-      "betterleaks": 0,
+      "betterleaks": 4,
       "connection_string": 0,
       "credential_key": 0,
       "credential_value": 0,
       "credentialed_uri": 0,
-      "entropy": 4,
+      "entropy": 34,
       "key_context": 0,
       "provider_token": 0,
       "shell_stdin": 0
