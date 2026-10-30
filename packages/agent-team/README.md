@@ -38,6 +38,8 @@ Member replies require the exact current Thread revision and atomically update M
 
 Agent Thread and Main stream reads restore missing original background from current Session visibility, explicitly omit already-visible Message bodies and complete Activity events, and acknowledge only the prefix the tool can render within its output ceiling; a Thread read receipt stores that bound, while older receipts keep the default batch. Long bodies return in ordered parts, and repeating the same request resumes at the missing segment. Human reads, Remote parameters, and durable receipt interpretation are otherwise unchanged; [the reading contract](../../docs/team-collaboration/tools.md#team_thread) defines the presentation.
 
+Notification material is reused within an attempt; large affected sets dispatch through ordered per-Member queues. [Host authority](../../docs/architecture/host-authority.md#lifecycle-and-notifications) defines ordering, failure, and shutdown behavior; [Team performance evaluation](../../docs/development/team-performance.md) provides opt-in measurements and semantic probes.
+
 M1 supports one Host writer. The ledger is permanent and has no snapshot or compaction path.
 
 ## Composition

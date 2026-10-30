@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { writeFile } from 'node:fs/promises'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -12,7 +13,7 @@ import AgentTeam from '../src/index.ts'
 import { agentTeamHumanActor } from '../src/ledger.ts'
 import * as agentTeamInvariant from '../src/invariant.ts'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamProjectRef, AgentTeamMemberActor, AgentTeamRequestId } from '../src/types.ts'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -208,6 +209,208 @@ describe('post-commit delivery', () => {
     info.mockRestore()
   })
 
+  it('returns the durable result before a large notification fan-out drains', async () => {
+    const { ctx } = await harness()
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('fanout-queue-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const members: Array<{ member: AgentTeamMemberActor; calls: UserMessage[] }> = []
+    for (let index = 0; index < 8; index += 1) {
+      const member = await addLiveMember(ctx, project.project.projectRef, `reader-${index}`)
+      const seam = wakeSeam()
+      seam.state.fail = false
+      ctx.agentTeam['handles'].set(member.memberId, { agent: seam.agent, dispose: async () => {} })
+      members.push({ member, calls: seam.state.calls })
+    }
+    const waiter = nextChange(ctx.agentTeam)
+    const body = members.map(({ member }) => `@${member.handle}`).join(' ')
+    const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('fanout-queued'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `${body} review this` })
+    expect(sent.kind).toBe('committed')
+    const followUp = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('fanout-queued-follow-up'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${members[0]!.member.handle} follow-up` })
+    expect(followUp.kind).toBe('committed')
+    expect(members.flatMap(({ calls: memberCalls }) => memberCalls)).toEqual([])
+    expect(await waiter).toMatchObject({ version: sent.kind === 'committed' ? sent.receipt.sequence : expect.any(Number) })
+    await vi.waitFor(() => {
+      const delivered = members.flatMap(({ calls: memberCalls }) => memberCalls)
+      expect(delivered).toHaveLength(8)
+    })
+  })
+
+  it('isolates failed and replaced Members while a deferred batch drains', async () => {
+    const { ctx } = await harness()
+    const team = ctx.agentTeam
+    const project = await team.createProject({ requestId: requestId('queued-generation-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const members = []
+    for (let index = 0; index < 8; index += 1) {
+      const member = await addLiveMember(ctx, project.project.projectRef, `generation-${index}`)
+      const seam = wakeSeam()
+      seam.state.fail = index === 1
+      team['handles'].set(member.memberId, { agent: seam.agent, dispose: async () => {} })
+      members.push({ member, ...seam })
+    }
+    const sent = await team.startThread({ kind: 'discussion', requestId: requestId('queued-generation'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: members.map(({ member }) => `@${member.handle}`).join(' ') })
+    expect(sent.kind).toBe('committed')
+    const retired = members[0]!
+    const replacement = wakeSeam()
+    replacement.state.fail = false
+    team['handles'].set(retired.member.memberId, { agent: replacement.agent, dispose: async () => {} })
+    team['clearMemberNotificationState'](retired.member.memberId)
+    team['notifyMember'](replacement.agent, { kind: 'activation', previousSessionId: retired.agent.id })
+    await vi.waitFor(() => expect(team['notificationEffectTails'].size).toBe(0))
+    expect(retired.state.calls).toHaveLength(0)
+    expect(replacement.state.calls).toHaveLength(1)
+    expect(members[1]!.state.calls).toHaveLength(0)
+    expect(members.slice(2).every(member => member.state.calls.length === 1)).toBe(true)
+    members[1]!.state.fail = false
+    await team.startThread({ kind: 'discussion', requestId: requestId('queued-generation-retry'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${members[1]!.member.handle} retry` })
+    expect(members[1]!.state.calls).toHaveLength(1)
+    team.validateLedger()
+  })
+
+  it('re-attempts the Threads an earlier notice could not render when the Member starts its own turn', async () => {
+    const { ctx } = await harness()
+    const debug = vi.spyOn(ctx.logger, 'debug')
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('undelivered-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
+    const { agent, state } = wakeSeam()
+    state.fail = false
+    ctx.agentTeam['handles'].set(member.memberId, { agent, dispose: async () => {} })
+
+    // One notice names at most eight Thread scopes, so a ninth unread Thread is
+    // durably owed but was never rendered by the last attempt.
+    for (let index = 0; index < 9; index += 1) {
+      const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId(`undelivered-${index}`), workspaceId: alpha,
+        projectRef: project.project.projectRef, body: `@${member.handle} item ${index}` })
+      expect(sent.kind).toBe('committed')
+    }
+    const delivered = state.calls.length
+    expect(delivered).toBe(9)
+    const delivery = ctx.agentTeam['inboxNoticeDeliveries'].get(member.memberId)
+    expect(delivery?.covered).not.toBe('')
+    expect(delivery?.undelivered.length).toBeGreaterThan(0)
+
+    // The Member's own turn start is not a stand-down here: facts the last
+    // notice never named are still owed, so the running edge re-attempts them.
+    ctx.emit('agent/status', { agent, status: 'running' })
+    expect(state.calls.length).toBe(delivered + 1)
+    debug.mockRestore()
+  })
+
+  it('keeps snapshot facts and planned notice text equal to independent reads without retaining stale material', async () => {
+    const { ctx } = await harness()
+    const team = ctx.agentTeam
+    const ledger = team['ledger']!
+    const project = await team.createProject({ requestId: requestId('snapshot-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
+    const { agent, state } = wakeSeam()
+    state.fail = false
+    team['handles'].set(member.memberId, { agent, dispose: async () => {} })
+    for (let index = 0; index < 9; index += 1) {
+      await team.startThread({ kind: 'discussion', requestId: requestId(`snapshot-thread-${index}`), workspaceId: alpha,
+        projectRef: project.project.projectRef, body: `@${member.handle} item ${index}` })
+    }
+    await team.postMainMessage({ requestId: requestId('snapshot-main'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${member.handle} main update` })
+    const snapshot = ledger.notificationSnapshot(member.memberId)
+    expect(snapshot).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId) })
+    expect(ledger['notificationReadSet']).toBeUndefined()
+    const plan = team['inboxDeliveryPlan'](snapshot.threads, snapshot.main)
+    const delivery = structuredClone(team['inboxNoticeDeliveries'].get(member.memberId))
+    const planned = team['notificationText'](agent, snapshot.threads, member.memberId, snapshot.main, plan)
+    expect(planned).toEqual(team['notificationText'](agent, snapshot.threads, member.memberId, snapshot.main))
+    expect(planned.undelivered.length).toBeGreaterThan(0)
+    expect(team['inboxNoticeDeliveries'].get(member.memberId)).toEqual(delivery)
+
+    const facts = vi.spyOn(ledger, 'notificationFacts').mockImplementationOnce(() => { throw new Error('snapshot failure') })
+    expect(() => ledger.notificationSnapshot(member.memberId)).toThrow('snapshot failure')
+    expect(ledger['notificationReadSet']).toBeUndefined()
+    facts.mockRestore()
+    await team.postMainMessage({ requestId: requestId('snapshot-next-main'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${member.handle} next update` })
+    const next = ledger.notificationSnapshot(member.memberId)
+    expect(next.main).not.toEqual(snapshot.main)
+    expect(next).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId) })
+  })
+
+  it('preserves notice text, coverage, attempts and wake routing through failures and generation replacement', async () => {
+    const { ctx } = await harness()
+    const team = ctx.agentTeam
+    const project = await team.createProject({ requestId: requestId('equivalence-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    const member = await addLiveMember(ctx, project.project.projectRef)
+    const seam = wakeSeam()
+    seam.state.fail = false
+    let agent = seam.agent
+    team['handles'].set(member.memberId, { agent, dispose: async () => {} })
+    const events: Array<{ method: string; text: string }> = []
+    const capture = (current: Agent): void => {
+      current.steer = message => { if (seam.state.fail) throw new Error('equivalence steer failed'); events.push({ method: 'steer', text: JSON.stringify(message.content) }) }
+      current.followup = message => { if (seam.state.fail) throw new Error('equivalence followup failed'); events.push({ method: 'followup', text: JSON.stringify(message.content) }) }
+    }
+    capture(agent)
+    const checkpoints: unknown[] = []
+    const checkpoint = (label: string): void => {
+      const delivery = team['inboxNoticeDeliveries'].get(member.memberId)
+      checkpoints.push({ label, events: structuredClone(events), delivery: structuredClone(delivery) })
+    }
+    for (let index = 0; index < 9; index += 1) await team.startThread({ kind: 'discussion', requestId: requestId(`equivalence-thread-${index}`), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${member.handle} item ${index}` })
+    checkpoint('truncated')
+    expect(team['inboxNoticeDeliveries'].get(member.memberId)?.undelivered.length).toBeGreaterThan(0)
+    seam.state.fail = true
+    await team.postMainMessage({ requestId: requestId('equivalence-failure'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${member.handle} main update` })
+    expect(team['inboxNoticeDeliveries'].get(member.memberId)?.covered).toBe('')
+    checkpoint('steer-failure')
+    seam.state.fail = false
+    team['notifyMember'](agent, { kind: 'running' })
+    checkpoint('retry')
+    const facts = vi.spyOn(team['ledger']!, 'notificationFacts').mockImplementationOnce(() => { throw new Error('equivalence derivation failed') })
+    await team.postMainMessage({ requestId: requestId('equivalence-derive-failure'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${member.handle} derive failure` })
+    facts.mockRestore()
+    checkpoint('derivation-failure')
+    const retired = agent
+    agent = wakeSeam().agent
+    capture(agent)
+    team['handles'].set(member.memberId, { agent, dispose: async () => {} })
+    const before = events.length
+    team['notifyMember'](retired, { kind: 'running' })
+    expect(events).toHaveLength(before)
+    team['notifyMember'](agent, { kind: 'activation', previousSessionId: retired.id })
+    checkpoint('replacement-activation')
+    const first = team['ledger']!.notificationFacts(member.memberId)[0]!.item.thread
+    await team.readThreadForAgent(agent, { requestId: requestId('equivalence-read'), workspaceId: alpha, threadRef: first.threadRef })
+    const attemptsBeforeRunning = team['inboxNoticeDeliveries'].get(member.memberId)!.attempt
+    const eventsBeforeRunning = events.length
+    team['notifyMember'](agent, { kind: 'running' })
+    checkpoint('read-then-running')
+    expect(team['inboxNoticeDeliveries'].get(member.memberId)!.attempt).toBe(attemptsBeforeRunning + 1)
+    expect(events).toHaveLength(eventsBeforeRunning + 1)
+    expect(events.length).toBeGreaterThan(before)
+    const carried = createUserMessage({ content: [{ type: 'text', text: 'Carried user input' }], source: { kind: 'user' } })
+    Object.defineProperty(agent.inbox, 'nextTurn', { value: [carried], configurable: true })
+    await team.postMainMessage({ requestId: requestId('equivalence-sequenced'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `@${member.handle} followup lane` })
+    expect(events.at(-1)?.method).toBe('followup')
+    checkpoint('carried-input-followup')
+    Object.defineProperty(agent.inbox, 'nextTurn', { value: [], configurable: true })
+    team['steerResume'](team['ledger']!.getMember(member.memberId)!, 'Resume the interrupted work.', 'operator recovery')
+    checkpoint('recovery-prefix')
+    expect(events.at(-1)?.text).toContain('Resume the interrupted work.')
+    team.validateLedger()
+    if (process.env.DSH_BENCH_NOTICE_OUTPUT !== undefined) {
+      const identities = new Map<string, string>()
+      const normalized = JSON.stringify(checkpoints).replace(/(?:thread|project|message|activity|member):[A-Za-z0-9-]+/g, value => {
+        if (!identities.has(value)) identities.set(value, `${value.split(':')[0]}:${identities.size}`)
+        return identities.get(value)!
+      }).replace(/\d{4}-\d{2}-\d{2}T[0-9:.]+(?:Z|[+-]\d{2}:\d{2})/g, '<timestamp>')
+        .replace(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?/g, '<clock>')
+      await writeFile(process.env.DSH_BENCH_NOTICE_OUTPUT, normalized + '\n')
+    }
+  })
+
   it('wakes a non-owner Main stream follower for ordinary updates', async () => {
     const { ctx } = await harness()
     const project = await ctx.agentTeam.createProject({ requestId: requestId('main-wake-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
@@ -273,6 +476,40 @@ describe('post-commit delivery', () => {
       .rejects.toThrow(/invariant violated/)
     // The loud path still reports a real commit: the operation is durable.
     expect(ctx.agentTeam.status().sequence).toBe(3)
+  })
+
+  it('reports a deferred notification effect divergence at error level instead of folding it into the retry warn', async () => {
+    const { ctx } = await harness()
+    const error = vi.spyOn(ctx.logger, 'error')
+    const warn = vi.spyOn(ctx.logger, 'warn')
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('deferred-invariant-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
+    // The deferral only engages at the queue threshold, so the fan-out has to
+    // reach it for this path to be the one an invariant divergence lands in.
+    const members: AgentTeamMemberActor[] = []
+    for (let index = 0; index < 8; index += 1) {
+      const member = await addLiveMember(ctx, project.project.projectRef, `diverging-${index}`)
+      const seam = wakeSeam()
+      seam.state.fail = false
+      // A wake that raises the invariant error stands in for any integrity
+      // check inside the effect: it must not be answered like a retryable wake.
+      seam.agent.steer = () => { throw new agentTeamInvariant.AgentTeamInvariantError('projection diverged (test seam)') }
+      seam.agent.followup = seam.agent.steer
+      ctx.agentTeam['handles'].set(member.memberId, { agent: seam.agent, dispose: async () => {} })
+      members.push(member)
+    }
+    const body = members.map(member => `@${member.handle}`).join(' ')
+    const sent = await ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('deferred-invariant'), workspaceId: alpha,
+      projectRef: project.project.projectRef, body: `${body} review this` })
+    expect(sent.kind).toBe('committed')
+    await vi.waitFor(() => {
+      expect(error.mock.calls.some(args => String(args[0]).includes('violated an invariant'))).toBe(true)
+    })
+    // The divergence is not reported as an ordinary retryable delivery failure.
+    expect(warn.mock.calls.some(args => String(args[0]).includes('post-commit notification for '))).toBe(false)
+    // It stays a real commit: reporting the divergence never rolls anything back.
+    expect(() => ctx.agentTeam.validateLedger()).not.toThrow()
+    error.mockRestore()
+    warn.mockRestore()
   })
 
   it('wakes a Member through its Main stream markers: a mention, and its own grant of ownership', async () => {

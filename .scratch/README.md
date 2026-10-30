@@ -75,6 +75,7 @@
 | 2026-10 | project-ownership-model | Project 与具名 Owner：参与派生改责任派生、规则版本 2、Task board 投影等 01–09。 | [README](archive/2026-10/project-ownership-model/README.md) |
 | 2026-10 | quality-improvement | 质量改进：研究收敛为 spec 加七张依赖排序票（context 续期、lifecycle、附件幂等）。 | [README](archive/2026-10/quality-improvement/README.md) |
 | 2026-10 | state-requests-diagnostics | 状态机/数据请求/诊断日志 6 票完成：成员隔离、共享读取、有界投影、规模与故障验收。 | [README](archive/2026-10/state-requests-diagnostics/README.md) |
+| 2026-10 | team-performance-optimization | 单次通知读取与计划复用、按 Member 保序派发；真实工具协作与固定版本评测完成，分别报告提交收益和总派发代价。 | [README](archive/2026-10/team-performance-optimization/README.md) |
 | 2026-10 | team-tools-model-eval | Team 工具 × gpt-6.1-sol 系统评测：两层 harness 加语料加修复 a03c0a0，Task #4 accept。 | [README](archive/2026-10/team-tools-model-eval/README.md) |
 | 2026-10 | thread-quoting-and-mentions | Thread 引用与 mention 语义：读侧引用、「提到了你」、开 Thread 落点、引用送达作者。 | [README](archive/2026-10/thread-quoting-and-mentions/README.md) |
 

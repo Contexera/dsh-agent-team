@@ -38,11 +38,17 @@
     "check:public-baseline": "node scripts/check-public-baseline.mjs .",
     "test": "npm run generate:typert && npm run check:facades && npm run check:docs && npm run check:core-skills && npm run check:boundaries && npm run check:versions && npm run check:comments && vitest run",
     "test:browser": "npm run build && node scripts/run-browser-test.mjs",
+    "bench:team": "node --import tsx scripts/team-performance/team-performance-baseline.ts",
+    "bench:team:matrix": "node scripts/team-performance/run-team-performance-matrix.mjs",
+    "bench:team:compare": "node scripts/team-performance/compare-team-performance.mjs",
+    "bench:team:usage": "node --import tsx scripts/team-performance/team-live-usage.ts",
+    "bench:team:browser": "npm run build && node scripts/team-performance/run-team-browser-performance.mjs",
+    "bench:team:semantics": "node --import tsx scripts/team-performance/team-performance-semantics.ts",
     "preview": "node scripts/check-preview-credentials.mjs && npm run build && node scripts/run-preview.mjs",
     "preview:ui": "npm run build && node scripts/run-ui-preview.mjs",
     "lint": "corepack pnpm dlx oxlint@1.76.0 --disable-typescript-plugin packages scripts",
     "duplication": "jscpd --config .jscpd.json packages scripts",
-    "typecheck": "npm run generate:typert && tsc -p packages/agent-team/tsconfig.json && tsc -p packages/tool-agent-team/tsconfig.json && tsc -p packages/client-agent-team/tsconfig.json",
+    "typecheck": "npm run generate:typert && tsc -p packages/agent-team/tsconfig.json && tsc -p packages/tool-agent-team/tsconfig.json && tsc -p packages/client-agent-team/tsconfig.json && tsc -p tsconfig.scripts.json",
     "build": "npm run clean:build-outputs && npm run generate:typert && tsc -p packages/agent-team/tsconfig.build.json && tsc -p packages/tool-agent-team/tsconfig.build.json && tsc -p packages/client-agent-team/tsconfig.build.json && node scripts/build-client.mjs"
   },
   "dsh": {

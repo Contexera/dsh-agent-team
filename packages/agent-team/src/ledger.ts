@@ -643,6 +643,8 @@ export class AgentTeamLedger {
   private readonly areFactsVisible?: ((memberId: AgentTeamMemberId, facts: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef) => boolean) | undefined
   private readonly areMainEntriesVisible: AgentTeamLedgerOptions['areMainEntriesVisible']
   private readonly rulesVersion: number
+  /** A one-call read set lets notificationFacts and mainNotificationFacts reuse material memberInbox already derived. */
+  private notificationReadSet: { readonly memberId: AgentTeamMemberId; readonly facts: Map<AgentTeamThreadRef, readonly AgentTeamThreadReadFact[]>; readonly main: Map<AgentTeamProjectRef, readonly MainUnreadItem[]> } | undefined
   private operationTail: Promise<void> = Promise.resolve()
   /**
    * Runtime human display name. Durable identity stays `member:human`; only
@@ -1457,7 +1459,7 @@ export class AgentTeamLedger {
       // Attention row left behind by a departed Member delivers nothing. The
       // Human owns every Project, so membership never has to be asked of it.
       if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.isProjectMemberFrom(this.state, project.projectRef, memberId)) continue
-      const unread = this.mainUnreadFrom(this.state, memberId, project.projectRef)
+      const unread = this.mainUnreadForNotification(memberId, project.projectRef)
       if (unread.length > 0) result.push({ project, entries: this.mainEntries(unread.map(item => item.source), unread) })
     }
     return Object.freeze(result)
@@ -2082,7 +2084,7 @@ export class AgentTeamLedger {
     for (const project of this.state.projects.values()) {
       if (!workspaceIds.includes(project.workspaceId) || this.visibleProject(project) === undefined) continue
       if (memberId !== AGENT_TEAM_HUMAN_MEMBER_ID && !this.isProjectMemberFrom(this.state, project.projectRef, memberId)) continue
-      const unread = this.mainUnreadFrom(this.state, memberId, project.projectRef)
+      const unread = this.mainUnreadForNotification(memberId, project.projectRef)
       if (unread.length === 0) continue
       const newest = unread.at(-1)!
       const entry = this.mainEntry(newest.source, true, newest.direct)
@@ -2194,9 +2196,38 @@ export class AgentTeamLedger {
     const member = this.requireMember(memberId)
     if (request !== undefined && !this.participatesIn(memberId, request.workspaceId)) throw new Error('Member cannot inspect another Workspace')
     const actor = { kind: 'member' as const, memberId, handle: member.handle }
-    const inbox = request === undefined ? this.memberInbox(actor, {}) : this.inbox(actor, request)
-    return Object.freeze(inbox.items.map(item => Object.freeze({ item,
-      facts: this.unreadFor(memberId, item.thread.threadRef), reminders: item.reminders })))
+    return this.withNotificationReadSet(memberId, () => {
+      const inbox = request === undefined ? this.memberInbox(actor, {}) : this.inbox(actor, request)
+      return Object.freeze(inbox.items.map(item => Object.freeze({ item,
+        facts: this.notificationReadSet?.facts.get(item.thread.threadRef) ?? this.unreadFor(memberId, item.thread.threadRef), reminders: item.reminders })))
+    })
+  }
+
+  /** Thread and Main notification material share one bounded read set for one delivery attempt. */
+  notificationSnapshot(memberId: AgentTeamMemberId): {
+    readonly threads: ReturnType<AgentTeamLedger['notificationFacts']>
+    readonly main: ReturnType<AgentTeamLedger['mainNotificationFacts']>
+  } {
+    return this.withNotificationReadSet(memberId, () => ({ threads: this.notificationFacts(memberId), main: this.mainNotificationFacts(memberId) }))
+  }
+
+  private withNotificationReadSet<T>(memberId: AgentTeamMemberId, read: () => T): T {
+    const previous = this.notificationReadSet
+    if (previous?.memberId === memberId) return read()
+    this.notificationReadSet = { memberId, facts: new Map(), main: new Map() }
+    try {
+      return read()
+    } finally {
+      this.notificationReadSet = previous
+    }
+  }
+
+  private mainUnreadForNotification(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef): readonly MainUnreadItem[] {
+    const readSet = this.notificationReadSet
+    if (readSet?.memberId === memberId && readSet.main.has(projectRef)) return readSet.main.get(projectRef)!
+    const unread = this.mainUnreadFrom(this.state, memberId, projectRef)
+    if (readSet?.memberId === memberId) readSet.main.set(projectRef, unread)
+    return unread
   }
 
   /**
@@ -4477,7 +4508,11 @@ export class AgentTeamLedger {
   }
 
   private unreadFor(memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamThreadReadFact[] {
-    return this.unreadForFrom(this.state, memberId, threadRef)
+    const readSet = this.notificationReadSet
+    if (readSet?.memberId === memberId && readSet.facts.has(threadRef)) return readSet.facts.get(threadRef)!
+    const facts = this.unreadForFrom(this.state, memberId, threadRef)
+    if (readSet?.memberId === memberId) readSet.facts.set(threadRef, facts)
+    return facts
   }
 
   private unreadForFrom(projection: Projection, memberId: AgentTeamMemberId, threadRef: AgentTeamThreadRef): readonly AgentTeamThreadReadFact[] {

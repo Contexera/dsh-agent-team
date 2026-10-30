@@ -3,5 +3,5 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["scripts/session-trace.ts"]
+  "include": ["scripts/session-trace.ts", "scripts/team-performance/team-performance-baseline.ts", "scripts/team-performance/team-performance-semantics.ts", "scripts/team-performance/team-live-usage.ts"]
 }
