@@ -1,0 +1,1080 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, Bash, Edit, ListAgents, Read, SendMessage, SendUserFile, Skill, WebFetch, Write</tools-used-before-summary>
+Summary:
+## 1. Primary Request and Intent
+
+工作目录：
+`/home/yu/projects/dsh-agent-team`
+
+当前分支：
+`feat/agent-context-reading`
+
+工作项：
+`.scratch/active/agent-tools-context-rendering`
+
+用户此前已批准七张实施票、六段完整流程，并授权自主实施、合理使用 subagent、主线程审查及阶段性提交自己的修改。未授权 push、发布或付费模型调用。
+
+本段时间线：
+
+1. 接续此前会话完成 06 通知优先级／预算／正文去重。
+2. 用户在实施中补充：
+   “合理利用subagent，nmem已经恢复了”
+   - 助手重新检索 nmem，服务确实恢复。
+   - 继续采用实现与独立审查分工，没有重复派相同任务。
+3. 06 完成并提交：
+   `05bf168 feat: prioritize bounded notification context`
+   - 1519 tests passed，1 原有 skipped。
+   - typecheck、docs、core-skills、comments 等通过。
+   - lint exit 0，改动文件无新增 warning。
+   - 16 个本票文件，性能改动全部留在工作树，未混入提交。
+4. 助手向用户汇报 06 完成，下一步 07 的只读盘点已完成。
+5. 最新实施请求：
+   “继续”
+6. 现正实施 07：
+   - 清理七工具的旧模型输出和不准确说明。
+   - 同步双语维护文档、core skill。
+   - 复用真实 Session／Host／Agent loop 验证 F1–F6。
+   - 新建显式合成输入量测，移除自动扫描个人日志的旧量测脚本。
+   - 真实模型评测不运行，仍缺本轮模型配置及费用授权。
+7. 当前摘要请求要求 TEXT ONLY，不得工具调用。
+8. 摘要请求之后收到真实自动通知：
+   后台任务 `bx0w4zao5` “Run final seven-tool checks and full regression” exit 1。
+   尚未读取失败日志，不知道失败发生在 typecheck、npm test 还是 lint。不能报告 07 最终通过。
+
+整体票据当前状态：
+- 01 complete，`56e5a92`
+- 02 complete，`241f8f8`
+- 03 complete，Thread 在 `241f8f8`，Main 在 `1e95b83`
+- 04 complete，`1e95b83`
+- 05 complete，`6b6b7f2`
+- 06 complete，`05bf168`
+- 07 in-progress，未提交，不能标整体 complete 或归档。
+
+最新助手对 07 的承诺：
+“接着做 07：先核实七工具说明里的矛盾，删掉过时内容，再跑六段流程的联合检查。实现和审查继续分开；真实模型调用先不运行。先从 nmem 核对验收约定。”
+
+## 2. Key Technical Concepts
+
+### 2.1 必须保持的三状态
+
+区分：
+1. 当前上下文完整提供了事实。
+2. 显式 `team_thread read` 确认已读。
+3. Host 已提交操作。
+
+完整通知、read/history/message 结果、完整拒绝可以满足当前上下文条件，但：
+- 通知／查询／回复成功不推进已读水位。
+- 不消费未读 marker。
+- 只有显式 read 确认。
+- 每次写仍检查新事实、权限、Thread revision、Task 状态及验收资格。
+- Main 不新增 Thread token。
+- 当前 board/card 状态不证明历史 Activity 或对应 Thread 已读。
+
+### 2.2 架构
+
+- Team 是外部 opt-in Cordis bundle。
+- `packages/agent-team` 唯一 Team authority。
+- append-only ledger 是持久事实来源。
+- `packages/tool-agent-team` 七个模型工具只通过隔离 `team-member` preset。
+- Human 只有 Web Client 控制面。
+- 不改相邻 Harness、agent loop、默认行为。
+- 不新增第二套持久已读状态、通用上下文框架、通知数据库或兼容 fallback。
+
+七工具：
+`team_view`、`team_inbox`、`team_attention`、`team_thread`、`team_message`、`team_dm`、`team_task`。
+
+### 2.3 当前 Session 完整事实判断
+
+`packages/agent-team/src/surface-visibility.ts`
+
+- SHA-256 绑定生产者实际完整输出文本。
+- Message 绑定 Thread 或 Main Project、messageRef、bodyDigest；分段还带 start/end/total。
+- Activity 绑定 immutable event 的身份及 factDigest。
+- 只从当前 `session.surface.nodes` 派生的实际文本判断。
+- Team notice 要正确 producer 和 `form:'notice'`。
+- tool result 沿 `sourceEventSeqs` 找到同 callId 的真实 Team tool call。
+- 通过 `deriveEventMessage(event)` 校验实际文本 digest。
+- 文本裁掉但 metadata 保留，不算完整。
+- 没有 substring、模型复述或“我看过”备用判断。
+- identity-only／省略结果不能重新绑定被省略全文。
+- queued notice 尚未进入 surface，不算可见。
+
+已实现读取：
+- read/message 总输出上限 32768 UTF-16 code units。
+- 重复同请求从当前 surface 最早缺段继续，无 offset 参数。
+- 一批过长先减条数，单 Message 仍过长才分段。
+- read 完整覆盖才确认，不能越过未完整旧 Message。
+- message 始终不确认。
+- Activity 不分段，超过固定输出上限明确不确认并交 Human。
+- history 仍 count-only 分页，未承诺总字符预算。
+- `[attachment]` 路径只是定位，Message 完整不等于附件已读。
+
+### 2.4 06 已提交通知策略
+
+`notificationText` 当前工作树含共享性能参数：
+```ts
+private notificationText(
+  agent: Agent,
+  notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
+  readerId?: AgentTeamMemberId,
+  main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [],
+  deliveryPlan?: InboxDeliveryPlan,
+  prefix = '',
+): {
+  readonly text: string
+  readonly messages: readonly RenderedTeamMessage[]
+  readonly activities: readonly ActivityFact[]
+  readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>
+  readonly undelivered: readonly AgentTeamThreadRef[]
+}
+```
+
+HEAD 的本票版本不含 `deliveryPlan` 性能参数；工作树继续保留它。不要误删。
+
+- 必传真实 Agent，已移除缺 Agent fallback。
+- 只派生一次 `visibleTeamSurface(agent)`。
+- 全部候选全局排序，之后才应用 8 Thread scope、20 detail 上限。
+- priority 0：缺失 direct Message、Task/Claim Activity、目标为读者的 Main ownership Activity，sequence 最新优先。
+- priority 1：当前完整可见事实，只身份，不重复正文，不新增绑定。
+- priority 2：Task reminders。
+- priority 3：普通计数、Main Thread cards。
+- reminder candidate `direct:true` 是为了纳入明确省略计数／路由，不改变其 priority2。
+- 非目标 Main ownership Activity 不展开为 direct，和普通 Message 合计成 Main ordinary updates。
+- Main ordinary count 自带 Project ref，避免排序后错归属。
+- identity-only direct reply 仍保留 `Replies to:` 目标及 excerpt。
+- 总上限 32768 UTF-16，恢复前缀也计入；预留 2048 给 footer。
+- direct/reminder 未展开：总数 + 最多四 scope 路由 + 其余数量 + `team_inbox`／`team_thread read`。
+- 普通正文不输出。
+- 长通知 Message 8Ki 截断，截断条不绑定。
+- 未改 ledger、covered、运行／idle 合并、失败重试或持久未读。
+
+06 Main 普通计数：
+```ts
+const ordinary = entries.filter(entry =>
+  !entry.direct && (entry.kind === 'message' || entry.kind === 'activity'))
+...
+`Main stream: ${count} unread update${count === 1 ? '' : 's'} · Project ${project.projectRef} · newest at ${newestAt}.`
+```
+
+### 2.5 07 规则分工与保持行为
+
+- persona：跨工具规则。
+- tool description：选择工具和基本调用必需的契约。
+- parameter description：格式、动作适用范围。
+- result：本次状态和可执行恢复。
+- core skill：详细方法和少见情况。
+- 不能为了去重让基本调用必须先读教程。
+- 不为所有 catch 增加“结果不确定”。
+- 已提交但通知失败不能改判未提交或诱导重复写。
+- DM 已记录未送达已有真实类型化路径及禁止盲重发说明，保留。
+
+当前地址行为：
+- Thread 和 Main `projectRef` 互斥。
+- `read/history/attention` 同时给 `threadRef` 和 `taskRef` 可以，只要属于同一个 Thread。
+- `message` 对 Thread 必须有 `threadRef`；单给 `taskRef` 拒绝。
+- **既有 `message` 同时给 `threadRef + taskRef` 时，额外 taskRef 被忽略。**
+- Main `message` 用 projectRef。
+- 07 只准确描述，不新增拒绝额外 taskRef 的 guard。
+- 自己持有 active Claim 才阻止 unfollow；其他人的 Claim 不阻止自己 unfollow。
+- DM 文本中的 `@mention` 不额外投递，尤其不能借 DM 通知 Human。
+- v1 `undeliveredMentions` 仅从模型出口移除，Host 历史 receipt/replay 保留。
+
+### 2.6 验收和量测
+
+旧归档：
+`.scratch/archive/2026-10/team-tools-model-eval/harness/live-eval.mts:177-220`
+
+它：
+- 自行维护 `messages` 数组。
+- 直接 `tool.execute → tool.output.render`。
+- 没有真实 Session call/result provenance 和 presentationMeta。
+- 能测历史参数形状，不能证明当前 surface 恢复。
+- 不复制旧凭据或配置，不运行旧付费脚本。
+
+新验收复用：
+- `realHarness`
+- `ScriptedAdapter`
+- 真实 Agent loop、Host 和 Session。
+- 确定性测试证明规则，不证明真实模型理解。
+- realHarness 测试 preset **没有完整发布 persona prefix**，所以记录的 GenerateOptions 不是生产请求总长度。
+
+新量测：
+- 输入文件数 ≠ Session 数。
+- 当前 surface ≠ 累计日志输出。
+- 单检查点累计，不能把多个累计检查点相加。
+- UTF-16 code units ≠ token、费用。
+- 分段 binding 次数 ≠ 唯一内容量或当前完整可见量。
+- 不默认扫描个人日志。
+
+### 2.7 新核对的 Harness deprecation
+
+读到：
+`../deepseek-harness/.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md`
+
+- `Session.snapshotEvents()`、`eventAt()`、`ownEvents()` 是 deprecated。
+- 既有逻辑可暂不迁移。
+- **新生产代码或非测试脚本禁止新增调用／别名 wrapper。**
+- `.spec.ts` 测试允许调用，以检查真实 emitted events。
+- 新 snapshot 导出调用放在 `context-scenarios.spec.ts`，测量脚本只消费显式导出的 events 并用 `Session.create`／derive，不新增同步历史读取。
+- 既有 production surface-visibility/member-context 的调用未在本票迁移，不应无故扩 scope。
+
+## 3. Files and Code Sections
+
+### 3.1 Git／共享性能工作区
+
+当前 HEAD：
+`05bf168 feat: prioritize bounded notification context`
+
+此前：
+- `6b6b7f2 feat: recover main and activity context before writes`
+- `1e95b83 feat: restore main context and continue long messages`
+- `8085867` 共享 persona 命名修改，非本线程
+- `241f8f8 feat: recover thread context from complete visible facts`
+- `b48f3b5` 共享 Client mention picker，非本线程
+
+持续未提交的性能改动：
+```text
+package.json
+packages/agent-team/src/index.ts
+packages/agent-team/src/ledger.ts
+scripts/README.md
+scripts/team-performance/
+```
+
+四项生产性能优化：
+1. `notificationFacts` 一次调用复用 unread facts。
+2. `notificationSnapshot` 共享 Thread/Main 的 Main unread 派生。
+3. `notificationText` 复用 deliveryPlan。
+4. running 边沿 covered 非空时不重复读取。
+
+性能起始差异：
+`.scratch/local/agent-context-implementation/performance-before-notification.diff`
+
+06 index-only stage 脚本：
+`.scratch/local/agent-context-implementation/stage-notification.py`
+- 对 working Host 文本精确去掉四项性能片段，生成 index blob。
+- `git hash-object -w --stdin`、`git update-index --cacheinfo`。
+- 不改工作树、不临时回滚别人代码。
+- 06 已提交后该脚本通常不必再跑。
+- 07 不改 Host index/ledger，只需明确 git add 自己文件，勿 `git add -A`。
+
+### 3.2 07 `packages/tool-agent-team/src/index.ts`
+
+最新由实现 agent 改，主线程已审查多数 diff。
+
+删除：
+- `team_message.output.schema.properties.undeliveredMentions`
+- committed render 的旧段：
+  ```ts
+  Mention not delivered — ... never took part ...
+  Only a Human can invite a Member ...
+  ```
+- `messageOutcome` 中：
+  ```ts
+  const undelivered = 'undeliveredMentions' in result ? ...
+  ...
+  { undeliveredMentions: [...undelivered] }
+  ```
+- 旧错误 comment：start 中提及的人开始 follow 等。
+
+保留：
+- Host v1 receipt/ledger 类型和重放。
+- committed 结果 refs、revision token、时间、accountable、source refs、Attention 副作用。
+- 完整拒绝、surface binding、DM delivery error handling。
+
+说明修改：
+- team_attention：单 scope，同 Thread 双 ref、own active Claim 不能 unfollow。
+- team_thread：保留 read 唯一确认、token来源、当前完整 facts 身份省略、长 Message 重复同请求续读、容量错误、Activity不可拆、附件定位、Main oldest-prefix；适度删重复。
+- `taskRef` description 明确 read/history alias；message 用 threadRef，Main用projectRef。
+- team_dm body 清掉写作风格中错误“Mention the Human…”；说明 @mentions 不额外通知。
+- team_message 清重复风格，但保留 post/start/reply权限、token和mentions规则。
+- team_task Direction 一句话规则移入 `direction` 参数，删除重复 Good/Bad 示例。
+- 两个错误引用从 `'threadRef and projectRef'` 改 `'a Thread ref and projectRef'`，覆盖 taskRef 也存在的情况。
+
+**重要：agent 初版新增下面 guard，主线程已删除，不能恢复：**
+```ts
+if (args.taskRef !== undefined) throw new Error(
+  recoveryFor('action_only_arguments').sentence({
+    action: 'message', parameter: 'taskRef', owner: 'read or history'
+  }))
+```
+
+当前约 `720–729`：
+```ts
+if (args.action === 'message') {
+  if (args.messageRef === undefined)
+    throw new Error(recoveryFor('missing_message_ref').sentence({ refused: 'for action message' }))
+  // Reading one Message is authorized by the Thread that carries it, so threadRef is required.
+  // A taskRef alongside threadRef does not change the address and is ignored;
+  // taskRef alone cannot identify the Thread.
+  if (args.threadRef === undefined)
+    throw new Error(`message needs threadRef — ${recoveryFor('missing_thread_identity').sentence({})}`)
+  if (args.beforeSequence !== undefined || args.limit !== undefined)
+    throw new Error(recoveryFor('history_only_arguments').sentence({ action: 'message' }))
+  const readBack = host.readMessageForAgent(agent, {
+    workspaceId: base.workspaceId,
+    threadRef: args.threadRef as AgentTeamThreadRef,
+    messageRef: args.messageRef as AgentTeamMessageRef,
+  })
+  ...
+}
+```
+Main 在更前面由 `mainStreamOutcome` 分支处理，不受 threadRef required 分支影响。
+
+主线程最后操作前 Read 的就是此段；没有新 production edit。
+
+说明长度 agent 最终报告：
+- 七工具 description：8069 → 7451
+- 参数 description：8846 → 8785
+- 合计：16915 → 16236，减少679 UTF-16字符。
+这是自报量测，主线程尚未独立复算，不应当性能收益宣传。
+
+### 3.3 `packages/tool-agent-team/tests/team-tools-render.spec.ts`
+
+修改旧 v1 render test：
+```ts
+it('a committed reply ignores the retired v1 undeliveredMentions field', ...)
+```
+输入手工 legacy 字段，断言：
+- Committed、Message/Thread ref、新token保留。
+- 不含 `Mention not delivered`、`never took part`、`ask the Human`。
+- output schema 不再有 undeliveredMentions。
+
+新增／修改 description 契约测试：
+- Thread/Main互斥、双ref同Thread。
+- own active Claim 提示。
+- message Thread required、额外taskRef ignored、Main projectRef。
+- DM @mentions 不额外通知。
+- direction 参数有 one-sentence 说明。
+- 原 copy token、read唯一 read-side token source 等断言保留。
+
+注意：
+这些是模型使用位置的说明规则检查，不替代行为测试。
+
+### 3.4 `packages/tool-agent-team/tests/team-addressing.spec.ts`（07新增）
+
+**初版是 mock Host 错误再断言透传，主线程否决；已整体替换为真实 Host。**
+
+当前：
+- `realHarness()` 实际 Context、Host、live Member Sessions。
+- 通过 public Host API建 Project、2 Member、2 Task Threads。
+- `teamTools()`取真实源码工具，直接 execute；不经过 Agent loop的调用记录，但地址／权限检查用真实Host，不声称验证surface provenance。
+- 3 tests：
+  1. 同Thread threadRef+taskRef 被attention/read接受；不同Thread被真实Host拒绝。
+  2. Thread message带额外taskRef成功；Main message projectRef成功。
+  3. 自己activeClaim阻止unfollow；他人activeClaim不阻止另一个Member unfollow，真实提交后following false。
+
+helper：
+```ts
+function call(name: string, args: Record<string, unknown>, agent: Member['agent']): Promise<unknown> {
+  const tool = teamTools().get(name)
+  if (tool === undefined) throw new Error(...)
+  return tool.execute(args, {
+    agent,
+    callId: `call:${crypto.randomUUID()}`,
+    signal: new AbortController().signal,
+  } as never)
+}
+```
+
+最后一个 test 之前有多余 defensive fixture：
+```ts
+if (attentionStatusForAgent(...).attention === undefined) {
+  await changeAttentionForAgent(... action:'follow')
+}
+```
+**主线程最后实际 Edit 已删除这段**，因为 successful claim按合同自动follow，不应由测试补救隐藏回退。
+此删改发生在最终全量后台任务启动之后，需最终再跑此3tests确认。尚未收到针对这次删改的结果。
+
+### 3.5 `packages/agent-team/tests/thread-read-context.spec.ts`（07扩F2）
+
+原F2 read→board→claim没有别人的现有Claim，主线程补了真实peer Claim。
+
+在 test：
+`provides the Task and discussion before the Member checks the board and claims a direction`
+
+当前准备：
+```ts
+const { ctx, workspaceId, adapter, agent, threadRef, taskRef, anchor, read } = await discussion('task')
+const projectRef = anchor.projectRef
+const peer = await ctx.agentTeam.addMember({
+  requestId: requestId('peer'), workspaceId,
+  handle:'packager', description:'Builds the signed package',
+  presetId:'team-member', projectRefs:[projectRef],
+})
+const peerAgent = ctx.agents.get(peer.status.member.sessionId)!
+await ctx.agentTeam.changeAttentionForAgent(agent, {
+  requestId:requestId('pause-follow'), workspaceId, threadRef, action:'unfollow'
+})
+const peerRead = await ctx.agentTeam.readThreadForAgent(peerAgent, ...)
+const peerClaim = await ctx.agentTeam.changeClaimForAgent(peerAgent, {
+  requestId:requestId('peer-claim'), workspaceId, taskRef:taskRef!,
+  action:'claim', direction:'Build the signed release package',
+  baseRevision:peerRead.thread.revision,
+})
+if (peerClaim.kind !== 'committed') throw ...
+await ctx.agentTeam.suspendMember({
+  requestId:requestId('pause-peer'), memberId:peer.status.member.memberId
+})
+await ctx.agentTeam.changeAttentionForAgent(agent, {
+  requestId:requestId('resume-follow'), workspaceId, threadRef, action:'follow'
+})
+await ctx.agentTeam.readThread({
+  requestId:requestId('human-read-claim'), workspaceId, threadRef
+})
+adapter.enqueue(textResponse('Checking current work.'))
+const update = await ctx.agentTeam.reply({
+  requestId:requestId('package-check'), workspaceId, threadRef,
+  body:'Verify installation from the signed package, not the source checkout.',
+  baseRevision:peerClaim.thread.revision,
+})
+...
+const context = await read()
+expect(context).toContain('Build the signed release package')
+expect(context).toContain(peerClaim.claim.claimRef)
+```
+
+之后沿原 tool loop board→另一个方向claim：
+`Reproduce Windows installation from the signed package`，验证active Claim。
+
+- 暂停reader follow避免peer Claim Activity触发共享adapter。
+- suspend peer避免后面消息让peer消费adapter；suspend保留其active Claim。
+- Human发消息前必须显式read新Claim event。
+- 完成后此文件6tests通过。
+- 此test `projectRef` 两次错取是fixture错误，最终 `anchor.projectRef` 正确；见 errors。
+
+### 3.6 正式文档（07）
+
+已改：
+- `docs/team-collaboration/tools.md`
+- `docs/team-collaboration/tools.zh.md`
+- `docs/architecture/tools-and-preset.md`
+- `.zh.md`
+- `packages/tool-agent-team/README.md`
+- `.zh.md`
+- `CHANGELOG.md`
+- `packages/agent-team/core-skills/team-domain-model/SKILL.md`
+- `scripts/check-docs.mjs`
+
+主要：
+- 删除不存在replyToMessageRef设置开关。
+- Thread/Main互斥，Thread双alias同目标可共存，message需要threadRef/projectRef。
+- v1未送达mention只是Host旧历史，不进入模型结果。
+- registry只集中有恢复路径的措辞，不许宣称所有错误都有下一步。
+- own active Claim阻止unfollow（主线程纠正agent泛称Task有Claim）。
+- 规则位置分工。
+- DM mention误导清掉。
+- 使用中性的对方代替 tools.zh 旧“他的handle”。
+
+`core-skills/team-domain-model/SKILL.md`
+- description缩短少量以留预算。
+- line49：
+  `... unfollowing stops ordinary updates only, but your active Claims must be done or released first.`
+- 7838/7850，budget未提高。
+- persona根`cordis.patch.yml`检查后**未改**，当前15337/15400（agent按shipping方式量测）。
+- 不存在`packages/agent-team/preset/`；persona实际在仓库根`cordis.patch.yml`。
+
+`check-docs.mjs`：
+```js
+'team-collaboration/tools.md': [556, 517],
+```
+从[562,517]下调，遵守最长块缩短必须降低上限。
+- 主线程补own句一度561>556，随后精简，最终通过。
+- 英文tools第86段现在：
+  `Your active Claim prevents unfollowing that Thread until done or released.`
+- 中文明确读者自己持有。
+
+### 3.7 新量测／组合场景（scratch ignored）
+
+新文件：
+1. `.scratch/active/agent-tools-context-rendering/harness/context-volume.mts`
+2. `harness/context-scenarios.spec.ts`
+3. `harness/vitest.config.ts`
+4. `harness/README.md`
+
+删除：
+`harness/context-volume.mjs`
+- 原自动递归扫 `$HOME/.dsh/sessions/*.jsonl.zstd`，spawn zstd，自行累计。
+- 已读后删除。
+- 历史材料原命令／数字不改。
+- 其它历史 `member-context-resend.mjs`／`member-context-triggers.mjs` 未删，README明确不是当前验收命令，不默认跑。
+
+`context-volume.mts` 核心：
+```ts
+interface Snapshot {
+  stage: string
+  sessionId: string
+  header: SessionHeader
+  events: SessionEvent[]
+  requests: { messages: RequestMessage[]; tools?: unknown }[]
+}
+function textUnits(message: Message | RequestMessage): number {
+  return message.content.reduce((sum, part) =>
+    sum + (part.type === 'text' ? part.text.length : 0), 0)
+}
+```
+
+- `Session.create(SessionId(snapshot.sessionId), snapshot.events, snapshot.header)` 恢复并验证source/surface。
+- 累计日志：遍历输入events，用公共独立 `deriveEventMessage(event)`拿原消息文本。
+- currentSurface：`session.deriveMessages()`。
+- tool/call map callId→`name:action`，给tool结果分类。
+- Member injection按 `source.memberContext.category/variant`分类。
+- 分段计数从原输出teamFacts.messages中start是否定义计数，不声称当前valid binding。
+- requests逐条输出：
+  ```ts
+  {
+    index,
+    textCodeUnits,
+    messageJsonCodeUnits: JSON.stringify(request.messages).length,
+    toolSchemaJsonCodeUnits: JSON.stringify(request.tools ?? []).length,
+  }
+  ```
+- 必须显式传一个或多个JSON文件。
+- 输入format：`team-context-snapshots-v1`，不是raw persistence日志。
+- 没输入明确throw，不扫目录。
+- sessions按sessionId Map去重。
+- 输出每个snapshot cumulativeLog/currentSurface/requests；finalSessions标最终stage。
+- 当前note明确：
+  “Requests are recorded GenerateOptions from the realHarness test preset, which omits the shipped persona prefix; they are not production request totals or provider wire payloads.”
+- 当前统计尚无真实token、usage或费用。
+- 独立review包含此脚本，尚待报告，不能预判无问题。
+
+`context-scenarios.spec.ts`
+- 1个测试，真实Agent loop串联F3/F5/F6。
+- `realHarness(ScriptedAdapter)`。
+- 建Project、builder。
+- checkpoints保存：
+  ```ts
+  {
+    stage,
+    sessionId: agent.session.id,
+    header: agent.session.header,
+    events: agent.session.snapshotEvents(),
+    requests: adapter.requests.map(r => ({ messages:r.messages, tools:r.tools }))
+  }
+  ```
+  snapshotEvents调用只在spec中，Harness允许。
+- `call(name,args)` queue toolCallResponse+textResponse，followup，wait adapter请求增加2，取真实Session最后tool结果且isError不为true。
+- F3 direct→post replyTo→read：
+  post后unread1/direct1，read后0且不重复原文。
+- F5 crop surface nodes slice1，read无新operation补原文，再read不重复。
+- F6 5200次中文/emoji长body：
+  notice截断；`team_thread message`最多5次循环，实际2段。
+  每段<=32768，查询期间unread1/direct1。
+  message-part文本拼接严格等于全文。
+  最后read确认1、不重复中文body、unread0。
+- 输出：
+  `.scratch/local/agent-context-implementation/context-snapshots.json`
+- 真实模型不会被调用。
+
+配置：
+```ts
+import { mergeConfig } from 'vitest/config'
+import base from '../../../../vitest.config.ts'
+export default mergeConfig(base, {
+  test: {
+    projects:[{
+      extends:true,
+      test:{
+        name:'context-scenarios',
+        include:['.scratch/active/agent-tools-context-rendering/harness/context-scenarios.spec.ts']
+      }
+    }]
+  }
+})
+```
+
+运行：
+```bash
+npx vitest run --config .scratch/active/agent-tools-context-rendering/harness/vitest.config.ts --project context-scenarios
+```
+再：
+```bash
+node --import tsx .scratch/active/agent-tools-context-rendering/harness/context-volume.mts .scratch/local/agent-context-implementation/context-snapshots.json
+```
+
+临时typecheck配置：
+`.scratch/local/agent-context-implementation/tsconfig.metrics.json`
+```json
+{
+  "extends":"../../../tsconfig.types.json",
+  "compilerOptions":{"noEmit":true},
+  "include":["../../active/agent-tools-context-rendering/harness/context-volume.mts"]
+}
+```
+已通过；未改生成tsconfig facades。
+
+### 3.8 Scratch进度
+
+已更新：
+- `.scratch/active/agent-tools-context-rendering/README.md`
+  - 01–06 complete。
+  - HEAD05bf168。
+  - 07 in-progress。
+  - 当前工具agent/docsagent/主线程分工，73联合tests、新量测。
+  - 真实模型未授权，不能整体complete。
+- `issues/06-notification-context.md` 全部勾选complete。
+- `issues/07-tool-guidance-and-acceptance.md` in-progress，criteria大多数尚未逐项勾。
+- `materials/2026-10-29-implementation-progress.md`
+  - 06 complete详证。
+  - 新增07实施中、guard误加后删除、mock测试替换、F2fixture失败等记录。
+- 新：
+  `materials/2026-10-30-acceptance-plan.md`
+  - F1–F6现有测试定位。
+  - 旧model runner不足。
+  - 当前量测定义及结果。
+  - 07需核实列表。
+  - 最终tool修改后仍需回归。
+- 新harness README入口。
+
+scratch active ignored，不force-add，不归档未完成工作。
+
+### 3.9 06测试（已提交，不需重做）
+
+- `notification-context.spec.ts` 5：
+  - old direct省略，新direct正文。
+  - Main新direct优先Thread旧身份/普通计数。
+  - 9Thread排序后8scope。
+  - 100Thread×7000正文footer不会消失。
+  - 字符预算先于20detail。
+- `notification-recovery-context.spec.ts` 4：
+  - 原完整文本crop后，后续omitted notice不能证明旧Message。
+  - repeats70/491/570恢复；491普通4条可装、恢复只3条，证明prefix计预算。
+- `notification-reminder-context.spec.ts` 1：
+  - live stalled reminder被20direct挤出，明确warning route。
+  - reminder仍unread1/direct1，read才消费。
+- `notification-attribution.spec.ts` 4：
+  - non-target owner Activity普通计数，不说you owner。
+  - 多Project计数自带Project。
+  - Thread/Main先crop原notice，再message查询body，新notice仍带reply关系、body省略。
+- activity-notice-recovery扩去重。
+- post-commit-delivery fake Agent补真实Session，Main普通message文案改update。
+
+## 4. Errors and Fixes
+
+### 4.1 06独立review后的修复
+
+1. 先slice8再排序漏第9最新Thread：
+   - 真实red。
+   - 全候选排序后scope cap。
+2. footer全量路由超过reserve导致整条direct omission warning被append丢弃：
+   - 100Thread×7000真实red。
+   - 最多4路由+其它数量，green。
+3. 非目标 Main ownership 被当direct并说“you owner”：
+   - 恢复entry.direct guard。
+   - 普通ownership Activity合计ordinary updates。
+4. 全局排序后 Main count没有Project：
+   - count补projectRef。
+5. 旧direct reply body在surface时省略同时丢reply relation：
+   - onSurface分支仍渲染Replies to。
+   - 主线程强化测试：crop旧notice、用message只取body，避免history已带relation掩盖问题。
+6. reminder超20detail只有generic省略：
+   - reminder本就public directCount。
+   - candidate.direct true加入现有warning。
+   - 不改covered，不加自动重试。
+7. 恢复预算原70/570不敏感：
+   - 新491case，普通4条/恢复3条均实际断言。
+8. agent optional fallback：
+   - signature改必传Agent，两个调用同步，移除surface undefined分支。
+9. 文档 KiB误用：
+   - 改精确32768/2048 UTF-16 code units。
+10. review文档“尚未改”是过期报告：
+   - 文档agent已落盘，核对后撤销此finding。
+
+06 reminder fixture：
+- Task未in_progress，超时；补真实Claim后才复现目标失败。
+- 误断言unread0，实际上reminder计unread1/direct1；依据ledger修断言。
+- 未把fixture失败当产品缺陷。
+
+### 4.2 07具体问题与修正
+
+1. **subagent擅加 message拒绝额外taskRef guard**
+   - 用户目标是清理说明，没要求收紧已合法调用。
+   - 主线程删除guard。
+   - 要求description/README准确陈述threadRef必需、额外taskRef忽略。
+   - Main projectRef继续支持。
+2. **description写“message takes threadRef only”误排除Main**
+   - 主线程提醒。
+   - agent改为Thread用threadRef、Main用projectRef。
+3. **mock拒绝测试是假覆盖**
+   - 初版fake Host抛预设“不同Thread”“activeClaim”错误，assert同错误。
+   - 主线程要求完整替换成真实Host公开操作。
+   - agent已替换3tests并报告通过。
+4. **active Claim描述过宽**
+   - agent写Task有active Claim不能unfollow。
+   - ledger只检查`hasActiveClaim(actor.memberId,task.taskRef)`。
+   - 主线程改“your active Claims”／“读者自己”。
+5. **docs下调budget后补own句超限**
+   - 561>556。
+   - 精简句子而非提高上限，docs再次通过。
+6. **F2 fixture两次误取Project**
+   - `.thread.projectRef`不存在。
+   - `.projectRef`也不存在。
+   - Read真实AgentTeamThreadHistory类型后用`anchor.projectRef`。
+   - 两次startsWith undefined均测试fixture错误，不加production防御。
+7. **F2 Human没read新Claim就reply**
+   - public Host明确拒绝，fixture throw ordinary update failed。
+   - 补Human `readThread`，6tests green。
+8. **测试多余fallback follow**
+   - 新addressing test在successful Claim后若未follow就主动follow。
+   - 主线程最后已删除，防止隐藏自动follow回退。
+   - 需最终再次验证3tests。
+9. **最新最终检查失败**
+   - `bx0w4zao5` exit1，刚收到。
+   - 未读取日志，原因未查明。
+   - 不知道停在哪个 &&阶段，不能说typecheck/fulltests/lint本轮已通过。
+
+### 4.3 工具／执行注意
+
+- 本环境用`python3 -I`，没有`python`。
+- 避免Read大subagent output_file（JSONL巨大）。
+- 读文件用Read，搜索目前无专用Grep工具，用rg via Bash。
+- 偶尔猜错Harness路径：
+  - 正确`../deepseek-harness/packages/core/session/src`
+  - LLM正确`packages/llm/llm/src`
+  - persona正确根`cordis.patch.yml`
+- `Read`对未变化文件会提示wasted，避免重复。
+- 不轮询后台日志；正常等待task notification。
+- ListAgents只在协调build占用时用过一次，不重复轮询。
+
+## 5. Problem Solving and Verification
+
+### 5.1 06最终验证（已完成）
+
+提交：
+`05bf168`
+
+- typecheck exit0。
+- npm test：
+  133 files passed /1 skipped，
+  1519 tests passed /1 skipped。
+- lint exit0，改动文件无新增warning，原warnings保留。
+- docs/core-skills/comments/boundaries/facades/versions由npm test通过。
+- 无UI、Remote、Web组装修改，因此本票未重复browser，明确记录。
+- 16本票文件，759insertions/68deletions。
+- 性能4项未提交保持。
+- 未push/release/付费调用。
+
+日志：
+- `typecheck-notification-reviewed.log`
+- `full-notification-reviewed.log`
+- `lint-notification-reviewed.log`
+- `notification-attribution-final.log`
+- `notification-edge-final.log`
+- `notification-reminder-green.log`
+位于`.scratch/local/agent-context-implementation/`。
+
+### 5.2 07已实际验证
+
+主线程：
+- F1–F6相关组合：
+  9 files /73 tests passed。
+  ```
+  member-context-integration
+  thread-read-context
+  main-read-context
+  surface-rejection-recovery
+  activity-tool-recovery
+  surface-probe
+  rules-v1-replay
+  notification-recovery-context
+  member-execution-isolation
+  ```
+  日志`flows-f1-f6-guidance.log`。
+  此次发生在最终tool文本修改前，不能冒充最终总验收。
+- F2新增peerClaim后`thread-read-context`：6passed。
+  日志`flow-f2-peer-claim.log`。
+- typecheck一轮通过：
+  `typecheck-guidance.log`。
+- `check:docs`通过，最长tools556/556，zh517/517。
+- `check:core-skills`7838/7850通过。
+- `check:comments`：
+  Host2471/4150，tools131/280，其它通过。
+- `git diff --check HEAD`多次通过。
+- 新snapshot scenario1test通过。
+- 新metrics脚本tsc通过。
+- 无输入明确失败。
+- 同一导出文件传两次：inputFiles2、sessions1。
+- 校验crop后cumulative增、surface降。
+- 2part bindings真实记录。
+
+实现agent最后自报：
+- tool package 8 files /151 tests passed。
+- package tsc exit0。
+- recovery-hints14passed。
+- newaddressing3passed。
+- 之后主线程又删多余fixture fallback，所以3tests还需再确认。
+- 不把自报当最终主线程全量已过。
+
+新snapshot实际数据（合成随机refs/path等影响，不固定性能结论）：
+- 1 Session，10 checkpoints，16 ScriptedAdapter calls。
+- F3 explicit read：log4566，surface4566。
+- F5 compacted：log4605，surface87。
+- F5 restored：log8047，surface3529。
+- F5 repeated：log8871，surface4353。
+- F6 truncated notice：log18107，surface13589。
+- part1：log51105，surface46587。
+- part2：log76804，surface72286。
+- finalread：log77754，surface73236。
+- 不包含完整发布persona，非生产请求费用。
+
+已有Member场景重跑：
+- memory更新8242→355。
+- ownership更新8301→154。
+- startup8242→8455。
+- compaction recovery8301→8514。
+- 没变化注入0。
+- 日志`context-scenario-notification.json`。
+- 单步字符和surface分开，不虚报token收益。
+
+### 5.3 当前最终验证失败（最重要）
+
+任务：
+`bx0w4zao5`
+
+命令：
+```bash
+npm run typecheck > .scratch/local/agent-context-implementation/typecheck-guidance-final.log 2>&1 &&
+npm test > .scratch/local/agent-context-implementation/full-guidance-final.log 2>&1 &&
+npm run lint > .scratch/local/agent-context-implementation/lint-guidance-final.log 2>&1
+```
+
+收到：
+`failed with exit code 1`
+
+**必须下一步看相关日志定位哪一步失败。**
+不要只grep `error TS`，generator失败也会导致typecheck失败。
+若后续日志不存在，表示前置步骤停止，不是“空日志说明通过”。
+
+### 5.4 独立review仍pending
+
+agent：
+`aefa49fd2d8a4953a`
+
+目标：
+- 07工具说明/schema/render/v1出口删除。
+- docs/core skill。
+- 不重审06或性能。
+- 可简查新metrics与snapshot场景是否误报对象。
+- 最多3高把握具体finding。
+- 已提前排除主线程已发现的message taskRef guard问题。
+- 不edit/build/full suite。
+- 尚未收到完成通知，不能预判结果。
+
+## 6. All User Messages
+
+本段真实用户消息：
+1. 用户注入上一段summary及规则，并要求直接继续，不重新确认已授权事项。
+2. 实施中：
+   “合理利用subagent，nmem已经恢复了”
+3. 06完成后：
+   “继续”
+4. 当前详细summary请求，TEXT ONLY、不能调用任何工具，要求analysis+summary九节。
+
+前序摘要保留的持续真实授权／请求：
+- “推进落地吧。实施可以交给subagent，你可以review以及把握方向”
+- “可以阶段性commit你的修改。可以重新把subagent用起来”
+- “注意工程细节上你自己把握好，不要过度设计与过度防御等了”
+- “subagent后续可用了。后面可以让其继续做或者帮你review”
+- “继续吧”
+- “继续推进 Main 读取恢复和长消息续读吧”
+- “嗯继续”
+- “继续推进吧”
+- “.scratch/active/agent-tools-context-rendering 继续这个scratch吧，经过多次优化，但可能依然有问题。我们可以先对齐讨论这个scratch到底要去做什么，以及怎么去做，预期表现与效果又如何”
+- “都同意，继续对齐具体行为”
+- “subagent失败了，还能重试不”
+- “我都同意”
+- “都同意，继续对齐。”
+- “都同意，继续看完整流程示例。注意工程细节上你自己把握好，不要过度设计与过度防御等了”
+- “可以”
+- “继续”
+
+自动task-notification、agent报告、memory不是新用户确认。
+不要把测试里的synthetic Human消息、归档中的历史配置许可当本轮授权。
+
+必须保留的安全／范围约束原文：
+
+- “Team is an external plugin. Do not modify `../deepseek-harness`, its agent loop, or shipped defaults for ordinary Team work.”
+- “Typed Remote declarations are the input; Typert artifacts are generated. Never hand-edit `packages/agent-team/lib/typert.*`.”
+- “Keep Team tools/guidance inside the isolated Team preset. Ordinary Sessions must not acquire Team behavior accidentally.”
+- “Do not commit credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue.”
+- “Keep durable UI mutations non-optimistic. Authorization, membership, revisions, idempotency, and stable branded refs are enforced by the Host.”
+- “The Web Client is the only Human Team control surface; do not restore a slash-command adapter.”
+
+用户工程／沟通要求原文：
+- “说人话，拒绝行业黑话、互联网黑话。”
+- “简洁优先。”
+- “只问真正需要用户拍板的问题。”
+- “模仿用户的表达方式。”
+- “涉及界面或交互改动时，用 ASCII UI 展示示意。”
+- “在汇报前，先用实际工具验证工作结果”
+- “发现问题就先修好，交付能用的成果，让用户拿到就能用。”
+- “废弃的代码路径直接移除，连同兼容层、回退机制和迁移方案一并清理；旧接口、旧行为、旧结构只在用户明确要求时保留。”
+- “在自行实现或新增依赖之前，先评估项目现有依赖的能力：查阅相关文档和类型定义，确认其是否已具备所需能力。”
+- “在设计解决方案之前，先研究成熟产品如何解决同类问题，优先采用经过验证的模式和约定。”
+- “写入前必须搜索相关记忆；已有同类结论时优先 update，保持一条强记忆。”
+- “及时更新记忆，写入、更新记忆都要先读 distill-memory 相关 SKILL。”
+
+授权边界：
+- 阶段commit自己的文件已授权，不必再询问。
+- 未授权push、发布、付费模型请求。
+- 归档模型harness中有历史endpoint/model/凭据；不能复用，不上传个人Session。
+- 不开worktree，用户没要求。
+- 不force-add active scratch。
+- 不手改生成facades或Typert。
+- 不在Human Client上为Agent renderer改行为。
+- 普通tests用ScriptedAdapter无费用。
+- 外向/不可逆操作仍需对应授权。
+
+已加载skills持续约束：
+- tdd：真实Session／tool→Host seams已确认，不再重新问seams；每条行为red-green，不批量imaginary tests。
+- codebase-design：简单实现，不建通用框架。
+- skill-manager：改core skill前读规范，预算不提高。
+- distill-memory：写前搜，更新同类。
+- 不因compaction重新invoke one-time setup。
+- 新生产comments不得引用scratch/ticket编号。
+
+## 7. Pending Tasks
+
+### 7.1 立即处理
+
+1. **读取最新失败日志，定位 `bx0w4zao5` exit1 的阶段和原因。**
+   - typecheck-guidance-final.log
+   - full-guidance-final.log
+   - lint-guidance-final.log
+2. 修复真实问题后重跑适用检查，不掩盖失败。
+3. 等独立review `aefa49fd2d8a4953a`。
+   - 不再spawn重复review。
+   - 核实finding，不照单全收。
+4. 再跑new team-addressing3tests：
+   - 最后主线程删除了“Claim后若没follow就补follow”的test fallback。
+5. 最终重跑真实snapshot scenario及metrics（若工具结果/说明改变相关输入）。
+6. 完成最终typecheck、full tests、lint。
+7. 07没有UI/Remote/manifest/preset row改动，persona未改；根据实际组装影响决定build/browser，不机械要求全验收，也不能遗漏影响Web bundle的检查。
+   - 当前未跑07build/browser。
+   - core skill内容和tool输出改，至少shipping检查由npm test覆盖；是否需built artifact可再按指南判断。
+8. Stage own07文件，不stage性能package/index/ledger/scriptsREADME/scriptsperformance。
+9. 按授权阶段commit，Conventional Commits单行，无body。
+10. 更新scratch07已完成的非付费部分，但**整体07还包含真实模型验收，未获授权不能complete或归档**。
+11. 到确实只剩模型配置/费用授权时，再向用户提出具体需要拍板的事项，不在普通实现中反复询问。
+
+### 7.2 当前 agents
+
+- `aefa49fd2d8a4953a` 独立07review：running，pending通知。
+- `a16bf38e81b479b30` 工具实施：最近完成，最后报告3真实addressing、151tools tests。
+  可SendMessage继续，不新建重复。
+- `adc7265bd29a48498` 文档/core agent：complete。
+- 06 agents全部complete。
+
+### 7.3 当前nmem
+
+检索已恢复。
+本段做过：
+- 搜当前work-item与验收约定成功。
+- 更新旧设计only记忆：
+  id `9f9a64ed-7bca-40b9-b6c1-e5d23b157fd7`
+  标题改“历史：Agent context 工作项最初只做设计对齐”
+  指向现行授权memory。
+- 当前授权记忆：
+  `41599767-3ba6-40f9-a202-0343acb0bb2e`
+- 新保存验收约束：
+  `af8eba7f-3164-4bdf-9412-19cc9aabaeca`
+  “Agent context 联合验收必须经过真实 Session”
+  当前内容写01–06完成，07待实施；07收尾时应update这条而非重复新增。
+- distill-memory技能本会话已读。
+- 不把源码结构／测试结果无意义再存memory；稳定验收方法和授权背景才长期有用。
+
+## 8. Current Work
+
+最新用户“继续”后实际推进：
+
+1. 简短说明做07、查nmem。
+2. 成功取现行验收约束；确认工作树只性能改动。
+3. 主线程核实工具代码：
+   - v1模型undelivered残留确实存在。
+   - reply开关不存在。
+   - DM body说明错误。
+   - address解析与说明不一致。
+4. 恢复前只读盘点agent `a16...`实施工具包。
+5. 新文档agent `adc...`负责docs/core，persona必要时才改。
+6. 主线程研究Harness现有Session能力与旧eval局限。
+7. 新真实Session snapshot scenario+explicit metrics：
+   - 实际跑成功。
+   - tsc、无输入、重复文件/Session区分、crop分离累计与surface验证通过。
+   - 删旧自动扫描个人日志context-volume.mjs。
+8. 跑73相关联合tests通过。
+9. 文档agent完成；主线程修own Claim、budget及中性指代；docs/core/comments通过。
+10. 实现agent初版完成：
+    - 主线程发现新增taskRef拒绝guard有行为变化，删除。
+    - 发现mock拒绝测试无效，要求替换。
+    - 发现message“threadRef only”误排除Main，要求修。
+11. 主线程扩F2已有peer Claim：
+    - 两次Project字段猜错。
+    - 最后anchor.projectRef正确。
+    - Human未read新Claim导致reply拒绝，补read。
+    - 6tests/typecheck通过。
+12. 启独立07review `aefa...`。
+13. 实现agent返回真实Host测试3通过、tools151通过、tsc/recovery通过。
+14. 主线程启动最终后台：
+    typecheck→npmtest→lint，任务`bx0w4zao5`。
+15. 主线程Read最终team-addressing：
+    - 无mock，真实Host。
+    - 发现Claim后主动fallback follow，多余且会掩盖回退，删掉。
+16. 最后Read tools/index message分支，确认额外taskRef guard已无，threadRef必需/Main前置分支不变。
+17. 用户请求summary。
+18. 自动通知最终后台exit1，尚未检查原因。
+
+当前working tree大致：
+```text
+ M CHANGELOG.md
+ M docs/architecture/tools-and-preset.md
+ M docs/architecture/tools-and-preset.zh.md
+ M docs/team-collaboration/tools.md
+ M docs/team-collaboration/tools.zh.md
+ M package.json                                      # 外部性能
+ M packages/agent-team/core-skills/team-domain-model/SKILL.md
+ M packages/agent-team/src/index.ts                   # 全部外部性能
+ M packages/agent-team/src/ledger.ts                  # 全部外部性能
+ M packages/agent-team/tests/thread-read-context.spec.ts
+ M packages/tool-agent-team/README.md
+ M packages/tool-agent-team/README.zh.md
+ M packages/tool-agent-team/src/index.ts
+ M packages/tool-agent-team/tests/team-tools-render.spec.ts
+ M scripts/README.md                                 # 外部性能
+ M scripts/check-docs.mjs
+?? packages/tool-agent-team/tests/team-addressing.spec.ts
+?? scripts/team-performance/                         # 外部性能
+```
+scratch文件ignored，不在status。
+
+**07目前没有stage或commit。**
+HEAD还是05bf168。
+
+## 9. Optional Next Step
+
+直接继续07，不重新问实施授权，不重复总结。
+
+最新真实用户实施请求：
+“继续”
+
+对应助手承诺：
+“接着做 07：先核实七工具说明里的矛盾，删掉过时内容，再跑六段流程的联合检查。实现和审查继续分开；真实模型调用先不运行。先从 nmem 核对验收约定。”
+
+立即下一步：
+1. 检查 `bx0w4zao5` 的失败：
+   `.scratch/local/agent-context-implementation/typecheck-guidance-final.log`
+   以及存在时的full/lint日志。
+   读取完整关键错误及exit阶段，不猜原因。
+2. 处理失败，重新跑最窄检查。
+3. 等独立review完成并验证。
+4. newaddressing测试最终再验（主线程删fallback之后）。
+5. 最终验证、精确stage、阶段commit自己的07非付费实现。
+6. 明确真实模型评测未完成、需要本轮配置/费用授权；不要虚报07整体完成，不归档。
+
+不要提前写“07全部通过”：最后全量命令实际刚失败，根因尚未查明。
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/d97bd4b9-910f-416b-aa21-0dcce0083c36.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
