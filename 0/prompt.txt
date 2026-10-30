@@ -1,0 +1,48 @@
+<task-notification>
+<task-id>a822b822b9e1eed7b</task-id>
+<tool-use-id>chatcmpl-tool-837ad653c5589504</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/7cf571b6-bccf-4d18-905c-f866eded96e3/tasks/a822b822b9e1eed7b.output</output-file>
+<status>completed</status>
+<summary>Agent "P2-2 v1 confirmation fixture" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Done. Steps 1 and 2 of P2-2 are implemented; no production code was touched.
+
+## What changed
+
+**`packages/agent-team/tests/fixtures/rules-v1-ledger.ts`** — the captured table grew from 10 to 12 records. Two new `team/thread-replied` operations were appended:
+
+| sequence | requestId | actor | body | mentions | inbox delta |
+|---|---|---|---|---|---|
+| 11 | `fixture:invite-confirmed` | human | `@carol, please look` | `[member:carol]` | Attention set for carol (`startSequence: 11`, `readThroughSequence: 10`), one direct marker to carol |
+| 12 | `fixture:undelivered` | alice | `@dave, over to you` | `[]` (dave never took part, so nothing was delivered) | empty |
+
+Exported shape additions: `task.revision` went 7 → 12, and new `invitation` / `undelivered` entries carry `{ messageRef, sequence, revision }`. `records`, `projectRef`, `members`, `discussion`, `standup`, `outsider` are unchanged. The header comment now states the file is a captured rules-v1 operation table for replay validation only, is never regenerated at runtime, and how to regenerate it (boot a v1 ledger over a clone, fixed clock hooks, paste the *pool's* stored entries — important, because the table re-encodes records with schema defaults during replay).
+
+**`packages/agent-team/tests/rules-v1-replay.spec.ts`** — the test no longer calls `v1.reply()` or reads a `confirmation_required` result. It now filters the frozen records for `team/thread-replied`, asserts exactly two with the expected sequences, and pins the fixture content: carol's Attention set and direct marker on the invitation, empty mentions/markers on the undelivered reply, and thread revisions. Then it keeps the original outcome assertions: carol's Attention starts at sequence 11, dave's Attention on the Task Thread is absent, `v2.validate()` does not throw, history is `['Investigate the regression', '@carol, please look', '@dave, over to you']`, and every member's standing is identical before/after adoption.
+
+**Fixture-driven knock-on changes** (other specs import the fixture):
+- `main-stream.spec.ts`: card `replyCount` 0 → 2.
+- `agent-team.spec.ts`: the legacy-read test's expected view gained the two replies; its snapshot fact builder now preserves `mentions` (the second reply carries a message fact, which exposed that the builder dropped it).
+
+## How the capture was verified
+
+I ran the throwaway script `/tmp/capture-v1-invitation.mjs` twice — once with random ids and once with a fixed clock — and the two dumps were identical apart from ids/timestamps. Then I ran the *live* v1 path (including the `confirmation_required` round trip) in a disposable spec over only the original 10 records and diffed its two produced operations against the frozen ones: identical after normalizing ids, timestamps and message refs, with only the intentional `requestId` labels differing. The disposable spec and probe were deleted.
+
+## Verification
+
+```
+$ npm run typecheck 2&gt;&amp;1 | tail -5        → exit 0 (only generate:typert banner)
+$ npx vitest run rules-v1-replay main-stream agent-team | tail -20
+  Test Files  3 passed (3)
+       Tests  148 passed (148)
+$ npm run check:comments | tail -5
+  Comment check OK: packages/agent-team/src 2221/4150 (15.3% ...), client 932/2020, tools 87/280, scripts 1336/1980
+$ grep -rn "confirmationToken\|confirmation_required" packages/agent-team/tests/
+  packages/agent-team/tests/main-stream.spec.ts:301:      confirmationToken: 'token' as never })).rejects.toThrow(/does not exist at rules version 2/)
+```
+
+The one remaining grep hit is not a live v1 write path: it is the version-2 refusal test, asserting that a `confirmationToken` on a v2 ledger throws. No test drives the v1 confirmation flow at runtime any more.
+
+Also ran the full suite (`99 passed | 1 skipped`, 1356 tests) and `npm run lint` (exit 0). The confirmation Map, token type, result union and v1 write branch in `packages/agent-team/src/ledger.ts` are untouched.</result>
+<usage><subagent_tokens>118331</subagent_tokens><tool_uses>98</tool_uses><duration_ms>758005</duration_ms></usage>
+</task-notification>
