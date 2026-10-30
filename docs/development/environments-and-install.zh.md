@@ -80,7 +80,7 @@ dsh web
 
 发布节奏是批量的。两次发布之间，操作者将本地构建日常自用，作为轻量验收渠道。日常使用反馈等同有效验证。agent 与贡献者按检查梯度选择最窄检查即可，不必为每个小改动要求完整验收。累积若干修复与优化、在日常使用中稳定后，再批量发新版。发布流程本身有五段：前置检查、检查阶梯、发布材料、打 tag 与发布、发布后核验。见 [`release-runbook.md`](../release-runbook.md)。
 
-每次发布后随即把稳定 profile 装到该版本（按精确版本号，理由见上）。稳定 profile 与开发 profile 共享全局 ledger 存储（`$DSH_HOME/storages/`）。稳定 profile 停留在旧版，而 ledger 已被新版写入。这时启动会因记录 schema 校验失败而崩溃。2026-08 的 0.1.1 即是这种"写得出、读不回"的中间版本。
+每次发布后随即把稳定 profile 装到该版本（按精确版本号，理由见上）。稳定 profile 与开发 profile 共享全局 ledger 存储（`$DSH_HOME/storages/`）。稳定 profile 停留在旧版，而 ledger 已被新版写入。这时启动会因记录 schema 校验失败而崩溃。一旦该 ledger 已采用规则版本 2，旧构建就不是「可能校验失败」，而是一定拒绝打开。因此顺序是：先备份 `agent_team.sqlite`，把新构建装到共享该存储的每个 profile，然后才在任何一个地方首次打开 Team。备份做法见 [`release-runbook.md`](../release-runbook.md) §2 第 7 步。2026-08 的 0.1.1 即是这种"写得出、读不回"的中间版本。
 
 本 bundle 的最低兼容版本是 DSH `0.2.1-rc.2`。DSH 的 JSONL Session persistence 会自行迁移已发布的旧格式（v0/v1/v2 → V3 → V4）。旧格式 Session 数据无需手动处置。不要为 Team ledger 或 Member Session 添加迁移、读取旧格式或静默回退逻辑。
 

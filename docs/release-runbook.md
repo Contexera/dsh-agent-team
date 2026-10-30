@@ -32,11 +32,11 @@ Run in this order; a failure stops the release, and a fix re-runs from the faile
 | `npm run typecheck` | Type errors against the certified harness checkout. |
 | `npm test` | Test failures, and the six mechanical gates it bundles: `check:facades`, `check:docs`, `check:core-skills`, `check:boundaries`, `check:versions`, `check:comments`. |
 | `npm run build` | Build errors; also what `prepack` will run at publish time. |
-| `npm run lint` | Lint findings. |
+| `npm run lint` | Lint errors. The command runs without `--deny-warnings`, so warnings do not fail it. |
 | `npm run test:browser` | Broken composition, Remote mounting, slot takeover, or ordinary-DSH restoration. Needs the adjacent `../deepseek-harness` checkout; browser acceptance is a local step and never runs in CI. |
 | `npm pack --dry-run` | Nothing by itself — record the file count for the release report. |
 | `npm run check:artifact` | An artifact that would ship broken: stray `.ts`/`.tsx`, a missing `cordis.patch.yml`, or a runtime relative import whose target is not in the tarball. Run it *after* `npm run build`. |
-| `npm run check:public-baseline` | A public surface that drifted from the manifest's certified baseline (both READMEs and the pinned compatibility discussion). |
+| `npm run check:public-baseline` | A public surface that drifted from the manifest's certified baseline (both READMEs and the pinned compatibility discussion). It reads that discussion through `gh`, so the operator needs an authenticated `gh`; `--offline` is for local iteration and cannot stand in before a publish. |
 | `git diff --check v<previous>..HEAD` | Whitespace damage anywhere in the release's change set. The bare `git diff --check` inspects only *unstaged* work, so it passes silently once the release is committed — which is when the ladder runs. |
 
 ## 4. Release material

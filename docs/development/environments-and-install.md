@@ -88,7 +88,7 @@ The runtime must match the installation form. Published `dsh` runs the stable pr
 
 Release cadence is batched. Between releases, daily use of a local build is a lightweight acceptance channel; choose the narrowest check for each small change and batch a release after accumulated fixes are stable. The release procedure itself — pre-flight, the check ladder, release material, the tag and publish sequence, and post-publish verification — is [`release-runbook.md`](../release-runbook.md).
 
-Stable and development profiles share `$DSH_HOME/storages/`. If a stable old version reads a ledger written by a newer version, schema validation can fail; update the stable profile after each release.
+Stable and development profiles share `$DSH_HOME/storages/`. If a stable old version reads a ledger written by a newer version, schema validation can fail; once that ledger has adopted rules version 2, an older build refuses it outright instead of only risking a failure. The order is therefore: back up `agent_team.sqlite`, install the new build on every profile sharing that storage, and only then open Team for the first time anywhere. [`release-runbook.md`](../release-runbook.md) §2 step 7 holds the backup procedure.
 
 The minimum compatible DSH version is `0.2.1-rc.2`. DSH's JSONL Session persistence migrates released historical formats itself (v0/v1/v2 → V3 → V4); old-format Session data needs no manual disposal. Do not add Team ledger or Member Session migration, old-format reads, or silent fallbacks.
 
