@@ -1,0 +1,4 @@
+主要是目前可能有两点缺口：
+
+1. 创建task的owner实际也负责task的完成，会自己claim task，如果此时直接在thread发消息，其不会直接收到，只能@，对于不清楚这一点的其他user可能造成困惑；
+2. 对于task状态由process到review ，accountable owner会收到通知，但是后续在review的task继续推进，accountable无法继续发现消息而只能通过mention或者阈值等；
