@@ -1,0 +1,275 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M65RNSV3GHXKSZ11Y4KBKDYF",
+  "session_id": "d97bd4b9-910f-416b-aa21-0dcce0083c36",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-30T06:41:43.587432483Z",
+  "branch": "master",
+  "checkpoints_count": 1,
+  "save_step_count": 2,
+  "files_touched": [
+    "packages/agent-team/src/index.ts",
+    "packages/agent-team/src/ledger.ts",
+    "packages/agent-team/src/member-context.ts",
+    "packages/agent-team/src/surface-visibility.ts",
+    "packages/agent-team/tests/main-read-context.spec.ts",
+    "packages/agent-team/tests/thread-read-context.spec.ts",
+    "packages/tool-agent-team/src/index.ts",
+    "packages/tool-agent-team/src/reading-budget.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "anthropic/magpie-8217178402",
+  "turn_id": "b1d7b25e4a7e",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 6,
+    "cache_creation_tokens": 963,
+    "cache_read_tokens": 338226,
+    "output_tokens": 639,
+    "api_call_count": 3,
+    "subagent_tokens": {
+      "input_tokens": 0,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 0,
+      "output_tokens": 0,
+      "api_call_count": 0
+    }
+  },
+  "redaction": {
+    "replacements": 172,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 6,
+      "credentialed_uri": 0,
+      "entropy": 166,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-call_kBFHaJTNmFBz0VjsPXvPcVzW",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "grilling"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f5ae4c1751d7",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 61,
+        "end": 62,
+        "entry_ids": [
+          "91e947e0-3434-4b69-8e30-dcb634129654"
+        ],
+        "tool_use_id": "call_kBFHaJTNmFBz0VjsPXvPcVzW"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_kBFHaJTNmFBz0VjsPXvPcVzW"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: grilling",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_wkvhipgBuwoeBrOvyfRNGFfY",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "nowledge-mem:distill-memory"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f5ae4c1751d7",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 156,
+        "end": 157,
+        "entry_ids": [
+          "c43e588e-df99-4e86-be75-36e567237a2f"
+        ],
+        "tool_use_id": "call_wkvhipgBuwoeBrOvyfRNGFfY"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_wkvhipgBuwoeBrOvyfRNGFfY"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: nowledge-mem:distill-memory",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_wc3asBdr7EdjaA3smyqwIOQ2",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "codebase-design"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f5ae4c1751d7",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 317,
+        "end": 318,
+        "entry_ids": [
+          "4d18d19f-6944-4e1d-892a-838899d4a537"
+        ],
+        "tool_use_id": "call_wc3asBdr7EdjaA3smyqwIOQ2"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_wc3asBdr7EdjaA3smyqwIOQ2"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: codebase-design",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_ilpCxF1Oj3gvZY4ISM0czzQq",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "codebase-design"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f5ae4c1751d7",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 540,
+        "end": 541,
+        "entry_ids": [
+          "a334eaed-238b-4d1c-a1bf-9fd5bcba053e"
+        ],
+        "tool_use_id": "call_ilpCxF1Oj3gvZY4ISM0czzQq"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_ilpCxF1Oj3gvZY4ISM0czzQq"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: codebase-design",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_RbaQSSsOREQUeWsLtCzIxbg7",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "tdd"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f5ae4c1751d7",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 593,
+        "end": 594,
+        "entry_ids": [
+          "8b3bef8a-e642-420c-88f9-ba110a7054b1"
+        ],
+        "tool_use_id": "call_RbaQSSsOREQUeWsLtCzIxbg7"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_RbaQSSsOREQUeWsLtCzIxbg7"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: tdd",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_w5M9oUy6JhueDeu9iLlrrIyG",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "nowledge-mem:distill-memory"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f5ae4c1751d7",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 693,
+        "end": 694,
+        "entry_ids": [
+          "9a5634d4-ee44-46dd-8583-fb196e8e2684"
+        ],
+        "tool_use_id": "call_w5M9oUy6JhueDeu9iLlrrIyG"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_w5M9oUy6JhueDeu9iLlrrIyG"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: nowledge-mem:distill-memory",
+        "default_collapsed": true
+      }
+    },
+    {
+      "id": "claude-skill-call_6r4gBSlMlRTXRTG4L1VXNtQ5",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "skill-manager"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "f5ae4c1751d7",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 2214,
+        "end": 2215,
+        "entry_ids": [
+          "d2486fc4-1352-4293-b2af-f29e857aee53"
+        ],
+        "tool_use_id": "call_6r4gBSlMlRTXRTG4L1VXNtQ5"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "call_6r4gBSlMlRTXRTG4L1VXNtQ5"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: skill-manager",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 1
+  }
+}

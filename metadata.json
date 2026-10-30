@@ -3,7 +3,7 @@
   "checkpoint_id": "01M65RNSV3GHXKSZ11Y4KBKDYF",
   "strategy": "manual-commit",
   "branch": "master",
-  "checkpoints_count": 6,
+  "checkpoints_count": 7,
   "files_touched": [
     "packages/agent-team/src/index.ts",
     "packages/agent-team/src/ledger.ts",
@@ -21,14 +21,21 @@
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
       "prompt": "/0/prompt.txt"
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
+      "prompt": "/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 1712824,
-    "cache_creation_tokens": 297710,
-    "cache_read_tokens": 60091407,
-    "output_tokens": 109119,
-    "api_call_count": 372,
+    "input_tokens": 1712830,
+    "cache_creation_tokens": 298673,
+    "cache_read_tokens": 60429633,
+    "output_tokens": 109758,
+    "api_call_count": 375,
     "subagent_tokens": {
       "input_tokens": 992945,
       "cache_creation_tokens": 0,
@@ -38,14 +45,14 @@
     }
   },
   "redaction": {
-    "replacements": 30,
+    "replacements": 202,
     "layers": {
       "betterleaks": 0,
       "connection_string": 0,
       "credential_key": 0,
-      "credential_value": 0,
+      "credential_value": 6,
       "credentialed_uri": 0,
-      "entropy": 30,
+      "entropy": 196,
       "key_context": 0,
       "provider_token": 0,
       "shell_stdin": 0
