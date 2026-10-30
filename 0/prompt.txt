@@ -1,0 +1,88 @@
+<task-notification>
+<task-id>a84e558b9c82abdba</task-id>
+<tool-use-id>chatcmpl-tool-afb4de43a66015a0</tool-use-id>
+<output-file>/tmp/claude-1000/-home-yu-projects-dsh-agent-team/7cf571b6-bccf-4d18-905c-f866eded96e3/tasks/a84e558b9c82abdba.output</output-file>
+<status>completed</status>
+<summary>Agent "P2-3 shared Thread controller" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Item P2-3 is done. Both Thread surfaces now drive one shared read/write controller, and each keeps its own layout and Task actions.
+
+## The controller
+
+New file: `/home/yu/projects/dsh-agent-team/packages/client-agent-team/src/client/thread-controller.ts`
+
+```ts
+useTeamThreadController(options: TeamThreadControllerOptions): TeamThreadController
+```
+
+Inputs: `workspaceId`, `threadRef`, optional `taskRef`, plus the Remote functions both faces already received (`readThread`, `loadThreadHistory`, `threadObservations`, `subscribeChanges`, `resolveMessageRefs`, `reply`, `putAttachment`), `drafts`, and four surface callbacks:
+
+- `projectMembers()` — roster at send time, for optimistic mention chips
+- `memberName(id)` — quote-banner author name
+- `onRead?()` — panel clears the feed's unread badge; page passes nothing
+- `afterWrite?()` — page re-reads roster/Project view; panel passes nothing
+
+Two optional behavior inputs, each used by exactly one face:
+
+- `openingTarget(facts)` — the page's "first unread Message naming the Human"; absent means open at the newest fact (the panel's behavior)
+- the Task-write surface, described below
+
+It returns projection state (`projection`, `task`, `thread`, `currentFacts`, `readFacts`, `olderFacts`, `taskCards`, `followerIds`, `historyHasMore`), read/write state (`loading`, `error`, `pending`, `autoReadExhausted`, `newFactsCount`, `replyTarget`, `replyTo`, `pendingFiles`, `draftKey`, `flashedMessage`), and actions (`readCurrent`, `loadOlder`, `refreshAfterFence`, `refreshPassiveFacts`, `retryAutoRead`, `onTimelineScroll`, `jumpToNewest`, `flashMessage`, `setReplyTarget`, `setPendingFiles`, `clearSendState`, `sendReply`, `commit`, `applyTaskCommit`, `reportError`).
+
+`commit(spec)` runs one durable write under the shared busy gate: it keeps the requestId per key so a lost answer replays instead of writing twice, and it converges on either fence (`unread_required` drains and re-reads; `stale_revision` re-projects passively). `applyTaskCommit(committed)` merges a committed Task write's projection and activity row, then re-reads. It takes the union of the fields promote, accept/close/reopen, and transfer all return, with `claims` optional because transfer's result does not carry them.
+
+## How the differences were reconciled
+
+| Difference | Resolution |
+|---|---|
+| Page opens on first unread `@Human` Message and pulses it; panel always opens at newest | `openingTarget` option; the jump/flash machinery lives in the controller but only runs when a target is returned |
+| Page acknowledges reads to its feed through none; panel calls `onRead(threadRef)` on each successful read | `onRead?` hook |
+| Page also reloads roster + Project view after writes; panel does not | `afterWrite?` hook |
+| Page has full Task controls (promote, accept with early-accept confirm, close, reopen, transfer); panel only promotes | Controller exposes `commit`/`applyTaskCommit`; each face defines its own writes. Transfer's `landedOn` receipt and refusal copy stay page-only (`useTaskTransfer` unchanged) |
+| Page subscribes to `workspace` and `presence` scopes in addition to `thread` | Controller owns the `thread` subscription; those two stay in the page and feed the controller's error surface via `reportError` |
+| Page keeps `projectView` and derives `members`; panel receives both as props | Stayed surface-owned; page's supplemental loader and its coalescing round are unchanged |
+| Page's follower set seeds the follow control; panel passes `undefined` so the hook asks the Host | Preserved exactly; both still call `useThreadFollow` with `followerIds`/`undefined` as before |
+| Panel has an `onPromoted` hand-off on commit; page merges and re-reads | `commit` takes an `onCommitted` callback, so each face decides |
+| Promote button label gated by `mutating`, not `pending` (a reply send must not retitle it) | Both faces keep their own local `mutating` state around the `commit` call |
+
+Facts, history cursor, sequence guards, drain cap, unread counting, error cleanup, and reply lifecycle logic were moved verbatim.
+
+## Duplication for this file pair
+
+| Metric | Before | After |
+|---|---|---|
+| Clone groups involving these two files | 21 | 6 |
+| Duplicated lines across those groups | 357 | 84 |
+| Package tsx totals | 22 clones / 364 lines | 7 clones / 91 lines |
+
+The six remaining groups are the two faces' row renderers and layout blocks (markup, not coordination). The report's ~300-line figure matched my measured 357.
+
+## Verification
+
+| Command | Result |
+|---|---|
+| `npm run typecheck` | pass (exit 0) |
+| `npm run lint` | pass, 0 warnings |
+| `npm run duplication` | 12 mentions of the pair (6 clone groups), down from 42 (21) |
+| `npx vitest run packages/client-agent-team` | 41 files / 361 tests passed (same as the pre-change baseline) |
+| `npm run check:comments` | OK, client-agent-team 945/2020 |
+| `npm run check:boundaries` | OK, 105 files |
+| `npm run check:docs` | OK |
+| `npm run test:browser` | 8/8 passed, run after the final edit |
+
+Panel-switch and stale-read tests pass unchanged.
+
+## Left alone deliberately
+
+- No Host, protocol, or `../deepseek-harness` change; no new dependency.
+- The follow and transfer controls still use `useThreadFollow` and `useTaskTransfer` as they did. They are per-control state, not read/write coordination, and moving them would change their error surfaces.
+- Nothing unconditionally awaits the controller's `afterWrite` in the panel: panel `sendReply` and `refreshAfterFence` are byte-for-byte their old behavior (no extra request). Only the page passes `afterWrite`.
+
+## Noticed but not changed
+
+- `useTaskTransfer` takes `taskRef: task?.taskRef as AgentTeamTaskRef`, a cast that hides an `undefined` even though the transfer control only renders when a Task exists.
+- `TeamThreadPage` uses non-null assertions on `replyContexts.get(...)` and `cards[nextCard]!`; both are guarded by the surrounding code, so I matched the file's convention.
+- `TeamProjectPanel`'s row `openCard` state is not reset when the panel swaps Threads in place (the page resets its copy). Pre-existing; behavior preserved.
+- The `??`-guarded change-detection in `drafts.ts` and the working-tree edits in `TeamComposer.tsx`/`TeamMainStream.tsx` came from earlier uncommitted work and were not touched.</result>
+<usage><subagent_tokens>176862</subagent_tokens><tool_uses>150</tool_uses><duration_ms>3907853</duration_ms></usage>
+</task-notification>
