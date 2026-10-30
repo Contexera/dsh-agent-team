@@ -1,0 +1,2 @@
+这里其实可能得涉及架构、模型上的调整。我们可能不用身份去区分投递，而用attention？follow与unfollow，否则当前这种情况我没有看出follow与unfollow有什么作用。身份也只是因为其持有更大的默认attention
+能理解我的想法吗
