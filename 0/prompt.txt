@@ -1,0 +1,1 @@
+.scratch/active/agent-tools-context-rendering 继续这个scratch吧，经过多次优化，但可能依然有问题。我们可以先对齐讨论这个scratch到底要去做什么，以及怎么去做，预期表现与效果又如何
