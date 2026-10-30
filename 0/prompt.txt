@@ -1,0 +1,121 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>$AGENT_COMPLETE, Agent, Bash, Edit, Read</tools-used-before-summary>
+Summary:
+1. Primary Request and Intent:
+   The user asked to continue work on `reports/project-ownership-model-review-2026-10.md` and implement its remaining recommendations. Explicit user instructions in this session: "继续。刚刚subagent好像我给不小心中断了" (Continue — I think I accidentally interrupted the subagent), "继续，subagent也完成了。后面也可以利用subagent" (Continue, the subagent also finished; you can also use subagents going forward), "continue", and "继续". Earlier standing authorization (from the prior summary): "自己决定推进。同时也注意实际情况如何。" (Decide yourself how to proceed; also pay attention to the actual situation) and "不行可以用subagent" (use a subagent if needed). The goal was to close out the report's remaining work items P2-1 through P3-1.
+
+2. Key Technical Concepts:
+   - Project ownership model for Agent Team (an opt-in Cordis bundle for DeepSeek Harness)
+   - Ledger-based operation system with rules versioning (v1 vs v2); append-only operation ledger as the sole durable authority
+   - Mention delivery: body-authored `@Handle` as the *sole* delivery authority (the P2-1 "正文单一权威" decision)
+   - Host authority boundary: no parallel authority in projections/tools/Remote/UI
+   - Non-optimistic durable UI mutations; Host enforces authorization, membership, revisions, idempotency, branded refs
+   - Legacy localStorage backward compatibility (ignore, don't migrate)
+   - Static legacy operation fixtures for v1 replay validation
+   - Shared React read/write controller hook vs. surface-owned layout/Task actions
+   - TypeScript strict mode, `exactOptionalPropertyTypes`
+   - Browser acceptance testing against an adjacent Harness checkout
+   - Duplication measurement via jscpd; comment-budget enforcement
+
+3. Files and Code Sections:
+
+   **`packages/agent-team/src/types/requests-results.ts`** — Removed `readonly recipients?: readonly AgentTeamMemberId[]` from `AgentTeamReplyRequest` (~381), `AgentTeamPostMainMessageRequest` (~516), `AgentTeamStartThreadRequest` (~587). Updated comments so the parent author "is delivered to" rather than "joins the recipients". `AgentTeamConfirmationRequired.recipients` (line ~396) was **kept** — it is a *result* field on the v1-only confirmation path, not a request field.
+
+   **`packages/agent-team/src/ledger.ts`** — Renamed `mergeBodyMentions` → `deliveryRecipientsFor` and rewrote its doc, because the `explicit` parameter now only ever carries the answered parent author:
+   ```ts
+   /**
+    * The recipient set one write delivers to. The body is the sole authority on
+    * mentions: the `@Handle` scan below is the only thing a caller can name with,
+    * and it is the same scan for an Agent and for Human input typed by hand. The
+    * one input besides the body is `answered`, the parent Message's author, whom
+    * a reply reaches the way a mention does.
+    */
+   private deliveryRecipientsFor(
+     sender: AgentTeamMemberId,
+     projectRef: AgentTeamProjectRef,
+     body: string,
+     answered: readonly AgentTeamMemberId[],
+   ): readonly AgentTeamMemberId[] {
+     const candidates = this.mentionCandidatesFor(projectRef)
+     const resolution = resolveBodyMentions(body, candidates, sender)
+     const authored = resolution.all && this.state.rulesVersion < 2 ? this.allRecipientsFor(projectRef) : resolution.memberIds
+     const merged = new Set([...answered, ...authored])
+     merged.delete(sender)
+     return Object.freeze([...merged].sort())
+   }
+   ```
+   All three call sites updated (lines 1205, 1267, 1343).
+
+   **`packages/agent-team/tests/fixtures/rules-v1-ledger.ts`** (P2-2) — Grew from 10 to 12 records. Two new `team/thread-replied` operations appended: sequence 11 (`fixture:invite-confirmed`, human, body `@carol, please look`, `mentions: [member:carol]`, carol Attention `startSequence: 11` + one direct marker) and sequence 12 (`fixture:undelivered`, alice, body `@dave, over to you`, `mentions: []`, empty inbox delta). Exported shape gained `invitation`/`undelivered` entries and `task.revision` 7→12. New header comment states it is "A captured rules version 1 operation table for replay validation only… not regenerated at runtime" and how to regenerate (boot v1 ledger over a clone, fixed `occurredAt`, paste the *pool's* stored entries — not the re-encoded table values).
+
+   **`packages/agent-team/tests/rules-v1-replay.spec.ts`** (P2-2) — The test `replays the invitation and the undelivered mention captured under version 1` no longer calls `v1.reply()` or reads `confirmation_required`. It now filters frozen records for `team/thread-replied`, asserts exactly two with expected sequences, and **pins the fixture content itself** (bodies, senders, mentions, Attention set, direct markers, thread revisions) before keeping the original outcome assertions.
+
+   **`packages/client-agent-team/src/client/thread-controller.ts`** (NEW, P2-3, ~26KB) — `useTeamThreadController(options)` exposing projection state, read/write state, and actions (`readCurrent`, `loadOlder`, `refreshAfterFence`, `refreshPassiveFacts`, `retryAutoRead`, `onTimelineScroll`, `jumpToNewest`, `flashMessage`, `setReplyTarget`, `setPendingFiles`, `clearSendState`, `sendReply`, `commit`, `applyTaskCommit`, `reportError`). Surface callbacks: `projectMembers()`, `memberName(id)`, `onRead?()`, `afterWrite?()`, `openingTarget(facts)`. `commit(spec)` runs one durable write under a shared busy gate, keeping requestId per key and converging on `unread_required`/`stale_revision` fences. `afterWrite` is defined **only** by `TeamThreadPage` (`afterWrite: () => refreshSupplemental()`), so the panel makes no extra request.
+
+   **`packages/client-agent-team/src/client/drafts.ts`** — `TeamDraftState` is now `{ draft: string }`; `StoredDraft` is `{ draft: string; savedAt: number }`; `writeRecipients()` removed; `EMPTY` is `{ draft: '' }`. `readStored()` ignores legacy `recipientIds` with the comment "Legacy drafts carried `recipientIds`; ignore it — body mentions are now the sole authority."
+
+   **`packages/client-agent-team/src/client/TeamComposer.tsx`** — Removed the whole `pruneRecipients()` function and its `useEffect`; `deliverableRecipients(draft, members, replyTo)` (no recipients param); `commitMention(nextDraft, nextCaret)`; removed dead `containsMention` import.
+
+   **`packages/client-agent-team/src/client/team-formatters.ts`** — Stale comment fixed: "Preview-only: the body is the sole delivery authority, so this is exactly what the Host derives."
+
+   **`scripts/team-ui.e2e.ts`** — All `recipients:` sites removed. `peerReply` changed from `(label, recipients: readonly string[])` to `(label, mention: boolean)`:
+   ```ts
+   const peerReply = async (label: string, mention: boolean): Promise<void> => {
+     const read = await scaffold.ctx.agentTeam.readThreadForAgent(reviewerAgent, {...})
+     const reply = await scaffold.ctx.agentTeam.replyForAgent(reviewerAgent, {
+       requestId: `m2-06-follow-${label}-reply` as never,
+       workspaceId: workspace.id, taskRef: task.taskRef, body: mention ? `关注切换验收 ${label} @human` : `关注切换验收 ${label}`,
+       baseRevision: read.thread.revision,
+     })
+     if (reply.kind !== 'committed') throw new Error(`follow-journey reply rejected: ${reply.kind}`)
+   }
+   const publishOrdinaryReply = (label: string) => peerReply(label, false)
+   const publishDirectMention = (label: string) => peerReply(label, true)
+   ```
+   Two sites gained `@human` in the body: `m2-09-builder-mention` → `'@human 需要你拍板：默认走 A 方案'`, and `m2-09-stack-task` → `'叠放校验：谁在这个 Task 上 @human'`. Five sites deleted outright (no delivery assertion).
+
+   **Docs updated (6 files + README):** `docs/team-collaboration/attention-and-messaging.md`/`.zh.md`, `docs/frontend-design/thread-and-composer.md`/`.zh.md`, `docs/team-collaboration/tools.md`/`.zh.md`, `packages/agent-team/README.md`. I personally fixed the v1/v2 mismatch in both `tools.md` and `tools.zh.md` (the old text stated the v1 "reports the undelivered names" behavior as current).
+
+   **`reports/project-ownership-model-review-2026-10.md`** — Status table updated: P2-1 (已实施), P2-2 (第 1、2 步已实施), P2-3 (已实施), P2-5 (已实施), P3-1 (未实施, with a 2026-10-27 deferral rationale). Also annotated the lint (5→0 warnings), duplication, and the typecheck-coverage gap.
+
+4. Errors and fixes:
+   - **33 test failures across 5 files** from the `recipients` removal (bodies named nobody, so no delivery). Fixed by adding `@handle` to bodies across `agent-team.spec.ts`, `member-lifecycle.spec.ts`, `post-commit-delivery.spec.ts`, `projection-indexes.spec.ts`, `operation-protocol.spec.ts` (fixture body), `surface-agreement.spec.ts`.
+   - **`operation-protocol.spec.ts` request collision**: the stored fixture had `mentions: [memberId]` but the replay now derives `[]`. Fixed by making the fixture body `` `@${memberHandle} protocol fixture main message` ``.
+   - **`post-commit-delivery.spec.ts` wake-retry failure** (`expected [] to have a length of 1`): the retry reply needed a *new* direct marker to change the delivery signature. Fixed with `@${member.handle}` on both the thread start and the retry reply.
+   - **Browser acceptance failure (1 of 8)**: `scripts/team-ui.e2e.ts` still had `recipients:` call sites that `npm run typecheck` never caught. Fixed all sites; verified 8/8.
+   - **Vacuous test**: subagent flagged `keeps a small cold context on its own generation` now passes trivially (no wake → session id unchanged holds). I added `expect(JSON.stringify(adapter.requests.at(-1)!.messages)).toContain('Continue please')` and changed the body to `'@builder Continue please'`.
+   - **Lint warnings (5 → 3 → 0)**: removed unused `builder` in `agent-team.spec.ts:737` (introduced by the P2-1 edit), unused `actor` at ~2624, and unused `memberId` at `member-lifecycle.spec.ts:2108`.
+   - **Typecheck coverage gap (documented, not fixed)**: `scripts/team-ui.e2e.ts` is in no tsconfig include, and `tsconfig.scripts.json` (which only lists `session-trace.ts`) isn't even invoked by `typecheck`. Probing showed it *cannot* be typechecked in-repo because `playwright`, `./scaffold.ts`, and `./support.ts` only resolve inside the harness checkout. Recorded the gap and two remediation options in the report, noting `test:browser` is the only effective gate for that file until then.
+
+5. Problem Solving:
+   Completed P2-1 end-to-end (Host, Client, tests, docs, browser acceptance script), P2-2 steps 1–2, and P2-3. Discovered P2-5 was already done by prior work (`buildReleaseSnapshot` called from all four departure entry points: `leaveWorkspace` ~1106, `archiveProject` ~1150, `removeMember` ~1641, `archiveMember` ~1680). Deliberately did **not** do P2-2 steps 3–4 (deleting the confirmation Map/token/result union/v1 write branch) because the old-ledger replay commitment still requires them, and deferred P3-1 (test splitting) as a pure-reorganization item with poor risk/reward. Verified every subagent claim independently rather than trusting reports — including that the archived-Member test's semantic change was correct, that `following('carol')` changing to `[true,false,true,false]` was a genuine consequence of moving the invitation into the frozen history, that `mainMessageInboxDelta` derives markers only from `mentions` (so owner notification is watermark-derived, not marker-based), and that P2-3 changed zero test files.
+
+6. All user messages:
+   - "继续。刚刚subagent好像我给不小心中断了"
+   - "继续，subagent也完成了。后面也可以利用subagent"
+   - "continue"
+   - "继续"
+   (Plus the final system-generated compaction instruction. All `[SYSTEM NOTIFICATION - NOT USER INPUT]` blocks were explicitly automated background-task events and carried no user approval or consent.)
+
+7. Pending Tasks:
+   - P2-2 steps 3 and 4: delete the transient `confirmations` Map, `AgentTeamConfirmationToken`, the `confirmation_required` result union, and the v1 invitation write branch — **explicitly deferred** until the release support window no longer needs rules-v1 live writes.
+   - P3-1: split `agent-team.spec.ts` (3415 lines), `member-lifecycle.spec.ts` (3880 lines), `scripts/team-ui.e2e.ts` (4244 lines) by authority seam — **deliberately deferred**, documented in the report.
+   - Nothing has been committed; all work is uncommitted in the working tree (28 modified files + 2 untracked: `packages/client-agent-team/src/client/thread-controller.ts` and `reports/`).
+
+8. Current Work:
+   Immediately before the summary request I had completed final verification of all the work. The last actions were running the complete gate set, which produced:
+   - All 8 static gates OK: `typecheck`, `lint`, `check:comments`, `check:docs`, `check:boundaries`, `check:versions`, `check:facades`, `check:core-skills`
+   - `npx vitest run`: **100 files | 0 failedFiles | 1357 tests | 0 failed**
+   - `npm run test:browser`: **8 passed (8)**, 86.00s
+   - `git diff --stat`: 28 files changed, 301 insertions(+), 967 deletions(-) — a net **−666 lines**
+
+   The report's status table now records P2-1, P2-2 (steps 1–2), P2-3, and P2-5 as implemented/uncommitted, and P3-1 as deferred with rationale.
+
+9. Optional Next Step:
+   No next step should be started without user confirmation — all in-scope report items are either completed or deliberately deferred with the rationale recorded in the report. The natural next action, if the user wants it, is to report the final results and ask whether to commit the work (nothing has been committed; per repo convention each commit is one Conventional Commits subject line with no body). I should not begin P2-2 steps 3–4 or P3-1 unprompted, since both were deliberately deferred for documented reasons.
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/7cf571b6-bccf-4d18-905c-f866eded96e3.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
