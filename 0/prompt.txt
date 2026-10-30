@@ -1,0 +1,13 @@
+有问题：pnpm dsh --profile web-dev
+$ node --import tsx/esm apps/cli/src/bin.ts --profile web-dev
+dsh: warning: 2 entries did not activate
+wowyuarm-agent-team-invariant (@contexera/dsh-agent-team/invariant): pending (waiting for service: agentTeam)
+wowyuarm-agent-team-host (@contexera/dsh-agent-team/host): Error: invalid Project owner inbox projection
+    at AgentTeamLedger.validateOperation (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:2513:23)
+    at AgentTeamLedger.validateRecords (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:2384:22)
+    at AgentTeamLedger.replay (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:2359:14)
+    at new AgentTeamLedger (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/ledger.js:191:14)
+    at [cordis.init] (file:///home/yu/projects/dsh-agent-team/packages/agent-team/lib/index.js:745:28)
+    at async Fiber._reload (/home/yu/projects/deepseek-harness/vendor/cordis/src/fiber.ts:656:9)
+dsh web: http://127.0.0.1:3080/?REDACTED
+dsh web: opening the default browser; pass --no-open to disable
