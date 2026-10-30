@@ -1,0 +1,42 @@
+Base directory for this skill: /home/yu/.claude/skills/discussion
+
+# Discussion
+
+A conductor for converging work: a topic that needs multiple rounds — research, exploring alternatives, decisions — and deserves persistence as a `.scratch/active/<work>/` work item instead of chat that evaporates at compaction.
+
+The flow internalizes to-spec and to-tickets for the local `.scratch` world: the discussion is the interview; its durable output is the work item's `DESIGN.md` and, once the shape is agreed, its `issues/` tickets — all under the repo's own `.scratch/AGENTS.md` rules, which own the structures and stay the single source for them.
+
+## 1. Gate
+
+Discussion-worthy means: multiple rounds needed, real decisions to make, and the outcome will be built or referenced later. A question with a one-pass answer gets answered, not a work item.
+
+## 2. Open the work item
+
+Follow `.scratch/AGENTS.md`: `active/<work>/` with the five-item `README.md` (status, last-checked date, current frontier, completion conditions, formal-doc exit) and a `materials/` directory. Work in the conversation; persist what matters as it crystallizes, not at the end.
+
+If the repository has no `.scratch` work area, offer to run ax-init first. Without one, keep the discussion in-conversation and say that nothing is being persisted.
+
+## 3. Research
+
+Pull in facts with the `research` skill — primary sources, each claim cited, findings saved into `materials/`. Facts are the agent's job: never ask the user for something that can be looked up.
+
+## 4. Discuss in rounds
+
+Run the questioning with the `grilling` discipline: map the topic as a design tree, work it in frontier rounds, numbered questions each carrying a recommended answer; one round, then wait. Settled answers reshape the tree and unlock the next frontier. The questioning is done when the frontier is empty — nothing left silently assumed.
+
+## 5. Converge
+
+Synthesize — do not transcript. `DESIGN.md` holds: the problem in the user's terms, the chosen shape, key decisions with their reasons, the agreed testing seams, and open questions. No file paths or code snippets (they go stale); the exception is decision-dense fragments (state machines, type shapes) inlined with their source noted.
+
+## 6. Ticket
+
+When the shape is agreed, break the work into tracer-bullet tickets per `.scratch/AGENTS.md` (vertical slices, blocking edges, frontier; wide refactors as expand–contract). Present the breakdown — title, blocked-by, what it delivers — and settle granularity with the user before writing any ticket file.
+
+## 7. Keep the entry alive
+
+Update the README's five items as the frontier moves; set last-checked at the start of each session that touches the item. Implementation proceeds per ticket (tdd at the agreed seams).
+
+Before closing a work item with code changes, offer `/scratch-review <work-item>` to review the implementation against its design and tickets and save the report under `reviews/`. Resolve confirmed findings first; human acceptance evidence belongs separately under `validation/`. Closing follows the `.scratch/AGENTS.md` lifecycle — durable conclusions graduate into maintained docs, the item archives.
+
+
+ARGUMENTS: 开scratch吧。稍后我们细聊；且需要你先进一步深入看看，以免遗漏一些设计与edge case；必要时也可以看看我们之前project ownership model已经大部分落地的scratch，其中有些思想的
