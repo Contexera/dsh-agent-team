@@ -1,0 +1,2 @@
+这可以开个单独tools render统一并且审视现有tools设计以及提供给agent的prompt与context scratch；
+你先更新我们上述已经讨论好的关于attention那个scratch（相关设计与讨论都按照你那样的）；然后单独开另外个scratch，也说明好情况
