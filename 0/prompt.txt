@@ -1,0 +1,12 @@
+Full review comments:
+
+- [P1] Scope follow request IDs to the current Thread — /home/yu/projects/dsh-agent-team/packages/client-agent-team/src/client/thread-actions.ts:102-103
+  After a successful follow, the request ID remains cached. A follow → unfollow → follow cycle therefore reuses the first follow operation's ID, so the Host returns the old idempotent result instead of committing the new follow. The same stale ID is reused when the discussion panel switches to another Thread, where it can collide with the previous Thread's operation. Remove the ID after a known result or scope it to the Thread and action.
+- [P2] Refresh follow state from new observations — /home/yu/projects/dsh-agent-team/packages/client-agent-team/src/client/thread-actions.ts:93-96
+  This effect treats the supplied observed set as permanently authoritative, but the Thread page passes a snapshot that is only populated during its initial read, while later subscription refreshes update only followerIds; the discussion panel also does not feed its refreshed observations into this hook. When the other face or another client changes Attention, the button remains stale and the next click can send the opposite action. Keep the state unanswered until a successful observation and update it whenever a successful observation arrives.
+- [P2] Freeze released claims in the shared snapshot — /home/yu/projects/dsh-agent-team/packages/agent-team/src/ledger.ts:5076-5078
+  Before this refactor, each releasing operation stored claims: Object.freeze(releasedClaims). The shared builder now returns the mutable input array, and the archive/remove results expose that same array, so a caller can mutate the committed operation data after the commit and leave replay or validation observing corrupted Claim records. Freeze the nested claims array when assembling the snapshot.
+- [P1] Split the oversized component paragraph — /home/yu/projects/dsh-agent-team/docs/frontend-design/components.md:38-38
+  The changed paragraph exceeds the repository's documented block-length ceiling: npm run check:docs reports 935 characters against the recorded limit of 576, so the required npm test workflow fails before running the test suite. Split or condense this paragraph according to docs/AGENTS.md:47-48.
+
+看看这些问题实际存在吗
