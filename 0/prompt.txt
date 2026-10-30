@@ -1,0 +1,1068 @@
+This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
+
+<tools-used-before-summary>Agent, Bash, Edit, ListAgents, Read, SendMessage, SendUserFile, Skill, WebFetch, Write</tools-used-before-summary>
+Summary:
+## 1. Primary Request and Intent
+
+工作目录：
+`/home/yu/projects/dsh-agent-team`
+
+分支：
+`feat/agent-context-reading`
+
+工作项：
+`.scratch/active/agent-tools-context-rendering`
+
+用户已在此前批准七张实施票与六段完整流程，并授权：
+- “推进落地吧。实施可以交给subagent，你可以review以及把握方向”
+- “可以阶段性commit你的修改。可以重新把subagent用起来”
+- 工程偏好：“注意工程细节上你自己把握好，不要过度设计与过度防御等了”
+
+本轮时间线：
+1. 接续前文完成 03 Main 读取恢复与 04 长消息续读，已有提交：
+   `1e95b83 feat: restore main context and continue long messages`
+2. 用户“嗯继续”，实施 05 Main／Activity 写前上下文恢复。
+3. 05 实施中两个 subagent 遇到认证错误停止。助手接手，用户随后明确说：
+   “subagent后续可用了。后面可以让其继续做或者帮你review”
+4. 助手恢复文档 subagent，另启独立审查，完成 05 并阶段提交：
+   `6b6b7f2 feat: recover main and activity context before writes`
+5. 助手汇报 05 已完成：完整 Main／Activity 不重复读取即可重新操作；只有 read 确认；1505 tests passed / 1 existing skipped；browser 10/10；未 push/release，性能修改保留。
+6. 最新实施请求：
+   “继续吧”
+7. 现正在实施 06 通知优先级、整体预算和减少重复正文，尚未提交；07 仍 pending。
+8. 当前用户要求 TEXT ONLY 详细摘要，不得调用工具。本摘要后应直接继续 06，不重新询问实施授权。
+
+当前整体票据：
+- 01 Member 分类背景：complete，`56e5a92`
+- 02 Thread 完整拒绝恢复：complete，`241f8f8`
+- 03 Thread/Main read 恢复：complete，Thread 在 `241f8f8`，Main 在 `1e95b83`
+- 04 长消息续读：complete，`1e95b83`
+- 05 Main/Activity 写前恢复：complete，`6b6b7f2`
+- 06 通知优先级／预算／去重：in-progress
+- 07 七工具规则整理与联合验收：pending
+
+最新助手对用户的工作承诺：
+“接着做通知这部分：先核对之前定下的规则和并行性能改动，再调整通知顺序、总长度和重复正文，保持投递与未读规则不变。”
+
+最近进度汇报：
+“已验证两个关键场景：旧的完整 Activity 不再随新通知重复展开；压缩后恢复时，会重新提供缺失内容，并保留所有未读标记。通知失败重试、运行中合并和验收提醒的已有测试也通过了。接下来核对输出上限和省略提示，再做独立审查。”
+
+## 2. Key Technical Concepts
+
+### 2.1 架构与三状态
+
+- Team 是 opt-in、外部 Cordis bundle，不修改 Harness。
+- `packages/agent-team` 是唯一 Team authority。
+- append-only operation ledger 是持久事实来源。
+- Session surface 只证明“当前上下文完整提供了事实”，不维护第二套持久已读状态。
+- 七工具：
+  `team_view`、`team_inbox`、`team_attention`、`team_thread`、`team_message`、`team_dm`、`team_task`
+- 只有 `team-member` preset 获得 Team 工具/规则。
+- Human 只有 Web Client 控制面，不恢复 slash adapter。
+
+必须区分：
+1. 完整事实已在当前上下文。
+2. 显式 `team_thread read` 确认已读。
+3. Host 已提交操作。
+
+完整通知、history、message、拒绝结果可满足上下文条件，但：
+- 不推进水位。
+- 不消费 marker。
+- 回复／提交成功也不替代 read。
+- 新事实、revision、权限、Task closed、验收资格每次写仍重新检查。
+- Main 不新增 Thread `baseRevision` token。
+- Card／board 当前状态不证明历史事件，也不证明 card 指向的 Thread 已读。
+
+### 2.2 Session 完整事实绑定
+
+`packages/agent-team/src/surface-visibility.ts`
+
+- 生产者完整输出实际文本 SHA-256。
+- Message 绑定：
+  Thread 或 Main Project + messageRef + bodyDigest；
+  长消息另带 start/end/total。
+- Activity 绑定：
+  scope + activityRef + Thread/Project + immutable factDigest。
+- 只读取当前 `Session.surface.nodes`。
+- Team notice 必须正确 producer kind 且 `form:'notice'`。
+- tool result 必须沿 `sourceEventSeqs` 找到同 callId 的真实 `team_thread`／`team_message`／`team_task` call。
+- 用 `deriveEventMessage(event)` 的实际投影文本核对 textDigest。
+- 保留 metadata 但文本裁剪，不算完整。
+- 不做正文 substring、模型复述或“我看过”fallback。
+- 省略正文／Activity 的输出不能重新绑定被省略事实；必须依赖当前 surface 仍存在的原完整输出。
+- queued Inbox notice 不在 surface，不可拿来判“已经可见”。
+
+Harness 公共接口已验证：
+- `Session.surface.nodes`
+- `snapshotEvents(SessionLogOffset(...))`
+- `deriveEventMessage(event)`
+- `deriveMessages()`
+- `Session.fromRestore(...)`
+- `SessionMessageProjection`
+- tool output `render`／`presentationMeta`
+- `agent.session.requestHeader()?.config ?? agent.options`
+- `llm.resolveModelInfo(...)`
+
+不存在／不使用：
+- `session.messages`
+- `session.messageProjections`
+
+### 2.3 03/04 已提交读取与长消息机制
+
+- 不新增 continuation offset 参数。
+- 重复同一个 `team_thread read` 或同 address/messageRef 的 `team_thread message`。
+- 每次找当前 surface 最早缺段。
+- 先减少条数，单 Message 仍超预算才分段。
+- read 只有此前有效片段 + 本次输出覆盖全文才确认。
+- message 始终不确认。
+- 后面的未读不得越过未完整 Message。
+- 裁剪/压缩丢段，则补缺段。
+- UTF-16 offset，避免切断高代理项；中文/emoji 已测。
+- `READ_MAX_CHARACTERS = 32 * 1024`，内部留 64 给最终水位/计数变化。
+- 读容量保守上界：
+  `max(0, min(262144, contextWindow - 16384))`
+  未知模型/provider/NO_ADAPTER 默认 262144。
+- 这是保守字符限制，不是实际 token 计数。
+- 超容量明确错误，不确认，不盲重试。
+- `[attachment] absolute-path` 只是附件定位，不等于附件正文已读。
+- `history` 仍只按条分页，不承诺总字符预算，正式文档已明确。
+- 超大单 Activity 不分段；固定 32Ki 输出装不下就明确不确认、换模型或重复调用也不能解决，要求 Human 检查。
+
+ledger：
+- Thread authorized read 有内部 `selectedThroughSequence?: number`。
+- 默认前20；选择只能缩小前缀。
+- selection0 且有未读：不确认 fact/marker/reminder。
+- 无未读的 reminder-only read 正常。
+- receipt 保存选择界限，旧 receipt 缺字段仍默认20。
+- Main 复用 `readThroughSequence`。
+- select 在 ledger 队列内权限确认后同步执行，无 await 空档。
+- Main preview 补确认区间所有未读，避免旧未读被新 Task cards 挤出 latest20 后仍确认。
+- Human 页面规则不变。
+- 幂等重试返回“原 receipt + 当前投影”，不是冻结原答案，不再确认。
+- 独立审查曾疑 Main retry 丢旧 Activity，后经实际工具验证撤回：符合已定 current snapshot 契约，未虚报新事实确认，不加 snapshot cache。
+
+### 2.4 05 已提交 Activity 标准投影
+
+新模块：
+`packages/agent-team/src/activity-facts.ts`
+
+```ts
+interface ThreadActivityFact {
+  readonly scope: 'thread'
+  readonly activityRef: AgentTeamActivityRef
+  readonly sequence: number
+  readonly kind: AgentTeamActivity['kind']
+  readonly actor: AgentTeamMemberId
+  readonly taskRef: AgentTeamTaskRef
+  readonly threadRef: AgentTeamThreadRef
+  readonly claimRef: AgentTeamClaimRef | null
+  readonly claimRefs: readonly AgentTeamClaimRef[]
+  readonly completedClaimRefs: readonly AgentTeamClaimRef[]
+  readonly acceptedClaimRefs: readonly AgentTeamClaimRef[]
+  readonly releasedClaimRefs: readonly AgentTeamClaimRef[]
+  readonly from: AgentTeamMemberId | null
+  readonly to: AgentTeamMemberId | null
+  readonly refollowedMembers: readonly AgentTeamMemberId[]
+}
+interface MainActivityFact {
+  readonly scope: 'main'
+  readonly activityRef: AgentTeamActivityRef
+  readonly sequence: number
+  readonly kind: AgentTeamMainActivity['kind']
+  readonly actor: AgentTeamMemberId
+  readonly projectRef: AgentTeamProjectRef
+  readonly memberId: AgentTeamMemberId
+}
+type ActivityFact = ThreadActivityFact | MainActivityFact
+```
+
+- 只从不可变 Activity 本身取字段，不查询当前 Task/Claim 来补历史。
+- optional arrays 统一空数组；单值 absent 统一 null。
+- SHA-256(JSON.stringify(explicit ordered tuple))，不依赖对象属性顺序。
+- `activityText()` 唯一 formatter。
+- Thread 文本：
+  `${sequence} ${actor} ${kind} Task ${taskRef} · Thread ${threadRef} · ${activityRef}`
+  后追加真实非空 Claim 列表、from/to、refollowedMembers。
+- Main 文本：
+  `${sequence} ${actor} ${kind} Member ${memberId} · Project ${projectRef} · ${activityRef}`
+- occurredAt 由外层渲染，未纳入 semantic digest；审查未发现由此造成错误绑定。
+- producer `teamMessageSurface` 不检查 `text.includes(activityText(...))`，该 substring 断言已删除；生产出口必须只绑定实际完整渲染的事实。
+
+05 Host：
+```ts
+readonly areMainEntriesVisible?: (
+  memberId: AgentTeamMemberId,
+  entries: readonly AgentTeamMainTimelineEntry[],
+  projectRef: AgentTeamProjectRef
+) => boolean
+```
+
+Main gate 检查全部必要未读，而不只拒绝窗口：
+```ts
+if (unread.length > 0 && !this.areMainEntriesVisible?.(
+  actor.memberId,
+  this.mainEntries(unread.map(item => item.source), unread),
+  project.projectRef,
+)) {
+  return this.resolved(this.mainUnreadRequired(project.projectRef, unread))
+}
+```
+
+Agent Main/Thread read 都返回：
+```ts
+{
+  readonly visibleMessageRefs: readonly AgentTeamMessageRef[]
+  readonly visibleActivityRefs: readonly AgentTeamActivityRef[]
+}
+```
+
+tools：
+- `ActivityFactView` 带完整 immutable 字段和 `activityOmitted`。
+- `MainEntryView` 新增 `activityRef`、`projectRef`、`activityOmitted`。
+- `activityFromView()` 唯一 view→ActivityFact 校验/重建路径。
+- read/history/rejection 的实际完整 Activity 绑定。
+- 完整混合 Message/Activity Thread rejection，baseline known + 全部必要事实已完整展示才给 token。
+- Main rejection 有 16Ki 总预算，无 token。
+- read 省略 Activity：
+  `Activity <ref> — complete event already in current context; omitted.`
+  省略不绑定。
+- 通知 Activity 使用 canonical formatter；Human acceptance 的“你的 Claim 已完成/已接受”是额外解释，不代替完整事件字段。
+
+### 2.5 06 正在实现的通知策略
+
+目标范围：
+- 不更改投递、covered、合并、恢复、未读语义。
+- 不新增队列／delivery database／永久去重。
+- 仅通知内容选择、排序、总预算和短身份。
+
+当前实现策略：
+- 总通知上限 32768 UTF-16。
+- 恢复前缀也计入。
+- 预留 2048 给 footer、重要省略提示与读取入口。
+- 全局候选排序跨 Thread/Main：
+  - priority0：当前缺失的直接 Message、Task/Claim Activity、Main ownership Activity，sequence 新的优先。
+  - priority1：当前已完整可见的上述事实，仅身份：
+    `already in current context; still unread`
+    不重新绑定。
+  - priority2：Task reminders。
+  - priority3：普通计数和 Main Thread cards。
+- 8 个 Thread scope 上限，在全局排序之后应用（主线程已修正 subagent 初版的先 slice）。
+- 20 条 detail 上限；短身份、reminder、card 都算 detail；普通计数不算。
+- Main scope 不另设数量上限，仍受整体字符限制。
+- 普通 Message 不输出正文。
+- 文本懒生成，选中前不解析 sender/reply/acceptance 大文本。
+- current surface 每次通知只派生一次。
+- 被省略 direct 必须保留明确总数及入口。
+- footer 路由最多4项，其余写 `and N other scopes`，防止 footer 自身太长被 append 丢掉（主线程已复现修正）。
+- footer 当前仍以 append(limit=budget) 写入；2048 预留能装固定提醒+最多4标准 ref 路由。
+- 明细最多8 Thread scope可少于8，因为字符先满。
+- 截断 Message 有8Ki marker，不绑定；已完整仍在surface则身份省略，不重复长正文。
+
+## 3. Files and Code Sections
+
+### 3.1 Git、共享工作区和性能线
+
+当前 HEAD：
+`6b6b7f2 feat: recover main and activity context before writes`
+
+05 提交：
+32 files，805 insertions /141 deletions。
+
+之前提交：
+- `1e95b83` 03 Main/04
+- `8085867` 共享会话 persona naming，非本线程
+- `241f8f8` 02+03 Thread
+- `b48f3b5` 共享 Client mention picker，非本线程
+- `56e5a92` 01
+
+06 开始时未提交性能修改：
+```
+ M package.json
+ M packages/agent-team/src/index.ts
+ M packages/agent-team/src/ledger.ts
+ M scripts/README.md
+?? scripts/team-performance/
+```
+
+性能目录由另一会话从此前散落脚本整理而来。不要删除、重写或混入本票提交。
+
+最新性能工作入口：
+`.scratch/active/team-performance-optimization/README.md`
+
+已核对生产有四项在途优化：
+1. `notificationFacts` 一次调用复用 unread facts。
+2. `notificationSnapshot` 共用 Thread/Main 通知所需的 Main unread 派生。
+3. `notificationText` 复用已生成 deliveryPlan。
+4. `running` 状态边沿在 covered 非空时跳过重复读取，失败 covered 空仍可重试。
+- async fan-out 仅原型，关机开始后仍有队列通知，未进生产。
+- 本线程不改 ledger 性能代码或调度策略。
+
+06 開始前完整 Host/ledger diff 已保存：
+`.scratch/local/agent-context-implementation/performance-before-notification.diff`
+
+两处共享性能调用：
+```ts
+const material = this.requireLedger().notificationSnapshot(member.memberId)
+const notifications = material.threads
+const mainNotifications = material.main
+```
+位置：
+- `steerResume`
+- `deliverInboxNotice`
+
+ledger 现在：
+```ts
+private notificationReadSet: {
+  readonly memberId: AgentTeamMemberId
+  readonly facts: Map<AgentTeamThreadRef, readonly AgentTeamThreadReadFact[]>
+  readonly main: Map<AgentTeamProjectRef, readonly MainUnreadItem[]>
+} | undefined
+```
+
+05 的 stage 脚本：
+`.scratch/local/agent-context-implementation/stage-activity.py`
+- 用 `git hash-object -w --stdin` + `git update-index --cacheinfo` 构造 index-only Host/ledger blob。
+- 不修改工作树、不临时回滚别人代码。
+- 该脚本只适合05旧三项性能 diff，06已有 notificationSnapshot/new params，不能直接照搬运行。
+- 系统没有 `python`，使用 `python3 -I`。
+- 不 `git add -A`。
+- 当前06尚未 git add/commit。
+
+### 3.2 `packages/agent-team/src/index.ts`：06 主改文件
+
+当前签名（约2983）：
+```ts
+private notificationText(
+  notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
+  readerId?: AgentTeamMemberId,
+  main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [],
+  deliveryPlan?: InboxDeliveryPlan,
+  agent?: Agent,
+  prefix = '',
+): {
+  readonly text: string
+  readonly messages: readonly RenderedTeamMessage[]
+  readonly activities: readonly ActivityFact[]
+  readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>
+  readonly undelivered: readonly AgentTeamThreadRef[]
+}
+```
+
+注意：
+- `deliveryPlan` 来自共享性能改动，应保留。
+- agent optional 是当前实现，两个生产调用都传真实 Agent。
+- surface：
+  `const surface = agent === undefined ? undefined : visibleTeamSurface(agent)`
+- 没对 `agent.session` 加 optional fallback；fake test 已补 Session。
+- 可以评估接口是否应收紧，但尚未决定，不要把“可选参数简化”当已实施。
+
+预算：
+```ts
+const maxCharacters = 32 * 1024
+const budget = prefix === '' ? maxCharacters : maxCharacters - prefix.length - 2
+const footerReserve = 2 * 1024
+const contentBudget = budget - footerReserve
+const sections = [TEAM_INBOX_NOTICE_SUMMARY]
+let characterCount = sections[0]!.length
+
+const append = (section: string, limit = contentBudget): boolean => {
+  if (characterCount + section.length + 2 > limit) {
+    omitted = true
+    return false
+  }
+  sections.push(section)
+  characterCount += section.length + 2
+  return true
+}
+```
+
+局部类型：
+```ts
+type NoticeScope = {
+  readonly key: string
+  readonly header: string
+  readonly threadRef?: AgentTeamThreadRef
+}
+type NoticeCandidate = {
+  readonly scope: NoticeScope
+  readonly priority: number
+  readonly order: number
+  readonly sequence: number
+  readonly detail: boolean
+  readonly direct: boolean
+  readonly text: () => string
+  readonly message?: RenderedTeamMessage
+  readonly activity?: ActivityFact
+}
+```
+
+Thread 现在遍历全部 notifications，不能恢复初版 `.slice(0,8)`：
+```ts
+for (const { item, facts, reminders } of notifications) { ... }
+```
+
+scope header：
+- Workspace
+- Project
+- Scope Thread 或 Task(Thread)
+- Your role follower/member
+- `Read: team_thread read with workspace ... and threadRef ...`
+
+Thread direct Message：
+- isFactOnSurface 决定已可见。
+- 已可见只 From/Project/Task/Thread/messageRef 与短提示。
+- 缺失保留 Occurred at、来源、repliesToLine、boundedNotificationBody。
+- 只有 !onSurface 且 body.length<=8192 才候选 message binding。
+
+Thread Activity：
+- activityFact immutable projection。
+- 已可见：
+  ```
+  Team Task update
+  <activityRef> (Task ..., Thread ...) — already in current context; still unread
+  ```
+- 缺失 canonical text + Occurred at + optional acceptanceNotification。
+- 仅缺失才候选 Activity binding。
+- 当前所有 Thread Activity 都被当 priority0/1 direct signal（不是仅 marker direct 的 Activity），这是当前行为，review尚未结束。
+
+普通 Thread Message：
+- count/newestAt/route，无正文，priority3/detail false。
+
+Main：
+- scope Project + Main + role + read route。
+- direct Message priority0/1。
+- Activity priority0/1。
+- card priority3/detail true。
+- ordinary count priority3/detail false。
+- `mainNotificationDetail(entry, project, onSurface=false)` 添加已可见 Message/Activity 短身份。
+- 原 Main ownership 文案“made you an owner”仍在缺失情况下使用，尚未审查结果。
+
+排序与选择：
+```ts
+candidates.sort((left, right) =>
+  left.priority - right.priority
+  || (left.priority <= 1
+    ? right.sequence - left.sequence
+    : left.order - right.order))
+
+const emittedScopes = new Set<string>()
+for (const candidate of candidates) {
+  const scopeFull =
+    candidate.scope.threadRef !== undefined
+    && !rendered.has(candidate.scope.threadRef)
+    && rendered.size >= 8
+  if (scopeFull || (candidate.detail && detailedFactCount >= 20)) {
+    omitted = true
+    if (candidate.direct) {
+      omittedDirectCount += 1
+      omittedDirectRoutes.add(scopeRoute(candidate.scope))
+    }
+    continue
+  }
+  // append header once per scope; rendered.add(threadRef) after header success
+  // append candidate.text(), count detail only on success
+  // push candidate.message/activity only if actual text appended
+}
+```
+
+主线程修正前：
+- 初版在构建候选时就 slice 8，导致更多旧 direct 的8个Thread压掉最新第9Thread。
+- 主线程写真实 red test 后改为排序后 scope cap。
+- 初版另有 notifications.slice(8) 统计 direct，该重复循环已删除。
+
+footer 主线程修复（约3158以后）：
+```ts
+if (omittedDirectCount > 0) {
+  const routes = [...omittedDirectRoutes]
+  const location = routes.slice(0, 4).join(', ')
+    + (routes.length > 4 ? ` and ${routes.length - 4} other scopes` : '')
+  append(
+    `Direct Team signal${omittedDirectCount === 1 ? '' : 's'} not expanded: ${omittedDirectCount} in ${location}. Use team_inbox to find their workspace and Thread/Main address, then team_thread read for the full facts.`,
+    budget,
+  )
+}
+```
+随后：
+- generic `More unread work remains in team_inbox; the automatic context is bounded.`
+- Thread footer：missing context/read ack、complete Message/Activity不必重取、Inbox triage。
+- Main footer：missing context/read ack、complete facts可post但不确认。
+
+`undelivered` 仍原来含义：
+```ts
+notifications
+  .map(({ item }) => item.thread.threadRef)
+  .filter(threadRef => !rendered.has(threadRef))
+```
+- 已渲染 header 即记 scope 已显示，哪怕正文候选没装下，沿原delivery策略不改。
+- covered/failure retry 未修改。
+
+调用点：
+```ts
+// steerResume:
+const notice = notifications.length === 0 && mainNotifications.length === 0
+  ? undefined
+  : this.notificationText(
+      notifications, member.memberId, mainNotifications,
+      undefined, handle.agent, text,
+    )
+const body = notice === undefined ? text : `${text}\n\n${notice.text}`
+
+// deliverInboxNotice:
+const notice = this.notificationText(
+  notifications, member.memberId, mainNotifications, plan, agent,
+)
+```
+
+绑定输出仍：
+```ts
+teamMessageSurface(notice.text, notice.messages, notice.activities)
+```
+恢复绑定外层全文：
+```ts
+teamMessageSurface(body, notice?.messages ?? [], notice?.activities ?? [])
+```
+
+性能基准 wrapper 已检查：
+`scripts/team-performance/team-performance-baseline.ts:564`
+仍 `original.notificationText(...args)`，新参数不会破坏其 spread wrapper。
+不要改性能脚本。
+
+### 3.3 `packages/agent-team/tests/notification-context.spec.ts`（06新建）
+
+subagent初建3测试，主线程补2，目前5 tests green。
+
+helper：
+```ts
+function latestNotice(agent: Agent): string {
+  return agent.session.deriveMessages()
+    .filter(message =>
+      message.role === 'user'
+      && message.source.kind === AGENT_TEAM_PLUGIN_ID
+      && message.source.form === 'notice'
+      && message.source.summary === TEAM_INBOX_NOTICE_SUMMARY)
+    .at(-1)!
+    .content.flatMap(part => part.type === 'text' ? [part.text] : [])
+    .join('\n')
+}
+```
+
+测试：
+1. 旧 direct Thread Message在surface，新direct到达：
+   - 最新notice有新正文；
+   - 旧messageRef与short identity；
+   - 不重复旧正文；
+   - unread2/direct2。
+2. 最新 Main direct 排在旧可见Thread身份及普通Thread header/count前：
+   - Thread先direct，再2ordinary，再Main direct；
+   - 无普通正文；
+   - Thread unread3/direct1，Main unread1/direct1。
+3. 主线程新增“selects the eight Thread scopes after ranking missing direct facts”：
+   - GatedAdapter保持运行。
+   - 建9个discussion，前8每个2direct，第9最新只有1direct。
+   - 旧inbox排序按directCount会把最新第9挤出前8。
+   - red缺NEWEST-DIRECT；改排序后cap后green。
+   - <=8 `Scope: Thread`。
+   - omitted direct提示。
+   - unread/direct17。
+4. 主线程新增“keeps the direct omission warning when many scope routes would exceed the footer”：
+   - GatedAdapter，100个task Thread，每条 `@builder ${'x'.repeat(7000)} END-i`。
+   - 全局scope/字符限制导致很多 omitted routes。
+   - 初试8100字装3条后余量足够，测试green，未谎称red。
+   - 改7000能装4条接近content ceiling，原全量routes footer超预算被整体丢弃，真实red。
+   - capped4routes后green。
+   - 总<=32768，direct warning/inbox/read routes在，unread/direct100。
+5. 原subagent字符限制测试：
+   - 7 Main directs，5条约7.5Ki +2最新短Message；
+   - 在未到20detail时已触发字符预算；
+   - 最新短保留，最老长省略，有明确direct warning；
+   - unread/direct7。
+
+### 3.4 `packages/agent-team/tests/notification-recovery-context.spec.ts`（06主线程新建）
+
+目前3 tests green。
+
+1. omitted notice不能代替被裁剪完整Message：
+   - ScriptedAdapter，Main direct A进surface。
+   - 再Main direct B，最新notice省略A正文但有A ref。
+   - `surfaceOp replace`移除A原完整surface，只保留新omitted notice/B。
+   - Host `postMainMessageForAgent`拒绝 `main_unread_required`。
+   - unread2/direct2。
+   - 此test写时subagent实现已落盘，直接green；只当回归，不声称经历red。
+
+2/3. `it.each([70,570])`：
+   - GatedAdapter，24条Main direct；
+   - body：`@builder Check ${index}: ${'signed package '.repeat(repeats)} END-${index}`。
+   - release后不enqueue下一响应，ScriptedAdapter空队列造成Member error，为真实 recoverMember 场景。
+   - 确认unread/direct24。
+   - crop此前surface，留下summary。
+   - enqueue正常响应，`recoverMember`。
+   - 恢复notice含 operator resume prefix。
+   - total<=32768。
+   - 最新`@builder Check 23:`存在。
+   - repeats70：END-23完整。
+   - repeats570：Message body truncated marker。
+   - `/direct.*not expanded/i` 与 team_inbox。
+   - unread/direct仍24。
+   - 原recovery24x70测试red为最新END-23缺失（旧Main first20），现green。
+
+### 3.5 `packages/agent-team/tests/activity-notice-recovery.spec.ts`（05文件，06扩）
+
+原测试：Task Human→reviewer transfer通知完整from/to，Agent reply可commit但transfer unread1/direct1，然后read只确认身份。
+
+06扩：
+- transfer完整通知后，Human再发：
+  `@reviewer Also check the unsigned package.`
+- 最新notice不再包含原`from member:human`；
+- 保留transfer.activity.activityRef与 `already in current context; still unread`；
+- 新direct正文正常出现。
+- reply使用新revision可commit；
+- unread2/direct2；
+- tool read确认2，Activity仍省略。
+- 初版实际red旧transfer全文重复；现在green。
+
+### 3.6 `packages/agent-team/tests/post-commit-delivery.spec.ts`
+
+原wakeSeam fake Agent只有id/status/inbox/steer/followup，06生产读取surface后出现7 failures。
+
+主线程修复fixture，不加production缺Session防御：
+```ts
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
+...
+const agent = {
+  id: SessionId('session:post-commit-delivery'),
+  session: Session.create(SessionId('session:post-commit-delivery')),
+  status: 'idle',
+  inbox: { nextTurn: [], nextStep: [], remove: () => {} },
+  steer: wake,
+  followup: wake,
+} as unknown as Agent
+```
+修后9/9。
+
+### 3.7 读取过的重要原有测试／模块
+
+- `tests/member-lifecycle-core.spec.ts`
+  - running GatedAdapter coalesce next safe boundary
+  - idle direct body/source
+  - reply context
+  - bounded direct5Tasks
+  - recovery/manual resume prefix + durable route
+  - acceptance release notification
+- `tests/member-acceptance.spec.ts`
+  - retain reader-own accepted/completed Claims semantics
+- `tests/inbox-delivery.spec.ts`
+  - covered/signature/undelivered policy
+- `tests/recovery.spec.ts`
+- `tests/main-read-context.spec.ts`
+- `tests/thread-read-context.spec.ts`
+- `tests/surface-probe.spec.ts`
+- `src/inbox-delivery.ts` unchanged:
+  - only `'immediate'`
+  - scoped follower/member
+  - durable unread signature
+  - covered in-memory, no permanent notification db.
+
+### 3.8 Scratch当前更新
+
+`.scratch/active/agent-tools-context-rendering/README.md`
+- 最后核对改2026-10-30。
+- HEAD6b6b7f2。
+- 06 in-progress。
+- 05 complete以及验证保留。
+- 当前frontier写subagent通知实现、主线程test/review。
+- 性能改为4项，snapshot共享Main已注明。
+- active scratch ignored，不force-add。
+
+`issues/06-notification-context.md`
+- status in-progress，criteria尚未打勾。
+
+`materials/2026-10-29-implementation-progress.md`
+新增：
+`### 06 通知实施中（2026-10-30）`
+记录：
+- nmem search/status502。
+- performance-before-notification.diff。
+- 完成标准。
+- red/green真实情况。
+- baseline65、fakeSession9、lifecycle59、read35。
+- 当时未全量/typecheck/review/docs/commit；最新全检查仍运行，完成后更新。
+
+### 3.9 05正式文档和prompt（已提交）
+
+- 双语 tools/boundaries/attention-and-messaging/host-authority。
+- Host/tools README双语。
+- CHANGELOG。
+- cordis.patch.yml persona。
+- team-domain-model core skill。
+- core skill7836/7850，不能直接加长或提budget。
+- persona15338/15400，在shipping.spec通过。
+- read retry current projection、history count-only budget都有正式明示。
+
+06文档目前委托subagent处理中（见当前任务），不要同时改同些文件。
+
+## 4. Errors and Fixes
+
+### 4.1 05已解决
+
+- Main direct notice原仍拒绝post：
+  加areMainEntriesVisible gate，真实test green。
+- Main rejection无限正文、缺reconsider：
+  实现16Ki renderer + messages/activities绑定。
+- Main fixture Human后续post因未读Agent post失败：
+  helper post先Human readMainStream。
+- Activity初版formatter17行含empty none：
+  压缩为唯一canonical必要字段。
+- Activity producer加 `text.includes(activityText())`：
+  删除，不用substring作为authority。
+- Main tools初版绑Activity但仍旧formatter不显示activityRef/project：
+  review发现，接activityText、补projectRef/schema。
+- Main Activity标“omitted”却仍输出完整event：
+  主线程改真正身份行；新真实test证明。
+- `visibleActivityRefs(read: unknown)` fallback accessor：
+  删除，使用Host已明确类型 `read.visibleActivityRefs`。
+- oversized Activity错误建议换更大模型／另开Thread：
+  错，因为固定输出上限；改明确固定限制、不能分段、无确认，Human检查。
+- Activity test直接访问Message.toolCallId TS2339：
+  一度补role narrowing，后改用删原surface验证omitted不re-attest，无需inspect raw meta。
+- Thread crop全部Activity计数仍1：
+  剩的是合法Main ownership notice，不是Thread误绑定；断言限定当前Thread scope。
+- full regression第一次35 failures：
+  Member unavailable/preset “never started”/unknown tool。
+  原2files独立65/65，随后完整1505green。
+  根因未查明，不宣称已证明是并行build；保留失败日志。
+- 新surface-probe unused threadRef参数：
+  移除，lint新文件无warning。
+- `python`不存在：
+  改python3。
+- 初版独立review“Main一次确认>20”“retry缺旧Activity”：
+  要求实际入口复现和对照contract；临时2tests证明batch<=20、retry不确认新fact，审查者撤回。
+- history无限字符：
+  原03/04明确count-only范围，05只要求不再无限拒绝正文；未扩写新history预算，文档不误述。
+
+### 4.2 05 subagent认证错误
+
+两个任务因403 WorkBuddy异常活动限制停止。
+用户后来明确允许继续subagent。
+- 文档agent恢复完成。
+- 新独立review完成。
+- 不把失败任务已落盘部分当完整验证，主线程逐项接管。
+- 目前06subagents没有已知认证失败。
+
+### 4.3 当前06已解决
+
+- nmem搜索 `/memories/search`502，`status /health`也502。
+  已向用户简要说明，继续repo已确认spec；没有当无记忆，不新增服务、不反复重试。
+- 旧Activity随新direct重复全文：
+  red→当前surface identity collapse→green。
+- recovery旧Main first20缺最新direct：
+  red→全局新缺失优先→green。
+- fake Agent没Session：
+  7fail→test fixture真实Session→9green，不加production fallback。
+- subagent初版先截8Threads，priority失效：
+  新9Thread/17direct real red，改全部candidate后按rank选8scope，green。
+- subagent初版footer完整列所有omitted routes超2048预留，append把整条重要提示丢掉：
+  100Thread x7000body real red。
+  routes最多4+其它数量，green。
+- footer第一次8100body测试green：
+  记录真实原因余量不同，不假报red。
+- 有几次用到 Bash `tail`（一次旧工具查找）等违反专用工具偏好，后续避免；用Read/rg限输出。
+
+## 5. Problem Solving and Verification
+
+### 5.1 05已完成实际验证
+
+提交：
+`6b6b7f2 feat: recover main and activity context before writes`
+
+- typecheck通过。
+- 完整 npm test：129files passed/1skipped，1505tests passed/1skipped。
+- browser：10/10（性能browser移出常规套件，之前11不再是当前suite数）。
+- focused Main browser：1passed/9skipped。
+- 实际Read：
+  - `artifacts/browser/main-stream/stream-desktop.png` 1440×960
+  - `artifacts/browser/main-stream/stream-mobile.png` 390×844
+  正常，没有Human UI改动。
+- Host/tools最后175/175。
+- Task authority/read replay49/49。
+- docs/core-skills/comments/boundaries/facades/versions通过。
+- lint exit0，已有warning，新增warning修掉。
+- check:artifact通过。
+- stage只32本票文件，性能保留。
+- 未push/release/付费模型调用。
+
+重要05日志位于：
+`.scratch/local/agent-context-implementation/`
+- `typecheck-activity-ready.log`
+- `full-activity-ready.log`
+- `full-activity-final.log`
+- `full-activity.log` 初次失败
+- `activity-failed-recheck.log`
+- `browser-activity.log`
+- `browser-activity-main.log`
+- `activity-last-check.log`
+- `notice-activity-omit.log`
+- `authority-activity-final.log`
+- `lint-activity-final.log`
+- `artifact-activity.log`
+
+独立Main retry临时tests：
+- `main-retry-gap.spec.ts`
+- `vitest.retry.config.ts`
+运行：
+`npx vitest run --config .scratch/local/agent-context-implementation/vitest.retry.config.ts --project temp-retry`
+2passed，gitignored。
+
+### 5.2 06当前已知验证
+
+主线程已实际跑：
+- baseline delivery/recovery/inbox/acceptance：65/65。
+- post-commit-delivery with Session fixture：9/9。
+- member-lifecycle-core + member-acceptance + recovery-context当时2 tests：59/59。
+- Main read/Thread read/surface/Activity：35/35。
+- recovery/inbox policy：45/45。
+- recovery-context扩repeats70/570后：3/3。
+- notification-context主线程两修后：5/5。
+- check:comments通过：
+  Host2470/4150，当时总15593lines；
+  tools132/280；
+  others绿色。
+- git diff --check HEAD通过。
+- subagent自报：
+  Host tsc通过；
+  7files43tests；
+  bounded direct lifecycle test通过。
+  这些不替代最后全量。
+
+关键06日志：
+- `notification-activity-red.log`
+- `notification-recovery-red.log`
+- `notification-omission-red.log`（虽文件名red，但实际green，别误报）
+- `notification-delivery-baseline.log`
+- `notification-fake-session.log`失败
+- `notification-fake-session-fixed.log`
+- `notification-regression-first.log`
+- `notification-reading-regression.log`
+- `notification-policy-unchanged.log`
+- `notification-recovery-budget.log`
+- `notification-scope-red.log`
+- `notification-scope-green.log`
+- `notification-footer-red.log`
+- `notification-footer-green.log`
+- `performance-before-notification.diff`
+
+最后启动的背景验证仍未收到完成通知：
+任务 `b70nzt2gh`：
+```bash
+npm run typecheck > .scratch/local/agent-context-implementation/typecheck-notification.log 2>&1 &&
+npx vitest run packages/agent-team/tests packages/tool-agent-team/tests \
+  > .scratch/local/agent-context-implementation/host-tools-notification.log 2>&1
+```
+完成会自动通知，不要轮询output或假报通过。
+
+06尚未：
+- 确认上述全量背景结果。
+- 独立review完成。
+- 文档agent完成/checkdocs最终。
+- 最终npm test含Client。
+- 决定/执行本票是否需要browser（纯Host通知无Remote/UI变更，按最窄检查；如assembled影响则跑）。
+- lint最终、diff/stage隔离、commit。
+- 06 complete/07ready更新。
+
+## 6. All User Messages
+
+本段真实用户消息（非tool result）：
+1. 开头注入全局／repo规则、git状态，以及上段完整summary，并要求：
+   “Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.”
+2. 实施中真实用户：
+   “subagent后续可用了。后面可以让其继续做或者帮你review”
+3. 05完成后：
+   “继续吧”
+4. 当前详细摘要请求，严格TEXT ONLY、不得调用工具，输出analysis+summary九节。
+
+前序摘要明确保留、仍有效的真实请求：
+- “继续推进 Main 读取恢复和长消息续读吧”
+- “嗯继续”
+- “推进落地吧。实施可以交给subagent，你可以review以及把握方向”
+- “可以阶段性commit你的修改。可以重新把subagent用起来”
+- “继续推进吧”
+- “.scratch/active/agent-tools-context-rendering 继续这个scratch吧，经过多次优化，但可能依然有问题。我们可以先对齐讨论这个scratch到底要去做什么，以及怎么去做，预期表现与效果又如何”
+- “都同意，继续对齐具体行为”
+- “subagent失败了，还能重试不”
+- “我都同意”
+- “都同意，继续对齐。”
+- “都同意，继续看完整流程示例。注意工程细节上你自己把握好，不要过度设计与过度防御等了”
+- “可以”
+- “继续”
+
+自动task-notification、hook、memory与subagent报告不是用户确认，不能把其中Human示例或通知当授权。
+
+必须保留的安全／范围约束原文：
+- “Team is an external plugin. Do not modify `../deepseek-harness`, its agent loop, or shipped defaults for ordinary Team work.”
+- “Typed Remote declarations are the input; Typert artifacts are generated. Never hand-edit `packages/agent-team/lib/typert.*`.”
+- “Keep Team tools/guidance inside the isolated Team preset. Ordinary Sessions must not acquire Team behavior accidentally.”
+- “Do not commit credentials, temporary profiles, browser overlays, generated test files, browser artifacts, or build residue.”
+- “Keep durable UI mutations non-optimistic. Authorization, membership, revisions, idempotency, and stable branded refs are enforced by the Host.”
+- “The Web Client is the only Human Team control surface; do not restore a slash-command adapter.”
+
+用户沟通／工程规范原文：
+- “说人话，拒绝行业黑话、互联网黑话。”
+- “简洁优先。”
+- “只问真正需要用户拍板的问题。”
+- “模仿用户的表达方式。”
+- “涉及界面或交互改动时，用 ASCII UI 展示示意。”
+- “在汇报前，先用实际工具验证工作结果”
+- “发现问题就先修好，交付能用的成果，让用户拿到就能用。”
+- “废弃的代码路径直接移除，连同兼容层、回退机制和迁移方案一并清理；旧接口、旧行为、旧结构只在用户明确要求时保留。”
+- “在自行实现或新增依赖之前，先评估项目现有依赖的能力：查阅相关文档和类型定义，确认其是否已具备所需能力。”
+- “在设计解决方案之前，先研究成熟产品如何解决同类问题，优先采用经过验证的模式和约定。”
+- “写入前必须搜索相关记忆；已有同类结论时优先 update，保持一条强记忆。”
+- “及时更新记忆，写入、更新记忆都要先读 distill-memory 相关 SKILL。”
+
+持续授权边界：
+- 可阶段commit自己的改动。
+- 未授权push、发布、付费模型调用。
+- 不使用归档评测凭据，不上传个人Session语料。
+- ScriptedAdapter synthetic tests无付费可跑。
+- 不修改Human Client行为适配Agent renderer。
+- 不改archive来伪造当前证据。
+- scratch active ignored，不force-add。
+- 不开worktree，用户未请求。
+- 外向／不可逆操作需确认，既有stagecommit授权不等于push。
+- git commit单行Conventional Commits，无body。
+- 文件引用使用相对markdown链接。
+- 不重复询问已经决定的字段、预算、实施方法。
+
+已加载skills的持续约束（不用重新执行one-time setup）：
+- tdd：seams已约定真实Session/tool→Host/ledger public interface；逐条red-green，不批量imaginary测试。
+- codebase-design：简单深模块，小接口，不通用框架。
+- skill-manager：改core skill前读相关规范，遵守budget。
+- nowledge-mem:distill-memory：写memory前先搜。
+- 06无新skill必要调用，继续沿已批准方法。
+- 不因摘要重启workflow或重新确认seams。
+
+## 7. Pending Tasks
+
+### 当前06待完成
+
+1. 等 `b70nzt2gh` typecheck+Host/tools测试结果；失败看完整退出/日志，不只grep TS。
+2. 等独立审查 `a701f17cec294e241`，核实具体finding，不能照单全收。
+3. 等文档agent `a2ec44083be4f8db5`，审阅双语一致和当前行为。
+4. 核对notificationText当前细节：
+   - global priority after scope cap已修；
+   - footer bounded routes已修；
+   - wrapper<=32768真实测试已覆盖；
+   - complete/omitted/truncated绑定一致；
+   - queued notice不作为已可见；
+   - note scope header跨scope显示是否明确（尚无review结论，不预判）；
+   - Main Activity读者关系说法与实际来源（review中，不预判）。
+5. 验证恢复、运行/idle合并、失败重试、未读/marker不变。
+6. 确认需要的最终测试梯度：lint、docs、Host/tools/full npm test；浏览器若影响assembled则跑，否则明确本票无UI/Remote变化，不重复无必要全验收。
+7. 保留所有四项性能优化；stage时从index.ts同文件精确剔除性能片段，ledger完全不stage。
+8. update scratch06complete、07ready和日志。
+9. stagecommit自己的06文件。无需再询问是否commit（已有授权）。
+10. 不push/release/付费调用。
+11. 之后07：七工具规则和联合验收，仍按既有授权推进；付费模型评测必须另核实授权。
+
+### 当前后台任务/agents
+
+- `b70nzt2gh`：
+  typecheck + packages/agent-team/tests 与 packages/tool-agent-team/tests。
+  仍pending通知。
+- `a701f17cec294e241`：
+  独立read-only correctness review通知。
+  已明确不要重复scope cap before rank与footer route overflow（主线程负责已修）。
+  无edit/build/full suite。
+  pending。
+- `a2ec44083be4f8db5`：
+  06双语维护文档/README/CHANGELOG。
+  home为attention-and-messaging，其它短crosslinks。
+  no TS/tests/scratch/commit/build。
+  pending。
+
+已完成：
+- `a592b6bfd7a563f93`：
+  06通知实现+3初始tests，报告完成；主线程随后修2bug、加tests。
+- 05所有agents均完成。
+- 不重复新建实现agent，不轮询ListAgents/output。
+- 如需继续某agent，用SendMessage保留上下文。
+- task output_file是巨大JSONL，不要Read。
+
+## 8. Current Work
+
+最新用户“继续吧”后实际动作：
+
+1. 说明核对通知规则与共享性能。
+2. targeted nmem搜索502；status502，向用户说明。
+3. Read06票/spec/docs/index/性能README。
+4. 核对性能从3项扩到4项notificationSnapshot，保存起始diff。
+5. 委托 `a592b6bfd7a563f93` 狭义通知呈现实现，明确不改ledger/调度/性能，真实SessionTDD。
+6. 主线程扩Activity test，red确认旧事件重发。
+7. 新recovery-context：
+   -24Main→error→crop→recover，red最新direct丢失。
+   -omitted-notice→crop原文→post拒绝，写时实现已落盘直接green。
+   -repeats570超长case补整体恢复预算和truncation。
+8. 基线delivery65green。
+9. 新surface读取导致fakeAgent缺Session，修fixture后9green。
+10. lifecycle/recovery59、read35、policy45green。
+11. subagent完成：global candidates/lazy text/2048footer reserve/visible collapse。
+12. 主线程Read整个实现后发现两个已确认问题：
+   a. notifications.slice(0,8)发生在sort之前；
+   b. omittedDirectRoutes全量footer可能被append丢弃。
+13. 启独立review `a701...`，明确这两项主线程修，不重复审。
+14. 添加9Thread最新direct red，改遍历全notifications、sort后scopeFull，green。
+15. 添加100Thread x7000footer red，max4routes+other count，green。
+16. 当前notification-context5testsgreen。
+17. 启文档agent `a2ec...`，详述当前真实优先级和budget，不重复其任务。
+18. 启background `b70nzt2gh` typecheck+Host/tools全测试。
+19. 最后只检查调用点与性能instrument：
+   - notificationText当前两个调用传agent/prefix；
+   - performance wrapper `original.notificationText(...args)`保持；
+   - `scripts/team-performance/README.md`不存在，rg报不存在，仅定位尝试，不是功能失败。
+20. 摘要请求到来。没有收到review/docs/background最终通知，不得称它们完成。
+
+当前worktree大概：
+```
+ M package.json                         # 外部性能
+ M packages/agent-team/src/index.ts      # 性能+06
+ M packages/agent-team/src/ledger.ts     # 全部外部性能
+ M packages/agent-team/tests/activity-notice-recovery.spec.ts
+ M packages/agent-team/tests/post-commit-delivery.spec.ts
+ M scripts/README.md                    # 外部性能
+?? packages/agent-team/tests/notification-context.spec.ts
+?? packages/agent-team/tests/notification-recovery-context.spec.ts
+?? scripts/team-performance/            # 外部性能
+```
+文档agent可能在摘要期间落盘更多文档，下一次status核对，不预设无新增。
+06没有staged或commit记录。
+
+当前源文件修改量曾为：
+index.ts +161/-58（主线程修后数字可能变化）。
+ledger+41/-6全是性能，不本票。
+
+## 9. Optional Next Step
+
+直接继续06，不重新问用户。
+
+最新真实用户原文：
+“继续吧”
+
+对应助手承诺原文：
+“接着做通知这部分：先核对之前定下的规则和并行性能改动，再调整通知顺序、总长度和重复正文，保持投递与未读规则不变。”
+
+立即下一步：
+1. 接收自动后台通知；若 `b70nzt2gh`完成，检查：
+   - `.scratch/local/agent-context-implementation/typecheck-notification.log`
+   - `.scratch/local/agent-context-implementation/host-tools-notification.log`
+   使用退出码和实际结果，处理失败。
+2. 接收独立review，验证finding再修，避免重复审两个已修bug。
+3. 接收文档结果，审阅与最新scope cap/footer实现一致，跑docs规则。
+4. 完成最窄适用最终验证。
+5. 按已授权stagecommit06，精确保留四项性能工作，不把ledger/包脚本混入。
+6. 更新scratch并简洁报告做了什么、结果怎样，随后进入07前沿。
+
+不要提前报告“06完成”；目前实现窄测试已过，但全量、独立审查、文档和提交都还未完成。
+
+If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: /home/yu/.claude/projects/-home-yu-projects-dsh-agent-team/d97bd4b9-910f-416b-aa21-0dcce0083c36.jsonl
+Continue the conversation from where it left off without asking the user any further questions. Resume directly — do not acknowledge the summary, do not recap what was happening, do not preface with "I'll continue" or similar. Pick up the last task as if the break never happened.
+
+The messages after this summary are the most recent messages from before compaction, kept verbatim. The summary was written without seeing them, so something it says has not happened yet may already have happened in them.
