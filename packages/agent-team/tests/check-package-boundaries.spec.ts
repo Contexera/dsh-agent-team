@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -32,6 +32,10 @@ afterEach(async () => {
 const source = (name: string, text: string): Promise<void> =>
   writeFile(join(root, 'packages', 'a', 'src', name), text)
 
+// The checker prints paths through `node:path`, so a violation names the file with the platform
+// separator. Comparing against a literal forward-slash string passes on Linux and fails on Windows.
+const violation = (file: string): string => `packages${sep}a${sep}src${sep}${file}`
+
 const check = async (): Promise<{ code: number; output: string }> => {
   try {
     const { stdout } = await run(process.execPath, [script, '--root', root])
@@ -47,7 +51,7 @@ describe('package boundary check', () => {
     await source('plain.ts', "import { dependency } from '../../b/src/dep'\nexport const used = dependency\n")
     const result = await check()
     expect(result.code).toBe(1)
-    expect(result.output).toContain("packages/a/src/plain.ts:1 imports '../../b/src/dep'")
+    expect(result.output).toContain(`${violation('plain.ts')}:1 imports '../../b/src/dep'`)
   })
 
   it('refuses a re-export that leaves its own package', async () => {
@@ -69,14 +73,14 @@ describe('package boundary check', () => {
     await source('dynamic.ts', "export const loaded = import('../../b/src/dep')\n")
     const result = await check()
     expect(result.code).toBe(1)
-    expect(result.output).toContain("packages/a/src/dynamic.ts:1 imports '../../b/src/dep'")
+    expect(result.output).toContain(`${violation('dynamic.ts')}:1 imports '../../b/src/dep'`)
   })
 
   it('scans the module extensions TypeScript also emits', async () => {
     await source('module.mts', "import { dependency } from '../../b/src/dep'\nexport const used = dependency\n")
     const result = await check()
     expect(result.code).toBe(1)
-    expect(result.output).toContain('packages/a/src/module.mts:1')
+    expect(result.output).toContain(`${violation('module.mts')}:1`)
   })
 
   it('allows a relative specifier that stays inside its own package', async () => {
@@ -103,7 +107,7 @@ describe('package boundary check', () => {
     await source('mixed.ts', "import { dependency, type Missing } from '../../b/src/dep'\nexport const used = dependency\n")
     const result = await check()
     expect(result.code).toBe(1)
-    expect(result.output).toContain('packages/a/src/mixed.ts:1')
+    expect(result.output).toContain(`${violation('mixed.ts')}:1`)
   })
 
   it('reads references from the syntax tree, not from text that quotes one', async () => {
