@@ -1,0 +1,77 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M687DKZN7QAVWS03Y01ZY8BQ",
+  "strategy": "manual-commit",
+  "branch": "feat/agent-context-reading",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "cordis.patch.yml",
+    "docs/architecture/tools-and-preset.md",
+    "docs/architecture/tools-and-preset.zh.md",
+    "docs/team-collaboration/attention-and-messaging.md",
+    "docs/team-collaboration/attention-and-messaging.zh.md",
+    "docs/team-collaboration/boundaries.md",
+    "docs/team-collaboration/boundaries.zh.md",
+    "docs/team-collaboration/memory-and-context.md",
+    "docs/team-collaboration/memory-and-context.zh.md",
+    "packages/agent-team/core-skills/team-domain-model/SKILL.md",
+    "packages/agent-team/src/activity-facts.ts",
+    "packages/agent-team/src/context-source.ts",
+    "packages/agent-team/src/recovery-hints.ts",
+    "packages/agent-team/src/spec.ts",
+    "packages/agent-team/src/types/operations.ts",
+    "packages/agent-team/src/types/requests-results.ts",
+    "packages/agent-team/tests/activity-notice-recovery.spec.ts",
+    "packages/agent-team/tests/activity-tool-recovery.spec.ts",
+    "packages/agent-team/tests/member-context-integration.spec.ts",
+    "packages/agent-team/tests/member-lifecycle-core.spec.ts",
+    "packages/agent-team/tests/notification-attribution.spec.ts",
+    "packages/agent-team/tests/notification-context.spec.ts",
+    "packages/agent-team/tests/notification-recovery-context.spec.ts",
+    "packages/agent-team/tests/notification-reminder-context.spec.ts",
+    "packages/agent-team/tests/shipping.spec.ts",
+    "packages/agent-team/tests/surface-agreement.spec.ts",
+    "packages/agent-team/tests/surface-exemption.spec.ts",
+    "packages/agent-team/tests/surface-probe.spec.ts",
+    "packages/agent-team/tests/surface-rejection-recovery.spec.ts",
+    "packages/agent-team/tests/thread-read-selection.spec.ts",
+    "packages/tool-agent-team/src/activity-view.ts",
+    "packages/tool-agent-team/src/main-stream.ts",
+    "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+    "packages/tool-agent-team/tests/team-addressing.spec.ts",
+    "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+    "packages/tool-agent-team/tests/team-thread-render.spec.ts",
+    "packages/tool-agent-team/tests/team-thread-task-cards.spec.ts",
+    "packages/tool-agent-team/tests/team-tools-render.spec.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 0,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "output_tokens": 0,
+    "api_call_count": 0
+  },
+  "redaction": {
+    "replacements": 172,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 6,
+      "credentialed_uri": 0,
+      "entropy": 166,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
