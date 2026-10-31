@@ -191,6 +191,7 @@ export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
 export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@wowyuarm/dsh-agent-team.preset')
 
 const ORPHANED_MEMBER_DIAGNOSTIC = 'Member preset composition was lost after a reload; its tools are unavailable. Resume rebuilds the member in place.'
+const NOTIFICATION_QUEUE_THRESHOLD = 8
 
 /**
  * A preset mount/validation failure during activation, carrying its own class
@@ -430,6 +431,8 @@ export default class AgentTeam extends TypertRemoteService {
    * so exactly one of them activates the replayed id.
    */
   private readonly additionLifecycleTails = new Map<AgentTeamRequestId, Promise<void>>()
+  /** Deferred notification effects leave durable writes and Client invalidation on the caller's path; each Member keeps its own effect chain. */
+  private readonly notificationEffectTails = new Map<AgentTeamMemberId, Promise<void>>()
   /** Resolves when Host teardown starts: in-chain idle waits release on it instead of outliving the Host. */
   private readonly shutdown = (() => {
     let resolve!: () => void
@@ -1315,9 +1318,10 @@ export default class AgentTeam extends TypertRemoteService {
   private steerResume(member: AgentTeamAgentMember, text: string, trigger: 'automatic recovery' | 'operator recovery'): void {
     const handle = this.handles.get(member.memberId)
     if (handle === undefined) throw new Error(`member '${member.handle}' has no active session`)
-    const notifications = this.requireLedger().notificationFacts(member.memberId)
-    const mainNotifications = this.requireLedger().mainNotificationFacts(member.memberId)
-    const notice = notifications.length === 0 && mainNotifications.length === 0 ? undefined : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, text)
+    const material = this.requireLedger().notificationSnapshot(member.memberId)
+    const notifications = material.threads
+    const mainNotifications = material.main
+    const notice = notifications.length === 0 && mainNotifications.length === 0 ? undefined : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, undefined, text)
     const body = notice === undefined ? text : `${text}\n\n${notice.text}`
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
@@ -2677,11 +2681,13 @@ export default class AgentTeam extends TypertRemoteService {
         else agent.steer(notice)
       })
     }
-    for (const memberId of ledger.affectedMembersOf(operation)) {
+    const affectedMembers = ledger.affectedMembersOf(operation)
+    const deferNotifications = affectedMembers.length >= NOTIFICATION_QUEUE_THRESHOLD
+    for (const memberId of affectedMembers) {
       const handle = this.handles.get(memberId)
       if (handle !== undefined) {
         this.afterCommit(`notification for '${this.memberLabel(memberId)}'`,
-          () => this.notifyMember(handle.agent, { kind: 'commit', receipt, operationKind: operation.kind }))
+          () => this.notifyMember(handle.agent, { kind: 'commit', receipt, operationKind: operation.kind }), deferNotifications, memberId)
         continue
       }
       this.afterCommit(`transition repair for '${this.memberLabel(memberId)}'`, () => {
@@ -2721,9 +2727,35 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * Run one effect that follows the ledger append. The operation is durable by now, so a delivery or listener failure degrades to a log line;
    * a failed Inbox wake clears its own signature so the next commit retries the same durable facts without a second operation.
-   * An invariant divergence is the exception: it is re-raised on the caller's frame so a failed integrity check stays loud.
+   * Synchronous invariant divergence is re-raised on the caller's frame; deferred notification effects report it at error level because the commit has already returned.
    */
-  private afterCommit(label: string, effect: () => void): void {
+  private afterCommit(label: string, effect: () => void, deferNotification = false, notificationMemberId?: AgentTeamMemberId): void {
+    const pendingNotification = notificationMemberId === undefined ? undefined : this.notificationEffectTails.get(notificationMemberId)
+    if (notificationMemberId !== undefined && (deferNotification || pendingNotification !== undefined)) {
+      const previous = pendingNotification ?? Promise.resolve()
+      const queued = previous.then(() => new Promise<void>(resolve => {
+        setImmediate(() => {
+          try {
+            // Durable facts are rederived during the next activation if shutdown wins the race.
+            if (this.accepting) effect()
+          } catch (error) {
+            // A deferred effect has no caller frame to re-raise on, so an
+            // invariant divergence is reported at the level the synchronous
+            // path reserves for it instead of folding into the retry warn.
+            if (error instanceof AgentTeamInvariantError) this.ctx.logger.error(`agent-team: post-commit ${label} violated an invariant: ${error.message}`)
+            else this.ctx.logger.warn(`agent-team: post-commit ${label} failed: ${error instanceof Error ? error.message : String(error)}`)
+          } finally {
+            resolve()
+          }
+        })
+      }))
+      this.notificationEffectTails.set(notificationMemberId, queued)
+      void queued.then(() => {
+        if (this.notificationEffectTails.get(notificationMemberId) !== queued) return
+        this.notificationEffectTails.delete(notificationMemberId)
+      })
+      return
+    }
     try {
       effect()
     } catch (error) {
@@ -2788,7 +2820,7 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * Wake from durable unread state with bounded facts. One correlated line states what the wake did: its cause, the attempt it spent,
    * and whether the notice was queued, already carried by a recovery instruction, skipped, or failed. A queued notice is delivery intent, not evidence the model read it.
-   * A delivery failure is contained here: the operation is already durable. Only an invariant divergence leaves on the caller's frame.
+   * A delivery failure is contained here: the operation is already durable. A synchronous invariant divergence leaves on the caller's frame; a deferred one is logged by afterCommit.
    */
   private notifyMember(agent: Agent, cause: NotificationCause, sequenced = false): void {
     const member = this.memberForAgent(agent)
@@ -2835,8 +2867,9 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   private deliverInboxNotice(agent: Agent, member: AgentTeamAgentMember, cause: NotificationCause, sequenced = false): void {
-    const notifications = this.requireLedger().notificationFacts(member.memberId)
-    const mainNotifications = this.requireLedger().mainNotificationFacts(member.memberId)
+    const material = this.requireLedger().notificationSnapshot(member.memberId)
+    const notifications = material.threads
+    const mainNotifications = material.main
     const scope = this.memberScope(member.memberId, agent.id)
     const causeText = this.notificationCauseText(cause)
     if (notifications.length === 0 && mainNotifications.length === 0) {
@@ -2872,7 +2905,7 @@ export default class AgentTeam extends TypertRemoteService {
     }
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
     if (existingInboxHint !== undefined) this.removeExpectedTeamWake(agent, existingInboxHint)
-    const notice = this.notificationText(agent, notifications, member.memberId, mainNotifications)
+    const notice = this.notificationText(agent, notifications, member.memberId, mainNotifications, plan)
     const hint = createUserMessage({
       content: [{ type: 'text', text: notice.text }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, teamFacts: teamMessageSurface(notice.text, notice.messages, notice.activities) },
@@ -2977,7 +3010,7 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(agent: Agent, notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], prefix = ''): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly activities: readonly ActivityFact[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
+  private notificationText(agent: Agent, notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], deliveryPlan?: InboxDeliveryPlan, prefix = ''): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly activities: readonly ActivityFact[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
     const maxCharacters = 32 * 1024
     // The recovery instruction shares this budget, and footers state what was
     // omitted; hold both back so a full notice still fits 32K of UTF-16.
@@ -2999,7 +3032,7 @@ export default class AgentTeam extends TypertRemoteService {
       characterCount += section.length + 2
       return true
     }
-    const plan = readerId === undefined ? undefined : this.inboxDeliveryPlan(notifications, main)
+    const plan = deliveryPlan ?? (readerId === undefined ? undefined : this.inboxDeliveryPlan(notifications, main))
     const rendered = new Set<AgentTeamThreadRef>()
     // The notice that is being built is delivery intent, not Session output:
     // only facts already on the live surface may be collapsed to an identity.

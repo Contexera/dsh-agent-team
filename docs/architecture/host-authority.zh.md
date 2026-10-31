@@ -29,7 +29,10 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - Task 提醒由 Host 在 Team 事件后评估并写入 `team/reminder-raised`，不使用 timer。其可选 `reminderMarkers` Inbox delta 仅属于一个接收者；marker 被读取消费后，replay 仍保留完整 episode 用于去重。
 - reminder operation 会使对应 Task Thread 的 change scope 失效，让 Human Inbox 刷新，但不增加公开 fact 或 revision。accept、close 与生命周期清理会移除已经失效的未读 marker，同时保留 episode 历史。Agent idle 是进程内观测，跨 generation 替换保留，Host 重启后丢弃；idle 未知时不满足时间条件。
 
-- ledger append 之后剩下的是 delivery 效果：commit listeners、Client change invalidation、participation notice。每个受影响的 Member 还会收到一次 wake。每一项都经过同一条边界：失败只记日志，不让操作本身失败。失败的 listener 或 wake 仍以 committed result 作答，而不是虚假的回滚。只有 invariant divergence 继续 reject。失败的 Inbox wake 清掉这个 wake 记录的 notice state。因此，下一次触及该 Member 的 commit 重新推导同一批 durable Inbox facts 并重试，不追加第二次操作。DM 保留显式的 recorded-but-not-delivered 错误。
+- ledger append 之后剩下的是 delivery 效果：commit listeners、Client change invalidation、participation notice。每个受影响的 Member 还会收到一次 wake。每一项都经过同一条边界：普通失败只记日志，不让操作本身失败，调用方仍收到 committed result。
+- 通知读取只在一次同步 read set 内共享 Thread/Main 未读材料，文本渲染复用本次 delivery plan，不跨 commit 缓存。`running` 边沿先从当前未读事实重新派生，再判断是否已经覆盖；读取之后不能仅凭上一条通知的 coverage 作此判断。
+- 一次提交影响至少 8 个身份时，通知 effect 延迟到 durable commit 和 Client invalidation 之后执行。同一 Member 按序处理；后续小批次遇到未完成队列时也加入，不能插队。不同 Member 独立调度。关闭时跳过尚未开始的 effect，activation 再从持久未读事实派生。队列排空只表示派发结束，不代表 Agent 已读取或回复通知。
+- 同步执行的 invariant divergence 仍会让调用方收到 reject；延迟通知中的 divergence 因 commit 已经返回，只记 error 级日志。失败的 Inbox wake 清掉这个 wake 记录的 notice state。因此，下一次触及该 Member 的 commit 重新推导同一批 durable Inbox facts 并重试，不追加第二次操作。DM 保留显式的 recorded-but-not-delivered 错误。
 
 ## 哪些操作会唤醒 Member，以及成员卡住时怎么选
 

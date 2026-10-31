@@ -63,6 +63,7 @@ const BLOCK_CHARACTER_CEILINGS = {
   'development/generated-and-seams.md': [515, 362],
   'development/start-and-checks.md': [595, 415],
   'development/storage-and-delivery.md': [585, 583],
+  'development/team-performance.md': [443, 270],
   'domain-model.md': [593, 508],
   'dsh-release-compatibility.md': [475, 235],
   'frontend-design/README.md': [367, 189],

@@ -38,6 +38,8 @@ Member reply 必须携带准确的当前 Thread revision，并在一个 operatio
 
 Agent 的 Thread 与 Main stream read 根据当前 Session 可见性恢复缺失的背景原文，明确省略已可见 Message 正文与完整 Activity 事件，并只确认工具能在输出上限内渲染的前缀；Thread read receipt 记录这个界限，旧 receipt 仍按缺省 batch 解释。超长正文按有序分段返回，重复同一请求从缺失段继续。Human read、Remote 参数与持久 receipt 的解释其余不变；呈现规则见[读取契约](../../docs/team-collaboration/tools.zh.md#team_thread)。
 
+通知材料在一次投递内复用；较大的受影响集合通过按 Member 保序的队列派发。[Host authority](../../docs/architecture/host-authority.zh.md#lifecycle-与通知) 定义顺序、失败和关闭行为；[Team 性能评测](../../docs/development/team-performance.zh.md) 提供显式开启的测量与语义探针。
+
 M1 支持单个 Host writer。Ledger 永久保留，不提供 snapshot 或 compaction。
 
 ## Composition
