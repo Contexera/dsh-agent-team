@@ -26,13 +26,13 @@ describe('every unread Thread fact interrupts, whatever the reader owns', () => 
   it('a Project owner gets one ordinary update immediately', () => {
     const result = plan({ threads: [thread(threadA, owned, [1])] })
     expect(result.trigger).toBe('immediate')
-    expect(result.threads[0]).toMatchObject({ role: 'follower', delivery: 'immediate' })
+    expect(result.threads[0]).toMatchObject({ role: 'follower' })
   })
 
   it('a reader who owns no Project gets the same result', () => {
     const result = plan({ threads: [thread(threadA, other, [1])] })
     expect(result.trigger).toBe('immediate')
-    expect(result.threads[0]).toMatchObject({ role: 'follower', delivery: 'immediate' })
+    expect(result.threads[0]).toMatchObject({ role: 'follower' })
   })
 
   it('one ordinary update is enough, so no count accumulates across reads', () => {
@@ -44,7 +44,7 @@ describe('every unread Thread fact interrupts, whatever the reader owns', () => 
   it('carries an ordinary update alongside a mention instead of waiting for it', () => {
     const result = plan({ threads: [thread(threadA, owned, [1, 2], { direct: [2] })] })
     expect(result.trigger).toBe('immediate')
-    expect(result.threads[0]).toMatchObject({ role: 'follower', delivery: 'immediate' })
+    expect(result.threads[0]).toMatchObject({ role: 'follower' })
   })
 })
 

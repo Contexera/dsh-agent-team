@@ -10,7 +10,6 @@ import type { AgentTeamInboxItem, AgentTeamInboxReminder, AgentTeamMainTimelineE
  * chooses a slower class here. `covered` is what keeps an unchanged
  * rederivation from spending a second attempt on the same durable facts.
  */
-export type InboxDelivery = 'immediate'
 
 /** The reader's role in one notice scope, as the notice states it. */
 export type InboxScopeRole = 'follower' | 'member'
@@ -43,12 +42,11 @@ export interface InboxDeliveryInput {
 export interface InboxThreadPlan {
   readonly threadRef: AgentTeamThreadRef
   readonly role: InboxScopeRole
-  readonly delivery: InboxDelivery
 }
 
 export interface InboxDeliveryPlan {
   /** Why a notice goes out now, or `undefined` when nothing may interrupt the reader. */
-  readonly trigger: InboxDelivery | undefined
+  readonly trigger: 'immediate' | undefined
   readonly signature: string
   /** The signature the next rederivation compares `covered` against: everything the notice can actually render. */
   readonly delivered: string
@@ -75,7 +73,7 @@ export function planInboxDelivery(input: InboxDeliveryInput): InboxDeliveryPlan 
     // facts are not what `covered` records: an unchanged rederivation still sees
     // them as owed and re-attempts instead of standing down.
     if (now.length > 0 && !undelivered.has(threadRef)) delivered.push([threadRef, ...now])
-    threads.push(Object.freeze({ threadRef, role: item.attention === undefined ? 'member' : 'follower', delivery: 'immediate' as const }))
+    threads.push(Object.freeze({ threadRef, role: item.attention === undefined ? 'member' : 'follower' }))
   }
   for (const { projectRef, entries } of input.main) {
     if (entries.length > 0) { immediate.push([projectRef, ...entries.map(entry => entry.sequence)]); delivered.push([projectRef, ...entries.map(entry => entry.sequence)]) }
