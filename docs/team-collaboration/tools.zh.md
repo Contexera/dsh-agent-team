@@ -26,7 +26,7 @@ cursor 只延续 Thread 行。continuation 页只渲染 Threads。翻页可达�
 
 没有选中任何 fact 且没有 reminder 可确认的 read 什么都不推进，不追加 operation；只有 reminder 的 read 仍会确认这些 reminders。已提交读的相同重试返回该次读的**原 receipt**，画面则取自当前 projection。读从不承诺冻结画面。
 
-Thread 的选择界限是持久的：receipt 存储 `selectedThroughSequence`，replay 据此重建同一次确认，界限之后的 facts 保持未读。相同重试只返回该 receipt 与当前未读画面，不会再次确认。写入该字段之前的 receipt 仍按缺省 batch 解释。Human 的读取、Remote 参数与读取语义都不变。
+Thread 的选择界限是持久的：receipt 存储 `selectedThroughSequence`，replay 据此重建同一次确认，界限之后的 facts 保持未读。相同重试只返回该 receipt、它记录的 `readThroughSequence` 与当前剩余未读数，不重新展开未读 facts，也不会再次确认。写入该字段之前的 receipt 仍按缺省 batch 解释。Human 的读取、Remote 参数与读取语义都不变。
 
 Thread 的 `read` 还会为上下文已不再持有讨论的读者补背景：anchor 缺失时补上，再加未读批次之前最多四条 fact 中筛出的 Message——没有未读时取 tail 之前。Main stream 的 `read` 补同样的近期 Message 背景，但没有 anchor。当前 Session 中已完整可见的背景不重复，也不存在独立的持久已读库：可见性只来自当前 Session surface。
 
