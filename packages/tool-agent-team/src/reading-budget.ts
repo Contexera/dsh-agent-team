@@ -96,10 +96,6 @@ export function budgetReading<V extends Reading>(agent: Agent, value: V, render:
     // where the body should be. A capacity check cannot help either, because
     // the body reached the context once already.
     if (missing === undefined) {
-      // Nothing left to deliver, so this result says the body is already here
-      // instead of rendering a zero-length part where the body should be. A
-      // capacity check cannot help either, because the body reached context
-      // once already.
       const omitted = value.kind === 'message' && value.message !== undefined
         ? { message: { ...value.message, bodyOmitted: true } }
         : { [key]: selected.map(entry => entry.messageRef === first.messageRef ? { ...entry, bodyOmitted: true } : entry) }
