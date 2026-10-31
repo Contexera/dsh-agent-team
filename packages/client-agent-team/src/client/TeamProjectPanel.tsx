@@ -11,7 +11,7 @@ import type {
   AgentTeamThreadTaskCard,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { Button, IconCloseOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconCloseOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDiscussionAnchor } from './navigation.ts'
 import type { TeamDraftStore } from './drafts.ts'
@@ -282,13 +282,17 @@ export function TeamProjectPanel({ surface, workspaceId, projectRef, threadRef, 
       {/* The same control the Thread page's band carries, in the head's own room: the visible verb is the
           short one and the accessible name keeps the full phrase — and, while the write runs, the long
           pending phrase, so the panel announces progress the shortened visible word cannot. */}
-      {thread !== undefined && <Button size="sm" variant="outline" className={follow.following === true ? css.toggleOn : undefined}
-        disabled={follow.pending} aria-pressed={follow.following === true}
-        aria-label={follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
-        onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
-        {follow.pending ? t('followPendingLabel') : follow.following === true ? t('unfollowLabel') : t('followLabel')}
-      </Button>}
-      {task === undefined && thread !== undefined && <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>}
+      {thread !== undefined && <Tooltip label={follow.following === true ? t('unfollowHint') : t('followHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+        <Button size="sm" variant="outline" className={follow.following === true ? css.toggleOn : undefined}
+          disabled={follow.pending} aria-pressed={follow.following === true}
+          aria-label={follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
+          onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
+          {follow.pending ? t('followPendingLabel') : follow.following === true ? t('unfollowLabel') : t('followLabel')}
+        </Button>
+      </Tooltip>}
+      {task === undefined && thread !== undefined && <Tooltip label={t('promoteHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+        <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
+      </Tooltip>}
       {task !== undefined && <Button size="sm" variant="primary" onClick={() => { onPromoted(task.taskRef) }}>{t('openTask', { number: resolvedTaskNumber ?? '…' })}</Button>}
       <Button size="sm" icon={<IconCloseOutlineRegular size={14} />} aria-label={t('panelClose')} onClick={onClose} />
     </div>

@@ -219,6 +219,7 @@ export function TeamProjectsPanel(props: TeamProjectsPanelProps) {
       </Modal>
       <TeamSidebarSection
         title={t('projects')}
+        help={{ label: t('projectHelpLabel'), body: t('projectHelp') }}
         open={sectionOpen}
         onToggle={open => { setSidebarSectionOpen(workspaceId, 'projects', open) }}
         actions={(

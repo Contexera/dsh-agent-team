@@ -394,6 +394,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A model question beside the section name. It is not the disclosure, so opening the hint does not fold the list. */
+.sectionHint {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-xs, 4px);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+}
+.sectionHint:hover { color: var(--dsw-alias-label-secondary); }
+.sectionHint:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
 .sectionActions {
   align-items: center;
   display: inline-flex;

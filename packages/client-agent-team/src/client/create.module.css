@@ -163,9 +163,30 @@
 }
 
 .sectionLabel {
+  align-items: center;
   color: var(--dsw-alias-label-secondary);
+  display: inline-flex;
   font-size: 12px;
+  gap: 2px;
   line-height: 18px;
+}
+.sectionHint {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--dsw-radius-xs, 4px);
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 18px;
+  justify-content: center;
+  padding: 0;
+  width: 18px;
+}
+.sectionHint:hover { color: var(--dsw-alias-label-secondary); }
+.sectionHint:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
 }
 
 /* The retry sits 8px under the message (the shipped message-then-action gap) in one alert region; the button keeps its own shape. */

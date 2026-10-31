@@ -12,7 +12,7 @@ import type {
   AgentTeamView,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import { Button, IconChevronLeftOutlineRegular, Menu, Modal, Pill, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronLeftOutlineRegular, Menu, Modal, Pill, Tooltip, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
@@ -526,12 +526,14 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
                 name says so in the long form: the shortened visible word is not what a screen reader reads,
                 and a control that stopped announcing its own progress would be a regression against the
                 previous copy. */}
-            <Button size="sm" variant="outline" className={follow.following === true ? css.toggleOn : undefined}
-              disabled={follow.pending} aria-pressed={follow.following === true}
-              aria-label={follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
-              onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
-              {follow.pending ? t('followPendingLabel') : follow.following === true ? t('unfollowLabel') : t('followLabel')}
-            </Button>
+            <Tooltip label={follow.following === true ? t('unfollowHint') : t('followHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+              <Button size="sm" variant="outline" className={follow.following === true ? css.toggleOn : undefined}
+                disabled={follow.pending} aria-pressed={follow.following === true}
+                aria-label={follow.pending ? t('followPending') : follow.following === true ? t('unfollowThread') : t('followThread')}
+                onClick={() => { void follow.toggle(follow.following === true ? 'unfollow' : 'follow') }}>
+                {follow.pending ? t('followPendingLabel') : follow.following === true ? t('unfollowLabel') : t('followLabel')}
+              </Button>
+            </Tooltip>
             {/* A finished Task is mended from here: only a Member actor is confined to open Tasks, so the
                 Human's transfer stands with the resolution. */}
             {task !== undefined && transferTargets.length > 0 && <Menu
@@ -539,22 +541,32 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
               onClose={() => { setTransferMenuOpen(false) }}
               items={transferMenuItems}
               onSelect={id => { void transfer.transfer(id as AgentTeamMemberId) }}
-              anchor={<Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="menu"
-                aria-label={transfer.pending ? t('transferringTask') : t('transferTask')} onClick={() => { setTransferMenuOpen(value => !value) }}>
-                {transfer.pending ? t('transferPendingLabel') : t('transferLabel')}
-              </Button>}
+              anchor={<Tooltip label={t('transferHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+                <Button size="sm" variant="outline" disabled={transfer.pending} aria-haspopup="menu"
+                  aria-label={transfer.pending ? t('transferringTask') : t('transferTask')} onClick={() => { setTransferMenuOpen(value => !value) }}>
+                  {transfer.pending ? t('transferPendingLabel') : t('transferLabel')}
+                </Button>
+              </Tooltip>}
             />}
           </div>
           {showLifecycleGroup && <div className={css.actionGroup} data-team-action-group="lifecycle">
             {task === undefined
-              ? <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
+              ? <Tooltip label={t('promoteHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+                  <Button size="sm" variant="primary" disabled={pending} onClick={() => { void convertToTask() }}>{mutating === 'promote' ? t('promotingTask') : t('promoteToTask')}</Button>
+                </Tooltip>
               : task.resolution === 'open'
                 ? <>
-                  {canAccept && <Button size="sm" variant="primary" disabled={pending}
-                    onClick={() => { if (earlyAccept) { setConfirmingAccept(true) } else { void mutateTask('accept') } }}>{t('acceptTask')}</Button>}
-                  <Button size="sm" variant="outline" disabled={pending} onClick={() => { void mutateTask('close') }}>{t('closeTask')}</Button>
+                  {canAccept && <Tooltip label={t('acceptHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+                    <Button size="sm" variant="primary" disabled={pending}
+                      onClick={() => { if (earlyAccept) { setConfirmingAccept(true) } else { void mutateTask('accept') } }}>{t('acceptTask')}</Button>
+                  </Tooltip>}
+                  <Tooltip label={t('closeHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+                    <Button size="sm" variant="outline" disabled={pending} onClick={() => { void mutateTask('close') }}>{t('closeTask')}</Button>
+                  </Tooltip>
                 </>
-                : <Button size="sm" variant="primary" disabled={pending} onClick={() => { void mutateTask('reopen') }}>{t('reopenTask')}</Button>}
+                : <Tooltip label={t('reopenHint')} side="bottom" delayMs={500} portal maxWidth={260}>
+                    <Button size="sm" variant="primary" disabled={pending} onClick={() => { void mutateTask('reopen') }}>{t('reopenTask')}</Button>
+                  </Tooltip>}
           </div>}
         </div>}
       </header>

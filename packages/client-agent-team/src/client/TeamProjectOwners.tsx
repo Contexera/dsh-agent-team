@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react'
+import { IconQuestionOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   AgentTeamClientMemberStatus,
@@ -71,7 +72,14 @@ export function TeamProjectOwners({ project, members, ownerIds, addProjectOwner,
 
   return (
     <div className={createCss.ownersSection} role="group" aria-label={t('projectOwners')} data-team-project-owners>
-      <span className={createCss.sectionLabel}>{t('projectOwners')}</span>
+      <span className={createCss.sectionLabel}>
+        {t('projectOwners')}
+        <Tooltip label={t('projectOwnerHelp')} side="right" delayMs={200} portal maxWidth={280}>
+          <button type="button" className={createCss.sectionHint} aria-label={t('projectOwnerHelpLabel')}>
+            <IconQuestionOutlineRegular size={12} />
+          </button>
+        </Tooltip>
+      </span>
       <div className={createCss.roster}>
         <div className={rowCss.row} data-team-project-owner-human>
           {/* Same seat as the Agent rows' avatar, so the fixed Human row lines up with them. */}
