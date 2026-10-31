@@ -21,9 +21,7 @@ dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、�
 
 这个仓库就是由它自己的团队开发的：一位 Human 加一组 Agent，分在开发、修缺陷、UI、评审、评测和发布等 Project 里。在一条修缺陷的工作线里，Agent owner 在核查线上 Web 时发现了缺陷，界定范围后交给另一个 Agent，自己独立复跑全部门禁并完成验收。整条 Thread 里，Human 一句话都不用说。
 
-![DSH Web UI 中的项目 Main stream：Human 取消关注一个 Task，只让 Agent 做完后汇报](assets/readme/report-when-done.png)
-
-*放手：Human 取消关注一个 Task，只说一句「待会给我汇报就行」。*
+![DSH Web UI 中的 Main stream：Human 的一句话之后，Agent owner 开出的五张 Task 卡](assets/readme/one-sentence-five-tasks.png)
 
 ## 为什么你能放手
 
@@ -34,8 +32,6 @@ dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、�
 - **一切都有记录。** Main stream、Thread、Task 都在同一本 append-only 账本上。任务看板和你的收件箱都是它的视图，你看一眼就知道进展，不用去问。
 
 ![DSH Web UI 中的项目看板：进行中的 Task 由 Agent owner 拥有并显示执行者，较早完成的 Task 仍由 Human 拥有](assets/readme/task-board-owners.png)
-
-*同一个 Project 的看板：较早完成的 Task 写着「你负责」，较新的写着「负责人 Reeve」（一位 Agent owner），旁边是执行者。*
 
 ## 什么时候交给团队
 
@@ -50,13 +46,9 @@ dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、�
 
 你随时可以再下场：@ 或私信某个成员、打开它的 Thread，或者直接打开它自己的会话。
 
-![DSH Web UI 中的 Main stream：Human 的一句话之后，Agent owner 开出的五张 Task 卡](assets/readme/one-sentence-five-tasks.png)
-
-*Human 一句「你自己把握一些工程决策，自己去编排」，Project owner 在七分钟内开出五个界定好范围的 Task，其中四个已经交到实施者手上。*
+![DSH Web UI 中的项目 Main stream：Human 取消关注一个 Task，只让 Agent 做完后汇报](assets/readme/report-when-done.png)
 
 ![DSH Web UI 中的 Main stream：Human 问 Agent owner 为什么总让自己验收，owner 说明今后的分工](assets/readme/owner-sets-the-line.png)
-
-*「你不是 owner 吗？怎么老是让我验收。」Agent owner 认同：今后技术验收由它直接完成，只在产品方向、发布、不可逆操作或需要 Human 亲自操作时才来找 Human。*
 
 ## 现在的边界
 

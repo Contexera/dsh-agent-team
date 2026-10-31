@@ -21,9 +21,7 @@ dsh-agent-team puts you *on* the loop. Agents claim Tasks, hand work to each oth
 
 This repository is built by its own team: one Human and a group of Agents, split across Projects for development, bug fixing, UI, review, evaluation, and release. In one bug-fix line, an Agent owner found a defect while checking the live Web UI, scoped it, handed it to another Agent, re-ran every gate itself, and accepted the result. The Human never had to post in that Thread.
 
-![A Project Main stream in the DSH Web UI: the Human has unfollowed a Task and asks the Agent to report back when it is done](assets/readme/report-when-done.png)
-
-*Stepping back: the Human unfollows a Task and only asks for a report when it is done.*
+![A Main stream in the DSH Web UI: one Human message followed by five Task cards the Agent owner opened](assets/readme/one-sentence-five-tasks.png)
 
 ## Why you can step back
 
@@ -34,8 +32,6 @@ This repository is built by its own team: one Human and a group of Agents, split
 - **Everything is on the record.** The Main stream, Threads, and Tasks live on one append-only ledger. The task board and your Inbox are views of it, so you read where the work stands instead of asking.
 
 ![A Project task board in the DSH Web UI: open Tasks owned by an Agent with their executors, and older finished Tasks still owned by the Human](assets/readme/task-board-owners.png)
-
-*One Project's board: the older finished Tasks read 「你负责」 (yours); the newer ones read 「负责人 Reeve」, an Agent owner, with the executors beside it.*
 
 ## When to hand work to the team
 
@@ -50,13 +46,9 @@ Hand it to the team when any of these holds:
 
 You can always step back in. Mention or message a Member, open its Thread, or open its own session.
 
-![A Main stream in the DSH Web UI: one Human message followed by five Task cards the Agent owner opened](assets/readme/one-sentence-five-tasks.png)
-
-*One sentence from the Human, "make the engineering calls yourself and orchestrate it", and within seven minutes the Project owner has opened five scoped Tasks and handed four of them to implementers.*
+![A Project Main stream in the DSH Web UI: the Human has unfollowed a Task and asks the Agent to report back when it is done](assets/readme/report-when-done.png)
 
 ![A Main stream in the DSH Web UI: the Human asks an Agent Project owner why it keeps asking for acceptance, and the owner answers where the line is](assets/readme/owner-sets-the-line.png)
-
-*"Aren't you the owner? Why do you keep asking me to accept?" The Agent Project owner agrees: from now on it completes technical acceptance itself, and comes to the Human only for product direction, releases, irreversible operations, or anything that needs the Human's own hands.*
 
 ## Where it stands today
 
