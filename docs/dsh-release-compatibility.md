@@ -342,3 +342,15 @@ Section 3.6 is not re-triggered by a format change: no released artifact content
 Evidence on the certified tree: `npm run typecheck` (517 Harness mappings), `npm test` (1164 passed, 1 skipped), `npm run lint` (3 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (306 files), `check:artifact` (53 runtime relative imports resolved), and `npm run test:browser` (6 journeys).
 
 The browser journey and the full suite were also re-run against the daily `0.2.1-rc.2` checkout, where the same 6 journeys pass, because the assertion above ships to a line that still resolves the previous host.
+
+### DSH 0.2.1-rc.5
+
+DSH `0.2.1-rc.5` is certified on the same peers with no manifest change, shipped as Agent Team `0.2.6`. The candidate falls inside `>=0.2.1-rc.2 <0.2.2`, so section 4 records a baseline instead of a peer move, and every version spot keeps naming the range's lower bound.
+
+At certification time npm `latest` and `next` both pointed at the candidate, so the declared line admits the host a default install actually resolves.
+
+Tag `b830ec950f` (2026-10-29) carries 667 changed files against `dsh-v0.2.1-rc.2`. No symbol this bundle imports was removed or renamed, and the generated facades absorb one new upstream package, `dsh-client-ui-entry-customization`, which this bundle does not import.
+
+Typert output is unchanged. Section 3.6 is not re-triggered: every changed file under `packages/session` is a manifest version line, and no released artifact content is refused.
+
+Evidence on the certified tree: `npm run typecheck` (517 Harness mappings), `npm test` (1554 passed, 1 skipped), `npm run lint` (99 warnings, 0 errors), `npm run build`, `npm pack --dry-run` (358 files), `check:artifact` (65 runtime relative imports resolved), `git diff --check`, and `npm run test:browser` (10 journeys).

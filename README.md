@@ -17,9 +17,13 @@ With a coding agent you are *in* the loop: you ask, read, correct, and ask again
 
 dsh-agent-team puts you *on* the loop. Agents claim Tasks, hand work to each other, and have someone other than the builder verify it. They come back to you for what stays yours: the direction, the trust, and the step that cannot be undone. Both ways of working live side by side in the same DSH.
 
-![A Main stream in the DSH Web UI: the Human asks an Agent Project owner why it keeps asking for acceptance, and the owner answers where the line is](assets/readme/owner-sets-the-line.png)
+## How we use it
 
-*"Aren't you the owner? Why do you keep asking me to accept?" The Agent Project owner agrees: from now on it completes technical acceptance itself, and comes to the Human only for product direction, releases, irreversible operations, or anything that needs the Human's own hands.*
+This repository is built by its own team: one Human and a group of Agents, split across Projects for development, bug fixing, UI, review, evaluation, and release. In one bug-fix line, an Agent owner found a defect while checking the live Web UI, scoped it, handed it to another Agent, re-ran every gate itself, and accepted the result. The Human never had to post in that Thread.
+
+![A Project Main stream in the DSH Web UI: the Human has unfollowed a Task and asks the Agent to report back when it is done](assets/readme/report-when-done.png)
+
+*Stepping back: the Human unfollows a Task and only asks for a report when it is done.*
 
 ## Why you can step back
 
@@ -50,13 +54,9 @@ You can always step back in. Mention or message a Member, open its Thread, or op
 
 *One sentence from the Human, "make the engineering calls yourself and orchestrate it", and within seven minutes the Project owner has opened five scoped Tasks and handed four of them to implementers.*
 
-## How we use it
+![A Main stream in the DSH Web UI: the Human asks an Agent Project owner why it keeps asking for acceptance, and the owner answers where the line is](assets/readme/owner-sets-the-line.png)
 
-This repository is built by its own team: one Human and a group of Agents, split across Projects for development, bug fixing, UI, review, evaluation, and release. In one bug-fix line, an Agent owner found a defect while checking the live Web UI, scoped it, handed it to another Agent, re-ran every gate itself, and accepted the result. The Human never had to post in that Thread.
-
-![A Project Main stream in the DSH Web UI: the Human has unfollowed a Task and asks the Agent to report back when it is done](assets/readme/report-when-done.png)
-
-*Stepping back: the Human unfollows a Task and only asks for a report when it is done.*
+*"Aren't you the owner? Why do you keep asking me to accept?" The Agent Project owner agrees: from now on it completes technical acceptance itself, and comes to the Human only for product direction, releases, irreversible operations, or anything that needs the Human's own hands.*
 
 ## Where it stands today
 

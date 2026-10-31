@@ -405,3 +405,15 @@ Tag `1f81c047`（2026-10-23）相对 `dsh-v0.2.1-rc.2` 改动 640 个文件。�
 认证树上的证据：`npm run typecheck`（517 个 Harness 映射）、`npm test`（1164 通过、1 跳过）、`npm run lint`（3 warning、0 error）、`npm run build`、`npm pack --dry-run`（306 文件）、`check:artifact`（53 个运行时相对导入全部解析）、`npm run test:browser`（6 条旅程）。
 
 浏览器旅程与整套测试也在日常 `0.2.1-rc.2` 检出上重跑过，同样 6 条旅程全绿，因为上面的断言要发到仍解析上一版宿主的那条线上。
+
+### DSH 0.2.1-rc.5
+
+DSH `0.2.1-rc.5` 在同一 peer 区间上认证通过，manifest 无改动，随 Agent Team `0.2.6` 发布。候选版本落在 `>=0.2.1-rc.2 <0.2.2` 之内，因此按 §4 记录基线而不移动 peer，所有版本位仍指向该区间下界。
+
+认证时 npm `latest` 与 `next` 都指向它，所以声明线继续接纳默认安装真正会解析到的那个宿主。
+
+Tag `b830ec950f`（2026-10-29）相对 `dsh-v0.2.1-rc.2` 改动 667 个文件。本 bundle 导入的符号没有被删除或改名，生成的 facade 吸收了一个上游新包 `dsh-client-ui-entry-customization`，本 bundle 不导入它。
+
+Typert 产物无变化。§3.6 未因格式变化重新触发：`packages/session` 下改动的文件全是 manifest 的版本行，没有已发布产物被拒。
+
+认证树上的证据：`npm run typecheck`（517 个 Harness 映射）、`npm test`（1554 通过、1 跳过）、`npm run lint`（99 warning、0 error）、`npm run build`、`npm pack --dry-run`（358 文件）、`check:artifact`（65 个运行时相对导入全部解析）、`git diff --check`、`npm run test:browser`（10 条旅程）。

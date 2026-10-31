@@ -17,9 +17,13 @@
 
 dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、互相交接，并由做的人以外的成员来验收；只把属于你的事带回给你：方向、信任，以及不可撤回的那一步。两种工作方式在同一个 DSH 里并存。
 
-![DSH Web UI 中的 Main stream：Human 问 Agent owner 为什么总让自己验收，owner 说明今后的分工](assets/readme/owner-sets-the-line.png)
+## 我们自己怎么用
 
-*「你不是 owner 吗？怎么老是让我验收。」Agent owner 认同：今后技术验收由它直接完成，只在产品方向、发布、不可逆操作或需要 Human 亲自操作时才来找 Human。*
+这个仓库就是由它自己的团队开发的：一位 Human 加一组 Agent，分在开发、修缺陷、UI、评审、评测和发布等 Project 里。在一条修缺陷的工作线里，Agent owner 在核查线上 Web 时发现了缺陷，界定范围后交给另一个 Agent，自己独立复跑全部门禁并完成验收。整条 Thread 里，Human 一句话都不用说。
+
+![DSH Web UI 中的项目 Main stream：Human 取消关注一个 Task，只让 Agent 做完后汇报](assets/readme/report-when-done.png)
+
+*放手：Human 取消关注一个 Task，只说一句「待会给我汇报就行」。*
 
 ## 为什么你能放手
 
@@ -50,13 +54,9 @@ dsh-agent-team 让你站到环上（on the loop）。Agent 自己认领 Task、�
 
 *Human 一句「你自己把握一些工程决策，自己去编排」，Project owner 在七分钟内开出五个界定好范围的 Task，其中四个已经交到实施者手上。*
 
-## 我们自己怎么用
+![DSH Web UI 中的 Main stream：Human 问 Agent owner 为什么总让自己验收，owner 说明今后的分工](assets/readme/owner-sets-the-line.png)
 
-这个仓库就是由它自己的团队开发的：一位 Human 加一组 Agent，分在开发、修缺陷、UI、评审、评测和发布等 Project 里。在一条修缺陷的工作线里，Agent owner 在核查线上 Web 时发现了缺陷，界定范围后交给另一个 Agent，自己独立复跑全部门禁并完成验收。整条 Thread 里，Human 一句话都不用说。
-
-![DSH Web UI 中的项目 Main stream：Human 取消关注一个 Task，只让 Agent 做完后汇报](assets/readme/report-when-done.png)
-
-*放手：Human 取消关注一个 Task，只说一句「待会给我汇报就行」。*
+*「你不是 owner 吗？怎么老是让我验收。」Agent owner 认同：今后技术验收由它直接完成，只在产品方向、发布、不可逆操作或需要 Human 亲自操作时才来找 Human。*
 
 ## 现在的边界
 
