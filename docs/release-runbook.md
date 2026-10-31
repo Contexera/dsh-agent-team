@@ -50,7 +50,11 @@ Run in this order; a failure stops the release, and a fix re-runs from the faile
 - Leave out metrics, internal nouns, and file names; state what the version *is*, not what changed about it.
 - GitHub rewrites raw HTML anchor ids, so the switcher's jump has not worked since 0.1.7; the switcher line is still the required shape, pending a maintainer decision.
 
-**The pinned compatibility discussion** in `deepseek-ai/deepseek-harness` (discussion 4303) is a public surface with no sync path, which is why `check:public-baseline` exists. Maintenance is a rotation over three comments of our own: post the new release comment, fold the previous version into the version-history comment, then delete our own previous release comment by node id — post, verify, then delete. Never edit or delete anyone else's comment; the thread legitimately carries external comments and replies beyond our three.
+**The pinned compatibility discussion** in `deepseek-ai/deepseek-harness` (discussion 4303) is a public surface with no sync path, which is why `check:public-baseline` exists.
+
+That body is maintained in place rather than rotated: it carries the positioning, the usage section, the install block and the certified baseline, so a change in any of them is an edit to the body itself — including the install pin, which no gate compares with the manifest.
+
+Maintenance is a rotation over two comments of our own: post the new release comment, fold the previous version into the version-history comment, then delete our own previous release comment by node id — post, verify, then delete. Never edit or delete anyone else's comment; the thread legitimately carries external comments and replies beyond our two.
 
 ## 5. Publish
 
