@@ -75,7 +75,7 @@ it('configures the Team page identity from Settings in real Web', async () => {
   expect(thresholdRing.outlineStyle).not.toBe('none')
   await page.keyboard.press('Enter')
   await expect.poll(() => {
-    const value = scaffold!.ctx.settings.describe().find(row => row.ns === 'wowyuarm-agent-team-host')?.value as
+    const value = scaffold!.ctx.settings.describe().find(row => row.ns === 'contexera-agent-team-host')?.value as
       | { memberCompaction?: { enabled?: boolean; tokens?: number } }
       | undefined
     return value?.memberCompaction

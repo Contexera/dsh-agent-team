@@ -8,8 +8,19 @@
 import type { ContextFormed, ContextSnapshotSection, MessageSource, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { TeamMessageSurface } from './surface-visibility.ts'
 
-/** The producer kind attributing every Agent Team message source. */
-export const AGENT_TEAM_PLUGIN_ID = '@wowyuarm/dsh-agent-team'
+/** The producer kind attributing every Agent Team message source this bundle writes now. */
+export const AGENT_TEAM_PLUGIN_ID = '@contexera/dsh-agent-team'
+
+/**
+ * Producer kinds this bundle wrote before the published identity moved from
+ * `@wowyuarm` to `@contexera`. Read-only: no writer emits them, but 599 Members'
+ * Session logs carry them, so every read path must keep recognizing them or an
+ * existing Session loses its own context attribution on upgrade.
+ */
+export const AGENT_TEAM_LEGACY_PLUGIN_IDS = ['@wowyuarm/dsh-agent-team'] as const
+
+/** Every producer kind this bundle accepts, current first; the read-side union of {@link AGENT_TEAM_PLUGIN_ID} and its renamed history. */
+export const AGENT_TEAM_PLUGIN_IDS = [AGENT_TEAM_PLUGIN_ID, ...AGENT_TEAM_LEGACY_PLUGIN_IDS] as const
 
 /** Kind the Harness's V4 read-time conversion gives this plugin's released V3 `plugin` sources: `plugin:` + producer id, payload fields preserved. */
 export const AGENT_TEAM_V3_RENAMED_KIND = `plugin:${AGENT_TEAM_PLUGIN_ID}`
@@ -20,11 +31,17 @@ declare module '@deepseek-ai/dsh-llm' {
     [AGENT_TEAM_PLUGIN_ID]: { kind: typeof AGENT_TEAM_PLUGIN_ID; readonly teamFacts?: TeamMessageSurface } & ContextFormed
     /** The converted shape of this plugin's released V3 history; read-side only. */
     [AGENT_TEAM_V3_RENAMED_KIND]: { kind: typeof AGENT_TEAM_V3_RENAMED_KIND; readonly teamFacts?: TeamMessageSurface } & ContextFormed
+    /** The pre-rename producer kind; read-side only, and only ever in history. */
+    '@wowyuarm/dsh-agent-team': { kind: '@wowyuarm/dsh-agent-team'; readonly teamFacts?: TeamMessageSurface } & ContextFormed
+    /** The converted shape of that pre-rename history. */
+    'plugin:@wowyuarm/dsh-agent-team': { kind: 'plugin:@wowyuarm/dsh-agent-team'; readonly teamFacts?: TeamMessageSurface } & ContextFormed
   }
 }
 
-/** The source shapes carrying this plugin's attribution: its current kind and the read-time conversion of its V3 history. */
-export type AgentTeamMessageSource = Extract<MessageSource, { kind: typeof AGENT_TEAM_PLUGIN_ID | typeof AGENT_TEAM_V3_RENAMED_KIND }>
+/** The source shapes carrying this plugin's attribution: its current kind, its pre-rename history, and the V3 conversions of both. */
+export type AgentTeamMessageSource = Extract<MessageSource, {
+  kind: typeof AGENT_TEAM_PLUGIN_ID | typeof AGENT_TEAM_V3_RENAMED_KIND | 'plugin:@wowyuarm/dsh-agent-team' | '@wowyuarm/dsh-agent-team'
+}>
 
 /** The kind the read-time conversion renames one producer's released V3 sources into. */
 export const v3RenamedSourceKind = <const P extends string>(producer: P): `plugin:${P}` => `plugin:${producer}`
@@ -34,9 +51,14 @@ export function matchesProducerKind(kind: string | undefined, producer: string):
   return kind === producer || kind === v3RenamedSourceKind(producer)
 }
 
-/** Whether one message source carries this plugin's own attribution. */
+/** Whether a source kind belongs to any of `producers`, each matched exactly or through its V3 conversion. */
+export function matchesAnyProducerKind(kind: string | undefined, producers: readonly string[]): boolean {
+  return producers.some(producer => matchesProducerKind(kind, producer))
+}
+
+/** Whether one message source carries this plugin's own attribution, including the producer kinds it carried before the identity rename. */
 export function isAgentTeamSource(source: MessageSource): source is AgentTeamMessageSource {
-  return matchesProducerKind(source.kind, AGENT_TEAM_PLUGIN_ID)
+  return matchesAnyProducerKind(source.kind, AGENT_TEAM_PLUGIN_IDS)
 }
 
 /** Handoff snapshot section name carrying the model-authored prose. */

@@ -9,6 +9,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { Context, Service, type Volatile } from '@deepseek-ai/cordis'
@@ -33,8 +34,8 @@ import { DomainFacility, type Domain } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeRequestScopedAttachment } from './attachments.ts'
 import { reportEnvironment } from './environment-check.ts'
-import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, planLegacyAdoption, type LegacyHumanProfileFields } from './human-profile.ts'
-import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
+import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, planLegacyAdoption, planNamespaceMigration, type LegacyHumanProfileFields } from './human-profile.ts'
+import { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
@@ -183,15 +184,24 @@ export { agentTeamDomainSpec, agentTeamOperationSchema } from './spec.ts'
 export type * from './types.ts'
 export { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from './ledger.ts'
 export { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName } from './human-profile.ts'
-export { HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
+export { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
 
 /** Process-stable marker carried by the final Team message tool definition. */
-export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@wowyuarm/dsh-agent-team.preset')
+export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@contexera/dsh-agent-team.preset')
 
 const ORPHANED_MEMBER_DIAGNOSTIC = 'Member preset composition was lost after a reload; its tools are unavailable. Resume rebuilds the member in place.'
 const NOTIFICATION_QUEUE_THRESHOLD = 8
+
+/** Read one profile or settings document, or `undefined` when it is absent or unreadable; both are steady states on a first boot. */
+async function readProfileDocument(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, 'utf8')
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * A preset mount/validation failure during activation, carrying its own class
@@ -635,16 +645,26 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * One-time adoption of the profile facts the retired `agent-team-human` settings section held (see `LEGACY_HUMAN_PROFILE_SECTION`).
-   * Whichever readiness edge fires second (settings service, ledger open) starts the attempt; only a pristine profile is adopted, once per boot.
+   * One-time adoption of Human profile facts that predate the current stored
+   * shape. Two sources, in upgrade order: the pre-rename settings namespace
+   * (see {@link migrateRenamedHumanProfileNow}), then the retired
+   * `agent-team-human` settings section (see `LEGACY_HUMAN_PROFILE_SECTION`).
+   * Whichever readiness edge fires second (settings service, ledger open)
+   * starts the attempt; only a profile still missing a field is written, once
+   * per boot.
    */
   private adoptLegacyHumanProfile(): void {
     if (this.legacyAdoptionStarted) return
     if (this.ctx.get('settings') === undefined || this.ledger === undefined) return
     this.legacyAdoptionStarted = true
-    void this.adoptLegacyHumanProfileNow().catch((error: unknown) => {
+    void this.migrateLegacyHumanProfileNow().catch((error: unknown) => {
       this.ctx.logger.warn('agent-team: legacy human profile adoption failed: %s', String(error))
     })
+  }
+
+  private async migrateLegacyHumanProfileNow(): Promise<void> {
+    await this.migrateRenamedHumanProfileNow()
+    await this.adoptLegacyHumanProfileNow()
   }
 
   private async adoptLegacyHumanProfileNow(): Promise<void> {
@@ -685,6 +705,49 @@ export default class AgentTeam extends TypertRemoteService {
     if (plan === undefined) return
     await this.setHumanProfile(plan)
     this.ctx.logger.info('agent-team: adopted the legacy human profile from %s', source)
+  }
+
+  /**
+   * Carries the Human profile across the `@wowyuarm` → `@contexera` row rename.
+   *
+   * The settings namespace IS the Host row id, so the rename left every
+   * existing profile's name and avatar reference stored under an id that no
+   * loader entry answers to any more: the composition skips that patch, and
+   * the row restarts from schema defaults. The stored values survive only in
+   * the profile's own patch document, so this reads them there and writes each
+   * missing field into the current namespace through the settings service —
+   * the same write path the profile page uses, which is what makes the
+   * migration visible live rather than at the next restart.
+   *
+   * The new namespace's own user layer decides what is missing: a Human who
+   * already edited the profile after upgrading keeps every field they set, and
+   * an empty user layer is the only state that triggers a write.
+   */
+  private async migrateRenamedHumanProfileNow(): Promise<void> {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) return
+    const profile = this.ctx.get('profileContext')
+    if (profile === undefined) return
+    const document = await readProfileDocument(profile.patchPath)
+    if (document === undefined) return
+    const legacy = parseRowHumanProfile(document, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE)
+    if (legacy === undefined) return
+    // The stored user layer, not the resolved config: `config` already carries
+    // schema defaults, so only `user` can say whether the Human wrote a field.
+    const descriptor = settings.describe().find(row => row.ns === HUMAN_PROFILE_SETTINGS_NAMESPACE)
+    const stored = (descriptor?.user ?? {}) as { readonly name?: unknown; readonly avatarRef?: unknown }
+    const plan = planNamespaceMigration(stored, legacy)
+    if (plan === undefined) return
+    const avatarRef = plan.avatarRef
+    if (avatarRef !== undefined && await readHumanAvatar(humanAvatarsRoot(), avatarRef) === undefined) {
+      // The reference is carried only while its bytes still draw; a name in the
+      // same plan is a separate field and survives that judgement.
+      if (plan.name === undefined) return
+      await this.setHumanProfile({ name: plan.name })
+    } else {
+      await this.setHumanProfile(plan)
+    }
+    this.ctx.logger.info('agent-team: migrated the human profile off the pre-rename settings namespace in %s', profile.patchPath)
   }
 
   protected async [Service.init](): Promise<void> {

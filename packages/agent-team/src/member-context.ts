@@ -5,11 +5,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset } from '@deepseek-ai/dsh-session'
-import { matchesProducerKind } from './context-source.ts'
+import { matchesAnyProducerKind } from './context-source.ts'
 import type { AgentTeamAgentMember, AgentTeamProject } from './types.ts'
 import { memberMemoryDirectoryPath } from './member-runtime.ts'
 
-export const name = 'wowyuarm-agent-team-member-context'
+export const name = 'contexera-agent-team-member-context'
+
+/** The plugin name this producer wrote under before the identity rename; its V3 history and older V4 rows carry it, so reads must accept it. */
+export const LEGACY_NAME = 'wowyuarm-agent-team-member-context'
+
+/** Every producer name whose rows this module authored, current first. */
+export const PRODUCER_NAMES = [name, LEGACY_NAME] as const
 
 /**
  * Which injected block this message carries. Identity, ownership, and
@@ -21,9 +27,18 @@ export type MemberContextTag =
   | { readonly category: 'identity' | 'ownership' | 'workspaces' }
   | { readonly category: 'memory'; readonly variant: 'baseline' | 'update' | 'unavailable'; readonly digest: string; readonly textDigest: string }
 
-/** This producer's attribution; `kind` must be producer-owned (Session format V4). The second member is the read-side rename of this producer's released V3 history. */
+/** This producer's attribution; `kind` must be producer-owned (Session format V4). The `plugin:` member of each pair is the read-side rename of that producer's released V3 history. */
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
+    'contexera-agent-team-member-context': {
+      kind: 'contexera-agent-team-member-context'
+      readonly memberContext?: MemberContextTag
+    } & ContextFormed
+    'plugin:contexera-agent-team-member-context': {
+      kind: 'plugin:contexera-agent-team-member-context'
+      readonly memberContext?: MemberContextTag
+    } & ContextFormed
+    /** Pre-rename producer name; read-side only, and only ever in history. */
     'wowyuarm-agent-team-member-context': {
       kind: 'wowyuarm-agent-team-member-context'
       readonly memberContext?: MemberContextTag
@@ -126,7 +141,7 @@ function visibleMemberContext(agent: Agent): VisibleMemberContext {
     // offsets. Re-entering through the validating constructor keeps the two
     // number domains explicit (the seq = log.length contiguity contract).
     const event = agent.session.snapshotEvents(SessionLogOffset(sequence), SessionLogOffset(sequence + 1))[0]
-    if (event?.type !== 'user/message' || !matchesProducerKind(event.data.source.kind, name)) continue
+    if (event?.type !== 'user/message' || !matchesAnyProducerKind(event.data.source.kind, PRODUCER_NAMES)) continue
     const derived = agent.session.deriveEventMessage(event)
     if (derived?.role !== 'user') continue
     const tag = (derived.source as { readonly memberContext?: MemberContextTag }).memberContext

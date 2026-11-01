@@ -11,15 +11,24 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type ContextFormed, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { matchesProducerKind } from './context-source.ts'
+import { matchesAnyProducerKind } from './context-source.ts'
 import { formatTeamDuration, formatTeamTimestamp } from './time-format.ts'
 import { advanceOwnedSessionEventCursor, type OwnedSessionEventCursor, type SessionEventFold } from './session-event-cursor.ts'
 
-export const name = 'wowyuarm-agent-team-member-time-context'
+export const name = 'contexera-agent-team-member-time-context'
 
-/** This producer's attribution; `kind` must be producer-owned (Session format V4). The second member is the read-side rename of its released V3 history. */
+/** The plugin name this producer wrote under before the identity rename; older clock snapshots carry it, so the fold must accept it. */
+export const LEGACY_NAME = 'wowyuarm-agent-team-member-time-context'
+
+/** Every producer name whose snapshots this module authored, current first. */
+export const PRODUCER_NAMES = [name, LEGACY_NAME] as const
+
+/** This producer's attribution; `kind` must be producer-owned (Session format V4). The `plugin:` member of each pair is the read-side rename of that producer's released V3 history. */
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
+    'contexera-agent-team-member-time-context': { kind: 'contexera-agent-team-member-time-context' } & ContextFormed
+    'plugin:contexera-agent-team-member-time-context': { kind: 'plugin:contexera-agent-team-member-time-context' } & ContextFormed
+    /** Pre-rename producer name; read-side only, and only ever in history. */
     'wowyuarm-agent-team-member-time-context': { kind: 'wowyuarm-agent-team-member-time-context' } & ContextFormed
     'plugin:wowyuarm-agent-team-member-time-context': { kind: 'plugin:wowyuarm-agent-team-member-time-context' } & ContextFormed
   }
@@ -60,7 +69,7 @@ export function applyClockEvent(state: ClockBaseline, event: { readonly type: st
       return state.openTurn === -1 ? state : { ...state, lastTurnInjectionTime: null, openTurn: -1 }
     case 'user/message': {
       const source = (event.data as UserMessage).source
-      const injected = matchesProducerKind(source.kind, name)
+      const injected = matchesAnyProducerKind(source.kind, PRODUCER_NAMES)
       const withMessage = state.lastMessageTime === event.time ? state : { ...state, lastMessageTime: event.time }
       if (!injected) return withMessage
       return { ...withMessage, lastInjectionTime: event.time, lastTurnInjectionTime: event.time }

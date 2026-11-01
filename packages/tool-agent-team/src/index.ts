@@ -33,7 +33,7 @@ function activityBindings(views: readonly { readonly kind?: string; readonly act
   })
 }
 
-export const name = 'wowyuarm-agent-team-tools'
+export const name = 'contexera-agent-team-tools'
 export const inject = ['tools']
 
 /** One shared bound for every bounded anchor subject a render shows. */

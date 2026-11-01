@@ -50,6 +50,6 @@ describe('the acceptance context boundary', () => {
   it('does not claim another Team notice as an acceptance reminder', () => {
     const reminder = createAcceptanceReminder('remind')
     expect(isAcceptanceNotice({ ...reminder, source: { kind: 'user' } } as never)).toBe(false)
-    expect(isAcceptanceNotice({ ...reminder, source: { kind: '@wowyuarm/dsh-agent-team', form: 'notice', summary: 'Team Inbox has unread work.' } } as never)).toBe(false)
+    expect(isAcceptanceNotice({ ...reminder, source: { kind: '@contexera/dsh-agent-team', form: 'notice', summary: 'Team Inbox has unread work.' } } as never)).toBe(false)
   })
 })

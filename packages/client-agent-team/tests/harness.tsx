@@ -168,7 +168,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     }
     return form
   }
-  const teamConfigForm = configFormFor('wowyuarm-agent-team-host')
+  const teamConfigForm = configFormFor('contexera-agent-team-host')
   teamConfigForm.publish({
     status: 'ready',
     writable: true,

@@ -1070,11 +1070,11 @@ describe('Agent Team Member lifecycle', () => {
     const last = JSON.stringify(adapter.requests[2]!.messages)
     // The closing step still carries the turn's single snapshot in history.
     const lastSnapshots = adapter.requests[2]!.messages.filter(message =>
-      (message as { source?: { kind?: string } }).source?.kind === 'wowyuarm-agent-team-member-time-context')
+      (message as { source?: { kind?: string } }).source?.kind === 'contexera-agent-team-member-time-context')
     expect(lastSnapshots).toHaveLength(1)
     expect(last).toContain('Team clock sampled while preparing turn ')
     const snapshots = agent.session.ownEvents().filter(event => event.type === 'user/message'
-      && (event.data as { source?: { kind?: string; form?: string } }).source?.kind === 'wowyuarm-agent-team-member-time-context')
+      && (event.data as { source?: { kind?: string; form?: string } }).source?.kind === 'contexera-agent-team-member-time-context')
     expect(snapshots).toHaveLength(1)
     const data = snapshots[0]!.data as { content: Array<{ type: string; text: string }>; source: { kind: string; form: string; sections?: unknown[] } }
     expect(data.source.form).toBe('snapshot')

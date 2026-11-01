@@ -25,7 +25,7 @@ describe('recovery notifications retain unread work within the whole-output budg
     await waitFor(() => adapter.requests.length === 2 ? true : undefined)
     await agent.whenIdle()
     const notice = agent.session.deriveMessages().filter(message => message.role === 'user'
-      && message.source.kind === '@wowyuarm/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
+      && message.source.kind === '@contexera/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
       .content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
     expect(notice).not.toContain('first full check')
     expect(notice).toContain(first.message.messageRef)
@@ -61,7 +61,7 @@ describe('recovery notifications retain unread work within the whole-output budg
       .toMatchObject({ unreadCount: 24, directCount: 24 })
     if (repeats === 491) {
       const ordinaryNotice = agent.session.deriveMessages().filter(message => message.role === 'user'
-        && message.source.kind === '@wowyuarm/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
+        && message.source.kind === '@contexera/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
         .content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
       expect(ordinaryNotice).toContain('END-20')
     }
@@ -75,7 +75,7 @@ describe('recovery notifications retain unread work within the whole-output budg
     await waitFor(() => adapter.requests.length > before ? true : undefined)
     await agent.whenIdle()
     const recovery = agent.session.deriveMessages().filter(message => message.role === 'user'
-      && message.source.kind === '@wowyuarm/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
+      && message.source.kind === '@contexera/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
       .content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
     expect(recovery).toContain('The operator asked you to resume')
     expect(recovery.length).toBeLessThanOrEqual(32 * 1024)

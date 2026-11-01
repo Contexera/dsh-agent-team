@@ -40,7 +40,7 @@ describe('complete Activity notices supply context without acknowledging it', ()
     await waitFor(() => adapter.requests.length > before + 1 ? true : undefined)
     await waitForIdle(ctx, agent)
     const latestNotice = agent.session.deriveMessages().filter(message => message.role === 'user'
-      && message.source.kind === '@wowyuarm/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
+      && message.source.kind === '@contexera/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
       .content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
     expect(latestNotice).not.toContain(`from ${AGENT_TEAM_HUMAN_MEMBER_ID}`)
     expect(latestNotice).toContain(transfer.activity.activityRef)

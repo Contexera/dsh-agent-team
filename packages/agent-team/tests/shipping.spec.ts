@@ -44,9 +44,25 @@ async function shippedHarnessName(): Promise<string> {
 // delivers that Message and interrupts Members who need not act on it.
 const PERSONA_CHARACTER_BUDGET = 15400
 
+/** Every shipped row id, whatever its role, carries the published scope prefix; the rename this guards left none behind. */
+const ROW_ID_PREFIX = 'contexera-agent-team-'
+
+/**
+ * The offset of the `- id:` line that opens the row declaring `name`, or -1.
+ * Locating rows by the package they mount keeps these assertions about the
+ * SHAPE of the patch — which rows exist, in what order, under what group —
+ * rather than about row ids, which are an implementation detail of the same
+ * rename that the prefix assertion above already covers.
+ */
+function rowStartByName(patch: string, name: string): number {
+  const at = patch.indexOf(`name: '${name}'`)
+  if (at < 0) return -1
+  return patch.lastIndexOf('- id: ', at)
+}
+
 function teamMemberPresetText(patch: string): string {
-  const start = patch.indexOf('        - id: wowyuarm-agent-team-preset-team-member')
-  const end = patch.indexOf('        - id: wowyuarm-agent-team-host')
+  const start = rowStartByName(patch, '@deepseek-ai/dsh-agent-preset')
+  const end = rowStartByName(patch, '@contexera/dsh-agent-team/host')
   return start >= 0 && end > start ? patch.slice(start, end) : ''
 }
 
@@ -84,10 +100,16 @@ describe('Agent Team shipping contract', () => {
     ])
     const preset = teamMemberPresetText(patch)
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-preset'")
-    expect(patch).toContain('id: wowyuarm-agent-team-scope')
+    // Every LOADER row (4- or 8-space `- id:`) is a Team row and carries the
+    // published scope prefix; deeper `- id:` lines are plugin entries inside a
+    // preset's config, not loader rows. This is the rename's whole invariant,
+    // asserted over the document instead of at one hardcoded id.
+    const loaderRowIds = [...patch.matchAll(/^ {4,8}- id: (.+)$/gm)].map(match => match[1]!.trim())
+    expect(loaderRowIds.length).toBeGreaterThan(0)
+    expect(loaderRowIds.every(id => id.startsWith(ROW_ID_PREFIX))).toBe(true)
+    expect(patch).not.toContain('wowyuarm')
     expect(patch).toContain("name: '@deepseek-ai/dsh-agent-preset-registry'")
     expect(patch).toContain('default: team-member')
-    expect(patch).toContain('id: wowyuarm-agent-team-preset-team-member')
     expect(patch).toContain('id: team-member')
     expect(patch).toContain('agentPresets: true')
     expect(patch).toContain("name: '@contexera/dsh-agent-team/host'")
@@ -123,14 +145,16 @@ describe('Agent Team shipping contract', () => {
     // patch all address it by the constant, so the two must not drift.
     // The row also has to stay the isolating group's nested row — a second
     // top-level row with this id duplicates it and fails the boot sweep.
-    const scopeStart = patch.indexOf('    - id: wowyuarm-agent-team-scope')
-    const scopeEnd = patch.indexOf('    - id: wowyuarm-agent-team-client')
+    // The group is found by its own row id: `cordis:group` is also the name of
+    // a nested row inside it, and the group's `name:` is unquoted YAML.
+    const scopeStart = patch.indexOf(`- id: ${ROW_ID_PREFIX}scope`)
+    const scopeEnd = rowStartByName(patch, '@contexera/dsh-agent-team')
     expect(scopeStart).toBeGreaterThanOrEqual(0)
     expect(scopeEnd).toBeGreaterThan(scopeStart)
     expect(patch.slice(scopeStart, scopeEnd)).toMatch(new RegExp(`^ {8}- id: ${HUMAN_PROFILE_SETTINGS_NAMESPACE}$`, 'm'))
     // The composition mounts it as that group's nested row, with no `config`
     // of its own: the schema defaults are the profile until the Human edits it.
-    const scopeGroup = composed.find(entry => entry.id === 'wowyuarm-agent-team-scope')
+    const scopeGroup = composed.find(entry => entry.id === `${ROW_ID_PREFIX}scope`)
     const nestedRows = (Array.isArray(scopeGroup?.config) ? scopeGroup.config : []) as { id?: string; name?: string; config?: unknown }[]
     const hostRow = nestedRows.find(entry => entry.id === HUMAN_PROFILE_SETTINGS_NAMESPACE)
     expect(hostRow?.name).toBe('@contexera/dsh-agent-team/host')

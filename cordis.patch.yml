@@ -1,5 +1,5 @@
 - insert:
-    - id: wowyuarm-agent-team-scope
+    - id: contexera-agent-team-scope
       name: cordis:group
       group: true
       isolate:
@@ -12,7 +12,7 @@
         # composes. Members always pass their explicit `presetId` on mount;
         # a missing definition fails loudly (`agent-preset/not-found`)
         # instead of silently degrading.
-        - id: wowyuarm-agent-team-preset-registry
+        - id: contexera-agent-team-preset-registry
           name: '@deepseek-ai/dsh-agent-preset-registry'
           config:
             default: team-member
@@ -21,7 +21,7 @@
         # packages/agent-team/preset/. Both `!!js` entries keep their deferred
         # expression semantics (AgentPreset preserves child expressions until
         # their own plugins activate).
-        - id: wowyuarm-agent-team-preset-team-member
+        - id: contexera-agent-team-preset-team-member
           name: '@deepseek-ai/dsh-agent-preset'
           config:
             id: team-member
@@ -221,13 +221,13 @@
                     thresholdChars: 8192
                     headChars: 4096
                     tailChars: 1024
-        - id: wowyuarm-agent-team-host
+        - id: contexera-agent-team-host
           name: '@contexera/dsh-agent-team/host'
-    - id: wowyuarm-agent-team-client
+    - id: contexera-agent-team-client
       name: '@contexera/dsh-agent-team'
     # The Team's invariant companion self-hosts: it validates the durable
     # ledger from its own fiber, so no `@deepseek-ai/dsh-invariants` registry
     # row is mounted — the Harness line after rc.2 removes that package, and
     # the companion no longer depends on it (packages/agent-team/src/invariant.ts).
-    - id: wowyuarm-agent-team-invariant
+    - id: contexera-agent-team-invariant
       name: '@contexera/dsh-agent-team/invariant'

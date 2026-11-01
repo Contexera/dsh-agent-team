@@ -132,7 +132,7 @@ describe('Team Member private memory composition', () => {
     const loader = Object.create(Loader.prototype) as Loader
     const plugin = loader.unwrapExports(memberContext) as Record<string, unknown>
     expect(plugin).toBe(memberContext)
-    expect(plugin.name).toBe('wowyuarm-agent-team-member-context')
+    expect(plugin.name).toBe('contexera-agent-team-member-context')
     // No declared inject: the row mounts while the Host restores Members, so a
     // dependency on `agentTeam` would fail every startup preset mount.
     expect(plugin.inject).toBeUndefined()

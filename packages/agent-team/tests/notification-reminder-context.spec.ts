@@ -43,7 +43,7 @@ describe('bounded notices retain a route to live Task reminders', () => {
     adapter.release.resolve()
     await agent.whenIdle()
     const text = agent.session.deriveMessages().filter(message => message.role === 'user'
-      && message.source.kind === '@wowyuarm/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
+      && message.source.kind === '@contexera/dsh-agent-team' && message.source['form'] === 'notice').at(-1)!
       .content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
     expect(text).toContain(`Direct Team signal not expanded: 1 in Thread ${threadRef}`)
     expect(text).toContain('team_inbox')
