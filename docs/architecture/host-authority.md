@@ -158,7 +158,7 @@ On a reused request id the ledger compares the recorded resolved attachment ids 
 
 ## Human profile and version footnote
 
-The Human's display name and avatar reference live in the Team Host row's own Config, in the settings namespace `wowyuarm-agent-team-host` (user layer); avatar bytes live in the persistent `$DSH_HOME/agent-team/human/v1/` store, never in the TTL-bound attachment cache.
+The Human's display name and avatar reference live in the Team Host row's own Config, in the settings namespace `contexera-agent-team-host` (user layer); avatar bytes live in the persistent `$DSH_HOME/agent-team/human/v1/` store, never in the TTL-bound attachment cache.
 
 The retired `agent-team-human` section is no longer an authority: the rc.1 settings importer carries sections across through a closed built-in mapping, so a third-party section stays behind in the renamed legacy document. A boot that finds the row still pristine — the default name and no avatar — adopts those facts through the same write path the settings page uses, and anything already re-entered wins.
 

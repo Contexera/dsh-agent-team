@@ -98,7 +98,7 @@ Agent Team 是显式 opt-in 的。安装只会把 bundle 加入 `web` profile，
 dsh --profile web --dump-config
 ```
 
-输出中应包含 Team rows，例如 `wowyuarm-agent-team-scope` 和 `wowyuarm-agent-team-client`。打开浏览器后，从 DSH 导航进入 **Team mode**。第一次可以按下面的路径操作：
+输出中应包含 Team rows，例如 `contexera-agent-team-scope` 和 `contexera-agent-team-client`。打开浏览器后，从 DSH 导航进入 **Team mode**。第一次可以按下面的路径操作：
 
 ```text
 Team mode

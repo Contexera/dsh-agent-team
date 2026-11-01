@@ -98,7 +98,7 @@ Before starting the UI, you can inspect the composed profile:
 dsh --profile web --dump-config
 ```
 
-The output should include Team rows such as `wowyuarm-agent-team-scope` and `wowyuarm-agent-team-client`. In the browser, enter **Team mode** from the DSH navigation. The first useful path is:
+The output should include Team rows such as `contexera-agent-team-scope` and `contexera-agent-team-client`. In the browser, enter **Team mode** from the DSH navigation. The first useful path is:
 
 ```text
 Team mode
