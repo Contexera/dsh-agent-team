@@ -20,7 +20,7 @@ Host 为 `agent_team` 自己持有 SQLite-backed `DomainFacility`，不修改全
 
 dsh `0.1.7-rc.1` 线上 message source 由生产者署名。Session format V4 要求每条持久 source 携带生产者自身的 kind。退役的 `{ kind: 'plugin', plugin: … }` wrapper 会在写入准入被拒。released V3 历史由上游在读时转换。转换做三件事：改名为 `plugin:<producer>`、删掉 `plugin` 键、保留 `form`/`sections`/`summary`。磁盘上永不改写。
 
-读侧对本 bundle 全部三个生产者 id 的两种形状，按精确身份识别。识别收敛在一处：`packages/agent-team/src/context-source.ts`，与各自持有 id 的两个 per-Member 生产者。
+读侧对本 bundle 每个生产者 id 的新旧两套、两种形状，按精确身份识别，因此改名前的 Session 仍可读。识别收敛在一处：`packages/agent-team/src/context-source.ts`，与各自持有 id 的两个 per-Member 生产者。
 
 早期版本内置的启动期写侧修复（`session-remediation.ts`）随 V4 切换一并移除。它发布的正是 V4 写入拒绝的 wrapper，针对的 0.1.5 前自定义 kind 在读时转换之前就被 released 迁移链拒绝。没有修复路径。此类 artifact 在每次重试中都保持确定性的 `session-refused` diagnostic。
 

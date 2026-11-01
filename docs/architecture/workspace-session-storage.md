@@ -10,7 +10,7 @@ The Host has a private SQLite-backed `DomainFacility` at `$DSH_HOME/storages/age
 
 Message sources are producer-attributed on the dsh `0.1.7-rc.1` line. Session format V4 requires every durable source to carry its producer's own kind (never the retired `{ kind: 'plugin', plugin: … }` wrapper, which write admission refuses). Released V3 history is converted at read time — `plugin:<producer>`, `plugin` key dropped, `form`/`sections`/`summary` preserved — never rewritten on disk.
 
-The read side recognizes both shapes for all three of this bundle's producer ids by exact identity, in one place (`packages/agent-team/src/context-source.ts` and the two per-Member producers that own their ids).
+The read side recognizes both shapes for each of this bundle's producer ids, current and legacy, by exact identity, in one place (`packages/agent-team/src/context-source.ts` and the two per-Member producers that own their ids), so a Session written before the rename still reads.
 
 The startup write-side repair pass that earlier lines shipped (`session-remediation.ts`) was removed with the V4 cut: what it published was exactly the wrapper V4 refuses at write time, and the bespoke pre-0.1.5 kinds it targeted are refused by the released migration chain before the read-time conversion runs. They therefore have no repair path — such an artifact stays refused with its deterministic `session-refused` diagnostic on every retry.
 
