@@ -6,7 +6,11 @@ All notable changes to this project are documented in this file. The format foll
 
 **Upgrade note**
 
-- Team's durable identifiers now carry the `contexera` name: the six loader row ids in `cordis.patch.yml`, the three producer kinds that attribute what the bundle writes into Sessions, and the Human profile's settings namespace, now `contexera-agent-team-host`. Stored data needs no edit: a Session using the pre-rename kinds still reads, bare or `plugin:`-converted, and an existing profile keeps its display name and avatar — at boot the Host carries them from the old namespace into the new one and fills only the fields the new namespace does not already store.
+- Team's durable identifiers now carry the `contexera` name: the six loader row ids in `cordis.patch.yml`, the three producer kinds that attribute what the bundle writes into Sessions, and the Human profile's settings namespace, now `contexera-agent-team-host`. Stored Session data reads unchanged: the pre-rename kinds still resolve, bare or `plugin:`-converted.
+
+**Fixed**
+
+- A Thread card's title, a Thread chip's title, a quote line, an Inbox gist and a board card's subject read as the line renders: its Markdown is projected to plain text before the line is cut to width, so `**…**` no longer shows as written. A Message body still renders its Markdown.
 
 ## [0.2.6] - 2026-10-31
 
