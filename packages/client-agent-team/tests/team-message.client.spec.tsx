@@ -190,6 +190,32 @@ describe('TeamMessage structured mention rendering', () => {
     expect(opened).toEqual([alphaRef])
   })
 
+  it('labels a thread chip with its opening line projected to plain text', async () => {
+    const threadRef = 'thread:dd0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e32' as AgentTeamThreadRef
+    const { findByRole } = render(
+      <TeamMessage
+        senderName="Builder"
+        memberId={'member:builder' as AgentTeamMemberId}
+        human={false}
+        body={`见 ${threadRef}`}
+        onOpenRef={() => {}}
+        onResolveThreadRefs={async threadRefs => {
+          const entries = threadRefs.map((ref): ResolvedThreadRef => ({
+            threadRef: ref,
+            projectRef: 'project:11111111-2222-4333-8333-111111111111' as AgentTeamProjectRef,
+            title: '**上线计划** 明早十点',
+          }))
+          for (const entry of entries) rememberResolvedThreadRef(entry)
+          return entries
+        }}
+        t={t}
+      />,
+    )
+    // The chip is a label on one line, not a Message: it names the cited Thread
+    // by the text its body renders, never by the Markdown that body was written in.
+    await findByRole('button', { name: '讨论 · 上线计划 明早十点' })
+  })
+
   it('leaves unresolvable thread refs as plain text', async () => {
     const unknownRef = 'thread:cc0ad7ce-11d3-4c05-8a9e-6f2b1c9d7e32' as AgentTeamThreadRef
     const { container, findByText } = render(
@@ -548,6 +574,15 @@ describe('TeamMessage quote line and card actions', () => {
     fireEvent.click(quote!)
     // The pointer lands on the Message this one quotes, never on this one.
     expect(opened).toBe('message:parent')
+  })
+
+  it('projects a quoted excerpt to the plain text its body renders', () => {
+    const { container } = render(
+      <TeamMessage senderName="Builder" memberId={'member:builder' as AgentTeamMemberId} human={false} body="收到"
+        replyTo={{ senderName: 'Momo', excerpt: '**讨论 Momo 与 Reeve 的职责边界** 先形成共同理解', messageRef: 'message:parent' as never }} t={t} />,
+    )
+    const quote = container.querySelector('[data-quote-line]')!
+    expect(quote.textContent).toContain('讨论 Momo 与 Reeve 的职责边界 先形成共同理解')
   })
 
   it('renders an inert quote when the surface offers no jump', () => {

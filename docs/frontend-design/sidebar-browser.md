@@ -135,7 +135,7 @@ The identity is what a queue reader scans for, so it carries the row's ink; whil
 
 The count reads `99+` past ninety-nine, and the mention split inside it reaches assistive tech and hover through the capsule's own label — the row's visible text stays the Thread rather than a second count.
 
-(3) The gist under it — the Thread's opening line capped at 120 characters straight from the Host's `previewText`, 13px/20 secondary on the identity's own column, one line.
+(3) The gist under it — the Host's `previewText` opening line, its Markdown projected to plain text and then capped at 120 characters, 13px/20 secondary on the identity's own column, one line.
 
 (4) The newest instant closing the identity line behind the count — the Inbox row time of the Typography table — with the precise local `YYYY-MM-DD HH:mm` on the element's `title`.
 

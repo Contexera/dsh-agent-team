@@ -551,21 +551,22 @@ function assertUnhandledKind(operation: never): never {
 }
 
 /**
- * Opening-line gist: the first line, trimmed, then cut to `max` characters
- * with an explicit mark.
+ * Opening-line gist: the first non-empty line, trimmed, then bounded as a wire
+ * guard. The bound stays far above any display width: the Client projects the
+ * line's Markdown away and then bounds it per surface, and a bound applied here
+ * would cut inside `**…**`, leaving a marker pair that never closes.
  */
 function boundedOpeningLine(body: string, max: number): string {
-  const firstLine = body.split('\n', 1)[0]?.trim() ?? ''
+  const firstLine = body.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
   return firstLine.length > max ? `${firstLine.slice(0, max - 1)}…` : firstLine
 }
 
 /**
- * The one-line gist bound shared by the Inbox row, the Task title the Thread page renders, and a quote's excerpt of its parent Message.
+ * The one-line gist source guard shared by the Inbox row, the Thread card and chip title, the Task title, and a quote's
+ * excerpt. It bounds what crosses the wire, not what the reader sees: the Client owns the display bound, because only
+ * text it has already projected to plain can be cut without splitting a marker pair.
  */
-const ONE_LINE_GIST_MAX_CHARACTERS = 120
-
-/** A chip shares its line with prose, so the gist bound above would crowd the message out. */
-const THREAD_CHIP_TITLE_MAX_CHARACTERS = 40
+const GIST_SOURCE_MAX_CHARACTERS = 2048
 
 /**
  * How many Threads one Workspace's 「最近活跃」 slice may carry. It bounds what
@@ -2001,7 +2002,7 @@ export class AgentTeamLedger {
       projectName: candidate.projectName, ...(candidate.task === undefined ? {} : { task: candidate.task }),
       ...(candidate.taskNumber === undefined ? {} : { taskNumber: candidate.taskNumber }), thread: candidate.thread,
       unreadCount: candidate.unreadCount, directCount: candidate.directCount, reminders: candidate.reminders,
-      previewText: boundedOpeningLine(this.threadAnchor(candidate.thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
+      previewText: boundedOpeningLine(this.threadAnchor(candidate.thread.threadRef).body, GIST_SOURCE_MAX_CHARACTERS),
       newestSequence: candidate.newestSequence, newestOccurredAt: candidate.newestOccurredAt,
       newestActor: candidate.newestActor, liveClaimOwners: this.liveClaimOwners(candidate.task),
       ...(candidate.attention === undefined ? {} : { attention: candidate.attention }) }))
@@ -2052,7 +2053,7 @@ export class AgentTeamLedger {
       if (newest === undefined) continue
       const item: AgentTeamTaskBoardItem = Object.freeze({ workspaceId: project.workspaceId, projectRef: project.projectRef, projectName: project.name,
         task, taskNumber: taskNumbers.get(task.taskRef) ?? 0, threadRef: task.threadRef,
-        subject: boundedOpeningLine(this.threadAnchor(task.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
+        subject: boundedOpeningLine(this.threadAnchor(task.threadRef).body, GIST_SOURCE_MAX_CHARACTERS),
         liveClaimOwners: this.liveClaimOwners(task), accountableOwner: {
           ...this.memberActor(task.accountable),
           ...(this.state.members.get(task.accountable)?.state === undefined ? {} : { state: this.state.members.get(task.accountable)!.state }),
@@ -2088,7 +2089,7 @@ export class AgentTeamLedger {
       if (unread.length === 0) continue
       const newest = unread.at(-1)!
       const entry = this.mainEntry(newest.source, true, newest.direct)
-      const previewText = entry.kind === 'message' ? boundedOpeningLine(entry.message.body, ONE_LINE_GIST_MAX_CHARACTERS)
+      const previewText = entry.kind === 'message' ? boundedOpeningLine(entry.message.body, GIST_SOURCE_MAX_CHARACTERS)
         : entry.kind === 'thread-card' ? entry.card.anchor.preview : undefined
       rows.push(Object.freeze({ workspaceId: project.workspaceId, projectRef: project.projectRef, projectName: project.name,
         unreadCount: unread.length, directCount: unread.filter(item => item.direct).length,
@@ -2165,7 +2166,7 @@ export class AgentTeamLedger {
         projectName: this.state.projects.get(projectRef)?.name ?? '',
         ...(task === undefined ? {} : { task }), ...(taskNumber === undefined ? {} : { taskNumber }), thread,
         unreadCount: 0, directCount: 0,
-        previewText: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, ONE_LINE_GIST_MAX_CHARACTERS),
+        previewText: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, GIST_SOURCE_MAX_CHARACTERS),
         newestSequence: newest.sequence, newestOccurredAt: newest.occurredAt,
         newestActor: this.inboxActorFor(newest), liveClaimOwners: this.liveClaimOwners(task), reminders: [] }))
     }
@@ -2380,7 +2381,7 @@ export class AgentTeamLedger {
         threadRef: thread.threadRef,
         projectRef,
         ...(task === undefined ? {} : { taskRef: task.taskRef, taskNumber: numbers.get(task.taskRef) ?? 0 }),
-        title: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, THREAD_CHIP_TITLE_MAX_CHARACTERS),
+        title: boundedOpeningLine(this.threadAnchor(thread.threadRef).body, GIST_SOURCE_MAX_CHARACTERS),
       }))
     }
     return resolved
@@ -2401,7 +2402,7 @@ export class AgentTeamLedger {
       const main = this.state.mainSourceByRef.get(messageRef)
       if (main?.kind === 'message') {
         if (this.visibleProject(this.state.projects.get(main.message.projectRef))?.workspaceId !== workspaceId) continue
-        resolved.push(Object.freeze({ messageRef, sender: main.message.sender, excerpt: boundedOpeningLine(main.message.body, ONE_LINE_GIST_MAX_CHARACTERS) }))
+        resolved.push(Object.freeze({ messageRef, sender: main.message.sender, excerpt: boundedOpeningLine(main.message.body, GIST_SOURCE_MAX_CHARACTERS) }))
         continue
       }
       const message = this.state.messagesByRef.get(messageRef)
@@ -2412,7 +2413,7 @@ export class AgentTeamLedger {
         messageRef: message.messageRef,
         threadRef: message.threadRef,
         sender: message.sender,
-        excerpt: boundedOpeningLine(message.body, ONE_LINE_GIST_MAX_CHARACTERS),
+        excerpt: boundedOpeningLine(message.body, GIST_SOURCE_MAX_CHARACTERS),
       }))
     }
     return resolved
@@ -5201,7 +5202,7 @@ export class AgentTeamLedger {
     const parentRef = source.message.replyToMessageRef
     const parent = parentRef === undefined ? undefined : this.state.mainSourceByRef.get(parentRef)
     const replyTo = parent?.kind === 'message'
-      ? Object.freeze({ sender: this.printableSender(parent.message.sender), excerpt: boundedOpeningLine(parent.message.body, ONE_LINE_GIST_MAX_CHARACTERS) })
+      ? Object.freeze({ sender: this.printableSender(parent.message.sender), excerpt: boundedOpeningLine(parent.message.body, GIST_SOURCE_MAX_CHARACTERS) })
       : undefined
     return Object.freeze({ kind: 'message', sequence: source.sequence, occurredAt: source.message.occurredAt, unread, direct,
       message: source.message, mentions: this.state.mentionsByMessage.get(source.message.messageRef) ?? [],
@@ -5224,7 +5225,7 @@ export class AgentTeamLedger {
     const task = thread.taskRef === undefined ? undefined : this.state.tasks.get(thread.taskRef)
     return Object.freeze({
       threadRef, anchor: Object.freeze({ messageRef: anchor.messageRef, sender: anchor.sender,
-        preview: boundedOpeningLine(anchor.body, ONE_LINE_GIST_MAX_CHARACTERS), sequence: anchor.sequence, occurredAt: anchor.occurredAt }),
+        preview: boundedOpeningLine(anchor.body, GIST_SOURCE_MAX_CHARACTERS), sequence: anchor.sequence, occurredAt: anchor.occurredAt }),
       ...(task === undefined ? {} : { task: Object.freeze({ taskRef: task.taskRef, taskNumber: this.state.taskNumberByTask.get(task.taskRef) ?? 0,
         status: task.status, resolution: task.resolution, accountable: task.accountable, liveClaimOwners: this.liveClaimOwners(task) }) }),
       replyCount, participants: Object.freeze(writers.map(memberId => this.memberActor(memberId))),

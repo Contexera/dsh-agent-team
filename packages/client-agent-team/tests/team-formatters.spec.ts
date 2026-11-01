@@ -4,7 +4,7 @@ import { AGENT_TEAM_HUMAN_HANDLE } from '@contexera/dsh-agent-team/host'
 import { MENTION_BODY_FIXTURE } from '../../agent-team/tests/fixtures/mention-bodies.ts'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
-import { bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
+import { bodyMentionsHuman, formatClockTime, containsMention, firstSentence, formatAbsoluteTime, formatActivity, formatInboxTime, formatMessageTime, HUMAN_HISTORIC_HANDLE, HUMAN_MEMBER_ID, isPlainTextBody, isSingleBrandedRef, mentionNamesOf, formatRiskClass, mentionedMemberIds, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, taskStatusDot } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -422,5 +422,25 @@ describe('Team presentation formatters', () => {
     expect(bodyMentionsHuman('Iris 看一下', 'Iris')).toBe(false)
     expect(bodyMentionsHuman('@human 看这里', 'human')).toBe(true)
     expect(bodyMentionsHuman('@Iris 看这里', 'human')).toBe(false)
+  })
+
+  it('projects one compact line to plain text, never its Markdown source', () => {
+    expect(plainGist('**讨论 Momo 与 Reeve 的职责边界** Human 让我们交流')).toBe('讨论 Momo 与 Reeve 的职责边界 Human 让我们交流')
+    // The Host hands a bounded source line; the projection still strips a pair
+    // whose closer survived the wire bound.
+    expect(plainGist('**讨论 Momo 与 Reeve 的职责边界，避免两层澄清和转发。** Hu…')).toBe('讨论 Momo 与 Reeve 的职责边界，避免两层澄清和转发。 Hu…')
+    expect(plainGist('# 标题\n正文')).toBe('标题')
+    expect(plainGist('用 `plainGist` 读 [文档](https://example.com)')).toBe('用 plainGist 读 文档')
+    // A card title never disappears because a body opens with a blank line.
+    expect(plainGist('\n**第一行**\n第二行')).toBe('第一行')
+  })
+
+  it('bounds a compact line only after projecting it', () => {
+    // Projection first: a cut inside `**…**` would leave an opener that no
+    // longer pairs with anything.
+    expect(plainGist(`**${'长'.repeat(80)}**`, 20)).toBe(`${'长'.repeat(19)}…`)
+    expect(plainGist('短 尾巴', 20)).toBe('短 尾巴')
+    expect(plainGist('x'.repeat(130))).toBe(`${'x'.repeat(119)}…`)
+    expect(plainGist('甲\t乙  丙')).toBe('甲 乙 丙')
   })
 })

@@ -18,7 +18,7 @@ import type { TeamDraftStore } from './drafts.ts'
 import { TeamComposer } from './TeamComposer.tsx'
 import { diagnosticText, TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { TeamMessage } from './TeamMessage.tsx'
-import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, formatTaskTitle, taskStatusDot } from './team-formatters.ts'
+import { firstSentence, formatActivity, formatRiskClass, formatTaskStatus, plainGist, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
@@ -191,7 +191,7 @@ export function TeamThreadPage(props: TeamThreadPageProps) {
   }, [workspaceId, taskRef, threadRef])
 
   const resolvedTaskNumber = taskNumber ?? projectView?.taskNumbers.find(entry => entry.taskRef === task?.taskRef)?.taskNumber
-  const taskTitle = activeProjection === undefined ? undefined : formatTaskTitle(activeProjection.anchor.body)
+  const taskTitle = activeProjection === undefined ? undefined : plainGist(activeProjection.anchor.body)
   const taskClaims = activeProjection?.claims ?? []
   const effectiveProjectRef = task?.projectRef ?? projectRef
   const projectMemberIds = useMemo(() => new Set(projectView?.members.filter(item => item.projectRef === effectiveProjectRef).map(item => item.memberId) ?? []), [projectView, effectiveProjectRef])

@@ -41,7 +41,7 @@ The trailing fallback row never repeats the reader's own name — that would pri
 
 Known branded `task:*` refs are resolved in batches and rendered at their original position as clickable `Task #N` in Human, plain Agent, and rich Markdown text. Code fences, indented code, mixed inline code, and existing links stay literal. Normalize malformed double-colon or uppercase spellings before resolution. Resolved refs can navigate across Workspace, Project, and Thread; failed refs remain plain text. Task numbers are home-Project creation ordinals, while branded refs remain stable identity.
 
-Known branded `thread:*` refs resolve the same way through `resolveThreadRefs` and render at their original position as clickable Thread chips titled with the cited Thread's opening line (`讨论 · …` in Chinese), so one taskless Thread no longer reads exactly like the next. A ref becomes a link only when the Host confirms it — abbreviated spellings included — and clicks navigate by the resolved full ref, so unresolvable text stays plain and never silently no-ops.
+Known branded `thread:*` refs resolve the same way through `resolveThreadRefs` and render at their original position as clickable Thread chips titled with the cited Thread's opening line as plain text, capped at 40 characters (`讨论 · …` in Chinese), so one taskless Thread no longer reads exactly like the next. A ref becomes a link only when the Host confirms it — abbreviated spellings included — and clicks navigate by the resolved full ref, so unresolvable text stays plain and never silently no-ops.
 
 Known branded `project:*` refs render as Project chips naming the cited Project (`项目 · …` under the Chinese locale, `Project · …` under English); clicks hop to that Project. Known branded `member:*` refs render as Member chips naming the cited Member (`成员 · @…` / `Member · @…`) — deliberately distinct from `@mention` chips, which notify, while a cited ref never does. Clicking an active Member's chip opens their session exactly the way the agent card does; suspended Members and the Human render as inert labelled text.
 
@@ -155,6 +155,8 @@ A Thread card is the feed's one large target: the page ground at rest behind a h
 The Main stream holds three entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, and Thread cards.
 
 A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and, until it resolves, its live Claim owners or `待认领`. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
+
+Every one of those names is compact text: the body's first non-empty line with its Markdown projected to plain text, then bounded — projection first, so a marker pair like `**…**` is never cut into an opener that pairs with nothing. The same rule serves a Thread chip's title, a quote line, an Inbox gist and a board card's subject, while a Message body still renders its Markdown wherever it is a Message.
 
 Both faces draw that card with the same component, and the discussion panel draws the Tasks its discussion spawned with it too: the status, the live Claim owners and the reply count must not depend on which of the three is open. A derived card sits at the sequence of the fact that created its Task, never collected at the end of the timeline, and clicking it opens that Task's Thread page.
 

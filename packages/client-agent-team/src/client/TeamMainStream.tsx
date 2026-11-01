@@ -16,7 +16,7 @@ import { TeamMessage } from './TeamMessage.tsx'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
-import { formatTaskTitle, mentionNamesOf } from './team-formatters.ts'
+import { mentionNamesOf, plainGist } from './team-formatters.ts'
 import { chunkRunsWithDays, isRunGap } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import css from './conversation.module.css'
@@ -294,7 +294,7 @@ export function TeamMainStream({
       pendingFiles={pendingFiles}
       onFilesChange={setPendingFiles}
       {...(replyEntry === undefined ? {} : {
-        replyTo: { memberId: replyEntry.message.sender, senderName: nameOf(replyEntry.message.sender), excerpt: formatTaskTitle(replyEntry.message.body) },
+        replyTo: { memberId: replyEntry.message.sender, senderName: nameOf(replyEntry.message.sender), excerpt: plainGist(replyEntry.message.body) },
         onCancelReply: () => { setReplyTarget(undefined) },
       })}
       toolbarExtra={<TeamThreadStartControls open={startingThread} asTask={asTask} pending={pending} onOpenChange={toggleThreadStart} onAsTaskChange={setAsTask} t={t} />}

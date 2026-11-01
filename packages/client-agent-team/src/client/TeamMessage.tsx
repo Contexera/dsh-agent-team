@@ -8,9 +8,16 @@ import type { ResolvedMemberRef } from './refs.ts'
 import { cachedAttachmentDataUrl, formatByteSize, loadAttachmentDataUrl } from './attachment-preview.ts'
 import { cachedResolvedTaskRef, resolveUnknownTaskRefs, useResolvedTaskRefVersion, type ResolvedTaskRef } from './refs.ts'
 import { cachedResolvedThreadRef, resolveUnknownThreadRefs, useResolvedThreadRefVersion, type ResolvedThreadRef } from './refs.ts'
-import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, isSingleBrandedRef, memberHue, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, unshownMentionNames, type MentionHandle, type PlannedMessageBody } from './team-formatters.ts'
+import { bodyMentionsHuman, formatAbsoluteTime, formatClockTime, formatMessageTime, isSingleBrandedRef, memberHue, plainGist, planMessageBody, shouldClampMessage, splitBrandedRefs, splitMentionNames, unshownMentionNames, type MentionHandle, type PlannedMessageBody } from './team-formatters.ts'
 import { useAvatarImage } from './avatar-image.ts'
 import css from './conversation.module.css'
+
+/**
+ * A Thread chip shares its line with prose, so the title it cites is bounded
+ * tighter than a card's; the projection happens first, so the cut never lands
+ * inside a marker pair.
+ */
+const THREAD_CHIP_TITLE_MAX_CHARACTERS = 40
 
 export interface TeamMessageProps {
   readonly senderName: string
@@ -87,6 +94,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
   const quoteAuthor = replyTo === undefined ? undefined : replyTo.senderName.replace(/^@/, '')
   const fallbackNames = unshownMentionNames(plan.fallbackNames, readerName, quoteAuthor)
   const displayBody = plan.displayBody
+  const quoteExcerpt = replyTo === undefined ? undefined : plainGist(replyTo.excerpt)
   const { markdownRef, markdownLabels, taskLabel, renderRefs } = useResolvedBodyRefs({
     plan,
     mentionNames,
@@ -147,7 +155,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
               <span className={css.quoteLineBar} aria-hidden="true" />
               <span className={css.quoteLineBody}>
                 <span className={css.quoteLineAuthor}>{replyTo.senderName}</span>
-                <span className={css.quoteLineText}>{replyTo.excerpt}</span>
+                <span className={css.quoteLineText}>{quoteExcerpt}</span>
               </span>
             </span>
           : <button type="button" className={css.quoteLine} data-quote-line="" onClick={() => { onOpenReplyTo(replyTo.messageRef) }}
@@ -155,7 +163,7 @@ export const TeamMessage = memo(function TeamMessage({ senderName, memberId, hum
               <span className={css.quoteLineBar} aria-hidden="true" />
               <span className={css.quoteLineBody}>
                 <span className={css.quoteLineAuthor}>{replyTo.senderName}</span>
-                <span className={css.quoteLineText}>{replyTo.excerpt}</span>
+                <span className={css.quoteLineText}>{quoteExcerpt}</span>
               </span>
             </button>)}
         {/* The wrapper stays mounted for every clampable body and only swaps its class: remounting the Markdown subtree would wipe
@@ -233,7 +241,8 @@ function useResolvedBodyRefs({ plan, mentionNames, onOpenRef, onOpenMemberSessio
   // Unresolvable refs never reach this label; they stay plain text (see renderRefs).
   const threadChipLabel = useCallback((title: string): string => {
     const base = t?.('threadLabel') ?? 'Thread'
-    return title === '' ? base : `${base} · ${title}`
+    const projected = plainGist(title, THREAD_CHIP_TITLE_MAX_CHARACTERS)
+    return projected === '' ? base : `${base} · ${projected}`
   }, [t])
   // Member chips use a handle, deliberately distinct from `@mention` chips, which notify.
   const projectChipLabel = useCallback((name: string): string => t?.('projectLabel', { name }) ?? `Project · ${name}`, [t])

@@ -58,6 +58,20 @@ describe('Team Main stream', () => {
     await b.runtime.dispose()
   })
 
+  it('titles a card with the text its opening line renders, never its Markdown source', async () => {
+    const b = await openProject({ mainStreamEntries: [{
+      kind: 'thread-card', sequence: 1, occurredAt: agentMessage.occurredAt, card: {
+        threadRef: 'thread:styled',
+        anchor: { messageRef: 'message:styled', sender: 'member:builder', preview: '**登录页改版** 先统一配色', sequence: 1, occurredAt: agentMessage.occurredAt },
+        replyCount: 0, participants: [], newestSequence: 1, newestOccurredAt: agentMessage.occurredAt,
+        newestActor: { memberId: 'member:builder', name: 'builder' },
+      },
+    }] })
+    const card = await b.view.findByRole('button', { name: /^打开讨论：登录页改版 先统一配色/ })
+    expect(card.textContent).not.toContain('**')
+    await b.runtime.dispose()
+  })
+
   /**
    * A Main stream Message can cite a discussion in a sibling Project. The ref resolves through the Host with its own
    * Project, and that Project — not the feed's — is where the discussion has to open, or the panel would seat itself over

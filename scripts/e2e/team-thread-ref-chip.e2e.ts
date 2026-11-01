@@ -19,7 +19,7 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   // Rules version 2 has no top-level send: the Project page's composer posts to
   // the Main stream, so the cited Thread is started through the Host.
   const started = await scaffold.ctx.agentTeam.startThread({ requestId: 'e2e-thread-ref' as never, workspaceId,
-    projectRef: refProject.projectRef, kind: 'discussion', body: 'ALPHA-ROOT-MARKER alpha discussion opens here' })
+    projectRef: refProject.projectRef, kind: 'discussion', body: '**ALPHA-ROOT-MARKER** alpha discussion opens here' })
   const alphaRef = (started as { thread: { threadRef: string } }).thread.threadRef
   // The abbreviated 8-hex spelling: resolution, not spelling, decides
   // linkability.
@@ -30,9 +30,10 @@ it('opens a taskless thread from its ref chip in real Web', async () => {
   await betaArticle.waitFor()
   const chip = betaArticle.locator(`button[title="${alphaShort}"]`)
   await chip.waitFor()
-  // Chip titles cap at 40 characters, so the 43-char anchor renders truncated;
-  // navigation still proves identity.
+  // A chip is a plain-text label, not a Message: the anchor's bold opening line
+  // loses its markers, is cut to 40 characters, and still navigates by identity.
   await expect.poll(() => chip.textContent()).toMatch(/ALPHA-ROOT-MARKER alpha discussion open…/)
+  expect(await chip.textContent()).not.toContain('**')
   await page.screenshot({ path: join(UI02_SHOTS, 'thread-ref-chip.png'), fullPage: true })
   await chip.click()
   // Separate "never navigated" from "navigated but failed to render": the

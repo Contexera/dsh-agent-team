@@ -1,5 +1,6 @@
 import type { AgentTeamActivity, AgentTeamClaim, AgentTeamClientMemberStatus, AgentTeamMemberDiagnosticClass, AgentTeamMemberId, AgentTeamTask, AgentTeamTaskRef, AgentTeamThreadRef } from '@contexera/dsh-agent-team/types'
 import { resolveBodyMentions, scanBodyHandles } from '@contexera/dsh-agent-team/mentions'
+import { extractMarkdownPlainText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamKey } from './locales.ts'
 import type { TeamConversationProps } from './slots.ts'
 import type { TeamStateDotState } from './TeamStateDot.tsx'
@@ -61,9 +62,28 @@ export function taskStatusDot(status: AgentTeamTask['status']): TeamStateDotStat
   return ({ todo: 'todo', in_progress: 'ongoing', in_review: 'warning', done: 'done', closed: 'quiet' } as const)[status]
 }
 
-export function formatTaskTitle(body: string): string {
-  const firstLine = body.split('\n', 1)[0]?.trim() ?? ''
-  return firstLine.length > 120 ? `${firstLine.slice(0, 119)}…` : firstLine
+/**
+ * How many source characters one compact line reads before parsing. The bound
+ * sits far above any display width, so only a pathological single line pays
+ * for more, and no render parses a whole long Message.
+ */
+const GIST_SOURCE_MAX_CHARACTERS = 2048
+
+/** Display width of one compact body line: card titles, quote lines, Inbox rows and board titles. */
+const GIST_MAX_CHARACTERS = 120
+
+/**
+ * One body line as compact plain text: the first non-empty line with its
+ * Markdown presentation projected away, whitespace compacted, then bounded.
+ * Projection runs before the bound, so a marker pair like `**…**` is never cut
+ * into an opener that never closes. A Message body keeps its Markdown wherever
+ * it renders as a Message; every label, card title, chip and quote line reads
+ * the body through here.
+ */
+export function plainGist(text: string, max = GIST_MAX_CHARACTERS): string {
+  const firstLine = text.split('\n').map(line => line.trim()).find(line => line !== '') ?? ''
+  const projected = extractMarkdownPlainText(firstLine.slice(0, GIST_SOURCE_MAX_CHARACTERS), { mode: 'first-line' }).replace(/\s+/g, ' ').trim()
+  return projected.length > max ? `${projected.slice(0, max - 1)}…` : projected
 }
 
 export function memberHue(memberId: string): number {

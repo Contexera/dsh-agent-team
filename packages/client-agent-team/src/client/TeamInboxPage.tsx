@@ -4,7 +4,7 @@ import type { AgentTeamInboxItem, AgentTeamMainInboxItem, AgentTeamMemberId } fr
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, taskStatusDot } from './team-formatters.ts'
+import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, plainGist, taskStatusDot } from './team-formatters.ts'
 import { namedAvatarOwners, TeamAvatarStack, type TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
 import { TeamStateDot } from './TeamStateDot.tsx'
@@ -286,7 +286,7 @@ function InboxQueueRow({ row, t, showWorkspace, human, onOpen }: {
     newestOccurredAt={item.newestOccurredAt}
     preview={reminderIsNewest
       ? t(item.reminders.at(-1)!.kind === 'review-backlog' ? 'inboxReviewReminder' : 'inboxStalledReminder')
-      : item.previewText}
+      : item.previewText === undefined ? undefined : plainGist(item.previewText)}
     t={t}
     onOpen={onOpen}
   />
@@ -313,7 +313,7 @@ function InboxMainRow({ row, t, showWorkspace, human, onOpen }: {
     unreadCount={item.unreadCount}
     directCount={item.directCount}
     newestOccurredAt={item.newestOccurredAt}
-    preview={item.previewText}
+    preview={item.previewText === undefined ? undefined : plainGist(item.previewText)}
     t={t}
     onOpen={onOpen}
   />

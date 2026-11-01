@@ -180,7 +180,7 @@ export interface AgentTeamResolvedThreadRef {
   readonly projectRef: AgentTeamProjectRef
   readonly taskRef?: AgentTeamTaskRef
   readonly taskNumber?: number
-  /** Opening-line gist distinguishing one Thread chip from another: first line, trimmed, capped at 40 characters. */
+  /** Opening-line gist distinguishing one Thread chip from another: the first non-empty line, trimmed, bounded as a wire guard — the Client projects it to plain text and caps its own display width. */
   readonly title: string
 }
 
@@ -228,7 +228,7 @@ export interface AgentTeamResolvedMessageRef {
   /** Absent for a Main stream Message, which belongs to no Thread. */
   readonly threadRef?: AgentTeamThreadRef
   readonly sender: AgentTeamMemberId
-  /** Body gist for the quote block: first line, trimmed, capped at 120 characters. */
+  /** Body gist for the quote block: the first non-empty line, trimmed, bounded as a wire guard — the Client projects it to plain text and caps its own display width. */
   readonly excerpt: string
 }
 

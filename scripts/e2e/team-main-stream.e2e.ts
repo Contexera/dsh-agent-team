@@ -30,10 +30,14 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   const toggle = page.getByRole('button', { name: '讨论/任务' })
   await toggle.click()
   expect(await toggle.getAttribute('aria-pressed')).toBe('true')
-  await composer.fill('登录页改版')
+  await composer.fill('**登录页改版** 先统一配色')
   await send.click()
-  const discussionCard = page.getByRole('button', { name: /^打开讨论：登录页改版/ })
+  const discussionCard = page.getByRole('button', { name: /^打开讨论：登录页改版 先统一配色/ })
   await discussionCard.waitFor()
+  // The composer keeps this Human body literal, but the card is a one-line gist:
+  // it shows the text the line renders, never the Markdown source.
+  expect(await discussionCard.textContent()).toContain('登录页改版 先统一配色')
+  expect(await discussionCard.textContent()).not.toContain('**')
   expect(await toggle.getAttribute('aria-pressed')).toBe('false')
   expect(await page.getByRole('checkbox', { name: '作为任务' }).count()).toBe(0)
 

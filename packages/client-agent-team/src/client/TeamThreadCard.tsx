@@ -2,7 +2,7 @@ import type { AgentTeamMainThreadCard } from '@contexera/dsh-agent-team/types'
 import type { TeamConversationProps } from './slots.ts'
 import { TeamAvatarStack, namedAvatarOwners, type TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamStateDot } from './TeamStateDot.tsx'
-import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, formatTaskTitle, taskStatusDot } from './team-formatters.ts'
+import { claimersLabel, formatAbsoluteTime, formatInboxTime, formatTaskStatus, plainGist, taskStatusDot } from './team-formatters.ts'
 import streamCss from './main-stream.module.css'
 
 /**
@@ -21,7 +21,7 @@ export function TeamThreadCard({ card, unread, human, t, onOpen }: {
   readonly onOpen: () => void
 }) {
   const task = card.task
-  const title = formatTaskTitle(card.anchor.preview)
+  const title = plainGist(card.anchor.preview)
   const resolved = task?.status === 'done' || task?.status === 'closed'
   const owners = namedAvatarOwners(task?.liveClaimOwners ?? [], human)
   const replies = t('cardReplies', { count: card.replyCount })

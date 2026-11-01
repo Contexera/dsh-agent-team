@@ -6,7 +6,7 @@ import type { TeamConversationProps } from './slots.ts'
 import type { TeamDraftKey, TeamDraftStore } from './drafts.ts'
 import { TeamPresenceDot } from './TeamPresenceDot.tsx'
 import { buildMentionGroups, enrollmentIds, mentionSurfaceOf, type MentionGroupKey } from './mention-presentation.ts'
-import { HUMAN_MEMBER_ID, mentionedMemberIds } from './team-formatters.ts'
+import { HUMAN_MEMBER_ID, mentionedMemberIds, plainGist } from './team-formatters.ts'
 import css from './composer.module.css'
 import { formatByteSize } from './attachment-preview.ts'
 
@@ -249,7 +249,7 @@ export function TeamComposer({ members, followerMemberIds, projectMemberIds, own
       {replyTo !== undefined && <div className={css.replyBanner} data-reply-banner="">
         <span className={css.replyBannerBody}>
           <span className={css.replyBannerAuthor}>{t('replyingTo', { name: replyTo.senderName })}</span>
-          <span className={css.replyBannerText}>{replyTo.excerpt}</span>
+          <span className={css.replyBannerText}>{plainGist(replyTo.excerpt)}</span>
         </span>
         {onCancelReply !== undefined && <button type="button" className={css.replyBannerCancel} onClick={onCancelReply}
           aria-label={t('cancelReply')} title={t('cancelReply')}>×</button>}

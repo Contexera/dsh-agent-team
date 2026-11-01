@@ -13,7 +13,7 @@ import { TeamProjectPanel } from './TeamProjectPanel.tsx'
 import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamCountBadge } from './TeamCountBadge.tsx'
-import { taskStatusDot } from './team-formatters.ts'
+import { plainGist, taskStatusDot } from './team-formatters.ts'
 import { TeamStateDot } from './TeamStateDot.tsx'
 import { BoardCardFoot } from './BoardCardFoot.tsx'
 import { hostTaskRefLookup, jumpToTaskThread } from './refs.ts'
@@ -505,7 +505,7 @@ function ProjectionBoardCard({ item, unread, human, humanMemberId, t, onOpen }: 
       {item.needsAcceptance && <span className={projectCss.boardAcceptBadge}>{t('boardNeedsAcceptance')}</span>}
       <TeamCountBadge count={unread} />
     </span>
-    <span className={projectCss.boardCardTitle}>{item.subject}</span>
+    <span className={projectCss.boardCardTitle}>{plainGist(item.subject)}</span>
     <BoardCardFoot item={item} human={human} humanMemberId={humanMemberId} t={t} />
   </button>
 }

@@ -558,19 +558,20 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     expect(() => test.ctx.agentTeam.resolveThreadRefs({ workspaceId: beta, threadRefs: [first.thread.threadRef] })).toThrow(/unknown Workspace/)
   })
 
-  it('caps resolved Thread chip titles at 40 characters', async () => {
+  it('bounds resolved Thread chip titles at the wire guard, not a display width', async () => {
     const test = await harness()
     const project = await test.ctx.agentTeam.createProject({ requestId: requestId('thread-title-project'), workspaceId: alpha, name: 'engineering', description: 'Engineering work' })
     const exact = `x${'y'.repeat(38)}z`
     const exactThread = committed(await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread-title-exact'), workspaceId: alpha, projectRef: project.project.projectRef, body: exact }))
-    // A 40-character opening line passes through untouched; anything longer
-    // is cut to 39 characters plus the mark so chips share the line with prose.
+    // A title carries the whole opening line: the display width belongs to the
+    // Client, which projects Markdown away before it cuts, so this guard only
+    // stops a pathological line.
     expect(test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [exactThread.thread.threadRef] }).resolved).toEqual([
       { threadRef: exactThread.thread.threadRef, projectRef: project.project.projectRef, title: exact },
     ])
-    const longThread = committed(await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread-title-long'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'a'.repeat(100)}\nsecond line` }))
+    const longThread = committed(await test.ctx.agentTeam.startThread({ kind: 'discussion', requestId: requestId('thread-title-long'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'a'.repeat(2100)}\nsecond line` }))
     expect(test.ctx.agentTeam.resolveThreadRefs({ workspaceId: alpha, threadRefs: [longThread.thread.threadRef] }).resolved).toEqual([
-      { threadRef: longThread.thread.threadRef, projectRef: project.project.projectRef, title: `${'a'.repeat(39)}…` },
+      { threadRef: longThread.thread.threadRef, projectRef: project.project.projectRef, title: `${'a'.repeat(2047)}…` },
     ])
   })
 
@@ -773,8 +774,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     committed((await ledger.reply({ requestId: requestId('ordinary'), workspaceId: alpha, taskRef: followed.task.taskRef, body: 'Ordinary progress reply', baseRevision: mentioned.thread.revision, actor })).value)
 
     // An unfollowed Thread whose fresh mention must still surface: direct
-    // markers never depended on Human follow. Its anchor's first line exceeds
-    // the 120-character preview bound the Thread page applies to Task titles.
+    // markers never depended on Human follow.
     const unfollowed = withTask(committed((await ledger.startThread({ kind: 'task', requestId: requestId('unfollowed'), workspaceId: alpha, projectRef: project.project.projectRef, body: `${'x'.repeat(130)}\nsecond line`, actor: agentTeamHumanActor() })).value))
     await ledger.changeAttention({ requestId: requestId('unfollow'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, action: 'unfollow', actor: agentTeamHumanActor() })
     committed((await ledger.reply({ requestId: requestId('ping'), workspaceId: alpha, taskRef: unfollowed.task.taskRef, body: '@human blocking on your call', baseRevision: unfollowed.thread.revision, actor })).value)
@@ -792,7 +792,7 @@ describe('AgentTeam durable Thread Attention ledger', () => {
     })
     expect(inbox.items[0]).toMatchObject({
       projectName: 'engineering', taskNumber: 2, directCount: 1, unreadCount: 1,
-      previewText: `${'x'.repeat(119)}…`,
+      previewText: 'x'.repeat(130),
     })
     expect(inbox.items[0]?.newestOccurredAt).not.toBe('')
     const cold = ledgerAtBoot(test)
