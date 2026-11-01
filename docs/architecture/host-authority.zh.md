@@ -147,7 +147,7 @@ Composer attachments 是有界 cache，不是 archive，也不是 ledger bytes�
 
 ## Human profile 与版本脚注
 
-Human 的显示名与头像引用存放在 Team Host row 自己的 Config。settings namespace 就是这个 row 的 id，user layer。头像 bytes 存放在持久的 `$DSH_HOME/agent-team/human/v1/` store，从不进入带 TTL 的 attachment cache。
+Human 的显示名与头像引用存放在 Team Host row 自己的 Config。settings namespace 就是这个 row 的 id，user layer。头像 bytes 存放在持久的 `$DSH_HOME/agent-team/human/v1/` store，从不进入带 TTL 的 attachment cache。改名前的 profile 把这些值存在旧 id `wowyuarm-agent-team-host` 下；那一行不再挂载，启动时 Host 从 profile 自己的 patch 文档读出它，只把当前 namespace 的 user 层还没有的字段写进去。
 
 已退役的 `agent-team-human` section 不再是权威。rc.1 的 settings importer 通过一份封闭的内置映射搬运 section。第三方 section 会留在改名后的 legacy document 里。启动时若发现该 row 仍是 pristine（默认名且无头像），就沿用设置页同一条写入路径收养这些 facts。已经重新填过的值优先。
 

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and Semantic Versioning. Team bundle versions evolve independently of DeepSeek Harness versions; DeepSeek Harness compatibility is expressed through `peerDependencies` and [`docs/dsh-release-compatibility.md`](docs/dsh-release-compatibility.md).
 
+## [Unreleased]
+
+**Upgrade note**
+
+- Team's durable identifiers now carry the `contexera` name: the six loader row ids in `cordis.patch.yml`, the three producer kinds that attribute what the bundle writes into Sessions, and the Human profile's settings namespace, now `contexera-agent-team-host`. Stored data needs no edit: a Session using the pre-rename kinds still reads, bare or `plugin:`-converted, and an existing profile keeps its display name and avatar — at boot the Host carries them from the old namespace into the new one and fills only the fields the new namespace does not already store.
+
 ## [0.2.6] - 2026-10-31
 
 **Upgrade note**
