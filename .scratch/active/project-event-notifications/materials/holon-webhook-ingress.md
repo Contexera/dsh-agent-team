@@ -73,9 +73,9 @@ build_callback_url()       // {base}/api/callbacks/{wake|enqueue}/{token}
 ```
 
 - 查询只按 `token_hash` 走，`active_by_token_hash` 同时过滤 `status = 'active'`（`src/runtime_db/repositories.rs:2265`）
-- 明文 token 只出现在两处：拼给 agent 的 URL、`reset-callback` 接口返回值
+- 明文 token 出现在三处：拼给 agent 的 URL、`reset-callback` 接口返回值、命令行子任务的环境变量 `HOLON_EXTERNAL_TRIGGER_URL`（见下面第三条）
 - agent 的 prompt context 会带上该 URL，并附带"这是 capability secret，不要复述、不要提交仓库"的说明（`src/context/mod.rs:1366` `render_default_external_ingress`）
-- 命令行子任务会额外拿到环境变量 `HOLON_EXTERNAL_TRIGGER_URL`（`src/runtime/command_task.rs:959`）
+- 命令行子任务会额外拿到环境变量 `HOLON_EXTERNAL_TRIGGER_URL`（`src/runtime/command_task.rs:959`）。子进程可以读取、打印或记录这个值；本资料未核实 Holon 是否对子任务输出中的该值做脱敏，原因未查明。访问日志的脱敏只覆盖 HTTP 路径（见 §7 表中“日志”一行）
 
 ### 3.3 轮换与撤销
 
@@ -205,7 +205,7 @@ Continuation context:
 | 作用域 | 一条记录对应一个 agent，无广播、无按 source 分区的路由 |
 | agent 已停止 | 停止时触发器已被撤销，旧 URL 投递直接 403 |
 | 日志 | 访问日志把 `/api/callbacks/.../<token>` 脱敏为 `<redacted>`（`src/http/mod.rs:1677`） |
-| 审计 | 记录 `external_trigger_created` / `external_trigger_revoked` / `callback_delivered` / `wake_hint_triggered|coalesced|ignored` |
+| 审计 | 记录 `external_trigger_created` / `external_trigger_revoked` / `callback_delivered` / `wake_hint_triggered` / `wake_hint_coalesced` / `wake_hint_ignored` |
 | 体积 | 单次 body 上限 256 KB |
 
 ## 8. 已实现但需注意的行为
