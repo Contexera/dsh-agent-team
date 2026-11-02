@@ -13,9 +13,10 @@ export const AGENT_TEAM_PLUGIN_ID = '@contexera/dsh-agent-team'
 
 /**
  * Producer kinds this bundle wrote before the published identity moved from
- * `@wowyuarm` to `@contexera`. Read-only: no writer emits them, but 599 Members'
- * Session logs carry them, so every read path must keep recognizing them or an
- * existing Session loses its own context attribution on upgrade.
+ * `@wowyuarm` to `@contexera`. Read-only: no writer emits them, but Session
+ * logs written before the rename carry them, so every read path must keep
+ * recognizing them or an existing Session loses its own context attribution on
+ * upgrade.
  */
 export const AGENT_TEAM_LEGACY_PLUGIN_IDS = ['@wowyuarm/dsh-agent-team'] as const
 

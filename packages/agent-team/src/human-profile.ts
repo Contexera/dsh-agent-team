@@ -1,5 +1,5 @@
 import z from '@deepseek-ai/schemastery'
-import { parse } from 'yaml'
+import { isCollection, isMap, isPair, isScalar, isSeq, parse, parseDocument } from 'yaml'
 import { bundleVersionOf, readInstalledManifest } from './installed-manifest.ts'
 
 /** Fallback display name before any user override is stored. */
@@ -53,44 +53,78 @@ export function parseLegacyHumanProfile(yamlText: string): LegacyHumanProfileFie
   return readProfileFields(section as Record<string, unknown>)
 }
 
-/** Decides what adoption may write: nothing unless the stored profile is still the pristine default, and never the legacy default name. `avatarRef` byte existence is the caller's check. */
-export function planLegacyAdoption(
-  current: { readonly name: string; readonly avatarRef?: string },
-  legacy: LegacyHumanProfileFields,
-): { readonly name?: string; readonly avatarRef?: string } | undefined {
-  if (current.name !== HUMAN_PROFILE_DEFAULT_NAME || current.avatarRef !== undefined) return undefined
-  const name = legacy.name !== undefined && legacy.name !== HUMAN_PROFILE_DEFAULT_NAME ? legacy.name : undefined
-  const avatarRef = legacy.avatarRef
-  if (name === undefined && avatarRef === undefined) return undefined
-  return { ...(name === undefined ? {} : { name }), ...(avatarRef === undefined ? {} : { avatarRef }) }
-}
+/** YAML tag the Cordis entry-list dialect gives an unevaluated `!!js` expression. */
+const EXPRESSION_TAG = 'tag:yaml.org,2002:js'
 
 /**
- * Reads the Human profile fields a profile patch document stores under one row
- * id. The pre-rename Host row kept the name and avatar reference as that row's
- * `config`, and after the rename no loader entry answers to the old id any
- * more — the patch is skipped at composition time — so the document itself is
- * the only place the values still exist.
+ * Reads the config a profile patch document stores under one row id.
  *
- * A missing document, a non-array patch, a duplicate id, or a malformed field
- * all read as absent: this is a recovery path, and a half-understood document
- * must not overwrite a profile.
+ * The pre-rename Host row kept the Human profile AND the operational Host
+ * settings as that row's `config`, and after the rename no loader entry answers
+ * to the old id any more — the patch is skipped at composition time — so the
+ * document itself is the only place those values still exist.
+ *
+ * Values are returned as the document holds them, minus every field that
+ * contains a Cordis expression: the loader would evaluate `!!js` in the row's
+ * own context, and this recovery runs outside that context, so an expression
+ * cannot be written back as a literal without silently replacing a computed
+ * setting with its source text. Such a field is left to its default.
+ *
+ * A missing document, a non-array patch, a duplicate id, an unparsable
+ * document, or a malformed config all read as absent: this is a recovery path,
+ * and a half-understood document must not overwrite a stored setting.
  */
-export function parseRowHumanProfile(yamlText: string, rowId: string): LegacyHumanProfileFields | undefined {
-  let document: unknown
-  try {
-    document = parse(yamlText)
-  } catch {
-    return undefined
-  }
-  if (!Array.isArray(document)) return undefined
-  const rows = document.filter(row => typeof row === 'object' && row !== null && (row as Record<string, unknown>).id === rowId)
+export function parseRowHumanProfile(yamlText: string, rowId: string): Record<string, unknown> | undefined {
+  const document = parseDocument(yamlText)
+  if (document.errors.length !== 0) return undefined
+  const parsed: unknown = document.toJS()
+  if (!Array.isArray(parsed)) return undefined
+  const rows = parsed.filter(row => isRecord(row) && row.id === rowId)
   // Two rows for one id would make "the stored value" ambiguous; the loader
   // would apply them in order, but a recovery must not guess which one won.
   if (rows.length !== 1) return undefined
   const config = (rows[0] as Record<string, unknown>).config
-  if (typeof config !== 'object' || config === null) return undefined
-  return readProfileFields(config as Record<string, unknown>)
+  if (!isRecord(config)) return undefined
+  const expressed = expressionFields(document, rowId)
+  const carried: Record<string, unknown> = {}
+  for (const [field, value] of Object.entries(config)) {
+    if (!expressed.has(field)) carried[field] = value
+  }
+  return Object.keys(carried).length === 0 ? undefined : carried
+}
+
+/** Whether a parsed YAML node is a mapping with named fields. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** The `config` fields of the row that carries `rowId`, that hold or contain an unevaluated expression. */
+function expressionFields(document: ReturnType<typeof parseDocument>, rowId: string): ReadonlySet<string> {
+  const fields = new Set<string>()
+  const rows = isSeq(document.contents) ? document.contents.items : []
+  for (const row of rows) {
+    if (!isMap(row) || scalarText(row.get('id', true)) !== rowId) continue
+    const config = row.get('config', true)
+    if (!isMap(config)) continue
+    for (const pair of config.items) {
+      const field = scalarText(pair.key)
+      if (field !== undefined && holdsExpression(pair.value)) fields.add(field)
+    }
+  }
+  return fields
+}
+
+/** Whether a node is an expression, or a collection with one anywhere beneath it. */
+function holdsExpression(node: unknown): boolean {
+  if (isScalar(node)) return node.tag === EXPRESSION_TAG
+  if (!isCollection(node)) return false
+  const { items } = node as { readonly items: readonly unknown[] }
+  return items.some(item => holdsExpression(isPair(item) ? item.value : item))
+}
+
+/** The scalar text of a node, or `undefined` when it is not a scalar string. */
+function scalarText(node: unknown): string | undefined {
+  return isScalar(node) && typeof node.value === 'string' ? node.value : undefined
 }
 
 /** Reads the Human profile fields out of a settings namespace's user layer, tolerating either field being absent or unusable. */
@@ -106,25 +140,6 @@ export function readProfileFields(fields: Record<string, unknown>): LegacyHumanP
   const avatarRef = typeof fields.avatarRef === 'string' && fields.avatarRef.trim() !== ''
     ? fields.avatarRef.trim()
     : undefined
-  if (name === undefined && avatarRef === undefined) return undefined
-  return { ...(name === undefined ? {} : { name }), ...(avatarRef === undefined ? {} : { avatarRef }) }
-}
-
-/**
- * Decides what the namespace move may write: the pre-rename values, but only
- * for fields the new namespace stores no value for. `stored` is that
- * namespace's own user layer, so a Human who already edited the profile after
- * the upgrade keeps every field they set — the migration fills gaps and never
- * overwrites, even when their value happens to equal the schema default.
- */
-export function planNamespaceMigration(
-  stored: { readonly name?: unknown; readonly avatarRef?: unknown },
-  legacy: LegacyHumanProfileFields,
-): { readonly name?: string; readonly avatarRef?: string } | undefined {
-  const name = stored.name === undefined && legacy.name !== undefined && legacy.name !== HUMAN_PROFILE_DEFAULT_NAME
-    ? legacy.name
-    : undefined
-  const avatarRef = stored.avatarRef === undefined ? legacy.avatarRef : undefined
   if (name === undefined && avatarRef === undefined) return undefined
   return { ...(name === undefined ? {} : { name }), ...(avatarRef === undefined ? {} : { avatarRef }) }
 }

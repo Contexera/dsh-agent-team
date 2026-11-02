@@ -13,7 +13,9 @@ import AgentTeam from '../src/index.ts'
 import { AgentTeamLedger, AGENT_TEAM_HUMAN_HANDLE, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
 import { provideQuietTokenMeter } from './helpers/team-host-fixture.ts'
-import { assertValidHumanName, HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_VERSION, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, planLegacyAdoption, planNamespaceMigration } from '../src/human-profile.ts'
+import { assertValidHumanName, HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_VERSION, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile } from '../src/human-profile.ts'
+import { planHostRowWrite } from '../src/host-row-settings.ts'
+import { DEFAULT_WAKE_RECYCLE } from '../src/wake-recycle.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from '../src/human-avatar.ts'
 import type { AgentTeamMemberId, AgentTeamOperation, AgentTeamOperationId, AgentTeamRequestId } from '../src/types.ts'
@@ -121,7 +123,7 @@ describe('bundle version footnote', () => {
   })
 })
 
-describe('legacy human profile adoption', () => {
+describe('retired human settings section', () => {
   const legacyDocument = [
     'ui-theme:',
     '  preference: light',
@@ -151,24 +153,9 @@ describe('legacy human profile adoption', () => {
   it('returns undefined when no field survives validation', () => {
     expect(parseLegacyHumanProfile('agent-team-human:\n  name: "   "\n  avatarRef: ""')).toBeUndefined()
   })
-
-  it('carries both fields into a pristine profile', () => {
-    expect(planLegacyAdoption({ name: HUMAN_PROFILE_DEFAULT_NAME }, { name: 'YuCreate', avatarRef: 'ref-1' }))
-      .toEqual({ name: 'YuCreate', avatarRef: 'ref-1' })
-  })
-
-  it('never writes over a profile the Human already filled', () => {
-    expect(planLegacyAdoption({ name: 'Ada' }, { name: 'YuCreate', avatarRef: 'ref-1' })).toBeUndefined()
-    expect(planLegacyAdoption({ name: HUMAN_PROFILE_DEFAULT_NAME, avatarRef: 'mine' }, { name: 'YuCreate' })).toBeUndefined()
-  })
-
-  it('skips a legacy name that is the default and reports nothing when nothing survives', () => {
-    expect(planLegacyAdoption({ name: HUMAN_PROFILE_DEFAULT_NAME }, { name: 'human', avatarRef: 'ref-1' })).toEqual({ avatarRef: 'ref-1' })
-    expect(planLegacyAdoption({ name: HUMAN_PROFILE_DEFAULT_NAME }, { name: 'human' })).toBeUndefined()
-  })
 })
 
-describe('pre-rename host row migration', () => {
+describe('pre-rename host row document', () => {
   // Spelled out rather than imported: the value under test is the id an
   // un-upgraded profile already wrote, so a fixture that follows the constant
   // would pass even after the constant stopped matching those documents.
@@ -197,6 +184,11 @@ describe('pre-rename host row migration', () => {
     expect(parseRowHumanProfile(patchDocument('name: YuCreate'), 'contexera-agent-team-host')).toEqual({ name: 'Ada' })
   })
 
+  it('keeps each field as the document holds it, including nested groups', () => {
+    const document = patchDocument('name: YuCreate', 'wakeRecycle: { enabled: false, idleMs: 123 }')
+    expect(parseRowHumanProfile(document, legacyRowId)).toEqual({ name: 'YuCreate', wakeRecycle: { enabled: false, idleMs: 123 } })
+  })
+
   it('treats a missing, duplicated, or malformed row as nothing to migrate', () => {
     expect(parseRowHumanProfile(patchDocument('name: YuCreate'), 'wowyuarm-agent-team-invariant')).toBeUndefined()
     // Two rows for one id: the loader would apply them in order, and a recovery
@@ -212,46 +204,68 @@ describe('pre-rename host row migration', () => {
     expect(parseRowHumanProfile('{ id: wowyuarm-agent-team-host }', legacyRowId)).toBeUndefined()
   })
 
-  it('drops an unusable field but keeps the usable one', () => {
-    expect(parseRowHumanProfile(patchDocument('name: "   "', 'avatarRef: ref-1'), legacyRowId)).toEqual({ avatarRef: 'ref-1' })
-    expect(parseRowHumanProfile(patchDocument('name: YuCreate', 'avatarRef: ""'), legacyRowId)).toEqual({ name: 'YuCreate' })
+  it('reads an expression as nothing to migrate rather than as its source text', () => {
+    // `!!js` parses without an error: the scalar is the expression's SOURCE, so
+    // adopting it would leave the Human literally named 'process.env.HUMAN_NAME'.
+    expect(parseRowHumanProfile(patchDocument('name: !!js process.env.HUMAN_NAME'), legacyRowId)).toBeUndefined()
+    // A field that merely contains an expression cannot be carried either: the
+    // loader would evaluate it in the row's own context, and a literal write
+    // would replace a computed threshold with its own source.
+    expect(parseRowHumanProfile(patchDocument('name: YuCreate', 'wakeRecycle: { enabled: false, idleMs: !!js 60_000 }'), legacyRowId))
+      .toEqual({ name: 'YuCreate' })
+    // One expression does not condemn the fields beside it.
+    expect(parseRowHumanProfile(patchDocument('name: !!js process.env.HUMAN_NAME', 'avatarRef: ref-1'), legacyRowId))
+      .toEqual({ avatarRef: 'ref-1' })
   })
+})
 
-  it('fills an empty current namespace from the retired row', () => {
-    expect(planNamespaceMigration({}, { name: 'YuCreate', avatarRef: 'ref-1' }))
-      .toEqual({ name: 'YuCreate', avatarRef: 'ref-1' })
-    expect(planNamespaceMigration({}, { avatarRef: 'ref-1' })).toEqual({ avatarRef: 'ref-1' })
+describe('host row migration precedence', () => {
+  const operational = { wakeRecycle: { enabled: false, idleMs: 123, minContextTokens: 456 }, memberCompaction: { enabled: false, tokens: 12345 } }
+
+  it('fills an empty namespace from the carried values', () => {
+    expect(planHostRowWrite({}, { name: 'YuCreate', avatarRef: 'ref-1', ...operational }))
+      .toEqual({ name: 'YuCreate', avatarRef: 'ref-1', ...operational })
   })
 
   it('never overwrites a field the current namespace already stores', () => {
-    expect(planNamespaceMigration({ name: 'Ada' }, { name: 'YuCreate', avatarRef: 'ref-1' }))
-      .toEqual({ avatarRef: 'ref-1' })
-    expect(planNamespaceMigration({ avatarRef: 'mine' }, { name: 'YuCreate', avatarRef: 'ref-1' }))
-      .toEqual({ name: 'YuCreate' })
-    expect(planNamespaceMigration({ name: 'Ada', avatarRef: 'mine' }, { name: 'YuCreate', avatarRef: 'ref-1' }))
+    expect(planHostRowWrite({ name: 'Ada' }, { name: 'YuCreate', avatarRef: 'ref-1' })).toEqual({ avatarRef: 'ref-1' })
+    expect(planHostRowWrite({ wakeRecycle: { enabled: true } }, operational)).toEqual({ memberCompaction: operational.memberCompaction })
+    expect(planHostRowWrite({ name: 'Ada', avatarRef: 'mine', ...operational }, { name: 'YuCreate', avatarRef: 'ref-1', ...operational }))
       .toBeUndefined()
   })
 
   it('counts a stored value equal to the default as the Human having set it', () => {
     // `human` here is the Human's own choice after the upgrade, not an absence,
     // so the retired name may not replace it.
-    expect(planNamespaceMigration({ name: HUMAN_PROFILE_DEFAULT_NAME }, { name: 'YuCreate' })).toBeUndefined()
+    expect(planHostRowWrite({ name: HUMAN_PROFILE_DEFAULT_NAME }, { name: 'YuCreate' })).toBeUndefined()
   })
 
   it('never re-writes the retired row\'s default name as if it were a fact', () => {
-    expect(planNamespaceMigration({}, { name: HUMAN_PROFILE_DEFAULT_NAME })).toBeUndefined()
-    expect(planNamespaceMigration({}, { name: HUMAN_PROFILE_DEFAULT_NAME, avatarRef: 'ref-1' })).toEqual({ avatarRef: 'ref-1' })
-    expect(planNamespaceMigration({}, {})).toBeUndefined()
+    expect(planHostRowWrite({}, { name: HUMAN_PROFILE_DEFAULT_NAME })).toBeUndefined()
+    expect(planHostRowWrite({}, { name: HUMAN_PROFILE_DEFAULT_NAME, avatarRef: 'ref-1' })).toEqual({ avatarRef: 'ref-1' })
+  })
+
+  it('completes a group an older row stored only part of', () => {
+    // Writing the partial object would leave the row resolving schema defaults
+    // for the rest, mixing a carried setting with a stale default.
+    expect(planHostRowWrite({}, { wakeRecycle: { enabled: false } })).toEqual({
+      wakeRecycle: { enabled: false, idleMs: DEFAULT_WAKE_RECYCLE.idleMs, minContextTokens: DEFAULT_WAKE_RECYCLE.minContextTokens },
+    })
+  })
+
+  it('drops a value its own schema rejects instead of writing it', () => {
+    expect(planHostRowWrite({}, { name: '   ', avatarRef: '', memberCompaction: { tokens: -1 } })).toBeUndefined()
+    expect(planHostRowWrite({}, { name: 42, wakeRecycle: 'not-a-group' })).toBeUndefined()
   })
 })
 
-describe('legacy human profile adoption on boot', () => {
-  const legacyDocument = (avatarRef: string): string => [
+describe('host row migration on boot', () => {
+  const retiredSection = (name: string, avatarRef?: string): string => [
     'ui-theme:',
     '  preference: light',
     'agent-team-human:',
-    `  avatarRef: ${avatarRef}`,
-    '  name: YuCreate',
+    ...(avatarRef === undefined ? [] : [`  avatarRef: ${avatarRef}`]),
+    `  name: ${name}`,
     '',
   ].join('\n')
 
@@ -268,21 +282,22 @@ describe('legacy human profile adoption on boot', () => {
     return home
   }
 
+  interface Mutation { readonly namespace: string; readonly ops: unknown }
+
   /**
-   * Boot a real Host over that home and record every profile write it makes.
-   * The settings stub is the write surface: adoption has to reach it through
-   * the same namespace and op shape the profile page's Remote uses.
+   * Boot a real Host over that home and record every settings write it makes.
    *
-   * `profile` mounts the profile context a profile-launched Host always has,
-   * with the user layer `describe()` reports for the Host row — the only thing
-   * that can say whether the Human stored a field themselves.
+   * The settings stub records rather than applies, which is the right surface
+   * for this migration: a field of this row is volatile, so the settings
+   * service is what makes a write live, and the migration's own obligation ends
+   * at emitting the write. `profile.user` is the current namespace's user layer
+   * — the only signal that says whether the Human stored a field themselves.
    */
   async function bootHost(
     home: string,
-    config?: { readonly name: string },
     profile?: { readonly patchPath: string; readonly user?: Record<string, unknown> },
-  ): Promise<Array<{ readonly namespace: string; readonly ops: unknown }>> {
-    const mutations: Array<{ readonly namespace: string; readonly ops: unknown }> = []
+  ): Promise<readonly Mutation[]> {
+    const mutations: Mutation[] = []
     const ctx = new Context()
     await ctx.plugin(Storage)
     ctx.storage.backend.register('memory', new MemoryStorageBackend(new MemoryMediaPool()))
@@ -306,71 +321,37 @@ describe('legacy human profile adoption on boot', () => {
     } as never)
     if (profile !== undefined) ctx.provide('profileContext', { home, dir: home, patchPath: profile.patchPath })
     await ctx.plugin(SessionProjectionRegistry)
-    const fiber = config === undefined ? await ctx.plugin(AgentTeam) : await ctx.plugin(AgentTeam, config)
+    const fiber = await ctx.plugin(AgentTeam)
     cleanups.push(async () => { await fiber.dispose() })
     expect(home).toBe(process.env.DSH_HOME)
     return mutations
   }
 
-  it('carries a legacy name and avatar into a pristine Host row', async () => {
-    const home = await tempDshHome()
-    const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'logo.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff]))
-    await writeFile(join(home, 'settings.yaml.imported'), legacyDocument(avatar.avatarRef))
-    const mutations = await bootHost(home)
-    await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
-    expect(mutations[0]).toEqual({
-      namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
-      ops: [
-        { op: 'set', path: ['name'], value: 'YuCreate' },
-        { op: 'set', path: ['avatarRef'], value: avatar.avatarRef },
-      ],
-    })
-  })
+  /** Write the profile patch document a pre-rename profile already holds. */
+  async function tempProfile(home: string, document: string): Promise<{ readonly patchPath: string }> {
+    const patchPath = join(home, 'cordis.patch.yml')
+    await writeFile(patchPath, document)
+    return { patchPath }
+  }
 
-  it('carries the name alone when the referenced avatar bytes are gone', async () => {
-    const home = await tempDshHome()
-    await writeFile(join(home, 'settings.yaml.imported'), legacyDocument('8dbafa6d-06a8-4b4b-8a34-1b1f73c99aa0'))
-    const mutations = await bootHost(home)
-    await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
-    expect(mutations[0]).toEqual({
-      namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
-      ops: [{ op: 'set', path: ['name'], value: 'YuCreate' }],
-    })
-  })
+  const legacyRow = (...config: readonly string[]): string => [
+    '- id: contexera-agent-team-host',
+    "  name: '@contexera/dsh-agent-team/host'",
+    '  config:',
+    '    name: Ada',
+    '- id: wowyuarm-agent-team-host',
+    "  name: '@wowyuarm/dsh-agent-team/host'",
+    '  config:',
+    ...config.map(line => `    ${line}`),
+    '',
+  ].join('\n')
 
-  it('leaves a profile the Human already filled alone', async () => {
-    const home = await tempDshHome()
-    await writeFile(join(home, 'settings.yaml.imported'), legacyDocument('ref-1'))
-    const mutations = await bootHost(home, { name: 'Ada' })
-    await new Promise(resolve => setTimeout(resolve, 50))
-    expect(mutations).toEqual([])
-  })
-
-  describe('pre-rename host row', () => {
-    const patchDocument = (...config: readonly string[]): string => [
-      '- id: contexera-agent-team-host',
-      "  name: '@contexera/dsh-agent-team/host'",
-      '  config:',
-      '    name: Ada',
-      '- id: wowyuarm-agent-team-host',
-      "  name: '@wowyuarm/dsh-agent-team/host'",
-      '  config:',
-      ...config.map(line => `    ${line}`),
-      '',
-    ].join('\n')
-
-    /** Write the profile patch document a pre-rename profile already holds. */
-    async function tempProfile(home: string, document: string): Promise<{ readonly patchPath: string }> {
-      const patchPath = join(home, 'cordis.patch.yml')
-      await writeFile(patchPath, document)
-      return { patchPath }
-    }
-
-    it('moves the name and avatar reference into the current namespace', async () => {
+  describe('retired settings section', () => {
+    it('carries a legacy name and avatar into an unwritten Host row', async () => {
       const home = await tempDshHome()
       const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'logo.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff]))
-      const profile = await tempProfile(home, patchDocument('name: YuCreate', `avatarRef: ${avatar.avatarRef}`))
-      const mutations = await bootHost(home, undefined, profile)
+      await writeFile(join(home, 'settings.yaml.imported'), retiredSection('YuCreate', avatar.avatarRef))
+      const mutations = await bootHost(home)
       await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
       expect(mutations[0]).toEqual({
         namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
@@ -381,24 +362,86 @@ describe('legacy human profile adoption on boot', () => {
       })
     })
 
-    it('keeps a field the Human stored after upgrading and fills only the gap', async () => {
+    it('carries the name alone when the referenced avatar bytes are gone', async () => {
       const home = await tempDshHome()
-      const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'logo.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff]))
-      const profile = await tempProfile(home, patchDocument('name: YuCreate', `avatarRef: ${avatar.avatarRef}`))
-      const mutations = await bootHost(home, undefined, { ...profile, user: { name: 'Ada' } })
+      await writeFile(join(home, 'settings.yaml.imported'), retiredSection('YuCreate', '8dbafa6d-06a8-4b4b-8a34-1b1f73c99aa0'))
+      const mutations = await bootHost(home)
       await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
-      // The Human's post-upgrade name wins; only the avatar reference is a gap.
       expect(mutations[0]).toEqual({
         namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
-        ops: [{ op: 'set', path: ['avatarRef'], value: avatar.avatarRef }],
+        ops: [{ op: 'set', path: ['name'], value: 'YuCreate' }],
       })
     })
 
-    it('writes nothing once the current namespace carries both fields', async () => {
+    it('leaves a row the Human already wrote alone', async () => {
+      const home = await tempDshHome()
+      await writeFile(join(home, 'settings.yaml.imported'), retiredSection('YuCreate', 'ref-1'))
+      const mutations = await bootHost(home, { patchPath: join(home, 'cordis.patch.yml'), user: { name: 'Ada' } })
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(mutations).toEqual([])
+    })
+  })
+
+  describe('pre-rename host row', () => {
+    it('moves the name and avatar reference into the current namespace', async () => {
       const home = await tempDshHome()
       const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'logo.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff]))
-      const profile = await tempProfile(home, patchDocument('name: YuCreate', `avatarRef: ${avatar.avatarRef}`))
-      const mutations = await bootHost(home, undefined, { ...profile, user: { name: 'Ada', avatarRef: 'mine' } })
+      const profile = await tempProfile(home, legacyRow('name: YuCreate', `avatarRef: ${avatar.avatarRef}`))
+      const mutations = await bootHost(home, profile)
+      await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
+      expect(mutations[0]).toEqual({
+        namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+        ops: [
+          { op: 'set', path: ['name'], value: 'YuCreate' },
+          { op: 'set', path: ['avatarRef'], value: avatar.avatarRef },
+        ],
+      })
+    })
+
+    it('moves the operational settings the same row stored', async () => {
+      // A rename that silently resets these is a behaviour change, not a
+      // cosmetic one: an operator who switched Member compaction off would get
+      // it back on without touching anything.
+      const home = await tempDshHome()
+      const profile = await tempProfile(home, legacyRow(
+        'memberCompaction: { enabled: false, tokens: 12345 }',
+        'wakeRecycle: { enabled: false, idleMs: 123, minContextTokens: 456 }',
+      ))
+      const mutations = await bootHost(home, profile)
+      await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
+      expect(mutations[0]).toEqual({
+        namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+        ops: [
+          { op: 'set', path: ['wakeRecycle'], value: { enabled: false, idleMs: 123, minContextTokens: 456 } },
+          { op: 'set', path: ['memberCompaction'], value: { enabled: false, tokens: 12345 } },
+        ],
+      })
+    })
+
+    it('keeps a field the Human stored after upgrading and fills only the gaps', async () => {
+      const home = await tempDshHome()
+      const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'logo.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff]))
+      const profile = await tempProfile(home, legacyRow('name: YuCreate', `avatarRef: ${avatar.avatarRef}`, 'memberCompaction: { enabled: false, tokens: 12345 }'))
+      const mutations = await bootHost(home, { ...profile, user: { name: 'Ada' } })
+      await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
+      // The Human's post-upgrade name wins; everything else is a gap.
+      expect(mutations[0]).toEqual({
+        namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+        ops: [
+          { op: 'set', path: ['avatarRef'], value: avatar.avatarRef },
+          { op: 'set', path: ['memberCompaction'], value: { enabled: false, tokens: 12345 } },
+        ],
+      })
+    })
+
+    it('writes nothing once the current namespace carries every field', async () => {
+      const home = await tempDshHome()
+      const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'logo.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff]))
+      const profile = await tempProfile(home, legacyRow('name: YuCreate', `avatarRef: ${avatar.avatarRef}`, 'memberCompaction: { enabled: false, tokens: 12345 }'))
+      const mutations = await bootHost(home, {
+        ...profile,
+        user: { name: 'Ada', avatarRef: avatar.avatarRef, memberCompaction: { enabled: true, tokens: 1 } },
+      })
       await new Promise(resolve => setTimeout(resolve, 50))
       expect(mutations).toEqual([])
     })
@@ -412,20 +455,54 @@ describe('legacy human profile adoption on boot', () => {
         '    name: Ada',
         '',
       ].join('\n'))
-      const mutations = await bootHost(home, undefined, profile)
+      const mutations = await bootHost(home, profile)
       await new Promise(resolve => setTimeout(resolve, 50))
       expect(mutations).toEqual([])
     })
 
     it('carries the name alone when the pre-rename avatar bytes are gone', async () => {
       const home = await tempDshHome()
-      const profile = await tempProfile(home, patchDocument('name: YuCreate', 'avatarRef: 8dbafa6d-06a8-4b4b-8a34-1b1f73c99aa0'))
-      const mutations = await bootHost(home, undefined, profile)
+      const profile = await tempProfile(home, legacyRow('name: YuCreate', 'avatarRef: 8dbafa6d-06a8-4b4b-8a34-1b1f73c99aa0'))
+      const mutations = await bootHost(home, profile)
       await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
       expect(mutations[0]).toEqual({
         namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
         ops: [{ op: 'set', path: ['name'], value: 'YuCreate' }],
       })
+    })
+
+    it('never writes an expression\'s source text as a setting', async () => {
+      const home = await tempDshHome()
+      const avatar = await writeHumanAvatar(humanAvatarsRoot(), 'logo.jpg', 'image/jpeg', Buffer.from([0xff, 0xd8, 0xff]))
+      const profile = await tempProfile(home, legacyRow('name: !!js process.env.HUMAN_NAME', `avatarRef: ${avatar.avatarRef}`))
+      const mutations = await bootHost(home, profile)
+      await vi.waitFor(() => { expect(mutations).toHaveLength(1) })
+      // The name is left at its default rather than becoming
+      // 'process.env.HUMAN_NAME'; the field beside it still migrates.
+      expect(mutations[0]).toEqual({
+        namespace: HUMAN_PROFILE_SETTINGS_NAMESPACE,
+        ops: [{ op: 'set', path: ['avatarRef'], value: avatar.avatarRef }],
+      })
+    })
+
+    it('keeps an explicitly stored default name over both legacy sources', async () => {
+      // End-to-end precedence: the new namespace stores `human` on purpose, and
+      // the OLDER retired section must not overwrite it either.
+      const home = await tempDshHome()
+      const profile = await tempProfile(home, legacyRow('name: FormerName'))
+      await writeFile(join(home, 'settings.yaml.imported'), retiredSection('EarlierLegacyName'))
+      const mutations = await bootHost(home, { ...profile, user: { name: HUMAN_PROFILE_DEFAULT_NAME } })
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(mutations).toEqual([])
+    })
+
+    it('keeps an explicitly stored non-default name over both legacy sources', async () => {
+      const home = await tempDshHome()
+      const profile = await tempProfile(home, legacyRow('name: FormerName'))
+      await writeFile(join(home, 'settings.yaml.imported'), retiredSection('EarlierLegacyName'))
+      const mutations = await bootHost(home, { ...profile, user: { name: 'CurrentName' } })
+      await new Promise(resolve => setTimeout(resolve, 50))
+      expect(mutations).toEqual([])
     })
   })
 })

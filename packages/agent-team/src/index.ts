@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { Context, Service, type Volatile } from '@deepseek-ai/cordis'
+import { Context, Service } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { installModelSelection, type Agent, type AgentHandle, type ModelSelectionRef } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
@@ -25,7 +25,6 @@ import { scopeOf } from '@deepseek-ai/dsh-scope'
 import { Session, SessionId, SessionLogOffset, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
-import z from '@deepseek-ai/schemastery'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-token-meter'
 import type {} from '@deepseek-ai/dsh-tools'
@@ -34,16 +33,17 @@ import { DomainFacility, type Domain } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { ATTACHMENT_MAX_BYTES, attachmentPayloadPath, attachmentsRoot, copyPathAttachment, pathAttachmentId, readAttachment, removeAttachment, sanitizeMediaType, sweepAttachmentCache, validatePathAttachment, writeRequestScopedAttachment } from './attachments.ts'
 import { reportEnvironment } from './environment-check.ts'
-import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, planLegacyAdoption, planNamespaceMigration, type LegacyHumanProfileFields } from './human-profile.ts'
+import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName, parseLegacyHumanProfile, parseRowHumanProfile, type LegacyHumanProfileFields } from './human-profile.ts'
+import { TEAM_HOST_ROW_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowWrite } from './host-row-settings.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 import { humanAvatarsRoot, readHumanAvatar, removeHumanAvatar, writeHumanAvatar } from './human-avatar.ts'
 import { createHumanUpdateChecker } from './human-update-check.ts'
 import { AgentTeamInvariantError } from './invariant.ts'
 import { createCheckpointContinuationMessage } from './context-codec.ts'
 import { TeamContextManagement, type TeamTransitionPlan } from './team-context-management.ts'
-import { decideWakeRecycle, DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig, type WakeRecyclePlan } from './wake-recycle.ts'
+import { decideWakeRecycle, type WakeRecycleConfig, type WakeRecyclePlan } from './wake-recycle.ts'
 import { createAcceptanceReminder, planAcceptanceContext } from './acceptance-context.ts'
-import { installMemberCompaction, DEFAULT_MEMBER_COMPACTION, type MemberCompactionConfig } from './member-compaction.ts'
+import { installMemberCompaction, type MemberCompactionConfig } from './member-compaction.ts'
 import { AGENT_TEAM_PLUGIN_ID, isAgentTeamContextSource, isAgentTeamSource } from './context-source.ts'
 import { surfaceVisibilityProbe, teamMessageSurface, visibleTeamSurface, isFactOnSurface, isMainEntryOnSurface, NOTIFICATION_BODY_MAX_CHARACTERS, NOTIFICATION_TRUNCATION_MARKER, type RenderedTeamMessage } from './surface-visibility.ts'
 export { teamMessageSurface, visibleTeamSurface, missingMessageRange } from './surface-visibility.ts'
@@ -184,6 +184,7 @@ export { agentTeamDomainSpec, agentTeamOperationSchema } from './spec.ts'
 export type * from './types.ts'
 export { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from './ledger.ts'
 export { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName } from './human-profile.ts'
+export { HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTINGS_SCHEMA, WAKE_RECYCLE_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowField, type HostRowWrite } from './host-row-settings.ts'
 export { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
@@ -309,40 +310,6 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-/**
- * Config of the Team Host row: the Human profile (see human-profile.ts).
- * The settings service offers a form only for volatile fields, so a non-volatile field would be invisible and unwritable.
- */
-export interface Config {
-  name: Volatile<string>
-  avatarRef: Volatile<string | undefined>
-  wakeRecycle: Volatile<WakeRecycleConfig>
-  memberCompaction: Volatile<MemberCompactionConfig>
-}
-
-/** The wake-swap thresholds as one volatile group, with its own defaults so an unwritten profile still resolves a complete config. */
-export const WAKE_RECYCLE_SETTINGS_SCHEMA = z.object({
-  enabled: z.boolean().default(DEFAULT_WAKE_RECYCLE.enabled),
-  idleMs: z.number().min(0).default(DEFAULT_WAKE_RECYCLE.idleMs),
-  minContextTokens: z.number().min(0).default(DEFAULT_WAKE_RECYCLE.minContextTokens),
-}).default({}).volatile()
-
-/** Member input budget, checked before each request; a tool result can exceed it between requests. */
-export const MEMBER_COMPACTION_SETTINGS_SCHEMA = z.object({
-  enabled: z.boolean().default(DEFAULT_MEMBER_COMPACTION.enabled),
-  tokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MEMBER_COMPACTION.tokens),
-}).default({}).volatile()
-
-/**
- * The Host row's whole schema: the profile fields verbatim, so {@link HUMAN_PROFILE_SETTINGS_SCHEMA} keeps owning their volatility and defaults.
- * A patch layer replaces the row's whole config, so the parts are declared together.
- */
-export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
-  ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
-  wakeRecycle: WAKE_RECYCLE_SETTINGS_SCHEMA,
-  memberCompaction: MEMBER_COMPACTION_SETTINGS_SCHEMA,
-})
-
 export default class AgentTeam extends TypertRemoteService {
   static Config = TEAM_HOST_ROW_SETTINGS_SCHEMA
   static inject = [
@@ -465,7 +432,7 @@ export default class AgentTeam extends TypertRemoteService {
     super(ctx, 'agentTeam')
     this.ctx.inject(['settings'], settingsCtx => {
       settingsCtx.effect(() => settingsCtx.settings.configure({ auto: false }, this.ctx.fiber))
-      this.adoptLegacyHumanProfile()
+      this.migrateLegacyHostRow()
     })
     this.ctx.on('loader/volatile-update', () => {
       this.syncHumanHandle()
@@ -645,29 +612,107 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * One-time adoption of Human profile facts that predate the current stored
+   * One-time migration of Host row values that predate the current stored
    * shape. Two sources, in upgrade order: the pre-rename settings namespace
-   * (see {@link migrateRenamedHumanProfileNow}), then the retired
+   * (see {@link migrateRenamedHostRowNow}), then the retired
    * `agent-team-human` settings section (see `LEGACY_HUMAN_PROFILE_SECTION`).
    * Whichever readiness edge fires second (settings service, ledger open)
-   * starts the attempt; only a profile still missing a field is written, once
-   * per boot.
+   * starts the attempt; both write only fields the current namespace stores
+   * nothing for, once per boot.
    */
-  private adoptLegacyHumanProfile(): void {
+  private migrateLegacyHostRow(): void {
     if (this.legacyAdoptionStarted) return
     if (this.ctx.get('settings') === undefined || this.ledger === undefined) return
     this.legacyAdoptionStarted = true
-    void this.migrateLegacyHumanProfileNow().catch((error: unknown) => {
-      this.ctx.logger.warn('agent-team: legacy human profile adoption failed: %s', String(error))
+    void this.migrateLegacyHostRowNow().catch((error: unknown) => {
+      this.ctx.logger.warn('agent-team: legacy host row migration failed: %s', String(error))
     })
   }
 
-  private async migrateLegacyHumanProfileNow(): Promise<void> {
-    await this.migrateRenamedHumanProfileNow()
-    await this.adoptLegacyHumanProfileNow()
+  private async migrateLegacyHostRowNow(): Promise<void> {
+    await this.migrateRenamedHostRowNow()
+    await this.adoptRetiredHumanSectionNow()
   }
 
-  private async adoptLegacyHumanProfileNow(): Promise<void> {
+  /**
+   * The Host row's own USER layer in the current namespace: exactly the fields
+   * the Human wrote there. The resolved config is the wrong signal — it carries
+   * schema defaults, so a Human who explicitly stored a value equal to the
+   * default would read as "nothing stored" and be overwritten.
+   */
+  private storedHostRowFields(): Readonly<Record<string, unknown>> {
+    const descriptor = this.ctx.get('settings')?.describe().find(row => row.ns === HUMAN_PROFILE_SETTINGS_NAMESPACE)
+    return (descriptor?.user ?? {}) as Readonly<Record<string, unknown>>
+  }
+
+  /**
+   * Writes one migration decision into the current namespace and reports
+   * whether anything went out. Every field of the row is volatile, so the
+   * settings write is also what makes the value live; nothing else may write
+   * the running config.
+   *
+   * The name still passes the Remote's own judgement: adopting a display name a
+   * live Member handle already claims would make the Human unaddressable. That
+   * drops only the name — the operational settings in the same plan are
+   * independent of it.
+   */
+  private async writeHostRowValues(plan: HostRowWrite): Promise<boolean> {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) return false
+    const ops: SettingsPathOp[] = []
+    let name = plan.name
+    if (name !== undefined) {
+      try {
+        this.validateHumanProfile({ name })
+      } catch (error) {
+        this.ctx.logger.warn('agent-team: kept the Host row display name unset: %s', String(error))
+        name = undefined
+      }
+    }
+    if (name !== undefined) ops.push({ op: 'set', path: ['name'], value: name })
+    // The reference is carried only while its bytes still draw: the avatar
+    // store, not the document, is the authority for whether it exists at all.
+    if (plan.avatarRef !== undefined && await readHumanAvatar(humanAvatarsRoot(), plan.avatarRef) !== undefined) {
+      ops.push({ op: 'set', path: ['avatarRef'], value: plan.avatarRef })
+    }
+    if (plan.wakeRecycle !== undefined) ops.push({ op: 'set', path: ['wakeRecycle'], value: plan.wakeRecycle })
+    if (plan.memberCompaction !== undefined) ops.push({ op: 'set', path: ['memberCompaction'], value: plan.memberCompaction })
+    if (ops.length === 0) return false
+    await settings.mutate(HUMAN_PROFILE_SETTINGS_NAMESPACE, ops)
+    return true
+  }
+
+  /**
+   * Carries the whole Host row across the `@wowyuarm` → `@contexera` row rename.
+   *
+   * The settings namespace IS the Host row id, so the rename left every value
+   * the row stored — the Human's name and avatar reference AND the operational
+   * settings this Host runs with — under an id that no loader entry answers to
+   * any more: the composition skips that patch, and the row restarts from
+   * schema defaults. That is a silent behaviour reset, not only a cosmetic one:
+   * an operator who switched Member compaction off would silently get it back
+   * on. The stored values survive only in the profile's own patch document, so
+   * this reads them there and writes every field the current namespace stores
+   * nothing for.
+   *
+   * Fields that hold a Cordis expression are not carried: the loader would
+   * evaluate them in the row's own context, and this runs outside it, so their
+   * source text must never be written back as the value.
+   */
+  private async migrateRenamedHostRowNow(): Promise<void> {
+    const profile = this.ctx.get('profileContext')
+    if (profile === undefined) return
+    const document = await readProfileDocument(profile.patchPath)
+    if (document === undefined) return
+    const carried = parseRowHumanProfile(document, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE)
+    if (carried === undefined) return
+    const plan = planHostRowWrite(this.storedHostRowFields(), carried)
+    if (plan === undefined) return
+    if (!await this.writeHostRowValues(plan)) return
+    this.ctx.logger.info('agent-team: migrated the host row off the pre-rename settings namespace in %s', profile.patchPath)
+  }
+
+  private async adoptRetiredHumanSectionNow(): Promise<void> {
     // A profile-launched Host always carries the profile context; a Host booted
     // without one still adopts from the DSH home, which is where the
     // document may still live. Read through `get`: cordis refuses a direct
@@ -694,60 +739,13 @@ export default class AgentTeam extends TypertRemoteService {
       }
     }
     if (legacy === undefined || source === undefined) return
-    // The reference is carried only while its bytes still draw: the avatar
-    // store is the authority for whether this avatar exists at all.
-    let avatarRef = legacy.avatarRef
-    if (avatarRef !== undefined && await readHumanAvatar(humanAvatarsRoot(), avatarRef) === undefined) avatarRef = undefined
-    const plan = planLegacyAdoption(this.humanProfile(), {
-      ...(legacy.name === undefined ? {} : { name: legacy.name }),
-      ...(avatarRef === undefined ? {} : { avatarRef }),
-    })
+    // The same rule as the rename above, on the same signal: a value the Human
+    // stored in the current namespace outranks this older document too, so the
+    // two migrations cannot disagree about which source wins.
+    const plan = planHostRowWrite(this.storedHostRowFields(), { ...legacy })
     if (plan === undefined) return
-    await this.setHumanProfile(plan)
-    this.ctx.logger.info('agent-team: adopted the legacy human profile from %s', source)
-  }
-
-  /**
-   * Carries the Human profile across the `@wowyuarm` → `@contexera` row rename.
-   *
-   * The settings namespace IS the Host row id, so the rename left every
-   * existing profile's name and avatar reference stored under an id that no
-   * loader entry answers to any more: the composition skips that patch, and
-   * the row restarts from schema defaults. The stored values survive only in
-   * the profile's own patch document, so this reads them there and writes each
-   * missing field into the current namespace through the settings service —
-   * the same write path the profile page uses, which is what makes the
-   * migration visible live rather than at the next restart.
-   *
-   * The new namespace's own user layer decides what is missing: a Human who
-   * already edited the profile after upgrading keeps every field they set, and
-   * an empty user layer is the only state that triggers a write.
-   */
-  private async migrateRenamedHumanProfileNow(): Promise<void> {
-    const settings = this.ctx.get('settings')
-    if (settings === undefined) return
-    const profile = this.ctx.get('profileContext')
-    if (profile === undefined) return
-    const document = await readProfileDocument(profile.patchPath)
-    if (document === undefined) return
-    const legacy = parseRowHumanProfile(document, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE)
-    if (legacy === undefined) return
-    // The stored user layer, not the resolved config: `config` already carries
-    // schema defaults, so only `user` can say whether the Human wrote a field.
-    const descriptor = settings.describe().find(row => row.ns === HUMAN_PROFILE_SETTINGS_NAMESPACE)
-    const stored = (descriptor?.user ?? {}) as { readonly name?: unknown; readonly avatarRef?: unknown }
-    const plan = planNamespaceMigration(stored, legacy)
-    if (plan === undefined) return
-    const avatarRef = plan.avatarRef
-    if (avatarRef !== undefined && await readHumanAvatar(humanAvatarsRoot(), avatarRef) === undefined) {
-      // The reference is carried only while its bytes still draw; a name in the
-      // same plan is a separate field and survives that judgement.
-      if (plan.name === undefined) return
-      await this.setHumanProfile({ name: plan.name })
-    } else {
-      await this.setHumanProfile(plan)
-    }
-    this.ctx.logger.info('agent-team: migrated the human profile off the pre-rename settings namespace in %s', profile.patchPath)
+    if (!await this.writeHostRowValues(plan)) return
+    this.ctx.logger.info('agent-team: adopted the retired human settings section from %s', source)
   }
 
   protected async [Service.init](): Promise<void> {
@@ -855,7 +853,7 @@ export default class AgentTeam extends TypertRemoteService {
     // the ledger existed; sync once here so @ matching starts from the stored
     // name.
     this.syncHumanHandle()
-    this.adoptLegacyHumanProfile()
+    this.migrateLegacyHostRow()
     const initialization = await ledger.initialize()
     if (initialization.committed) this.emitCommitted(initialization.value)
     this.startAttachmentGc(ledger)
