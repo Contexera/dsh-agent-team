@@ -1,0 +1,5 @@
+interface:
+  display_name: "ax-review"
+  short_description: "Audit a repo's agent experience: links, references, cold-start walk, guardrails"
+policy:
+  allow_implicit_invocation: false

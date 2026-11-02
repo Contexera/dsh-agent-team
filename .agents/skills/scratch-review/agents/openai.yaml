@@ -1,0 +1,5 @@
+interface:
+  display_name: "scratch-review"
+  short_description: "Review a .scratch work item against its spec and save the report"
+policy:
+  allow_implicit_invocation: false

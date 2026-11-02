@@ -1,0 +1,3 @@
+# Credits
+
+- This skill adapts [`research`](https://github.com/mattpocock/skills/tree/main/skills/engineering/research) from [mattpocock/skills](https://github.com/mattpocock/skills) (MIT License, Copyright (c) 2026 Matt Pocock). Adaptations: see git history.

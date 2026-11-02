@@ -1,0 +1,5 @@
+interface:
+  display_name: "Discussion"
+  short_description: "Converging multi-round discussion into a .scratch work item"
+policy:
+  allow_implicit_invocation: false

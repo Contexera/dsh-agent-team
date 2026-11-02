@@ -1,0 +1,5 @@
+interface:
+  display_name: "ax-init"
+  short_description: "Bootstrap a repo's agent layer: AGENTS.md, docs skeleton, .scratch work area"
+policy:
+  allow_implicit_invocation: false

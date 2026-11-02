@@ -1,0 +1,3 @@
+interface:
+  display_name: "Codebase Ablation"
+  short_description: "Measure a module's real role by removing it"

@@ -2,6 +2,8 @@ node_modules/
 lib/
 *.tsbuildinfo
 *.log
+__pycache__/
+*.pyc
 .DS_Store
 artifacts/
 .scratch/local/
@@ -12,7 +14,9 @@ artifacts/
 # generation records the tag-suffixed checkout name). Never commit it.
 .generated-harness
 # Agent harness hooks and session data written locally by `entire enable`.
-.agents/
+# `.agents/skills/` is shared project content and stays tracked.
+.agents/*
+!.agents/skills/
 .claude/
 .codex/
 .entire/
