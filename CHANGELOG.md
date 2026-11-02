@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file. The format foll
 **Upgrade note**
 
 - Team's durable identifiers now carry the `contexera` name: the six loader row ids in `cordis.patch.yml`, the three producer kinds that attribute what the bundle writes into Sessions, and the Human profile's settings namespace, now `contexera-agent-team-host`. Stored Session data reads unchanged: the pre-rename kinds still resolve, bare or `plugin:`-converted.
+- An existing profile keeps the Team Host row's whole Config across that rename: at boot the Host carries the old row's values — the display name, `wakeRecycle`, `memberCompaction`, and the avatar reference while its bytes still exist — into `contexera-agent-team-host`, filling only the fields that namespace's user layer stores nothing for, so a value edited after upgrading wins. A field holding a `!!js` expression keeps its default instead of being written back as source text.
 
 **Fixed**
 

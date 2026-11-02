@@ -158,9 +158,13 @@ On a reused request id the ledger compares the recorded resolved attachment ids 
 
 ## Human profile and version footnote
 
-The Human's display name and avatar reference live in the Team Host row's own Config, in the settings namespace `contexera-agent-team-host` (user layer); avatar bytes live in the persistent `$DSH_HOME/agent-team/human/v1/` store, never in the TTL-bound attachment cache. A profile written before this row was renamed keeps them under the old id `wowyuarm-agent-team-host`; that row no longer mounts, so the Host reads it out of the profile's own patch document at boot and writes only the fields the current namespace's user layer does not already store.
+The Human's display name and avatar reference live in the Team Host row's own Config, in the settings namespace `contexera-agent-team-host` (user layer); avatar bytes live in the persistent `$DSH_HOME/agent-team/human/v1/` store, never in the TTL-bound attachment cache.
 
-The retired `agent-team-human` section is no longer an authority: the rc.1 settings importer carries sections across through a closed built-in mapping, so a third-party section stays behind in the renamed legacy document. A boot that finds the row still pristine — the default name and no avatar — adopts those facts through the same write path the settings page uses, and anything already re-entered wins.
+A profile written before this row was renamed keeps the row's whole Config under the old id `wowyuarm-agent-team-host`: the display name, the avatar reference, and the operational `wakeRecycle` and `memberCompaction` groups. That row no longer mounts, so every one of those values silently returns to its schema default — a Member compaction an operator had switched off comes back on.
+
+At boot the Host reads those values out of the profile's own patch document and writes each field into the current namespace unless that namespace's user layer already stores it, so a value the Human set there after upgrading wins, even one equal to the schema default. A field holding a `!!js` expression keeps its default instead of being written back as source text; the avatar reference is carried only while its bytes remain in the store; and a display name that a live Member handle already claims is dropped rather than written.
+
+The retired `agent-team-human` section is no longer an authority: the rc.1 settings importer carries sections across through a closed built-in mapping, so a third-party section stays behind in the renamed legacy document. A boot that finds a field unset in the current namespace adopts it from there through the same write path the settings page uses — the section carries the name and the avatar reference only — and anything already re-entered wins.
 
 Four typed Remotes serve the settings page: `humanProfile` (name, avatar reference, and version footnote facts) and `putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` (images only, 10 MB cap shared with attachments; a removed entry throws and the Client falls back to the initial).
 
