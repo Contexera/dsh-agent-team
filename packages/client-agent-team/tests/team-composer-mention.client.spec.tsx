@@ -5,6 +5,7 @@ import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/
 import { TeamDraftStore } from '../src/client/drafts.ts'
 import { zh } from '../src/client/locales.ts'
 import { TeamComposer } from '../src/client/TeamComposer.tsx'
+import { mentionedMemberIds } from '../src/client/team-formatters.ts'
 
 const t = ((key: keyof typeof zh, params?: Record<string, string | number>) => {
   let value: string = zh[key]
@@ -114,6 +115,28 @@ describe('TeamComposer mention menu', () => {
     openMenu(ui, '@')
     expect(optionTexts(ui).some(text => text.includes('通知所有成员'))).toBe(false)
     expect(optionTexts(ui).some(text => text.includes('@insider'))).toBe(true)
+  })
+
+  it('opens on an @ typed straight after CJK prose, and stays shut inside an ASCII word', () => {
+    const drafts = new TeamDraftStore()
+    const ui = render(<TeamComposer members={[inside]} projectMemberIds={new Set([inside.member.memberId])} drafts={drafts}
+      draftKey={'project:project:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
+
+    openMenu(ui, '把这个给@')
+    expect(optionTexts(ui).some(text => text.includes('@insider'))).toBe(true)
+    // The pick lands as the text the delivery scan reads as a call, so the
+    // notice the composer shows and the send agree.
+    fireEvent.click(ui.getByRole('option', { name: /@insider/ }))
+    const textarea = ui.container.querySelector('textarea') as HTMLTextAreaElement
+    // A pick inserts one `@` plus the canonical handle, which this fixture
+    // spells with its own leading `@`.
+    expect(textarea.value).toBe(`把这个给@${inside.member.handle} `)
+    expect(ui.queryByRole('listbox')).toBeNull()
+    expect(mentionedMemberIds(textarea.value, [inside])).toEqual([inside.member.memberId])
+    // Delivery keeps an address prose, so the picker must not offer a pick that
+    // would land as text the Host reads as an address.
+    openMenu(ui, 'mail@')
+    expect(ui.queryByRole('listbox')).toBeNull()
   })
 
   it('shows an empty-state line when a query matches nobody, rather than closing', () => {

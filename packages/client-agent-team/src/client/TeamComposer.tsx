@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent, ReactNode } from 'react'
+import { startsMentionAt } from '@contexera/dsh-agent-team/mentions'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
 import { IconPaperclipOutlineMedium, IconSendOutlineRegular, Tooltip, useAnchoredMaxHeight, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { TeamConversationProps } from './slots.ts'
@@ -23,7 +24,9 @@ function findMention(draft: string, caret: number): MentionMatch | undefined {
   while (tokenStart > 0 && !/\s/u.test(beforeCaret[tokenStart - 1]!)) tokenStart -= 1
   const at = beforeCaret.lastIndexOf('@')
   if (at < tokenStart) return undefined
-  if (at > 0 && /[\p{L}\p{N}_]/u.test(beforeCaret[at - 1]!)) return undefined
+  // The picker opens exactly where delivery reads a call, so a pick never lands
+  // as text the Host would keep prose.
+  if (!startsMentionAt(draft, at)) return undefined
   return { start: at, end: caret, query: beforeCaret.slice(at + 1) }
 }
 

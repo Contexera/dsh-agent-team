@@ -31,7 +31,7 @@ A run groups consecutive same-sender Messages and its Thread entry row. Activity
 The seat states the time of day only — it is 34px and does not clip, while a dated label is 57px within the year and 87px across it. The date therefore stays with the identity line that opened the run and the day separator above it, and the exact instant rides the label's `title`. A day boundary gets its anchor, and the Project feed alone draws a five-minute `TeamRunDivider` hairline, carrying no instant.
 
 ## Mentions and Task refs
-Mention chips are rendered only for handles in the Message's resolved mention list, matching the authored `@Handle` case-insensitively on Unicode word boundaries — a bare name without its `@` is prose and never chipifies, and code stays literal. A chip names the person as they are called today. The Human's pre-rename handle stays an alias the Host still delivers to, so a Message whose body wrote `@human` chips in place as the current profile name instead of landing in the trailing row under a name its body never used.
+Mention chips are rendered only for handles in the Message's resolved mention list, matching the authored `@Handle` case-insensitively on ASCII word boundaries, so CJK prose can call a name directly; a bare name without its `@` is prose and never chipifies, and code stays literal. A chip names the person as they are called today. The Human's pre-rename handle stays an alias the Host still delivers to, so a Message whose body wrote `@human` chips in place as the current profile name instead of landing in the trailing row under a name its body never used.
 
 Human literal, Agent plain prose, and rich Markdown use their corresponding segmentation path; absent names become a trailing fallback row without duplication.
 

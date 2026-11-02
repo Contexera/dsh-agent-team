@@ -24,6 +24,8 @@ The textarea grows to 336px, autofocuses without moving the timeline, sends on E
 
 The mention popup is an upward `role="listbox"` associated through `aria-controls`, `aria-activedescendant`, and `aria-expanded`; arrows cycle, Tab/Enter accept, Escape closes, and outside dismissal/max height use public hooks. The highlighted row is kept inside the scrollable popup (`scrollIntoView` with `block: 'nearest'`), so long rosters never hide the keyboard selection.
 
+The popup opens exactly where delivery reads a call (`startsMentionAt`): `@` may follow CJK prose and punctuation directly, since those spaces no words, but never sits inside an ASCII word, where the body is an address and stays prose — so a pick always lands as text the Host calls.
+
 The popup paints the shared translucent menu surface, so it takes the shipped frosted recipe instead of an opaque fill: the menu token under `--dsw-menu-backdrop-filter`, with the elevation stroke and prominent shadow. DSH 0.1.7 made that token translucent without renaming it, so an opaque popup over the conversation stopped reading while every existence check stayed green. The composer card follows the same 0.1.7 surface language: no layout border, an l2 elevation hairline, and the soft elevation tier.
 
 The popup offers every Workspace participant a mention can address: lifecycle ends eligibility, never presence, so an offline Member still reads a durable mention on return. Rows are grouped by relation on `data-mention-group` — Project owners, then this Thread's followers, then the rest of the Project, then Workspace peers a pick would enroll. A mention of a non-member is a Project-membership fact, so that last group is exactly where a pick adds the Member.
@@ -34,7 +36,7 @@ Every candidate stays pickable, and within a group the order is online first, th
 
 Only the enrolment group carries weight: its name drops to the secondary label alias through `data-mention-inside`, because a Member outside the Project is the one the pick changes. The group headings carry the structural difference colour cannot — owner, follow, membership — so a Project member outside this Thread is named by its heading rather than dimmed. Below 600px the description is dropped and the grouping stays.
 
-A quiet recipient notice shows who will be notified: the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive word boundaries), plus the quoted Message's author on a reply. The body is the sole delivery authority — no explicit recipient list travels with the request — so the notice and the send read the same set. A recipient the Project does not yet carry is named there as joining it.
+A quiet recipient notice shows who will be notified: the `@Handle` names typed into the body (`mentionedMemberIds`, matched on the Host's own case-insensitive ASCII word boundaries), plus the quoted Message's author on a reply. The body is the sole delivery authority — no explicit recipient list travels with the request — so the notice and the send read the same set. A recipient the Project does not yet carry is named there as joining it.
 
 Drafts are stored per Project/Thread in the bounded `TeamDraftStore`; a legacy `recipientIds` field in an old entry is ignored on load, successful sends clear the draft and failures preserve it.
 

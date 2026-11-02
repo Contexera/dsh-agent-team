@@ -35,7 +35,21 @@ function codeRanges(body: string): readonly (readonly [number, number])[] {
   return ranges
 }
 
-const ALL_MARKER = /(?<![\p{L}\p{N}_@])@all(?=$|[^\p{L}\p{N}_])/iu
+/**
+ * A call starts at an `@` that is not inside an ASCII word, so an address like
+ * `mail@host.example` stays prose. CJK prose separates no words with spaces, so
+ * the text itself is a boundary there: `请@Reeve` calls. Handles end on the same
+ * ASCII word rule, and the Client's composer opens its picker on it too.
+ */
+const CALL_BOUNDARY_START = '(?<![\\w@])'
+const CALL_BOUNDARY_END = '(?=$|[^\\w])'
+
+/** Whether an `@` at `at` would start a call, so the composer opens its picker exactly where delivery reads one. */
+export function startsMentionAt(body: string, at: number): boolean {
+  return !/[\w@]/u.test(body.slice(at - 1, at))
+}
+
+const ALL_MARKER = new RegExp(`${CALL_BOUNDARY_START}@all${CALL_BOUNDARY_END}`, 'iu')
 
 /** Whether one body carries the `@all` marker outside code. */
 export function hasAllMarker(body: string): boolean {
@@ -44,7 +58,7 @@ export function hasAllMarker(body: string): boolean {
   return marker !== null && !excluded.some(([start, end]) => marker.index >= start && marker.index < end)
 }
 
-/** Every `@Handle` occurrence naming one of `handles`: case-insensitive, on Unicode word boundaries, longest first, outside code. The `@` is required. This is the single definition of an authored mention, shared by Host delivery and Client chip rendering. */
+/** Every `@Handle` occurrence naming one of `handles`: case-insensitive, on the ASCII word boundaries `CALL_BOUNDARY_START`/`CALL_BOUNDARY_END` define, longest first, outside code. The `@` is required. This is the single definition of an authored mention, shared by Host delivery and Client chip rendering. */
 export function scanBodyHandles(body: string, handles: readonly string[]): readonly AgentTeamBodyHandleMatch[] {
   const seen = new Set<string>()
   const usable: string[] = []
@@ -58,7 +72,7 @@ export function scanBodyHandles(body: string, handles: readonly string[]): reado
   const excluded = codeRanges(body)
   const ordered = [...usable].sort((left, right) => right.length - left.length)
   const pattern = new RegExp(
-    `(?<![\\p{L}\\p{N}_@])@(?:${ordered.map(handle => escapeRegExp(handle)).join('|')})(?=$|[^\\p{L}\\p{N}_])`,
+    `${CALL_BOUNDARY_START}@(?:${ordered.map(handle => escapeRegExp(handle)).join('|')})${CALL_BOUNDARY_END}`,
     'giu',
   )
   const matches: AgentTeamBodyHandleMatch[] = []

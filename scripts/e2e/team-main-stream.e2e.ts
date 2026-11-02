@@ -189,12 +189,33 @@ it('posts, starts a discussion and a Task, and opens cards in the Main stream un
   expect(await page.getByRole('option', { name: /通知所有成员/ }).count()).toBe(0)
   await composer.fill('')
 
+  // Chinese prose spaces no words, so an @ typed straight after it opens the
+  // picker — the same boundary delivery reads a call on. Inside an ASCII word
+  // the body is an address and the picker stays shut.
+  const picker = page.getByRole('listbox', { name: '提及成员建议' })
+  await composer.pressSequentially('把这个给@')
+  await picker.waitFor()
+  expect(await picker.getByRole('option').count()).toBeGreaterThan(0)
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'mention-picker-desktop.png'), fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect.poll(() => picker.count()).toBe(0)
+  await composer.fill('')
+  await composer.pressSequentially('mail@')
+  await expect.poll(() => picker.count()).toBe(0)
+  await composer.fill('')
+
   expect(await maxHorizontalScroll(page, '[data-team-project]')).toBe(0)
   await page.setViewportSize({ width: 390, height: 844 })
   await settleLayout(page)
   await taskCard.waitFor()
   await toggle.click()
   await page.getByRole('checkbox', { name: '作为任务' }).check()
+  // The narrow lane reaches the same picker from the same boundary.
+  await composer.pressSequentially('把这个给@')
+  await picker.waitFor()
+  await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'mention-picker-mobile.png'), fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect.poll(() => picker.count()).toBe(0)
   await composer.fill('在手机宽度下写一条比较长的任务描述，检查控制行换行与卡片不溢出')
   await page.screenshot({ path: join(MAIN_STREAM_SHOTS, 'stream-mobile.png'), fullPage: true })
   expect(await maxHorizontalScroll(page, '[data-team-project]')).toBe(0)

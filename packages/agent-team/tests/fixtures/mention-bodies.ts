@@ -41,6 +41,10 @@ export const MENTION_BODY_FIXTURE: MentionBodyFixture = Object.freeze({
     body('see @tarsish and @tars2', []),
     // Punctuation opens and ends a handle.
     body('(@reeves)', ['reeves']),
+    // CJK prose separates no words with spaces, so the neighbouring text is the
+    // boundary itself: a call may start and end right against it.
+    body('请@tars 看一下这个', ['tars']),
+    body('请@tars看一下', ['tars']),
     // Longest handle first in both directions at different positions.
     body('@reeves first, @reeve second', ['reeves', 'Reeve']),
     body('@tars-like work', ['tars']),

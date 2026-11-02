@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasAllMarker, resolveBodyMentions, scanBodyHandles } from '../src/mentions.ts'
+import { hasAllMarker, resolveBodyMentions, scanBodyHandles, startsMentionAt } from '../src/mentions.ts'
 import type { AgentTeamBodyMentionCandidate } from '../src/mentions.ts'
 import type { AgentTeamMemberId } from '../src/types.ts'
 import { MENTION_BODY_FIXTURE } from './fixtures/mention-bodies.ts'
@@ -46,6 +46,14 @@ describe('resolveBodyMentions requires an authored @', () => {
     expect(resolve('@tars-like work')).toEqual({ names: ['tars'], all: false })
   })
 
+  it('calls a name written straight after CJK prose, which separates no words with spaces', () => {
+    expect(resolve('请@tars 看一下这个')).toEqual({ names: ['tars'], all: false })
+    expect(resolve('把这个给@tars')).toEqual({ names: ['tars'], all: false })
+    // The same adjacency on an ASCII word stays an address or a longer word.
+    expect(resolve('mail@tars.example')).toEqual({ names: [], all: false })
+    expect(resolve('ping@tarsish')).toEqual({ names: [], all: false })
+  })
+
   it('prefers the longest handle, so a prefix never steals a longer name', () => {
     const roster = [candidate('reeve'), candidate('reeves')]
     expect(resolve('@reeves, please look', roster)).toEqual({ names: ['reeves'], all: false })
@@ -54,6 +62,21 @@ describe('resolveBodyMentions requires an authored @', () => {
 
   it('escapes regular-expression characters in a handle', () => {
     expect(resolve('@a+b take it', [candidate('a+b')])).toEqual({ names: ['a+b'], all: false })
+  })
+})
+
+describe('startsMentionAt', () => {
+  it('accepts the boundary a body start, punctuation, and CJK prose offer', () => {
+    expect(startsMentionAt('@tars', 0)).toBe(true)
+    expect(startsMentionAt('(@tars', 1)).toBe(true)
+    expect(startsMentionAt('请@tars', 1)).toBe(true)
+    expect(startsMentionAt('，@tars', 1)).toBe(true)
+  })
+
+  it('rejects the inside of an ASCII word and a doubled @, which the scan also keeps prose', () => {
+    expect(startsMentionAt('mail@tars', 4)).toBe(false)
+    expect(startsMentionAt('tars_@', 5)).toBe(false)
+    expect(startsMentionAt('@@tars', 1)).toBe(false)
   })
 })
 
