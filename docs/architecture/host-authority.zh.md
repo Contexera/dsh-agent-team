@@ -155,6 +155,8 @@ Human 的显示名与头像引用存放在 Team Host row 自己的 Config。sett
 
 已退役的 `agent-team-human` section 不再是权威。rc.1 的 settings importer 通过一份封闭的内置映射搬运 section。第三方 section 会留在改名后的 legacy document 里。启动时某个字段在当前 namespace 里没存过，就从那里收养它，走设置页同一条写入路径；该 section 只带名字与头像引用，已经重新填过的值优先。
 
+只有 Host row 有这条迁移路径：profile patch 用改名前的 id（`wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}`）覆盖其余五行之一的，会被跳过——没有 loader entry 认这个 id，Team 回落到该行的出厂值。手改过 Team preset 或 preset 注册表 `default` 的，升级后要重新应用一次。
+
 设置页由四个 typed Remote 服务。`humanProfile` 提供名字、头像引用与版本脚注 facts。`putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` 只收图片，与 attachments 共用 10 MB 上限。已删除的条目读取时抛错，Client 回退到首字母。
 
 脚注携带本 Host 实际运行的那份 bundle 的版本，以及 repository 链接。版本从已安装包自己的 manifest 读取，因此陈述的是 profile 真正装上的版本，而不是每次发版都得记得改的字符串。当后台检查观察到更新的已发布 release，再多一条点名这个版号的更新 tip。

@@ -166,6 +166,8 @@ At boot the Host reads those values out of the profile's own patch document and 
 
 The retired `agent-team-human` section is no longer an authority: the rc.1 settings importer carries sections across through a closed built-in mapping, so a third-party section stays behind in the renamed legacy document. A boot that finds a field unset in the current namespace adopts it from there through the same write path the settings page uses — the section carries the name and the avatar reference only — and anything already re-entered wins.
 
+Only the Host row has this migration path: a profile patch that addresses one of the other five renamed rows by its pre-rename id — `wowyuarm-agent-team-{scope,preset-registry,preset-team-member,client,invariant}` — is skipped, because no loader entry answers to that id, so Team falls back to that row's shipped values. A hand edit to the Team preset or to the preset registry's `default` has to be re-applied after upgrading.
+
 Four typed Remotes serve the settings page: `humanProfile` (name, avatar reference, and version footnote facts) and `putHumanAvatar`/`getHumanAvatar`/`removeHumanAvatar` (images only, 10 MB cap shared with attachments; a removed entry throws and the Client falls back to the initial).
 
 The footnote carries the version of the bundle this Host runs from — read from the installed package's own manifest, so it states what the profile actually installed rather than a string every release must remember to bump — plus the repository link and an update tip. The tip names the newer version once a background check has observed a newer published release.
