@@ -4,20 +4,11 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { teamTools } from './render-text.ts'
 
 /**
- * Execution-level tests for blank-parameter tolerance: some models fill every
- * optional slot with `""` (or `0`/`false`) instead of omitting it, and the tool
- * guards ask `!== undefined`. These lock the three observed failure loops shut:
- * blank addresses (23 rejections in one real session), a reply that carried a
- * stray `projectRef` being told to fetch a token it already held (7 rejections),
- * and a blank `body` being reported as a generic missing-property error.
- *
- * The same fill-every-slot habit produces one more shape: a read that carries a
- * page size. `read` is the one action that returns a bounded batch by design —
- * the Host's read request has no `limit` at all — so a `limit` there is the
- * model asking for something the action cannot deliver, and refusing the whole
- * call teaches it nothing (one real session retried the identical arguments
- * twice after being told to drop them). `history`, whose request really does
- * carry `limit`, keeps refusing it.
+ * Execution-level tests for blank-parameter edge cases. The blanket
+ * fill-every-slot success shapes are covered by optional-slot-matrix.spec.ts;
+ * these tests keep the blanks that still need their own outcome: a genuine
+ * missing direction, real kind/sourceThreadRefs misuse, a stray projectRef,
+ * an empty body, and the page-size split between read and history.
  */
 
 const THREAD = 'thread:d78400e4-4925-4065-87b1-3f81b4a4b5fb'
@@ -71,64 +62,7 @@ async function call(tool: ToolDefinition, args: Record<string, unknown>, host: R
   return await tool.execute(args, { agent, callId: 'call:1', signal: new AbortController().signal } as never)
 }
 
-describe('blank optional parameters count as not passed', () => {
-  it('a read with every slot blanked resolves the Thread instead of addressing the Main stream', async () => {
-    const host = threadHost()
-    await call(teamTools().get('team_thread')!, { action: 'read', threadRef: THREAD, projectRef: '', taskRef: '', messageRef: '', beforeSequence: 0, limit: 0, workspace: 'workspace:alpha' }, host)
-    const read = host.readThreadForAgent as ReturnType<typeof vi.fn>
-    expect(read).toHaveBeenCalledTimes(1)
-    expect(read.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD })
-  })
-
-  it('a reply whose slots are blanked commits instead of demanding a token it already holds', async () => {
-    const host = messageHost()
-    await call(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 20, body: 'x', projectRef: '', taskRef: '', replyToMessageRef: '' }, host)
-    const reply = host.replyForAgent as ReturnType<typeof vi.fn>
-    expect(reply).toHaveBeenCalledTimes(1)
-    expect(reply.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD, baseRevision: 20 })
-  })
-
-  it('a reply carrying the start default kind and empty collections commits instead of being read as a missing token', async () => {
-    // The observed 6.1-sol shape: kind: 'discussion' and sourceThreadRefs: []
-    // on a reply. The old guard folded kind into the token check and reported
-    // "requires threadRef and a positive baseRevision" even though both were
-    // present, sending the model to fix the wrong parameter.
-    const host = messageHost()
-    await call(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 20, body: 'x',
-      kind: 'discussion', accountable: '', attachments: [], sourceThreadRefs: [], projectRef: '', replyToMessageRef: '', taskRef: '' }, host)
-    const reply = host.replyForAgent as ReturnType<typeof vi.fn>
-    expect(reply).toHaveBeenCalledTimes(1)
-    expect(reply.mock.calls[0]![1]).toMatchObject({ threadRef: THREAD, baseRevision: 20, body: 'x' })
-    expect(reply.mock.calls[0]![1]).not.toHaveProperty('kind')
-    expect(reply.mock.calls[0]![1]).not.toHaveProperty('sourceThreadRefs')
-  })
-
-  it('a reply that really asks for kind: task is still told kind belongs to start', async () => {
-    const host = messageHost()
-    const refusal = await call(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 20, body: 'x', kind: 'task' }, host)
-      .then(() => { throw new Error('the refusal was not thrown') }, (error: Error) => error)
-    expect(refusal.message).toContain('kind')
-    expect(refusal.message).toContain('action: start')
-    expect(host.replyForAgent).not.toHaveBeenCalled()
-  })
-
-  it('a board with blanked numeric and boolean slots lists instead of refusing the whole board', async () => {
-    const board = vi.fn((_agent: unknown, _request: Record<string, unknown>) => ({ open: [], finished: [], finishedTruncated: false }))
-    const host = threadHost({ taskBoardForAgent: board })
-    await call(teamTools().get('team_task')!, { action: 'board', projectRef: '', mine: false, taskRef: '', threadRef: '', baseRevision: 0 }, host)
-    expect(board).toHaveBeenCalledTimes(1)
-  })
-
-  it('a board with a blanked direction slot lists instead of demanding direction', async () => {
-    // The observed 6.1-sol shape: every optional slot filled, including the
-    // claim-only `direction`; it retried this identical shape three times.
-    const board = vi.fn((_agent: unknown, _request: Record<string, unknown>) => ({ open: [], finished: [], finishedTruncated: false }))
-    const host = threadHost({ taskBoardForAgent: board })
-    await call(teamTools().get('team_task')!, { action: 'board', accountable: '', baseRevision: 0, claimRef: '', direction: '',
-      mine: false, projectRef: '', target: '', taskRef: '', threadRef: '', workspace: 'workspace:alpha' }, host)
-    expect(board).toHaveBeenCalledTimes(1)
-  })
-
+describe('a blank slot still fails where the action needs a value', () => {
   it('a claim with a blank direction still reports the missing direction rather than writing', async () => {
     const change = vi.fn()
     const host = threadHost({ changeClaimForAgent: change })
@@ -138,19 +72,14 @@ describe('blank optional parameters count as not passed', () => {
   })
 })
 
-describe('a post that declares a start-only kind still posts', () => {
-  it('a Main stream post carrying kind, accountable, and an empty sourceThreadRefs commits instead of refusing', async () => {
-    const post = vi.fn(async (_agent: unknown, _request: Record<string, unknown>) => ({
-      kind: 'committed', receipt: { occurredAt: '2026-10-27T06:00:00.000Z' }, message: { messageRef: 'message:post', projectRef: PROJECT },
-    }))
-    const host = messageHost({ postMainMessageForAgent: post })
-    await call(teamTools().get('team_message')!, { action: 'post', projectRef: PROJECT, body: 'plain Main stream message',
-      kind: 'discussion', accountable: '', sourceThreadRefs: [], attachments: [], baseRevision: 0, threadRef: '', taskRef: '' }, host)
-    expect(post).toHaveBeenCalledTimes(1)
-    expect(post.mock.calls[0]![1]).toMatchObject({ projectRef: PROJECT, body: 'plain Main stream message' })
-    // None of the start-only parameters may reach the Host post request.
-    expect(post.mock.calls[0]![1]).not.toHaveProperty('kind')
-    expect(post.mock.calls[0]![1]).not.toHaveProperty('sourceThreadRefs')
+describe('start-only parameters keep their owning action', () => {
+  it('a reply that really asks for kind: task is still told kind belongs to start', async () => {
+    const host = messageHost()
+    const refusal = await call(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 20, body: 'x', kind: 'task' }, host)
+      .then(() => { throw new Error('the refusal was not thrown') }, (error: Error) => error)
+    expect(refusal.message).toContain('kind')
+    expect(refusal.message).toContain('action: start')
+    expect(host.replyForAgent).not.toHaveBeenCalled()
   })
 
   it('a post that really names sources is still told they belong to start', async () => {

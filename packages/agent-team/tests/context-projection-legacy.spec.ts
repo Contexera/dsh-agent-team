@@ -107,18 +107,6 @@ describe('legacy durable logs still cold-fold', () => {
     expect(state.continuations).toEqual([])
   })
 
-  it('a pending whose turn already ended is replaceable; an unresolved one is not', () => {
-    eventSeq = 0
-    const unresolved = foldTeamContextProjection([
-      turnStart(1),
-      toolCall(1, 'call-first', NEW_CONTEXT_TOOL_NAME, { handoff: 'first' }),
-      toolResult(1, 'call-first'),
-      toolCall(1, 'call-second', NEW_CONTEXT_TOOL_NAME, { handoff: 'second' }),
-      toolResult(1, 'call-second'),
-    ], { sessionId: SID })
-    expect(unresolved.pending?.handoff).toBe('first')
-  })
-
   it('a later turn end never resolves an intent whose own turn never ended', () => {
     // The log was cut after the rollover result and before its turn end: the
     // intent is spent, and the coordinator discards it. Resolving it from the

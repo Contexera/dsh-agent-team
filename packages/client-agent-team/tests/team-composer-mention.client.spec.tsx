@@ -45,6 +45,7 @@ function status(handle: string, memberId: string): AgentTeamClientMemberStatus {
 const inside = status('@insider', 'member:insider')
 const outsider = status('@outsider', 'member:outsider')
 const follower = status('@follower', 'member:follower')
+const owner = status('@owner', 'member:owner')
 
 function openMenu(ui: ReturnType<typeof render>, text: string): void {
   const textarea = ui.container.querySelector('textarea') as HTMLTextAreaElement
@@ -85,19 +86,24 @@ describe('TeamComposer mention menu', () => {
     expect(groups(ui)).toEqual(['project', 'other'])
   })
 
-  it('lists a Thread\'s follower above another Project member and a Workspace peer', () => {
+  it('lists the owner first, then a Thread\'s follower, a Project member, and a Workspace peer', () => {
     const drafts = new TeamDraftStore()
-    const ui = render(<TeamComposer members={[outsider, inside, follower]}
+    const ui = render(<TeamComposer members={[outsider, inside, follower, owner]}
       followerMemberIds={new Set([follower.member.memberId])}
-      projectMemberIds={new Set([inside.member.memberId, follower.member.memberId])}
+      projectMemberIds={new Set([owner.member.memberId, inside.member.memberId, follower.member.memberId])}
+      ownerMemberIds={new Set([owner.member.memberId])}
       drafts={drafts} draftKey={'thread:thread:one' as never} pending={false} placeholder="" pendingFiles={[]} onSubmit={() => {}} t={t} />)
 
     openMenu(ui, '@')
-    const memberRows = optionTexts(ui).filter(text => /insider|outsider|follower/u.test(text))
-    expect(memberRows[0]).toContain('follower')
-    expect(memberRows[1]).toContain('insider')
-    expect(memberRows[2]).toContain('outsider')
-    expect(groups(ui)).toEqual(['thread', 'project', 'other'])
+    const memberRows = optionTexts(ui).filter(text => /owner|insider|outsider|follower/u.test(text))
+    expect(memberRows[0]).toContain('owner')
+    expect(memberRows[1]).toContain('follower')
+    expect(memberRows[2]).toContain('insider')
+    expect(memberRows[3]).toContain('outsider')
+    expect(groups(ui)).toEqual(['owner', 'thread', 'project', 'other'])
+    for (const label of [zh.mentionGroupOwner, zh.mentionGroupThread, zh.mentionGroupProject, zh.mentionGroupOther]) {
+      expect(ui.container.textContent).toContain(label)
+    }
   })
 
   it('offers no @all and keeps a typed @all as plain text', () => {

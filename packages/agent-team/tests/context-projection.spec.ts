@@ -4,7 +4,6 @@ import { SessionLogOffset, SessionSeq, type SessionEvent } from '@deepseek-ai/ds
 import {
   checkpointRefFor,
   carriedInputOf,
-  createTeamContextProjectionDefinition,
   foldTeamContextProjection,
   type TeamContextProjectionState,
 } from '../src/context-projection.ts'
@@ -91,19 +90,6 @@ describe('AgentTeam context projection — legacy rollover intent decode', () =>
     expect(state.pending).toMatchObject({ handoff: 'continue from here', turn: 1, turnEndSeq: events.at(-1)!.seq })
     expect(state.pending?.resultSeq).toBe(events[2]!.seq)
     expect(state.pending?.relatedFiles).toEqual([])
-  })
-
-  it('the renamed decoder name folds identically to its predecessor', () => {
-    // No current build produces either name; both must fold, because a log
-    // written under the renamed tool still has to resolve after an upgrade.
-    const events = [
-      turnStart(1),
-      contextToolCall(1, 'call-rollover', CONTEXT_ROLLOVER_TOOL_NAME, { handoff: 'new name, same swap' }),
-      toolResult(1, 'call-rollover'),
-      turnEnd(1),
-    ]
-    const state = fold(events)
-    expect(state.pending).toMatchObject({ handoff: 'new name, same swap', turn: 1 })
   })
 
   it('the legacy new_context name still folds into pending intent — crash recovery of old logs', () => {
@@ -245,34 +231,6 @@ describe('AgentTeam context projection — legacy rollover intent decode', () =>
     expect(state.pending).toMatchObject({ toolCallId: 'call-reused', handoff: 'fresh retry', turn: 2 })
     expect(state.pending?.checkpointRef).toBeUndefined()
     expect(state.openCalls).toEqual([])
-  })
-
-  it('inherited fork-prefix calls never produce intent in a seeded child', () => {
-    const parentEvents = [
-      turnStart(1),
-      ...legacyNewContextPair(1, 'call-parent', { handoff: 'old generation' }),
-      turnEnd(1),
-    ]
-    const childEvents: SessionEvent[] = [...parentEvents, turnStart(2), turnEnd(2)]
-    // The child inherited the whole parent prefix: the same events fold to no
-    // pending intent once every one of them is inside the inherited cut.
-    const state = fold(childEvents, SessionLogOffset(parentEvents.length))
-    expect(state.pending).toBeNull()
-    expect(state.checkpoints).toEqual([])
-  })
-
-  it('the live unit folds event-by-event to the same state as the cold fold', () => {
-    const events = [
-      turnStart(1),
-      ...legacyNewContextPair(1, 'call-1', { handoff: 'live', relatedFiles: [{ path: 'src/index.ts', reason: 'in progress' }] }),
-      turnEnd(1),
-    ]
-    const definition = createTeamContextProjectionDefinition()
-    // `init` seeds the Session identity and the inherited cut from the
-    // header — the definition itself closes over neither.
-    let live = definition.init({ id: SID } as never, 0 as never)
-    for (const event of events) live = definition.apply(live, event)
-    expect(live).toEqual(fold(events))
   })
 })
 

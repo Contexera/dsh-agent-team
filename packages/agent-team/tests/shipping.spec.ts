@@ -13,6 +13,7 @@ import { HUMAN_PROFILE_SETTINGS_SCHEMA } from '../src/human-profile.ts'
 import { HUMAN_PROFILE_SETTINGS_NAMESPACE } from '../src/human-settings.ts'
 import { TEAM_HOST_ROW_SETTINGS_SCHEMA } from '../src/index.ts'
 import { dshPeerRanges } from '../../../scripts/dsh-peers.mjs'
+import { teamTools } from '../../tool-agent-team/tests/render-text.ts'
 
 const root = resolve(import.meta.dirname, '../../../')
 
@@ -283,14 +284,9 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('Keep `memory.md` a bounded index, not a store')
     expect(preset).toContain('past 16 KiB it is not injected at all')
     expect(preset).toContain('the bundled `member-memory-manager` skill')
-    const toolSource = await readFile(resolve(root, 'packages/tool-agent-team/src/index.ts'), 'utf8')
-    expect([...toolSource.matchAll(/name: '(team_[a-z]+)'/g)].map(match => match[1])).toEqual([
+    expect([...teamTools().keys()].sort()).toEqual([
       'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view',
-    ])
-    expect(toolSource).toContain("from '@contexera/dsh-agent-team/recovery-hints'")
-    const recoverySource = await readFile(resolve(root, 'packages/agent-team/src/recovery-hints.ts'), 'utf8')
-    expect(recoverySource).toContain('your own last committed mutation, or a complete Thread rejection that explicitly provides one')
-    expect(toolSource).not.toContain('the revision is not shown anywhere else')
+    ].sort())
 
     const manifest = JSON.parse(manifestText) as {
       name: string

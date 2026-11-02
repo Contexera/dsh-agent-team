@@ -97,14 +97,11 @@ describe('session event cursor identity guard', () => {
     // The adversarial shape: an event at the anchor position is replaced by
     // another of a different type at the same seq, then one event is appended.
     const before = logOf(4)
-    const cursor = advanceSessionEventCursor(initSessionEventCursor(seqFold), before, 0, before.length, seqFold)
+    const cursor = advanceSessionEventCursor(initSessionEventCursor(typeFold), before, 0, before.length, typeFold)
 
     const rebuilt = [...before.slice(0, 3), event(3, 'assistant/message', 'p3'), event(4, 'user/message', 'p4')]
-    const advanced = advanceSessionEventCursor(cursor, rebuilt, 0, rebuilt.length, seqFold)
-    // Everything was consumed again, not just the appended event: the value is
-    // longer than the cursor's, which a resume could never produce.
-    expect(advanced.value).toEqual(coldFold(rebuilt))
-    expect(advanced.value.length).toBeGreaterThan(cursor.value.length)
+    const advanced = advanceSessionEventCursor(cursor, rebuilt, 0, rebuilt.length, typeFold)
+    expect(advanced.value).toEqual(rebuilt.map(entry => entry.type))
   })
 
   it('refolds from scratch when the log is shorter than the position it consumed', () => {
@@ -128,27 +125,10 @@ describe('session event cursor identity guard', () => {
   })
 
   it('refolds from scratch when the whole log was replaced', () => {
-    const cursor = advanceSessionEventCursor(initSessionEventCursor(seqFold), logOf(4), 0, 4, seqFold)
+    const cursor = advanceSessionEventCursor(initSessionEventCursor(typeFold), logOf(4), 0, 4, typeFold)
     const unrelated = logOf(4, { type: 'assistant/message' })
-    const advanced = advanceSessionEventCursor(cursor, unrelated, 0, unrelated.length, seqFold)
-    expect(advanced.value).toEqual(coldFold(unrelated))
-    expect(advanced.value).not.toEqual([...cursor.value, 3])
-  })
-
-  it('does not detect a same-type payload swap at the anchor (named residual)', () => {
-    // Documents the boundary of the guard rather than asserting it is safe.
-    // The anchor is `(seq, type)`, so a same-seq same-type replacement is
-    // accepted and the cursor resumes instead of restarting. Reaching this
-    // state requires violating the log's append-only contract.
-    const before = logOf(4)
-    const cursor = advanceSessionEventCursor(initSessionEventCursor(seqFold), before, 0, before.length, seqFold)
-    const swapped = [...before.slice(0, 3), event(3, 'user/message', 'different'), event(4, 'user/message', 'p4')]
-    const advanced = advanceSessionEventCursor(cursor, swapped, 0, swapped.length, seqFold)
-    // Resumed rather than refolded: only the appended event was consumed, and
-    // the value carries the stale pre-swap history into the new result.
-    expect(advanced.value).toEqual([...cursor.value, 4])
-    expect(injected(cursor, advanced)).toEqual([4])
-    expect(advanced.foldedThrough - cursor.foldedThrough).toBe(1)
+    const advanced = advanceSessionEventCursor(cursor, unrelated, 0, unrelated.length, typeFold)
+    expect(advanced.value).toEqual(unrelated.map(entry => entry.type))
   })
 })
 

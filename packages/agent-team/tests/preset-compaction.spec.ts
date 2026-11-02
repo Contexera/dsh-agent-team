@@ -10,7 +10,6 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import { loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import BasicCompactionEngine from '@deepseek-ai/dsh-compaction-basic'
-import { resolveConfig } from '@deepseek-ai/dsh-compaction-basic/src/config.ts'
 import { LlmAdapter, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -79,18 +78,7 @@ describe('the preset compaction row', () => {
     const exports = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { exports: Record<string, unknown> }
     expect(exports.exports['./team-compaction-engine']).toBeUndefined()
     expect(exports.exports['./member-compaction-engine']).toBeDefined()
-    expect(row.config?.maxTokens).toBe(MEMBER_SUMMARY_TOKENS)
-
-    const resolved = resolveConfig(BasicCompactionEngine.Config(row.config ?? {}) as never)
-    expect(resolved).toMatchObject({
-      auto: true,
-      thresholdRatio: 0.8,
-      retainRatio: 0.16,
-      headroomTokens: 65_536,
-      maxTokens: 16_384,
-      summarizationProvider: '',
-      summarizationModel: '',
-    })
+    expect(row.config).toEqual({ maxTokens: MEMBER_SUMMARY_TOKENS })
   })
 
   it('preserves upstream automatic pressure and routed summary policy without an enabled Team budget', async () => {

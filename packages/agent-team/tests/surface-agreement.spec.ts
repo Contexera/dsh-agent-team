@@ -141,9 +141,8 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     expect(ordinary).toHaveLength(1)
     // An ordinary notice renders a count and not one character of body, so the
     // probe correctly refuses to attest it and the write stays gated.
-    const ordinaryText = 'Task task:abc: 1 unread update · newest at 2026-10-14T00:00:00.000Z.'
-    const ordinaryBody = ordinary[0]!.fact.kind === 'message' ? ordinary[0]!.fact.message.body : ''
-    expect(ordinaryText).not.toContain(ordinaryBody)
+    const ordinaryText = state.calls[0]!.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
+    expect(ordinaryText).not.toContain(body)
     expect(isFactOnSurface(visibleTeamSurface(agent), ordinary[0]!, anchor.thread.threadRef)).toBe(false)
   })
 })

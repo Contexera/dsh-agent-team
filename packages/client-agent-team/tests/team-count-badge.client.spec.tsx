@@ -32,25 +32,14 @@ describe('TeamCountBadge', () => {
   })
 
   it('names itself when the count is the only thing saying it', () => {
-    const { container } = render(<TeamCountBadge count={3} label="3 条未读，其中 1 条提及" />)
+    const { container } = render(<TeamCountBadge count={3} label="3 条未读，其中 1 条提及" tone="hairline" className="hung" />)
     const badge = container.querySelector('[data-team-count-badge]')!
+    expect(badge.getAttribute('data-team-count-badge')).toBe('hairline')
     expect(badge.getAttribute('role')).toBe('img')
     expect(badge.getAttribute('aria-label')).toBe('3 条未读，其中 1 条提及')
     expect(badge.getAttribute('title')).toBe('3 条未读，其中 1 条提及')
     expect(badge.textContent).toBe('3')
-  })
-
-  it('carries the tone and the hanging surface, and no geometry of its own', () => {
-    const { container } = render(<TeamCountBadge count={1} tone="hairline" className="hung" />)
-    const badge = container.querySelector('[data-team-count-badge]')!
-    expect(badge.getAttribute('data-team-count-badge')).toBe('hairline')
-    expect(hasClassToken(badge, 'badge')).toBe(true)
     expect(hasClassToken(badge, 'hairline')).toBe(true)
     expect(hasClassToken(badge, 'hung')).toBe(true)
-    cleanup()
-    const { container: solid } = render(<TeamCountBadge count={1} />)
-    const plain = solid.querySelector('[data-team-count-badge]')!
-    expect(hasClassToken(plain, 'hairline')).toBe(false)
-    expect(plain.getAttribute('data-team-count-badge')).toBe('solid')
   })
 })

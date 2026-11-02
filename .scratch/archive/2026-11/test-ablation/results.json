@@ -1,0 +1,971 @@
+{
+  "date": "2026-11-02",
+  "baseCommit": "41c94aa57a9041270f1e58bddceac7c41545cb79",
+  "harnessCommit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "node": "v24.15.0",
+  "scope": {
+    "changedTestFiles": 22,
+    "productionFilesChanged": 0,
+    "packagePatchSha256": "e0eb7829efbbbf4bcb6e7763ef0817e96d4ef2197e8aa997f8357c1520e7de39"
+  },
+  "baseline": {
+    "files": 141,
+    "passed": 1592,
+    "failed": 0,
+    "skipped": 1,
+    "total": 1593,
+    "packages": {
+      "agent-team": 1050,
+      "tool-agent-team": 151,
+      "client-agent-team": 391
+    }
+  },
+  "final": {
+    "files": 141,
+    "passed": 1568,
+    "failed": 0,
+    "skipped": 1,
+    "total": 1569,
+    "packages": {
+      "agent-team": 1038,
+      "tool-agent-team": 144,
+      "client-agent-team": 386
+    }
+  },
+  "reduction": {
+    "tests": 24,
+    "linesAdded": 80,
+    "linesRemoved": 403,
+    "netLinesRemoved": 323
+  },
+  "verifiedFaultCount": 30,
+  "detectedBeforeAndAfter": 27,
+  "detectedOnlyAfter": 3,
+  "experiments": [
+    {
+      "id": "timestamp-zone",
+      "source": "packages/agent-team/src/time-format.ts",
+      "mutation": {
+        "before": "const TEAM_ZONE_OFFSET_MINUTES = 8 * 60",
+        "after": "const TEAM_ZONE_OFFSET_MINUTES = 0"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/time-format.spec.ts",
+        "packages/agent-team/tests/member-time.spec.ts",
+        "packages/agent-team/tests/member-time-context.spec.ts"
+      ],
+      "original": {
+        "total": 39,
+        "failed": 5
+      },
+      "reduced": {
+        "total": 36,
+        "failed": 4
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/member-time-context.spec.ts",
+          "name": "renderClockSnapshot states elapsed explicitly renders the fixed UTC+8 instant, the elapsed span, and the ordering note"
+        },
+        {
+          "file": "packages/agent-team/tests/time-format.spec.ts",
+          "name": "formatTeamTimestamp renders the fixed UTC+8 coordination zone renders one stored UTC instant with an explicit +08:00 offset"
+        },
+        {
+          "file": "packages/agent-team/tests/time-format.spec.ts",
+          "name": "formatTeamTimestamp renders the fixed UTC+8 coordination zone crosses the date boundary in the coordination zone, not UTC"
+        },
+        {
+          "file": "packages/agent-team/tests/time-format.spec.ts",
+          "name": "formatTeamTimestamp renders the fixed UTC+8 coordination zone preserves second granularity without sub-second noise"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "timestamp-seconds",
+      "source": "packages/agent-team/src/time-format.ts",
+      "mutation": {
+        "before": "pad(shifted.getUTCSeconds())",
+        "after": "pad(0)"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/time-format.spec.ts"
+      ],
+      "original": {
+        "total": 10,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 8,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/time-format.spec.ts",
+          "name": "formatTeamTimestamp renders the fixed UTC+8 coordination zone preserves second granularity without sub-second noise"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "rollover-modern-name",
+      "source": "packages/agent-team/src/context-projection.ts",
+      "mutation": {
+        "before": "TEAM_ROLLOVER_TOOL_NAMES.includes(name)",
+        "after": "name === NEW_CONTEXT_TOOL_NAME"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/context-projection.spec.ts",
+        "packages/agent-team/tests/context-projection-legacy.spec.ts"
+      ],
+      "original": {
+        "total": 32,
+        "failed": 4
+      },
+      "reduced": {
+        "total": 28,
+        "failed": 3
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/context-projection.spec.ts",
+          "name": "AgentTeam context projection — legacy rollover intent decode the legacy new_context name still folds into pending intent — crash recovery of old logs"
+        },
+        {
+          "file": "packages/agent-team/tests/context-projection.spec.ts",
+          "name": "AgentTeam context projection — legacy rollover intent decode a spent pending from the legacy new_context name is replaceable by a modern-name retry"
+        },
+        {
+          "file": "packages/agent-team/tests/context-projection.spec.ts",
+          "name": "AgentTeam context projection — legacy rollover intent decode a provider retry reusing a callId after its error result folds the fresh arguments, not the stale ones"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "rollover-inherited-prefix",
+      "source": "packages/agent-team/src/context-projection.ts",
+      "mutation": {
+        "before": "if (event.seq < state.inheritedEventCount) return state",
+        "after": "if (event.seq < 0) return state"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/context-projection.spec.ts",
+        "packages/agent-team/tests/context-projection-legacy.spec.ts"
+      ],
+      "original": {
+        "total": 32,
+        "failed": 3
+      },
+      "reduced": {
+        "total": 28,
+        "failed": 2
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/context-projection-legacy.spec.ts",
+          "name": "legacy durable logs still cold-fold the inherited prefix of a seeded generation folds none of the ancestor facts"
+        },
+        {
+          "file": "packages/agent-team/tests/context-projection.spec.ts",
+          "name": "AgentTeam context projection — the engine unit Team registers records the inherited cut it was given, so a seeded child keeps none of the ancestor facts"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "rollover-live-apply",
+      "source": "packages/agent-team/src/context-projection.ts",
+      "mutation": {
+        "before": "apply: (state, event) => step(state, event),",
+        "after": "apply: (state, _event) => state,"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/context-projection.spec.ts",
+        "packages/agent-team/tests/context-projection-legacy.spec.ts"
+      ],
+      "original": {
+        "total": 32,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 28,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/context-projection-legacy.spec.ts",
+          "name": "one registration and one cached-row shape the live unit applying one event at a time equals the cold fold of the recorded log"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "rollover-pending-overwrite",
+      "source": "packages/agent-team/src/context-projection.ts",
+      "mutation": {
+        "before": "if (state.pending !== null && state.pending.turnEndSeq === -1) return { ...state, openCalls }",
+        "after": "if (state.pending !== null && state.pending.turnEndSeq === -2) return { ...state, openCalls }"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/context-projection.spec.ts",
+        "packages/agent-team/tests/context-projection-legacy.spec.ts"
+      ],
+      "original": {
+        "total": 32,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 28,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/context-projection.spec.ts",
+          "name": "AgentTeam context projection — legacy rollover intent decode a second successful call before the turn ends does not replace the first intent"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "memory-skills-path",
+      "source": "packages/agent-team/src/member-context.ts",
+      "mutation": {
+        "before": "Private skills directory: ${privateMemoryPath}/skills",
+        "after": "Private skills directory: ${privateMemoryPath}/wrong-skills"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/member-context.spec.ts"
+      ],
+      "original": {
+        "total": 7,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 6,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/member-context.spec.ts",
+          "name": "Team Member private memory context escapes framing and preserves a bounded private index"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "remote-method-drift",
+      "source": "packages/agent-team/src/index.ts",
+      "mutation": {
+        "before": "@Remote('view')",
+        "after": "@Remote('viewProbe')"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/typert-generation.spec.ts"
+      ],
+      "original": {
+        "total": 2,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 1,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/typert-generation.spec.ts",
+          "name": "Agent Team generated Typert boundary publishes exactly the intended Agent Team Client boundary"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "preset-ratio-override",
+      "source": "cordis.patch.yml",
+      "mutation": {
+        "before": "                    maxTokens: 16384",
+        "after": "                    maxTokens: 16384\n                    thresholdRatio: 0.5"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/preset-compaction.spec.ts"
+      ],
+      "original": {
+        "total": 2,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 2,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/preset-compaction.spec.ts",
+          "name": "the preset compaction row names the Team admission adapter while keeping the engine ratios"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "cursor-anchor-type-observable",
+      "source": "packages/agent-team/src/session-event-cursor.ts",
+      "mutation": {
+        "before": "seen !== undefined && seen.seq === anchor.seq && seen.type === anchor.type",
+        "after": "seen !== undefined && seen.seq === anchor.seq"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/session-event-cursor.spec.ts"
+      ],
+      "original": {
+        "total": 13,
+        "failed": 0
+      },
+      "reduced": {
+        "total": 12,
+        "failed": 2
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/session-event-cursor.spec.ts",
+          "name": "session event cursor identity guard refolds from scratch when the anchor event type changed at the same position"
+        },
+        {
+          "file": "packages/agent-team/tests/session-event-cursor.spec.ts",
+          "name": "session event cursor identity guard refolds from scratch when the whole log was replaced"
+        }
+      ],
+      "status": "detected-only-after"
+    },
+    {
+      "id": "registered-tool-omission",
+      "source": "packages/tool-agent-team/src/index.ts",
+      "mutation": {
+        "before": "  ctx.tools.register(teamView)",
+        "after": ""
+      },
+      "testFiles": [
+        "packages/agent-team/tests/shipping.spec.ts"
+      ],
+      "original": {
+        "total": 6,
+        "failed": 0
+      },
+      "reduced": {
+        "total": 6,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/shipping.spec.ts",
+          "name": "Agent Team shipping contract ships an opt-in Host patch and one explicit team-member preset"
+        }
+      ],
+      "status": "detected-only-after"
+    },
+    {
+      "id": "blank-zero-arguments",
+      "source": "packages/tool-agent-team/src/index.ts",
+      "mutation": {
+        "before": "value === '' || value === 0 || value === false",
+        "after": "value === '' || value === false"
+      },
+      "testFiles": [
+        "packages/tool-agent-team/tests/blank-parameter-tolerance.spec.ts",
+        "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts"
+      ],
+      "original": {
+        "total": 36,
+        "failed": 8
+      },
+      "reduced": {
+        "total": 30,
+        "failed": 5
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_thread message"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_message start"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_message post"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_task board"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_task list"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "blank-collection-arguments",
+      "source": "packages/tool-agent-team/src/index.ts",
+      "mutation": {
+        "before": " || (Array.isArray(value) && value.length === 0)",
+        "after": ""
+      },
+      "testFiles": [
+        "packages/tool-agent-team/tests/blank-parameter-tolerance.spec.ts",
+        "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts"
+      ],
+      "original": {
+        "total": 36,
+        "failed": 3
+      },
+      "reduced": {
+        "total": 30,
+        "failed": 2
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_message start"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_message reply"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "reply-discussion-default",
+      "source": "packages/tool-agent-team/src/index.ts",
+      "mutation": {
+        "before": "if (args.kind !== undefined && args.kind !== 'discussion')",
+        "after": "if (args.kind !== undefined)"
+      },
+      "testFiles": [
+        "packages/tool-agent-team/tests/blank-parameter-tolerance.spec.ts",
+        "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts"
+      ],
+      "original": {
+        "total": 36,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 30,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/tool-agent-team/tests/optional-slot-matrix.spec.ts",
+          "name": "every action tolerates every optional slot filled with its neutral value team_message reply"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "rejection-direct-count",
+      "source": "packages/tool-agent-team/src/index.ts",
+      "mutation": {
+        "before": "${value.directCount ?? 0} direct` : identity",
+        "after": "0 direct` : identity"
+      },
+      "testFiles": [
+        "packages/tool-agent-team/tests/team-tools-render.spec.ts",
+        "packages/tool-agent-team/tests/team-rejection-payload.spec.ts"
+      ],
+      "original": {
+        "total": 75,
+        "failed": 3
+      },
+      "reduced": {
+        "total": 75,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "unread_required renders the facts it is gating on renders every unread fact body, keeps the counts, and hands back the current revision"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "rejection-write-token",
+      "source": "packages/tool-agent-team/src/index.ts",
+      "mutation": {
+        "before": "[nextWriteLine(value.revision)]",
+        "after": "[]"
+      },
+      "testFiles": [
+        "packages/tool-agent-team/tests/team-tools-render.spec.ts",
+        "packages/tool-agent-team/tests/team-rejection-payload.spec.ts"
+      ],
+      "original": {
+        "total": 75,
+        "failed": 12
+      },
+      "reduced": {
+        "total": 75,
+        "failed": 10
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "unread_required renders the facts it is gating on renders every unread fact body, keeps the counts, and hands back the current revision"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "unread_required renders the facts it is gating on renders activity facts, not just messages"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "unread_required renders the facts it is gating on a rejection carrying no facts still renders the token and the read route"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "stale_revision renders the increment it rejected against renders the facts added since the stale baseRevision and the current revision"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "stale_revision renders the increment it rejected against names the increment window so the model knows what the span covers"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "stale_revision renders the increment it rejected against an empty increment still hands back the current revision"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "the claim mutation shares the same rejection shape unread_required on team_task renders the bodies and the token too"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "the claim mutation shares the same rejection shape stale_revision on team_task renders the increment and the token"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-rejection-payload.spec.ts",
+          "name": "the rejection render never invents a second write token the recovery sentence stays a route to read, and does not repeat the token"
+        },
+        {
+          "file": "packages/tool-agent-team/tests/team-tools-render.spec.ts",
+          "name": "team_task renders Task resolutions and transfers a rejection on a resolution keeps the shared form and the Task standing"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "thread-read-identity",
+      "source": "packages/tool-agent-team/src/index.ts",
+      "mutation": {
+        "before": "`${value.threadRef}${standing === '' ? '' : ` · ${standing}`} · ${value.following ? 'following' : 'not following'}`",
+        "after": "`thread:other${standing === '' ? '' : ` · ${standing}`} · ${value.following ? 'following' : 'not following'}`"
+      },
+      "testFiles": [
+        "packages/tool-agent-team/tests/team-thread-render.spec.ts"
+      ],
+      "original": {
+        "total": 12,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 11,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/tool-agent-team/tests/team-thread-render.spec.ts",
+          "name": "team_thread renders Task accountability with the Task standing a read of a Taskful Thread names its accountable owner on the identity line"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "ordinary-notice-body-leak-verified",
+      "source": "packages/agent-team/src/index.ts",
+      "mutation": {
+        "before": "text: () => `${route}: ${count} unread update${count === 1 ? '' : 's'} · newest at ${newestAt}.` })",
+        "after": "text: () => `${route}: ${count} unread update${count === 1 ? '' : 's'} · newest at ${newestAt}.\\n${ordinary.map(entry => entry.fact.kind === 'message' ? entry.fact.message.body : '').join('\\n')}` })"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/surface-agreement.spec.ts"
+      ],
+      "original": {
+        "total": 2,
+        "failed": 0
+      },
+      "reduced": {
+        "total": 2,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/surface-agreement.spec.ts",
+          "name": "the Host notice rendering and the probe agree on the same bytes an ordinary notice carries no body, so its own fact stays unexempt"
+        }
+      ],
+      "status": "detected-only-after"
+    },
+    {
+      "id": "inbox-role",
+      "source": "packages/agent-team/src/inbox-delivery.ts",
+      "mutation": {
+        "before": "role: item.attention === undefined ? 'member' : 'follower'",
+        "after": "role: 'member'"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/inbox-delivery.spec.ts"
+      ],
+      "original": {
+        "total": 13,
+        "failed": 4
+      },
+      "reduced": {
+        "total": 11,
+        "failed": 3
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/inbox-delivery.spec.ts",
+          "name": "every unread Thread fact interrupts, whatever the reader owns a Project owner gets one ordinary update immediately"
+        },
+        {
+          "file": "packages/agent-team/tests/inbox-delivery.spec.ts",
+          "name": "every unread Thread fact interrupts, whatever the reader owns carries an ordinary update alongside a mention instead of waiting for it"
+        },
+        {
+          "file": "packages/agent-team/tests/inbox-delivery.spec.ts",
+          "name": "the scope role names why the Thread is in scope, not how fast the notice travels a reader holding Attention is a follower"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "inbox-bounded-totals",
+      "source": "packages/agent-team/src/ledger.ts",
+      "mutation": {
+        "before": "totalUnreadCount: [...candidates, ...main].reduce",
+        "after": "totalUnreadCount: [...selected, ...main].reduce"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/projection-indexes.spec.ts",
+        "packages/agent-team/tests/agent-team-attention.spec.ts"
+      ],
+      "original": {
+        "total": 82,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 82,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/agent-team-attention.spec.ts",
+          "name": "AgentTeam durable Thread Attention ledger reports whole-queue Inbox totals from a bounded one-row read"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "query-rule-kind-order",
+      "source": "packages/client-agent-team/src/client/team-queries.ts",
+      "mutation": {
+        "before": "[...rule.kinds].sort().join(',')",
+        "after": "rule.kinds.join(',')"
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/team-queries.spec.ts"
+      ],
+      "original": {
+        "total": 20,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 19,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-queries.spec.ts",
+          "name": "TeamQueries rule immutability accepts a re-registration that names the same rule, so a factory may rebuild it per render"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "query-rule-workspace",
+      "source": "packages/client-agent-team/src/client/team-queries.ts",
+      "mutation": {
+        "before": "${rule.workspaceId ?? '*'}",
+        "after": "*"
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/team-queries.spec.ts"
+      ],
+      "original": {
+        "total": 20,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 19,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-queries.spec.ts",
+          "name": "TeamQueries rule immutability fails when a later read names a different rule for the same key"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "mention-surface",
+      "source": "packages/client-agent-team/src/client/mention-presentation.ts",
+      "mutation": {
+        "before": "return draftKindOf(draftKey)",
+        "after": "return 'project'"
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/mention-presentation.spec.ts",
+        "packages/client-agent-team/tests/team-composer-mention.client.spec.tsx",
+        "packages/client-agent-team/tests/team-composer-mention-weight.client.spec.tsx"
+      ],
+      "original": {
+        "total": 14,
+        "failed": 3
+      },
+      "reduced": {
+        "total": 12,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-composer-mention.client.spec.tsx",
+          "name": "TeamComposer mention menu lists the owner first, then a Thread's follower, a Project member, and a Workspace peer"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "mention-owner-priority",
+      "source": "packages/client-agent-team/src/client/mention-presentation.ts",
+      "mutation": {
+        "before": "if (roster.owners?.has(id) === true) return 'owner'",
+        "after": "if (roster.owners?.has(id) === true) return 'project'"
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/mention-presentation.spec.ts",
+        "packages/client-agent-team/tests/team-composer-mention.client.spec.tsx",
+        "packages/client-agent-team/tests/team-composer-mention-weight.client.spec.tsx"
+      ],
+      "original": {
+        "total": 14,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 12,
+        "failed": 2
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/mention-presentation.spec.ts",
+          "name": "mention roster grouping orders owners first, then this Thread, this Project, and the rest"
+        },
+        {
+          "file": "packages/client-agent-team/tests/team-composer-mention.client.spec.tsx",
+          "name": "TeamComposer mention menu lists the owner first, then a Thread's follower, a Project member, and a Workspace peer"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "mention-heading",
+      "source": "packages/client-agent-team/src/client/TeamComposer.tsx",
+      "mutation": {
+        "before": "key === 'owner' ? t('mentionGroupOwner')",
+        "after": "key === 'owner' ? t('mentionGroupOther')"
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/team-composer-mention.client.spec.tsx",
+        "packages/client-agent-team/tests/team-composer-mention-weight.client.spec.tsx"
+      ],
+      "original": {
+        "total": 7,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 6,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-composer-mention.client.spec.tsx",
+          "name": "TeamComposer mention menu lists the owner first, then a Thread's follower, a Project member, and a Workspace peer"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "badge-tone",
+      "source": "packages/client-agent-team/src/client/TeamCountBadge.tsx",
+      "mutation": {
+        "before": "data-team-count-badge={tone}",
+        "after": "data-team-count-badge=\"solid\""
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/team-count-badge.client.spec.tsx",
+        "packages/client-agent-team/tests/team-inbox.client.spec.tsx"
+      ],
+      "original": {
+        "total": 30,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 29,
+        "failed": 2
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-count-badge.client.spec.tsx",
+          "name": "TeamCountBadge names itself when the count is the only thing saying it"
+        },
+        {
+          "file": "packages/client-agent-team/tests/team-inbox.client.spec.tsx",
+          "name": "Team Inbox surfaces lists a Project Main stream as one row among the Thread rows, ordered with them and inked by the same rule"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "badge-hairline-style",
+      "source": "packages/client-agent-team/src/client/TeamCountBadge.tsx",
+      "mutation": {
+        "before": "${tone === 'hairline' ? ` ${css.hairline}` : ''}",
+        "after": ""
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/team-count-badge.client.spec.tsx",
+        "packages/client-agent-team/tests/team-inbox.client.spec.tsx"
+      ],
+      "original": {
+        "total": 30,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 29,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-count-badge.client.spec.tsx",
+          "name": "TeamCountBadge names itself when the count is the only thing saying it"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "badge-container-class",
+      "source": "packages/client-agent-team/src/client/TeamCountBadge.tsx",
+      "mutation": {
+        "before": "${className === undefined ? '' : ` ${className}`}",
+        "after": ""
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/team-count-badge.client.spec.tsx"
+      ],
+      "original": {
+        "total": 5,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 4,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-count-badge.client.spec.tsx",
+          "name": "TeamCountBadge names itself when the count is the only thing saying it"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "main-message-quote-action",
+      "source": "packages/client-agent-team/src/client/TeamMainStream.tsx",
+      "mutation": {
+        "before": "rowActions=\"always\"",
+        "after": "rowActions=\"never\""
+      },
+      "testFiles": [
+        "packages/client-agent-team/tests/team-main-stream.client.spec.tsx"
+      ],
+      "original": {
+        "total": 9,
+        "failed": 2
+      },
+      "reduced": {
+        "total": 8,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/client-agent-team/tests/team-main-stream.client.spec.tsx",
+          "name": "Team Main stream posts a plain message to the Main stream, quoting a Main message when asked"
+        }
+      ],
+      "status": "detected-before-and-after"
+    },
+    {
+      "id": "inbox-sequence-signature-preserved",
+      "source": "packages/agent-team/src/inbox-delivery.ts",
+      "mutation": {
+        "before": "const now = facts.map(entry => entry.fact.sequence)",
+        "after": "const now = facts.map(() => 0)"
+      },
+      "testFiles": [
+        "packages/agent-team/tests/inbox-delivery.spec.ts"
+      ],
+      "original": {
+        "total": 13,
+        "failed": 1
+      },
+      "reduced": {
+        "total": 11,
+        "failed": 1
+      },
+      "remainingFailingTests": [
+        {
+          "file": "packages/agent-team/tests/inbox-delivery.spec.ts",
+          "name": "an unchanged unread set spends no second attempt a new fact or a same-count replacement on the same Thread rederives"
+        }
+      ],
+      "status": "detected-before-and-after"
+    }
+  ],
+  "exploratoryObservations": [
+    {
+      "id": "cursor-anchor-type",
+      "originalFailed": 0,
+      "result": "The original sequence-only assertions missed an anchor type mismatch. Existing assertions now fold event types; cursor-anchor-type-observable detects it."
+    },
+    {
+      "id": "ordinary-notice-body-leak",
+      "result": "The initial mutation matched two branches and was rejected before execution. It is excluded from fault totals; the unique Thread mutation is ordinary-notice-body-leak-verified."
+    },
+    {
+      "id": "inbox-sequence-signature",
+      "originalFailed": 1,
+      "initialReducedFailed": 0,
+      "result": "Append and same-count replacement are different scenarios. The existing retained test now asserts both; inbox-sequence-signature-preserved detects the fault."
+    }
+  ],
+  "checks": {
+    "build": "passed",
+    "typecheck": "passed",
+    "fullSuite": "passed",
+    "lint": "passed with pre-existing unused-variable warnings",
+    "diffCheck": "passed"
+  },
+  "rawEvidence": "artifacts/test-ablation/ (ignored): baseline.json, acceptance.json, acceptance-*.log, per-experiment original/reduced JSON reports and build logs",
+  "limitations": "Representative fault injection, not exhaustive mutation coverage. No test-count or runtime target was used to decide removals. The manually enabled storage benchmark remains skipped."
+}

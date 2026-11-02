@@ -21,6 +21,7 @@
 
 | 月 | 工作项 | 一句话结论 | 链接 |
 | --- | --- | --- | --- |
+| 2026-11 | test-ablation | 通过 30 种故障实验验证测试精简，减少 24 项测试并修正三类漏检。 | [README](archive/2026-11/test-ablation/README.md) |
 | 2026-08 | agent-team-quality-audit | 只读简化与可维护性审查；发现已实施或记为保留/延后，政策结论进架构与开发文档。 | [README](archive/2026-08/agent-team-quality-audit/README.md) |
 | 2026-08 | agent-team-storage-architecture | 设计操作账本持久化（v7→v8 事故后），0.1.0 发布 01+02，03/04/05 延后。 | [README](archive/2026-08/agent-team-storage-architecture/README.md) |
 | 2026-08 | community-outreach | 社区外联操作；发布节奏与产品链接归 root README 与开发文档。 | [README](archive/2026-08/community-outreach/README.md) |

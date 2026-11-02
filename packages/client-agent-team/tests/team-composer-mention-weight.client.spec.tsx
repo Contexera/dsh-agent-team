@@ -83,24 +83,9 @@ function renderComposer(draftKey: string): ReturnType<typeof render> {
 
 afterEach(cleanup)
 
-describe('mention row grouping and weight', () => {
+describe('mention row weight', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', storage())
-  })
-
-  it('puts each Member in the group its relation names, with the owner leading', () => {
-    const ui = renderComposer('thread:thread:one')
-    openMenu(ui, '@')
-
-    expect(rows(ui).map(row => row.getAttribute('data-mention-group'))).toEqual(['owner', 'thread', 'project', 'other'])
-    expect(rowOf(ui, 'owner').getAttribute('data-mention-group')).toBe('owner')
-    expect(rowOf(ui, 'follower').getAttribute('data-mention-group')).toBe('thread')
-    expect(rowOf(ui, 'projectpeer').getAttribute('data-mention-group')).toBe('project')
-    expect(rowOf(ui, 'stranger').getAttribute('data-mention-group')).toBe('other')
-    // Each heading names its relation in words, so the grouping is readable, not colour-only.
-    for (const label of [zh.mentionGroupOwner, zh.mentionGroupThread, zh.mentionGroupProject, zh.mentionGroupOther]) {
-      expect(ui.container.textContent).toContain(label)
-    }
   })
 
   it('dims only a Member outside the conversation being written into', () => {

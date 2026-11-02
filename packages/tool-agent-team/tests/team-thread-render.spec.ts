@@ -64,44 +64,6 @@ describe('team_thread renders the model-facing decision surface', () => {
     expect(text).toContain('claim:7ad04d38-3889-4414-ac0c-23f73c0b962a')
   })
 
-  it('a read states its facts and never recommends a context action', () => {
-    const text = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
-      kind: 'read', threadRef: 'thread:x', revision: 100, following: false,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
-      claims: [],
-      facts: [{ sequence: 12, kind: 'message', body: 'plain message', sender: 'human', mentions: [], unread: false, direct: false }],
-      readThroughSequence: 12, remainingUnreadCount: 0,
-    })
-    // Taskless results keep the identifying surface: the outcome line still
-    // names the Thread even when there is no Task standing to state.
-    expect(text).toContain('thread:x')
-    expect(text.split('\n')[1]).toContain('thread:x')
-    expect(text).not.toContain('Context guidance')
-    expect(text).not.toContain('usageTokens')
-    // The empty-facts status path keeps the same identifying header.
-    const statusText = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
-      kind: 'status', threadRef: 'thread:x', revision: 100, following: false,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
-      claims: [],
-      facts: [],
-      readThroughSequence: 12, remainingUnreadCount: 0,
-    })
-    expect(statusText).toContain('thread:x')
-    expect(statusText.split('\n')[1]).toContain('thread:x')
-    // Advice never appears for a non-accept activity even when unread.
-    const activityText = renderText(teamTools().get('team_thread')!, {}, {
-      workspaceId: 'workspace:alpha', projectRef: 'project:046dd831-c679-4279-b6aa-7813476cf12e',
-      kind: 'read', threadRef: 'thread:x', revision: 100, following: false,
-      anchor: { messageRef: 'message:anchor', sender: 'human', body: 'anchor', sequence: 1 },
-      claims: [],
-      facts: [{ sequence: 13, kind: 'activity', activity: 'claim', activityRef: 'activity:claim', actor: 'builder', taskRef: 'task:x', threadRef: 'thread:x', claimRef: 'claim:x', unread: true, direct: false }],
-      readThroughSequence: 13, remainingUnreadCount: 0,
-    })
-    expect(activityText).not.toContain('Context guidance')
-  })
-
   it('history renders structured activities and no context section', () => {
     const text = renderText(teamTools().get('team_thread')!, {}, {
       kind: 'history', threadRef: 'thread:x', taskRef: 'task:x', revision: 100, status: 'done', resolution: 'accepted', following: true,

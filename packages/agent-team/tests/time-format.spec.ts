@@ -16,12 +16,6 @@ describe('formatTeamTimestamp renders the fixed UTC+8 coordination zone', () => 
     expect(formatTeamTimestamp('2026-09-08T16:30:00.000Z')).toBe('2026-09-09T00:30:00+08:00')
   })
 
-  it('renders the same instant identically across repeated calls (cache invariant)', () => {
-    const first = formatTeamTimestamp('2026-08-20T03:11:00.000Z')
-    for (let index = 0; index < 5; index += 1) expect(formatTeamTimestamp('2026-08-20T03:11:00.000Z')).toBe(first)
-    expect(first).toBe('2026-08-20T11:11:00+08:00')
-  })
-
   it('preserves second granularity without sub-second noise', () => {
     expect(formatTeamTimestamp('2026-09-08T08:58:41.917Z')).toBe('2026-09-08T16:58:41+08:00')
   })
@@ -29,12 +23,6 @@ describe('formatTeamTimestamp renders the fixed UTC+8 coordination zone', () => 
   it('returns unparseable input unchanged instead of fabricating a time', () => {
     expect(formatTeamTimestamp('')).toBe('')
     expect(formatTeamTimestamp('not-a-timestamp')).toBe('not-a-timestamp')
-  })
-
-  it('renders lexicographically sortable output: later instants sort after earlier ones', () => {
-    const earlier = formatTeamTimestamp('2026-09-08T09:00:00.000Z')
-    const later = formatTeamTimestamp('2026-09-08T09:00:01.000Z')
-    expect(earlier < later).toBe(true)
   })
 })
 

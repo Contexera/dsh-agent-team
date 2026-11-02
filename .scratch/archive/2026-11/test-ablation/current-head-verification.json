@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-02",
+  "verifiedHead": "e1bf7c4c7270a0e384c98bbe53391815af27bf76",
+  "experimentBaseCommit": "41c94aa57a9041270f1e58bddceac7c41545cb79",
+  "harnessCommit": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "headChange": {
+    "files": 48,
+    "scope": [
+      ".agents/skills/",
+      ".gitignore"
+    ],
+    "productionConfigurationAndExistingTestsUnchanged": true
+  },
+  "packagePatchSha256": "e0eb7829efbbbf4bcb6e7763ef0817e96d4ef2197e8aa997f8357c1520e7de39",
+  "originalResultsSha256": "54b912e676ebb11f9ec6d159f74673ff90c404a38eef393f5470820262b433b4",
+  "currentHeadReportSha256": "3dc8bf090c17e08c76498302f576eb4518b6f84af13b6cc4e9609c868a7fa22e",
+  "command": "npm test -- --reporter=default --reporter=json --outputFile.json=artifacts/test-ablation/current-head.json",
+  "fullSuite": {
+    "files": 141,
+    "passed": 1568,
+    "failed": 0,
+    "skipped": 1,
+    "total": 1569
+  },
+  "faultEvidenceAudit": {
+    "experiments": 30,
+    "beforeAndAfterReportCountsVerified": true,
+    "reducedFailureDetailsPresent": true,
+    "uniqueMutationsVerified": true,
+    "previouslyMissedFaults": 3
+  },
+  "temporaryWorktrees": 0,
+  "originalEvidenceRetained": true
+}

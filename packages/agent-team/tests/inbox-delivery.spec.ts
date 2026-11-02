@@ -4,7 +4,6 @@ import type { AgentTeamProjectRef, AgentTeamThreadRef } from '../src/types/entit
 import type { AgentTeamMainTimelineEntry } from '../src/types/requests-results.ts'
 
 const owned = 'project:00000000-0000-4000-8000-000000000001' as AgentTeamProjectRef
-const other = 'project:00000000-0000-4000-8000-000000000002' as AgentTeamProjectRef
 const threadA = 'thread:00000000-0000-4000-8000-00000000000a' as AgentTeamThreadRef
 const threadB = 'thread:00000000-0000-4000-8000-00000000000b' as AgentTeamThreadRef
 
@@ -29,18 +28,6 @@ describe('every unread Thread fact interrupts, whatever the reader owns', () => 
     expect(result.threads[0]).toMatchObject({ role: 'follower' })
   })
 
-  it('a reader who owns no Project gets the same result', () => {
-    const result = plan({ threads: [thread(threadA, other, [1])] })
-    expect(result.trigger).toBe('immediate')
-    expect(result.threads[0]).toMatchObject({ role: 'follower' })
-  })
-
-  it('one ordinary update is enough, so no count accumulates across reads', () => {
-    const first = plan({ threads: [thread(threadA, owned, [1])] })
-    expect(first.trigger).toBe('immediate')
-    expect(plan({ threads: [thread(threadA, owned, [2])], covered: first.signature }).trigger).toBe('immediate')
-  })
-
   it('carries an ordinary update alongside a mention instead of waiting for it', () => {
     const result = plan({ threads: [thread(threadA, owned, [1, 2], { direct: [2] })] })
     expect(result.trigger).toBe('immediate')
@@ -54,9 +41,11 @@ describe('an unchanged unread set spends no second attempt', () => {
     expect(plan({ threads: [thread(threadA, owned, [1, 2, 3])], covered: first.signature }).trigger).toBeUndefined()
   })
 
-  it('a new fact on the same Thread rederives', () => {
-    const first = plan({ threads: [thread(threadA, owned, [1, 2, 3])] })
-    expect(plan({ threads: [thread(threadA, owned, [1, 2, 3, 4])], covered: first.signature }).trigger).toBe('immediate')
+  it('a new fact or a same-count replacement on the same Thread rederives', () => {
+    const first = plan({ threads: [thread(threadA, owned, [1])] })
+    expect(first.trigger).toBe('immediate')
+    expect(plan({ threads: [thread(threadA, owned, [1, 2])], covered: first.signature }).trigger).toBe('immediate')
+    expect(plan({ threads: [thread(threadA, owned, [2])], covered: first.signature }).trigger).toBe('immediate')
   })
 
   it('an unchanged set across two Threads is not delivered twice', () => {

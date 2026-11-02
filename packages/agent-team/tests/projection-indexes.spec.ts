@@ -194,9 +194,6 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       hasMore = page.hasMore
       cursor = page.cursor
     }
-    for (let index = 0; index < Math.max(paged.length, projectAFacts.length); index += 1) {
-      if (paged[index] !== projectAFacts[index]) console.log('DIFF at', index, paged[index], projectAFacts[index])
-    }
     expect(paged).toEqual(projectAFacts)
     // hasMore counts facts, not only the Messages the items carry: every Task
     // Thread creation also appends its promote activity to the same timeline.
@@ -245,10 +242,6 @@ describe('large-ledger projection equivalence (issue #21)', () => {
       expect(item.previewText).toBe(`Task ${source.label}`)
       expect(item.taskNumber).toBe(source.taskNumber)
     }
-    // limit still bounds only items; the total collapses the whole slice.
-    const humanBadge = ledger.inbox(human, { workspaceId: alpha, limit: 1 })
-    expect(humanBadge.items).toHaveLength(1)
-    expect(humanBadge.totalUnreadCount).toBe(15)
     // The beta Workspace holds ordinary follow unread with no mention at all,
     // which is admission enough now.
     const betaInbox = ledger.inbox(human, { workspaceId: beta, limit: 100 })

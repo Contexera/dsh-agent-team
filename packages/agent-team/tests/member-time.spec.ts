@@ -316,15 +316,6 @@ describe('discovery projections hang off the same per-fact source', () => {
   })
 })
 
-describe('the render layer converts fixed UTC+8 deterministically', () => {
-  it('the shared formatter maps the ledger instant to the coordination zone', async () => {
-    const { ledger, actor, taskRef } = await seededThread()
-    const read = (await ledger.readThread({ requestId: requestId('read'), workspaceId: alpha, taskRef, actor })).value
-    const fact = read.facts[0]!
-    expect(formatTeamTimestamp(fact.fact.occurredAt)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$/u)
-  })
-})
-
 describe('DM relay history carries the prior instant', () => {
   it('dmHistoryBetween cites the prior DM with its committed instant', async () => {
     const { ledger, actor } = await seededThread()

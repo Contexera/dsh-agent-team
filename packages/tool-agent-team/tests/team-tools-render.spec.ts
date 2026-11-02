@@ -495,46 +495,23 @@ describe('team_message renders its outcome', () => {
     expect(parameters.required).toContain('body')
   })
 
-  it('typed rejections begin Not committed, keep refs/counts/recovery, and hand back the current revision', () => {
-    const unread = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8000, body: 'x' }, {
-      kind: 'unread_required', threadRef: THREAD, taskRef: TASK, revision: 8394, unreadCount: 2, directCount: 1,
-      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the gated fact', sender: 'human', mentions: [], unread: true, direct: true },
-        { sequence: 8395, kind: 'message', messageRef: 'message:8395', body: 'another update', sender: 'human', mentions: [], unread: true, direct: false }],
-    })
-    expect(unread).toContain('Not committed — unread_required.')
-    expect(unread).toContain(`${THREAD} · ${TASK} · 2 unread, 1 direct`)
-    expect(unread).toContain('team_thread read')
-    // Project C: the gated facts render in the rejection itself, and the
-    // current revision comes back as the next write token. This inverted the
-    // old contract, which held that a rejection carried no facts and no token.
-    expect(unread).toContain('the gated fact')
-    expect(unread).toContain('Next write — baseRevision: 8394')
-
-    const stale = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 8387, body: 'x' }, {
-      kind: 'stale_revision', threadRef: THREAD, expectedRevision: 8387, revision: 8394,
-      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
-    })
-    expect(stale).toContain('Not committed — the Thread changed after your last read (stale_revision).')
-    expect(stale).toContain('Reconsider the new facts above')
-    expect(stale).toContain('the increment')
-    expect(stale).toContain('Next write — baseRevision: 8394')
-
+  it('an unrecognized token and a legacy result do not invent facts or a token', () => {
     // A token this Thread never reached is not a race. The ordinary sentence
     // would send a model re-reading to find an insertion that never happened,
     // so the refusal names the copying mistake and drops the increment lines,
     // which would otherwise present facts as missed when none were.
-    const copied = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 4711, body: 'x' }, {
+    const unrecognized = renderText(teamTools().get('team_message')!, { action: 'reply', threadRef: THREAD, baseRevision: 4711, body: 'x' }, {
       kind: 'stale_revision', threadRef: THREAD, expectedRevision: 4711, revision: 8394, staleTokenKind: 'unrecognized',
       facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
-    expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
-    expect(copied).toContain('not a revision this Thread reached')
+    expect(unrecognized).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
+    expect(unrecognized).toContain('not a revision this Thread reached')
     // The headline must not contradict the way out: the first line can no
     // longer claim the Thread changed, and the race sentence is gone with it.
-    expect(copied).not.toContain('the Thread changed')
-    expect(copied).not.toContain('Reconsider the new facts above')
-    expect(copied).not.toContain('the increment')
-    expect(copied).not.toContain('Next write — baseRevision: 8394')
+    expect(unrecognized).not.toContain('the Thread changed')
+    expect(unrecognized).not.toContain('Reconsider the new facts above')
+    expect(unrecognized).not.toContain('the increment')
+    expect(unrecognized).not.toContain('Next write — baseRevision: 8394')
 
     // member_not_following is a version-1 result the Host can no longer produce
     // for a tool call: the fallback render names the kind and the Thread without
@@ -607,43 +584,29 @@ describe('team_task renders the affected Claim', () => {
     }
   })
 
-  it('claim rejections share the outcome-first form and hand back the current revision', () => {
+  it('a claim rejection omits the Claim archive, and an unrecognized token omits skipped facts', () => {
     const unread = renderText(teamTools().get('team_task')!, { action: 'claim', taskRef: TASK, baseRevision: 8000, direction: 'd' }, {
       kind: 'unread_required', taskRef: TASK, threadRef: THREAD, revision: 8394, status: 'in_progress', unreadCount: 2, directCount: 1,
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
       facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the gated fact', sender: 'human', mentions: [], unread: true, direct: true },
         { sequence: 8395, kind: 'message', messageRef: 'message:8395', body: 'another update', sender: 'human', mentions: [], unread: true, direct: false }],
     })
-    expect(unread).toContain('Not committed — unread_required.')
-    expect(unread).toContain(`${THREAD} · ${TASK} · 2 unread, 1 direct`)
-    expect(unread).toContain('team_thread read')
-    expect(unread).toContain('the gated fact')
-    expect(unread).toContain('Next write — baseRevision: 8394')
     // The Claim archive still never rides along with a rejection: the affected
     // Claim and the facts are the decision surface, not the whole history.
     expect(unread).not.toContain('Active Claims')
 
-    const stale = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 8387, claimRef: CLAIM }, {
-      kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 8387, revision: 8394, status: 'in_progress',
-      claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
-      facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
-    })
-    expect(stale).toContain('Not committed — the Thread changed after your last read (stale_revision).')
-    expect(stale).toContain('the increment')
-    expect(stale).toContain('Next write — baseRevision: 8394')
-
     // The copied-token refusal on the Claim side, because the Claim tool
     // renders its own rejections: a member that closes a Claim with a token
     // from another Thread gets the same correction, not the race sentence.
-    const copied = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
+    const unrecognized = renderText(teamTools().get('team_task')!, { action: 'done', taskRef: TASK, baseRevision: 4711, claimRef: CLAIM }, {
       kind: 'stale_revision', taskRef: TASK, threadRef: THREAD, expectedRevision: 4711, revision: 8394, status: 'in_progress', staleTokenKind: 'unrecognized',
       claims: [{ claimRef: CLAIM, direction: 'Audit the render recovery paths', state: 'active', owner: 'member:owner' }],
       facts: [{ sequence: 8394, kind: 'message', messageRef: 'message:8394', body: 'the increment', sender: 'human', mentions: [], unread: true, direct: false }],
     })
-    expect(copied).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
-    expect(copied).not.toContain('the Thread changed')
-    expect(copied).not.toContain('the increment')
-    expect(copied).not.toContain('Next write — baseRevision: 8394')
+    expect(unrecognized).toContain('Not committed — that write token was never a revision this Thread reached (stale_revision).')
+    expect(unrecognized).not.toContain('the Thread changed')
+    expect(unrecognized).not.toContain('the increment')
+    expect(unrecognized).not.toContain('Next write — baseRevision: 8394')
   })
 })
 

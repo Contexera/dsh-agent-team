@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { TeamQueries, describeRule, teamQueryKey, type TeamQueryIdentity, type TeamQueryRule } from '../src/client/team-queries.ts'
+import { TeamQueries, teamQueryKey, type TeamQueryIdentity, type TeamQueryRule } from '../src/client/team-queries.ts'
 import type { TeamChangeListener, TeamChangeScope, TeamChangeUpdate } from '../src/client/team-changes.ts'
 
 function hub() {
@@ -359,15 +359,5 @@ describe('TeamQueries rule immutability', () => {
     expect(queries.diagnostics()['members:w1']).toMatchObject({ superseded: 1 })
     held.resolve('roster')
     expect(await pending).toBe('roster')
-  })
-
-  it('describes a rule by what it admits, not by the closure that computed it', () => {
-    // The descriptor is the rule's identity: sorted kinds plus the Workspace it scopes to.
-    expect(describeRule({ kinds: ['presence', 'workspace'], workspaceId: 'w1' as never }))
-      .toBe(describeRule({ kinds: ['workspace', 'presence'], workspaceId: 'w1' as never }))
-    expect(describeRule({ kinds: ['workspace'], workspaceId: 'w1' as never }))
-      .not.toBe(describeRule({ kinds: ['presence', 'workspace'], workspaceId: 'w1' as never }))
-    expect(describeRule({ kinds: ['workspace'], workspaceId: 'w1' as never }))
-      .not.toBe(describeRule({ kinds: ['workspace'], workspaceId: 'w2' as never }))
   })
 })

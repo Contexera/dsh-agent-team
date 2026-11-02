@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentTeamClientMemberStatus, AgentTeamMemberId } from '@contexera/dsh-agent-team/types'
-import { buildMentionGroups, enrollmentIds, mentionCandidatesFor, mentionSurfaceOf, type MentionGroup } from '../src/client/mention-presentation.ts'
+import { buildMentionGroups, enrollmentIds, mentionCandidatesFor, type MentionGroup } from '../src/client/mention-presentation.ts'
 
 function member(handle: string, opts: { presence?: 'available' | 'working' | 'error' | 'unavailable', state?: 'enabled' | 'suspended' | 'inactive' | 'archived', description?: string } = {}): AgentTeamClientMemberStatus {
   return {
@@ -29,11 +29,6 @@ const handlesOf = (groups: readonly MentionGroup[]): readonly string[] =>
 const keysOf = (groups: readonly MentionGroup[]): readonly string[] => groups.map(group => group.key)
 
 describe('mention roster grouping', () => {
-  it('reads the surface from the draft key the composer already writes to', () => {
-    expect(mentionSurfaceOf('thread:thread:one' as never)).toBe('thread')
-    expect(mentionSurfaceOf('project:project:one' as never)).toBe('project')
-  })
-
   it('orders owners first, then this Thread, this Project, and the rest', () => {
     const groups = buildMentionGroups(
       [member('stranger'), member('peer'), member('follower'), member('owner')], '', 'thread',

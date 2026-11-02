@@ -97,6 +97,7 @@ const CASES: readonly MatrixCase[] = [
   { tool: 'team_thread', action: 'history', baseline: { action: 'history', threadRef: THREAD }, hostMethod: 'threadHistoryForAgent' },
   { tool: 'team_thread', action: 'message', baseline: { action: 'message', threadRef: THREAD, messageRef: MESSAGE }, hostMethod: 'readMessageForAgent' },
   { tool: 'team_message', action: 'start', baseline: { action: 'start', projectRef: PROJECT, body: 'text' }, hostMethod: 'startThreadForAgent' },
+  // The neutral fill adds `kind` and `sourceThreadRefs` to reply/post; neither is a start, so both must be dropped.
   { tool: 'team_message', action: 'reply', baseline: { action: 'reply', threadRef: THREAD, baseRevision: 20, body: 'text' }, hostMethod: 'replyForAgent' },
   { tool: 'team_message', action: 'post', baseline: { action: 'post', projectRef: PROJECT, body: 'text' }, hostMethod: 'postMainMessageForAgent' },
   { tool: 'team_task', action: 'board', baseline: { action: 'board' }, hostMethod: 'taskBoardForAgent' },
@@ -108,7 +109,7 @@ const CASES: readonly MatrixCase[] = [
   { tool: 'team_task', action: 'accept', baseline: { action: 'accept', taskRef: TASK, baseRevision: 20 }, hostMethod: 'changeTaskForAgent' },
   { tool: 'team_task', action: 'close', baseline: { action: 'close', taskRef: TASK, baseRevision: 20 }, hostMethod: 'changeTaskForAgent' },
   { tool: 'team_task', action: 'reopen', baseline: { action: 'reopen', taskRef: TASK, baseRevision: 20 }, hostMethod: 'changeTaskForAgent' },
-  { tool: 'team_task', action: 'transfer', baseline: { action: 'transfer', taskRef: TASK, baseRevision: 20, target: 'human' }, hostMethod: 'transferTaskForAgent' },
+  { tool: 'team_task', action: 'transfer', baseline: { action: 'transfer', taskRef: TASK, baseRevision: 20, target: 'member:human' }, hostMethod: 'transferTaskForAgent' },
 ]
 
 function parameterProperties(tool: ToolDefinition): Record<string, ParameterSpec> {
@@ -146,7 +147,18 @@ describe('every action tolerates every optional slot filled with its neutral val
       expect(Object.keys(filled).length).toBeGreaterThan(Object.keys(scenario.baseline).length)
       for (const key of Object.keys(filled)) expect(schema.properties).toHaveProperty(key)
       await expect(call(tool!, filled, host)).resolves.toBeDefined()
-      expect(host[scenario.hostMethod]).toHaveBeenCalledTimes(1)
+      const hostMethod = host[scenario.hostMethod] as ReturnType<typeof vi.fn>
+      expect(hostMethod).toHaveBeenCalledTimes(1)
+      const request = hostMethod.mock.calls[0]![1] as Record<string, unknown>
+      const expectedRequest = { ...scenario.baseline }
+      delete expectedRequest.action
+      expect(request).toMatchObject(expectedRequest)
+      if (scenario.tool === 'team_message' && (scenario.action === 'reply' || scenario.action === 'post')) {
+        expect(filled).toHaveProperty('kind')
+        expect(filled).toHaveProperty('sourceThreadRefs')
+        expect(request).not.toHaveProperty('kind')
+        expect(request).not.toHaveProperty('sourceThreadRefs')
+      }
     })
   }
 

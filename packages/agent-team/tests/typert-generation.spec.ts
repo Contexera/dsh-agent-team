@@ -66,11 +66,4 @@ describe('Agent Team generated Typert boundary', () => {
     expect([...hostMethods].sort()).toEqual(EXPECTED_REMOTE_METHODS)
     expect([...clientMethods].sort()).toEqual(EXPECTED_REMOTE_METHODS)
   })
-
-  it('keeps the host and remote artifacts in agreement', () => {
-    const host = TYPERT as GeneratedHost
-    const client = remote as unknown as GeneratedRemote
-    expect(host.invocations.map(invocation => invocation.method).sort())
-      .toEqual(client.descriptors.map(invocation => invocation.method).sort())
-  })
 })

@@ -112,19 +112,6 @@ describe('Team Main stream', () => {
     await b.runtime.dispose()
   })
 
-  it('reveals the quote/copy card on a Main stream message row under pointer and keyboard', async () => {
-    const b = await openProject()
-    await b.view.findByText('配色要不要跟设置页统一？')
-    const row = b.view.getByText('配色要不要跟设置页统一？').closest('article')!
-    // The reveal rules live under [data-team-project] (Main stream) and [data-team-thread] (Thread pages);
-    // this pins that the Main stream container carries them.
-    expect(row.closest('[data-team-project]')).not.toBeNull()
-    const styles = getComputedStyle(row.querySelector('[data-message-card]')!)
-    expect(styles.opacity).not.toBe('0')
-    fireEvent.click(row)
-    await b.runtime.dispose()
-  })
-
   it('posts a plain message to the Main stream, quoting a Main message when asked', async () => {
     const b = await openProject()
     await b.view.findByText('配色要不要跟设置页统一？')

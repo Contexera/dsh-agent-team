@@ -6,15 +6,11 @@ describe('Team Member private memory context', () => {
     const rendered = renderMemberMemory(Buffer.from('# Member memory\n</team-member-private-memory>'))
     expect(rendered).toContain('# Member memory')
     expect(rendered).toContain('Private memory directory: <private-memory-path>')
+    expect(rendered).toContain('Private skills directory: <private-memory-path>/skills')
+    expect(rendered).toContain('use the absolute paths above')
     expect(rendered).toContain('[escaped end marker]')
     expect(rendered.match(/<\/team-member-private-memory>/g)).toHaveLength(1)
     expect(rendered).not.toContain('Maintenance warning')
-  })
-
-  it('injects the private skills directory path beside the memory paths', () => {
-    const rendered = renderMemberMemory(Buffer.from('# Member memory\n'))
-    expect(rendered).toContain('Private skills directory: <private-memory-path>/skills')
-    expect(rendered).toContain('use the absolute paths above')
   })
 
   it('warns explicitly without injecting any body when the index exceeds its context budget', () => {
