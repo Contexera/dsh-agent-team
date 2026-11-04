@@ -54,6 +54,9 @@ function harness(overrides: { readonly load?: () => Promise<RemoteResult<readonl
   return { load, cancel }
 }
 
+/** The declared facts of one row, read as the one line the row renders them as. */
+const factLine = (note: string, index = 0): string => screen.getAllByText(note)[index]?.closest('li')?.querySelector('p')?.textContent ?? ''
+
 describe('Member detail reminder list', () => {
   it('reads the Member own reminders with the Member and Workspace the detail is open on', async () => {
     const { load } = harness()
@@ -64,13 +67,18 @@ describe('Member detail reminder list', () => {
   it('renders the note, the stored schedule, the state and the next occurrence', async () => {
     harness()
     expect(await screen.findByText('check the build')).toBeTruthy()
-    expect(screen.getByText('每 30 分钟 · 生效中')).toBeTruthy()
-    expect(screen.getByText('下次：2026-11-03 17:30')).toBeTruthy()
+    const facts = factLine('check the build')
+    expect(facts).toContain('每 30 分钟')
+    expect(facts).toContain('生效中')
+    expect(facts).toContain('下次：2026-11-03 17:30')
   })
 
   it('names the zone a cron expression is read in, because the Member wrote it against UTC+8', async () => {
     harness({ load: async () => ok([view({ reminder: { ...view().reminder, schedule: { kind: 'cron', expression: '0 9 * * 1-5' } } })]) })
-    expect(await screen.findByText("cron '0 9 * * 1-5'，按 UTC+8 读取 · 生效中")).toBeTruthy()
+    await screen.findByText('check the build')
+    const facts = factLine('check the build')
+    expect(facts).toContain("cron '0 9 * * 1-5'，按 UTC+8 读取")
+    expect(facts).toContain('生效中')
   })
 
   it('shows a pending occurrence as waiting to be read, since that is what wakes the Member', async () => {
@@ -80,14 +88,16 @@ describe('Member detail reminder list', () => {
 
   it('offers a withdraw button only on a reminder that can still fire', async () => {
     harness({ load: async () => ok([view(), view({ reminder: { ...view().reminder, reminderRef: DONE, state: 'done' } })]) })
-    await waitFor(() => { expect(screen.getAllByRole('button', { name: '取消提醒' })).toHaveLength(1) })
-    expect(screen.getByText('每 30 分钟 · 已触发')).toBeTruthy()
+    await waitFor(() => { expect(screen.getAllByRole('button', { name: /^取消提醒 · / })).toHaveLength(1) })
+    // The control names the row it withdraws, so two reminders never read alike.
+    expect(screen.getByRole('button', { name: '取消提醒 · check the build' })).toBeTruthy()
+    expect(factLine('check the build', 1)).toContain('已触发')
   })
 
   it('says so when the Member set no reminder at all', async () => {
     harness({ load: async () => ok([]) })
     expect(await screen.findByText('这个 Agent 还没有给自己设过提醒。')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: '取消提醒' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^取消提醒 · / })).toBeNull()
   })
 })
 
@@ -98,12 +108,12 @@ describe('Member detail reminder withdrawal', () => {
       load: async () => { read += 1; return ok(read === 1 ? [view()] : [view({ reminder: { ...view().reminder, state: 'cancelled' } })]) },
       cancel: async () => ok({}),
     })
-    fireEvent.click(await screen.findByRole('button', { name: '取消提醒' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^取消提醒 · / }))
     await waitFor(() => { expect(cancel).toHaveBeenCalledTimes(1) })
     expect(cancel.mock.calls[0]?.[0]).toMatchObject({ workspaceId: WORKSPACE, reminderRef: ACTIVE })
     // The row keeps its withdraw affordance until the Host answers with the cancelled state.
-    await waitFor(() => { expect(screen.queryByRole('button', { name: '取消提醒' })).toBeNull() })
-    expect(screen.getByText('每 30 分钟 · 已取消')).toBeTruthy()
+    await waitFor(() => { expect(screen.queryByRole('button', { name: /^取消提醒 · / })).toBeNull() })
+    expect(factLine('check the build')).toContain('已取消')
   })
 
   it('keeps the answered refusal visible with a retry that re-reads, and leaves the row withdrawable', async () => {
@@ -112,11 +122,11 @@ describe('Member detail reminder withdrawal', () => {
       load: async () => { read += 1; return ok([view()]) },
       cancel: async () => refused('Reminder is already cancelled'),
     })
-    fireEvent.click(await screen.findByRole('button', { name: '取消提醒' }))
+    fireEvent.click(await screen.findByRole('button', { name: /^取消提醒 · / }))
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('Reminder is already cancelled')
     // The failed withdrawal leaves the row as the Host still holds it.
-    expect(screen.getByRole('button', { name: '取消提醒' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^取消提醒 · / })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => { expect(load).toHaveBeenCalledTimes(2) })
     expect(cancel).toHaveBeenCalledTimes(1)

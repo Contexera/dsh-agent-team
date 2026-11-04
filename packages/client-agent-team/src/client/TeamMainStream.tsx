@@ -17,7 +17,7 @@ import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
 import { formatAbsoluteTime, formatInboxTime, mentionNamesOf, plainGist } from './team-formatters.ts'
-import { chunkRunsWithDays, isRunGap } from './team-separators.ts'
+import { chunkRunsWithDays, isRunGap, localDateKey } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import css from './conversation.module.css'
 import threadCss from './thread.module.css'
@@ -57,6 +57,14 @@ interface TeamMainStreamProps {
 
 type MessageEntry = Extract<AgentTeamMainTimelineEntry, { readonly kind: 'message' }>
 
+/** Two statements in a row read as one ledger; a day boundary or another kind of entry breaks it. */
+function isLedgerRow(entry: AgentTeamMainTimelineEntry, previous: AgentTeamMainTimelineEntry | undefined, next: AgentTeamMainTimelineEntry | undefined): boolean {
+  const day = localDateKey(entry.occurredAt)
+  const joins = (other: AgentTeamMainTimelineEntry | undefined): boolean =>
+    other?.kind === 'activity' && localDateKey(other.occurredAt) === day
+  return joins(previous) || joins(next)
+}
+
 /** Rules version 2 Project reading: the Main stream timeline and its composer. Message, activity and card entries arrive from the Host already ordered. */
 export function TeamMainStream({
   workspaceId, projectRef, humanName, humanAvatarUrl, humanMemberId, members, projectMemberIds, projectOwnerIds, drafts,
@@ -81,6 +89,9 @@ export function TeamMainStream({
   const timeline = useTimelineScroll(`${entries.length}:${lastEntry === undefined ? '' : mainEntryKey(lastEntry)}`)
   const error = actionError ?? stream.error
 
+  // Activity rows line up by their position in the whole feed, not in one run
+  // block: every non-message entry is a block of its own.
+  const positionOf = useMemo(() => new Map(entries.map((entry, index) => [entry, index] as const)), [entries])
   const handleByMember = useMemo(() => new Map(members.map(status => [status.member.memberId, status.member.handle.replace(/^@/, '')])), [members])
   const human: TeamAvatarHuman | undefined = humanMemberId === undefined
     ? undefined
@@ -182,6 +193,13 @@ export function TeamMainStream({
     const unread = stream.marked.has(mainEntryKey(entry)) ? '' : undefined
     if (entry.kind === 'activity') {
       const activity = entry.activity
+      // Two statements in a row read as one ledger: each entry here is wrapped
+      // on its own, so the thread page's sibling rule cannot see its neighbours
+      // and the rows would stack as centred floats. An isolated line stays
+      // centred, which is the thread page's language for one system notice.
+      const position = positionOf.get(entry)
+      const ledger = position === undefined ? false
+        : isLedgerRow(entry, entries[position - 1], entries[position + 1])
       // A subscription lifecycle line names a script, not a Task. The Host
       // writes the automatic pause after repeated failures without an actor of
       // its own, so that line says who acted instead of guessing a Member.
@@ -195,31 +213,39 @@ export function TeamMainStream({
                   : activity.kind === 'subscription-webhook-reset' ? 'mainSubscriptionWebhookReset' : 'mainSubscriptionDeleted',
           { actor: activity.actor === undefined ? t('mainSubscriptionHostActor') : nameOf(activity.actor), name: activity.subscriptionName })
         return <div className={streamCss.entry} data-main-entry="subscription" data-unread={unread} key={mainEntryKey(entry)}>
-          <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
+          <p className={threadCss.activityRow} data-ledger={ledger || undefined}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
         </div>
       }
       const text = t(activity.kind === 'owner-added' ? 'mainOwnerAdded' : 'mainOwnerRemoved', {
         actor: nameOf(activity.actor), member: nameOf(activity.memberId),
       })
       return <div className={streamCss.entry} data-main-entry="activity" data-unread={unread} key={mainEntryKey(entry)}>
-        <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
+        <p className={threadCss.activityRow} data-ledger={ledger || undefined}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
       </div>
     }
     if (entry.kind === 'subscription-event') {
       // What a script printed is data. It is rendered as text, never parsed for
       // mentions or Markdown, and the marker states that boundary on screen.
+      // The block is content, not a system notice: its ledger mark hangs in the
+      // gutter and the head, title, link and detail share one text column, so
+      // nothing here reads as a line centred over left-aligned prose.
       const { event } = entry.event
       return <div className={streamCss.entry} data-main-entry="subscription-event" data-unread={unread} key={mainEntryKey(entry)}>
-        <div className={streamCss.subscriptionEventHead}>
-          <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{t('mainSubscriptionEvent', { name: entry.event.subscriptionName })}</span></p>
-          <time className={streamCss.subscriptionEventTime} dateTime={entry.occurredAt} title={formatAbsoluteTime(entry.occurredAt)}>{formatInboxTime(entry.occurredAt, t)}</time>
+        <div className={streamCss.subscriptionEvent}>
+          <span className={streamCss.subscriptionEventMark} aria-hidden="true" />
+          <p className={streamCss.subscriptionEventHead}>
+            <span className={streamCss.subscriptionEventLabel}>{t('mainSubscriptionEvent', { name: entry.event.subscriptionName })}</span>
+            <time className={streamCss.subscriptionEventTime} dateTime={entry.occurredAt} title={formatAbsoluteTime(entry.occurredAt)}>{formatInboxTime(entry.occurredAt, t)}</time>
+          </p>
+          <div className={streamCss.subscriptionEventBody}>
+            <p className={streamCss.subscriptionEventTitle}>{event.title}</p>
+            {event.url === undefined ? null : <p className={streamCss.subscriptionEventUrl}>
+              <a href={event.url} target="_blank" rel="noreferrer noopener">{event.url}</a>
+            </p>}
+            {event.detail === undefined ? null : <p className={streamCss.subscriptionEventDetail}>{event.detail}</p>}
+            <p className={streamCss.subscriptionEventNotice}>{t('mainSubscriptionEventUntrusted')}</p>
+          </div>
         </div>
-        <p className={streamCss.subscriptionEventTitle}>{event.title}</p>
-        {event.url === undefined ? null : <p className={streamCss.subscriptionEventUrl}>
-          <a href={event.url} target="_blank" rel="noreferrer noopener">{event.url}</a>
-        </p>}
-        {event.detail === undefined ? null : <p className={streamCss.subscriptionEventDetail}>{event.detail}</p>}
-        <p className={streamCss.subscriptionEventNotice}>{t('mainSubscriptionEventUntrusted')}</p>
       </div>
     }
     if (entry.kind === 'thread-card') {

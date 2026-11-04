@@ -74,7 +74,9 @@
 }
 
 /* A block of consecutive activities reads as one ledger: members align to the text column (identity seat + the row's 10px
-   gap, derived from the same declaration the face reads) instead of stacking as centered floats; an isolated activity stays centered. */
+   gap, derived from the same declaration the face reads) instead of stacking as centered floats; an isolated activity stays centered.
+   The main stream wraps each entry on its own, so its rows cannot use the sibling selectors and carry `data-ledger` instead. */
+.activityRow[data-ledger],
 .activityRow:has(+ .activityRow),
 .activityRow + .activityRow {
   justify-content: flex-start;

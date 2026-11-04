@@ -36,15 +36,9 @@ interface TeamProjectPageProps {
   readonly loadTaskBoard: TeamConversationProps['loadTaskBoard']
   readonly loadSubscriptions: TeamConversationProps['loadSubscriptions']
   readonly loadSubscriptionLogs: TeamConversationProps['loadSubscriptionLogs']
-  readonly testSubscriptionDraft: TeamConversationProps['testSubscriptionDraft']
-  readonly createSubscription: TeamConversationProps['createSubscription']
-  readonly updateSubscription: TeamConversationProps['updateSubscription']
   readonly pauseSubscription: TeamConversationProps['pauseSubscription']
   readonly resumeSubscription: TeamConversationProps['resumeSubscription']
   readonly deleteSubscription: TeamConversationProps['deleteSubscription']
-  readonly resetSubscriptionWebhook: TeamConversationProps['resetSubscriptionWebhook']
-  readonly loadSubscriptionDeliveries: TeamConversationProps['loadSubscriptionDeliveries']
-  readonly replaySubscriptionDelivery: TeamConversationProps['replaySubscriptionDelivery']
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -101,7 +95,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, loadSubscriptions, loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription, resetSubscriptionWebhook, loadSubscriptionDeliveries, replaySubscriptionDelivery, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, loadSubscriptions, loadSubscriptionLogs, pauseSubscription, resumeSubscription, deleteSubscription, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
@@ -414,10 +408,6 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     if (tab === 'subscriptions') void refreshSubscriptions()
   }, [tab])
 
-  const liveSubscriptions = subscriptions?.filter(entry => entry.subscription.state !== 'deleted')
-  const subscriptionsLabel = liveSubscriptions === undefined ? t('projectTabSubscriptions')
-    : t('projectTabSubscriptionsWithCount', { count: liveSubscriptions.length })
-
   return <main className={css.surface} data-team-project={projectRef} ref={setPanelSurface}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderWithTabs}`}>
       <header className={css.headerRow}>
@@ -431,7 +421,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       <nav className={projectCss.tabs} role="tablist" aria-label={project === undefined ? '# …' : `# ${project.name}`} onKeyDown={onTabKeyDown}>
         <button ref={mainTabRef} id={`${tabIdPrefix}-main`} type="button" role="tab" aria-selected={tab === 'main'} aria-controls={`${tabIdPrefix}-main-panel`} tabIndex={tab === 'main' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('main') }}>{t('projectTabMain')}</button>
         <button ref={boardTabRef} id={`${tabIdPrefix}-board`} type="button" role="tab" aria-selected={tab === 'board'} aria-controls={`${tabIdPrefix}-board-panel`} tabIndex={tab === 'board' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('board') }}>{t('projectTabBoard')}</button>
-        <button ref={subscriptionsTabRef} id={`${tabIdPrefix}-subscriptions`} type="button" role="tab" aria-selected={tab === 'subscriptions'} aria-controls={`${tabIdPrefix}-subscriptions-panel`} tabIndex={tab === 'subscriptions' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('subscriptions') }}>{subscriptionsLabel}</button>
+        <button ref={subscriptionsTabRef} id={`${tabIdPrefix}-subscriptions`} type="button" role="tab" aria-selected={tab === 'subscriptions'} aria-controls={`${tabIdPrefix}-subscriptions-panel`} tabIndex={tab === 'subscriptions' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('subscriptions') }}>{t('projectTabSubscriptions')}</button>
       </nav>
     </div>
 
@@ -460,7 +450,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     {tab === 'subscriptions' && <TeamSubscriptionsTab
       workspaceId={workspaceId}
       projectRef={projectRef}
-      host={{ loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription, resetSubscriptionWebhook, loadSubscriptionDeliveries, replaySubscriptionDelivery }}
+      host={{ loadSubscriptionLogs, pauseSubscription, resumeSubscription, deleteSubscription }}
       entries={subscriptions}
       loading={subscriptionsLoading}
       error={subscriptionsError}

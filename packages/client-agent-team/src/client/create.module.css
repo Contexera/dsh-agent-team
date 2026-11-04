@@ -169,10 +169,10 @@
   margin-top: 16px;
 }
 
-/* Each reminder is its own row so the withdraw button stays beside the note it withdraws. */
+/* One reminder per line, separated like every other list in the app: the withdraw
+   control holds its own column, so a wrapped note never pushes it around. */
 .reminderList {
   display: grid;
-  gap: 8px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -180,15 +180,49 @@
 
 .reminderRow {
   align-items: start;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  display: grid;
+  gap: 2px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 0;
+}
+
+.reminderRow:first-child {
+  padding-top: 0;
+}
+
+.reminderRow:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.reminderBody {
   display: grid;
   gap: 2px;
-  justify-items: start;
+  min-width: 0;
 }
 
 .reminderNote {
   font-size: 13px;
   line-height: 20px;
   overflow-wrap: anywhere;
+}
+
+/* A reminder that is no longer waiting is history, and reads as such without a badge. */
+.reminderRow[data-reminder-state="done"] .reminderNote,
+.reminderRow[data-reminder-state="cancelled"] .reminderNote {
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* Two declared lines rather than a wrapped run of facts: a separator that wraps
+   to the head of a line reads as a stray mark. */
+.reminderFacts {
+  color: var(--dsw-alias-label-secondary);
+  display: grid;
+  font-size: 12px;
+  gap: 2px;
+  line-height: 18px;
+  margin: 0;
 }
 
 .sectionLabel {

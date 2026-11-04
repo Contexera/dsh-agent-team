@@ -456,6 +456,33 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await page.setViewportSize({ width: 1440, height: 960 })
   await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()
 
+  // A reminder the Member set for itself, read back as rows: the note leads, the
+  // schedule and state share one line of facts, and no badge repeats them.
+  const reminderWorkspace = scaffold.ctx.workspaceRegistry.list()[0]!
+  const reminderBuilder = scaffold.ctx.agentTeam.members({ workspaceId: reminderWorkspace.id })
+    .find(status => status.member.handle === 'builder')!
+  await scaffold.ctx.agentTeam.createMemberReminderForAgent(scaffold.ctx.agents.get(reminderBuilder.member.sessionId)!, {
+    requestId: 'req:journey-reminder' as never,
+    workspaceId: reminderWorkspace.id,
+    reminderRef: 'reminder:journey' as never,
+    schedule: { kind: 'every', minutes: 30 },
+    note: '每半小时看一眼 CI 队列',
+  })
+  await builderRow.hover()
+  await builderRow.getByRole('button', { name: 'builder 的操作' }).click()
+  await page.getByRole('menuitem', { name: '编辑 Agent' }).click()
+  const reminderSection = page.locator('[data-team-member-reminders]')
+  await reminderSection.getByText('每半小时看一眼 CI 队列').waitFor()
+  const reminderRow = reminderSection.locator('li').first()
+  expect(await reminderRow.textContent()).toContain('每 30 分钟')
+  expect(await reminderRow.textContent()).toContain('生效中')
+  expect(await reminderRow.getByRole('button', { name: '取消提醒 · 每半小时看一眼 CI 队列' }).count()).toBe(1)
+  await settleAnimations(page)
+  await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-filled.png'), fullPage: true })
+  // No narrow seat for this dialog: below the wide breakpoint the sidebar renders
+  // its rail instead of the panels, and the Agent panel owns this dialog.
+  await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()
+
   // Row menus omit any clear-context entry: the Host recycles a Member's
   // generation at its wake boundary.
   await builderRow.hover()

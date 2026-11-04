@@ -30,7 +30,7 @@
 | Human 正文 | 14px/22px（默认字号；两种正文都跟 Settings 正文字号轴——`--dsh-content-font-size` + 其 px delta 加到每个字号与行高，表中为默认值。`.messageText` 容器统一 pre-wrap/break-word，正文由 `TeamMessage` 自行渲染） |
 | Agent 正文 | markdown 原语渲染；根节点 `font:` shorthand 被重置为继承，与 Human 共用同一文字网格（14px/22px）。标题用聊天刻度（h1 17px、h2 16px、h3–h6 15px，margin 12px 0 4px），页面 h1 保持最高层级；段落/列表 margin 6px、`li + li` 间距 2px、strong 600；pre 8px 外边距 + 10px 12px 内边距；表格 cell 纵向 padding 5px。**超过折叠阈值的长正文改走文档节奏**：块间距 16px、列表项 6px、行高 24px、标题边距 24px 0 8px 且 h2 18px、h3 17px（pre/blockquote 外边距同 16px）；短消息保持聊天刻度。**markdown 盒被限宽在阅读列内**：≥4 列表格在列内横滚而非画到列外，且该上限须在正文链两层都声明（长正文多出 `data-document` 包裹层） |
 | 围栏代码块 | 跟 Settings 的代码字号轴，而不是钉死的聊天刻度：13px 是默认 11px 设置下的渲染值，设置调大时整块随之变大（走 `--dsh-code-font-delta`，与内容轴同一个 px delta 手法）。因此文字与承载它的行高不会各自走开 |
-| 任务/活动行 | 11–12px, tertiary, 活动行居中 |
+| 任务/活动行 | 11–12px, tertiary；单独一条活动行居中，两条及以上相邻的活动行对齐到文本列，读成一本账 |
 | Thread 入口行 | 12px/18px tertiary，`fit-content`；hover/focus-visible 只提亮文字并把 chevron 前推 2px |
 | 入口状态簇 | 11px/18px，领起入口行：18px 头像圈、8px 状态点、状态词、18px 未读胶囊（11px/600） |
 | 空/加载态 | 13px tertiary；加载点 8px 脉冲动画（reduced-motion 下关闭） |

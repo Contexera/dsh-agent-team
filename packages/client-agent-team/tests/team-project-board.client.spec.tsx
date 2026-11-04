@@ -105,7 +105,8 @@ describe('Team Project board', () => {
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     const feedTab = await b.view.findByRole('tab', { name: '主对话' })
     const boardTab = b.view.getByRole('tab', { name: '看板' })
-    const subscriptionsTab = b.view.getByRole('tab', { name: /^订阅/ })
+    // The label is the surface's name alone: a count here would be a second, unasked-for statement.
+    const subscriptionsTab = b.view.getByRole('tab', { name: '订阅' })
     feedTab.focus()
     // Right moves the selection and the focus together, so the reader never has
     // to press a key on a tab that is not the one they are standing on.
@@ -130,8 +131,8 @@ describe('Team Project board', () => {
   })
 
   /**
-   * A Project change re-reads the subscription list so the tab's count stays
-   * honest, but the rows already on screen stay: the first read's loading face
+   * A Project change re-reads the subscription list so the tab shows what is
+   * armed, but the rows already on screen stay: the first read's loading face
    * is not a re-read's. The re-read below is held open on purpose, because the
    * defect this catches was a flash of 「正在加载订阅…」 that a fast answer would
    * have hidden.

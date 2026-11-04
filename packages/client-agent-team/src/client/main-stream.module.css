@@ -91,33 +91,91 @@
 }
 .startCheck:has(input:disabled) { color: var(--dsw-alias-label-dimmed); cursor: default; }
 
-/* A published subscription event is script output, not Team prose: the title
-   carries the weight, the detail stays secondary, and the untrusted marker is
-   part of the block so a reader who scrolls to any part of it still sees it. */
-.subscriptionEventTitle {
-  font-weight: 600;
-  margin: 2px 0 0 14px;
-  overflow-wrap: anywhere;
+/* A published subscription event has a Message's shape — a head line, then the
+   body — so it seats like one: the mark takes the identity seat and the head,
+   title, link and detail share the feed's text axis. Prose indented off the axis
+   every Message uses, or a line centred over it, would each say this block is
+   not part of the feed. Its text also rides the content axis, so script output
+   is exactly as large as a Message body at any font-size setting. */
+.subscriptionEvent {
+  column-gap: 10px;
+  display: grid;
+  grid-template-columns: var(--team-identity-seat, 34px) minmax(0, 1fr);
+  margin: 4px 0;
 }
-.subscriptionEventUrl { font-size: 0.85em; margin: 2px 0 0 14px; overflow-wrap: anywhere; opacity: 0.8; }
-.subscriptionEventDetail { margin: 4px 0 0 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
-.subscriptionEventNotice { color: var(--dsw-alias-label-secondary); font-size: 0.8em; margin: 4px 0 0 14px; }
 
-/* The event line keeps its clock on the same row as the subscription name. A
-   script's URL is data, so it is a real link with no referrer back to the app. */
+.subscriptionEventMark {
+  background: var(--dsw-alias-border-l3);
+  border-radius: 50%;
+  corner-shape: round;
+  grid-column: 1;
+  grid-row: 1;
+  height: 5px;
+  margin-top: 7px;
+  width: 5px;
+}
+
+/* The clock rides the head sentence instead of being pushed to the column's far
+   edge by a space-between. A script's URL is data, so it is a real link with no
+   referrer back to the app. */
 .subscriptionEventHead {
   align-items: baseline;
+  color: var(--dsw-alias-label-tertiary);
+  column-gap: 8px;
   display: flex;
-  gap: 8px;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  font-size: 11px;
+  grid-column: 2;
+  grid-row: 1;
+  line-height: 18px;
+  margin: 0;
+}
+
+.subscriptionEventLabel {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .subscriptionEventTime {
-  color: var(--dsw-alias-label-tertiary);
   flex: none;
-  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  line-height: 16px;
+}
+
+.subscriptionEventBody {
+  display: grid;
+  font-size: var(--dsh-content-font-size, 14px);
+  gap: 4px;
+  grid-column: 2;
+  grid-row: 2;
+  line-height: calc(22px + var(--dsh-content-font-delta, 0px));
+  margin-top: 2px;
+}
+
+.subscriptionEventTitle {
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.subscriptionEventUrl {
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+  opacity: 0.8;
+  overflow-wrap: anywhere;
+}
+
+.subscriptionEventDetail {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.subscriptionEventNotice {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
 }
 
 .subscriptionEventUrl a {

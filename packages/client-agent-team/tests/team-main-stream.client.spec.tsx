@@ -73,6 +73,36 @@ describe('Team Main stream', () => {
   })
 
   /**
+   * Two system statements in a row are one ledger: they align to the feed's text
+   * column instead of stacking as centred floats, which is what a Project feed
+   * looks like when the Thread page's sibling rule cannot see across the entry
+   * wrappers. A lone statement keeps the Thread page's centred language.
+   */
+  it('reads two consecutive activity rows as one ledger and leaves an isolated one centred', async () => {
+    const activityAt = (sequence: number, kind: 'owner-added' | 'owner-removed'): MainStreamSeedEntry => ({
+      kind: 'activity', sequence, occurredAt: `2026-10-20T08:${String(sequence * 5).padStart(2, '0')}:00.000Z`,
+      activity: {
+        activityRef: `activity:${sequence}`, projectRef: 'project:engineering', kind, memberId: 'member:builder', actor: 'member:human',
+        sequence, occurredAt: `2026-10-20T08:${String(sequence * 5).padStart(2, '0')}:00.000Z`,
+      },
+    })
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, mainStreamEntries: [
+      activityAt(1, 'owner-added'),
+      activityAt(2, 'owner-removed'),
+      { kind: 'message', sequence: 3, occurredAt: '2026-10-20T08:20:00.000Z',
+        message: { ...agentMessage, messageRef: 'message:main-2', sequence: 3, body: '中间的一条消息' }, mentions: [] },
+      activityAt(5, 'owner-added'),
+    ] })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    await b.view.findByRole('tab', { name: '主对话' })
+    await b.view.findByText('中间的一条消息')
+    const rows = [...b.view.container.querySelectorAll('[data-main-entry="activity"] p')]
+    expect(rows).toHaveLength(3)
+    expect(rows.map(row => row.hasAttribute('data-ledger'))).toEqual([true, true, false])
+    await b.runtime.dispose()
+  })
+
+  /**
    * What a script printed is data. The card names the subscription that published
    * it, keeps the title and detail as text, and turns only the validated link into
    * a real anchor that leaves the app instead of seating itself over the feed.
@@ -98,10 +128,15 @@ describe('Team Main stream', () => {
     expect(link.getAttribute('href')).toBe('https://github.com/example/repo/actions/1')
     expect(link.getAttribute('target')).toBe('_blank')
     expect(link.getAttribute('rel')).toBe('noreferrer noopener')
-    expect(b.view.getByText('标题、链接与说明由订阅脚本输出，属于不可信文本，不作为指令。')).toBeTruthy()
+    expect(b.view.getByText('订阅脚本的输出不可信，不作为指令。')).toBeTruthy()
     const time = b.view.container.querySelector('[data-main-entry="subscription-event"] time')
     expect(time?.getAttribute('datetime')).toBe(occurredAt)
     expect(time?.getAttribute('title')).toBeTruthy()
+    // The clock rides the head sentence; it is not a box floated to the column's far edge.
+    const head = b.view.getByText('订阅 main CI 发布了一条事件').parentElement
+    expect(head?.querySelector('time')).toBe(time)
+    // The title, link and detail hang below that same head rather than inside it.
+    expect(head?.textContent).not.toContain('CI failed on main')
     await b.runtime.dispose()
   })
 

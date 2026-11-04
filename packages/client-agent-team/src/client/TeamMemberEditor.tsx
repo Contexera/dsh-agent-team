@@ -206,6 +206,15 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
   </div>
 }
 
+/** What the reminder is waiting on, as one line: the pending read wins, then the next
+ *  occurrence, then the last one it already had. */
+function reminderTimingText(view: AgentTeamMemberReminderView, t: TeamSidebarProps['t']): string | undefined {
+  if (view.pendingOccurrenceAt !== undefined) return t('memberReminderPending', { time: formatAbsoluteTime(view.pendingOccurrenceAt) })
+  if (view.nextOccurrenceAt !== undefined) return t('memberReminderNext', { time: formatAbsoluteTime(view.nextOccurrenceAt) })
+  if (view.lastOccurrenceAt !== undefined) return t('memberReminderLast', { time: formatAbsoluteTime(view.lastOccurrenceAt) })
+  return undefined
+}
+
 /**
  * One Member's reminders in Member detail. Read-only by construction: the Human sees what the
  * Member asked of itself and may withdraw a reminder, but never invents one — a reminder has
@@ -275,21 +284,18 @@ export function MemberRemindersSection({ workspaceId, memberId, loadMemberRemind
         <ul className={createCss.reminderList}>
           {reminders.map(view => (
             <li className={createCss.reminderRow} key={view.reminder.reminderRef} data-reminder-state={view.reminder.state}>
-              <span className={createCss.reminderNote}>{view.reminder.note}</span>
-              <small className={css.editHint}>
-                {reminderScheduleText(view.reminder.schedule, t)}
-                {' · '}
-                {t(REMINDER_STATE_KEYS[view.reminder.state])}
-              </small>
-              {view.nextOccurrenceAt !== undefined && <small className={css.editHint}>{t('memberReminderNext', { time: formatAbsoluteTime(view.nextOccurrenceAt) })}</small>}
-              {view.pendingOccurrenceAt !== undefined && <small className={css.editHint}>{t('memberReminderPending', { time: formatAbsoluteTime(view.pendingOccurrenceAt) })}</small>}
-              {view.lastOccurrenceAt !== undefined && view.pendingOccurrenceAt === undefined && view.nextOccurrenceAt === undefined && (
-                <small className={css.editHint}>{t('memberReminderLast', { time: formatAbsoluteTime(view.lastOccurrenceAt) })}</small>
-              )}
+              <div className={createCss.reminderBody}>
+                <span className={createCss.reminderNote}>{view.reminder.note}</span>
+                <p className={createCss.reminderFacts}>
+                  <span>{`${reminderScheduleText(view.reminder.schedule, t)} · ${t(REMINDER_STATE_KEYS[view.reminder.state])}`}</span>
+                  {reminderTimingText(view, t) !== undefined && <span>{reminderTimingText(view, t)}</span>}
+                </p>
+              </div>
               {view.reminder.state === 'active' && (
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
+                  aria-label={`${t('memberReminderCancel')} · ${view.reminder.note}`}
                   disabled={disabled || withdrawing !== undefined}
                   onClick={() => { void cancel(view.reminder.reminderRef) }}
                 >
