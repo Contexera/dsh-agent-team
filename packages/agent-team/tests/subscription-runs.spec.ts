@@ -7,7 +7,10 @@
  * and reads the storage domain directly only to prove what was written or
  * dropped.
  */
-import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -36,6 +39,15 @@ import type {
 
 const workspaceId = WorkspaceId('workspace:alpha')
 const credentialValues: Record<string, string> = { GH_TOKEN: 'secret-value' }
+const capturedBashScript = (script: string): string => `printf '__DSH_TEAM_RAW_STDOUT__'; ${script}`
+const shellSpillRoot = mkdtempSync(join(tmpdir(), 'dsh-team-runs-spill-'))
+let shellSpillId = 0
+const shellSpill = (stdout: string): string => {
+  const path = join(shellSpillRoot, `${shellSpillId++}.log`)
+  writeFileSync(path, `__DSH_TEAM_RAW_STDOUT__${stdout}`)
+  return path
+}
+afterAll(() => { rmSync(shellSpillRoot, { recursive: true, force: true }) })
 
 interface FakeShell {
   readonly requests: ShellExecSpec[]
@@ -72,7 +84,8 @@ function fakeShell(options: { readonly stdout: string; readonly exitCode?: numbe
         return { result: async () => ({
           exitCode: isProbe ? 0 : state.exitCode,
           signal: null, timedOut: false, aborted: false, timeoutMs: spec.timeoutMs,
-          stdout: { text: isProbe ? '5.2.15' : state.stdout, truncated: false },
+          stdout: { text: isProbe ? '5.2.15' : state.stdout, truncated: false,
+            ...(isProbe ? {} : { spillPath: shellSpill(state.stdout) }) },
           stderr: { text: '', truncated: false },
         }) }
       },
@@ -167,7 +180,10 @@ interface HostSeams {
   checkpointFor(subscriptionRef: AgentTeamSubscriptionRef): SubscriptionCheckpoint
   updateCheckpoint(subscriptionRef: AgentTeamSubscriptionRef,
     change: (checkpoint: SubscriptionCheckpoint) => SubscriptionCheckpoint): Promise<unknown>
-  clearSubscriptionFailuresLocked(subscriptionRef: AgentTeamSubscriptionRef, accepted: boolean): Promise<void>
+  acceptFreshEvents(subscription: AgentTeamSubscription, events: readonly { readonly id: string; readonly title: string }[],
+    requestId: AgentTeamRequestId): Promise<unknown>
+  clearSubscriptionFailuresLocked(subscriptionRef: AgentTeamSubscriptionRef, accepted: boolean,
+    sourceRevision: number): Promise<void>
   recordFailedDelivery(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void>
   recordReplayIntent(subscription: AgentTeamSubscription, record: SubscriptionDeliveryRecord,
     requestId: AgentTeamRequestId, version: AgentTeamSubscriptionReplayVersion): Promise<void>
@@ -533,7 +549,7 @@ describe('when a run counts as a success', () => {
       script: { scriptContent: 'printf fixed\n' }, credentials: [] })
     expect(updated.kind).toBe('changed')
     // The trial ran the new script...
-    expect(shell.requests.some(spec => spec.command === 'printf fixed\n')).toBe(true)
+    expect(shell.requests.some(spec => spec.command === capturedBashScript('printf fixed\n'))).toBe(true)
     // ...and its output is not the waterline: 'c' stays publishable.
     const known = ledgerAtBoot(booted).subscriptionKnownIds(subscription.subscriptionRef)
     expect(known.has('a')).toBe(true)
@@ -568,7 +584,7 @@ describe('one ordered account of a success and a defeat', () => {
       })
     }
     const replay = replayOf(seam, projectRef, subscription, 'delivery:d1', 'once')
-    await waitFor(() => shell.requests.some(spec => spec.command === 'printf events\n') ? true : undefined)
+    await waitFor(() => shell.requests.some(spec => spec.command === capturedBashScript('printf events\n')) ? true : undefined)
     await held.promise
     // Nothing the run printed has reached the ledger: the accept is inside the
     // segment the test is holding, together with the clear it belongs to.
@@ -597,6 +613,49 @@ describe('one ordered account of a success and a defeat', () => {
     shell.stdout = '{"id":"c","title":"C"}\n'
     expect(await replayOf(seam, projectRef, subscription, 'delivery:d1', 'replay')).toMatchObject({ kind: 'replayed', eventCount: 1 })
     expect(seam.checkpointFor(subscription.subscriptionRef)).toMatchObject({ consecutiveFailures: 0 })
+  })
+
+  it('does not let a late success from an older revision clear or timestamp the current streak', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = keep(await boot(pool, shell))
+    const projectRef = await project(booted)
+    const subscription = await created(booted, projectRef, 'printf events\n')
+    const seam = seams(booted)
+    const updated = await booted.ctx.agentTeam.updateSubscription({
+      requestId: requestId('late-success-update'), workspaceId, projectRef, subscriptionRef: subscription.subscriptionRef,
+      expectedRevision: 1, name: subscription.name, intervalMinutes: 10, script: { scriptContent: 'printf current\n' },
+    })
+    if (updated.kind !== 'changed') throw new Error('expected a committed update')
+    const oldSuccess = '2026-10-01T00:00:00.000Z'
+    await seam.updateCheckpoint(subscription.subscriptionRef, checkpoint => Object.freeze({
+      ...checkpoint, consecutiveFailures: 2, lastSuccessAt: oldSuccess,
+    }))
+    await seam.serializeSubscriptionWrite(subscription.subscriptionRef,
+      () => seam.acceptFreshEvents(subscription, [{ id: 'late', title: 'Late' }], requestId('late-success')))
+    expect(seam.checkpointFor(subscription.subscriptionRef), 'the r1 success does not clear r2 failures or move its success time')
+      .toMatchObject({ consecutiveFailures: 2, lastSuccessAt: oldSuccess })
+  })
+
+  it('does not count a spent delivery from an older revision against the current revision', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = keep(await boot(pool, shell))
+    const projectRef = await project(booted)
+    const subscription = await created(booted, projectRef, 'printf events\n')
+    const seam = seams(booted)
+    const updated = await booted.ctx.agentTeam.updateSubscription({
+      requestId: requestId('late-failure-update'), workspaceId, projectRef, subscriptionRef: subscription.subscriptionRef,
+      expectedRevision: 1, name: subscription.name, intervalMinutes: 10, script: { scriptContent: 'printf current\n' },
+    })
+    if (updated.kind !== 'changed') throw new Error('expected a committed update')
+    await seam.updateCheckpoint(subscription.subscriptionRef, checkpoint => Object.freeze({
+      ...checkpoint, consecutiveFailures: 1,
+    }))
+    await seam.recordFailedDelivery(subscription, deliveryInput(subscription, { deliveryRef: 'delivery:late-revision' }))
+    expect(seam.checkpointFor(subscription.subscriptionRef).consecutiveFailures,
+      'the old delivery is retained for replay but does not increment the current revision').toBe(1)
+    expect(deliveriesOf(booted, projectRef, subscription.subscriptionRef)).toHaveLength(1)
   })
 
   it('ends the streak for a run that printed nothing new, in the same segment', async () => {
@@ -756,8 +815,7 @@ describe('replay', () => {
     expect(replayed.kind).toBe('replayed')
     // The current definition ran, with the delivery body on stdin, and its
     // output published exactly like a timer run's.
-    const run = shell.requests.find(spec => !spec.command.includes('BASH_VERSION'))!
-    expect(run.command).toBe('printf fixed\n')
+    const run = shell.requests.find(spec => spec.command === capturedBashScript('printf fixed\n'))!
     expect(JSON.parse(run.stdin ?? '{}')).toMatchObject({ body: 'payload' })
     expect(run.env).toMatchObject({ DSH_TEAM_TRIGGER: 'webhook', DSH_TEAM_DELIVERY_ID: 'delivery:d1' })
     const published = await waitFor(() => {
@@ -800,7 +858,8 @@ describe('replay', () => {
     expect(refused.kind).toBe('replay-failed')
     expect(refused.runRef).toBeDefined()
     // The version the delivery arrived under ran, not the fixed one.
-    expect(shell.requests.find(spec => !spec.command.includes('BASH_VERSION'))!.command).toBe('printf events\n')
+    expect(shell.requests.find(spec => spec.command === capturedBashScript('printf events\n'))!.command)
+      .toBe(capturedBashScript('printf events\n'))
     // A refused replay stays on the list, so an owner can try again.
     expect(deliveriesOf(booted, projectRef, subscription.subscriptionRef)).toHaveLength(1)
     expect(logsOf(booted, projectRef, subscription.subscriptionRef).runs.find(run => run.trigger === 'webhook'))

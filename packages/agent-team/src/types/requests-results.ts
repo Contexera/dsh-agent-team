@@ -1307,6 +1307,22 @@ export interface AgentTeamSubscriptionTrialFailure {
  */
 export type AgentTeamSubscriptionBaselineChoice = 'current-output' | 'ignore-history'
 
+/** The script source form; content bytes stay only in the stored script snapshot. */
+export type AgentTeamSubscriptionRequestScript =
+  | { readonly kind: 'content' }
+  | { readonly kind: 'path'; readonly path: string }
+
+/** The request fields whose canonical values cannot be recovered from the stored subscription alone. */
+export interface AgentTeamSubscriptionRequestIntent {
+  readonly intervalMinutes?: number | undefined
+  readonly webhook?: boolean | undefined
+  readonly scriptSource: AgentTeamSubscriptionRequestScript
+}
+
+export interface AgentTeamCreateSubscriptionRequestIntent extends AgentTeamSubscriptionRequestIntent {
+  readonly baseline: AgentTeamSubscriptionBaselineChoice
+}
+
 export interface AgentTeamCreateSubscriptionRequest {
   readonly requestId: AgentTeamRequestId
   readonly workspaceId: WorkspaceId

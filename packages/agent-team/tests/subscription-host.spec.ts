@@ -6,7 +6,10 @@
  * the policy it is handed is the cross-platform enforcement probe's job.
  */
 import { createHash } from 'node:crypto'
-import { afterEach, describe, expect, it, vi as fakeTimers } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterAll, afterEach, describe, expect, it, vi as fakeTimers } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -21,6 +24,15 @@ import type { AgentTeamCreateSubscriptionRequest, AgentTeamProjectRef, AgentTeam
 
 const workspaceId = WorkspaceId('workspace:alpha')
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
+const capturedBashScript = (script: string): string => `printf '__DSH_TEAM_RAW_STDOUT__'; ${script}`
+const shellSpillRoot = mkdtempSync(join(tmpdir(), 'dsh-team-host-spill-'))
+let shellSpillId = 0
+const shellSpill = (stdout: string): string => {
+  const path = join(shellSpillRoot, `${shellSpillId++}.log`)
+  writeFileSync(path, `__DSH_TEAM_RAW_STDOUT__${stdout}`)
+  return path
+}
+afterAll(() => { rmSync(shellSpillRoot, { recursive: true, force: true }) })
 
 interface FakeShell {
   readonly requests: ShellExecSpec[]
@@ -53,7 +65,8 @@ function fakeShell(options: { readonly stdout: string; readonly exitCode?: numbe
         const answer = (): ShellRunResult => ({
           exitCode: isProbe ? 0 : state.exitCode,
           signal: null, timedOut: false, aborted: false, timeoutMs: spec.timeoutMs,
-          stdout: { text: isProbe ? '5.2.15' : state.stdout, truncated: false },
+          stdout: { text: isProbe ? '5.2.15' : state.stdout, truncated: false,
+            ...(isProbe ? {} : { spillPath: shellSpill(state.stdout) }) },
           stderr: { text: '', truncated: false },
         })
         return { result: async () => answer() }
@@ -101,7 +114,8 @@ function gatedShell(stdout: string): GatedShell {
         }
         return { result: async () => ({
           exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: spec.timeoutMs,
-          stdout: { text: isProbe ? '5.2.15' : stdout, truncated: false },
+          stdout: { text: isProbe ? '5.2.15' : stdout, truncated: false,
+            ...(isProbe ? {} : { spillPath: shellSpill(stdout) }) },
           stderr: { text: '', truncated: false },
         }) }
       },
@@ -167,7 +181,7 @@ describe('creating a subscription', () => {
     expect(trial.workdir).toBe(process.cwd())
     expect(trial.sandboxPolicy).toEqual({ mode: 'workspace-write', workspaceRoot: process.cwd() })
     expect(trial.timeoutMs).toBe(60_000)
-    expect(trial.stdoutMaxBytes).toBe(65_536)
+    expect(trial.stdoutMaxBytes, 'one byte requests the public raw spill; the Team byte cap is applied after recovery').toBe(1)
     expect(trial.env).toMatchObject({ DSH_TEAM_TRIGGER: 'test', DSH_TEAM_PROJECT: projectRef, GH_TOKEN: 'secret-value' })
     expect(JSON.parse(trial.stdin ?? '{}')).toMatchObject({ body: '{"test":true}' })
     // The trial's ids are the waterline: the first live run publishes nothing new.
@@ -201,7 +215,43 @@ describe('creating a subscription', () => {
     await expect(booted.ctx.agentTeam.createSubscription(createRequest(projectRef, 'printf events\n',
       { credentials: [{ ref: 'MISSING_TOKEN', env: 'MISSING_TOKEN' }] }))).rejects.toThrow(/'MISSING_TOKEN'/)
     // The shell probe may have run; the script itself never did.
-    expect(shell.requests.filter(spec => spec.command === 'printf events\n')).toHaveLength(0)
+    expect(shell.requests.filter(spec => spec.command === capturedBashScript('printf events\n'))).toHaveLength(0)
+  })
+
+  it('resolves a committed create after its credential is removed', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const request = createRequest(projectRef, 'printf events\n')
+    const created = await booted.ctx.agentTeam.createSubscription(request)
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const credential = credentialValues.GH_TOKEN
+    delete credentialValues.GH_TOKEN
+    try {
+      shell.requests.length = 0
+      const retried = await booted.ctx.agentTeam.createSubscription(request)
+      if (retried.kind !== 'changed') throw new Error('the retry resolves the committed create')
+      expect(retried.subscription.subscriptionRef).toBe(created.subscription.subscriptionRef)
+      expect(shell.requests, 'the committed request neither reads credentials nor runs the script again').toHaveLength(0)
+    } finally {
+      credentialValues.GH_TOKEN = credential!
+    }
+  })
+
+  it('rejects a create retried under the same request id with another baseline choice', async () => {
+    const shell = fakeShell({ stdout: '' })
+    const booted = await boot(new MemoryMediaPool(), shell)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const request = createRequest(projectRef, 'printf events\n')
+    const created = await booted.ctx.agentTeam.createSubscription(request)
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const same = await booted.ctx.agentTeam.createSubscription({ ...request, baseline: 'current-output' })
+    if (same.kind !== 'changed') throw new Error('the default and explicit current-output are one intent')
+    expect(same.subscription.subscriptionRef).toBe(created.subscription.subscriptionRef)
+    await expect(booted.ctx.agentTeam.createSubscription({ ...request, baseline: 'ignore-history' }))
+      .rejects.toThrow(/reused with a different operation or payload/)
   })
 })
 
@@ -222,7 +272,7 @@ describe('a page trial of a draft', () => {
     expect(result.revision).toBe(1)
     expect(result.scriptHash).toBe(createHash('sha256').update(script, 'utf8').digest('hex'))
     expect(result.events.map(event => event.id)).toEqual(['draft'])
-    expect(shell.requests.find(spec => spec.command === script)!.env).toMatchObject({ DSH_TEAM_TRIGGER: 'test' })
+    expect(shell.requests.find(spec => spec.command === capturedBashScript(script))!.env).toMatchObject({ DSH_TEAM_TRIGGER: 'test' })
     // Nothing durable: no subscription, and the throwaway create ref left no run record behind.
     expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries).toHaveLength(0)
   })
@@ -307,7 +357,7 @@ describe('a timer run', () => {
     expect(event.event.event.id).toBe('b')
     expect(event.event.event.title).toBe('B')
     expect(event.direct).toBe(true)
-    const run = runShell.requests.find(spec => spec.command === 'printf events\n')!
+    const run = runShell.requests.find(spec => spec.command === capturedBashScript('printf events\n'))!
     expect(run.workdir).toBe(process.cwd())
     expect(run.env).toMatchObject({ DSH_TEAM_TRIGGER: 'interval' })
     const listed = ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!
@@ -372,7 +422,8 @@ describe('the terminal barrier a queued trial obeys', () => {
     return victim.subscription.subscriptionRef
   }
 
-  const executions = (shell: GatedShell): number => shell.requests.filter(spec => spec.command === 'printf victim-script\n').length
+  const executions = (shell: GatedShell): number =>
+    shell.requests.filter(spec => spec.command === capturedBashScript('printf victim-script\n')).length
 
   it('refuses a trial that was still queued when the subscription was deleted, and never runs the script', async () => {
     const pool = new MemoryMediaPool()
@@ -654,6 +705,45 @@ describe('the webhook trigger', () => {
     expect(kept.subscription.webhook).toEqual(enabled.subscription.webhook)
   })
 
+  it('marks a retried edit that first armed the address as unable to show it again', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(createRequest(projectRef, 'printf events\n', { name: 'timer only' }))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const request = { requestId: requestId('enable-retry'), workspaceId, projectRef,
+      subscriptionRef: created.subscription.subscriptionRef, expectedRevision: 1, name: 'timer only', intervalMinutes: 10,
+      webhook: true, script: { scriptContent: 'printf events\n' } }
+    const first = await booted.ctx.agentTeam.updateSubscription(request)
+    if (first.kind !== 'changed') throw new Error('expected a committed edit')
+    expect(first.webhookAddress).toMatch(addressPattern)
+    const retried = await booted.ctx.agentTeam.updateSubscription(request)
+    if (retried.kind !== 'changed') throw new Error('the retry resolves the committed edit')
+    expect(retried.webhookAddress, 'the full address was shown once').toBeUndefined()
+    expect(retried.webhookAddressGone, 'the retry says the newly armed address cannot be fetched again').toBe(true)
+  })
+
+  it('does not mark an edit that keeps the existing address as gone', async () => {
+    fakeTimers.useFakeTimers({ toFake: ['Date'] })
+    live.push({ dispose: async () => { fakeTimers.useRealTimers() } })
+    fakeTimers.setSystemTime(new Date('2026-11-04T12:00:00.000Z'))
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(createRequest(projectRef, 'printf events\n', { name: 'webhook feed', webhook: true }))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const request = { requestId: requestId('keep-retry'), workspaceId, projectRef,
+      subscriptionRef: created.subscription.subscriptionRef, expectedRevision: 1, name: 'renamed', intervalMinutes: 10,
+      webhook: true, script: { scriptContent: 'printf events\n' } }
+    const first = await booted.ctx.agentTeam.updateSubscription(request)
+    if (first.kind !== 'changed') throw new Error('expected a committed edit')
+    const retried = await booted.ctx.agentTeam.updateSubscription(request)
+    if (retried.kind !== 'changed') throw new Error('the retry resolves the committed edit')
+    expect(retried.webhookAddressGone, 'keeping an existing address is not an arming response').toBeUndefined()
+  })
+
   it('answers each refusal the status table names: unknown, paused, full, and gone with the subscription', async () => {
     const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
     const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
@@ -779,7 +869,7 @@ describe('the webhook trigger', () => {
     shell.requests.length = 0
     await pump(booted)
     const run = shell.requests.filter(request => request.stdin !== undefined).at(-1)
-    expect(run?.command, 'the payload replays the bytes it was queued against').toBe('printf events\n')
+    expect(run?.command, 'the payload replays the bytes it was queued against').toBe(capturedBashScript('printf events\n'))
     const logs = booted.ctx.agentTeam.subscriptionLogsForClient({ workspaceId, projectRef, subscriptionRef })
     expect(logs.runs.find(entry => entry.trigger === 'webhook'),
       'the delivery run says which revision it pinned').toMatchObject({ subscriptionRevision: 1, eventCount: 1 })

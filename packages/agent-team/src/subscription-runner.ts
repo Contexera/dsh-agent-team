@@ -4,15 +4,15 @@
  * Workspace record, the credential injection, and the output contract applied
  * to the captured streams.
  *
- * Two facts shape this module. The Harness captures output with its own byte
- * budget and hands back a decoded string, so the run must fail on the
- * collector's `truncated` flag instead of trusting a tail that happens to end
- * on a line boundary. And a subscription runs with no Session, so nothing here
- * may inherit the process cwd or an Agent's sandbox setting: the policy is
- * always explicit and never the escalating mode.
+ * Two facts shape this module. The Harness shell result exposes decoded text,
+ * so the run forces and recovers the collect reader's bounded raw spill before
+ * validating UTF-8 and the byte ceiling. And a subscription runs with no
+ * Session, so nothing here may inherit the process cwd or an Agent's sandbox
+ * setting: the policy is always explicit and never the escalating mode.
  * @module @contexera/dsh-agent-team/subscription-runner
  */
 
+import { open, rm, type FileHandle } from 'node:fs/promises'
 import type { ShellExecRequest, ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import type { CredentialInfo, CredentialRef, ResolvedCredential } from '@deepseek-ai/dsh-credentials'
 import {
@@ -64,6 +64,78 @@ export const SUBSCRIPTION_PROBE_TIMEOUT_MS = 10_000
 export const SUBSCRIPTION_FAILURE_TAIL_BYTES = 8 * 1024
 
 /**
+ * The shell seam exposes only decoded stdout. A one-byte collector cap forces
+ * its bounded full-stream spill below the sentinel, so Team can recover and
+ * validate the original bytes. If the provider's maxSpillBytes drops that
+ * stream or spilling fails, a successful run is refused instead of falling
+ * back to the lossy text.
+ */
+const RAW_STDOUT_MARKER_TEXT = '__DSH_TEAM_RAW_STDOUT__'
+const RAW_STDOUT_MARKER = Buffer.from(RAW_STDOUT_MARKER_TEXT, 'ascii')
+const RAW_STDOUT_COLLECTOR_BYTES = 1
+
+function capturedCommand(command: string, shell: SubscriptionShell): string {
+  if (shell === 'bash') return `printf '${RAW_STDOUT_MARKER_TEXT}'; ${command}`
+  const bytes = [...RAW_STDOUT_MARKER].join(', ')
+  return `[Console]::OpenStandardOutput().Write([byte[]](${bytes}), 0, ${RAW_STDOUT_MARKER.length}); & {\n${command}\n}`
+}
+
+type CapturedStdout =
+  | { readonly ok: true; readonly raw: Buffer; readonly text: string; readonly tooLarge: boolean }
+  | { readonly ok: false; readonly reason: string }
+
+async function readExactly(file: FileHandle, length: number, position: number): Promise<Buffer> {
+  const bytes = Buffer.alloc(length)
+  let offset = 0
+  while (offset < length) {
+    const read = await file.read(bytes, offset, length - offset, position + offset)
+    if (read.bytesRead === 0) break
+    offset += read.bytesRead
+  }
+  return bytes.subarray(0, offset)
+}
+
+async function readCapturedStdout(result: ShellRunResult, maxBytes: number): Promise<CapturedStdout> {
+  const path = result.stdout.spillPath
+  if (path === undefined) {
+    return { ok: false, reason: 'the shell executor did not preserve the complete raw stdout stream' }
+  }
+  let file: FileHandle | undefined
+  try {
+    file = await open(path, 'r')
+    const stat = await file.stat()
+    if (!stat.isFile()) return { ok: false, reason: 'the shell executor published no regular stdout spill file' }
+    const prefix = await readExactly(file, RAW_STDOUT_MARKER.length, 0)
+    if (!prefix.equals(RAW_STDOUT_MARKER)) {
+      return { ok: false, reason: 'the shell executor did not preserve the expected raw stdout stream' }
+    }
+    const outputBytes = stat.size - RAW_STDOUT_MARKER.length
+    if (outputBytes > maxBytes) {
+      const tailBytes = Math.min(outputBytes, SUBSCRIPTION_FAILURE_TAIL_BYTES)
+      const raw = await readExactly(file, tailBytes, stat.size - tailBytes)
+      return { ok: true, raw, text: raw.toString('utf8'), tooLarge: true }
+    }
+    const raw = await readExactly(file, outputBytes, RAW_STDOUT_MARKER.length)
+    if (raw.length !== outputBytes) {
+      return { ok: false, reason: 'the shell executor did not preserve the complete raw stdout stream' }
+    }
+    return { ok: true, raw, text: raw.toString('utf8'), tooLarge: false }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `the shell executor could not expose raw stdout: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  } finally {
+    try {
+      await file?.close()
+    } catch {
+      // Cleanup still owns the temporary raw stream when close reports an I/O failure.
+    }
+    await rm(path, { force: true }).catch(() => {})
+  }
+}
+
+/**
  * The structured outcome of one run. The first two are successes; the rest name
  * what the owner has to change, so a Main stream line or a record never has to
  * parse prose to tell a timeout from a rejected script.
@@ -76,7 +148,7 @@ export type SubscriptionRunCategory =
   | 'timeout'
   | 'exit-code'
   | 'stdout-truncated'
-  /** Only run records written before the replacement-character check was removed carry this; a run no longer fails this way. */
+  /** Persisted run records from older releases may carry this category; current runs do not produce it. */
   | 'invalid-utf8'
   | 'invalid-output'
   | 'executor-missing'
@@ -241,10 +313,10 @@ export async function runSubscriptionScript(request: SubscriptionRunRequest): Pr
   let spec: ShellExecSpec
   try {
     spec = request.executor.resolve({
-      command: script.content,
+      command: capturedCommand(script.content, script.shell),
       workdir: request.workspaceRoot,
       timeoutMs: request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS,
-      stdoutMaxBytes: request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES,
+      stdoutMaxBytes: RAW_STDOUT_COLLECTOR_BYTES,
       env: environment,
       ...(stdin === undefined ? {} : { stdin }),
       // Explicit, non-escalating, and built from the Workspace the Host itself
@@ -261,23 +333,25 @@ export async function runSubscriptionScript(request: SubscriptionRunRequest): Pr
   } catch (error) {
     return failed('spawn-failed', `the shell executor failed before the script produced output: ${error instanceof Error ? error.message : String(error)}`)
   }
-  const stdout = result.stdout.text
+  const stdoutMaxBytes = request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES
+  const captured = await readCapturedStdout(result, stdoutMaxBytes)
+  const stdout = captured.ok ? captured.text : result.stdout.text
   const stderr = result.stderr.text
   if (result.timedOut) {
     return failed('timeout', `the script exceeded ${Math.round((request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS) / 1000)} seconds and was killed`,
       stdout, stderr, result.exitCode, true)
   }
-  if (result.stdout.truncated) {
-    return failed('stdout-truncated', `the script printed more than ${request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES} bytes of stdout; narrow what it prints`,
+  if (captured.ok && captured.tooLarge) {
+    return failed('stdout-truncated', `the script printed more than ${stdoutMaxBytes} bytes of stdout; narrow what it prints`,
       stdout, stderr, result.exitCode)
   }
   if (result.exitCode !== 0) {
     return failed('exit-code', `the script exited with code ${result.exitCode === null ? 'null' : result.exitCode}`, stdout, stderr, result.exitCode)
   }
-  // The executor hands over decoded text, so a replacement character is
-  // indistinguishable from data the script chose to print: the run takes it
-  // as data rather than refusing output a healthy script may legitimately owe.
-  const parsed = parseSubscriptionOutput(Buffer.from(stdout, 'utf8'))
+  if (!captured.ok) {
+    return failed('invalid-output', captured.reason, stdout, stderr, result.exitCode)
+  }
+  const parsed = parseSubscriptionOutput(captured.raw)
   if (!parsed.ok) {
     return failed('invalid-output', parsed.reason, stdout, stderr, result.exitCode)
   }

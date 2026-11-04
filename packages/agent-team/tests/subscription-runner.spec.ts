@@ -3,7 +3,17 @@
  * makes of the streams that come back. The executor here is a recorder, so a
  * refused run is proved by the reason and the request, never by a real shell.
  */
-import { describe, expect, it } from 'vitest'
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import { SandboxBashExecutor } from '@deepseek-ai/dsh-bash-sandbox'
+import { SandboxProvider } from '@deepseek-ai/dsh-sandbox'
+import { SandboxPolicyService } from '@deepseek-ai/dsh-sandbox-policy'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
+import { afterAll, describe, expect, it } from 'vitest'
 import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { failureTail, runSubscriptionScript, type SubscriptionCredentials } from '../src/subscription-runner.ts'
 import { SUBSCRIPTION_RUN_TIMEOUT_MS, SUBSCRIPTION_STDOUT_MAX_BYTES, snapshotScript } from '../src/subscriptions.ts'
@@ -34,9 +44,23 @@ function subscription(overrides: { readonly script?: ReturnType<typeof script>; 
 
 interface Recorded {
   readonly spec: ShellExecSpec
+  spillPath?: string | undefined
 }
 
-function executor(answer: (spec: ShellExecSpec) => Partial<ShellRunResult> & { readonly stdoutText?: string }) {
+const fakeSpillRoot = mkdtempSync(join(tmpdir(), 'dsh-team-runner-fake-'))
+let fakeSpillId = 0
+
+afterAll(() => {
+  rmSync(fakeSpillRoot, { recursive: true, force: true })
+})
+
+type ExecutorAnswer = Partial<ShellRunResult> & {
+  readonly stdoutText?: string
+  /** A regular file is the provider contract; the broken link exercises cleanup after a read failure. */
+  readonly spill?: 'file' | 'unreadable' | 'missing'
+}
+
+function executor(answer: (spec: ShellExecSpec) => ExecutorAnswer) {
   const recorded: Recorded[] = []
   return {
     recorded,
@@ -44,15 +68,24 @@ function executor(answer: (spec: ShellExecSpec) => Partial<ShellRunResult> & { r
       return request
     },
     async execute(spec: ShellExecSpec) {
-      recorded.push({ spec })
+      const record: Recorded = { spec }
+      recorded.push(record)
       const answered = answer(spec)
+      const spillPath = join(fakeSpillRoot, `${fakeSpillId++}.log`)
+      record.spillPath = spillPath
+      if (answered.spill === 'unreadable') symlinkSync(join(fakeSpillRoot, 'missing'), spillPath)
+      else if (answered.spill !== 'missing') writeFileSync(spillPath, `__DSH_TEAM_RAW_STDOUT__${answered.stdoutText ?? ''}`)
       return { result: async (): Promise<ShellRunResult> => ({
         exitCode: answered.exitCode ?? 0,
         signal: null,
         timedOut: answered.timedOut ?? false,
         aborted: false,
         timeoutMs: spec.timeoutMs,
-        stdout: { text: answered.stdoutText ?? '', truncated: answered.stdout?.truncated ?? false },
+        stdout: {
+          text: answered.stdoutText ?? '',
+          truncated: answered.stdout?.truncated ?? false,
+          ...(answered.spill === 'missing' ? {} : { spillPath }),
+        },
         stderr: { text: answered.stderr?.text ?? '', truncated: false },
       }) }
     },
@@ -66,6 +99,37 @@ const credentials = (values: Record<string, string>): SubscriptionCredentials =>
 
 const validOutput = '{"id":"a","title":"A"}\n'
 
+function paddedOutputScript(totalBytes: number): string {
+  const head = '{"id":"a","title":"A","pad":"'
+  const tail = '"}\n'
+  const padding = totalBytes - Buffer.byteLength(head + tail)
+  return `printf '${head}'; head -c ${padding} /dev/zero | tr '\\0' x; printf '${tail}'`
+}
+
+class PassthroughSandboxProvider extends SandboxProvider {
+  async confine(argv: readonly string[]) {
+    return { argv: [...argv], enforcement: 'full' as const, denialSignatures: [], runnerFailureRules: [] }
+  }
+}
+
+async function realSandboxBash() {
+  const workspace = await mkdtemp(join(tmpdir(), 'dsh-team-runner-'))
+  const ctx = new Context()
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(PassthroughSandboxProvider)
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: workspace })
+  await ctx.plugin(LocalSubprocessRuntime)
+  await ctx.plugin(SandboxBashExecutor, { graceMs: 200 })
+  return {
+    executor: ctx.shell as SandboxBashExecutor,
+    workspace,
+    async dispose() {
+      await ctx.fiber.dispose()
+      await rm(workspace, { recursive: true, force: true })
+    },
+  }
+}
+
 describe('what one run is handed', () => {
   it('runs in the Workspace root under an explicit, non-escalating policy', async () => {
     const shell = executor(() => ({ stdoutText: validOutput }))
@@ -75,11 +139,12 @@ describe('what one run is handed', () => {
     })
     expect(report.ok).toBe(true)
     const { spec } = shell.recorded[0]!
+    expect(existsSync(shell.recorded[0]!.spillPath!)).toBe(false)
     expect(spec.workdir).toBe(WORKSPACE)
     expect(spec.sandboxPolicy).toEqual({ mode: 'workspace-write', workspaceRoot: WORKSPACE })
     expect(spec.timeoutMs).toBe(SUBSCRIPTION_RUN_TIMEOUT_MS)
-    // The Harness default is 64,000 bytes; this contract asks for its own cap.
-    expect(spec.stdoutMaxBytes).toBe(SUBSCRIPTION_STDOUT_MAX_BYTES)
+    // The public collector spills the raw stream; Team applies its 65,536-byte contract after recovery.
+    expect(spec.stdoutMaxBytes).toBe(1)
     expect(spec.stdin).toBeUndefined()
   })
 
@@ -137,13 +202,25 @@ describe('what one run is handed', () => {
 
 describe('what the streams have to prove', () => {
   it('fails on a truncated stdout instead of accepting a valid-looking tail', async () => {
-    const shell = executor(() => ({ stdoutText: validOutput, stdout: { truncated: true } as never }))
+    const shell = executor(() => ({ stdoutText: 'x'.repeat(SUBSCRIPTION_STDOUT_MAX_BYTES + 1), stdout: { truncated: true } as never }))
     const report = await runSubscriptionScript({
       executor: shell, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
       trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
     })
     expect(report.ok).toBe(false)
     expect(report.reason).toMatch(/65536 bytes of stdout/)
+    expect(existsSync(shell.recorded[0]!.spillPath!)).toBe(false)
+  })
+
+  it('reports missing raw stdout instead of inferring a size overrun', async () => {
+    const shell = executor(() => ({ stdoutText: validOutput, stdout: { truncated: true } as never, spill: 'missing' }))
+    const report = await runSubscriptionScript({
+      executor: shell, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
+      trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(report).toMatchObject({ ok: false, category: 'invalid-output', events: [] })
+    expect(report.reason).toMatch(/did not preserve the complete raw stdout stream/)
+    expect(report.reason).not.toMatch(/65536 bytes/)
   })
 
   it('fails a killed run, and names how long it was allowed to live', async () => {
@@ -155,6 +232,7 @@ describe('what the streams have to prove', () => {
     expect(report.ok).toBe(false)
     expect(report.timedOut).toBe(true)
     expect(report.reason).toMatch(/exceeded 60 seconds/)
+    expect(existsSync(shell.recorded[0]!.spillPath!)).toBe(false)
   })
 
   it('fails a non-zero exit, keeping both stream tails for the owner', async () => {
@@ -170,14 +248,91 @@ describe('what the streams have to prove', () => {
     expect(report.reason).toMatch(/exited with code 3/)
   })
 
-  it('takes a replacement character as data instead of refusing the run', async () => {
-    const shell = executor(() => ({ stdoutText: '{"id":"a\uFFFD","title":"A"}\n' }))
-    const report = await runSubscriptionScript({
-      executor: shell, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
-      trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
-    })
-    expect(report.ok).toBe(true)
-    expect(report.ok && report.events.map(event => event.id)).toEqual(['a\uFFFD'])
+  it.skipIf(process.platform === 'win32')('accepts a legal replacement character and a UTF-8 character split across output chunks', async () => {
+    const real = await realSandboxBash()
+    try {
+      const report = await runSubscriptionScript({
+        executor: real.executor, credentials: credentials({}), liveShell: 'bash',
+        subscription: subscription({ script: script(String.raw`printf '{"id":"a\357\277\275","title":"A"}\n'
+printf '{"id":"b\342'; sleep 0.01; printf '\202'; sleep 0.01; printf '\254","title":"B"}\n'`) }),
+        trigger: 'interval', workspaceRoot: real.workspace, lastSuccessAt: undefined,
+      })
+      expect(report.ok).toBe(true)
+      expect(report.ok && report.events.map(event => event.id)).toEqual(['a\uFFFD', 'b\u20AC'])
+    } finally {
+      await real.dispose()
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('rejects illegal raw stdout bytes from the real sandbox bash executor', async () => {
+    const real = await realSandboxBash()
+    try {
+      for (const [octal, title] of [['377', 'FF'], ['376', 'FE']] as const) {
+        const report = await runSubscriptionScript({
+          executor: real.executor, credentials: credentials({}), liveShell: 'bash',
+          subscription: subscription({ script: script(`printf '{"id":"a\\${octal}","title":"${title}"}\n'`) }),
+          trigger: 'interval', workspaceRoot: real.workspace, lastSuccessAt: undefined,
+        })
+        expect(report).toMatchObject({ ok: false, category: 'invalid-output', events: [] })
+        expect(report.reason).toMatch(/not valid UTF-8/)
+      }
+    } finally {
+      await real.dispose()
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('applies the output limit to the recovered raw bytes at the exact boundary', async () => {
+    const real = await realSandboxBash()
+    try {
+      const exact = await runSubscriptionScript({
+        executor: real.executor, credentials: credentials({}), liveShell: 'bash',
+        subscription: subscription({ script: script(paddedOutputScript(SUBSCRIPTION_STDOUT_MAX_BYTES)) }),
+        trigger: 'interval', workspaceRoot: real.workspace, lastSuccessAt: undefined,
+      })
+      expect(exact.ok).toBe(true)
+      expect(Buffer.byteLength(exact.stdout)).toBe(SUBSCRIPTION_STDOUT_MAX_BYTES)
+
+      const over = await runSubscriptionScript({
+        executor: real.executor, credentials: credentials({}), liveShell: 'bash',
+        subscription: subscription({ script: script(paddedOutputScript(SUBSCRIPTION_STDOUT_MAX_BYTES + 1)) }),
+        trigger: 'interval', workspaceRoot: real.workspace, lastSuccessAt: undefined,
+      })
+      expect(over).toMatchObject({ ok: false, category: 'stdout-truncated', events: [] })
+    } finally {
+      await real.dispose()
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('preserves stdin, exit status, and stderr through raw capture', async () => {
+    const real = await realSandboxBash()
+    try {
+      const report = await runSubscriptionScript({
+        executor: real.executor, credentials: credentials({}), liveShell: 'bash',
+        subscription: subscription({ script: script(`IFS= read -r input || true
+printf '%s' "$input" >&2
+printf '{"id":"a","title":"A"}\n'
+exit 7`) }),
+        trigger: 'webhook', workspaceRoot: real.workspace, lastSuccessAt: undefined, stdin: 'webhook-input',
+      })
+      expect(report).toMatchObject({ ok: false, category: 'exit-code', exitCode: 7, stdout: validOutput })
+      expect(report.stderr).toContain('webhook-input')
+    } finally {
+      await real.dispose()
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('keeps a real executor timeout ahead of raw-output classification', async () => {
+    const real = await realSandboxBash()
+    try {
+      const report = await runSubscriptionScript({
+        executor: real.executor, credentials: credentials({}), liveShell: 'bash',
+        subscription: subscription({ script: script('sleep 1') }),
+        trigger: 'interval', workspaceRoot: real.workspace, lastSuccessAt: undefined, timeoutMs: 100,
+      })
+      expect(report).toMatchObject({ ok: false, category: 'timeout', timedOut: true })
+    } finally {
+      await real.dispose()
+    }
   })
 
   it('accepts a complete event stream and reports every event', async () => {
@@ -188,6 +343,33 @@ describe('what the streams have to prove', () => {
     })
     expect(report.ok).toBe(true)
     expect(report.events.map(event => event.id)).toEqual(['a', 'b'])
+  })
+
+  it('removes the raw spill after invalid output and after a read failure', async () => {
+    const empty = executor(() => ({}))
+    const emptyReport = await runSubscriptionScript({
+      executor: empty, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
+      trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(emptyReport).toMatchObject({ ok: true, events: [] })
+    expect(existsSync(empty.recorded[0]!.spillPath!)).toBe(false)
+
+    const invalid = executor(() => ({ stdoutText: 'not json\n' }))
+    const invalidReport = await runSubscriptionScript({
+      executor: invalid, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
+      trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(invalidReport).toMatchObject({ ok: false, category: 'invalid-output' })
+    expect(existsSync(invalid.recorded[0]!.spillPath!)).toBe(false)
+
+    if (process.platform === 'win32') return
+    const unreadable = executor(() => ({ spill: 'unreadable' }))
+    const unreadableReport = await runSubscriptionScript({
+      executor: unreadable, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
+      trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
+    })
+    expect(unreadableReport).toMatchObject({ ok: false, category: 'invalid-output' })
+    expect(existsSync(unreadable.recorded[0]!.spillPath!)).toBe(false)
   })
 
   it('fails a workspace that is gone instead of falling back to the process cwd', async () => {

@@ -642,7 +642,8 @@ const subscriptionCreated: Op<'team/subscription-created'> = {
   ...opBase('operation:protocol-41', 'request:protocol-subscription-created', 41),
   previousOperationId,
   kind: 'team/subscription-created',
-  data: { workspaceId: alpha, subscription: fixtureSubscription, activity: subscriptionActivity('created', 1, 41), baselineIds: ['already-known'] },
+  data: { workspaceId: alpha, subscription: fixtureSubscription, activity: subscriptionActivity('created', 1, 41), baselineIds: ['already-known'],
+    request: { intervalMinutes: 15, scriptSource: { kind: 'content' }, baseline: 'current-output' } },
 }
 
 const subscriptionUpdated: Op<'team/subscription-updated'> = {
@@ -654,8 +655,11 @@ const subscriptionUpdated: Op<'team/subscription-updated'> = {
     subscription: { ...fixtureSubscription, name: 'protocol feed renamed', revision: 2 },
     previousRevision: 1,
     activity: { ...subscriptionActivity('updated', 2, 42), subscriptionName: 'protocol feed renamed' },
+    request: { intervalMinutes: 15, scriptSource: { kind: 'content' } },
   },
 }
+const { request: _createdRequest, ...legacySubscriptionCreatedData } = subscriptionCreated.data
+const { request: _updatedRequest, ...legacySubscriptionUpdatedData } = subscriptionUpdated.data
 
 const subscriptionPaused: Op<'team/subscription-paused'> = {
   ...opBase('operation:protocol-43', 'request:protocol-subscription-paused', 43),
@@ -1595,30 +1599,30 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
   },
   'team/subscription-created': {
     stored: subscriptionCreated,
-    legacyShapes: [],
+    legacyShapes: [{ ...subscriptionCreated, data: legacySubscriptionCreatedData }],
     retry: {
       same: async () => {
         const out = await ledger.createSubscription({
           requestId: subscriptionCreated.requestId, actor: human, workspaceId: alpha, projectRef,
           name: fixtureSubscription.name, triggers: fixtureSubscription.triggers, script: fixtureSubscription.script,
           credentials: [], baselineIds: subscriptionCreated.data.baselineIds,
-        })
+        }, subscriptionCreated.data.request)
         expect(out.value.receipt.operationId, 'the creation mapper answers with the stored subscription write').toBe(subscriptionCreated.operationId)
         expect(out.value.subscription.subscriptionRef).toBe(fixtureSubscription.subscriptionRef)
         return out
       },
       changed: () => ledger.createSubscription({
         requestId: subscriptionCreated.requestId, actor: human, workspaceId: alpha, projectRef,
-        name: 'a different subscription name', triggers: fixtureSubscription.triggers, script: fixtureSubscription.script,
-        credentials: [], baselineIds: [],
-      }),
+        name: fixtureSubscription.name, triggers: fixtureSubscription.triggers, script: fixtureSubscription.script,
+        credentials: [], baselineIds: subscriptionCreated.data.baselineIds,
+      }, { ...subscriptionCreated.data.request!, baseline: 'ignore-history' }),
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },
   'team/subscription-updated': {
     stored: subscriptionUpdated,
-    legacyShapes: [],
+    legacyShapes: [{ ...subscriptionUpdated, data: legacySubscriptionUpdatedData }],
     retry: {
       same: async () => {
         const out = await ledger.updateSubscription({
@@ -1626,7 +1630,7 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
           subscriptionRef: fixtureSubscription.subscriptionRef, expectedRevision: 1,
           name: subscriptionUpdated.data.subscription.name, triggers: fixtureSubscription.triggers,
           script: fixtureSubscription.script, credentials: [],
-        })
+        }, subscriptionUpdated.data.request)
         expect(out.value.receipt.operationId, 'the update mapper answers with the stored subscription write').toBe(subscriptionUpdated.operationId)
         expect(out.value.subscription.revision, 'the stored edit is what a retry answers with').toBe(2)
         return out

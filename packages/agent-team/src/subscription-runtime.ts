@@ -123,7 +123,7 @@ export class SubscriptionScheduler {
   private readonly running = new Set<AgentTeamSubscriptionRef>()
   /** The due instant each executing timer run answers, so a tick can tell it is already spent. */
   private readonly runningDue = new Map<AgentTeamSubscriptionRef, number>()
-  /** Executions that already hold a slot: teardown waits for these, not for the queue. */
+  /** Admitted work, including publication after a run releases its slot; teardown does not wait for the queue. */
   private readonly inFlight = new Set<Promise<void>>()
   private readonly queue: QueuedRun[] = []
   /** One in-flight publication pass per subscription, so overlapping passes cannot spend the same budget. */
@@ -139,8 +139,9 @@ export class SubscriptionScheduler {
 
   /**
    * Stop admitting work and converge: reject every trial that never started,
-   * then wait for the executions already holding a slot. A Host closes its
-   * stores only after this resolves, so a late run cannot write a closed one.
+   * then wait for admitted work, including publication that outlives its run
+   * slot. A Host closes its stores only after this resolves, so late work cannot
+   * write a closed one.
    */
   async stop(): Promise<void> {
     this.stopped = true
@@ -359,9 +360,6 @@ export class SubscriptionScheduler {
       await this.settleOutcome(subscription, outcome, interval).catch((error: unknown) => {
         this.ports.log(`subscription '${ref}' could not record its outcome: ${error instanceof Error ? error.message : String(error)}`)
       })
-      await this.publishPass().catch((error: unknown) => {
-        this.ports.log(`subscription '${ref}' could not publish after its run: ${error instanceof Error ? error.message : String(error)}`)
-      })
     } finally {
       this.running.delete(ref)
       this.runningDue.delete(ref)
@@ -369,6 +367,9 @@ export class SubscriptionScheduler {
       // the next timer tick to start.
       void this.admit()
     }
+    await this.publishPass().catch((error: unknown) => {
+      this.ports.log(`subscription '${ref}' could not publish after its run: ${error instanceof Error ? error.message : String(error)}`)
+    })
   }
 
   /**
@@ -470,7 +471,7 @@ export class SubscriptionScheduler {
         break
       }
       checkpoint = await this.ports.save(subscription.subscriptionRef, current => ({ ...current,
-        publishedInWindow: current.publishedInWindow + 1, publishWindowMinute: minute })) ?? checkpoint
+        publishedInWindow: current.publishedInWindow + 1 })) ?? checkpoint
       budget -= 1
     }
   }

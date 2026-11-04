@@ -55,6 +55,7 @@ import type {
   AgentTeamClaimRef,
   AgentTeamCreateProjectRequest,
   AgentTeamCreateProjectResult,
+  AgentTeamCreateSubscriptionRequestIntent,
   AgentTeamDirectMarker,
   AgentTeamDmRequest,
   AgentTeamDmResult,
@@ -196,6 +197,8 @@ import type {
   AgentTeamSubscriptionEventPublished,
   AgentTeamSubscriptionPublishResult,
   AgentTeamSubscriptionRef,
+  AgentTeamSubscriptionRequestIntent,
+  AgentTeamSubscriptionScriptSource,
   AgentTeamUpdateMemberRequest,
   AgentTeamView,
   AgentTeamViewRequest,
@@ -465,6 +468,28 @@ type AgentTeamAuthorizedSubscriptionWrite =
   | AgentTeamAuthorizedBaselineSubscriptionRequest
   | AgentTeamAcceptSubscriptionEventsRequest
   | AgentTeamPublishSubscriptionEventRequest
+
+/** A create or update retry before its script source and credentials have been resolved. */
+type AgentTeamSubscriptionWriteReplayBase = {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly actor: AgentTeamActor
+  readonly name: string
+  readonly credentials?: readonly SubscriptionCredential[] | undefined
+  readonly intervalMinutes?: number | undefined
+  readonly webhook?: boolean | undefined
+  readonly script: AgentTeamSubscriptionScriptSource
+}
+
+export type AgentTeamSubscriptionWriteReplayRequest =
+  | AgentTeamSubscriptionWriteReplayBase & { readonly kind: 'create'; readonly baseline?: 'current-output' | 'ignore-history' | undefined }
+  | AgentTeamSubscriptionWriteReplayBase & { readonly kind: 'update'; readonly subscriptionRef: AgentTeamSubscriptionRef; readonly expectedRevision: number }
+
+export interface AgentTeamSubscriptionWriteReplay {
+  readonly value: AgentTeamSubscriptionChangeResult
+  readonly addressArmed: boolean
+}
 
 /** One run's validated output, accepted under the version the run pinned. */
 export interface AgentTeamAcceptSubscriptionEventsRequest {
@@ -1064,10 +1089,15 @@ export class AgentTeamLedger {
   }
 
   /** Durable creation of one subscription, with the ids its trial run asked to ignore. */
-  createSubscription(request: AgentTeamAuthorizedCreateSubscriptionRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+  createSubscription(request: AgentTeamAuthorizedCreateSubscriptionRequest,
+    requestIntent?: AgentTeamCreateSubscriptionRequestIntent): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
+        if (requestIntent !== undefined && existing.data !== undefined && 'request' in existing.data
+          && existing.data.request !== undefined && !isDeepStrictEqual(existing.data.request, requestIntent)) {
+          this.throwRequestCollision(existing.requestId)
+        }
         this.assertSameSubscriptionWrite(existing, request)
         return this.resolved(this.subscriptionChangeOf(existing))
       }
@@ -1099,7 +1129,9 @@ export class AgentTeamLedger {
       })
       const activity = this.subscriptionActivity(subscription, 'subscription-created', request.actor, sequence, base.occurredAt)
       const operation: AgentTeamSubscriptionCreatedOperation = Object.freeze({ ...base, kind: 'team/subscription-created',
-        data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity, baselineIds: Object.freeze([...request.baselineIds]) }) })
+        data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity, baselineIds: Object.freeze([...request.baselineIds]),
+          ...(requestIntent === undefined ? {} : { request: Object.freeze({ ...requestIntent,
+            scriptSource: Object.freeze({ ...requestIntent.scriptSource }) }) }) }) })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.subscriptionChangeOf(operation, armed.token))
@@ -1107,10 +1139,15 @@ export class AgentTeamLedger {
   }
 
   /** Replace the editable parts of one subscription; every edit is a new revision. */
-  updateSubscription(request: AgentTeamAuthorizedUpdateSubscriptionRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+  updateSubscription(request: AgentTeamAuthorizedUpdateSubscriptionRequest,
+    requestIntent?: AgentTeamSubscriptionRequestIntent): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
     return this.enqueue(async () => {
       const existing = this.state.byRequest.get(request.requestId)
       if (existing !== undefined) {
+        if (requestIntent !== undefined && existing.data !== undefined && 'request' in existing.data
+          && existing.data.request !== undefined && !isDeepStrictEqual(existing.data.request, requestIntent)) {
+          this.throwRequestCollision(existing.requestId)
+        }
         this.assertSameSubscriptionWrite(existing, request)
         return this.resolved(this.subscriptionChangeOf(existing))
       }
@@ -1132,7 +1169,9 @@ export class AgentTeamLedger {
       })
       const activity = this.subscriptionActivity(subscription, 'subscription-updated', request.actor, sequence, base.occurredAt)
       const operation: AgentTeamSubscriptionUpdatedOperation = Object.freeze({ ...base, kind: 'team/subscription-updated',
-        data: Object.freeze({ workspaceId: request.workspaceId, subscription, previousRevision: prior.revision, activity }) })
+        data: Object.freeze({ workspaceId: request.workspaceId, subscription, previousRevision: prior.revision, activity,
+          ...(requestIntent === undefined ? {} : { request: Object.freeze({ ...requestIntent,
+            scriptSource: Object.freeze({ ...requestIntent.scriptSource }) }) }) }) })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
       return this.committed(this.subscriptionChangeOf(operation, armed.token))
@@ -1455,16 +1494,109 @@ export class AgentTeamLedger {
    * from its trial, which a retry must not re-run, so the committed baseline
    * stands and every other field is still compared.
    */
-  subscriptionWriteReplay(request: AgentTeamAuthorizedSubscriptionWrite): AgentTeamSubscriptionChangeResult | undefined {
+  subscriptionWriteReplay(request: AgentTeamAuthorizedSubscriptionWrite | AgentTeamSubscriptionWriteReplayRequest): AgentTeamSubscriptionWriteReplay | undefined {
     const existing = this.state.byRequest.get(request.requestId)
     if (existing === undefined) return undefined
-    if (existing.kind === 'team/subscription-created') {
+    if ('kind' in request && (request.kind === 'create' || request.kind === 'update')) {
+      this.assertSameSubscriptionReplay(existing, request)
+    } else if (existing.kind === 'team/subscription-created') {
       const created = request as AgentTeamAuthorizedCreateSubscriptionRequest
       this.assertSameSubscriptionWrite(existing, { ...created, baselineIds: existing.data.baselineIds })
     } else {
       this.assertSameSubscriptionWrite(existing, request)
     }
-    return this.subscriptionChangeOf(existing)
+    return Object.freeze({ value: this.subscriptionChangeOf(existing), addressArmed: this.subscriptionWriteArmedAddress(existing) })
+  }
+
+  private assertSameSubscriptionReplay(existing: AgentTeamOperation, request: AgentTeamSubscriptionWriteReplayRequest): void {
+    const data = existing.data as Record<string, unknown>
+    if (!this.sameActor(existing.actor, request.actor) || data.workspaceId !== request.workspaceId
+      || (existing.kind !== 'team/subscription-created' && existing.kind !== 'team/subscription-updated')) {
+      this.throwRequestCollision(existing.requestId)
+    }
+    const stored = existing.data.subscription
+    const credentials = Object.freeze([...(request.credentials ?? [])])
+    const common = request.projectRef === stored.projectRef && request.name.trim() === stored.name
+      && isDeepStrictEqual(credentials, stored.credentials)
+    if (!common) this.throwRequestCollision(existing.requestId)
+    if ('scriptContent' in request.script && request.script.scriptContent !== stored.script.content) {
+      this.throwRequestCollision(existing.requestId)
+    }
+    if (existing.data.request === undefined && 'scriptPath' in request.script) {
+      throw new Error(`agent-team cannot verify a legacy script path for request id '${existing.requestId}'; read committed subscription '${stored.subscriptionRef}' before starting a new request`)
+    }
+    if (existing.kind === 'team/subscription-created') {
+      if (request.kind !== 'create') this.throwRequestCollision(existing.requestId)
+      const intent = this.createSubscriptionRequestIntent(request)
+      if (existing.data.request !== undefined) {
+        if (!isDeepStrictEqual(existing.data.request, intent)) this.throwRequestCollision(existing.requestId)
+      } else if (!this.sameLegacyCreateReplay(existing, request)) {
+        this.throwRequestCollision(existing.requestId)
+      }
+      return
+    }
+    if (request.kind !== 'update' || request.subscriptionRef !== stored.subscriptionRef
+      || request.expectedRevision !== existing.data.previousRevision) {
+      this.throwRequestCollision(existing.requestId)
+    }
+    const intent = this.updateSubscriptionRequestIntent(request)
+    if (existing.data.request !== undefined) {
+      if (!isDeepStrictEqual(existing.data.request, intent)) this.throwRequestCollision(existing.requestId)
+    } else if (!this.sameLegacyUpdateReplay(existing, request)) {
+      this.throwRequestCollision(existing.requestId)
+    }
+  }
+
+  private createSubscriptionRequestIntent(request: Extract<AgentTeamSubscriptionWriteReplayRequest, { readonly kind: 'create' }>): AgentTeamCreateSubscriptionRequestIntent {
+    return Object.freeze({ ...this.updateSubscriptionRequestIntent(request), baseline: request.baseline ?? 'current-output' })
+  }
+
+  private updateSubscriptionRequestIntent(request: AgentTeamSubscriptionWriteReplayBase): AgentTeamSubscriptionRequestIntent {
+    return Object.freeze({ ...(request.intervalMinutes === undefined ? {} : { intervalMinutes: request.intervalMinutes }),
+      ...(request.webhook === undefined ? {} : { webhook: request.webhook }),
+      scriptSource: Object.freeze('scriptPath' in request.script
+        ? { kind: 'path' as const, path: request.script.scriptPath }
+        : { kind: 'content' as const }) })
+  }
+
+  /** Old creates carry no source or baseline intent; compare every fact their operation did retain. */
+  private sameLegacyCreateReplay(existing: Extract<AgentTeamOperation, { kind: 'team/subscription-created' }>,
+    request: Extract<AgentTeamSubscriptionWriteReplayRequest, { readonly kind: 'create' }>): boolean {
+    const triggers = Object.freeze({ ...(request.intervalMinutes === undefined ? {} : { interval: Object.freeze({ minutes: request.intervalMinutes }) }),
+      ...(request.webhook === true ? { webhook: true as const } : {}) })
+    if (!isDeepStrictEqual(triggers, existing.data.subscription.triggers)) return false
+    return !(request.baseline === 'ignore-history' && existing.data.baselineIds.length > 0)
+  }
+
+  /** Old updates lack the caller's omitted-or-explicit trigger intent, so compare the effects they did record. */
+  private sameLegacyUpdateReplay(existing: Extract<AgentTeamOperation, { kind: 'team/subscription-updated' }>,
+    request: Extract<AgentTeamSubscriptionWriteReplayRequest, { readonly kind: 'update' }>): boolean {
+    const stored = existing.data.subscription
+    if ((request.intervalMinutes === undefined ? undefined : request.intervalMinutes) !== stored.triggers.interval?.minutes) return false
+    if (request.webhook === true && stored.triggers.webhook !== true) return false
+    if (request.webhook === false && stored.triggers.webhook === true) return false
+    return true
+  }
+
+  private subscriptionWriteArmedAddress(operation: AgentTeamOperation): boolean {
+    if (operation.kind === 'team/subscription-created') return operation.data.subscription.webhook !== undefined
+    if (operation.kind === 'team/subscription-webhook-reset') return true
+    if (operation.kind !== 'team/subscription-updated' || operation.data.subscription.webhook === undefined) return false
+    let priorWebhook: AgentTeamSubscription['webhook']
+    let found = false
+    for (let index = this.state.ordered.length - 1; index >= 0; index -= 1) {
+      const candidate = this.state.ordered[index]!
+      if (candidate.sequence >= operation.sequence || candidate.kind !== 'team/subscription-created'
+        && candidate.kind !== 'team/subscription-updated' && candidate.kind !== 'team/subscription-paused'
+        && candidate.kind !== 'team/subscription-resumed' && candidate.kind !== 'team/subscription-deleted'
+        && candidate.kind !== 'team/subscription-webhook-reset') continue
+      if (candidate.data.subscription.subscriptionRef !== operation.data.subscription.subscriptionRef
+        || candidate.data.subscription.revision !== operation.data.previousRevision) continue
+      priorWebhook = candidate.data.subscription.webhook
+      found = true
+      break
+    }
+    return found && priorWebhook === undefined
   }
 
   private assertSameSubscriptionWrite(existing: AgentTeamOperation, request: AgentTeamAuthorizedSubscriptionWrite): void {

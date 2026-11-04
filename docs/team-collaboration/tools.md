@@ -167,6 +167,8 @@ A committed resolution names the action, the resulting status and resolution, th
 
 The answer to an arming or resetting call carries the complete address, and that is the only time it is readable: the ledger keeps a hash of the token, so a retry of the same request, a later `list`, or the subscription page can never show it again. `reset_webhook` moves the address under the `expectedRevision` the caller read; the old one stops resolving immediately, while deliveries already queued keep running.
 
+For create and update, request identity includes the script source, trigger options, and create baseline. A committed retry still checks the current actor and Project ownership, then answers from the ledger without reading the script file, checking credential availability, or running the trial again; reusing the id with different options is a collision. A legacy record with no stored script path refuses a path retry and returns the committed `subscriptionRef`; read that stored subscription before starting a new request.
+
 `logs` reads the newest recorded runs — 50 are kept per subscription, newest first — with the trigger, start instant, duration, structured category, event count, exit code or timeout, the revision the run pinned, and for a webhook run the delivery and attempt that asked for it. The event count is what the run had accepted into the ledger, so a run that printed only ids the subscription already knew counts none.
 
 A webhook run whose batch finds no room in the unpublished queue is not a lost one: the validated events are kept with the delivery and a later pass accepts exactly them, without spending one of the delivery's retries — only a run that alone prints past the 500-event ceiling becomes an item under `deliveries`.

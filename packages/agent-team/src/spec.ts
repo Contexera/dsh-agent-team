@@ -264,6 +264,23 @@ const subscriptionScriptSchema = z.object({
   shell: z.union([z.literal('bash'), z.literal('pwsh')]),
 }).strict()
 
+const subscriptionRequestScriptSchema = z.union([
+  z.object({ kind: z.literal('content') }).strict(),
+  z.object({ kind: z.literal('path'), path: z.string().min(1) }).strict(),
+])
+
+const subscriptionRequestIntentFields = {
+  intervalMinutes: z.number().int().positive().optional(),
+  webhook: z.boolean().optional(),
+  scriptSource: subscriptionRequestScriptSchema,
+}
+
+const subscriptionRequestIntentSchema = z.object(subscriptionRequestIntentFields).strict().transform(omitUndefined)
+
+const createSubscriptionRequestIntentSchema = z.object({ ...subscriptionRequestIntentFields,
+  baseline: z.union([z.literal('current-output'), z.literal('ignore-history')]),
+}).strict().transform(omitUndefined)
+
 const subscriptionTriggersSchema = z.object({
   interval: z.object({ minutes: z.number().int().positive() }).strict().optional(),
   webhook: z.literal(true).optional(),
@@ -856,14 +873,14 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/subscription-created'),
     data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema,
-      baselineIds: z.array(z.string().min(1).max(200)) }).strict(),
+      baselineIds: z.array(z.string().min(1).max(200)), request: createSubscriptionRequestIntentSchema.optional() }).strict(),
   }).strict(),
   z.object({
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/subscription-updated'),
     data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, previousRevision: z.number().int().positive(),
-      activity: subscriptionActivitySchema }).strict(),
+      activity: subscriptionActivitySchema, request: subscriptionRequestIntentSchema.optional() }).strict(),
   }).strict(),
   z.object({
     ...operationBase,

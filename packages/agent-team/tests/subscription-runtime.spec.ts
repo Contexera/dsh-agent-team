@@ -50,6 +50,7 @@ interface Harness {
   readonly control: {
     saveThrows: boolean
     pendingThrows: boolean
+    publishThrows: boolean
     archived: boolean
     holdSaves: Promise<void> | undefined
     holdPublish: Promise<void> | undefined
@@ -79,7 +80,7 @@ function harness(options: {
   const logs: string[] = []
   const saves: string[] = []
   const stored = new Map<string, AgentTeamSubscription>(options.subscriptions.map(entry => [entry.subscriptionRef, entry]))
-  const control = { saveThrows: false, pendingThrows: false, archived: false,
+  const control = { saveThrows: false, pendingThrows: false, publishThrows: false, archived: false,
     holdSaves: undefined as Promise<void> | undefined, holdPublish: undefined as Promise<void> | undefined, stored }
   let release: Array<() => void> = []
   let scheduled: (() => void) | undefined
@@ -110,6 +111,7 @@ function harness(options: {
       return outcome
     },
     publish: async (entry, _acceptedSequence, eventId) => {
+      if (control.publishThrows) throw new Error('injected publication failure')
       published.push(`${entry.subscriptionRef}:${eventId}`)
       if (control.holdPublish !== undefined) await control.holdPublish
       pending[entry.subscriptionRef] = (pending[entry.subscriptionRef] ?? []).filter(queued => queued.eventId !== eventId)
@@ -359,6 +361,29 @@ describe('publication', () => {
     test.advance(2 * MINUTE)
     await test.scheduler.runTick()
     expect(test.published).toHaveLength(SUBSCRIPTION_PUBLISH_PER_MINUTE)
+  })
+
+  it('keeps a partly spent window when the clock is behind it', async () => {
+    const entry = subscription('s0')
+    const pending = Array.from({ length: SUBSCRIPTION_PUBLISH_PER_MINUTE + 10 }, (_, index) => ({
+      acceptedSequence: index + 1, eventId: `e${index}`,
+    }))
+    const test = harness({ subscriptions: [entry], pending: { [entry.subscriptionRef]: pending } })
+    const minute = Math.floor(Date.parse('2026-11-03T00:00:00.000Z') / MINUTE)
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT,
+      dueAt: Number.MAX_SAFE_INTEGER, publishWindowMinute: minute + 1, publishedInWindow: SUBSCRIPTION_PUBLISH_PER_MINUTE / 2 })
+
+    // The clock is a minute behind the durable window. Spending the ten that
+    // remain must not move that window backwards and reopen it on catch-up.
+    await test.scheduler.runTick()
+    expect(test.published).toHaveLength(SUBSCRIPTION_PUBLISH_PER_MINUTE / 2)
+    expect(test.checkpoints.get(entry.subscriptionRef)).toMatchObject({
+      publishWindowMinute: minute + 1, publishedInWindow: SUBSCRIPTION_PUBLISH_PER_MINUTE,
+    })
+
+    test.advance(MINUTE)
+    await test.scheduler.runTick()
+    expect(test.published).toHaveLength(SUBSCRIPTION_PUBLISH_PER_MINUTE / 2)
   })
 
   it('publishes nothing, and rewrites no checkpoint, for a deleted subscription', async () => {
@@ -618,6 +643,54 @@ describe('one admission for every entry point', () => {
     releaseSaves()
     await pumped(() => test.saves.includes(entry.subscriptionRef))
     expect(test.checkpoints.get(entry.subscriptionRef)?.dueAt).toBe(Date.parse('2026-11-03T00:05:00.000Z'))
+  })
+
+  it('frees settled script slots while publication continues and shutdown waits for it', async () => {
+    const entries = Array.from({ length: SUBSCRIPTION_CONCURRENT_RUNS + 1 }, (_, index) => subscription(`s${index}`))
+    const test = harness({ subscriptions: entries, outcomes: entries.map(() => 'accepted') })
+    for (const entry of entries) {
+      await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
+    }
+    await test.scheduler.runTick()
+    expect(test.runs).toHaveLength(SUBSCRIPTION_CONCURRENT_RUNS)
+    expect(test.scheduler.state().queued).toEqual([entries.at(-1)!.subscriptionRef])
+
+    let releasePublish = (): void => {}
+    test.control.holdPublish = new Promise<void>(resolve => { releasePublish = resolve })
+    test.releaseAll()
+    // The fifth script starts as soon as the first settled run releases its
+    // slot, even though that run's publication has not finished.
+    await pumped(() => test.runs.length === SUBSCRIPTION_CONCURRENT_RUNS + 1)
+    expect(test.runs).toHaveLength(SUBSCRIPTION_CONCURRENT_RUNS + 1)
+    await pumped(() => test.published.length === 1)
+    expect(test.published).toHaveLength(1)
+    test.releaseAll()
+    await pumped(() => test.scheduler.state().running.length === 0
+      && test.checkpoints.get(entries.at(-1)!.subscriptionRef)?.dueAt === Date.parse('2026-11-03T00:05:00.000Z'))
+    expect(test.scheduler.state()).toEqual({ running: [], queued: [] })
+
+    let drained = false
+    const stopping = test.scheduler.stop().then(() => { drained = true })
+    await Promise.resolve()
+    // Stop must include the publication promise that outlived the run slot.
+    expect(drained).toBe(false)
+    releasePublish()
+    await stopping
+    expect(drained).toBe(true)
+    expect(test.scheduler.state()).toEqual({ running: [], queued: [] })
+  })
+
+  it('logs a rejected publication after releasing the run slot without leaving shutdown hanging', async () => {
+    const entry = subscription('s0')
+    const test = harness({ subscriptions: [entry], outcomes: ['accepted'] })
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
+    await test.scheduler.runTick()
+    test.control.publishThrows = true
+    test.releaseAll()
+    await pumped(() => test.logs.some(message => message.includes('injected publication failure')))
+    expect(test.scheduler.state()).toEqual({ running: [], queued: [] })
+    await expect(test.scheduler.stop()).resolves.toBeUndefined()
+    expect(test.logs.join('\n')).toMatch(/could not publish 'e0': injected publication failure/)
   })
 
   it('stops admitting, rejects a trial that never started, and waits for the runs in flight', async () => {

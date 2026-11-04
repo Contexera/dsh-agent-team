@@ -172,6 +172,9 @@ A success has exactly one linearization point: the run succeeded when its output
 
 The accept and that clear are one segment under the subscription's write lock, which is why the settle step that runs afterwards only advances the next due time. The lock is what makes the clear honest: a defeat the ingress counts beside the run falls either inside the streak this success ends or outside it entirely, and nothing between reading the count and writing it can slip in.
 
+Only an acceptance or defeat whose pinned revision is still current changes the failure count or last-success time.
+A late result from an older revision is retained under that revision, but it neither clears nor extends the current revision's streak.
+
 The script itself runs outside the lock — holding it there would stall every delivery for the run's whole duration. An empty success takes the same segment and clears the same way, because it is the same fact: the run worked.
 
 One that alone prints past the 500-event ceiling is refused, since no later pass could ever publish it, and one that would carry the unpublished total past it is a failed run; a webhook delivery is the exception, because its request can never be fetched again, so it keeps that batch on its row until room opens (the ingress below).
@@ -187,6 +190,12 @@ The ingress itself is the one writer no scheduler admits, so it reads the termin
 The `replay` action runs one again — the current definition by default, so a fixed script can handle an old request, or the version it arrived under — publishes what the script prints like any run, so the same commit decides its success: one that delivers ends the failure streak, while a replay whose script fails counts nothing. It is a run, so it is admitted like one: the same four slots, the same per-subscription exclusion, and the same convergence when the Host stops, with a pause, a deletion, or an archived Project refusing it on the way in.
 
 A `requestId` names one intent, and `replays` holds it before anything runs: the record is written with the delivery and version the request named, in state `running`, and settled with the answer after the run.
+
+Create and update operations written by current builds also retain the caller's script source, trigger options, and create baseline.
+After the current actor and Project authority pass, a committed retry resolves from that intent before file reads, origin checks, credential lookup, or script execution.
+
+Operations written before this intent existed remain readable and replay through their stored normalized fields.
+Old pasted scripts can be compared exactly; a path retry those records cannot verify is refused with the committed `subscriptionRef` so the caller can read the stored subscription before starting a new request.
 
 Writing it is a precondition — a call that cannot record its own intent refuses instead of running a script nothing could then account for — and once it exists the id is spent. The same id naming another delivery, or the other version of the same one, is refused as a request collision even when no answer survived to say so, and a delivery whose replay delivered is not run again under a new id, since that would publish the same output twice.
 
@@ -214,11 +223,19 @@ A failed run keeps the row and waits 1, 5, and 30 minutes; the fourth failure tu
 
 A reset mints a new token for the same subscription and moves `generation` by one without moving the revision: accepted deliveries keep the version they arrived under, and the address the caller receives is the only copy in the clear, since the ledger keeps a hash.
 
+A retried create, update, or reset reports `webhookAddressGone` only when that stored operation armed an address.
+For an update, the Host compares the operation with the subscription state at its previous revision; a retained address on an ordinary update remains silent even when both writes share one millisecond.
+
 The scheduler reaches the world only through ports, so the runtime tests drive a fake clock and a fake executor. A timer run executes the stored snapshot through `ctx.shell` — the same executor the Member's shell tool uses — under a policy the Host builds itself from the trusted Workspace record: `workspace-write` rooted at that Workspace, 60 seconds, a 65,536-byte stdout cap, and never the escalating mode, because an unattended run has no one to approve it.
+
+The Team runner caps recovered raw script stdout at 65,536 bytes; this is not a tool or caller setting.
+The executor receives `ShellExecSpec.stdoutMaxBytes=1` only to force the Harness public collector to publish `spillPath`; after capture, Team restores and bounds the raw bytes, then removes that spill.
+The provider's default `maxSpillBytes` is 64 MiB; an oversized, missing, or otherwise incomplete spill is refused rather than accepted from decoded text.
 
 The mounted shell family is probed by behavior once and cached. A snapshot recorded under the other family fails its runs with that reason instead of running under a shell it was not written for.
 
-A run's stdout is the output contract: one JSON object per line, validated by the Team's own byte-level parser, with the collector's `truncated` flag treated as a failure so a valid-looking tail can never pass as complete output.
+A run's stdout is the output contract: one JSON object per line, validated by the Team's own byte-level parser from the recovered raw spill.
+The recovered raw bytes must be complete, valid UTF-8, and within the Team limit, so a decoded or valid-looking tail cannot pass as the full stream.
 
 New events are accepted into the ledger under the revision and script hash the run pinned and published at the budgeted rate; three failed runs in a row pause the subscription, which the ledger records with no Member actor because the Host acted on its own, and the pause carries one Main stream marker per owner — the Human included, followed or not — so the news reaches everyone it concerns.
 

@@ -562,6 +562,22 @@ describe('who may read a Project\'s subscriptions', () => {
 })
 
 describe('a request id means one payload', () => {
+  it('replays a legacy create with a pasted script and refuses a path it cannot verify', async () => {
+    const team = await seed()
+    const legacyRequestId = requestId('legacy-create')
+    const created = await team.ledger.createSubscription({ requestId: legacyRequestId, actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, name: 'main CI', triggers: { interval: { minutes: 10 } }, script, credentials: [], baselineIds: [] })
+    const subscriptionRef = subscriptionRefOf(created)
+    const common = { requestId: legacyRequestId, actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, name: 'main CI', intervalMinutes: 10, credentials: [] }
+    const pasted = team.ledger.subscriptionWriteReplay({ kind: 'create', ...common, script: { scriptContent: script.content }, baseline: 'current-output' })
+    expect(pasted?.value.subscription.subscriptionRef).toBe(subscriptionRef)
+    expect(() => team.ledger.subscriptionWriteReplay({ kind: 'create', ...common, script: { scriptPath: 'not-in-the-old-record.sh' }, baseline: 'current-output' }))
+      .toThrow(new RegExp(`read committed subscription '${subscriptionRef}'`))
+    expect(() => team.ledger.subscriptionWriteReplay({ kind: 'create', ...common, script: { scriptContent: 'printf different\n' }, baseline: 'current-output' }))
+      .toThrow(/reused with a different operation or payload/)
+  })
+
   it('refuses a create retried under the same id with any other field, and resolves the identical retry', async () => {
     const team = await seed()
     const first = { requestId: requestId('create-collision'), actor: team.owner.actor, workspaceId: alpha, projectRef: team.projectRef,

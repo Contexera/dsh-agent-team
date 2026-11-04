@@ -30,6 +30,7 @@ import type {
   AgentTeamOwnerActivity,
   AgentTeamReminderRef,
 } from "./entities.ts"
+import type { AgentTeamCreateSubscriptionRequestIntent, AgentTeamSubscriptionRequestIntent } from "./requests-results.ts"
 import type { SubscriptionEvent } from "../subscriptions.ts"
 
 /** The first durable operation in every Agent Team ledger. */
@@ -534,6 +535,8 @@ export interface AgentTeamSubscriptionCreatedOperation extends AgentTeamOperatio
     readonly activity: AgentTeamSubscriptionActivity
     /** The trial run's ids this subscription must never publish; empty means "ignore that history". */
     readonly baselineIds: readonly string[]
+    /** Absent on operations written before request replays carried their source and baseline intent. */
+    readonly request?: AgentTeamCreateSubscriptionRequestIntent | undefined
   }
 }
 
@@ -545,6 +548,8 @@ export interface AgentTeamSubscriptionUpdatedOperation extends AgentTeamOperatio
     readonly subscription: AgentTeamSubscription
     readonly previousRevision: number
     readonly activity: AgentTeamSubscriptionActivity
+    /** Absent on operations written before request replays carried their source and trigger intent. */
+    readonly request?: AgentTeamSubscriptionRequestIntent | undefined
   }
 }
 

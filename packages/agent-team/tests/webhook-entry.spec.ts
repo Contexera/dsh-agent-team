@@ -6,6 +6,9 @@
  * so what is proven here is the entry's own contract: what it refuses, what it
  * reads, and what it hands the Host.
  */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
@@ -24,23 +27,33 @@ const workspaceId = WorkspaceId('workspace:alpha')
 const origin = 'https://team.example.com'
 const requestId = (value: string): AgentTeamRequestId => value as AgentTeamRequestId
 const cleanups: Array<() => Promise<void>> = []
+const spillRoots: string[] = []
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(cleanup => cleanup()))
+  for (const root of spillRoots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
 /** A shell that answers the family probe and prints one event for the trial. */
 function fakeShell(): { readonly service: unknown } {
+  const spillRoot = mkdtempSync(join(tmpdir(), 'dsh-team-webhook-entry-'))
+  spillRoots.push(spillRoot)
+  let spillId = 0
   return {
     service: {
       resolve: (request: ShellExecSpec) => request,
       execute: async (spec: ShellExecSpec) => {
         const probe = spec.command.includes('BASH_VERSION')
-        const answer = (): ShellRunResult => ({
-          exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: spec.timeoutMs,
-          stdout: { text: probe ? '5.2.15' : '{"id":"a","title":"A"}\n', truncated: false },
-          stderr: { text: '', truncated: false },
-        })
+        const answer = (): ShellRunResult => {
+          const stdout = probe ? '5.2.15' : '{"id":"a","title":"A"}\n'
+          const spillPath = join(spillRoot, `${spillId++}.log`)
+          if (!probe) writeFileSync(spillPath, `__DSH_TEAM_RAW_STDOUT__${stdout}`)
+          return {
+            exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: spec.timeoutMs,
+            stdout: { text: stdout, truncated: false, ...(probe ? {} : { spillPath }) },
+            stderr: { text: '', truncated: false },
+          }
+        }
         return { result: async () => answer() }
       },
     },
