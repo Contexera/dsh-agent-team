@@ -1,5 +1,5 @@
 /**
- * The agent-facing Team timestamp formatter. Ledger storage keeps UTC ISO instants; rendering converts them to the fixed Team zone UTC+8 with an explicit offset (`2026-09-08T17:00:00+08:00`). A fixed offset has no daylight-saving component, so a stored instant renders byte-identically on every reread (context-cache invariant). The Web Client renders browser-local time and never uses this module.
+ * The agent-facing Team timestamp formatter. Ledger storage keeps UTC ISO instants; rendering converts them to the fixed Team zone UTC+8 with an explicit offset (`2026-09-08T17:00:00+08:00`). A fixed offset has no daylight-saving component, so a stored instant renders byte-identically on every reread (context-cache invariant). The Web Client renders browser-local time and does not use this module; the subscription form formats its own short UTC+8 reference clock without seconds or offset.
  * @module @contexera/dsh-agent-team/time-format
  */
 

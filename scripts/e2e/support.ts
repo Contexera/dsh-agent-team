@@ -78,7 +78,7 @@ async function webhookOriginOverlay(origin: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-team-webhook-overlay-'))
   const path = join(directory, 'webhook-origin.overlay.yml')
   await writeFile(path, [
-    '# The deployment public origin for one scenario: installation config, as spec.md §4.5 has it.',
+    '# The deployment public origin for one scenario: installation config.',
     '- id: contexera-agent-team-host',
     '  config:',
     '    webhook:',

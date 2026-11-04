@@ -43,8 +43,6 @@ const MONTH_LENGTHS: readonly number[] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31
 const MINUTE_MS = 60_000
 const MINUTES_PER_HOUR = 60
 const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR
-const HOUR_MS = 60 * MINUTE_MS
-const DAY_MS = 24 * HOUR_MS
 
 export type ReminderScheduleParse =
   | { readonly ok: true; readonly schedule: AgentTeamReminderSchedule }
@@ -122,11 +120,6 @@ function parseCronExpression(expression: string): CronFields | undefined {
     minutes: minutes!, hours: hours!, daysOfMonth: daysOfMonth!, months: months!, daysOfWeek: weekdays,
     dayOfMonthRestricted: fields[2] !== '*', dayOfWeekRestricted: fields[4] !== '*',
   }
-}
-
-/** The Team-zone wall clock of one instant, read through UTC getters on the shifted value. */
-function wallClockOf(instantMs: number): Date {
-  return new Date(instantMs + TEAM_ZONE_OFFSET_MINUTES * MINUTE_MS)
 }
 
 function instantOf(wallMs: number): number {
@@ -417,11 +410,3 @@ export function nextReminderWakeAt(reminders: readonly MemberReminderPlanEntry[]
   }
   return soonest === undefined || soonest <= nowMs ? undefined : soonest
 }
-
-/** Exposed for the notice text: the wall clock the cron fields were read in. */
-export function reminderWallClock(instantMs: number): Date {
-  return wallClockOf(instantMs)
-}
-
-/** Days between two instants, for tests that reason about the search horizon. */
-export const REMINDER_HORIZON_DAYS = CRON_SEARCH_HORIZON_MS / DAY_MS

@@ -77,6 +77,10 @@ The plugin manager renders that scope container as a component row and shows it 
 
 Always verify the built publication layout. A source symlink can bypass profile peer fallback and differ from a real installation; the browser scripts copy built packages for this reason.
 
+### One Host per DSH home
+
+One `$DSH_HOME` must not be shared by two running Host processes. Timers, private subscription checkpoints and the ledger projection all live in that home, so two Hosts over the same home fire duplicate runs and race on sequence numbers. The bundle does not lock the home; this is an operator constraint, so give each simultaneously running profile its own `DSH_HOME`. See [host-authority.md](../architecture/host-authority.md) for the scheduling authority.
+
 ### Profiles and release cadence
 
 Stable and development profiles are intentionally separate:

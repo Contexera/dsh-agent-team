@@ -205,7 +205,7 @@ A card states the subscription and whether it is doing anything: its name, the t
 
 New and edit share one dialog — name, interval, credential rows, script, and for a create the dedup baseline. `保存` stays disabled until a trial of this exact form passes on the Host, every edit retires that pass, and a retried save keeps its request id so a lost response cannot create twice. A refusal is not optimistic: the typed name and script stay, and the dialog states the reason with the refused trial's own output tails beside it.
 
-The form offers the interval trigger only until webhook ingress exists; a card still names whatever the Host reports, so a subscription created with both triggers reads as its interval. Deletion is confirmed in a dialog that states what goes with it, and every durable write rereads the list afterwards instead of editing a local copy — a card's own failure line stays on that card, so two refusals never collapse into one.
+The form offers both triggers — an interval, or a webhook address, or both — and a card names whatever the Host reports. Deletion is confirmed in a dialog that states what goes with it, and every durable write rereads the list afterwards instead of editing a local copy — a card's own failure line stays on that card, so two refusals never collapse into one.
 
 A reader who may not manage the Project reads the same list without 新建订阅, 编辑, 暂停/恢复 or 删除, with one line saying why. The Human-only Client makes the Human an owner of every Project, so this shape is the defensive one: it stands while the page still shows a Project it no longer manages — archived under it — and the Host's own authority refusal still answers a write issued anyway.
 

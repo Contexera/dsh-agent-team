@@ -1,11 +1,10 @@
 /**
  * A webhook delivery waiting to run: the row written before the entry answers 202, and private
- * scheduling state (`spec.md` §4.3), so it exists only while its delivery owes work.
+ * scheduling state, so it exists only while its delivery owes work.
  * @module @contexera/dsh-agent-team/subscription-admissions
  */
 
 import type { AgentTeamProjectRef, AgentTeamSubscriptionRef, AgentTeamRequestId } from './types/entities.ts'
-import { deliveryKey, type SubscriptionDeliveryRecord } from './subscription-runs.ts'
 import type { SubscriptionCredential, SubscriptionEvent, SubscriptionScriptSnapshot } from './subscriptions.ts'
 
 /**
@@ -21,7 +20,7 @@ export interface SubscriptionAdmissionRecord {
   /**
    * The Host's own identity for this delivery, minted at admission and handed to the
    * script as `DSH_TEAM_DELIVERY_ID` through every retry and replay — never the
-   * provider's id, since a provider redelivery is a new admission (`spec.md` §4.3).
+   * provider's id, since a provider redelivery is a new admission.
    */
   readonly admissionRef: string
   readonly subscriptionRef: AgentTeamSubscriptionRef
@@ -90,28 +89,4 @@ export function dueAdmissions(records: readonly SubscriptionAdmissionRecord[], n
     .filter(record => record.state !== 'running'
       && (record.nextAttemptAt === undefined || Date.parse(record.nextAttemptAt) <= nowMs))
     .sort((left, right) => Date.parse(left.receivedAt) - Date.parse(right.receivedAt))
-}
-
-/** The record one spent admission leaves behind: the request body, so an owner can decide to replay. */
-export function failedDeliveryOf(record: SubscriptionAdmissionRecord, error: string, expiresAt: string): SubscriptionDeliveryRecord {
-  return Object.freeze({
-    deliveryRef: record.deliveryRef,
-    admissionRef: record.admissionRef,
-    subscriptionRef: record.subscriptionRef,
-    projectRef: record.projectRef,
-    receivedRevision: record.receivedRevision,
-    receivedScriptHash: record.receivedScriptHash,
-    script: record.script,
-    credentials: record.credentials,
-    body: record.body,
-    receivedAt: record.receivedAt,
-    expiresAt,
-    attempts: record.attempts,
-    lastError: error,
-  })
-}
-
-/** The storage key a failed-delivery record lands under, beside its subscription. */
-export function failedDeliveryKeyOf(record: SubscriptionDeliveryRecord): string {
-  return deliveryKey(record.subscriptionRef, record.deliveryRef)
 }

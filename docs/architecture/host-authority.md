@@ -154,11 +154,13 @@ Admission re-reads the ledger rather than the queued snapshot: a subscription de
 
 Its state — next due instant, failure count, publication window, last success — lives in the private domain `agent_team_subscriptions` (`packages/agent-team/src/subscription-store.ts`), never in the ledger. Deleting every checkpoint changes no domain result, and a restart resumes from the persisted due instant instead of resetting it.
 
-The same domain keeps three tables no ledger fact depends on: `runs`, the newest fifty runs of each subscription; `deliveries`, the webhook deliveries whose automatic retries were spent; and `replays`, the answer each replay request already got. A run record carries the trigger, the start instant, the duration, the structured category, the exit code or timeout, the event count, the last 8 KiB of each stream, and the identity that explains it — `subscriptionRevision`, `scriptHash`, `runRef`, and for a delivery its `deliveryRef` with the attempt that spent the retries.
+The same domain keeps four tables no ledger fact depends on: `runs`, the newest fifty runs of each subscription; `deliveries`, the webhook deliveries whose automatic retries were spent; `replays`, the answer each replay request already got; and `admissions`, the accepted webhook requests that still owe a run or an accept, with the definition each arrived under and the batch a full queue held back.
+
+A run record carries the trigger, the start instant, the duration, the structured category, the exit code or timeout, the event count, the last 8 KiB of each stream, and the identity that explains it — `subscriptionRevision`, `scriptHash`, `runRef`, and for a delivery its `deliveryRef` with the attempt that spent the retries.
 
 The event count is what the run had accepted into the ledger, never what the script printed: a trial publishes nothing, a refused batch accepts nothing, and an id the subscription already knew is not new.
 
-A trial is recorded too, so an owner asking whether a fix passes reads the same history as the live runs; a create's draft trial is not, because the ledger never stored the subscription a record would belong to. Deleting a subscription drops all three tables with its checkpoint: the cleanup finishes before the call reports the deletion, and boot converges the rows an interrupted deletion left behind. Archiving a Project clears the same private state for every subscription it owns, at the archive rather than at the next restart.
+A trial is recorded too, so an owner asking whether a fix passes reads the same history as the live runs; a create's draft trial is not, because the ledger never stored the subscription a record would belong to. Deleting a subscription drops all four tables with its checkpoint: the cleanup finishes before the call reports the deletion, and boot converges the rows an interrupted deletion left behind. Archiving a Project clears the same private state for every subscription it owns, at the archive rather than at the next restart.
 
 The cleanup takes the same write lock as the private writes, so it cannot land inside one of their segments: either it runs first — and the segment's barrier read finds nothing live, writes nothing, and reports that it did not — or it runs after and takes every row the segment wrote. Each segment also re-reads the terminal state before it writes, so a deletion that lands between two segments leaves nothing behind either.
 
@@ -200,7 +202,7 @@ The listener binds `127.0.0.1` on `DSH_TEAM_WEBHOOK_PORT` (3081 by default), so 
 
 The token resolves against the ledger's armed addresses — a hash compared in constant time across every armed subscription — so a reset, a dropped trigger, a deletion, or an archived Project all answer 404, while a delivery already queued keeps its row, because a reset moves an address and not a queue.
 
-The status table is the contract: 202 once the row is durable, 404 for an unknown token or one whose subscription is deleted or archived, 409 while paused, 429 with `Retry-After` when ten deliveries are already queued or retrying, 413 past 256 KiB of body, 405 for anything but POST, 5xx when storage refuses the row.
+The status table is the contract: 202 once the row is durable, 404 for an unknown token or one whose subscription is deleted or archived, 409 while paused, 429 with `Retry-After` when ten deliveries are already queued or retrying, 413 past 256 KiB of body, 431 for a header over 1 KiB, 415 for a non-identity `content-encoding`, 400 for a body that is not UTF-8, 405 for anything but POST, 5xx when storage refuses the row.
 
 A header over 1 KiB refuses the delivery rather than truncating it, and a non-identity `content-encoding` is refused too, because a signature has to be verified over the bytes the provider signed.
 
@@ -221,6 +223,10 @@ A run's stdout is the output contract: one JSON object per line, validated by th
 New events are accepted into the ledger under the revision and script hash the run pinned and published at the budgeted rate; three failed runs in a row pause the subscription, which the ledger records with no Member actor because the Host acted on its own, and the pause carries one Main stream marker per owner — the Human included, followed or not — so the news reaches everyone it concerns.
 
 Credential values are resolved per run through `ctx.credentials` and merged after the executor's own environment scrub. The Host builds that map from scratch — the managed `DSH_TEAM_*` facts plus the subscription's declared references — so nothing from the Host process environment is forwarded by Team code.
+
+### One Host per DSH home
+
+A single `$DSH_HOME` must run at most one Host process. Subscriptions schedule their timers and keep private checkpoints in that home; two Hosts sharing it would each fire every due instant and each advance their own ledger projection and sequence numbers, so committed operations race. This is a deployment constraint rather than a lock the bundle enforces: give profiles that run at the same time separate `DSH_HOME` values, and never start a second `dsh web` against a home another Host is using.
 
 ## Composer attachments (cache, not archive)
 

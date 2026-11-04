@@ -165,9 +165,9 @@ export function credentialsProblem(credentials: readonly SubscriptionCredential[
  * Parse the stdout contract: one JSON object per line, empty lines ignored,
  * nothing published unless every line is legal.
  *
- * The bytes are decoded here rather than trusted from the executor: the
- * executor hands back a decoded string, and an invalid sequence would have
- * become U+FFFD on the way, so the original bytes are what this validates.
+ * Parse one run's JSON-lines output. The executor reports decoded text, so the
+ * caller re-encodes it: this fatal decoder cannot prove the original byte stream
+ * was valid UTF-8, and a replacement character printed as data stays data.
  */
 export function parseSubscriptionOutput(raw: Uint8Array): SubscriptionOutput {
   if (raw.length >= 3 && raw[0] === 0xef && raw[1] === 0xbb && raw[2] === 0xbf) {

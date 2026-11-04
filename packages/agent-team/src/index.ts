@@ -159,6 +159,7 @@ import type {
   AgentTeamStatus,
   AgentTeamSubscription,
   AgentTeamSubscriptionBaselineResult,
+  AgentTeamSubscriptionChangeResult,
   AgentTeamSubscriptionDeliveriesRequest,
   AgentTeamSubscriptionDeliveriesResult,
   AgentTeamSubscriptionDraftTrialRequest,
@@ -3322,7 +3323,7 @@ export default class AgentTeam extends TypertRemoteService {
   /**
    * Accept one run's new events, or say why they wait. The caller holds the write
    * lock and has read the terminal barrier in it. No room is not a failure: `hold`
-   * keeps a batch its request can never fetch again (`spec.md` §4.4).
+   * keeps a batch its request can never fetch again.
    */
   private async acceptFreshEvents(subscription: AgentTeamSubscription, events: readonly SubscriptionEvent[],
     requestId: AgentTeamRequestId, hold?: ((events: readonly SubscriptionEvent[]) => Promise<void>) | undefined,
@@ -3660,12 +3661,12 @@ export default class AgentTeam extends TypertRemoteService {
       return
     }
     // A row that already holds a validated batch owes no script: only its accept,
-    // retried until the queue has room (`spec.md` §4.4).
+    // retried until the queue has room.
     if (record.heldEvents !== undefined) {
       await this.enqueueHeldAdmission(record, requestId)
       return
     }
-    // The definition the payload arrived under, not the one that stands now (`spec.md` §4.3).
+    // The definition the payload arrived under, not the one that stands now.
     const source = this.replaySource(live, record, 'received')
     const execute = () => this.runSubscriptionOnce(source, 'webhook', {
       stdin: webhookStdin(record.headers, record.body),

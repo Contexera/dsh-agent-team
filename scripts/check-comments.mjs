@@ -106,8 +106,12 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // line of code shows (why the token is only ever hashed, why a reset moves an
 // address and not a queue, why the listener binds loopback); the four docs it
 // added were condensed twice first.
+// 2026-11-04: review fixes added the timer clamp, the settled-due barrier,
+// the retry replay and the held-batch attribution, each with the reason the
+// code cannot show. 4189 was the new audited count; 4315 restores the ~3%
+// slack the rule above asks for, after the previous row was left at zero slack.
 const COMMENT_BUDGETS = {
-  'packages/agent-team/src': 4162,
+  'packages/agent-team/src': 4315,
   'packages/client-agent-team/src': 2020,
   'packages/tool-agent-team/src': 280,
   'scripts': 2800,

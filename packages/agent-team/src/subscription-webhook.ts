@@ -99,24 +99,20 @@ export function webhookOriginRefusal(origin: string): string | undefined {
 /** Names forwarded whatever the provider: the two every payload needs to be understood. */
 const WEBHOOK_HEADERS_ALWAYS: readonly string[] = ['content-type', 'user-agent']
 
-/** Provider conventions (GitHub's `x-github-event`, GitLab's `x-gitlab-event`); anything else is listed. */
+/** Provider conventions (GitHub's `x-github-event`, GitLab's `x-gitlab-event`). */
 const WEBHOOK_HEADER_PATTERNS: readonly RegExp[] = [/^x-.*-event$/, /^x-.*-delivery$/, /^x-.*-signature/, /^x-.*-timestamp$/]
-
-/** Headers named explicitly by a deployment, beyond the patterns above. */
-const WEBHOOK_HEADERS_LISTED: readonly string[] = []
 
 export type WebhookHeadersResult =
   | { readonly ok: true; readonly headers: Readonly<Record<string, string>> }
   | { readonly ok: false; readonly reason: string; readonly header: string }
 
 function headerIsForwardable(lowercase: string): boolean {
-  return WEBHOOK_HEADERS_ALWAYS.includes(lowercase) || WEBHOOK_HEADERS_LISTED.includes(lowercase)
-    || WEBHOOK_HEADER_PATTERNS.some(pattern => pattern.test(lowercase))
+  return WEBHOOK_HEADERS_ALWAYS.includes(lowercase) || WEBHOOK_HEADER_PATTERNS.some(pattern => pattern.test(lowercase))
 }
 
 /**
  * The headers a script may see, lowercased, or why one cannot be forwarded. A value
- * past the limit refuses the delivery: a cut signature verifies nothing (`spec.md` §4.5).
+ * past the limit refuses the delivery: a cut signature verifies nothing (see docs/architecture/host-authority.md).
  */
 export function forwardableHeaders(raw: Readonly<Record<string, string | readonly string[] | undefined>>): WebhookHeadersResult {
   const forwarded: Record<string, string> = {}
@@ -150,7 +146,7 @@ export const WEBHOOK_PUMP_INTERVAL_MS = 5_000
 export const WEBHOOK_READ_DEADLINE_MS = 10_000
 
 /**
- * The status table of `spec.md` §4.5 plus its four refusals, so the entry and the tests
+ * The status table from docs/architecture/host-authority.md plus its four refusals, so the entry and the tests
  * read one list.
  */
 export const WEBHOOK_STATUS = Object.freeze({

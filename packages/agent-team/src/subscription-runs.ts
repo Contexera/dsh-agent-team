@@ -24,10 +24,6 @@ export const SUBSCRIPTION_RUN_HISTORY_LIMIT = 50
 export const SUBSCRIPTION_DELIVERY_LIMIT = 10
 export const SUBSCRIPTION_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60_000
 
-/** The backoff a delivery takes between attempts: 1, 5, then 30 minutes, three attempts in total. */
-export const SUBSCRIPTION_DELIVERY_RETRY_MS: readonly number[] = Object.freeze([60_000, 300_000, 1_800_000])
-export const SUBSCRIPTION_DELIVERY_ATTEMPTS = SUBSCRIPTION_DELIVERY_RETRY_MS.length
-
 /** One recorded run: what the tool and the Remote answer, minus what the caller may not see. */
 export interface SubscriptionRunRecord {
   readonly runRef: string
@@ -163,7 +159,6 @@ export interface SubscriptionDeliveryRecord {
   readonly expiresAt: string
   readonly attempts: number
   readonly lastError: string
-  /** The last replay's request id and answer, so a retried call never runs the script twice. */
   /**
    * The request that replayed this delivery, once it delivered. `runRef` is absent
    * when the answer was recovered from the ledger after its run record was lost:
@@ -264,11 +259,6 @@ export function deliveryEntryOf(record: SubscriptionDeliveryRecord): AgentTeamSu
     attempts: record.attempts,
     lastError: record.lastError,
   })
-}
-
-/** The next attempt's delay, or `undefined` once the delivery has used its attempts. */
-export function deliveryRetryDelayMs(attempts: number): number | undefined {
-  return SUBSCRIPTION_DELIVERY_RETRY_MS[attempts]
 }
 
 /** The instant a delivery record expires; it is dropped with the subscription and after this. */

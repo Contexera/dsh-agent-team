@@ -69,6 +69,10 @@ dsh web
 
 真实安装验证必须使用已构建 package 的发布布局。直接 symlink 到源码可能绕过 profile 内的 peer fallback，导致与真实安装不同的结果。`scripts/e2e/` 下的浏览器场景和 `scripts/team-ui.preview.ts` 已采用复制 package 的方式。
 
+### 每个 DSH home 只允许一个 Host
+
+同一个 `$DSH_HOME` 不能被两个正在运行的 Host 进程共用。定时器、订阅的私有 checkpoint 与账本投影都在这个 home 里，两个 Host 共用会重复触发运行、并让序号互相竞争。bundle 不对 home 加锁，这是运维约束：同时运行的每个 profile 都要使用独立的 `DSH_HOME`。调度权威见 [host-authority.md](../architecture/host-authority.md)。
+
 ### Profile 模式与发布节奏
 
 日常自用与开发验收使用两个并存 profile，互不干扰：

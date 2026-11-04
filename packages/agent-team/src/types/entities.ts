@@ -389,8 +389,6 @@ export interface AgentTeamMainMessage {
   readonly occurredAt: string
 }
 
-/** Project-level change shown in the Main stream: a Human grant or withdrawal of Project ownership. Rules version 2 and later only. */
-
 /** Sparse direct marker for one Main stream Message that mentions or answers a Member. Its own shape: the Thread marker requires a `threadRef`. */
 export interface AgentTeamMainMessageMarker {
   readonly memberId: AgentTeamMemberId
@@ -589,7 +587,6 @@ export interface AgentTeamStoredThreadReadFact {
   readonly unread: boolean
   readonly direct: boolean
 }
-
 
 /** Stable identifier of one Project subscription. */
 export type AgentTeamSubscriptionRef = Branded<'AgentTeamSubscriptionRef'>
