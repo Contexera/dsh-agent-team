@@ -931,3 +931,92 @@ describe('every declared output shape accepts what its tool returns', () => {
     validate(tool, { kind: 'committed', action: 'reply', threadRef: THREAD, messageRef: 'message:2', revision: 13 })
   })
 })
+
+describe('team_subscription reads its run history, its failed deliveries, and a replay', () => {
+  const SUB = 'subscription:8f14e45f-ceea-467f-a7d3-9b0f1a4c7e21'
+  const RUN = 'run:6b1f2c3d-0000-4000-8000-000000000001'
+  const subscription = (tool: Parameters<typeof renderText>[0], value: Record<string, unknown>): string =>
+    renderText(tool, {}, { workspaceId: 'workspace:alpha', projectRef: PROJECT, subscriptionRef: SUB, name: 'main CI', ...value })
+
+  it('shows an owner what a failed run printed, and only the summary to a member', () => {
+    const tool = teamTools().get('team_subscription')!
+    const failed = { runRef: RUN, trigger: 'interval', startedAt: '2026-11-03T09:00:00.000Z', durationMs: 1200,
+      category: 'exit-code', succeeded: false, eventCount: 0, exitCode: 2, timedOut: false, subscriptionRevision: 1,
+      reason: 'the script exited with code 2', stdoutTail: 'partial output', stderrTail: 'auth required' }
+    const owner = subscription(tool, { kind: 'logs', runs: [failed] })
+    expect(owner).toContain('Run history of main CI')
+    expect(owner).toContain('2026-11-03T09:00:00.000Z · interval · exit-code · 0 events · r1 · 1200 ms · exit 2')
+    expect(owner).toContain('exit-code: the script exited with code 2')
+    expect(owner).toContain('stdout tail:\npartial output')
+    expect(owner).toContain('stderr tail:\nauth required')
+    expect(owner).not.toContain('Only a Project owner')
+
+    // The same run as a non-owner reads it: the facts, never the output.
+    const { reason: _reason, stdoutTail: _stdout, stderrTail: _stderr, ...summary } = failed
+    const member = subscription(tool, { kind: 'logs', runs: [summary] })
+    expect(member).toContain('0 events · r1 · 1200 ms · exit 2')
+    expect(member).not.toContain('partial output')
+    expect(member).not.toContain('auth required')
+    expect(member).toContain('Only a Project owner sees what a run printed')
+  })
+
+  it('shows a passing run its output too, and names the delivery and attempt behind a webhook run', () => {
+    const tool = teamTools().get('team_subscription')!
+    const passed = { runRef: RUN, trigger: 'interval', startedAt: '2026-11-03T09:00:00.000Z', durationMs: 30,
+      category: 'accepted', succeeded: true, eventCount: 1, exitCode: 0, timedOut: false, subscriptionRevision: 2,
+      stdoutTail: '{"id":"a","title":"A"}', stderrTail: '' }
+    const owner = subscription(tool, { kind: 'logs', runs: [passed] })
+    // A green run is exactly where "the script printed nothing useful" is asked:
+    // hiding its output would make the passing case the undebuggable one.
+    expect(owner).toContain('stdout tail:\n{"id":"a","title":"A"}')
+    expect(owner).toContain('stderr tail:\n(empty)')
+    expect(owner).not.toContain('Only a Project owner')
+
+    const webhook = subscription(tool, { kind: 'logs', runs: [{ ...passed, trigger: 'webhook', deliveryRef: 'delivery:d1', attempt: 3 }] })
+    // The delivery, the attempt, and the revision it pinned are one story.
+    expect(webhook).toContain('webhook · accepted · 1 event · r2 · delivery:d1 attempt 3')
+  })
+
+  it('names the deliveries an owner can still replay, and says so when none are left', () => {
+    const tool = teamTools().get('team_subscription')!
+    const listed = subscription(tool, { kind: 'deliveries', deliveries: [{ deliveryRef: 'delivery:d1', receivedRevision: 2,
+      receivedAt: '2026-11-01T00:00:00.000Z', expiresAt: '2026-11-08T00:00:00.000Z', attempts: 3,
+      lastError: 'the script exited with code 1' }] })
+    expect(listed).toContain('Failed deliveries of main CI')
+    expect(listed).toContain('delivery:d1 · 3 attempts spent · received 2026-11-01T00:00:00.000Z at r2 · expires 2026-11-08T00:00:00.000Z')
+    expect(listed).toContain('last error: the script exited with code 1')
+    expect(subscription(tool, { kind: 'deliveries', deliveries: [] })).toContain('none: every delivery was handled')
+  })
+
+  it('reports a replay by what it delivered, and a refused one by its reason and tails', () => {
+    const tool = teamTools().get('team_subscription')!
+    expect(subscription(tool, { kind: 'replayed', runRef: RUN, eventCount: 2 })).toContain(`the run passed; 2 events accepted for publication (${RUN})`)
+    // Printing nothing new is a success with nothing to publish, not a delivery.
+    expect(subscription(tool, { kind: 'replayed', runRef: RUN, eventCount: 0 }))
+      .toContain(`the run passed and printed nothing new, so nothing was published (${RUN})`)
+    const refused = subscription(tool, { kind: 'replay-failed', runRef: RUN, reason: 'the script exited with code 1',
+      stdoutTail: '', stderrTail: 'auth required' })
+    expect(refused).toContain('the run did not deliver: the script exited with code 1')
+    expect(refused).toContain('stderr tail:\nauth required')
+  })
+
+  it('declares every field its run, delivery, and replay results carry', () => {
+    const tool = teamTools().get('team_subscription')!
+    const value = (payload: Record<string, unknown>) => ({ workspaceId: 'workspace:alpha', projectRef: PROJECT, subscriptionRef: SUB, ...payload })
+    for (const result of [
+      value({ kind: 'logs', name: 'main CI', runs: [{ runRef: RUN, trigger: 'test', startedAt: '2026-11-03T09:00:00.000Z',
+        durationMs: 3, category: 'verified', succeeded: true, eventCount: 0, timedOut: false, subscriptionRevision: 1,
+        deliveryRef: 'delivery:d1', attempt: 3 }] }),
+      value({ kind: 'logs', name: 'main CI', runs: [{ runRef: RUN, trigger: 'interval', startedAt: '2026-11-03T09:00:00.000Z',
+        durationMs: 3, category: 'exit-code', succeeded: false, eventCount: 0, exitCode: 1, timedOut: false,
+        subscriptionRevision: 1, scriptHash: 'a'.repeat(64), reason: 'the script exited with code 1',
+        stdoutTail: '', stderrTail: '' }] }),
+      value({ kind: 'deliveries', deliveries: [{ deliveryRef: 'delivery:d1', receivedRevision: 1,
+        receivedAt: '2026-11-01T00:00:00.000Z', expiresAt: '2026-11-08T00:00:00.000Z', attempts: 3, lastError: 'exit 1' }] }),
+      value({ kind: 'replayed', runRef: RUN, eventCount: 2 }),
+      value({ kind: 'replay-failed', runRef: RUN, reason: 'exit 1', stdoutTail: '', stderrTail: '' }),
+    ]) {
+      expect(validateJsonSchemaValue(tool.output.schema as never, result as never)).toEqual([])
+    }
+  })
+})

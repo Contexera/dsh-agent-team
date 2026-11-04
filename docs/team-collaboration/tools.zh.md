@@ -143,7 +143,15 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 ## `team_subscription`
 
-`team_subscription` 创建并维护某个 Project 的定时订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份按间隔运行的脚本。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`。只有该 Project 的 owner 可以修改（否则返回 `project_owner_required`）；Project 内任何成员都可以列出。webhook 触发、运行历史与订阅页面不属于这个工具。
+`team_subscription` 创建并维护某个 Project 的定时订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份按间隔运行的脚本。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`、`logs`、`deliveries`、`replay`。只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）；Project 内任何成员都可以列出订阅、读取运行历史。HTTP 上的 webhook 入口与订阅页面不属于这个工具。
+
+`logs` 读最近的运行记录——每个订阅保留 50 条，最新在前——带触发方式、开始时间、耗时、结构化类别、事件数、退出码或超时、这次运行固定的 revision，webhook 运行还带发起它的投递与 attempt。事件数是这次运行真正被账本接受的数量，所以只打印了订阅早已知道的 id 的运行计 0。
+
+Project 的 owner 与 Human 还能看到每次运行的原因和两路输出各自末尾 8 KiB——成功的运行同样如此；其他成员只看到摘要，因为脚本是在该 Project 的凭据下跑的。`deliveries` 只对 owner 列出（因为投递带着它到达时的请求体）自动重试用尽的 webhook 投递，带稳定 ref、接收时的 revision、最后一次错误与到期时间。每条在重试用尽时只计 1 次失败，所以三条这样的投递和三次失败的运行一样会暂停订阅。
+
+`replay` 重跑一条，默认用当前脚本（这样修好的脚本能处理旧请求），也可以 `version: received` 用该投递接收时的定义。它是一次运行：占用运行位、受同一订阅互斥约束，暂停、删除或已归档的订阅在入场时被拒绝。
+
+重放会发布脚本打印的内容，绝不计为订阅的失败。重复调用保持同一 request id，该 id 之后回答的是第一次调用的结果。一个 id 只命名一个意图：用它指另一条投递、或同一条投递的另一个版本，按请求碰撞拒绝；已经重放成功的投递不会被新的 id 再跑一遍。
 
 `create` 与 `update` 用 `scriptPath` 给脚本——按调用者自己的工作目录解析，也就是它 shell 工具所用的目录——或用一个没有文件可指时给的 `scriptContent`。Host 读取文件、存下不超过 16 KiB 的快照，并用正式运行的同一套方式试运行一次：同一个执行器、同一份显式 sandbox policy、60 秒上限、同一套输出合同。试运行失败就拒绝这次写入，返回 stdout 与 stderr 的末尾内容，什么都不会存下。声明的每个 credential 引用必须已配置，且 Host 每次运行前重新解析——之后被移除的引用会让那一次运行明确失败，而不是悄悄少一个变量。
 

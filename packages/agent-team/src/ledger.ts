@@ -1278,8 +1278,15 @@ export class AgentTeamLedger {
     const sequence = this.nextSequence()
     const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
     const activity = this.subscriptionActivity(subscription, activityKind, request.actor, sequence, base.occurredAt, reason)
+    // The Host's own pause is the one lifecycle line nobody asked for: it
+    // carries a marker per owner, the Human and the unfollowed included, so the
+    // news reaches them the way a published event does.
+    const inbox = reason === 'failures'
+      ? this.inboxDelta([], [], [], [], [], [], [AGENT_TEAM_HUMAN_MEMBER_ID, ...this.projectOwnerIds(subscription.projectRef)]
+        .map(memberId => Object.freeze({ memberId, projectRef: subscription.projectRef, activityRef: activity.activityRef, sequence })))
+      : undefined
     const operation = Object.freeze({ ...base, kind,
-      data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity }) }) as AgentTeamSubscriptionPausedOperation
+      data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity, ...(inbox === undefined ? {} : { inbox }) }) }) as AgentTeamSubscriptionPausedOperation
       | AgentTeamSubscriptionResumedOperation | AgentTeamSubscriptionDeletedOperation
     await this.table.put(operation.operationId, operation)
     this.applyAndAdvanceProjectionVersion(operation)
@@ -3622,6 +3629,15 @@ export class AgentTeamLedger {
     return this.state.byRequest.has(requestId)
   }
 
+  /**
+   * The operation one request id already committed, if any. It is the durable
+   * record of that request: a caller whose own bookkeeping failed after the
+   * commit reads the answer back from here instead of repeating the work.
+   */
+  committedOperation(requestId: AgentTeamRequestId): AgentTeamOperation | undefined {
+    return this.state.byRequest.get(requestId)
+  }
+
   /** Return one stored committed operation by id. */
   getOperation(operationId: AgentTeamOperationId): AgentTeamOperation | undefined {
     return this.state.byOperation.get(operationId)
@@ -5013,6 +5029,17 @@ export class AgentTeamLedger {
         || activity.reason !== expectedReason) {
         throw new Error(`${at} has an invalid subscription activity`)
       }
+      if (operation.kind === 'team/subscription-paused' && operation.data.inbox !== undefined) {
+        // The recipients are the Project's owners as they stood at this commit,
+        // the Human included: the Host freezes them here, never at read time.
+        const owners = [human.data.humanMemberId, ...(projection.owners.get(projectRef)?.keys() ?? [])].sort()
+        const notified = operation.data.inbox.mainMarkers?.added ?? []
+        if (!isDeepStrictEqual(notified.map(marker => marker.memberId).sort(), owners)
+          || notified.some(marker => marker.projectRef !== projectRef || marker.sequence !== operation.sequence
+            || !('activityRef' in marker) || marker.activityRef !== activity.activityRef)) {
+          throw new Error(`${at} does not notify exactly the Project owners`)
+        }
+      }
       this.addRef(refs, activity.activityRef)
       return
     }
@@ -5399,6 +5426,9 @@ export class AgentTeamLedger {
         target.subscriptionBaselines.set(subscription.subscriptionRef, new Set(operation.data.baselineIds))
       }
       this.appendMainActivity(target, activity)
+      if (operation.kind === 'team/subscription-paused' && operation.data.inbox !== undefined) {
+        this.applyInboxDelta(target, operation.data.inbox)
+      }
       return
     }
     if (operation.kind === 'team/subscription-baseline') {
@@ -7818,8 +7848,8 @@ export class AgentTeamLedger {
    * Member's own choice.
    */
   private repairLegacyAttentionSource(operation: AgentTeamOperation, projection: Projection): AgentTeamOperation {
-    if (!('inbox' in operation.data)) return operation
-    const { inbox } = operation.data
+    const inbox = 'inbox' in operation.data ? operation.data.inbox : undefined
+    if (inbox === undefined) return operation
     const threadRows = inbox.attention.set.filter(attention => attention.source === undefined)
     const mainRows = (inbox.mainAttention?.set ?? []).filter(attention => attention.source === undefined)
     if (threadRows.length === 0 && mainRows.length === 0) return operation

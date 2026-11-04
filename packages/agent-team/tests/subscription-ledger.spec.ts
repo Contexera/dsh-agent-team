@@ -304,6 +304,59 @@ describe('acceptance and publication', () => {
   })
 })
 
+describe('the pause the Host writes after repeated failures', () => {
+  /** The stored pause, read back from the ledger head so the markers can be asserted or rewritten. */
+  async function pauseForFailures(team: Seeded): Promise<AgentTeamSubscriptionRef> {
+    const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor))
+    const paused = await team.ledger.pauseSubscription({ requestId: requestId('pause'), actor: host, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'failures' })
+    expect(paused.committed).toBe(true)
+    return subscriptionRef
+  }
+
+  const head = (table: Table): [string, AgentTeamOperation] => [...table.entries()].sort((left, right) => left[1].sequence - right[1].sequence).at(-1)!
+
+  it('notifies the Human and every owner, in bytes a cold replay still accepts', async () => {
+    const team = await seed()
+    const subscriptionRef = await pauseForFailures(team)
+    expect(team.ledger.subscription(subscriptionRef)).toMatchObject({ state: 'paused', pausedReason: 'failures' })
+    const [key, operation] = head(team.table)
+    expect(key).toBe(operation.operationId)
+    if (operation.kind !== 'team/subscription-paused') throw new Error('expected the pause at the ledger head')
+    const notified = operation.data.inbox?.mainMarkers?.added ?? []
+    // Owners as they stood at this commit, the Human included, whatever their attention state.
+    expect(notified.map(marker => marker.memberId).sort()).toEqual([AGENT_TEAM_HUMAN_MEMBER_ID, team.owner.memberId].sort())
+    // An enrolled Member who owns nothing is not an owner.
+    expect(notified.map(marker => marker.memberId)).not.toContain(team.writer.memberId)
+    expect(notified.every(marker => marker.projectRef === team.projectRef && 'activityRef' in marker
+      && marker.activityRef === operation.data.activity.activityRef)).toBe(true)
+    expect(() => replayed(team.table)).not.toThrow()
+  })
+
+  it('refuses a pause whose markers miss an owner', async () => {
+    const team = await seed()
+    await pauseForFailures(team)
+    const records = [...team.table.entries()].sort((left, right) => left[1].sequence - right[1].sequence)
+    const [key, last] = records.at(-1)!
+    if (last.kind !== 'team/subscription-paused') throw new Error('expected the pause at the ledger head')
+    const tampered = { ...last, data: { ...last.data, inbox: { ...last.data.inbox!, mainMarkers: {
+      added: last.data.inbox!.mainMarkers!.added.filter(marker => marker.memberId !== AGENT_TEAM_HUMAN_MEMBER_ID), removed: [] } } } }
+    const reloaded = await openTable(poolOf([...records.slice(0, -1), [key, tampered]]))
+    expect(() => replayed(reloaded)).toThrow(/does not notify exactly the Project owners/)
+  })
+
+  it('writes no markers when a person pauses it', async () => {
+    const team = await seed()
+    const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor))
+    await team.ledger.pauseSubscription({ requestId: requestId('pause'), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: 1, reason: 'manual' })
+    const [, operation] = head(team.table)
+    if (operation.kind !== 'team/subscription-paused') throw new Error('expected the pause at the ledger head')
+    expect(operation.data.inbox).toBeUndefined()
+    expect(() => replayed(team.table)).not.toThrow()
+  })
+})
+
 describe('replay refusal', () => {
   it('refuses a publication whose markers are not exactly the current owners', async () => {
     const team = await seed()

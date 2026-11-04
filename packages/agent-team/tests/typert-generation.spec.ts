@@ -55,6 +55,7 @@ const EXPECTED_REMOTE_METHODS = [
   'resumeSubscription',
   'setHumanProfile',
   'startThread',
+  'subscriptionLogs',
   'subscriptions',
   'taskBoard',
   'testSubscription',

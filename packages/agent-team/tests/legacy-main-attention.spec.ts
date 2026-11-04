@@ -174,8 +174,8 @@ describe('records written before Attention recorded its source', () => {
     const stripped: Array<[string, unknown]> = []
     for await (const [id, operation] of await team.table.entries()) {
       const typed = operation as AgentTeamOperation
-      if (!('inbox' in typed.data)) { stripped.push([id, operation]); continue }
-      const inbox = typed.data.inbox
+      const inbox = 'inbox' in typed.data ? typed.data.inbox : undefined
+      if (inbox === undefined) { stripped.push([id, operation]); continue }
       stripped.push([id, { ...typed, data: { ...typed.data, inbox: {
         ...inbox,
         attention: { ...inbox.attention, set: inbox.attention.set.map(({ source: _dropped, ...row }) => row) },

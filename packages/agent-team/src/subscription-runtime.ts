@@ -69,12 +69,32 @@ export interface SubscriptionRuntimePorts {
   /** Stop a subscription after repeated failures; the reason is the ledger's own. */
   readonly pauseForFailures: (subscription: AgentTeamSubscription) => Promise<void>
   readonly checkpoint: (subscriptionRef: AgentTeamSubscriptionRef) => SubscriptionCheckpoint
-  readonly save: (checkpoint: SubscriptionCheckpoint) => Promise<void>
+  /**
+   * Change one checkpoint. `change` receives the record as it stands *at the
+   * moment of the write*, under the subscription's write lock, and the settled
+   * value comes back — or `undefined` when the subscription the ledger no longer
+   * serves, where nothing is written. Callers pass a field, never the record
+   * they read earlier: a whole-record write from a stale read drops what another
+   * writer committed meanwhile.
+   */
+  readonly save: (subscriptionRef: AgentTeamSubscriptionRef,
+    change: (checkpoint: SubscriptionCheckpoint) => SubscriptionCheckpoint) => Promise<SubscriptionCheckpoint | undefined>
 }
 
-/** What a queue entry asks for: a timer run the loop found due, or an owner-requested trial. */
+/**
+ * What a queued entry is allowed to start. A trial — create, update, test,
+ * resume — still reaches a paused subscription, because testing and resuming one
+ * is exactly how an owner brings it back. A `run` does not: it is a real
+ * execution that would publish, so being paused refuses it, and a webhook replay
+ * is admitted under this policy rather than beside the scheduler.
+ */
+export type SubscriptionAdmissionPolicy = 'trial' | 'run'
+
+/** What a queue entry asks for: a timer run the loop found due, or an owner-requested execution. */
 interface QueuedRun {
   readonly subscription: AgentTeamSubscription
+  /** What this entry is allowed to start; the timer path carries `run` and gates itself before it queues. */
+  readonly policy: SubscriptionAdmissionPolicy
   /**
    * Ordering key: the due instant a timer run answers, or the instant a trial
    * was requested. The queue is kept in this order, so a run that has waited
@@ -154,16 +174,22 @@ export class SubscriptionScheduler {
 
   /**
    * One owner-requested execution — the trial behind create, update, test, and
-   * resume — under the same four slots as a timer run. A trial is not a second
-   * kind of capacity: without this, twenty creates would start twenty scripts.
+   * resume, or a replay of a failed delivery — under the same four slots as a
+   * timer run. A trial is not a second kind of capacity: without this, twenty
+   * creates would start twenty scripts, and a replay would run beside them.
    */
-  runTrial<T>(subscription: AgentTeamSubscription, task: () => Promise<T>): Promise<T> {
+  runAdmitted<T>(subscription: AgentTeamSubscription, policy: SubscriptionAdmissionPolicy, task: () => Promise<T>): Promise<T> {
     if (this.draining) return Promise.reject(new Error('the Host is shutting down, so this run never started'))
     return new Promise<T>((resolve, reject) => {
-      this.enqueue({ subscription, orderAt: this.ports.now(), task,
+      this.enqueue({ subscription, policy, orderAt: this.ports.now(), task,
         settle: outcome => { if (outcome.ok) resolve(outcome.value as T); else reject(outcome.error) } })
       void this.admit()
     })
+  }
+
+  /** The trial path: the same admission, with the policy that still lets a paused subscription be tested. */
+  runTrial<T>(subscription: AgentTeamSubscription, task: () => Promise<T>): Promise<T> {
+    return this.runAdmitted(subscription, 'trial', task)
   }
 
   /** Spread the first timer run of every subscription over one minute, and catch up a missed run exactly once. */
@@ -172,10 +198,9 @@ export class SubscriptionScheduler {
     for (const subscription of this.ports.subscriptions()) {
       if (subscription.triggers.interval === undefined) continue
       if (subscription.state !== 'active' || !this.ports.projectActive(subscription)) continue
-      const checkpoint = this.ports.checkpoint(subscription.subscriptionRef)
-      if (checkpoint.dueAt !== undefined) continue
+      if (this.ports.checkpoint(subscription.subscriptionRef).dueAt !== undefined) continue
       const delay = Math.floor(this.ports.random() * SUBSCRIPTION_FIRST_RUN_MAX_DELAY_MS)
-      await this.ports.save({ ...checkpoint, dueAt: now + delay })
+      await this.ports.save(subscription.subscriptionRef, checkpoint => ({ ...checkpoint, dueAt: now + delay }))
     }
   }
 
@@ -217,7 +242,7 @@ export class SubscriptionScheduler {
       }
       // Wait in due order: an entry waiting for its own trial to finish keeps
       // the instant it came due, so the fairness rule stays "longest wait first".
-      this.enqueue({ subscription: live, orderAt: checkpoint.dueAt ?? now })
+      this.enqueue({ subscription: live, policy: 'run', orderAt: checkpoint.dueAt ?? now })
     }
     return Promise.all(work).then(() => {})
   }
@@ -237,12 +262,12 @@ export class SubscriptionScheduler {
       const stored = this.ports.current(next.subscription.subscriptionRef)
       const live = stored ?? next.subscription
       if (next.task !== undefined) {
-        const refusal = this.trialRefusal(stored, live)
+        const refusal = this.admissionRefusal(next.policy, stored, live)
         if (refusal !== undefined) {
           next.settle?.({ ok: false, error: refusal })
           continue
         }
-        this.track(this.launchTrial(next))
+        this.track(this.launchAdmitted(next))
         continue
       }
       // A subscription deleted or paused while it waited loses its turn: the
@@ -253,18 +278,30 @@ export class SubscriptionScheduler {
   }
 
   /**
-   * Why a queued trial may no longer run, or `undefined` when it may. A draft —
-   * a create's trial, never stored — is judged by its own snapshot; a stored
-   * record by the state it holds now, so `test` and `resume` still reach a
-   * paused subscription while a deleted one is refused.
+   * Why a queued execution may no longer start, or `undefined` when it may.
+   *
+   * The terminal barrier is re-read from the ledger, not from the snapshot the
+   * entry waited with. A draft — a create's trial, never stored — is judged by
+   * its own snapshot, because it has no record to reconcile against. A stored
+   * record is judged by the state it holds now: `test` and `resume` still reach
+   * a paused subscription, while a paused one refuses a real run, since a run is
+   * what pausing stops.
    */
-  private trialRefusal(stored: AgentTeamSubscription | undefined, live: AgentTeamSubscription): Error | undefined {
+  private admissionRefusal(policy: SubscriptionAdmissionPolicy, stored: AgentTeamSubscription | undefined,
+    live: AgentTeamSubscription): Error | undefined {
     const ref = live.subscriptionRef
+    const noun = policy === 'trial' ? 'trial' : 'run'
     if (stored !== undefined && stored.state === 'deleted') {
-      return new Error(`subscription '${ref}' was deleted while this trial waited, so the script never ran`)
+      return new Error(`subscription '${ref}' was deleted while this ${noun} waited, so the script never ran (subscription_deleted)`)
     }
     if (!this.ports.projectActive(live)) {
-      return new Error(`the Project of subscription '${ref}' was archived while this trial waited, so the script never ran`)
+      return new Error(`the Project of subscription '${ref}' was archived while this ${noun} waited, so the script never ran (project_archived)`)
+    }
+    if (policy === 'run') {
+      if (stored === undefined) return new Error(`subscription '${ref}' is no longer in the ledger, so the script never ran (subscription_deleted)`)
+      if (stored.state !== 'active') {
+        return new Error(`subscription '${ref}' is paused, so it cannot run this delivery (subscription_paused)`)
+      }
     }
     return undefined
   }
@@ -278,7 +315,7 @@ export class SubscriptionScheduler {
       .finally(() => { this.inFlight.delete(work) })
   }
 
-  private async launchTrial(entry: QueuedRun): Promise<void> {
+  private async launchAdmitted(entry: QueuedRun): Promise<void> {
     const ref = entry.subscription.subscriptionRef
     const task = entry.task!
     this.running.add(ref)
@@ -320,30 +357,35 @@ export class SubscriptionScheduler {
     })
   }
 
+  /**
+   * Record what the run decided.
+   *
+   * A success wrote its own half already: the run clears the streak at the
+   * instant its output was accepted, because only the accept knows that instant
+   * — so this advances the next due time and nothing else. A failure increments
+   * the count it reads at the write, under the same lock, so the count it adds to
+   * is the one the previous writer committed.
+   */
   private async settleOutcome(subscription: AgentTeamSubscription, outcome: SubscriptionRunOutcome,
     interval: AgentTeamSubscription['triggers']['interval']): Promise<void> {
+    // Neither a success nor a failure, and no write either: the record it would
+    // have updated is gone or archived, so saving here would revive a checkpoint
+    // that the deletion already removed.
+    if (outcome === 'dropped') return
     const ref = subscription.subscriptionRef
     const now = this.ports.now()
-    const checkpoint = this.ports.checkpoint(ref)
     const due = interval === undefined ? {} : { dueAt: nextDueAfter(now, interval.minutes) }
-    if (outcome === 'accepted' || outcome === 'empty') {
-      await this.ports.save({ ...checkpoint, consecutiveFailures: 0,
-        ...(outcome === 'accepted' ? { lastSuccessAt: new Date(now).toISOString() } : {}), ...due })
-      return
+    const settled = await this.ports.save(ref, outcome === 'accepted' || outcome === 'empty'
+      ? checkpoint => ({ ...checkpoint, ...due })
+      : checkpoint => ({ ...checkpoint, consecutiveFailures: checkpoint.consecutiveFailures + 1, ...due }))
+    if (settled === undefined) return
+    if (outcome !== 'accepted' && outcome !== 'empty' && settled.consecutiveFailures >= SUBSCRIPTION_FAILURES_BEFORE_PAUSE) {
+      await this.ports.pauseForFailures(subscription)
     }
-    if (outcome === 'dropped') {
-      // Neither a success nor a failure, and no write either: the record it
-      // would have updated is gone or archived, so saving here would revive a
-      // checkpoint that the deletion already removed.
-      return
-    }
-    const failures = checkpoint.consecutiveFailures + 1
-    await this.ports.save({ ...checkpoint, consecutiveFailures: failures, ...due })
-    if (failures >= SUBSCRIPTION_FAILURES_BEFORE_PAUSE) await this.ports.pauseForFailures(subscription)
   }
 
   private async saveDue(subscription: AgentTeamSubscription, dueAt: number): Promise<void> {
-    await this.ports.save({ ...this.ports.checkpoint(subscription.subscriptionRef), dueAt })
+    await this.ports.save(subscription.subscriptionRef, checkpoint => ({ ...checkpoint, dueAt }))
   }
 
   /** Keep the wait queue in due order: the longest wait is admitted first, whatever produced it. */
@@ -382,8 +424,8 @@ export class SubscriptionScheduler {
     let checkpoint = this.ports.checkpoint(subscription.subscriptionRef)
     const minute = Math.floor(this.ports.now() / 60_000)
     if (checkpoint.publishWindowMinute !== minute) {
-      checkpoint = { ...checkpoint, publishWindowMinute: minute, publishedInWindow: 0 }
-      await this.ports.save(checkpoint)
+      checkpoint = await this.ports.save(subscription.subscriptionRef,
+        current => ({ ...current, publishWindowMinute: minute, publishedInWindow: 0 })) ?? checkpoint
     }
     let budget = SUBSCRIPTION_PUBLISH_PER_MINUTE - checkpoint.publishedInWindow
     if (budget <= 0) return
@@ -395,9 +437,8 @@ export class SubscriptionScheduler {
         this.ports.log(`subscription '${subscription.subscriptionRef}' could not publish '${entry.eventId}': ${error instanceof Error ? error.message : String(error)}`)
         break
       }
-      checkpoint = { ...this.ports.checkpoint(subscription.subscriptionRef), publishedInWindow: checkpoint.publishedInWindow + 1,
-        publishWindowMinute: minute }
-      await this.ports.save(checkpoint)
+      checkpoint = await this.ports.save(subscription.subscriptionRef, current => ({ ...current,
+        publishedInWindow: current.publishedInWindow + 1, publishWindowMinute: minute })) ?? checkpoint
       budget -= 1
     }
   }

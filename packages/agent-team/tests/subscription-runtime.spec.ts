@@ -106,10 +106,12 @@ function harness(options: {
     },
     pauseForFailures: async entry => { paused.push(entry.subscriptionRef) },
     checkpoint: ref => checkpoints.get(ref) ?? { subscriptionRef: ref, ...INITIAL_CHECKPOINT },
-    save: async checkpoint => {
+    save: async (ref, change) => {
       if (control.saveThrows) throw new Error('injected checkpoint failure')
-      saves.push(checkpoint.subscriptionRef)
-      checkpoints.set(checkpoint.subscriptionRef, checkpoint)
+      const checkpoint = change(checkpoints.get(ref) ?? { subscriptionRef: ref, ...INITIAL_CHECKPOINT })
+      saves.push(ref)
+      checkpoints.set(ref, checkpoint)
+      return checkpoint
     },
   }
   const scheduler = new SubscriptionScheduler(ports)
@@ -197,23 +199,39 @@ describe('admission', () => {
 })
 
 describe('failure handling', () => {
-  it('counts failed runs and pauses the subscription after the third, while a success clears the count', async () => {
+  it('counts failed runs and pauses the subscription after the third', async () => {
     const entry = subscription('s0')
-    const test = harness({ subscriptions: [entry], outcomes: ['failed', 'failed', 'accepted', 'failed', 'failed', 'failed'] })
+    const test = harness({ subscriptions: [entry], outcomes: ['failed', 'failed', 'failed'] })
     await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
-    for (let round = 0; round < 5; round += 1) {
+    for (let round = 0; round < 2; round += 1) {
       await test.scheduler.runTick()
       await test.settle()
       test.advance(5 * MINUTE)
     }
-    expect(test.runs).toHaveLength(5)
+    expect(test.runs).toHaveLength(2)
     expect(test.paused).toEqual([])
     expect(test.checkpoints.get(entry.subscriptionRef)?.consecutiveFailures).toBe(2)
-    // A seventh failure would cross three; the sixth failure here is the one that pauses.
+    // The third failure crosses the threshold, and the count it reads is the one
+    // the previous settle committed.
     await test.scheduler.runTick()
     await test.settle()
     expect(test.checkpoints.get(entry.subscriptionRef)?.consecutiveFailures).toBe(3)
     expect(test.paused).toEqual([entry.subscriptionRef])
+  })
+
+  it('settles a success only as the next due instant, because the accept clears the count itself', async () => {
+    const entry = subscription('s0')
+    const test = harness({ subscriptions: [entry], outcomes: ['accepted'] })
+    // A streak stands when the run settles: clearing it belongs to the accept,
+    // which reads the count the streak had when the output became durable.
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT,
+      dueAt: 0, consecutiveFailures: 2 })
+    await test.scheduler.runTick()
+    await test.settle()
+    const settled = test.checkpoints.get(entry.subscriptionRef)
+    expect(settled?.consecutiveFailures).toBe(2)
+    expect(settled?.lastSuccessAt).toBeUndefined()
+    expect(settled?.dueAt).toBeGreaterThan(0)
   })
 })
 

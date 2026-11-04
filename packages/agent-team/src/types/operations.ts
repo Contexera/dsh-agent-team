@@ -555,6 +555,11 @@ export interface AgentTeamSubscriptionPausedOperation extends AgentTeamOperation
     readonly workspaceId: WorkspaceId
     readonly subscription: AgentTeamSubscription
     readonly activity: AgentTeamSubscriptionActivity
+    /**
+     * Present when the Host paused the subscription itself: one Main stream
+     * marker per owner, so the pause reaches them even unfollowed.
+     */
+    readonly inbox?: AgentTeamInboxDelta | undefined
   }
 }
 

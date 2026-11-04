@@ -425,7 +425,8 @@ describe('the terminal barrier a run in flight obeys', () => {
 describe('the scheduler checkpoint and Host shutdown', () => {
   /** The durability seam a Host keeps private: the write order is the contract under test. */
   interface CheckpointSeam {
-    saveSubscriptionCheckpoint(checkpoint: unknown): Promise<void>
+    updateCheckpoint(ref: AgentTeamSubscriptionRef,
+      change: (checkpoint: { readonly dueAt?: number | undefined; readonly consecutiveFailures: number }) => unknown): Promise<unknown>
     checkpointFor(ref: AgentTeamSubscriptionRef): { readonly dueAt?: number | undefined; readonly consecutiveFailures: number }
   }
 
@@ -442,13 +443,13 @@ describe('the scheduler checkpoint and Host shutdown', () => {
     const before = seam.checkpointFor(ref)
 
     pool.injectedWriteFailuresRemaining = 1
-    await expect(seam.saveSubscriptionCheckpoint({ subscriptionRef: ref, dueAt: 123_456, consecutiveFailures: 0, publishedInWindow: 0 }))
+    await expect(seam.updateCheckpoint(ref, checkpoint => ({ ...checkpoint, dueAt: 123_456 })))
       .rejects.toThrow(/injected write failure/)
     // The durable write failed, so the live checkpoint must still hold the old value.
     expect(seam.checkpointFor(ref)).toEqual(before)
     expect(seam.checkpointFor(ref).dueAt).toBeUndefined()
 
-    await seam.saveSubscriptionCheckpoint({ subscriptionRef: ref, dueAt: 123_456, consecutiveFailures: 0, publishedInWindow: 0 })
+    await seam.updateCheckpoint(ref, checkpoint => ({ ...checkpoint, dueAt: 123_456 }))
     expect(seam.checkpointFor(ref).dueAt).toBe(123_456)
   })
 

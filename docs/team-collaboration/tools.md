@@ -161,7 +161,17 @@ A committed resolution names the action, the resulting status and resolution, th
 
 ## `team_subscription`
 
-`team_subscription` creates and maintains a Project's interval subscription: a script the Host runs on a timer with no Session, as that Project. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, and `baseline`. Only the Project's owners may change one (`project_owner_required` otherwise); any member of the Project may list them. Webhook triggers, run history, and the subscription page are not part of this tool.
+`team_subscription` creates and maintains a Project's interval subscription: a script the Host runs on a timer with no Session, as that Project. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, `baseline`, `logs`, `deliveries`, and `replay`. Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise); any member of the Project may list them and read their run history. Webhook admission over HTTP and the subscription page are not part of this tool.
+
+`logs` reads the newest recorded runs — 50 are kept per subscription, newest first — with the trigger, start instant, duration, structured category, event count, exit code or timeout, the revision the run pinned, and for a webhook run the delivery and attempt that asked for it. The event count is what the run had accepted into the ledger, so a run that printed only ids the subscription already knew counts none.
+
+The Project's owners and the Human also get each run's reason and the last 8 KiB of stdout and stderr — of a passing run as well as a failing one; every other member gets the summary alone, because the script ran under the Project's credentials.
+
+`deliveries` lists — for the owners only, because a delivery holds the request body it arrived with — the webhook deliveries whose automatic retries were spent, with a stable ref, the revision they arrived at, the last error, and their expiry. Each one counted a single failure when its retries ran out, so three of them pause the subscription like three failed runs.
+
+`replay` runs one again, by default with the script as it stands now so a fix can handle an old request, or with `version: received` for the definition that delivery arrived under. It is a run: it takes a run slot and the subscription's own exclusion, and a paused, deleted, or archived subscription is refused on the way in.
+
+A replay publishes what the script prints and never counts as a failure of the subscription. Repeating it keeps the same request id, and that id then answers with what the first call did. One id names one intent: reusing it for another delivery, or the other version of the same one, is refused as a request collision, and a delivery whose replay delivered is not run again under a new id.
 
 `create` and `update` take the script as `scriptPath` — resolved against the caller's own working directory, the one its shell tool uses — or as `scriptContent` for a caller with no file. The Host reads the file, stores a snapshot of at most 16 KiB, and runs it once with the production path: the same executor, the same explicit sandbox policy, a 60-second limit, and the same output contract.
 

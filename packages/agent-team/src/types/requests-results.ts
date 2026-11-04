@@ -1182,6 +1182,92 @@ export interface AgentTeamSubscriptionListResult {
   readonly entries: readonly AgentTeamSubscriptionListEntry[]
 }
 
+/** One recorded run as a log read returns it: the summary everyone sees, the tails only an owner does. */
+export interface AgentTeamSubscriptionLogEntry {
+  readonly runRef: string
+  readonly trigger: 'interval' | 'webhook' | 'test'
+  /** ISO instant the script started. */
+  readonly startedAt: string
+  readonly durationMs: number
+  /** The structured outcome: `accepted` and `empty` succeeded, `verified` is a passing trial. */
+  readonly category: import('../subscription-runner.ts').SubscriptionRunCategory
+  readonly succeeded: boolean
+  readonly eventCount: number
+  readonly exitCode: number | null
+  readonly timedOut: boolean
+  readonly subscriptionRevision: number
+  /** Owner-only: why a failed run failed, in the words the run itself used. */
+  readonly reason?: string | undefined
+  /** Owner-only: the last 8 KiB of each stream, exactly what a refusal would show. */
+  readonly stdoutTail?: string | undefined
+  readonly stderrTail?: string | undefined
+  readonly scriptHash?: string | undefined
+  readonly attempt?: number | undefined
+  readonly deliveryRef?: string | undefined
+}
+
+export interface AgentTeamSubscriptionLogsRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  /** How many of the newest runs to return, at most the fifty the Host keeps. */
+  readonly limit?: number | undefined
+}
+
+export interface AgentTeamSubscriptionLogsResult {
+  readonly subscription: AgentTeamSubscription
+  /** Newest first. */
+  readonly runs: readonly AgentTeamSubscriptionLogEntry[]
+}
+
+/** One delivery whose retries are spent, as an owner reads it in the failed list. */
+export interface AgentTeamSubscriptionDeliveryEntry {
+  readonly deliveryRef: string
+  readonly receivedRevision: number
+  readonly receivedScriptHash: string
+  readonly receivedAt: string
+  readonly expiresAt: string
+  readonly attempts: number
+  readonly lastError: string
+}
+
+export interface AgentTeamSubscriptionDeliveriesRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+}
+
+export interface AgentTeamSubscriptionDeliveriesResult {
+  readonly deliveries: readonly AgentTeamSubscriptionDeliveryEntry[]
+}
+
+/**
+ * Which definition a replay runs: `current` (the default) so a fixed script can
+ * handle an old request, or `received`, the version the delivery arrived under.
+ */
+export type AgentTeamSubscriptionReplayVersion = 'current' | 'received'
+
+export interface AgentTeamSubscriptionReplayRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly deliveryRef: string
+  readonly version?: AgentTeamSubscriptionReplayVersion | undefined
+}
+
+export interface AgentTeamSubscriptionReplayResult {
+  readonly kind: 'replayed' | 'replay-failed'
+  readonly delivery: AgentTeamSubscriptionDeliveryEntry
+  /** The run this replay produced, absent when the subscription was already gone. */
+  readonly runRef?: string | undefined
+  /** Events this replay had accepted into the ledger; 0 when it printed nothing new or was refused. */
+  readonly eventCount?: number | undefined
+  readonly reason?: string | undefined
+  readonly stdoutTail?: string | undefined
+  readonly stderrTail?: string | undefined
+}
+
 /** Why a trial run refused a script, with enough of each stream to fix it. */
 export interface AgentTeamSubscriptionTrialFailure {
   readonly reason: string

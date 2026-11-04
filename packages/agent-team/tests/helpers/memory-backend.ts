@@ -24,12 +24,22 @@ export interface MemoryMedium {
   global: unknown
 }
 
+/** One write primitive, as a test hook sees it before it lands. */
+export interface MemoryWriteFault {
+  readonly table: string
+  readonly key: string
+  readonly operation: 'put' | 'delete' | 'global'
+  /** The record a put carries, so a hook can name one write without naming its table. */
+  readonly value?: unknown
+}
+
 /**
  * Shared media pool. Construct one and hand it to several
  * {@link MemoryStorageBackend} instances to simulate reopening the same
  * medium after a restart; `versions` holds the stamped unit versions and is
- * writable by tests to inject a mismatching on-medium version, and
- * `injectedWriteFailuresRemaining` injects write-primitive failures.
+ * writable by tests to inject a mismatching on-medium version,
+ * `injectedWriteFailuresRemaining` injects write-primitive failures, and the
+ * `writeFault` / `writeStall` hooks target one write by table and key.
  */
 export class MemoryMediaPool {
   /** Unit name → its records; a missing entry is a never-materialized unit. */
@@ -43,6 +53,18 @@ export class MemoryMediaPool {
    * untouched after a durability failure.
    */
   injectedWriteFailuresRemaining = 0
+  /**
+   * Asked before a write lands: return an error and that write is rejected
+   * instead of applied. Targeting one table is what tells a failed diagnostic
+   * copy apart from a failed answer, which a counted fault cannot.
+   */
+  writeFault?: ((fault: MemoryWriteFault) => Error | undefined) | undefined
+  /**
+   * Asked before a write lands: return a promise and the write waits for it.
+   * This is how a test holds a writer inside its own critical section and drives
+   * a second caller into the window it opens.
+   */
+  writeStall?: ((fault: MemoryWriteFault) => Promise<void> | undefined) | undefined
 
   /** Consume one injected failure, throwing in a rejected write's place. */
   consumeInjectedFailure(): void {
@@ -70,6 +92,16 @@ class MemoryKvUnit implements KvUnit {
     }
   }
 
+  /** Run the pool's hooks for this write: the targeted fault first, then the stall. */
+  private async intercept(table: string, key: string, operation: MemoryWriteFault['operation'],
+    value?: unknown): Promise<void> {
+    const fault = { table, key, operation, ...(value === undefined ? {} : { value }) }
+    const failure = this.pool.writeFault?.(fault)
+    if (failure !== undefined) throw failure
+    const stall = this.pool.writeStall?.(fault)
+    if (stall !== undefined) await stall
+  }
+
   async loadAll(): Promise<{ tables: Record<string, Record<string, unknown>>; global: unknown }> {
     this.assertOpen()
     const tables: Record<string, Record<string, unknown>> = {}
@@ -82,6 +114,7 @@ class MemoryKvUnit implements KvUnit {
   async putRecord(table: string, key: string, value: unknown): Promise<void> {
     this.assertOpen()
     this.pool.consumeInjectedFailure()
+    await this.intercept(table, key, 'put', value)
     let records = this.medium.tables.get(table)
     if (records === undefined) {
       records = new Map()
@@ -93,12 +126,14 @@ class MemoryKvUnit implements KvUnit {
   async deleteRecord(table: string, key: string): Promise<void> {
     this.assertOpen()
     this.pool.consumeInjectedFailure()
+    await this.intercept(table, key, 'delete')
     this.medium.tables.get(table)?.delete(key)
   }
 
   async setGlobal(value: unknown): Promise<void> {
     this.assertOpen()
     this.pool.consumeInjectedFailure()
+    await this.intercept('', '', 'global')
     this.medium.global = value
   }
 

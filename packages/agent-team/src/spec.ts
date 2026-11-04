@@ -860,7 +860,8 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     ...operationBase,
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/subscription-paused'),
-    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema }).strict(),
+    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema,
+      inbox: inboxDeltaSchema.optional() }).strict(),
   }).strict(),
   z.object({
     ...operationBase,

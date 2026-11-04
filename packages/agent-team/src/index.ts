@@ -57,8 +57,9 @@ import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type Sto
 import { agentTeamDomainSpec } from './spec.ts'
 import { subscriptionDomainSpec } from './subscription-store.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
-import { baselineIdsOf, detectShellFamily, failureTail, missingCredentials, runSubscriptionScript, type SubscriptionCredentials, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
-import { snapshotScript, subscriptionDefinitionProblem, SUBSCRIPTION_PENDING_MAX, SUBSCRIPTION_SCRIPT_MAX_BYTES, type SubscriptionCredential, type SubscriptionScriptSnapshot, type SubscriptionShell, type SubscriptionTriggers } from './subscriptions.ts'
+import { baselineIdsOf, detectShellFamily, failureCategory, failureTail, missingCredentials, runSubscriptionScript, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
+import { deliveryEntryOf, deliveryKey, deliveryKeysOf, deliveryRecordOf, evictedDeliveries, evictedRunKeys, failedDeliveries, replayKey, replayKeysOf, runRecordOf, runSummaryOf, subscriptionRunKey, subscriptionRunKeysOf, SUBSCRIPTION_DELIVERY_LIMIT, SUBSCRIPTION_RUN_HISTORY_LIMIT, type SubscriptionDeliveryInput, type SubscriptionDeliveryRecord, type SubscriptionReplayRecord, type SubscriptionRunRecord, type SubscriptionRunTrigger } from './subscription-runs.ts'
+import { snapshotScript, subscriptionDefinitionProblem, SUBSCRIPTION_FAILURES_BEFORE_PAUSE, SUBSCRIPTION_PENDING_MAX, SUBSCRIPTION_SCRIPT_MAX_BYTES, type SubscriptionCredential, type SubscriptionScriptSnapshot, type SubscriptionShell, type SubscriptionTriggers } from './subscriptions.ts'
 import { SqliteStorageBackend } from './vendor/storage-sqlite/index.ts'
 import { formatTeamTimestamp } from './time-format.ts'
 import { planInboxDelivery, type InboxDeliveryPlan, type InboxMemberReminder } from './inbox-delivery.ts'
@@ -158,9 +159,17 @@ import type {
   AgentTeamStatus,
   AgentTeamSubscription,
   AgentTeamSubscriptionBaselineResult,
+  AgentTeamSubscriptionDeliveriesRequest,
+  AgentTeamSubscriptionDeliveriesResult,
   AgentTeamSubscriptionListRequest,
   AgentTeamSubscriptionListResult,
+  AgentTeamSubscriptionLogEntry,
+  AgentTeamSubscriptionLogsRequest,
+  AgentTeamSubscriptionLogsResult,
   AgentTeamSubscriptionRef,
+  AgentTeamSubscriptionReplayRequest,
+  AgentTeamSubscriptionReplayResult,
+  AgentTeamSubscriptionReplayVersion,
   AgentTeamSubscriptionScriptSource,
   AgentTeamSubscriptionStateRequest,
   AgentTeamSubscriptionTrialFailure,
@@ -208,7 +217,7 @@ import type {
 
 export { agentTeamDomainSpec, agentTeamOperationSchema } from './spec.ts'
 export { subscriptionDomainSpec } from './subscription-store.ts'
-export { SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
+export { SubscriptionScheduler, type SubscriptionAdmissionPolicy, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
 export { baselineIdsOf, detectShellFamily, failureTail, missingCredentials, runSubscriptionScript, type SubscriptionCredentials, type SubscriptionRunReport } from './subscription-runner.ts'
 export {
   parseSubscriptionOutput,
@@ -280,6 +289,20 @@ class PresetCompositionError extends Error {
 interface ChangeWaiter {
   readonly scope: AgentTeamChangeScope | undefined
   wake(version: number): void
+}
+
+/**
+ * What one finished run answers: what it produced, the ref that names it, and
+ * whether its private record exists. The last two are deliberately independent —
+ * losing the diagnostic copy must not turn a delivered output into a failure.
+ */
+interface SubscriptionRunResult {
+  readonly outcome: 'accepted' | 'empty' | 'failed' | 'backlog'
+  readonly report: SubscriptionRunReport
+  readonly runRef: string
+  readonly recorded: boolean
+  /** Events this run had accepted into the ledger; 0 unless the outcome is `accepted`. */
+  readonly eventCount: number
 }
 
 /**
@@ -391,8 +414,20 @@ export default class AgentTeam extends TypertRemoteService {
   /** The scheduler's private state: deleting it changes no domain fact, so it is not part of the ledger. */
   private subscriptionDomain?: Domain<typeof subscriptionDomainSpec>
   private subscriptionTable?: KvTable<AgentTeamSubscriptionRef, SubscriptionCheckpoint>
+  /** The last fifty runs of every subscription, keyed by subscription then start instant. */
+  private subscriptionRunsTable?: KvTable<string, SubscriptionRunRecord>
+  /** The deliveries whose automatic retries were spent, waiting for an owner. */
+  private subscriptionDeliveriesTable?: KvTable<string, SubscriptionDeliveryRecord>
+  /** The answer each replay request already got, keyed by subscription then request id. */
+  private subscriptionReplaysTable?: KvTable<string, SubscriptionReplayRecord>
   private subscriptionScheduler?: SubscriptionScheduler
   private readonly subscriptionCheckpoints = new Map<AgentTeamSubscriptionRef, SubscriptionCheckpoint>()
+  /**
+   * One subscription's private read-modify-write steps, serialized. Two webhook
+   * deliveries that arrive together must not both add one to the same old
+   * failure count, or three spent retries would pause later than the third.
+   */
+  private readonly subscriptionWriteTails = new Map<AgentTeamSubscriptionRef, Promise<void>>()
   /** The probed shell family, cached for the composition's lifetime; a probe that found nothing is retried. */
   private subscriptionShellProbe: Promise<SubscriptionShell | undefined> | undefined
   private readonly handles = new Map<AgentTeamMemberId, AgentHandle>()
@@ -1156,7 +1191,17 @@ export default class AgentTeam extends TypertRemoteService {
     this.requireWorkspace(request.workspaceId)
     const result = await this.requireLedger().archiveProject({ ...request, actor: agentTeamHumanActor() })
     if (result.committed) this.emitCommitted(result.value.receipt)
+    // Archiving stops every subscription the Project owns, so their queues and
+    // history are cleared at the decision instead of waiting for the next boot.
+    if (result.committed) await this.forgetProjectSubscriptions(request.projectRef)
     return result.value
+  }
+
+  /** Drop the private state of every subscription a Project owns: none of it can run or publish again. */
+  private async forgetProjectSubscriptions(projectRef: AgentTeamProjectRef): Promise<void> {
+    for (const subscription of this.requireLedger().subscriptionsOfProject(projectRef)) {
+      await this.forgetSubscriptionPrivateState(subscription.subscriptionRef)
+    }
   }
 
   /** Human grant of Project ownership to one Agent Member of the Project's Workspace. */
@@ -2883,7 +2928,14 @@ export default class AgentTeam extends TypertRemoteService {
     this.subscriptionDomain = domain
     const table = domain.table('checkpoints')
     this.subscriptionTable = table
+    this.subscriptionRunsTable = domain.table('runs')
+    this.subscriptionDeliveriesTable = domain.table('deliveries')
+    this.subscriptionReplaysTable = domain.table('replays')
     for (const [subscriptionRef, checkpoint] of table.entries()) this.subscriptionCheckpoints.set(subscriptionRef, checkpoint)
+    // A deletion that could not finish its cleanup — a crash between the ledger
+    // commit and the row drops, or a storage fault — leaves rows nobody will ever
+    // read. Boot converges them instead of trusting the caller to have done it.
+    await this.convergeSubscriptionPrivateState()
     const scheduler = new SubscriptionScheduler({
       now: () => Date.now(),
       random: () => Math.random(),
@@ -2911,7 +2963,7 @@ export default class AgentTeam extends TypertRemoteService {
       publish: (subscription, acceptedSequence, eventId) => this.commitSubscriptionPublication(subscription, acceptedSequence, eventId),
       pauseForFailures: subscription => this.commitFailurePause(subscription),
       checkpoint: subscriptionRef => this.subscriptionCheckpoints.get(subscriptionRef) ?? { subscriptionRef, ...INITIAL_CHECKPOINT },
-      save: checkpoint => this.saveSubscriptionCheckpoint(checkpoint),
+      save: (subscriptionRef, change) => this.updateCheckpoint(subscriptionRef, change),
     })
     this.subscriptionScheduler = scheduler
     await scheduler.settleBoot()
@@ -2919,17 +2971,150 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * Persist first, project second. A failed write must leave the live
-   * checkpoint exactly where the durable one still is: the other order makes a
-   * storage error look like a saved wake-up that no restart will find.
+   * Change one checkpoint, under the subscription's write lock.
+   *
+   * A checkpoint is one row that four writers touch: a run settling its due
+   * instant, a spent delivery being counted, the publish window advancing, and a
+   * success clearing the streak. Each of them changes one field, so a writer that
+   * composed its record from an earlier read drops whatever the others committed
+   * meanwhile — and the loss is silent, because the last write wins. This is the
+   * only form of checkpoint write there is.
+   *
+   * `change` runs on the record read inside the lock, and `undefined` means the
+   * ledger no longer serves the subscription: nothing is written, so a run that
+   * finished after the deletion cannot recreate the row the deletion dropped.
    */
-  private async saveSubscriptionCheckpoint(checkpoint: SubscriptionCheckpoint): Promise<void> {
-    await this.subscriptionTable?.put(checkpoint.subscriptionRef, checkpoint)
-    this.subscriptionCheckpoints.set(checkpoint.subscriptionRef, checkpoint)
+  private updateCheckpoint(subscriptionRef: AgentTeamSubscriptionRef,
+    change: (checkpoint: SubscriptionCheckpoint) => SubscriptionCheckpoint): Promise<SubscriptionCheckpoint | undefined> {
+    return this.serializeSubscriptionWrite(subscriptionRef, () => this.updateCheckpointLocked(subscriptionRef, change))
+  }
+
+  /** {@link updateCheckpoint} for a caller that already holds the subscription's lock. */
+  private async updateCheckpointLocked(subscriptionRef: AgentTeamSubscriptionRef,
+    change: (checkpoint: SubscriptionCheckpoint) => SubscriptionCheckpoint): Promise<SubscriptionCheckpoint | undefined> {
+    const subscription = this.writableSubscription(subscriptionRef)
+    if (subscription === undefined) return undefined
+    const checkpoint = change(this.checkpointFor(subscriptionRef))
+    // Persist first, project second: a failed write must leave the live
+    // checkpoint where the durable one still is, or a storage error would look
+    // like a saved wake-up that no restart finds.
+    await this.subscriptionTable?.put(subscriptionRef, checkpoint)
+    this.subscriptionCheckpoints.set(subscriptionRef, checkpoint)
+    return checkpoint
+  }
+
+  /**
+   * The success linearization: end the streak, in the segment that accepted the
+   * output. Its caller holds the subscription's write lock, so no delivery the
+   * ingress counts can land between the accept and this write — the streak it
+   * clears is exactly the defeats counted before the accept, and one that
+   * arrives afterwards starts a new streak.
+   */
+  private async clearSubscriptionFailuresLocked(subscriptionRef: AgentTeamSubscriptionRef, accepted: boolean): Promise<void> {
+    try {
+      await this.updateCheckpointLocked(subscriptionRef, checkpoint => Object.freeze({ ...checkpoint,
+        consecutiveFailures: 0, ...(accepted ? { lastSuccessAt: new Date().toISOString() } : {}) }))
+    } catch (error) {
+      // The output is already in the ledger: a count that cannot be cleared is
+      // no reason to call a delivered run a failure, and the next success
+      // clears it again.
+      this.ctx.logger.warn(`agent-team: could not clear the failure count of '${subscriptionRef}': ${failureDetail(error)}`)
+    }
   }
 
   private checkpointFor(subscriptionRef: AgentTeamSubscriptionRef): SubscriptionCheckpoint {
     return this.subscriptionCheckpoints.get(subscriptionRef) ?? { subscriptionRef, ...INITIAL_CHECKPOINT }
+  }
+
+  /**
+   * The stored record when its private state may still be written: it exists, it
+   * is not deleted, and its Project still runs. Every private write reads the
+   * ledger through this first — a terminal barrier that only the caller checks
+   * is a barrier the next caller forgets.
+   */
+  private writableSubscription(subscriptionRef: AgentTeamSubscriptionRef): AgentTeamSubscription | undefined {
+    const stored = this.ledger?.subscription(subscriptionRef)
+    if (stored === undefined || stored.state === 'deleted') return undefined
+    return this.ledger?.getProject(stored.projectRef)?.state === 'active' ? stored : undefined
+  }
+
+  /**
+   * Every private row naming one subscription. A checkpoint is keyed by the ref
+   * itself; the other tables put the ref before a `|`, and a ref never contains
+   * one, so the key prefix is the ref either way.
+   */
+  private privateKeysOf(table: { keys(): Iterable<string> }, subscriptionRef: AgentTeamSubscriptionRef): readonly string[] {
+    const prefix = `${subscriptionRef}|`
+    return [...table.keys()].filter(key => key === subscriptionRef || key.startsWith(prefix))
+  }
+
+  /** The private tables a subscription owns, each with the word a failed delete logs it as. */
+  private subscriptionPrivateTables(): readonly (readonly [{ keys(): Iterable<string>; delete(key: string): Promise<boolean> } | undefined, string])[] {
+    return [
+      [this.subscriptionTable, 'checkpoint'],
+      [this.subscriptionRunsTable, 'run'],
+      [this.subscriptionDeliveriesTable, 'delivery'],
+      [this.subscriptionReplaysTable, 'replay'],
+    ]
+  }
+
+  /**
+   * Drop one subscription's private state, ordered against its other private
+   * writes by the same lock.
+   *
+   * A cleanup that ran beside a replay's own answer commit could delete the rows
+   * first and see them written back after: the deleting side must take the lock
+   * the writing side holds, so either the write finishes and the cleanup drops
+   * it, or the cleanup lands first and the write's barrier read finds nothing
+   * live and writes nothing.
+   */
+  private forgetSubscriptionPrivateState(subscriptionRef: AgentTeamSubscriptionRef): Promise<void> {
+    return this.serializeSubscriptionWrite(subscriptionRef, () => this.dropSubscriptionPrivateState(subscriptionRef))
+  }
+
+  /**
+   * Drop every private row of one subscription: its checkpoint, its runs, its
+   * failed deliveries, and the answers already given to replay requests. Awaited,
+   * so a caller that reported the deletion has actually cleaned up; a row that
+   * will not delete is logged and left to the boot sweep, never retried here.
+   */
+  private async dropSubscriptionPrivateState(subscriptionRef: AgentTeamSubscriptionRef): Promise<void> {
+    this.subscriptionCheckpoints.delete(subscriptionRef)
+    for (const [table, label] of this.subscriptionPrivateTables()) {
+      if (table === undefined) continue
+      for (const key of this.privateKeysOf(table, subscriptionRef)) {
+        try {
+          await table.delete(key)
+        } catch (error) {
+          this.ctx.logger.warn(`agent-team: could not drop a ${label} record: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
+  }
+
+  /**
+   * Convergence at boot: a deletion that never finished its cleanup — a crash
+   * between the ledger commit and the row drops, or a storage fault — must not
+   * leave rows that nobody can read or ever remove. A dead subscription is one
+   * the ledger no longer serves, which covers both a deletion and an archived
+   * Project.
+   */
+  private async convergeSubscriptionPrivateState(): Promise<void> {
+    for (const [table, label] of this.subscriptionPrivateTables()) {
+      if (table === undefined) continue
+      // Snapshot the keys: this loop deletes the rows it is walking.
+      for (const key of Array.from(table.keys())) {
+        const cut = key.indexOf('|')
+        const subscriptionRef = (cut < 0 ? key : key.slice(0, cut)) as AgentTeamSubscriptionRef
+        if (this.writableSubscription(subscriptionRef) !== undefined) continue
+        this.subscriptionCheckpoints.delete(subscriptionRef)
+        try {
+          await table.delete(key)
+        } catch (error) {
+          this.ctx.logger.warn(`agent-team: could not drop the stale ${label} record of '${subscriptionRef}': ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+    }
   }
 
   /** The Project's Workspace root as the Host's own registry holds it — never the process cwd. */
@@ -2961,7 +3146,8 @@ export default class AgentTeam extends TypertRemoteService {
     return this.subscriptionShellProbe
   }
 
-  private async executeSubscriptionRun(subscription: AgentTeamSubscription, trigger: 'interval' | 'test'): Promise<SubscriptionRunReport> {
+  private async executeSubscriptionRun(subscription: AgentTeamSubscription, trigger: SubscriptionRunTrigger,
+    extra: { readonly stdin?: string | undefined; readonly deliveryId?: string | undefined } = {}): Promise<SubscriptionRunReport> {
     return runSubscriptionScript({
       executor: this.shellExecutor(),
       credentials: this.credentialProvider(),
@@ -2970,15 +3156,161 @@ export default class AgentTeam extends TypertRemoteService {
       trigger,
       workspaceRoot: this.subscriptionWorkspaceRoot(subscription),
       lastSuccessAt: this.checkpointFor(subscription.subscriptionRef).lastSuccessAt,
+      ...(extra.stdin === undefined ? {} : { stdin: extra.stdin }),
+      ...(extra.deliveryId === undefined ? {} : { deliveryId: extra.deliveryId }),
     })
   }
 
   /**
-   * One timer run: execute the pinned snapshot, drop what this subscription
-   * already knows, and accept the rest. The outcome tells the scheduler whether
-   * to count a failure, so a run that printed nothing new never pauses a
-   * subscription, and a full backlog is a skip rather than a failure of the
-   * script.
+   * Record one finished run in the subscription's private history. A draft the
+   * ledger never stored — a create's trial — has no subscription to keep a
+   * record under, and a deletion drops the records it wrote.
+   *
+   * The record is one row of the same private state the deletion cleans up, so
+   * it is written under the subscription's write lock and reads the barrier
+   * there, beside the `put` and the eviction that belongs with it: a deletion
+   * that committed first owns the rows and this write refuses, and one that
+   * commits while this segment runs waits for it and then drops what it wrote.
+   * The script already finished, so the lock is held for one write, not a run.
+   *
+   * The answer says whether the record was written. A private write that fails
+   * is a diagnostic failure, never a failed run: the ledger already holds what
+   * the run produced.
+   */
+  private recordSubscriptionRun(record: SubscriptionRunRecord): Promise<boolean> {
+    const table = this.subscriptionRunsTable
+    if (table === undefined) return Promise.resolve(false)
+    return this.serializeSubscriptionWrite(record.subscriptionRef, async () => {
+      if (this.writableSubscription(record.subscriptionRef) === undefined) return false
+      try {
+        await table.put(subscriptionRunKey(record), record)
+        for (const key of evictedRunKeys(subscriptionRunKeysOf(table.keys(), record.subscriptionRef))) await table.delete(key)
+        return true
+      } catch (error) {
+        this.ctx.logger.warn(`agent-team: could not record a run of '${record.subscriptionRef}': ${failureDetail(error)}`)
+        return false
+      }
+    })
+  }
+
+  /**
+   * One run end to end: execute the pinned definition, then commit what it
+   * printed. The record is written after the accept, because a run succeeded at
+   * the instant its output became durable — the same instant that clears the
+   * failure count.
+   *
+   * `runRef` and `recorded` are separate answers on purpose: the ref names the
+   * run whatever happened to the private copy, and `recorded` says whether the
+   * copy exists. A caller that treated a missing record as a failed run would
+   * report a delivered output as undelivered and run it again.
+   *
+   * `undefined` means the subscription or its Project stopped being live while
+   * the script ran. That is a terminal barrier, not a failure of the script, and
+   * it writes nothing: the records it would touch were dropped with the
+   * subscription, so writing here would recreate them with nobody to clean up.
+   */
+  private async runSubscriptionOnce(subscription: AgentTeamSubscription, trigger: Exclude<SubscriptionRunTrigger, 'test'>,
+    extra: {
+      readonly stdin?: string | undefined
+      readonly delivery?: { readonly deliveryRef: string; readonly attempt: number } | undefined
+      /**
+       * The request this run answers, when the caller has one — a replay. The
+       * accept then commits under that id, so the ledger itself remembers that
+       * this request delivered, and a caller whose private bookkeeping failed
+       * reads the answer back instead of running the script again.
+       */
+      readonly requestId?: AgentTeamRequestId | undefined
+    } = {},
+  ): Promise<SubscriptionRunResult | undefined> {
+    const startedAt = Date.now()
+    const report = await this.executeSubscriptionRun(subscription, trigger, {
+      ...(extra.stdin === undefined ? {} : { stdin: extra.stdin }),
+      ...(extra.delivery === undefined ? {} : { deliveryId: extra.delivery.deliveryRef }),
+    })
+    // `eventCount` is what this run had accepted into the ledger, so it is known
+    // only once the deduplication has run — never the count the script printed,
+    // which counts what was already known as if it were new.
+    const finish = async (outcome: SubscriptionRunResult['outcome'], category: SubscriptionRunCategory,
+      eventCount: number): Promise<SubscriptionRunResult> => {
+      const record = runRecordOf({ subscription, trigger, startedAt, durationMs: Date.now() - startedAt, category, eventCount, report,
+        ...(extra.delivery === undefined ? {} : { delivery: extra.delivery }) })
+      return { outcome, report, runRef: record.runRef, eventCount, recorded: await this.recordSubscriptionRun(record) }
+    }
+    if (!report.ok) return finish('failed', failureCategory(report), 0)
+    const committed = await this.commitRunOutput(subscription, report, extra.requestId)
+    if (committed === undefined) return undefined
+    if (committed.outcome === 'empty') return finish('empty', 'empty', 0)
+    if (committed.outcome === 'backlog') return finish('backlog', 'backlog-full', 0)
+    return finish('accepted', 'accepted', committed.eventCount)
+  }
+
+  /**
+   * Commit what one run printed: drop the ids the subscription already knows,
+   * accept the rest, and end the failure streak — all in one segment under the
+   * subscription's write lock.
+   *
+   * They belong together because the clear is only honest for defeats counted
+   * before it. A delivery the ingress counted beside the run must fall either
+   * inside the streak this success ends or outside it entirely, and nothing but
+   * the lock can say which: read the count, accept, then clear leaves the window
+   * where a defeat lands in between and is cleared with the rest. The script
+   * runs outside the lock — holding it for the script would stall every delivery
+   * for its whole duration.
+   *
+   * `undefined` means the subscription or its Project stopped being live while
+   * the script ran: a terminal barrier, not a failure of the script, and it
+   * writes nothing at all.
+   */
+  private commitRunOutput(subscription: AgentTeamSubscription, report: SubscriptionRunReport,
+    requestId: AgentTeamRequestId | undefined
+  ): Promise<{ readonly outcome: 'accepted' | 'empty' | 'backlog'; readonly eventCount: number } | undefined> {
+    const subscriptionRef = subscription.subscriptionRef
+    const ledger = this.requireLedger()
+    return this.serializeSubscriptionWrite(subscriptionRef, async () => {
+      // Nothing admits this write but its caller, so the barrier is read here,
+      // inside the lock, rather than from the snapshot the run started with.
+      if (this.writableSubscription(subscriptionRef) === undefined) return undefined
+      const known = ledger.subscriptionKnownIds(subscriptionRef)
+      const fresh = report.events.filter(event => !known.has(event.id))
+      if (fresh.length === 0) {
+        // Nothing new is a success that accepts nothing: it ends the streak and
+        // leaves the waterline where it was.
+        await this.clearSubscriptionFailuresLocked(subscriptionRef, false)
+        return Object.freeze({ outcome: 'empty' as const, eventCount: 0 })
+      }
+      const pending = ledger.pendingSubscriptionEvents(subscriptionRef).length
+      if (pending + fresh.length > SUBSCRIPTION_PENDING_MAX) {
+        this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' printed ${fresh.length} events past its unpublished ceiling; this batch was refused`)
+        return Object.freeze({ outcome: 'backlog' as const, eventCount: 0 })
+      }
+      const project = ledger.getProject(subscription.projectRef)
+      if (project === undefined) return undefined
+      try {
+        const result = await ledger.acceptSubscriptionEvents({
+          requestId: requestId ?? (randomUUID() as AgentTeamRequestId), workspaceId: project.workspaceId,
+          projectRef: subscription.projectRef, subscriptionRef, subscriptionRevision: subscription.revision,
+          scriptHash: subscription.script.sha256, events: fresh, actor: agentTeamHostActor(),
+        })
+        if (result.committed) this.emitCommitted(result.value.receipt)
+      } catch (error) {
+        // A subscription deleted, or a Project archived, while the script ran
+        // is a terminal barrier rather than a failure of the script.
+        const message = error instanceof Error ? error.message : String(error)
+        if (!message.includes('subscription_deleted') && !message.includes('archived')) throw error
+        this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' finished after it stopped being live; the output was dropped`)
+        return undefined
+      }
+      await this.clearSubscriptionFailuresLocked(subscriptionRef, true)
+      return Object.freeze({ outcome: 'accepted' as const, eventCount: fresh.length })
+    })
+  }
+
+  /**
+   * One timer run for the scheduler. The outcome tells it whether to count a
+   * failure, so a run that printed nothing new never pauses a subscription. A
+   * batch past the unpublished ceiling is a failure — the script printed more
+   * than the Project can still take — while a subscription already at the
+   * ceiling never reaches this method: admission skips it before it starts.
    */
   private async runTimerSubscription(subscription: AgentTeamSubscription): Promise<SubscriptionRunOutcome> {
     const subscriptionRef = subscription.subscriptionRef
@@ -2987,34 +3319,12 @@ export default class AgentTeam extends TypertRemoteService {
     // The subscription or its Project stopped being live before the run got a
     // slot: nothing to record, and nothing the script could have done.
     if (project === undefined || ledger.subscription(subscriptionRef)?.state === 'deleted') return 'dropped'
-    const report = await this.executeSubscriptionRun(subscription, 'interval')
-    if (!report.ok) {
-      this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' run failed: ${report.reason ?? 'unknown reason'}`)
-      return 'failed'
+    const run = await this.runSubscriptionOnce(subscription, 'interval')
+    if (run === undefined) return 'dropped'
+    if (run.outcome === 'failed') {
+      this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' run failed: ${run.report.reason ?? 'unknown reason'}`)
     }
-    const known = ledger.subscriptionKnownIds(subscriptionRef)
-    const fresh = report.events.filter(event => !known.has(event.id))
-    if (fresh.length === 0) return 'empty'
-    if (ledger.pendingSubscriptionEvents(subscriptionRef).length + fresh.length > SUBSCRIPTION_PENDING_MAX) {
-      this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' printed ${fresh.length} events past its unpublished ceiling; this batch was refused`)
-      return 'backlog'
-    }
-    try {
-      const result = await ledger.acceptSubscriptionEvents({
-        requestId: randomUUID() as AgentTeamRequestId, workspaceId: project.workspaceId, projectRef: subscription.projectRef,
-        subscriptionRef, subscriptionRevision: subscription.revision, scriptHash: subscription.script.sha256, events: fresh,
-        actor: agentTeamHostActor(),
-      })
-      if (result.committed) this.emitCommitted(result.value.receipt)
-    } catch (error) {
-      // A subscription deleted, or a Project archived, while the script ran
-      // is a terminal barrier rather than a failure of the script.
-      const message = error instanceof Error ? error.message : String(error)
-      if (!message.includes('subscription_deleted') && !message.includes('archived')) throw error
-      this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' finished after it stopped being live; the output was dropped`)
-      return 'dropped'
-    }
-    return 'accepted'
+    return run.outcome
   }
 
   private async commitSubscriptionPublication(subscription: AgentTeamSubscription, acceptedSequence: number, eventId: string): Promise<void> {
@@ -3062,6 +3372,457 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
+   * One subscription's recorded runs, newest first. Two runs can start in the
+   * same millisecond, so the answer is ordered by start instant and falls back
+   * to the ref: the key order alone is only start order while instants differ.
+   */
+  private runRecordsOf(subscriptionRef: AgentTeamSubscriptionRef): readonly SubscriptionRunRecord[] {
+    const table = this.subscriptionRunsTable
+    if (table === undefined) return []
+    const records = subscriptionRunKeysOf(table.keys(), subscriptionRef)
+      .map(key => table.get(key))
+      .filter((record): record is SubscriptionRunRecord => record !== undefined)
+    return Object.freeze(records.sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)
+      || (left.runRef < right.runRef ? -1 : 1)))
+  }
+
+  /** One run as the caller may read it: the summary always, the output only an owner. */
+  private logEntryOf(record: SubscriptionRunRecord, seesOutput: boolean): AgentTeamSubscriptionLogEntry {
+    const summary = runSummaryOf(record)
+    if (!seesOutput) return Object.freeze({ ...summary })
+    return Object.freeze({ ...summary, ...(record.reason === undefined ? {} : { reason: record.reason }),
+      stdoutTail: record.stdoutTail, stderrTail: record.stderrTail, scriptHash: record.scriptHash, attempt: record.attempt,
+      ...(record.deliveryRef === undefined ? {} : { deliveryRef: record.deliveryRef }) })
+  }
+
+  /**
+   * What a subscription's recent runs did. Every Project member may read the
+   * summary; the halves only an owner reads are the script's own output and the
+   * sentence a failure explains itself with, because the script runs with the
+   * Project's credentials and its output may carry what they unlocked.
+   */
+  private subscriptionLogs(actor: AgentTeamActor, request: AgentTeamSubscriptionLogsRequest): AgentTeamSubscriptionLogsResult {
+    const ledger = this.requireLedger()
+    ledger.assertSubscriptionReadAuthority(actor, request.projectRef, request.workspaceId)
+    const subscription = ledger.subscription(request.subscriptionRef)
+    if (subscription === undefined || subscription.projectRef !== request.projectRef) {
+      throw new Error(`subscription '${request.subscriptionRef}' does not belong to Project '${request.projectRef}'`)
+    }
+    if (subscription.state === 'deleted') throw new Error(`subscription '${request.subscriptionRef}' is deleted (subscription_deleted)`)
+    const seesOutput = actor.kind === 'human'
+      || (actor.kind === 'member' && ledger.projectOwnerIds(request.projectRef).includes(actor.memberId))
+    const limit = Math.min(Math.max(request.limit ?? SUBSCRIPTION_RUN_HISTORY_LIMIT, 1), SUBSCRIPTION_RUN_HISTORY_LIMIT)
+    return Object.freeze({ subscription,
+      runs: Object.freeze(this.runRecordsOf(request.subscriptionRef).slice(0, limit).map(record => this.logEntryOf(record, seesOutput))) })
+  }
+
+  /** An Agent Member reads one subscription's runs; the authority split decides what it sees. */
+  subscriptionLogsForAgent(agent: Agent, request: AgentTeamSubscriptionLogsRequest): AgentTeamSubscriptionLogsResult {
+    return this.subscriptionLogs(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  /** The Human page reads the same records, and always carries the output. */
+  @Remote('subscriptionLogs')
+  subscriptionLogsForClient(request: AgentTeamSubscriptionLogsRequest): AgentTeamSubscriptionLogsResult {
+    return this.subscriptionLogs(this.humanCall(request.workspaceId), request)
+  }
+
+  /**
+   * The delivery records of one subscription, still failing. They outlive the
+   * run records on purpose: the run that failed may be evicted long before an
+   * owner gets to replay the request that produced it.
+   */
+  private deliveryRecordsOf(subscriptionRef: AgentTeamSubscriptionRef): readonly SubscriptionDeliveryRecord[] {
+    const table = this.subscriptionDeliveriesTable
+    if (table === undefined) return []
+    const records = deliveryKeysOf(table.keys(), subscriptionRef)
+      .map(key => table.get(key))
+      .filter((record): record is SubscriptionDeliveryRecord => record !== undefined)
+    return Object.freeze(records)
+  }
+
+  private subscriptionDeliveries(actor: AgentTeamActor, request: AgentTeamSubscriptionDeliveriesRequest): AgentTeamSubscriptionDeliveriesResult {
+    const ledger = this.requireLedger()
+    // A failed delivery holds the request body it arrived with, so the list is
+    // the owners' read, not every member's.
+    ledger.assertSubscriptionAuthority(actor, request.projectRef, request.workspaceId)
+    const subscription = ledger.subscription(request.subscriptionRef)
+    if (subscription === undefined || subscription.projectRef !== request.projectRef) {
+      throw new Error(`subscription '${request.subscriptionRef}' does not belong to Project '${request.projectRef}'`)
+    }
+    if (subscription.state === 'deleted') throw new Error(`subscription '${request.subscriptionRef}' is deleted (subscription_deleted)`)
+    const records = this.deliveryRecordsOf(request.subscriptionRef)
+    const failures = failedDeliveries(records, Date.now(), this.replayedDeliveryRefs(request.subscriptionRef, records))
+    return Object.freeze({ deliveries: Object.freeze(failures.map(deliveryEntryOf)) })
+  }
+
+  /** An Agent owner lists the deliveries whose automatic retries are spent. */
+  subscriptionDeliveriesForAgent(agent: Agent, request: AgentTeamSubscriptionDeliveriesRequest): AgentTeamSubscriptionDeliveriesResult {
+    return this.subscriptionDeliveries(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  /**
+   * One subscription's private read-modify-write steps, run one at a time.
+   *
+   * The ingress seam is the only writer the scheduler does not admit, and two
+   * deliveries can arrive together: without this they both read the same old
+   * failure count and one increment is lost, so three spent retries would pause
+   * later than the third — or never.
+   */
+  private serializeSubscriptionWrite<T>(subscriptionRef: AgentTeamSubscriptionRef, task: () => Promise<T>): Promise<T> {
+    const previous = this.subscriptionWriteTails.get(subscriptionRef) ?? Promise.resolve()
+    const next = previous.then(task, task)
+    const settled = next.then(() => {}, () => {})
+    this.subscriptionWriteTails.set(subscriptionRef, settled)
+    void settled.then(() => {
+      if (this.subscriptionWriteTails.get(subscriptionRef) === settled) this.subscriptionWriteTails.delete(subscriptionRef)
+    })
+    return next
+  }
+
+  /**
+   * The ingress seam: a delivery whose automatic retries are spent becomes a
+   * record an owner can read and replay. `deliveryRef` is the ingress's own
+   * stable id, so a repeated admission of the same delivery replaces its attempt
+   * count and error instead of adding a second row — and counts nothing, because
+   * the delivery already counted once when its retries ran out.
+   */
+  async recordFailedDelivery(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void> {
+    await this.serializeSubscriptionWrite(subscription.subscriptionRef,
+      () => this.recordFailedDeliveryLocked(subscription, input))
+  }
+
+  private async recordFailedDeliveryLocked(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput): Promise<void> {
+    const table = this.subscriptionDeliveriesTable
+    if (table === undefined) return
+    // Nothing admits this write but its caller, so the terminal barrier is read
+    // here: a delivery that arrives for a deleted subscription — or one whose
+    // Project was archived — must not recreate the rows the deletion dropped.
+    const live = this.writableSubscription(subscription.subscriptionRef)
+    if (live === undefined) {
+      this.ctx.logger.warn(`agent-team: a spent delivery for '${subscription.subscriptionRef}' arrived after the subscription stopped being live; it was dropped`)
+      return
+    }
+    const key = deliveryKey(live.subscriptionRef, input.deliveryRef)
+    const earlier = table.get(key)
+    await table.put(key, deliveryRecordOf(live, input, earlier))
+    await this.pruneDeliveries(live.subscriptionRef, Date.now())
+    // One delivery is one failure however many times it was retried, and a
+    // provider that redelivers the same request is still the same delivery.
+    if (earlier === undefined) await this.countDeliveryFailure(live)
+  }
+
+  /**
+   * Count the failure a spent delivery stands for, and pause the subscription at
+   * the threshold. Its caller holds the subscription's write lock, so the count
+   * it reads is the one the previous delivery committed.
+   */
+  private async countDeliveryFailure(subscription: AgentTeamSubscription): Promise<void> {
+    const settled = await this.updateCheckpointLocked(subscription.subscriptionRef, checkpoint => Object.freeze({
+      ...checkpoint, consecutiveFailures: checkpoint.consecutiveFailures + 1 }))
+    if (settled === undefined) return
+    if (settled.consecutiveFailures >= SUBSCRIPTION_FAILURES_BEFORE_PAUSE) await this.commitFailurePause(subscription)
+  }
+
+  /** Drop what expired, then what no longer fits: the newest ten deliveries are the ones kept. */
+  private async pruneDeliveries(subscriptionRef: AgentTeamSubscriptionRef, now: number): Promise<void> {
+    const table = this.subscriptionDeliveriesTable
+    if (table === undefined) return
+    const records = this.deliveryRecordsOf(subscriptionRef)
+    const expired = records.filter(record => Date.parse(record.expiresAt) <= now)
+    const evicted = evictedDeliveries(records.filter(record => !expired.includes(record)), SUBSCRIPTION_DELIVERY_LIMIT)
+    for (const record of [...expired, ...evicted]) await table.delete(deliveryKey(record.subscriptionRef, record.deliveryRef))
+    // A replay answer names a delivery and explains it; once the delivery is
+    // gone the answer has nothing left to mean, so it goes with the row.
+    const replays = this.subscriptionReplaysTable
+    if (replays === undefined) return
+    const alive = new Set(this.deliveryRecordsOf(subscriptionRef).map(record => record.deliveryRef))
+    for (const key of replayKeysOf(replays.keys(), subscriptionRef)) {
+      const record = replays.get(key)
+      if (record !== undefined && alive.has(record.deliveryRef) && Date.parse(record.expiresAt) > now) continue
+      await replays.delete(key)
+    }
+  }
+
+  /** One delivery of one subscription, or `undefined` once its retention ran out. */
+  private deliveryRecordOf(subscriptionRef: AgentTeamSubscriptionRef, deliveryRef: string): SubscriptionDeliveryRecord | undefined {
+    const record = this.subscriptionDeliveriesTable?.get(deliveryKey(subscriptionRef, deliveryRef))
+    return record === undefined || Date.parse(record.expiresAt) <= Date.now() ? undefined : record
+  }
+
+  /**
+   * The deliveries whose replay already delivered, named by whichever record
+   * survived it: the tombstone on the delivery, the answer the request wrote, or
+   * — when both private writes were lost — the accept the ledger holds under
+   * that request id. One reading, because the failure list and the "already
+   * replayed" refusal must never disagree about the same delivery.
+   *
+   * An output the ledger accepted is durable whatever the private copies say, so
+   * a request that is only `running` still counts once its accept exists. A run
+   * that printed nothing new leaves no accept; a request whose answer and
+   * tombstone both went missing is then indistinguishable from one that never
+   * delivered, and it stays a failure to replay under a new id.
+   */
+  private replayedDeliveryRefs(subscriptionRef: AgentTeamSubscriptionRef,
+    records: readonly SubscriptionDeliveryRecord[]): ReadonlySet<string> {
+    const replayed = new Set(records.filter(record => record.replay?.succeeded === true).map(record => record.deliveryRef))
+    const table = this.subscriptionReplaysTable
+    if (table === undefined) return replayed
+    const now = Date.now()
+    for (const key of replayKeysOf(table.keys(), subscriptionRef)) {
+      const answer = table.get(key)
+      if (answer === undefined || Date.parse(answer.expiresAt) <= now) continue
+      // A row written before intents existed carries no state and is an answer.
+      const delivered = answer.state === 'running'
+        ? this.replayAcceptanceOf(subscriptionRef, answer.requestId as AgentTeamRequestId) !== undefined
+        : answer.succeeded === true
+      if (delivered) replayed.add(answer.deliveryRef)
+    }
+    return replayed
+  }
+
+  /**
+   * The events a replay request already accepted into the ledger, if it did. The
+   * accept commits under the replay's own request id, so this is where a caller
+   * recovers the answer when its private copy could not be written: the output
+   * is already durable, and running the script a second time would publish what
+   * the ledger already holds.
+   */
+  private replayAcceptanceOf(subscriptionRef: AgentTeamSubscriptionRef, requestId: AgentTeamRequestId): number | undefined {
+    const operation = this.ledger?.committedOperation(requestId)
+    if (operation?.kind !== 'team/subscription-events-accepted') return undefined
+    if (operation.data.subscriptionRef !== subscriptionRef) return undefined
+    return operation.data.events.length
+  }
+
+  /** The answer one request already got, or `undefined` when it has asked for nothing yet. */
+  private replayRecordOf(subscriptionRef: AgentTeamSubscriptionRef, requestId: string): SubscriptionReplayRecord | undefined {
+    const record = this.subscriptionReplaysTable?.get(replayKey(subscriptionRef, requestId))
+    return record === undefined || Date.parse(record.expiresAt) <= Date.now() ? undefined : record
+  }
+
+  /**
+   * The definition a replay runs. `current` is the definition as it stands now,
+   * because replaying is how an owner confirms a fix; `received` is the version
+   * the delivery arrived under, because an automatic retry must run the bytes
+   * the payload was retried against, not a script that changed under it.
+   */
+  private replaySource(subscription: AgentTeamSubscription, record: SubscriptionDeliveryRecord,
+    version: AgentTeamSubscriptionReplayVersion): AgentTeamSubscription {
+    if (version === 'current') return subscription
+    return Object.freeze({ ...subscription, revision: record.receivedRevision, script: record.script, credentials: record.credentials })
+  }
+
+  /**
+   * The record a real run may start from, or the error that says why it may not.
+   * Deleted and archived are terminal barriers, and a paused subscription runs
+   * nothing — a replay is a run, so it needs a resume first.
+   */
+  private runTarget(subscriptionRef: AgentTeamSubscriptionRef, projectRef: AgentTeamProjectRef): AgentTeamSubscription {
+    const ledger = this.requireLedger()
+    const subscription = ledger.subscription(subscriptionRef)
+    if (subscription === undefined || subscription.projectRef !== projectRef) {
+      throw new Error(`subscription '${subscriptionRef}' does not belong to Project '${projectRef}'`)
+    }
+    if (subscription.state === 'deleted') throw new Error(`subscription '${subscriptionRef}' is deleted (subscription_deleted)`)
+    if (subscription.state === 'paused') {
+      throw new Error(`subscription '${subscriptionRef}' is paused, so it cannot run this delivery (subscription_paused)`)
+    }
+    if (ledger.getProject(projectRef)?.state !== 'active') {
+      throw new Error(`the Project of subscription '${subscriptionRef}' is archived (project_archived)`)
+    }
+    return subscription
+  }
+
+  /** The answer a request already got, rebuilt from the private record so a retried call reads the same. */
+  private replayResultOf(answered: SubscriptionReplayRecord): AgentTeamSubscriptionReplayResult {
+    const delivery = this.deliveryRecordOf(answered.subscriptionRef, answered.deliveryRef)
+    if (delivery === undefined) throw new Error(`delivery '${answered.deliveryRef}' is unknown or has expired`)
+    return Object.freeze({ kind: answered.succeeded === true ? 'replayed' : 'replay-failed', delivery: deliveryEntryOf(delivery),
+      eventCount: answered.eventCount ?? 0, ...(answered.runRef === undefined ? {} : { runRef: answered.runRef }),
+      ...(answered.reason === undefined ? {} : { reason: answered.reason }) })
+  }
+
+  /**
+   * Run one failed delivery again, now. A replay publishes what the script
+   * prints exactly like a timer run, so the same commit decides its success: one
+   * that delivers ends the streak — including one that printed nothing new —
+   * while a replay whose script fails counts nothing, because the retry loop
+   * already gave up on this delivery and an owner asking again is not the
+   * subscription failing.
+   *
+   * It is a run, so it is admitted like one — the same four slots, the same
+   * per-subscription exclusion, the same convergence when the Host stops — and
+   * the rest happens inside that admission, where a second call for the same
+   * request id cannot start beside it.
+   */
+  private async replaySubscriptionDelivery(actor: AgentTeamActor, request: AgentTeamSubscriptionReplayRequest): Promise<AgentTeamSubscriptionReplayResult> {
+    this.requireAccepting()
+    const ledger = this.requireLedger()
+    // A replay runs a script against the Project's Workspace, so it is an owner
+    // action like a trial, not something any reader may trigger.
+    ledger.assertSubscriptionAuthority(actor, request.projectRef, request.workspaceId)
+    const subscription = this.runTarget(request.subscriptionRef, request.projectRef)
+    const version = request.version ?? 'current'
+    const execute = (): Promise<AgentTeamSubscriptionReplayResult> => this.replayLocked(subscription, request, version)
+    const scheduler = this.subscriptionScheduler
+    return scheduler === undefined ? execute() : scheduler.runAdmitted(subscription, 'run', execute)
+  }
+
+  private async replayLocked(subscription: AgentTeamSubscription, request: AgentTeamSubscriptionReplayRequest,
+    version: AgentTeamSubscriptionReplayVersion): Promise<AgentTeamSubscriptionReplayResult> {
+    // Admission re-reads the ledger, but this reads it once more for the run
+    // itself: the record to run against is the one that stands now, not the
+    // snapshot the entry queued with.
+    const live = this.runTarget(request.subscriptionRef, request.projectRef)
+    const intent = this.replayRecordOf(live.subscriptionRef, request.requestId)
+    if (intent !== undefined) {
+      // One request id names one intent, and the record is written before the
+      // script runs. Naming a different delivery or version under it is a
+      // collision, not a second run — even when no answer survived to say so.
+      if (intent.deliveryRef !== request.deliveryRef || intent.version !== version) {
+        throw new Error(`request '${request.requestId}' already replayed delivery '${intent.deliveryRef}' (${intent.version}); one request id cannot name a second replay (replay_request_conflict)`)
+      }
+      if (intent.state === 'settled') return this.replayResultOf(intent)
+      // The run may have started and never recorded its answer. An accept the
+      // ledger holds under this request id is the answer that survived; without
+      // one there is nothing to stand on, and running the script again would be
+      // guessing at what the first attempt did.
+      const accepted = this.replayAcceptanceOf(live.subscriptionRef, request.requestId)
+      if (accepted === undefined) {
+        const delivery = this.deliveryRecordOf(live.subscriptionRef, intent.deliveryRef)
+        if (delivery === undefined) throw new Error(`delivery '${intent.deliveryRef}' is unknown or has expired`)
+        return Object.freeze({ kind: 'replay-failed', delivery: deliveryEntryOf(delivery), eventCount: 0,
+          reason: 'an earlier attempt for this request started and never recorded its answer, so it was not run again; replay the delivery under a new request id' })
+      }
+      const delivery = this.deliveryRecordOf(live.subscriptionRef, intent.deliveryRef)
+      if (delivery === undefined) throw new Error(`delivery '${intent.deliveryRef}' is unknown or has expired`)
+      // The output is in the ledger: settle the answer that was lost, then say
+      // what the run did.
+      await this.settleReplayIntent(delivery, Object.freeze({ ...intent, state: 'settled', succeeded: true,
+        eventCount: accepted, ...(intent.runRef === undefined ? {} : { runRef: intent.runRef }) }))
+      return Object.freeze({ kind: 'replayed', delivery: deliveryEntryOf(delivery), eventCount: accepted,
+        ...(intent.runRef === undefined ? {} : { runRef: intent.runRef }) })
+    }
+    const record = this.deliveryRecordOf(live.subscriptionRef, request.deliveryRef)
+    if (record === undefined) throw new Error(`delivery '${request.deliveryRef}' is unknown or has expired`)
+    // A replay that delivered took the delivery off the failed list; a second,
+    // different request must not run it again and publish the same output twice.
+    // The tombstone is only one of the records that can say so: an answer or a
+    // ledger accept under a request id that never got one counts the same, or a
+    // lost tombstone would let the same delivery run once more.
+    if (this.replayedDeliveryRefs(live.subscriptionRef, this.deliveryRecordsOf(live.subscriptionRef)).has(record.deliveryRef)) {
+      throw new Error(`delivery '${request.deliveryRef}' was already replayed successfully (delivery_replayed)`)
+    }
+    // The intent goes down before the script does: from here a retry either
+    // collides, reads the answer, or is told the attempt never finished. A call
+    // that cannot record it does not run the script at all.
+    await this.recordReplayIntent(live, record, request.requestId, version)
+    const source = this.replaySource(live, record, version)
+    const run = await this.runSubscriptionOnce(source, 'webhook',
+      { stdin: record.body, delivery: { deliveryRef: record.deliveryRef, attempt: record.attempts }, requestId: request.requestId })
+    if (run === undefined) {
+      return Object.freeze({ kind: 'replay-failed', delivery: deliveryEntryOf(record), eventCount: 0,
+        reason: 'the replay finished after the subscription stopped being live, so nothing was delivered' })
+    }
+    const succeeded = run.outcome === 'accepted' || run.outcome === 'empty'
+    const reason = run.report.ok
+      ? run.outcome === 'backlog' ? `the Project already holds ${SUBSCRIPTION_PENDING_MAX} unpublished events, so this output was refused` : undefined
+      : run.report.reason
+    const answer: SubscriptionReplayRecord = Object.freeze({
+      subscriptionRef: source.subscriptionRef, projectRef: source.projectRef, requestId: request.requestId,
+      deliveryRef: record.deliveryRef, version, state: 'settled', runRef: run.runRef, eventCount: run.eventCount, succeeded,
+      ...(reason === undefined ? {} : { reason }), expiresAt: record.expiresAt,
+    })
+    const kept = await this.settleReplayIntent(record, answer)
+    // The deletion owns the rows; the ledger still owns what happened. An output
+    // the ledger accepted before the deletion *was* delivered, and answering
+    // otherwise would contradict the ledger's own record of it. A run that
+    // printed nothing new has no such record to stand on, so a deletion that
+    // landed first leaves it with nothing to claim.
+    if (!kept && run.outcome !== 'accepted') {
+      return Object.freeze({ kind: 'replay-failed', delivery: deliveryEntryOf(record), eventCount: 0,
+        reason: 'the replay finished after the subscription stopped being live, so nothing was delivered' })
+    }
+    return Object.freeze({ kind: succeeded ? 'replayed' : 'replay-failed', delivery: deliveryEntryOf(record), eventCount: run.eventCount,
+      runRef: run.runRef, ...(reason === undefined ? {} : { reason }),
+      ...(succeeded ? {} : { stdoutTail: failureTail(run.report.stdout), stderrTail: failureTail(run.report.stderr) }) })
+  }
+
+  /**
+   * Record that this request is about to run — before it runs.
+   *
+   * It is the one write that makes a request id an intent rather than a hope:
+   * once it lands, a retry cannot silently take a different delivery, cannot
+   * read a competing version, and cannot mistake an unfinished attempt for a
+   * fresh one. A call that cannot record it must not run the script, so this
+   * rejects instead of logging, and the caller's retry starts from nothing.
+   */
+  private recordReplayIntent(subscription: AgentTeamSubscription, record: SubscriptionDeliveryRecord,
+    requestId: AgentTeamRequestId, version: AgentTeamSubscriptionReplayVersion): Promise<void> {
+    return this.serializeSubscriptionWrite(subscription.subscriptionRef, async () => {
+      if (this.writableSubscription(subscription.subscriptionRef) === undefined) {
+        throw new Error(`subscription '${subscription.subscriptionRef}' stopped being live, so this replay did not run (subscription_deleted)`)
+      }
+      const table = this.subscriptionReplaysTable
+      if (table === undefined) throw new Error('the subscription store is not open, so this replay cannot be recorded and did not run')
+      const intent: SubscriptionReplayRecord = Object.freeze({
+        subscriptionRef: subscription.subscriptionRef, projectRef: subscription.projectRef, requestId,
+        deliveryRef: record.deliveryRef, version, state: 'running', expiresAt: record.expiresAt,
+      })
+      await table.put(replayKey(subscription.subscriptionRef, requestId), intent)
+    })
+  }
+
+  /**
+   * Settle one replay's answer — the request record that holds it and the
+   * delivery's own tombstone — behind one barrier read, under the
+   * subscription's write lock.
+   *
+   * The lock is what orders this segment against a deletion. The cleanup takes
+   * the same lock, so a delete either runs first — and this finds nothing
+   * writable, writes nothing, and reports that it did not — or runs after, and
+   * drops every row this wrote. A barrier read once and then followed by awaits
+   * is a barrier a delete lands behind: that is exactly how a deleted
+   * subscription got its delivery row back.
+   *
+   * The answer is written first, because it is the authority a retry reads; the
+   * tombstone is the second guard, so losing it costs one duplicate check that
+   * the deduplication waterline covers anyway. A storage fault in either is
+   * logged: by now the output is in the ledger, so a private copy that fails
+   * cannot turn a delivered replay into an ungraspable answer.
+   */
+  private settleReplayIntent(record: SubscriptionDeliveryRecord, answer: SubscriptionReplayRecord): Promise<boolean> {
+    return this.serializeSubscriptionWrite(answer.subscriptionRef, async () => {
+      if (this.writableSubscription(answer.subscriptionRef) === undefined) return false
+      const write = async (label: string, task: () => Promise<unknown>): Promise<void> => {
+        try {
+          await task()
+        } catch (error) {
+          this.ctx.logger.warn(`agent-team: could not record the ${label} of a replay of '${answer.subscriptionRef}': ${failureDetail(error)}`)
+        }
+      }
+      await write('request answer', () => this.subscriptionReplaysTable === undefined ? Promise.resolve()
+        : this.subscriptionReplaysTable.put(replayKey(answer.subscriptionRef, answer.requestId), answer))
+      const table = this.subscriptionDeliveriesTable
+      // Merge into the row as it stands: the ingress may have replaced the
+      // attempt count and error while this replay ran, and those are newer.
+      const current = table?.get(deliveryKey(record.subscriptionRef, record.deliveryRef)) ?? record
+      await write('delivery answer', () => table === undefined ? Promise.resolve() : table.put(
+        deliveryKey(current.subscriptionRef, current.deliveryRef), Object.freeze({ ...current,
+          replay: Object.freeze({ requestId: answer.requestId, succeeded: answer.succeeded === true,
+            ...(answer.runRef === undefined ? {} : { runRef: answer.runRef }),
+            ...(answer.reason === undefined ? {} : { reason: answer.reason }) }) })))
+      return true
+    })
+  }
+
+  /** An Agent owner replays one failed delivery; the request id makes a retried call a no-op. */
+  replaySubscriptionDeliveryForAgent(agent: Agent, request: AgentTeamSubscriptionReplayRequest): Promise<AgentTeamSubscriptionReplayResult> {
+    return this.replaySubscriptionDelivery(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  /**
    * Read the script a create or update names. A path is resolved against the
    * calling Agent's own working directory, the one its bash tool uses; a Human
    * page has no such directory and must paste the content.
@@ -3104,7 +3865,17 @@ export default class AgentTeam extends TypertRemoteService {
    * admission, so five creates in parallel still run four scripts at most.
    */
   private trialSubscriptionRun(subscription: AgentTeamSubscription): Promise<SubscriptionRunReport> {
-    const execute = (): Promise<SubscriptionRunReport> => this.executeSubscriptionRun(subscription, 'test')
+    const execute = async (): Promise<SubscriptionRunReport> => {
+      const startedAt = Date.now()
+      const report = await this.executeSubscriptionRun(subscription, 'test')
+      // A trial writes no checkpoint: it neither counts towards the failure
+      // pause nor clears it, and passing never moves the success waterline. It
+      // is recorded, because an owner asking "did my fix pass?" reads the same
+      // history as the runs — and it counts no events, because it publishes none.
+      await this.recordSubscriptionRun(runRecordOf({ subscription, trigger: 'test', startedAt, durationMs: Date.now() - startedAt,
+        category: report.ok ? 'verified' : failureCategory(report), eventCount: 0, report }))
+      return report
+    }
     const scheduler = this.subscriptionScheduler
     return scheduler === undefined ? execute() : scheduler.runTrial(subscription, execute)
   }
@@ -3258,7 +4029,10 @@ export default class AgentTeam extends TypertRemoteService {
       ? await ledger.pauseSubscription({ ...request, actor, reason: 'manual' })
       : await ledger.deleteSubscription({ ...request, actor })
     if (result.committed) this.emitCommitted(result.value.receipt)
-    if (state === 'deleted') this.forgetSubscriptionCheckpoint(request.subscriptionRef)
+    // Awaited: the caller that is told the subscription is deleted must not see
+    // its records come back a moment later. A row that will not delete is logged
+    // here and converged at the next boot.
+    if (state === 'deleted') await this.forgetSubscriptionPrivateState(request.subscriptionRef)
     return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity })
   }
 
@@ -3277,7 +4051,7 @@ export default class AgentTeam extends TypertRemoteService {
     const result = await ledger.resumeSubscription({ ...request, actor })
     if (result.committed) this.emitCommitted(result.value.receipt)
     // Only a committed resume clears the count: a failed trial left it alone.
-    await this.saveSubscriptionCheckpoint({ ...this.checkpointFor(request.subscriptionRef), consecutiveFailures: 0 })
+    await this.updateCheckpoint(request.subscriptionRef, checkpoint => Object.freeze({ ...checkpoint, consecutiveFailures: 0 }))
     return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity })
   }
 
@@ -3300,13 +4074,6 @@ export default class AgentTeam extends TypertRemoteService {
     const subscription = ledger.subscription(request.subscriptionRef)
     if (subscription === undefined) throw new Error(`subscription '${request.subscriptionRef}' is gone`)
     return Object.freeze({ kind: 'baselined', subscription, added: Object.freeze([...request.ids]) })
-  }
-
-  private forgetSubscriptionCheckpoint(subscriptionRef: AgentTeamSubscriptionRef): void {
-    this.subscriptionCheckpoints.delete(subscriptionRef)
-    void this.subscriptionTable?.delete(subscriptionRef).catch((error: unknown) => {
-      this.ctx.logger.warn(`agent-team: could not drop the checkpoint of '${subscriptionRef}': ${error instanceof Error ? error.message : String(error)}`)
-    })
   }
 
   /**

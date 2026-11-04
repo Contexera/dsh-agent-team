@@ -355,6 +355,8 @@ export interface SubscriptionRunEnvironmentInput {
   readonly trigger: 'interval' | 'webhook' | 'test'
   /** When the last output was accepted, if this subscription ever succeeded. */
   readonly lastSuccessAt?: string | undefined
+  /** The admission id a webhook run hands the script, so it can tell a retry from a new delivery. */
+  readonly deliveryId?: string | undefined
   readonly resolved: Readonly<Record<string, string>>
 }
 
@@ -369,6 +371,7 @@ export function subscriptionRunEnvironment(input: SubscriptionRunEnvironmentInpu
     [`${SUBSCRIPTION_ENV_PREFIX}SUBSCRIPTION`]: input.subscriptionRef,
     [`${SUBSCRIPTION_ENV_PREFIX}TRIGGER`]: input.trigger,
     [`${SUBSCRIPTION_ENV_PREFIX}LAST_SUCCESS_AT`]: input.lastSuccessAt ?? '',
+    ...(input.deliveryId === undefined ? {} : { [`${SUBSCRIPTION_ENV_PREFIX}DELIVERY_ID`]: input.deliveryId }),
     ...input.resolved,
   }
 }

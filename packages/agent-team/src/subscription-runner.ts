@@ -64,6 +64,38 @@ export const SUBSCRIPTION_PROBE_TIMEOUT_MS = 10_000
 export const SUBSCRIPTION_FAILURE_TAIL_BYTES = 8 * 1024
 
 /**
+ * The structured outcome of one run. The first two are successes; the rest name
+ * what the owner has to change, so a Main stream line or a record never has to
+ * parse prose to tell a timeout from a rejected script.
+ */
+export type SubscriptionRunCategory =
+  | 'accepted'
+  | 'empty'
+  /** A trial run the caller asked for: its output was valid, and it published nothing. */
+  | 'verified'
+  | 'timeout'
+  | 'exit-code'
+  | 'stdout-truncated'
+  | 'invalid-utf8'
+  | 'invalid-output'
+  | 'executor-missing'
+  | 'shell-mismatch'
+  | 'workspace-missing'
+  | 'credentials-missing'
+  | 'spawn-failed'
+  | 'backlog-full'
+
+export const SUBSCRIPTION_RUN_CATEGORIES: readonly SubscriptionRunCategory[] = Object.freeze([
+  'accepted', 'empty', 'verified', 'timeout', 'exit-code', 'stdout-truncated', 'invalid-utf8', 'invalid-output',
+  'executor-missing', 'shell-mismatch', 'workspace-missing', 'credentials-missing', 'spawn-failed', 'backlog-full',
+])
+
+/** A success is a run whose output was durably accepted, an empty one accepted nothing new, and a trial one published nothing at all. */
+export function runSucceeded(category: SubscriptionRunCategory): boolean {
+  return category === 'accepted' || category === 'empty' || category === 'verified'
+}
+
+/**
  * The exit-code-free proof of a shell family. Each command is valid in exactly
  * one family and a plain error in the other, so a mounted executor answers by
  * behavior rather than by class name.
@@ -76,6 +108,8 @@ const SHELL_PROBES: Readonly<Record<SubscriptionShell, string>> = Object.freeze(
 export interface SubscriptionRunReport {
   /** True only when the script exited 0 with a complete, valid event stream. */
   readonly ok: boolean
+  /** Set by every failure path: what the owner has to change. A success has none. */
+  readonly category?: SubscriptionRunCategory | undefined
   /** Why the run failed, in the words an owner reads in the Main stream or a refusal. */
   readonly reason?: string | undefined
   readonly stdout: string
@@ -85,10 +119,15 @@ export interface SubscriptionRunReport {
   readonly events: readonly SubscriptionEvent[]
 }
 
-const FAILED_REPORT = { ok: false, stdout: '', stderr: '', exitCode: null, timedOut: false, events: [] } as const
+/** The category a failed run must carry; a failure without one is a bug, not a default. */
+export function failureCategory(report: SubscriptionRunReport): SubscriptionRunCategory {
+  if (report.category === undefined) throw new Error('a failed run must name the category an owner acts on')
+  return report.category
+}
 
-function failed(reason: string, stdout = '', stderr = '', exitCode: number | null = null, timedOut = false): SubscriptionRunReport {
-  return Object.freeze({ ok: false, reason, stdout, stderr, exitCode, timedOut, events: [] })
+function failed(category: SubscriptionRunCategory, reason: string, stdout = '', stderr = '',
+  exitCode: number | null = null, timedOut = false): SubscriptionRunReport {
+  return Object.freeze({ ok: false, category, reason, stdout, stderr, exitCode, timedOut, events: [] })
 }
 
 /** The last bytes of one stream, decoded on a character boundary. */
@@ -141,10 +180,15 @@ export interface SubscriptionRunRequest {
   /** The family the mounted executor was probed as; the snapshot must agree. */
   readonly liveShell: SubscriptionShell | undefined
   readonly subscription: AgentTeamSubscription
-  readonly trigger: 'interval' | 'test'
+  /** What triggered this run: a timer, a webhook delivery, or an owner's trial. */
+  readonly trigger: 'interval' | 'webhook' | 'test'
   /** The Project Workspace root from the Host's own registry record; absent when the directory is gone. */
   readonly workspaceRoot: string | undefined
   readonly lastSuccessAt: string | undefined
+  /** The stdin a webhook run replays, already shaped as `{headers, body}`. */
+  readonly stdin?: string | undefined
+  /** The admission id a webhook run hands the script, so it can tell a retry from a redelivery. */
+  readonly deliveryId?: string | undefined
   readonly stdoutMaxBytes?: number | undefined
   readonly timeoutMs?: number | undefined
 }
@@ -167,29 +211,32 @@ async function resolveCredentials(
 
 /**
  * Run one snapshot under the Host's own policy and apply the output contract.
- * The report's `reason` distinguishes what the owner must change: the
+ * The report's `category` distinguishes what the owner must change: the
  * executor, the credentials, the Workspace, the script's exit, its output, or
  * the size it printed.
  */
 export async function runSubscriptionScript(request: SubscriptionRunRequest): Promise<SubscriptionRunReport> {
   const script = request.subscription.script
   const mismatch = shellMismatchReason(script.shell, request.liveShell)
-  if (mismatch !== undefined) return failed(mismatch)
-  if (request.executor === undefined) return failed('no shell executor is available for unattended runs')
+  if (mismatch !== undefined) return failed('shell-mismatch', mismatch)
+  if (request.executor === undefined) return failed('executor-missing', 'no shell executor is available for unattended runs')
   if (request.workspaceRoot === undefined) {
-    return failed('the Project Workspace directory does not exist, so the script has nowhere to run')
+    return failed('workspace-missing', 'the Project Workspace directory does not exist, so the script has nowhere to run')
   }
   const credentials = await resolveCredentials(request.credentials, request.subscription.credentials)
   if ('missing' in credentials) {
-    return failed(`the Host has no configured credential for ${credentials.missing.map(ref => `'${ref}'`).join(', ')}`)
+    return failed('credentials-missing',
+      `the Host has no configured credential for ${credentials.missing.map(ref => `'${ref}'`).join(', ')}`)
   }
   const environment = subscriptionRunEnvironment({
     projectRef: request.subscription.projectRef,
     subscriptionRef: request.subscription.subscriptionRef,
     trigger: request.trigger,
     ...(request.lastSuccessAt === undefined ? {} : { lastSuccessAt: request.lastSuccessAt }),
+    ...(request.deliveryId === undefined ? {} : { deliveryId: request.deliveryId }),
     resolved: credentials.resolved,
   })
+  const stdin = request.stdin ?? (request.trigger === 'test' ? subscriptionTestStdin() : undefined)
   let spec: ShellExecSpec
   try {
     spec = request.executor.resolve({
@@ -198,43 +245,43 @@ export async function runSubscriptionScript(request: SubscriptionRunRequest): Pr
       timeoutMs: request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS,
       stdoutMaxBytes: request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES,
       env: environment,
-      ...(request.trigger === 'test' ? { stdin: subscriptionTestStdin() } : {}),
+      ...(stdin === undefined ? {} : { stdin }),
       // Explicit, non-escalating, and built from the Workspace the Host itself
       // recorded: an unattended run never inherits the process cwd, and never
       // asks for a mode a person would have to approve.
       sandboxPolicy: { mode: 'workspace-write', workspaceRoot: request.workspaceRoot },
     })
   } catch (error) {
-    return failed(`the Host could not prepare this run: ${error instanceof Error ? error.message : String(error)}`)
+    return failed('spawn-failed', `the Host could not prepare this run: ${error instanceof Error ? error.message : String(error)}`)
   }
   let result: ShellRunResult
   try {
     result = await (await request.executor.execute(spec)).result()
   } catch (error) {
-    return failed(`the shell executor failed before the script produced output: ${error instanceof Error ? error.message : String(error)}`)
+    return failed('spawn-failed', `the shell executor failed before the script produced output: ${error instanceof Error ? error.message : String(error)}`)
   }
   const stdout = result.stdout.text
   const stderr = result.stderr.text
   if (result.timedOut) {
-    return failed(`the script exceeded ${Math.round((request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS) / 1000)} seconds and was killed`,
+    return failed('timeout', `the script exceeded ${Math.round((request.timeoutMs ?? SUBSCRIPTION_RUN_TIMEOUT_MS) / 1000)} seconds and was killed`,
       stdout, stderr, result.exitCode, true)
   }
   if (result.stdout.truncated) {
-    return failed(`the script printed more than ${request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES} bytes of stdout; narrow what it prints`,
+    return failed('stdout-truncated', `the script printed more than ${request.stdoutMaxBytes ?? SUBSCRIPTION_STDOUT_MAX_BYTES} bytes of stdout; narrow what it prints`,
       stdout, stderr, result.exitCode)
   }
   if (result.exitCode !== 0) {
-    return failed(`the script exited with code ${result.exitCode === null ? 'null' : result.exitCode}`, stdout, stderr, result.exitCode)
+    return failed('exit-code', `the script exited with code ${result.exitCode === null ? 'null' : result.exitCode}`, stdout, stderr, result.exitCode)
   }
   // The executor decodes bytes it captured, so an invalid byte already arrived
   // as U+FFFD. Treating that mark as a failed run is the only way to refuse
   // output the script never printed as UTF-8.
   if (stdout.includes('\uFFFD')) {
-    return failed('the script printed bytes that are not valid UTF-8', stdout, stderr, result.exitCode)
+    return failed('invalid-utf8', 'the script printed bytes that are not valid UTF-8', stdout, stderr, result.exitCode)
   }
   const parsed = parseSubscriptionOutput(Buffer.from(stdout, 'utf8'))
   if (!parsed.ok) {
-    return failed(parsed.reason, stdout, stderr, result.exitCode)
+    return failed('invalid-output', parsed.reason, stdout, stderr, result.exitCode)
   }
   return Object.freeze({ ok: true, stdout, stderr, exitCode: result.exitCode, timedOut: false, events: parsed.events })
 }

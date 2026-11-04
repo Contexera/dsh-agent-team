@@ -154,11 +154,53 @@ Admission re-reads the ledger rather than the queued snapshot: a subscription de
 
 Its state — next due instant, failure count, publication window, last success — lives in the private domain `agent_team_subscriptions` (`packages/agent-team/src/subscription-store.ts`), never in the ledger. Deleting every checkpoint changes no domain result, and a restart resumes from the persisted due instant instead of resetting it.
 
+The same domain keeps three tables no ledger fact depends on: `runs`, the newest fifty runs of each subscription; `deliveries`, the webhook deliveries whose automatic retries were spent; and `replays`, the answer each replay request already got. A run record carries the trigger, the start instant, the duration, the structured category, the exit code or timeout, the event count, the last 8 KiB of each stream, and the identity that explains it — `subscriptionRevision`, `scriptHash`, `runRef`, and for a delivery its `deliveryRef` with the attempt that spent the retries.
+
+The event count is what the run had accepted into the ledger, never what the script printed: a trial publishes nothing, a refused batch accepts nothing, and an id the subscription already knew is not new.
+
+A trial is recorded too, so an owner asking whether a fix passes reads the same history as the live runs; a create's draft trial is not, because the ledger never stored the subscription a record would belong to. Deleting a subscription drops all three tables with its checkpoint: the cleanup finishes before the call reports the deletion, and boot converges the rows an interrupted deletion left behind. Archiving a Project clears the same private state for every subscription it owns, at the archive rather than at the next restart.
+
+The cleanup takes the same write lock as the private writes, so it cannot land inside one of their segments: either it runs first — and the segment's barrier read finds nothing live, writes nothing, and reports that it did not — or it runs after and takes every row the segment wrote. Each segment also re-reads the terminal state before it writes, so a deletion that lands between two segments leaves nothing behind either.
+
+Reading the history is a Project read with one cut through it: every member sees the summary, while the output — the two tails and the sentence a run explains itself with — belongs to the Human and the owners, because the script ran under the Project's credentials.
+
+The cut is on the output alone: a passing run shows its output to an owner exactly as a failing one does, and the identity travels with the summary, so a delivery, the revision it arrived under, and the run it produced read as one story. The `logs` action of `team_subscription` and `subscriptionLogs` on the Remote read the same records.
+
+A success has exactly one linearization point: the run succeeded when its output became durable in the ledger, which is the same commit that clears the consecutive-failure count and moves the last success. A script that exits 0 having printed nothing new is a success that accepts nothing.
+
+The accept and that clear are one segment under the subscription's write lock, which is why the settle step that runs afterwards only advances the next due time. The lock is what makes the clear honest: a defeat the ingress counts beside the run falls either inside the streak this success ends or outside it entirely, and nothing between reading the count and writing it can slip in.
+
+The script itself runs outside the lock — holding it there would stall every delivery for the run's whole duration. An empty success takes the same segment and clears the same way, because it is the same fact: the run worked.
+
+One whose batch would carry the unpublished total past 500 events is a failed run; a subscription already at that ceiling is skipped by admission before its script starts, which is why the skip counts nothing. Only interval and webhook runs count, a trial neither counts nor clears, and a resume clears the count only when it commits — a resume whose trial fails changes neither.
+
+A delivery whose retries are spent becomes a row in `deliveries`: a stable `deliveryRef`, the received revision and script hash together with the script and credentials that version ran under, the request body the script reads on stdin, the last error, and a seven-day expiry, at most ten per subscription. It outlives the run records that explain it, and it counts exactly one failure however many attempts it took — a provider that redelivers the same request is still the same delivery.
+
+Every checkpoint write is one read-modify-write under that same lock: a settle advancing the due instant, a counted delivery, the success clear, and the publish window all change one field of the same row, and a writer that composed its record from an earlier read drops what the others committed — silently, because the last write wins. Deliveries count one at a time through it, so three arriving together add three failures instead of one, and the third still pauses.
+
+The ingress itself is the one writer no scheduler admits, so it reads the terminal barrier before it writes: a delivery arriving for a deleted subscription or an archived Project is dropped instead of rebuilding the rows the deletion removed.
+
+The `replay` action runs one again — the current definition by default, so a fixed script can handle an old request, or the version it arrived under — publishes what the script prints like any run, so the same commit decides its success: one that delivers ends the failure streak, while a replay whose script fails counts nothing. It is a run, so it is admitted like one: the same four slots, the same per-subscription exclusion, and the same convergence when the Host stops, with a pause, a deletion, or an archived Project refusing it on the way in.
+
+A `requestId` names one intent, and `replays` holds it before anything runs: the record is written with the delivery and version the request named, in state `running`, and settled with the answer after the run.
+
+Writing it is a precondition — a call that cannot record its own intent refuses instead of running a script nothing could then account for — and once it exists the id is spent. The same id naming another delivery, or the other version of the same one, is refused as a request collision even when no answer survived to say so, and a delivery whose replay delivered is not run again under a new id, since that would publish the same output twice.
+
+A record still `running` is an attempt whose answer never landed. A retry cannot tell it from one that died, so it is not run again: if the ledger holds an accept under that id the output was delivered and the retry answers with it, and otherwise the retry is told the earlier attempt never recorded its answer, and is offered a new request id instead.
+
+The answer and the delivery's own tombstone settle in one locked segment, so a deletion is ordered before or after both rather than between them.
+
+A storage fault in either of those writes is logged and the call still answers with what the run did: the output is already in the ledger, so a private copy that fails cannot turn a delivered replay into an ungraspable one. The answer goes when retention takes the delivery it explains.
+
+Webhook admission over HTTP is not part of this build: the record, its retention, the owner read, and the replay are.
+
 The scheduler reaches the world only through ports, so the runtime tests drive a fake clock and a fake executor. A timer run executes the stored snapshot through `ctx.shell` — the same executor the Member's shell tool uses — under a policy the Host builds itself from the trusted Workspace record: `workspace-write` rooted at that Workspace, 60 seconds, a 65,536-byte stdout cap, and never the escalating mode, because an unattended run has no one to approve it.
 
 The mounted shell family is probed by behavior once and cached. A snapshot recorded under the other family fails its runs with that reason instead of running under a shell it was not written for.
 
-A run's stdout is the output contract: one JSON object per line, validated by the Team's own byte-level parser, with the collector's `truncated` flag treated as a failure so a valid-looking tail can never pass as complete output. New events are accepted into the ledger under the revision and script hash the run pinned and published at the budgeted rate; three failed runs in a row pause the subscription, which the ledger records with no Member actor because the Host acted on its own.
+A run's stdout is the output contract: one JSON object per line, validated by the Team's own byte-level parser, with the collector's `truncated` flag treated as a failure so a valid-looking tail can never pass as complete output.
+
+New events are accepted into the ledger under the revision and script hash the run pinned and published at the budgeted rate; three failed runs in a row pause the subscription, which the ledger records with no Member actor because the Host acted on its own, and the pause carries one Main stream marker per owner — the Human included, followed or not — so the news reaches everyone it concerns.
 
 Credential values are resolved per run through `ctx.credentials` and merged after the executor's own environment scrub. The Host builds that map from scratch — the managed `DSH_TEAM_*` facts plus the subscription's declared references — so nothing from the Host process environment is forwarded by Team code.
 
