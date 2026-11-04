@@ -319,6 +319,21 @@ describe('the Project subscription tab', () => {
     await waitFor(() => expect(none.textContent).toContain('没有失败投递'))
   })
 
+  it('lets an owner replay a delivery under the version it arrived with', async () => {
+    const delivery = { deliveryRef: 'delivery:d1', receivedRevision: 3, receivedScriptHash: 'a'.repeat(64),
+      receivedAt: '2026-11-04T02:00:00.000Z', expiresAt: '2026-11-11T02:00:00.000Z', attempts: 4, lastError: 'the script exited with code 1' }
+    const load = vi.fn(async () => ({ ok: true as const, value: { deliveries: [delivery] } }))
+    const replay = vi.fn(async (_request: AgentTeamSubscriptionReplayRequest) => ({ ok: true as const, value: {
+      kind: 'replayed' as const, delivery, runRef: 'run:9', eventCount: 2 } }))
+    const { view } = renderTab({ entries: [entry()], host: host({ loadSubscriptionDeliveries: load, replaySubscriptionDelivery: replay }) })
+    fireEvent.click(view.getByRole('button', { name: '失败投递 · main CI' }))
+    await view.findByRole('dialog', { name: '失败投递 · main CI' })
+    fireEvent.click(view.getByLabelText('接收时的版本（复现当时的行为）'))
+    fireEvent.click(view.getByRole('button', { name: '重放 · delivery:d1' }))
+    await waitFor(() => expect(replay).toHaveBeenCalledTimes(1))
+    expect(replay.mock.calls[0]![0]).toMatchObject({ version: 'received', deliveryRef: 'delivery:d1' })
+  })
+
   it('moves the address under the revision it read, and keeps the dialog shut when the Host refuses', async () => {
     const hooked = entry({}, { triggers: { webhook: true },
       webhook: { tokenHash: 'b'.repeat(64), generation: 1, armedAt: '2026-11-04T02:00:00.000Z' } })

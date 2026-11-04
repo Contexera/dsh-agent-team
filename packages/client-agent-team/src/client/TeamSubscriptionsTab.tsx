@@ -8,6 +8,7 @@ import type {
   AgentTeamSubscriptionDeliveryEntry,
   AgentTeamSubscriptionListEntry,
   AgentTeamSubscriptionLogEntry,
+  AgentTeamSubscriptionReplayVersion,
   AgentTeamSubscriptionRunSummary,
   AgentTeamSubscriptionTrialFailure,
   AgentTeamUpdateSubscriptionRequest,
@@ -176,7 +177,7 @@ export function TeamSubscriptionsTab({
       onArmed={setArmed}
       t={t}
     />}
-    {armed !== undefined && (armed.gone === true
+    {armed !== undefined && ('gone' in armed
       ? <SubscriptionWebhookGoneDialog name={armed.name} onClose={() => { setArmed(undefined) }} t={t} />
       : <SubscriptionWebhookAddressDialog
         name={armed.name}
@@ -481,6 +482,8 @@ function SubscriptionDeliveriesDialog({ entry, workspaceId, projectRef, loadSubs
   const [replaying, setReplaying] = useState<string>()
   const [replayed, setReplayed] = useState<string>()
   const [replayError, setReplayError] = useState<string>()
+  const [version, setVersion] = useState<AgentTeamSubscriptionReplayVersion>('current')
+  const versionGroup = useId()
   useEffect(() => {
     let mounted = true
     setError(undefined)
@@ -500,7 +503,7 @@ function SubscriptionDeliveriesDialog({ entry, workspaceId, projectRef, loadSubs
     setReplayError(undefined)
     setReplayed(undefined)
     try {
-      const result = await replaySubscriptionDelivery({ requestId: mintRequestId(), workspaceId, projectRef, subscriptionRef, deliveryRef })
+      const result = await replaySubscriptionDelivery({ requestId: mintRequestId(), workspaceId, projectRef, subscriptionRef, deliveryRef, version })
       if (!result.ok) {
         setReplayError(t('subscriptionDeliveryReplayFailed', { message: result.error.message }))
         return
@@ -533,6 +536,20 @@ function SubscriptionDeliveriesDialog({ entry, workspaceId, projectRef, loadSubs
     {error !== undefined && <SurfaceError message={t('subscriptionDeliveriesFailed', { message: error })} retry={t('retry')}
       onRetry={() => { setReloadToken(token => token + 1) }} />}
     {deliveries !== undefined && error === undefined && deliveries.length === 0 && <p className={css.hint}>{t('subscriptionDeliveriesEmpty')}</p>}
+    {deliveries !== undefined && deliveries.length > 0 && <fieldset className={css.fieldset}>
+      <legend>{t('subscriptionReplayVersion')}</legend>
+      <label className={css.radioRow}>
+        <input type="radio" name={versionGroup} checked={version === 'current'} disabled={replaying !== undefined}
+          onChange={() => { setVersion('current') }} />
+        <span>{t('subscriptionReplayVersionCurrent')}</span>
+      </label>
+      <label className={css.radioRow}>
+        <input type="radio" name={versionGroup} checked={version === 'received'} disabled={replaying !== undefined}
+          onChange={() => { setVersion('received') }} />
+        <span>{t('subscriptionReplayVersionReceived')}</span>
+      </label>
+      <p className={css.hint}>{t('subscriptionReplayVersionHint')}</p>
+    </fieldset>}
     {replayed !== undefined && <p className={css.notice} role="status">{replayed}</p>}
     {replayError !== undefined && <p className={css.error} role="alert">{replayError}</p>}
     {deliveries !== undefined && deliveries.length > 0 && <div className={css.listViewport}>

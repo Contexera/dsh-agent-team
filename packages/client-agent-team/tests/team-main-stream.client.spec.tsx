@@ -40,6 +40,20 @@ const typeDraft = (b: Awaited<ReturnType<typeof openProject>>, text: string) => 
 }
 
 describe('Team Main stream', () => {
+  it('names a webhook reset as a reset, not a deletion', async () => {
+    const reset = { kind: 'activity', sequence: 5, occurredAt: '2026-10-20T08:30:00.000Z', activity: {
+      activityRef: 'activity:reset', projectRef: 'project:engineering', kind: 'subscription-webhook-reset',
+      subscriptionRef: 'subscription:ci', subscriptionName: 'main CI', revision: 2, actor: 'member:human',
+      sequence: 5, occurredAt: '2026-10-20T08:30:00.000Z' } }
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true,
+      mainStreamEntries: [...seedEntries, reset] })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    await b.view.findByRole('tab', { name: '主对话' })
+    expect(await b.view.findByText('human 重置了订阅 main CI 的 Webhook 地址')).toBeTruthy()
+    expect(b.view.queryByText(/删除了订阅 main CI/)).toBeNull()
+    await b.runtime.dispose()
+  })
+
   it('renders messages, owner activity and both card kinds from the Host history, and opens the cards', async () => {
     const b = await openProject()
     expect(await b.view.findByText('配色要不要跟设置页统一？')).toBeTruthy()

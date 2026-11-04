@@ -191,8 +191,9 @@ export function TeamMainStream({
           : t(activity.kind === 'subscription-created' ? 'mainSubscriptionCreated'
             : activity.kind === 'subscription-updated' ? 'mainSubscriptionUpdated'
               : activity.kind === 'subscription-paused' ? 'mainSubscriptionPaused'
-                : activity.kind === 'subscription-resumed' ? 'mainSubscriptionResumed' : 'mainSubscriptionDeleted',
-          { actor: activity.actor === undefined ? 'agent-team' : nameOf(activity.actor), name: activity.subscriptionName })
+                : activity.kind === 'subscription-resumed' ? 'mainSubscriptionResumed'
+                  : activity.kind === 'subscription-webhook-reset' ? 'mainSubscriptionWebhookReset' : 'mainSubscriptionDeleted',
+          { actor: activity.actor === undefined ? t('mainSubscriptionHostActor') : nameOf(activity.actor), name: activity.subscriptionName })
         return <div className={streamCss.entry} data-main-entry="subscription" data-unread={unread} key={mainEntryKey(entry)}>
           <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
         </div>
