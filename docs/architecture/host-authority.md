@@ -119,7 +119,7 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 - Member capabilities (`capabilities` on the Member entity: reserved `tools.allow`, `skills.allow`) are durable intent carried verbatim by every lifecycle operation. Committing performs no known-name validation so old ledgers stay replayable across Harness upgrades; divergence is derived at activation as non-persisted `capabilityWarnings`. `tools.allow` is a deliberate interface reservation: it has no UI write path today.
 
   Edits follow the partial-update semantics of `model`: an omitted field keeps the stored value and an explicit `null` clears it, so a caller that does not manage capabilities can leave the field out and any Remote-written override survives.
-- Activation restricts every Member before preset validation (mount → restrict → validate), even without `tools.allow`. The allow-list can only narrow the preset baseline, retaining the seven Team tools and `working_directory`; names outside that baseline drop with a warning. Tool filtering, execution checks, and their limits are defined in [Tools and preset](tools-and-preset.md).
+- Activation restricts every Member before preset validation (mount → restrict → validate), even without `tools.allow`. The allow-list can only narrow the preset baseline, retaining the nine Team tools and `working_directory`; names outside that baseline drop with a warning. Tool filtering, execution checks, and their limits are defined in [Tools and preset](tools-and-preset.md).
 
   Editing the allow-list on a live Member swaps the restriction at a turn boundary in the same Session: idle Members apply immediately, and a running Member's edit waits for that Member's turn to end. Each Member owns one lifecycle chain, so the wait holds only that Member's later operations, still in submission order, while managing another Member never queues behind it and the ledger keeps its single ordered writer.
 
@@ -145,6 +145,22 @@ The Host row publishes one service, `ctx.agentTeam`, consumed in two distinct wa
 Only the Remote set is a contract. Everything else on `ctx.agentTeam` is internal and may change shape without a migration note.
 
 A preset row must resolve `ctx.agentTeam` while it runs, never capture it statically at declaration time: the service is provided when the Host plugin starts, so a row that closed over it at import time sees nothing. The same applies to `ctx.get('agentTeam')` in external code, which is undocumented use of an internal surface rather than a supported integration point.
+
+## Subscription scheduling and unattended execution
+
+The Host owns every timer a subscription obeys. `SubscriptionScheduler` (`packages/agent-team/src/subscription-runtime.ts`) admits at most four script runs globally — an owner-requested trial takes one of those slots — keeps one waiting timer entry per subscription and merges later due instants into it, never runs one subscription twice at once, counts failures, and spends a per-subscription publication budget of 20 events a minute.
+
+Admission re-reads the ledger rather than the queued snapshot: a subscription deleted — or a Project archived — while a trial or a timer run waits is refused without running its script, and a record in that terminal state neither publishes again nor keeps a checkpoint.
+
+Its state — next due instant, failure count, publication window, last success — lives in the private domain `agent_team_subscriptions` (`packages/agent-team/src/subscription-store.ts`), never in the ledger. Deleting every checkpoint changes no domain result, and a restart resumes from the persisted due instant instead of resetting it.
+
+The scheduler reaches the world only through ports, so the runtime tests drive a fake clock and a fake executor. A timer run executes the stored snapshot through `ctx.shell` — the same executor the Member's shell tool uses — under a policy the Host builds itself from the trusted Workspace record: `workspace-write` rooted at that Workspace, 60 seconds, a 65,536-byte stdout cap, and never the escalating mode, because an unattended run has no one to approve it.
+
+The mounted shell family is probed by behavior once and cached. A snapshot recorded under the other family fails its runs with that reason instead of running under a shell it was not written for.
+
+A run's stdout is the output contract: one JSON object per line, validated by the Team's own byte-level parser, with the collector's `truncated` flag treated as a failure so a valid-looking tail can never pass as complete output. New events are accepted into the ledger under the revision and script hash the run pinned and published at the budgeted rate; three failed runs in a row pause the subscription, which the ledger records with no Member actor because the Host acted on its own.
+
+Credential values are resolved per run through `ctx.credentials` and merged after the executor's own environment scrub. The Host builds that map from scratch — the managed `DSH_TEAM_*` facts plus the subscription's declared references — so nothing from the Host process environment is forwarded by Team code.
 
 ## Composer attachments (cache, not archive)
 

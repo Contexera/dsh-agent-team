@@ -177,6 +177,24 @@ import type {
   AgentTeamProjectOwnerRequest,
   AgentTeamProjectOwnerResult,
   AgentTeamUpdateProjectResult,
+  AgentTeamSubscription,
+  AgentTeamSubscriptionAcceptResult,
+  AgentTeamSubscriptionBaselineOperation,
+  AgentTeamSubscriptionCreatedOperation,
+  AgentTeamSubscriptionDeletedOperation,
+  AgentTeamSubscriptionEventPublishedOperation,
+  AgentTeamSubscriptionEventsAcceptedOperation,
+  AgentTeamSubscriptionPausedOperation,
+  AgentTeamSubscriptionResumedOperation,
+  AgentTeamSubscriptionUpdatedOperation,
+  AgentTeamSubscriptionEventRef,
+  AgentTeamOwnerActivity,
+  AgentTeamSubscriptionActivity,
+  AgentTeamSubscriptionChangeResult,
+  AgentTeamSubscriptionEventAccepted,
+  AgentTeamSubscriptionEventPublished,
+  AgentTeamSubscriptionPublishResult,
+  AgentTeamSubscriptionRef,
   AgentTeamUpdateMemberRequest,
   AgentTeamView,
   AgentTeamViewRequest,
@@ -185,6 +203,20 @@ import { formatTeamTimestamp } from './time-format.ts'
 import { resolveBodyMentions } from './mentions.ts'
 import { recoveryFor } from './recovery-hints.ts'
 import { planTaskReminders, reviewReminderRecipient } from './task-reminders.ts'
+import {
+  characterLength,
+  isScriptHash,
+  SUBSCRIPTION_EVENT_DETAIL_MAX_CHARACTERS,
+  SUBSCRIPTION_EVENT_ID_MAX_CHARACTERS,
+  SUBSCRIPTION_EVENT_TITLE_MAX_CHARACTERS,
+  SUBSCRIPTION_MAX_PER_PROJECT,
+  SUBSCRIPTION_PENDING_MAX,
+  subscriptionDefinitionProblem,
+  type SubscriptionCredential,
+  type SubscriptionEvent,
+  type SubscriptionScriptSnapshot,
+  type SubscriptionTriggers,
+} from './subscriptions.ts'
 import { MAX_ACTIVE_REMINDERS_PER_MEMBER, MAX_REMINDER_NOTE_CHARACTERS, nextOccurrenceAt, nextReminderWakeAt, parseReminderNote, parseReminderSchedule, planMemberReminders, reminderRefIsStorable, reminderScheduleIsSound, sameReminderIntent } from './member-reminders.ts'
 import type { MemberReminderCandidate, MemberReminderPlanEntry } from './member-reminders.ts'
 import type { AgentTeamBodyMentionCandidate } from './mentions.ts'
@@ -359,10 +391,106 @@ export interface AgentTeamAuthorizedDmRequest extends AgentTeamDmRequest {
 }
 
 /** Construction hooks used to make durable operation creation deterministic in tests. */
+/** One subscription definition as a caller supplies it; the ledger mints the ref, revision and instants. */
+export interface AgentTeamCreateSubscriptionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly name: string
+  readonly triggers: SubscriptionTriggers
+  readonly script: SubscriptionScriptSnapshot
+  readonly credentials: readonly SubscriptionCredential[]
+  /** Ids the trial run printed that this subscription must never publish; empty means ignore that history. */
+  readonly baselineIds: readonly string[]
+}
+
+export interface AgentTeamAuthorizedCreateSubscriptionRequest extends AgentTeamCreateSubscriptionRequest {
+  readonly actor: AgentTeamActor
+}
+
+/** A full replacement of the four editable parts; the revision moves by one. */
+export interface AgentTeamUpdateSubscriptionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly expectedRevision: number
+  readonly name: string
+  readonly triggers: SubscriptionTriggers
+  readonly script: SubscriptionScriptSnapshot
+  readonly credentials: readonly SubscriptionCredential[]
+}
+
+export interface AgentTeamAuthorizedUpdateSubscriptionRequest extends AgentTeamUpdateSubscriptionRequest {
+  readonly actor: AgentTeamActor
+}
+
+/** A state transition that does not move the revision. */
+export interface AgentTeamSubscriptionStateRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly expectedRevision: number
+}
+
+export interface AgentTeamAuthorizedSubscriptionStateRequest extends AgentTeamSubscriptionStateRequest {
+  readonly actor: AgentTeamActor
+}
+
+/** An automatic pause records its own reason and never moves the revision. */
+export interface AgentTeamAuthorizedPauseSubscriptionRequest extends AgentTeamSubscriptionStateRequest {
+  readonly actor: AgentTeamActor
+  readonly reason: 'manual' | 'failures'
+}
+
+/** Append-only re-baselining: the ids to ignore from now on, never a replacement of what is already recorded. */
+export interface AgentTeamAuthorizedBaselineSubscriptionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly ids: readonly string[]
+  readonly actor: AgentTeamActor
+}
+
+/** Every subscription write whose request id has to mean the same payload twice. */
+type AgentTeamAuthorizedSubscriptionWrite =
+  | AgentTeamAuthorizedCreateSubscriptionRequest
+  | AgentTeamAuthorizedUpdateSubscriptionRequest
+  | AgentTeamAuthorizedPauseSubscriptionRequest
+  | AgentTeamAuthorizedSubscriptionStateRequest
+  | AgentTeamAuthorizedBaselineSubscriptionRequest
+  | AgentTeamAcceptSubscriptionEventsRequest
+  | AgentTeamPublishSubscriptionEventRequest
+
+/** One run's validated output, accepted under the version the run pinned. */
+export interface AgentTeamAcceptSubscriptionEventsRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly subscriptionRevision: number
+  readonly scriptHash: string
+  readonly events: readonly SubscriptionEvent[]
+  readonly actor: AgentTeamActor
+}
+
+/** One accepted event published to the Main stream. */
+export interface AgentTeamPublishSubscriptionEventRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly acceptedSequence: number
+  readonly eventId: string
+  readonly actor: AgentTeamActor
+}
+
 export interface AgentTeamLedgerOptions {
   readonly operationId?: () => AgentTeamOperationId
   readonly occurredAt?: () => string
-  readonly ref?: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
+  readonly ref?: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity' | 'subscription') => string
   /**
    * Whether one unread fact is already on the named Member's model-visible
    * surface, in full. The Host supplies it: it owns the live Agent sessions,
@@ -511,6 +639,22 @@ interface Projection {
   readonly mainAttention: Map<string, AgentTeamMainAttention>
   /** The Human's own Main stream read watermark per Project. The Human's attention is derived, so its read state is the one piece that must be stored. */
   readonly humanMainWatermarks: Map<AgentTeamProjectRef, number>
+  /** Subscriptions by ref, deleted ones included: the ref stays resolvable after the terminal state. */
+  readonly subscriptions: Map<AgentTeamSubscriptionRef, AgentTeamSubscription>
+  /** Subscription creation order per Project, which is the order a list renders in. */
+  readonly subscriptionsByProject: Map<AgentTeamProjectRef, AgentTeamSubscriptionRef[]>
+  /** Ids this subscription must never publish again: the append-only deduplication waterline. */
+  readonly subscriptionBaselines: Map<AgentTeamSubscriptionRef, Set<string>>
+  /** Accepted events per subscription in accept order, published ones included with their publication marked. */
+  readonly subscriptionEvents: Map<AgentTeamSubscriptionRef, AgentTeamSubscriptionEventAccepted[]>
+  /** The accept op each accepted event came from, keyed by `<accept sequence>|<event id>`. */
+  readonly acceptedEventsBySequence: Map<string, { readonly subscriptionRef: AgentTeamSubscriptionRef; readonly event: AgentTeamSubscriptionEventAccepted }>
+  /**
+   * The script hash each revision of a subscription carried, so an accepted
+   * run can be pinned to the definition it says it executed. A revision that is
+   * not in here never existed.
+   */
+  readonly subscriptionScriptHistory: Map<AgentTeamSubscriptionRef, Map<number, string>>
 }
 
 /** Kinds a rules-version-1 segment rejects (owner operations carry their own check), and the one kind version 2 stops writing. */
@@ -533,6 +677,7 @@ type MainSource =
   | { readonly kind: 'message'; readonly sequence: number; readonly message: AgentTeamMainMessage }
   | { readonly kind: 'activity'; readonly sequence: number; readonly activity: AgentTeamMainActivity }
   | { readonly kind: 'thread'; readonly sequence: number; readonly threadRef: AgentTeamThreadRef; readonly unreadable: boolean; readonly hidden?: boolean }
+  | { readonly kind: 'subscription-event'; readonly sequence: number; readonly published: AgentTeamSubscriptionEventPublished }
 
 /** Minimal replay-time Attention observation; the read projection adds the current Task ref. */
 interface AgentTeamAttentionObservation {
@@ -584,7 +729,9 @@ function emptyProjection(): Projection {
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
     threadsByWriter: new Map(),
     directMarkersByMember: new Map(), activityMarkersByMember: new Map(), reminderMarkersByMember: new Map(), observationsByThread: new Map(), rulesVersion: 1, owners: new Map(), mentionedByProject: new Map(),
-    mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainAttention: new Map(), humanMainWatermarks: new Map() }
+    mainSourcesByProject: new Map(), mainSourceByRef: new Map(), mainMarkers: new Map(), mainMarkersByMember: new Map(), mainAttention: new Map(), humanMainWatermarks: new Map(),
+    subscriptions: new Map(), subscriptionsByProject: new Map(), subscriptionBaselines: new Map(), subscriptionEvents: new Map(), acceptedEventsBySequence: new Map(),
+    subscriptionScriptHistory: new Map() }
 }
 
 /** Exhaustiveness guard for the closed operation union: adding a kind must update every dispatch. */
@@ -633,6 +780,49 @@ function isEmptyInboxDelta(delta: AgentTeamInboxDelta): boolean {
     && (delta.mainMarkers === undefined || (delta.mainMarkers.added.length === 0 && delta.mainMarkers.removed.length === 0))
 }
 
+/** One triggers value, frozen so a caller cannot mutate what the ledger holds. */
+function freezeSubscriptionTriggers(triggers: SubscriptionTriggers): SubscriptionTriggers {
+  return Object.freeze({ ...(triggers.interval === undefined ? {} : { interval: Object.freeze({ ...triggers.interval }) }),
+    ...(triggers.webhook === true ? { webhook: true } : {}) })
+}
+
+function freezeSubscriptionCredentials(credentials: readonly SubscriptionCredential[]): readonly SubscriptionCredential[] {
+  return Object.freeze(credentials.map(credential => Object.freeze({ ...credential })))
+}
+
+/** Why a batch of event ids cannot be stored as such, or `undefined` when it can. */
+function subscriptionIdsProblem(ids: readonly string[]): string | undefined {
+  const seen = new Set<string>()
+  for (const id of ids) {
+    if (id === '') return 'an event id cannot be empty'
+    if (characterLength(id) > SUBSCRIPTION_EVENT_ID_MAX_CHARACTERS) {
+      return `id '${id}' is longer than ${SUBSCRIPTION_EVENT_ID_MAX_CHARACTERS} characters`
+    }
+    if (seen.has(id)) return `id '${id}' appears twice in the same batch`
+    seen.add(id)
+  }
+  return undefined
+}
+
+/** Why one run's events cannot be accepted, or `undefined` when they can. */
+function subscriptionRunEventsProblem(events: readonly SubscriptionEvent[], known: ReadonlySet<string>): string | undefined {
+  if (events.length === 0) return 'a run that produced no events has nothing to accept'
+  const ids = subscriptionIdsProblem(events.map(event => event.id))
+  if (ids !== undefined) return ids
+  const repeated = events.find(event => known.has(event.id))
+  if (repeated !== undefined) return `id '${repeated.id}' is already known to this subscription`
+  for (const event of events) {
+    if (characterLength(event.title) > SUBSCRIPTION_EVENT_TITLE_MAX_CHARACTERS) {
+      return `title of '${event.id}' is longer than ${SUBSCRIPTION_EVENT_TITLE_MAX_CHARACTERS} characters`
+    }
+    if (event.detail !== undefined && characterLength(event.detail) > SUBSCRIPTION_EVENT_DETAIL_MAX_CHARACTERS) {
+      return `detail of '${event.id}' is longer than ${SUBSCRIPTION_EVENT_DETAIL_MAX_CHARACTERS} characters`
+    }
+    if (event.url !== undefined && !/^https?:\/\/\S+$/i.test(event.url)) return `url of '${event.id}' is not an http(s) address`
+  }
+  return undefined
+}
+
 function reminderMarkerKey(marker: AgentTeamReminderMarker): string {
   return `${marker.memberId}|${marker.taskRef}|${marker.kind}|${marker.baselineSequence}`
 }
@@ -642,7 +832,13 @@ function reminderEpisodeKey(taskRef: AgentTeamTaskRef, kind: AgentTeamReminderMa
 }
 
 function mainMarkerKey(marker: AgentTeamMainMarker): string {
-  return `${marker.memberId}|${marker.projectRef}|${'messageRef' in marker ? marker.messageRef : marker.activityRef}`
+  return `${marker.memberId}|${marker.projectRef}|${mainMarkerSourceRef(marker)}`
+}
+
+/** The Main stream source one marker addresses: a Message, an Activity, or a published event. */
+function mainMarkerSourceRef(marker: AgentTeamMainMarker): string {
+  if ('messageRef' in marker) return marker.messageRef
+  return 'activityRef' in marker ? marker.activityRef : marker.eventRef
 }
 
 /** One Main stream Attention period's identity, as the projection's flat key. */
@@ -681,7 +877,7 @@ export class AgentTeamLedger {
   private readonly state: Projection = emptyProjection()
   private readonly createOperationId: () => AgentTeamOperationId
   private readonly createOccurredAt: () => string
-  private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') => string
+  private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity' | 'subscription') => string
   /** Host-supplied surface visibility probe; absent means no write is ever exempt. */
   private readonly areFactsVisible?: ((memberId: AgentTeamMemberId, facts: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef) => boolean) | undefined
   private readonly areMainEntriesVisible: AgentTeamLedgerOptions['areMainEntriesVisible']
@@ -802,6 +998,435 @@ export class AgentTeamLedger {
       this.applyAndAdvanceProjectionVersion(operation)
       return this.receipt(operation)
     })
+  }
+
+
+  // ── Project subscriptions ─────────────────────────────────────────────────
+
+  /** Every subscription, deleted ones included: a ref stays resolvable after the terminal state. */
+  subscriptions(): readonly AgentTeamSubscription[] {
+    return Object.freeze([...this.state.subscriptions.values()])
+  }
+
+  /** One Project's subscriptions in creation order. */
+  subscriptionsOfProject(projectRef: AgentTeamProjectRef): readonly AgentTeamSubscription[] {
+    return Object.freeze((this.state.subscriptionsByProject.get(projectRef) ?? [])
+      .flatMap(subscriptionRef => {
+        const subscription = this.state.subscriptions.get(subscriptionRef)
+        return subscription === undefined ? [] : [subscription]
+      }))
+  }
+
+  subscription(subscriptionRef: AgentTeamSubscriptionRef): AgentTeamSubscription | undefined {
+    return this.state.subscriptions.get(subscriptionRef)
+  }
+
+  /** The ids one subscription must never publish again: its baseline plus everything it accepted. */
+  subscriptionKnownIds(subscriptionRef: AgentTeamSubscriptionRef): ReadonlySet<string> {
+    const known = new Set(this.state.subscriptionBaselines.get(subscriptionRef) ?? [])
+    for (const entry of this.state.subscriptionEvents.get(subscriptionRef) ?? []) known.add(entry.event.id)
+    return known
+  }
+
+  /** Accepted events still waiting for publication, oldest first — the queue a publisher drains. */
+  pendingSubscriptionEvents(subscriptionRef: AgentTeamSubscriptionRef): readonly AgentTeamSubscriptionEventAccepted[] {
+    return Object.freeze((this.state.subscriptionEvents.get(subscriptionRef) ?? []).filter(entry => entry.publishedSequence === undefined))
+  }
+
+  /** Every accepted event of one subscription in accept order, published ones included. */
+  subscriptionEvents(subscriptionRef: AgentTeamSubscriptionRef): readonly AgentTeamSubscriptionEventAccepted[] {
+    return Object.freeze([...(this.state.subscriptionEvents.get(subscriptionRef) ?? [])])
+  }
+
+  /** Durable creation of one subscription, with the ids its trial run asked to ignore. */
+  createSubscription(request: AgentTeamAuthorizedCreateSubscriptionRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionChangeOf(existing))
+      }
+      this.activeProject(request.projectRef, request.workspaceId)
+      this.requireProjectOwnerActor(request.actor, request.projectRef)
+      const problem = subscriptionDefinitionProblem(request)
+      if (problem !== undefined) throw new Error(`this subscription cannot be created: ${problem}`)
+      const baselineProblem = subscriptionIdsProblem(request.baselineIds)
+      if (baselineProblem !== undefined) throw new Error(`this subscription cannot be created: ${baselineProblem}`)
+      const live = this.subscriptionsOfProject(request.projectRef).filter(entry => entry.state !== 'deleted')
+      if (live.length >= SUBSCRIPTION_MAX_PER_PROJECT) {
+        throw new Error(`Project '${request.projectRef}' already has ${SUBSCRIPTION_MAX_PER_PROJECT} subscriptions`)
+      }
+      const sequence = this.nextSequence()
+      const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
+      const subscription: AgentTeamSubscription = Object.freeze({
+        subscriptionRef: this.ref('subscription') as AgentTeamSubscriptionRef,
+        projectRef: request.projectRef,
+        name: request.name,
+        triggers: freezeSubscriptionTriggers(request.triggers),
+        script: Object.freeze({ ...request.script }),
+        credentials: freezeSubscriptionCredentials(request.credentials),
+        revision: 1,
+        state: 'active',
+        createdBy: this.actorMemberOf(request.actor),
+        createdAt: base.occurredAt,
+      })
+      const activity = this.subscriptionActivity(subscription, 'subscription-created', request.actor, sequence, base.occurredAt)
+      const operation: AgentTeamSubscriptionCreatedOperation = Object.freeze({ ...base, kind: 'team/subscription-created',
+        data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity, baselineIds: Object.freeze([...request.baselineIds]) }) })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.subscriptionChangeOf(operation))
+    })
+  }
+
+  /** Replace the editable parts of one subscription; every edit is a new revision. */
+  updateSubscription(request: AgentTeamAuthorizedUpdateSubscriptionRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionChangeOf(existing))
+      }
+      const prior = this.ownedSubscription(request, request.subscriptionRef)
+      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const problem = subscriptionDefinitionProblem(request)
+      if (problem !== undefined) throw new Error(`this update cannot be stored: ${problem}`)
+      const sequence = this.nextSequence()
+      const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
+      const subscription: AgentTeamSubscription = Object.freeze({
+        ...prior,
+        name: request.name,
+        triggers: freezeSubscriptionTriggers(request.triggers),
+        script: Object.freeze({ ...request.script }),
+        credentials: freezeSubscriptionCredentials(request.credentials),
+        revision: prior.revision + 1,
+      })
+      const activity = this.subscriptionActivity(subscription, 'subscription-updated', request.actor, sequence, base.occurredAt)
+      const operation: AgentTeamSubscriptionUpdatedOperation = Object.freeze({ ...base, kind: 'team/subscription-updated',
+        data: Object.freeze({ workspaceId: request.workspaceId, subscription, previousRevision: prior.revision, activity }) })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.subscriptionChangeOf(operation))
+    })
+  }
+
+  pauseSubscription(request: AgentTeamAuthorizedPauseSubscriptionRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionChangeOf(existing))
+      }
+      if (request.actor.kind === 'host' && request.reason !== 'failures') throw new Error('only the failures a run reported may pause a subscription without an owner')
+      const prior = this.ownedSubscription(request, request.subscriptionRef, { hostMayPause: true })
+      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      if (prior.state !== 'active') throw new Error(`subscription '${prior.subscriptionRef}' is already ${prior.state === 'deleted' ? 'deleted' : 'paused'}`)
+      const subscription: AgentTeamSubscription = Object.freeze({ ...prior, state: 'paused', pausedReason: request.reason })
+      return this.commitSubscriptionState('team/subscription-paused', request, subscription, 'subscription-paused', request.reason)
+    })
+  }
+
+  resumeSubscription(request: AgentTeamAuthorizedSubscriptionStateRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionChangeOf(existing))
+      }
+      const prior = this.ownedSubscription(request, request.subscriptionRef)
+      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      if (prior.state !== 'paused') throw new Error(`subscription '${prior.subscriptionRef}' is not paused`)
+      const subscription: AgentTeamSubscription = Object.freeze({ ...prior, state: 'active', pausedReason: undefined })
+      return this.commitSubscriptionState('team/subscription-resumed', request, subscription, 'subscription-resumed')
+    })
+  }
+
+  deleteSubscription(request: AgentTeamAuthorizedSubscriptionStateRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionChangeOf(existing))
+      }
+      const prior = this.ownedSubscription(request, request.subscriptionRef)
+      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const subscription: AgentTeamSubscription = Object.freeze({ ...prior, state: 'deleted', pausedReason: undefined })
+      return this.commitSubscriptionState('team/subscription-deleted', request, subscription, 'subscription-deleted')
+    })
+  }
+
+  /** Append ids to the deduplication waterline; nothing already recorded is removed. */
+  baselineSubscription(request: AgentTeamAuthorizedBaselineSubscriptionRequest): Promise<AgentTeamLedgerResult<AgentTeamOperationReceipt>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.receipt(existing))
+      }
+      const prior = this.ownedSubscription(request, request.subscriptionRef)
+      const problem = subscriptionIdsProblem(request.ids)
+      if (problem !== undefined) throw new Error(`this baseline cannot be stored: ${problem}`)
+      if (request.ids.length === 0) throw new Error('a baseline needs at least one id to ignore')
+      const known = this.subscriptionKnownIds(prior.subscriptionRef)
+      const repeated = request.ids.find(id => known.has(id))
+      if (repeated !== undefined) throw new Error(`id '${repeated}' is already known to this subscription; a baseline only appends`)
+      const operation: AgentTeamSubscriptionBaselineOperation = Object.freeze({
+        ...this.operationBase({ requestId: request.requestId, actor: request.actor }, this.nextSequence()),
+        kind: 'team/subscription-baseline',
+        data: Object.freeze({ workspaceId: request.workspaceId, projectRef: prior.projectRef,
+          subscriptionRef: prior.subscriptionRef, ids: Object.freeze([...request.ids]) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.receipt(operation))
+    })
+  }
+
+  /**
+   * Accept one run's validated output as durable facts. Deduplication and the
+   * backlog ceiling are rechecked here, against the projection rather than the
+   * caller's view: two runs that finish together must not both cross 500.
+   */
+  acceptSubscriptionEvents(request: AgentTeamAcceptSubscriptionEventsRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionAcceptResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionAcceptOf(existing))
+      }
+      this.activeProject(request.projectRef, request.workspaceId)
+      const subscription = this.state.subscriptions.get(request.subscriptionRef)
+      if (subscription === undefined || subscription.projectRef !== request.projectRef) {
+        throw new Error(`subscription '${request.subscriptionRef}' does not belong to Project '${request.projectRef}'`)
+      }
+      if (subscription.state === 'deleted') throw new Error(`subscription '${subscription.subscriptionRef}' is deleted (subscription_deleted)`)
+      if (request.subscriptionRevision < 1 || request.subscriptionRevision > subscription.revision) {
+        throw new Error(`run revision ${request.subscriptionRevision} is not a revision of '${subscription.subscriptionRef}' (current ${subscription.revision})`)
+      }
+      if (!isScriptHash(request.scriptHash)) throw new Error('a run must name the script hash it executed')
+      const ranRevision = this.state.subscriptionScriptHistory.get(subscription.subscriptionRef)?.get(request.subscriptionRevision)
+      if (ranRevision !== request.scriptHash) {
+        throw new Error(`run revision ${request.subscriptionRevision} of '${subscription.subscriptionRef}' ran script '${request.scriptHash}', `
+          + `which is not the script that revision carries (subscription_script_mismatch)`)
+      }
+      const pending = this.pendingSubscriptionEvents(subscription.subscriptionRef).length
+      if (pending + request.events.length > SUBSCRIPTION_PENDING_MAX) {
+        throw new Error(`this run would leave ${pending + request.events.length} unpublished events for '${subscription.subscriptionRef}'; the ceiling is ${SUBSCRIPTION_PENDING_MAX} (subscription_backlog_full)`)
+      }
+      const known = this.subscriptionKnownIds(subscription.subscriptionRef)
+      const problem = subscriptionRunEventsProblem(request.events, known)
+      if (problem !== undefined) throw new Error(`this run cannot be accepted: ${problem}`)
+      const operation: AgentTeamSubscriptionEventsAcceptedOperation = Object.freeze({
+        ...this.operationBase({ requestId: request.requestId, actor: request.actor }, this.nextSequence()),
+        kind: 'team/subscription-events-accepted',
+        data: Object.freeze({ workspaceId: request.workspaceId, projectRef: request.projectRef, subscriptionRef: subscription.subscriptionRef,
+          subscriptionRevision: request.subscriptionRevision, scriptHash: request.scriptHash, events: Object.freeze(request.events.map(event => Object.freeze({ ...event }))) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.subscriptionAcceptOf(operation))
+    })
+  }
+
+  /**
+   * Publish one accepted event. The recipients are frozen here, at the publish
+   * commit: every owner of the Project as it stands now, the Human included.
+   */
+  publishSubscriptionEvent(request: AgentTeamPublishSubscriptionEventRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionPublishResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionPublishOf(existing))
+      }
+      this.activeProject(request.projectRef, request.workspaceId)
+      const subscription = this.state.subscriptions.get(request.subscriptionRef)
+      if (subscription === undefined || subscription.projectRef !== request.projectRef) {
+        throw new Error(`subscription '${request.subscriptionRef}' does not belong to Project '${request.projectRef}'`)
+      }
+      if (subscription.state === 'deleted') throw new Error(`subscription '${subscription.subscriptionRef}' is deleted (subscription_deleted)`)
+      const accepted = (this.state.subscriptionEvents.get(subscription.subscriptionRef) ?? [])
+        .find(entry => entry.acceptedSequence === request.acceptedSequence && entry.event.id === request.eventId)
+      if (accepted === undefined) throw new Error(`event '${request.eventId}' was never accepted by '${subscription.subscriptionRef}'`)
+      if (accepted.publishedSequence !== undefined) throw new Error(`event '${request.eventId}' was already published`)
+      const sequence = this.nextSequence()
+      const eventRef = `event:${sequence}` as AgentTeamSubscriptionEventRef
+      const markers = [AGENT_TEAM_HUMAN_MEMBER_ID, ...this.projectOwnerIds(subscription.projectRef)]
+        .map(memberId => Object.freeze({ memberId, projectRef: subscription.projectRef, eventRef, sequence }))
+      const operation: AgentTeamSubscriptionEventPublishedOperation = Object.freeze({
+        ...this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence),
+        kind: 'team/subscription-event-published',
+        data: Object.freeze({ workspaceId: request.workspaceId, projectRef: subscription.projectRef,
+          subscriptionRef: subscription.subscriptionRef, subscriptionName: subscription.name,
+          acceptedSequence: accepted.acceptedSequence, eventId: accepted.event.id,
+          inbox: this.inboxDelta([], [], [], [], [], [], markers) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.subscriptionPublishOf(operation))
+    })
+  }
+
+  /** Commit one non-deleting lifecycle transition with its Main stream line. */
+  private async commitSubscriptionState<K extends 'team/subscription-paused' | 'team/subscription-resumed' | 'team/subscription-deleted'>(
+    kind: K,
+    request: AgentTeamAuthorizedPauseSubscriptionRequest | AgentTeamAuthorizedSubscriptionStateRequest,
+    subscription: AgentTeamSubscription,
+    activityKind: AgentTeamSubscriptionActivity['kind'],
+    reason?: 'manual' | 'failures',
+  ): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+    const sequence = this.nextSequence()
+    const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
+    const activity = this.subscriptionActivity(subscription, activityKind, request.actor, sequence, base.occurredAt, reason)
+    const operation = Object.freeze({ ...base, kind,
+      data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity }) }) as AgentTeamSubscriptionPausedOperation
+      | AgentTeamSubscriptionResumedOperation | AgentTeamSubscriptionDeletedOperation
+    await this.table.put(operation.operationId, operation)
+    this.applyAndAdvanceProjectionVersion(operation)
+    return this.committed(this.subscriptionChangeOf(operation))
+  }
+
+  private subscriptionActivity(subscription: AgentTeamSubscription, kind: AgentTeamSubscriptionActivity['kind'],
+    actor: AgentTeamActor, sequence: number, occurredAt: string, reason?: 'manual' | 'failures'): AgentTeamSubscriptionActivity {
+    return Object.freeze({ activityRef: this.ref('activity') as AgentTeamActivityRef, projectRef: subscription.projectRef,
+      kind, subscriptionRef: subscription.subscriptionRef, subscriptionName: subscription.name, revision: subscription.revision,
+      ...(reason === undefined ? {} : { reason }), ...(actor.kind === 'host' ? {} : { actor: actor.memberId }), sequence, occurredAt })
+  }
+
+  private activeProject(projectRef: AgentTeamProjectRef, workspaceId: WorkspaceId): AgentTeamProject {
+    const project = this.state.projects.get(projectRef)
+    if (project === undefined || project.workspaceId !== workspaceId) {
+      throw new Error(`Project '${projectRef}' is not in Workspace '${workspaceId}'`)
+    }
+    if (project.state !== 'active') throw new Error(`Project '${projectRef}' is archived; its subscriptions cannot change`)
+    return project
+  }
+
+  /**
+   * Resolve one subscription its caller may edit: same Project, not deleted,
+   * and the caller owns that Project. Only the Host's own automatic pause may
+   * act without an owner behind it.
+   */
+  private ownedSubscription(request: { readonly projectRef: AgentTeamProjectRef; readonly actor: AgentTeamActor },
+    subscriptionRef: AgentTeamSubscriptionRef, options?: { readonly hostMayPause?: boolean }): AgentTeamSubscription {
+    if (request.actor.kind === 'host') {
+      if (options?.hostMayPause !== true) throw new Error('a subscription write needs a Human or Agent Member actor')
+    } else {
+      this.requireProjectOwnerActor(request.actor, request.projectRef)
+    }
+    const subscription = this.state.subscriptions.get(subscriptionRef)
+    if (subscription === undefined || subscription.projectRef !== request.projectRef) {
+      throw new Error(`subscription '${subscriptionRef}' does not belong to Project '${request.projectRef}'`)
+    }
+    if (subscription.state === 'deleted') throw new Error(`subscription '${subscriptionRef}' is deleted (subscription_deleted)`)
+    return subscription
+  }
+
+  private subscriptionStaleRevision(prior: AgentTeamSubscription, expected: number): string {
+    return `subscription '${prior.subscriptionRef}' is at revision ${prior.revision}, not ${expected} (stale_revision)`
+  }
+
+  private actorMemberOf(actor: AgentTeamActor): AgentTeamMemberId {
+    if (actor.kind === 'host') throw new Error('a subscription write needs a Human or Agent Member actor')
+    return actor.memberId
+  }
+
+  private subscriptionChangeOf(operation: AgentTeamOperation): AgentTeamSubscriptionChangeResult {
+    if (operation.kind !== 'team/subscription-created' && operation.kind !== 'team/subscription-updated'
+      && operation.kind !== 'team/subscription-paused' && operation.kind !== 'team/subscription-resumed'
+      && operation.kind !== 'team/subscription-deleted') {
+      throw new Error(`operation ${operation.kind} is not a subscription write`)
+    }
+    return Object.freeze({ receipt: this.receipt(operation), subscription: operation.data.subscription, activity: operation.data.activity })
+  }
+
+  private subscriptionAcceptOf(operation: AgentTeamOperation): AgentTeamSubscriptionAcceptResult {
+    if (operation.kind !== 'team/subscription-events-accepted') throw new Error(`operation ${operation.kind} is not an event acceptance`)
+    const accepted = (this.state.subscriptionEvents.get(operation.data.subscriptionRef) ?? [])
+      .filter(entry => entry.acceptedSequence === operation.sequence)
+    return Object.freeze({ receipt: this.receipt(operation), subscriptionRef: operation.data.subscriptionRef, accepted: Object.freeze(accepted) })
+  }
+
+  private subscriptionPublishOf(operation: AgentTeamOperation): AgentTeamSubscriptionPublishResult {
+    if (operation.kind !== 'team/subscription-event-published') throw new Error(`operation ${operation.kind} is not an event publication`)
+    const accepted = (this.state.subscriptionEvents.get(operation.data.subscriptionRef) ?? [])
+      .find(entry => entry.acceptedSequence === operation.data.acceptedSequence && entry.event.id === operation.data.eventId)
+    if (accepted === undefined) throw new Error('a published event lost its acceptance')
+    return Object.freeze({ receipt: this.receipt(operation), published: Object.freeze({
+      eventRef: `event:${operation.sequence}` as AgentTeamSubscriptionEventRef,
+      projectRef: operation.data.projectRef, subscriptionRef: operation.data.subscriptionRef,
+      subscriptionName: operation.data.subscriptionName, event: accepted.event,
+      acceptedSequence: accepted.acceptedSequence, sequence: operation.sequence, occurredAt: operation.occurredAt }) })
+  }
+
+  /**
+   * A retry under the same request id must be the same write. The stored
+   * operation is the only durable copy of what the first call asked for, so
+   * every field the caller supplied is compared against it — a second call that
+   * only renames the target, moves the revision it expects, or names other
+   * event ids is a collision, not a resolved retry.
+   */
+  private assertSameSubscriptionWrite(existing: AgentTeamOperation, request: AgentTeamAuthorizedSubscriptionWrite): void {
+    const data = existing.data as Record<string, unknown>
+    if (!this.sameActor(existing.actor, request.actor) || data.workspaceId !== request.workspaceId) {
+      this.throwRequestCollision(existing.requestId)
+    }
+    if (!this.sameSubscriptionRequest(existing, request)) this.throwRequestCollision(existing.requestId)
+  }
+
+  /** The per-kind payload comparison behind {@link assertSameSubscriptionWrite}. */
+  private sameSubscriptionRequest(existing: AgentTeamOperation, request: AgentTeamAuthorizedSubscriptionWrite): boolean {
+    switch (existing.kind) {
+      case 'team/subscription-created': {
+        const asked = request as AgentTeamAuthorizedCreateSubscriptionRequest
+        const stored = existing.data.subscription
+        return asked.projectRef === stored.projectRef && asked.name === stored.name
+          && isDeepStrictEqual(asked.triggers, stored.triggers) && isDeepStrictEqual(asked.script, stored.script)
+          && isDeepStrictEqual(asked.credentials, stored.credentials)
+          && isDeepStrictEqual(asked.baselineIds, existing.data.baselineIds)
+      }
+      case 'team/subscription-updated': {
+        const asked = request as AgentTeamAuthorizedUpdateSubscriptionRequest
+        const stored = existing.data.subscription
+        return asked.projectRef === stored.projectRef && asked.subscriptionRef === stored.subscriptionRef
+          && asked.expectedRevision === existing.data.previousRevision && asked.name === stored.name
+          && isDeepStrictEqual(asked.triggers, stored.triggers) && isDeepStrictEqual(asked.script, stored.script)
+          && isDeepStrictEqual(asked.credentials, stored.credentials)
+      }
+      case 'team/subscription-paused': {
+        const asked = request as AgentTeamAuthorizedPauseSubscriptionRequest
+        const stored = existing.data.subscription
+        // The pause is the one transition that carries a reason, and the Host's
+        // own failure pause is the one that carries none of its own.
+        return asked.projectRef === stored.projectRef && asked.subscriptionRef === stored.subscriptionRef
+          && asked.expectedRevision === stored.revision && asked.reason === stored.pausedReason
+      }
+      case 'team/subscription-resumed':
+      case 'team/subscription-deleted': {
+        const asked = request as AgentTeamAuthorizedSubscriptionStateRequest
+        const stored = existing.data.subscription
+        return asked.projectRef === stored.projectRef && asked.subscriptionRef === stored.subscriptionRef
+          && asked.expectedRevision === stored.revision
+      }
+      case 'team/subscription-baseline': {
+        const asked = request as AgentTeamAuthorizedBaselineSubscriptionRequest
+        return asked.projectRef === existing.data.projectRef && asked.subscriptionRef === existing.data.subscriptionRef
+          && isDeepStrictEqual(asked.ids, existing.data.ids)
+      }
+      case 'team/subscription-events-accepted': {
+        const asked = request as AgentTeamAcceptSubscriptionEventsRequest
+        return asked.projectRef === existing.data.projectRef && asked.subscriptionRef === existing.data.subscriptionRef
+          && asked.subscriptionRevision === existing.data.subscriptionRevision && asked.scriptHash === existing.data.scriptHash
+          && isDeepStrictEqual(asked.events, existing.data.events)
+      }
+      case 'team/subscription-event-published': {
+        const asked = request as AgentTeamPublishSubscriptionEventRequest
+        return asked.projectRef === existing.data.projectRef && asked.subscriptionRef === existing.data.subscriptionRef
+          && asked.acceptedSequence === existing.data.acceptedSequence && asked.eventId === existing.data.eventId
+      }
+      default:
+        return false
+    }
   }
 
   /** Every reminder one Member owns, newest creation first, with the occurrence facts a surface renders. */
@@ -2945,6 +3570,28 @@ export class AgentTeamLedger {
     return this.state.projects.get(projectRef)
   }
 
+  /**
+   * Whether this actor may change a Project's subscriptions. A trial run makes
+   * no durable change, so the Host checks the same authority here that a write
+   * would enforce, instead of learning a caller was not an owner only after the
+   * script has already run.
+   */
+  assertSubscriptionAuthority(actor: AgentTeamActor, projectRef: AgentTeamProjectRef, workspaceId: WorkspaceId): void {
+    this.activeProject(projectRef, workspaceId)
+    this.requireProjectOwnerActor(actor, projectRef)
+  }
+
+  /**
+   * Reading is a Project fact, not an owner's: the Human and any Member of the
+   * Project may list its subscriptions and read the scripts they carry. A
+   * Member who merely shares the Workspace may not.
+   */
+  assertSubscriptionReadAuthority(actor: AgentTeamActor, projectRef: AgentTeamProjectRef, workspaceId: WorkspaceId): void {
+    this.activeProject(projectRef, workspaceId)
+    if (actor.kind === 'host') throw new Error('reading subscriptions needs a Human or Agent Member actor')
+    this.requireProjectMemberActor(actor, projectRef)
+  }
+
   /** Agent owners of one Project, sorted. The Human owns every Project and is not listed. */
   projectOwnerIds(projectRef: AgentTeamProjectRef): readonly AgentTeamMemberId[] {
     return Object.freeze([...this.state.owners.get(projectRef)?.keys() ?? []].sort())
@@ -3120,6 +3767,19 @@ export class AgentTeamLedger {
           operation.data.tasks,
           operation.data.transfers,
         )
+      case 'team/subscription-created':
+      case 'team/subscription-updated':
+      case 'team/subscription-paused':
+      case 'team/subscription-resumed':
+      case 'team/subscription-deleted':
+        // Subscription state shows in the Project's Main stream and the list.
+        return [{ kind: 'project', projectRef: operation.data.subscription.projectRef }]
+      case 'team/subscription-baseline':
+      case 'team/subscription-events-accepted':
+        // Accept only moves the pending count; a baseline moves nothing a reader shows.
+        return [{ kind: 'project', projectRef: operation.data.projectRef }]
+      case 'team/subscription-event-published':
+        return [{ kind: 'project', projectRef: operation.data.projectRef }]
       default:
         return assertUnhandledKind(operation)
     }
@@ -3162,6 +3822,18 @@ export class AgentTeamLedger {
       for (const memberId of this.mainStreamRecipientsFrom(this.state, projectRef)) {
         if (sender === undefined || memberId !== sender) members.add(memberId)
       }
+    }
+    // A subscription record is a Main stream entry like any other: it wakes the
+    // readers whose Main stream Attention covers that stream. A published event
+    // additionally carries a marker for every owner, which the inbox delta above
+    // already turned into a recipient.
+    if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
+      || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
+      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-event-published') {
+      const projectRef = 'projectRef' in operation.data
+        ? operation.data.projectRef
+        : operation.data.subscription.projectRef
+      for (const memberId of this.mainStreamRecipientsFrom(this.state, projectRef)) members.add(memberId)
     }
     if (operation.actor.kind === 'member') members.add(operation.actor.memberId)
     return [...members]
@@ -3213,6 +3885,14 @@ export class AgentTeamLedger {
       case 'team/rules-version-adopted':
       case 'team/project-owner-added':
       case 'team/project-owner-removed':
+      case 'team/subscription-created':
+      case 'team/subscription-updated':
+      case 'team/subscription-paused':
+      case 'team/subscription-resumed':
+      case 'team/subscription-deleted':
+      case 'team/subscription-baseline':
+      case 'team/subscription-events-accepted':
+      case 'team/subscription-event-published':
       case 'team/member-reminder-created':
       case 'team/member-reminder-raised':
       case 'team/member-reminder-consumed':
@@ -3848,6 +4528,13 @@ export class AgentTeamLedger {
       this.validateInboxDelta(inbox, projection, refs)
       return
     }
+    if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
+      || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
+      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-baseline'
+      || operation.kind === 'team/subscription-events-accepted' || operation.kind === 'team/subscription-event-published') {
+      this.validateSubscriptionOperation(operation, projection, refs)
+      return
+    }
     if (operation.kind === 'team/member-reminder-created') {
       const member = assertMember()
       const { reminder } = operation.data
@@ -3960,6 +4647,7 @@ export class AgentTeamLedger {
     additionalActivities: readonly AgentTeamActivity[] = [],
     additionalMainMessages: readonly AgentTeamMainMessage[] = [],
     additionalMainActivities: readonly AgentTeamMainActivity[] = [],
+    additionalMainEvents: readonly AgentTeamSubscriptionEventPublished[] = [],
   ): void {
     const attentionKeys = new Set<string>()
     for (const attention of delta.attention.set) {
@@ -4057,10 +4745,12 @@ export class AgentTeamLedger {
     const mainKeys = new Set<string>()
     for (const marker of delta.mainMarkers?.added ?? []) {
       const key = mainMarkerKey(marker)
-      // A Main stream marker always points at the Message or Activity its own record carries.
+      // A Main stream marker always points at the Message, Activity, or published event its own record carries.
       const target = 'messageRef' in marker
         ? additionalMainMessages.find(candidate => candidate.messageRef === marker.messageRef)
-        : additionalMainActivities.find(candidate => candidate.activityRef === marker.activityRef)
+        : 'activityRef' in marker
+          ? additionalMainActivities.find(candidate => candidate.activityRef === marker.activityRef)
+          : additionalMainEvents.find(candidate => candidate.eventRef === marker.eventRef)
       if (mainKeys.has(key) || projection.mainMarkers.has(key) || target === undefined || target.projectRef !== marker.projectRef
         || target.sequence !== marker.sequence || !this.validMentionTarget(projection, marker.projectRef, marker.memberId)) throw new Error('invalid Main stream marker addition')
       mainKeys.add(key)
@@ -4221,6 +4911,160 @@ export class AgentTeamLedger {
         || activity.actor !== AGENT_TEAM_HUMAN_MEMBER_ID || activity.threadRef !== task?.threadRef) throw new Error('invalid accountable transfer Activity')
       this.addRef(refs, activity.activityRef)
     }
+  }
+
+  /**
+   * Replay validation of one subscription record. Every judgement re-derives
+   * what the commit path derived: the Project state, the owner standing, the
+   * definition rules, the revision arithmetic, the deduplication waterline, and
+   * the frozen recipient markers of a publication.
+   */
+  private validateSubscriptionOperation(operation: Extract<AgentTeamOperation, { kind: `team/subscription-${string}` }>,
+    projection: Projection, refs: Set<string>): void {
+    const at = `agent-team operation ${operation.sequence} (${operation.kind})`
+    const data = operation.data
+    // A lifecycle record names its Project through the subscription it carries; every other one carries it directly.
+    const projectRef = 'projectRef' in data ? data.projectRef : data.subscription.projectRef
+    const project = projection.projects.get(projectRef)
+    if (project === undefined || project.workspaceId !== data.workspaceId) throw new Error(`${at} names a Project outside its Workspace`)
+    if (project.state !== 'active') throw new Error(`${at} changes an archived Project's subscriptions`)
+    const human = projection.ordered[0]
+    if (human === undefined || human.kind !== 'team/initialized') throw new Error('agent-team ledger has no Human Member')
+    let actor: AgentTeamMemberId | undefined
+    const ownerActor = (): AgentTeamMemberId => {
+      if (actor !== undefined) return actor
+      if (operation.actor.kind === 'human') {
+        if (operation.actor.memberId !== human.data.humanMemberId) throw new Error(`${at} has invalid Human authority`)
+        actor = operation.actor.memberId
+        return actor
+      }
+      if (operation.actor.kind !== 'member') throw new Error(`${at} needs a Human or Agent Member actor`)
+      const member = projection.members.get(operation.actor.memberId)
+      if (member === undefined || member.state !== 'enabled' || member.handle !== operation.actor.handle) {
+        throw new Error(`${at} has invalid Member authority`)
+      }
+      if (projection.owners.get(projectRef)?.has(member.memberId) !== true) {
+        throw new Error(`${at} was written by a Member who does not own the Project`)
+      }
+      actor = member.memberId
+      return actor
+    }
+    if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
+      || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
+      || operation.kind === 'team/subscription-deleted') {
+      const { subscription, activity } = operation.data
+      const prior = projection.subscriptions.get(subscription.subscriptionRef)
+      const definition = subscriptionDefinitionProblem(subscription)
+      if (definition !== undefined) throw new Error(`${at}: ${definition}`)
+      if (subscription.projectRef !== projectRef) throw new Error(`${at} stores a subscription of another Project`)
+      // The Host pauses a subscription itself once runs keep failing. That is
+      // the one lifecycle line with no Member behind it, so it records no actor.
+      const hostPause = operation.kind === 'team/subscription-paused' && operation.actor.kind === 'host'
+      if (hostPause && (operation.actor.handle !== HOST_ACTOR.handle || subscription.pausedReason !== 'failures')) {
+        throw new Error(`${at} has no authority to pause this subscription`)
+      }
+      const actorId = hostPause ? undefined : ownerActor()
+      const kind = operation.kind === 'team/subscription-created' ? 'subscription-created'
+        : operation.kind === 'team/subscription-updated' ? 'subscription-updated'
+          : operation.kind === 'team/subscription-paused' ? 'subscription-paused'
+            : operation.kind === 'team/subscription-resumed' ? 'subscription-resumed' : 'subscription-deleted'
+      let expectedReason: 'manual' | 'failures' | undefined
+      if (operation.kind === 'team/subscription-created') {
+        if (prior !== undefined) throw new Error(`${at} recreates an existing subscription`)
+        this.addRef(refs, subscription.subscriptionRef)
+        if (subscription.revision !== 1 || subscription.state !== 'active' || subscription.pausedReason !== undefined
+          || subscription.createdBy !== actorId || subscription.createdAt !== operation.occurredAt) {
+          throw new Error(`${at} stores an invalid initial subscription state`)
+        }
+        const ids = subscriptionIdsProblem(operation.data.baselineIds)
+        if (ids !== undefined) throw new Error(`${at}: ${ids}`)
+      } else {
+        if (prior === undefined) throw new Error(`${at} changes a subscription that does not exist`)
+        const sameFacts = prior.projectRef === subscription.projectRef && prior.createdBy === subscription.createdBy
+          && prior.createdAt === subscription.createdAt
+        if (operation.kind === 'team/subscription-updated') {
+          if (!sameFacts || prior.revision !== operation.data.previousRevision || subscription.revision !== prior.revision + 1
+            || subscription.state !== prior.state || subscription.pausedReason !== prior.pausedReason) {
+            throw new Error(`${at} does not move exactly the revision of its prior state`)
+          }
+        } else if (operation.kind === 'team/subscription-paused') {
+          if (!sameFacts || prior.revision !== subscription.revision || prior.state !== 'active'
+            || subscription.state !== 'paused'
+            || (subscription.pausedReason !== 'manual' && subscription.pausedReason !== 'failures')) {
+            throw new Error(`${at} does not pause an active subscription`)
+          }
+          expectedReason = subscription.pausedReason
+        } else if (operation.kind === 'team/subscription-resumed') {
+          if (!sameFacts || prior.revision !== subscription.revision || prior.state !== 'paused'
+            || subscription.state !== 'active' || subscription.pausedReason !== undefined) {
+            throw new Error(`${at} does not resume a paused subscription`)
+          }
+        } else if (operation.kind === 'team/subscription-deleted') {
+          if (!sameFacts || prior.revision !== subscription.revision || subscription.state !== 'deleted'
+            || subscription.pausedReason !== undefined) {
+            throw new Error(`${at} does not delete the subscription it names`)
+          }
+        }
+      }
+      if (activity.projectRef !== subscription.projectRef || activity.subscriptionRef !== subscription.subscriptionRef
+        || activity.subscriptionName !== subscription.name || activity.kind !== kind
+        || activity.revision !== subscription.revision || activity.actor !== actorId
+        || activity.sequence !== operation.sequence || activity.occurredAt !== operation.occurredAt
+        || activity.reason !== expectedReason) {
+        throw new Error(`${at} has an invalid subscription activity`)
+      }
+      this.addRef(refs, activity.activityRef)
+      return
+    }
+    if (operation.kind === 'team/subscription-baseline') {
+      ownerActor()
+      const target = projection.subscriptions.get(operation.data.subscriptionRef)
+      if (target === undefined || target.projectRef !== projectRef) throw new Error(`${at} names a subscription of another Project`)
+      if (target.state === 'deleted') throw new Error(`${at} appends to a deleted subscription`)
+      const problem = subscriptionIdsProblem(operation.data.ids)
+      if (problem !== undefined) throw new Error(`${at}: ${problem}`)
+      const known = new Set(projection.subscriptionBaselines.get(target.subscriptionRef) ?? [])
+      for (const entry of projection.subscriptionEvents.get(target.subscriptionRef) ?? []) known.add(entry.event.id)
+      const repeated = operation.data.ids.find(id => known.has(id))
+      if (repeated !== undefined) throw new Error(`${at} appends id '${repeated}', which the subscription already knows`)
+      return
+    }
+    const subscription = projection.subscriptions.get(operation.data.subscriptionRef)
+    if (subscription === undefined || subscription.projectRef !== projectRef) throw new Error(`${at} names a subscription of another Project`)
+    if (subscription.state === 'deleted') throw new Error(`${at} runs after the subscription was deleted`)
+    const accepted = projection.subscriptionEvents.get(subscription.subscriptionRef) ?? []
+    if (operation.kind === 'team/subscription-events-accepted') {
+      if (operation.data.subscriptionRevision < 1 || operation.data.subscriptionRevision > subscription.revision) {
+        throw new Error(`${at} names a revision this subscription never had`)
+      }
+      if (!isScriptHash(operation.data.scriptHash)) throw new Error(`${at} names a malformed script hash`)
+      const ranRevision = projection.subscriptionScriptHistory.get(subscription.subscriptionRef)?.get(operation.data.subscriptionRevision)
+      if (ranRevision !== operation.data.scriptHash) {
+        throw new Error(`${at} pairs revision ${operation.data.subscriptionRevision} with a script that revision never carried`)
+      }
+      const pending = accepted.filter(entry => entry.publishedSequence === undefined).length
+      if (pending + operation.data.events.length > SUBSCRIPTION_PENDING_MAX) throw new Error(`${at} crosses the unpublished ceiling`)
+      const known = new Set(projection.subscriptionBaselines.get(subscription.subscriptionRef) ?? [])
+      for (const entry of accepted) known.add(entry.event.id)
+      const problem = subscriptionRunEventsProblem(operation.data.events, known)
+      if (problem !== undefined) throw new Error(`${at}: ${problem}`)
+      return
+    }
+    if (operation.kind !== 'team/subscription-event-published') throw new Error(`${at} is not a subscription record`)
+    if (operation.data.subscriptionName !== subscription.name) throw new Error(`${at} names the subscription differently than it stood`)
+    const source = accepted.find(entry => entry.acceptedSequence === operation.data.acceptedSequence && entry.event.id === operation.data.eventId)
+    if (source === undefined) throw new Error(`${at} publishes an event it never accepted`)
+    if (source.publishedSequence !== undefined) throw new Error(`${at} publishes an event twice`)
+    const eventRef = `event:${operation.sequence}` as AgentTeamSubscriptionEventRef
+    const published: AgentTeamSubscriptionEventPublished = Object.freeze({ eventRef,
+      projectRef: subscription.projectRef, subscriptionRef: subscription.subscriptionRef, subscriptionName: subscription.name,
+      event: source.event, acceptedSequence: source.acceptedSequence, sequence: operation.sequence, occurredAt: operation.occurredAt })
+    const recipients = [human.data.humanMemberId, ...([...projection.owners.get(projectRef)?.keys() ?? []].sort())]
+    const expected = this.inboxDelta([], [], [], [], [], [], recipients.map(memberId => Object.freeze({ memberId,
+      projectRef: subscription.projectRef, eventRef, sequence: operation.sequence })))
+    if (!isDeepStrictEqual(operation.data.inbox, expected)) throw new Error(`${at} does not mark exactly the Project's owners`)
+    this.validateInboxDelta(operation.data.inbox, projection, refs, [], [], [], [], [], [published])
+    this.addRef(refs, eventRef)
   }
 
   private validateMessageInbox(operation: AgentTeamMessageSentOperation | AgentTeamThreadRepliedOperation, projection: Projection): void {
@@ -4536,6 +5380,59 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
+    if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
+      || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
+      || operation.kind === 'team/subscription-deleted') {
+      const { subscription, activity } = operation.data
+      // The creation order is the list order; an update must not move its row.
+      if (!target.subscriptions.has(subscription.subscriptionRef)) {
+        const refs = target.subscriptionsByProject.get(subscription.projectRef) ?? []
+        refs.push(subscription.subscriptionRef)
+        target.subscriptionsByProject.set(subscription.projectRef, refs)
+      }
+      target.subscriptions.set(subscription.subscriptionRef, subscription)
+      const history = target.subscriptionScriptHistory.get(subscription.subscriptionRef) ?? new Map<number, string>()
+      history.set(subscription.revision, subscription.script.sha256)
+      target.subscriptionScriptHistory.set(subscription.subscriptionRef, history)
+      // Creation is the one entry point of the waterline besides an explicit re-baseline.
+      if (operation.kind === 'team/subscription-created' && operation.data.baselineIds.length > 0) {
+        target.subscriptionBaselines.set(subscription.subscriptionRef, new Set(operation.data.baselineIds))
+      }
+      this.appendMainActivity(target, activity)
+      return
+    }
+    if (operation.kind === 'team/subscription-baseline') {
+      const baseline = target.subscriptionBaselines.get(operation.data.subscriptionRef) ?? new Set<string>()
+      for (const id of operation.data.ids) baseline.add(id)
+      target.subscriptionBaselines.set(operation.data.subscriptionRef, baseline)
+      return
+    }
+    if (operation.kind === 'team/subscription-events-accepted') {
+      const accepted = target.subscriptionEvents.get(operation.data.subscriptionRef) ?? []
+      for (const event of operation.data.events) {
+        const entry: AgentTeamSubscriptionEventAccepted = Object.freeze({ acceptedSequence: operation.sequence, event,
+          subscriptionRevision: operation.data.subscriptionRevision, scriptHash: operation.data.scriptHash, acceptedAt: operation.occurredAt })
+        accepted.push(entry)
+        target.acceptedEventsBySequence.set(`${operation.sequence}|${event.id}`, { subscriptionRef: operation.data.subscriptionRef, event: entry })
+      }
+      target.subscriptionEvents.set(operation.data.subscriptionRef, accepted)
+      return
+    }
+    if (operation.kind === 'team/subscription-event-published') {
+      const accepted = target.subscriptionEvents.get(operation.data.subscriptionRef) ?? []
+      const position = accepted.findIndex(entry => entry.acceptedSequence === operation.data.acceptedSequence && entry.event.id === operation.data.eventId)
+      if (position !== -1) accepted[position] = Object.freeze({ ...accepted[position]!, publishedSequence: operation.sequence })
+      const event = accepted[position]?.event
+      if (event === undefined) throw new Error('agent-team replay published an event it never accepted')
+      const published: AgentTeamSubscriptionEventPublished = Object.freeze({
+        eventRef: `event:${operation.sequence}` as AgentTeamSubscriptionEventRef,
+        projectRef: operation.data.projectRef, subscriptionRef: operation.data.subscriptionRef,
+        subscriptionName: operation.data.subscriptionName, event,
+        acceptedSequence: operation.data.acceptedSequence, sequence: operation.sequence, occurredAt: operation.occurredAt })
+      this.appendMainSource(target, operation.data.projectRef, { kind: 'subscription-event', sequence: operation.sequence, published })
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
     assertUnhandledKind(operation)
   }
 
@@ -4780,6 +5677,7 @@ export class AgentTeamLedger {
     target.mainSourcesByProject.set(projectRef, sources)
     if (source.kind === 'message') target.mainSourceByRef.set(source.message.messageRef, source)
     if (source.kind === 'activity') target.mainSourceByRef.set(source.activity.activityRef, source)
+    if (source.kind === 'subscription-event') target.mainSourceByRef.set(source.published.eventRef, source)
   }
 
   private appendMainActivity(target: Projection, activity: AgentTeamMainActivity): void {
@@ -5517,7 +6415,8 @@ export class AgentTeamLedger {
     return this.inboxDelta(attention, [], markers, [], responsible)
   }
 
-  private requireProjectOwnerActor(actor: AgentTeamHumanActor | AgentTeamMemberActor, projectRef: AgentTeamProjectRef): void {
+  private requireProjectOwnerActor(actor: AgentTeamActor, projectRef: AgentTeamProjectRef): void {
+    if (actor.kind === 'host') throw new Error(`a subscription write needs a Human or Agent Member actor (project_owner_required) — ${recoveryFor('project_owner_required').sentence({ projectRef })}`)
     if (actor.kind === 'member' && !this.isProjectOwnerFrom(this.state, projectRef, actor.memberId)) {
       throw new Error(`Only a Project owner can do this in Project '${projectRef}' (project_owner_required) — ${recoveryFor('project_owner_required').sentence({ projectRef })}`)
     }
@@ -5540,6 +6439,8 @@ export class AgentTeamLedger {
   private mainProducerFrom(projection: Projection, source: MainSource): AgentTeamMemberId | undefined {
     if (source.kind === 'message') return source.message.sender
     if (source.kind === 'activity') return source.activity.actor
+    // A published event belongs to a script, not to the Member who created the subscription.
+    if (source.kind === 'subscription-event') return undefined
     return projection.anchorByThread.get(source.threadRef)?.sender
   }
 
@@ -5565,7 +6466,7 @@ export class AgentTeamLedger {
       }
     }
     for (const marker of projection.mainMarkersByMember.get(memberId)?.get(projectRef) ?? []) {
-      const source = projection.mainSourceByRef.get('messageRef' in marker ? marker.messageRef : marker.activityRef)
+      const source = projection.mainSourceByRef.get(mainMarkerSourceRef(marker))
       if (source !== undefined) found.set(source.sequence, { source, ordinary: found.get(source.sequence)?.ordinary ?? false, direct: true })
     }
     return Object.freeze([...found.values()].sort((left, right) => left.source.sequence - right.source.sequence))
@@ -5623,7 +6524,7 @@ export class AgentTeamLedger {
   private mainReadPage(memberId: AgentTeamMemberId, projectRef: AgentTeamProjectRef, consumed: readonly AgentTeamMainMarker[], readThrough: number): readonly AgentTeamMainTimelineEntry[] {
     const sources = this.mainSourcesFrom(this.state, projectRef)
       .filter(source => source.sequence <= readThrough && (source.kind !== 'thread' || source.hidden !== true))
-    const marked = new Set(consumed.map(marker => this.state.mainSourceByRef.get('messageRef' in marker ? marker.messageRef : marker.activityRef)?.sequence))
+    const marked = new Set(consumed.map(marker => this.state.mainSourceByRef.get(mainMarkerSourceRef(marker))?.sequence))
     const page = sources.filter((source, index) => index >= sources.length - MAIN_READ_PAGE_SIZE || marked.has(source.sequence))
     return this.mainEntries(page, this.mainUnreadFrom(this.state, memberId, projectRef))
   }
@@ -5641,6 +6542,9 @@ export class AgentTeamLedger {
   }
 
   private mainEntry(source: MainSource, unread: boolean, direct: boolean): AgentTeamMainTimelineEntry {
+    if (source.kind === 'subscription-event') {
+      return Object.freeze({ kind: 'subscription-event', sequence: source.sequence, occurredAt: source.published.occurredAt, unread, direct, event: source.published })
+    }
     if (source.kind === 'activity') {
       return Object.freeze({ kind: 'activity', sequence: source.sequence, occurredAt: source.activity.occurredAt, unread, direct, activity: source.activity })
     }
@@ -5693,7 +6597,7 @@ export class AgentTeamLedger {
   }
 
   /** The Agent whose ownership changed learns of it through a Main stream marker. */
-  private ownerActivityInboxDelta(activity: AgentTeamMainActivity): AgentTeamInboxDelta {
+  private ownerActivityInboxDelta(activity: AgentTeamOwnerActivity): AgentTeamInboxDelta {
     const marker: AgentTeamMainActivityMarker = Object.freeze({ memberId: activity.memberId, projectRef: activity.projectRef,
       activityRef: activity.activityRef, sequence: activity.sequence })
     return this.inboxDelta([], [], [], [], [], [], [marker])
@@ -6876,7 +7780,8 @@ export class AgentTeamLedger {
   private ref(kind: 'thread'): AgentTeamThreadRef
   private ref(kind: 'claim'): AgentTeamClaimRef
   private ref(kind: 'activity'): AgentTeamActivityRef
-  private ref(kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity') {
+  private ref(kind: 'subscription'): AgentTeamSubscriptionRef
+  private ref(kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity' | 'subscription') {
     return this.createRef(kind)
   }
 

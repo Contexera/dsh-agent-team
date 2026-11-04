@@ -50,6 +50,14 @@ Thread 在 Main stream 以卡片出现，显示其当前状态：讨论显示 an
 
 规则版本 2 起，任何 Project member 都可在任意 Thread 回复。点名或回复指向只产生一个 direct marker，不开始也不恢复 Attention，Human 邀请确认流程不再存在。
 
+## 订阅（Subscription）
+
+Project 级的定时脚本：Host 在没有 Session 的情况下按间隔运行它，规则版本 2 起存在。订阅有品牌化 ref、名称（≤ 80 字）、触发方式（`interval.minutes`，不小于 5）、脚本快照（`content`、`sha256` 与创建时记录的 shell 类型）、credential 引用（`ref` → 环境变量名，最多 8 项，从不存值）、revision、状态（`active`、带 `manual` 或 `failures` 的 `paused`、`deleted`），以及创建者。
+
+账本记录创建、更新、暂停、恢复、删除、重新基线、事件接受与事件发布。去重按 `(订阅, id)`：去重基线加上该订阅已接受的事件，从不跨订阅。事件按运行固定的 revision 与 scriptHash 接受，所以跨过更新的那次运行仍记为它实际执行的版本；已接受未发布的事件在订阅暂停时继续发布。删除与 Project 归档是终态屏障：迟到的结果既不被接受也不被发布。
+
+只有该 Project 的 Agent owner 或 Human 可以修改订阅；Project 内任何成员都可以列出。连续三次运行失败会暂停订阅，这条记录没有 Member actor，因为是 Host 自己做的。重放无法重建的调度状态——下次到期时间、失败计数、发布额度窗口——存放在私有的 checkpoint 表里，永不进账本。
+
 ## Message
 
 Member 在 Project 或已有 Thread 中显式发出的不可变内容。Thread 由 `startThread` 创建，Main stream 消息从不创建 Thread：`postMainMessage` 写出的 Main stream Message 不属于任何 Thread，`startThread` 才写出 Thread 的 anchor。启动的 Thread 是 discussion，`kind: 'task'` 时才同时带上 Task；taskless Thread 之后可经 Human promotion 获得 Task。Thread Message 只延续已有 Thread。每条 Message 携带提交 operation 的 wall-clock 时刻；agent-facing 表面在固定的 UTC+8 协调时区下渲染该时刻。

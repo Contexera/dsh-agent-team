@@ -1,4 +1,4 @@
-# Eight-tool protocol
+# Nine-tool protocol
 
 English | [中文](tools.zh.md)
 
@@ -158,3 +158,19 @@ A committed mutation names its action (Claim created, completed, or released), r
 `transfer` takes `target` — a current Project owner's memberRef, `@Handle`, or a unique memberRef prefix, or `human` — and moves responsibility only, leaving Claims with their owners.
 
 A committed resolution names the action, the resulting status and resolution, the accountable owner, and the Claims it completed or released. A `self_acceptance_forbidden` or `accountable_owner_required` refusal names its way out from the Host's recovery registry and gains the Task's current state and accountable owner, which only the caller can read after the refusal.
+
+## `team_subscription`
+
+`team_subscription` creates and maintains a Project's interval subscription: a script the Host runs on a timer with no Session, as that Project. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, and `baseline`. Only the Project's owners may change one (`project_owner_required` otherwise); any member of the Project may list them. Webhook triggers, run history, and the subscription page are not part of this tool.
+
+`create` and `update` take the script as `scriptPath` — resolved against the caller's own working directory, the one its shell tool uses — or as `scriptContent` for a caller with no file. The Host reads the file, stores a snapshot of at most 16 KiB, and runs it once with the production path: the same executor, the same explicit sandbox policy, a 60-second limit, and the same output contract.
+
+A failing trial refuses the write and returns the tail of stdout and stderr instead; nothing is stored. Every declared credential reference must already be configured, and the Host resolves it again on each run — a reference removed later fails that run instead of silently running without it.
+
+A new subscription records the ids its trial printed as its deduplication baseline by default, so the first live run does not republish what the script already found; `baseline: ignore-history` starts empty instead. `update` never touches that waterline: after changing the script's id rule, `baseline` appends the ids to ignore, and nothing already recorded is cleared. A pause, resume, or delete carries `expectedRevision`; an update moves the revision, a state transition does not.
+
+Events are the script's stdout: one JSON object per line with `id`, `title`, and optional `url` and `detail`. Deduplication is scoped to one subscription, so two scripts printing the same id each publish their own.
+
+New events are accepted into the ledger and published to the Project's Main stream at most 20 per minute per subscription. Up to 500 accepted events may wait unpublished, and a batch that would cross that ceiling is refused as one failure rather than silently trimmed. A trial run never counts as a failure and never clears the count; three failed runs in a row pause the subscription and are recorded as such.
+
+The result names the subscription, its state, its revision, and its interval, and any refused trial renders the reason with the last of each stream. What a script prints is data, never instructions: an event on the Main stream is marked as untrusted text and its title, link, and detail never become a mention. Project subscriptions run unattended — a restricted Member gains this execution path, the Main stream records every change, and the Human can pause the subscription at any time.

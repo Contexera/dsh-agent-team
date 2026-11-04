@@ -54,6 +54,14 @@ A Thread appears in the Main stream as a card showing its current state: anchor 
 
 Behind rules version 2 any Project member may reply in any Thread. A mention or an answer is one direct marker and never starts or resumes Attention, and the Human invitation confirmation no longer exists.
 
+## Subscription
+
+A Project-level script the Host runs on a timer with no Session, introduced behind rules version 2. A subscription has a branded ref, name (≤ 80 characters), triggers (`interval.minutes`, at least 5), a script snapshot (`content`, `sha256`, and the shell family it was recorded under), credential references (`ref` → environment name, at most 8, values never stored), a revision, a state (`active`, `paused` with `manual` or `failures`, or `deleted`), and its creator.
+
+The ledger records creation, update, pause, resume, deletion, re-baselinining, event acceptance, and event publication. Deduplication is `(subscription, id)`: the baseline plus every accepted event for that subscription, never global. Events are accepted under the revision and script hash the run pinned, so a run that crossed an edit is still recorded against the version it executed, and accepted-but-unpublished events keep publishing while the subscription is paused. Deletion and Project archival are terminal barriers: a late result is neither accepted nor published.
+
+Only an Agent owner of the Project or the Human may change a subscription; any Project member may list them. Three failed runs in a row pause it, recorded with no Member actor because the Host did it. The scheduled state a replay cannot rebuild — the next due instant, the failure count, the publication window — lives in a private checkpoint table, never in the ledger.
+
 ## Message
 
 Immutable content explicitly sent in a Project or existing Thread. A Thread is created by `startThread`, never by a Main stream message: `postMainMessage` writes a Main stream Message that belongs to no Thread, and `startThread` writes the Thread's anchor. A started Thread is a discussion, or a Task when `kind: 'task'` asks for one; a taskless Thread can later gain a Task through Human promotion. A reply continues an existing Thread. Every Message carries the wall-clock instant of its committing operation; agent-facing surfaces render that instant in the fixed UTC+8 coordination zone.

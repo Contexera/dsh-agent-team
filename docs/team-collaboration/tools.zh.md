@@ -1,4 +1,4 @@
-# 八工具协议
+# 九工具协议
 
 [English](tools.md) | 中文
 
@@ -140,3 +140,15 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 拒绝与 message 拒绝使用相同形式及[完整性与令牌规则](boundaries.zh.md#mutation-fences)；每次尝试仍重新检查 Task 权限。
 
 `accept`、`close`、`reopen`、`transfer` 了结的是 Task 而非 Claim，权限由 Host 判定：`accept` 属于 Human，或从未在该 Task 上持有过 Claim 的 Project owner，且仅在 in_review 时；`close`、`reopen`、`transfer` 属于 Human 与当前负责人。工具只转发 action 与写令牌，不重新推导该权限。`transfer` 取 `target`——当前 Project owner 的 memberRef、`@Handle` 或唯一 memberRef 前缀，或 `human`——只转移责任，Claim 仍留在其 owner 手上。commit 的了结结果点名动作、结果 status 与 resolution、负责人，以及它完成或释放的 Claims。`self_acceptance_forbidden` 或 `accountable_owner_required` 拒绝的出路来自 Host 的 recovery registry，并补上 Task 的当前状态与负责人——那只有拒绝之后调用方自己才读得到。
+
+## `team_subscription`
+
+`team_subscription` 创建并维护某个 Project 的定时订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份按间隔运行的脚本。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`。只有该 Project 的 owner 可以修改（否则返回 `project_owner_required`）；Project 内任何成员都可以列出。webhook 触发、运行历史与订阅页面不属于这个工具。
+
+`create` 与 `update` 用 `scriptPath` 给脚本——按调用者自己的工作目录解析，也就是它 shell 工具所用的目录——或用一个没有文件可指时给的 `scriptContent`。Host 读取文件、存下不超过 16 KiB 的快照，并用正式运行的同一套方式试运行一次：同一个执行器、同一份显式 sandbox policy、60 秒上限、同一套输出合同。试运行失败就拒绝这次写入，返回 stdout 与 stderr 的末尾内容，什么都不会存下。声明的每个 credential 引用必须已配置，且 Host 每次运行前重新解析——之后被移除的引用会让那一次运行明确失败，而不是悄悄少一个变量。
+
+新订阅默认把试运行输出的 id 记为去重基线，因此第一次正式运行不会把脚本已经发现的内容全部重发一遍；`baseline: ignore-history` 则从空基线开始。`update` 从不改动这条水位线：脚本的 id 规则变化后，用 `baseline` 追加要忽略的 id，既有记录不会被清除。暂停、恢复、删除都要带 `expectedRevision`；update 推进版本，状态转换不推进。
+
+事件就是脚本的 stdout：每行一个 JSON 对象，含 `id`、`title`，可选 `url` 与 `detail`。去重范围限定在单个订阅内，两个脚本输出相同 id 时各自都会发布。新事件作为接受写入账本，再按每个订阅每分钟最多 20 条发布到该 Project 的 Main stream；最多 500 条已接受未发布的事件可以等待，会使未发布总量越过这条上限的一批整批拒绝并计 1 次失败，而不是被悄悄截断。试运行既不计入也不清零失败计数；连续三次运行失败会暂停订阅，并在账本中这样记录。
+
+结果会写明订阅、状态、版本与间隔；被拒绝的试运行会渲染原因和两条流的末尾内容。脚本打印的内容是数据，不是指令：Main stream 上的事件标注为不可信文本，其标题、链接与说明不会变成 mention。Project 订阅是无人值守执行——受限 Member 由此获得一条执行入口，Main stream 记录每次修改，Human 可以随时暂停订阅。

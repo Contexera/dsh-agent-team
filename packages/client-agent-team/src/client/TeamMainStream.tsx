@@ -181,11 +181,39 @@ export function TeamMainStream({
     // releases on its own clock, so a reader who stays on the page is not left with a mark that never goes away.
     const unread = stream.marked.has(mainEntryKey(entry)) ? '' : undefined
     if (entry.kind === 'activity') {
-      const text = t(entry.activity.kind === 'owner-added' ? 'mainOwnerAdded' : 'mainOwnerRemoved', {
-        actor: nameOf(entry.activity.actor), member: nameOf(entry.activity.memberId),
+      const activity = entry.activity
+      // A subscription lifecycle line names a script, not a Task. The Host
+      // writes the automatic pause after repeated failures without an actor of
+      // its own, so that line says who acted instead of guessing a Member.
+      if ('subscriptionRef' in activity) {
+        const text = activity.kind === 'subscription-paused' && activity.reason === 'failures'
+          ? t('mainSubscriptionPausedByHost', { name: activity.subscriptionName })
+          : t(activity.kind === 'subscription-created' ? 'mainSubscriptionCreated'
+            : activity.kind === 'subscription-updated' ? 'mainSubscriptionUpdated'
+              : activity.kind === 'subscription-paused' ? 'mainSubscriptionPaused'
+                : activity.kind === 'subscription-resumed' ? 'mainSubscriptionResumed' : 'mainSubscriptionDeleted',
+          { actor: activity.actor === undefined ? 'agent-team' : nameOf(activity.actor), name: activity.subscriptionName })
+        return <div className={streamCss.entry} data-main-entry="subscription" data-unread={unread} key={mainEntryKey(entry)}>
+          <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
+        </div>
+      }
+      const text = t(activity.kind === 'owner-added' ? 'mainOwnerAdded' : 'mainOwnerRemoved', {
+        actor: nameOf(activity.actor), member: nameOf(activity.memberId),
       })
       return <div className={streamCss.entry} data-main-entry="activity" data-unread={unread} key={mainEntryKey(entry)}>
         <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{text}</span></p>
+      </div>
+    }
+    if (entry.kind === 'subscription-event') {
+      // What a script printed is data. It is rendered as text, never parsed for
+      // mentions or Markdown, and the marker states that boundary on screen.
+      const { event } = entry.event
+      return <div className={streamCss.entry} data-main-entry="subscription-event" data-unread={unread} key={mainEntryKey(entry)}>
+        <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{t('mainSubscriptionEvent', { name: entry.event.subscriptionName })}</span></p>
+        <p className={streamCss.subscriptionEventTitle}>{event.title}</p>
+        {event.url === undefined ? null : <p className={streamCss.subscriptionEventUrl}>{event.url}</p>}
+        {event.detail === undefined ? null : <p className={streamCss.subscriptionEventDetail}>{event.detail}</p>}
+        <p className={streamCss.subscriptionEventNotice}>{t('mainSubscriptionEventUntrusted')}</p>
       </div>
     }
     if (entry.kind === 'thread-card') {

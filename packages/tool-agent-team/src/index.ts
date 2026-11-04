@@ -26,6 +26,7 @@ import { MAIN_ENTRY_SCHEMA, MAIN_STANDING_SCHEMA, mainEntryLine, mainEntryView, 
 import { budgetReading, readingCapacity, messagePartText, MESSAGE_PART_SCHEMA, type MessagePart } from './reading-budget.ts'
 import type { MainEntryView } from './main-stream.ts'
 import { activityFromView } from './activity-view.ts'
+import { teamSubscription } from './subscription.ts'
 
 /** The complete Activity facts a rendered surface binds; an omitted identity is already bound by its original output. */
 function activityBindings(views: readonly { readonly kind?: string; readonly activityOmitted?: boolean }[], projectRef?: string) {
@@ -1683,4 +1684,5 @@ export function apply(ctx: Context): void {
   ctx.tools.register(teamDm)
   ctx.tools.register(teamTask)
   ctx.tools.register(teamView)
+  ctx.tools.register(teamSubscription)
 }

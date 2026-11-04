@@ -111,7 +111,7 @@ Member 当前的失败原因以 `diagnostic` 挂在 status 上并由 Client 渲�
 
 ## Member capabilities 与 skills
 - Member capabilities 是随全部 lifecycle operation 原样流转的 durable intent。Member capabilities 指 Member 实体上的 `capabilities` 字段，即预留的 `tools.allow` 与 `skills.allow`。commit 时不做已知名白名单校验，保证 Harness 升级后旧 ledger 仍可重放。与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。因此不管理 capabilities 的调用方可以直接省略该字段，其他来源写入的覆盖不会被带掉。
-- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留七个 Team tools 与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查和限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
+- Activation 在 preset 校验前限制每个 Member，顺序为 mount → restrict → validate；未配置 `tools.allow` 时也生效。allow-list 只能缩减 preset 基准范围，保留九个 Team tools 与 `working_directory`；范围外的名字被忽略并报告 warning。工具过滤、执行检查和限制见 [Tools and preset](tools-and-preset.zh.md)。对 live Member 编辑 allow-list，在 turn 边界同 Session 换装 restriction。idle Member 立即生效，running Member 的编辑等自己这个回合结束。每个 Member 各自拥有一条 lifecycle 链，所以该等待只挡住这个 Member 后续的操作，且仍按提交序。管理别的 Member 从不排在它之后，而 ledger 仍是唯一的有序 writer。
 
   Host shutdown 释放每一个待定的等待，而不是去等一个可能永不结束的回合；在链之外被销毁的 Session 同样释放它。stop 取消该 Member 在途的回合，然后等 Agent 收敛。所以排在停靠编辑之后的 stop 先到达那个边界（编辑此时已生效），随后通常发现 Agent 已 idle。stop 从不清除或中止已提交的配置：编辑要么在边界生效，要么返回 `deferred:no-live-handle`；两种顺序都让存储的意图在下次 activation 时仍然成立。
 
@@ -135,6 +135,18 @@ Host row 只发布一个服务 `ctx.agentTeam`，它被两类消费方以不同�
 只有 Remote 那一组是契约。`ctx.agentTeam` 上其余部分都是内部实现，改动形状时不会附迁移说明。
 
 preset 行必须在执行时解析 `ctx.agentTeam`，不能在声明期静态捕获：该服务在 Host 插件启动后才提供，import 期就闭包捕获它的行拿到的是空。外部代码里的 `ctx.get('agentTeam')` 同理，那是对内部面的未文档化使用，不是受支持的集成点。
+
+## 订阅调度与无人值守执行
+
+每个订阅的定时器都由 Host 拥有。`SubscriptionScheduler`（`packages/agent-team/src/subscription-runtime.ts`）全局最多放行 4 个脚本运行——owner 手动触发的试运行也占其中一格——同一订阅的定时条目在等待队列中只保留一个并合并之后的到期时刻，同一订阅也不会同时跑两次，统计连续失败，并按每个订阅每分钟 20 条的花费发布额度。
+
+admission 依据账本而不是排队时的快照：等待中的试运行或定时运行若遇上订阅被删除、或 Project 被归档，会被直接拒绝、脚本不执行；处于这种终态的记录不再发布，也不再保留 checkpoint。它的状态——下次到期时间、失败计数、发布窗口、最后成功时间——放在私有 domain `agent_team_subscriptions`（`packages/agent-team/src/subscription-store.ts`）里，永不进账本：删掉所有 checkpoint 不改变任何领域结果，重启从持久化的到期时刻继续，而不是重置。
+
+调度器只通过 ports 触达外部，所以 runtime 测试可以用假时钟和假执行器驱动。定时运行经 `ctx.shell` 执行快照——与 Member 的 shell 工具是同一个执行器——但 policy 由 Host 自己从可信的 Workspace 记录构造：以该 Workspace 为根的 `workspace-write`、60 秒、65,536 字节 stdout 上限，且永不用提权模式，因为无人值守运行没有当场批准的人。当前挂载的 shell 家族靠行为探测一次并缓存；用另一个家族记录的快照会以该原因失败，而不会在它并非为其编写的 shell 下运行。
+
+运行的 stdout 就是输出合同：每行一个 JSON 对象，由 Team 自己的字节级解析器校验；采集器的 `truncated` 标志视为失败，因此看起来合法的尾部永远不能冒充完整输出。新事件按运行固定的 revision 与 scriptHash 接受进账本，并按额度发布；连续三次运行失败会暂停订阅，账本记录这条时没有 Member actor，因为是 Host 自己做的。
+
+credential 值每次运行前经 `ctx.credentials` 解析，并在执行器自身环境清除之后合并。Host 从零构造这张表——托管 `DSH_TEAM_*` 事实加上订阅声明的引用——所以 Team 代码不会转发 Host 进程环境里的任何内容。
 
 ## Composer attachments（cache，不是 archive）
 

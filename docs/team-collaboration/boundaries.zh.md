@@ -44,7 +44,7 @@ Human Client 使用 `readThread`、`threadHistory`、`threadObservations` 和 `c
 `threadObservations` 是针对一个 Thread 的、只读的 Human-only follow/unfollow Attention transitions projection。返回体同时携带当前关注者集合（`followers`）。`changeAttention` 修改该 durable state。 Thread composer 用这个读取为 mention 候选排序，当前关注者优先。observation 历史本身暂不渲染。 Client 只在本地保存三样东西：navigation mode、Workspace selection 与 Inbox 页位置。这些是 navigation 事实，不是未读事实。unread state、Attention、revisions 和 observations 仍由 Host 持有。 各 Workspace 的 Inbox 调用由 Client 合并。home 级不存在 Inbox ledger 或 Remote。
 
 ## Team Member context boundary
-显式的 `team-member` preset 是完整 coding composition。它有 shell、filesystem/search、web search 与 fetch、background-job controls。它有 skill 加载工具、compaction、七个 Team tools。它有 Workspace instruction discovery 和 private-memory context plugin。Host 拥有 Web service/provider。Team preset 只增加面向模型的 web tools。普通 Sessions 不会继承这些 Team rows。skill 发现本身是 Member 私有的。Host 在每个 Member 的 agent scope 上注册 provider。provider 只扫两个 root：插件内置只读 core skills，与该 Member 私有目录。catalog 以内置集起始。
+显式的 `team-member` preset 是完整 coding composition。它有 shell、filesystem/search、web search 与 fetch、background-job controls。它有 skill 加载工具、compaction、九个 Team tools。它有 Workspace instruction discovery 和 private-memory context plugin。Host 拥有 Web service/provider。Team preset 只增加面向模型的 web tools。普通 Sessions 不会继承这些 Team rows。skill 发现本身是 Member 私有的。Host 在每个 Member 的 agent scope 上注册 provider。provider 只扫两个 root：插件内置只读 core skills，与该 Member 私有目录。catalog 以内置集起始。
 
 Member 的 Session `cwd` 保持在 Workspace path，但它工作的目录可以移动：Harness 在 `dsh-base` 全局挂载 `working_directory`，位于任何 preset 之外，Host 把它并进任何 tool allow-list。Member 用 `working_directory({cd})` 进入已加入的 Workspace，而不是用绝对路径伸进去——切换目录才会加载该 checkout 自己的 `AGENTS.md`。目录切换不授予参与关系、Claim 或写权限；每次操作仍在选定的 Workspace 中鉴权。
 

@@ -49,6 +49,7 @@ import type {
   AgentTeamHumanActor,
   AgentTeamInboxDelta,
   AgentTeamMainActivity,
+  AgentTeamOwnerActivity,
   AgentTeamMemberActor,
   AgentTeamMemberId,
   AgentTeamMemberReminder,
@@ -60,10 +61,15 @@ import type {
   AgentTeamRequestId,
   AgentTeamTask,
   AgentTeamTaskRef,
+  AgentTeamSubscription,
+  AgentTeamSubscriptionActivity,
+  AgentTeamSubscriptionEventRef,
+  AgentTeamSubscriptionRef,
   AgentTeamThread,
   AgentTeamThreadReadReceipt,
   AgentTeamThreadRef,
 } from '../src/types.ts'
+import { snapshotScript } from '../src/subscriptions.ts'
 
 type Op<K extends AgentTeamOperation['kind']> = Extract<AgentTeamOperation, { readonly kind: K }>
 
@@ -542,7 +548,7 @@ const rulesVersionAdopted: Op<'team/rules-version-adopted'> = {
   data: { version: 2 },
 }
 
-const ownerActivity = (kind: 'owner-added' | 'owner-removed', sequence: number): AgentTeamMainActivity => ({
+const ownerActivity = (kind: 'owner-added' | 'owner-removed', sequence: number): AgentTeamOwnerActivity => ({
   activityRef: `activity:protocol-${kind}` as AgentTeamActivityRef, projectRef, kind, memberId, actor: human.memberId, sequence, occurredAt: instant,
 })
 const ownerInbox = (activity: AgentTeamMainActivity): AgentTeamInboxDelta => ({
@@ -606,6 +612,106 @@ const dmSent: Op<'team/dm-sent'> = {
   previousOperationId,
   kind: 'team/dm-sent',
   data: { workspaceId: alpha, senderMemberId: memberId, recipientMemberId: memberId, body: 'protocol fixture dm' },
+}
+
+const protocolScript = snapshotScript('printf %s\\n "${DSH_TEAM_TRIGGER}"\n', 'bash')
+if (!protocolScript.ok) throw new Error(`the protocol fixture script must be storable: ${protocolScript.reason}`)
+
+const fixtureSubscription: AgentTeamSubscription = {
+  subscriptionRef: 'subscription:protocol-1' as AgentTeamSubscriptionRef,
+  projectRef,
+  name: 'protocol feed',
+  triggers: { interval: { minutes: 15 } },
+  script: protocolScript.script,
+  credentials: [],
+  revision: 1,
+  state: 'active',
+  createdBy: human.memberId,
+  createdAt: instant,
+}
+
+const subscriptionActivity = (kind: 'created' | 'updated' | 'paused' | 'resumed' | 'deleted', revision: number, sequence: number,
+  reason?: 'manual' | 'failures'): AgentTeamSubscriptionActivity => ({
+  activityRef: `activity:protocol-subscription-${kind}` as AgentTeamActivityRef, projectRef,
+  kind: `subscription-${kind}` as AgentTeamSubscriptionActivity['kind'],
+  subscriptionRef: fixtureSubscription.subscriptionRef, subscriptionName: fixtureSubscription.name, revision,
+  ...(reason === undefined ? {} : { reason }), actor: human.memberId, sequence, occurredAt: instant,
+})
+
+const subscriptionCreated: Op<'team/subscription-created'> = {
+  ...opBase('operation:protocol-41', 'request:protocol-subscription-created', 41),
+  previousOperationId,
+  kind: 'team/subscription-created',
+  data: { workspaceId: alpha, subscription: fixtureSubscription, activity: subscriptionActivity('created', 1, 41), baselineIds: ['already-known'] },
+}
+
+const subscriptionUpdated: Op<'team/subscription-updated'> = {
+  ...opBase('operation:protocol-42', 'request:protocol-subscription-updated', 42),
+  previousOperationId,
+  kind: 'team/subscription-updated',
+  data: {
+    workspaceId: alpha,
+    subscription: { ...fixtureSubscription, name: 'protocol feed renamed', revision: 2 },
+    previousRevision: 1,
+    activity: { ...subscriptionActivity('updated', 2, 42), subscriptionName: 'protocol feed renamed' },
+  },
+}
+
+const subscriptionPaused: Op<'team/subscription-paused'> = {
+  ...opBase('operation:protocol-43', 'request:protocol-subscription-paused', 43),
+  previousOperationId,
+  kind: 'team/subscription-paused',
+  data: { workspaceId: alpha, subscription: { ...fixtureSubscription, state: 'paused', pausedReason: 'manual' },
+    activity: subscriptionActivity('paused', 1, 43, 'manual') },
+}
+
+/** The one lifecycle line with no Member behind it: the Host paused it after repeated failures. */
+const subscriptionPausedByHost: Op<'team/subscription-paused'> = {
+  ...opBase('operation:protocol-44', 'request:protocol-subscription-paused-by-host', 44, hostActor),
+  previousOperationId,
+  kind: 'team/subscription-paused',
+  data: { workspaceId: alpha, subscription: { ...fixtureSubscription, state: 'paused', pausedReason: 'failures' },
+    activity: { ...subscriptionActivity('paused', 1, 44, 'failures'), actor: undefined } as unknown as AgentTeamSubscriptionActivity },
+}
+
+const subscriptionResumed: Op<'team/subscription-resumed'> = {
+  ...opBase('operation:protocol-45', 'request:protocol-subscription-resumed', 45),
+  previousOperationId,
+  kind: 'team/subscription-resumed',
+  data: { workspaceId: alpha, subscription: fixtureSubscription, activity: subscriptionActivity('resumed', 1, 45) },
+}
+
+const subscriptionDeleted: Op<'team/subscription-deleted'> = {
+  ...opBase('operation:protocol-46', 'request:protocol-subscription-deleted', 46),
+  previousOperationId,
+  kind: 'team/subscription-deleted',
+  data: { workspaceId: alpha, subscription: { ...fixtureSubscription, state: 'deleted' }, activity: subscriptionActivity('deleted', 1, 46) },
+}
+
+const subscriptionBaseline: Op<'team/subscription-baseline'> = {
+  ...opBase('operation:protocol-47', 'request:protocol-subscription-baseline', 47),
+  previousOperationId,
+  kind: 'team/subscription-baseline',
+  data: { workspaceId: alpha, projectRef, subscriptionRef: fixtureSubscription.subscriptionRef, ids: ['ignored-1'] },
+}
+
+const fixtureSubscriptionEvent = { id: 'event-1', title: 'Protocol fixture event', url: 'https://example.test/1', detail: 'detail' }
+
+const subscriptionEventsAccepted: Op<'team/subscription-events-accepted'> = {
+  ...opBase('operation:protocol-48', 'request:protocol-subscription-events-accepted', 48, hostActor),
+  previousOperationId,
+  kind: 'team/subscription-events-accepted',
+  data: { workspaceId: alpha, projectRef, subscriptionRef: fixtureSubscription.subscriptionRef, subscriptionRevision: 1,
+    scriptHash: fixtureSubscription.script.sha256, events: [fixtureSubscriptionEvent] },
+}
+
+const subscriptionEventPublished: Op<'team/subscription-event-published'> = {
+  ...opBase('operation:protocol-49', 'request:protocol-subscription-event-published', 49, hostActor),
+  previousOperationId,
+  kind: 'team/subscription-event-published',
+  data: { workspaceId: alpha, projectRef, subscriptionRef: fixtureSubscription.subscriptionRef, subscriptionName: fixtureSubscription.name,
+    acceptedSequence: 48, eventId: fixtureSubscriptionEvent.id,
+    inbox: { ...emptyInbox, mainMarkers: { added: [{ memberId, projectRef, eventRef: 'event:49' as AgentTeamSubscriptionEventRef, sequence: 49 }], removed: [] } } },
 }
 
 /** What one same-request retry must produce: resolved, never a second commit. */
@@ -1473,6 +1579,95 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'no-op', inbox: 'none' },
+  },
+  'team/subscription-created': {
+    stored: subscriptionCreated,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.createSubscription({
+          requestId: subscriptionCreated.requestId, actor: human, workspaceId: alpha, projectRef,
+          name: fixtureSubscription.name, triggers: fixtureSubscription.triggers, script: fixtureSubscription.script,
+          credentials: [], baselineIds: subscriptionCreated.data.baselineIds,
+        })
+        expect(out.value.receipt.operationId, 'the creation mapper answers with the stored subscription write').toBe(subscriptionCreated.operationId)
+        expect(out.value.subscription.subscriptionRef).toBe(fixtureSubscription.subscriptionRef)
+        return out
+      },
+      changed: () => ledger.createSubscription({
+        requestId: subscriptionCreated.requestId, actor: human, workspaceId: alpha, projectRef,
+        name: 'a different subscription name', triggers: fixtureSubscription.triggers, script: fixtureSubscription.script,
+        credentials: [], baselineIds: [],
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-updated': {
+    stored: subscriptionUpdated,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.updateSubscription({
+          requestId: subscriptionUpdated.requestId, actor: human, workspaceId: alpha, projectRef,
+          subscriptionRef: fixtureSubscription.subscriptionRef, expectedRevision: 1,
+          name: subscriptionUpdated.data.subscription.name, triggers: fixtureSubscription.triggers,
+          script: fixtureSubscription.script, credentials: [],
+        })
+        expect(out.value.receipt.operationId, 'the update mapper answers with the stored subscription write').toBe(subscriptionUpdated.operationId)
+        expect(out.value.subscription.revision, 'the stored edit is what a retry answers with').toBe(2)
+        return out
+      },
+      changed: () => ledger.updateSubscription({
+        requestId: subscriptionUpdated.requestId, actor: human, workspaceId: alpha, projectRef,
+        subscriptionRef: fixtureSubscription.subscriptionRef, expectedRevision: 1,
+        name: 'a different edit', triggers: fixtureSubscription.triggers, script: fixtureSubscription.script, credentials: [],
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-paused': {
+    stored: subscriptionPaused,
+    legacyShapes: [subscriptionPausedByHost],
+    retry: { replayOnly: 'a state transition: its idempotent branch resolves the stored record without comparing a payload, so a request-id collision is not part of this protocol; subscription-ledger.spec.ts drives the pause retry' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-resumed': {
+    stored: subscriptionResumed,
+    legacyShapes: [],
+    retry: { replayOnly: 'a state transition: its idempotent branch resolves the stored record without comparing a payload; subscription-ledger.spec.ts drives the resume retry' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-deleted': {
+    stored: subscriptionDeleted,
+    legacyShapes: [],
+    retry: { replayOnly: 'a terminal state transition: its idempotent branch resolves the stored record without comparing a payload; subscription-ledger.spec.ts drives the delete retry' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-baseline': {
+    stored: subscriptionBaseline,
+    legacyShapes: [],
+    retry: { replayOnly: 'an append-only baseline carries no comparable request payload; subscription-ledger.spec.ts drives the baseline retry' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-events-accepted': {
+    stored: subscriptionEventsAccepted,
+    legacyShapes: [],
+    retry: { replayOnly: 'the committed-result mapper reads the replayed acceptance projection, which this fixture table does not build; subscription-ledger.spec.ts drives the acceptance retry against a real history' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-event-published': {
+    stored: subscriptionEventPublished,
+    legacyShapes: [],
+    retry: { replayOnly: 'the committed-result mapper reads the replayed publication projection, which this fixture table does not build; subscription-ledger.spec.ts drives the publication retry against a real history' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
   },
 }
 

@@ -37,6 +37,11 @@ import type {
   AgentTeamThreadFact,
   AgentTeamThreadReadFact,
   AgentTeamThreadRef,
+  AgentTeamSubscription,
+  AgentTeamSubscriptionActivity,
+  AgentTeamSubscriptionEventAccepted,
+  AgentTeamSubscriptionEventPublished,
+  AgentTeamSubscriptionRef,
 } from "./entities.ts"
 
 /** Receipt returned after an operation is durable or an identical retry resolves it. */
@@ -486,6 +491,7 @@ export type AgentTeamMainTimelineEntry =
   })
   | (AgentTeamMainTimelineBase & { readonly kind: 'activity'; readonly activity: AgentTeamMainActivity })
   | (AgentTeamMainTimelineBase & { readonly kind: 'thread-card'; readonly card: AgentTeamMainThreadCard })
+  | (AgentTeamMainTimelineBase & { readonly kind: 'subscription-event'; readonly event: AgentTeamSubscriptionEventPublished })
 
 /** The reader's own Main stream standing in one Project. */
 export interface AgentTeamMainStreamStanding {
@@ -1134,4 +1140,121 @@ export interface AgentTeamStatus {
   readonly humanMemberId: AgentTeamMemberId
   /** Validation rules version the ledger has adopted; Project owners exist from version 2. */
   readonly rulesVersion: number
+}
+
+/** One subscription write answered: the state it committed and the Main stream line that announced it. */
+export interface AgentTeamSubscriptionChangeResult {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly subscription: AgentTeamSubscription
+  readonly activity: AgentTeamSubscriptionActivity
+}
+
+/** One accepted batch of events, already durable and waiting only for publishing. */
+export interface AgentTeamSubscriptionAcceptResult {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly accepted: readonly AgentTeamSubscriptionEventAccepted[]
+}
+
+/** One published event, as the Main stream now holds it. */
+export interface AgentTeamSubscriptionPublishResult {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly published: AgentTeamSubscriptionEventPublished
+}
+
+/** Where a create or update takes its script from: the Agent's own file, or content a page pasted. */
+export type AgentTeamSubscriptionScriptSource =
+  | { readonly scriptPath: string }
+  | { readonly scriptContent: string }
+
+/** One stored subscription with the size of its unpublished backlog, as an owner sees the list. */
+export interface AgentTeamSubscriptionListEntry {
+  readonly subscription: AgentTeamSubscription
+  readonly unpublished: number
+}
+
+export interface AgentTeamSubscriptionListRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+}
+
+export interface AgentTeamSubscriptionListResult {
+  readonly entries: readonly AgentTeamSubscriptionListEntry[]
+}
+
+/** Why a trial run refused a script, with enough of each stream to fix it. */
+export interface AgentTeamSubscriptionTrialFailure {
+  readonly reason: string
+  readonly stdoutTail: string
+  readonly stderrTail: string
+}
+
+/**
+ * Which history a brand-new subscription ignores. `current-output` records the
+ * ids the trial run printed as the deduplication baseline, so the first live
+ * run does not republish what the script already found; `ignore-history`
+ * starts empty, and the first live run publishes everything it sees.
+ */
+export type AgentTeamSubscriptionBaselineChoice = 'current-output' | 'ignore-history'
+
+export interface AgentTeamCreateSubscriptionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly name: string
+  readonly intervalMinutes: number
+  readonly script: AgentTeamSubscriptionScriptSource
+  readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
+  readonly baseline?: AgentTeamSubscriptionBaselineChoice | undefined
+}
+
+/** The four editable parts, replaced whole; the revision moves by one. */
+export interface AgentTeamUpdateSubscriptionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly expectedRevision: number
+  readonly name: string
+  readonly intervalMinutes: number
+  readonly script: AgentTeamSubscriptionScriptSource
+  readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
+}
+
+export interface AgentTeamTestSubscriptionRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+}
+
+export interface AgentTeamSubscriptionStateRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly expectedRevision: number
+}
+
+/** Append-only re-baselining: the ids to ignore from now on. */
+export interface AgentTeamBaselineSubscriptionRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly ids: readonly string[]
+}
+
+/** One write that a trial run refused before it could commit. */
+export type AgentTeamSubscriptionWriteResult =
+  | { readonly kind: 'changed'; readonly subscription: AgentTeamSubscription; readonly activity: AgentTeamSubscriptionActivity }
+  | { readonly kind: 'trial-failed'; readonly failure: AgentTeamSubscriptionTrialFailure }
+
+export type AgentTeamSubscriptionTrialResult =
+  | { readonly kind: 'tested'; readonly events: readonly import('../subscriptions.ts').SubscriptionEvent[]; readonly stdoutTail: string; readonly stderrTail: string }
+  | { readonly kind: 'trial-failed'; readonly failure: AgentTeamSubscriptionTrialFailure }
+
+export interface AgentTeamSubscriptionBaselineResult {
+  readonly kind: 'baselined'
+  readonly subscription: AgentTeamSubscription
+  readonly added: readonly string[]
 }

@@ -35,9 +35,13 @@ export interface MainActivityFact {
   readonly activityRef: AgentTeamActivityRef
   readonly sequence: number
   readonly kind: AgentTeamMainActivity['kind']
-  readonly actor: AgentTeamMemberId
+  /** The Member who acted, or the Host handle when the Host itself paused a subscription. */
+  readonly actor: AgentTeamMemberId | 'agent-team'
   readonly projectRef: AgentTeamProjectRef
-  readonly memberId: AgentTeamMemberId
+  /** The Agent whose ownership changed; absent on a subscription lifecycle line. */
+  readonly memberId?: AgentTeamMemberId | undefined
+  /** The subscription a lifecycle line concerns; absent on an ownership change. */
+  readonly subscriptionRef?: import('./types.ts').AgentTeamSubscriptionRef | undefined
 }
 
 export type ActivityFact = ThreadActivityFact | MainActivityFact
@@ -83,9 +87,10 @@ export function activityFact(activity: AgentTeamActivity | AgentTeamMainActivity
     activityRef: activity.activityRef,
     sequence: activity.sequence,
     kind: activity.kind,
-    actor: activity.actor,
+    // A Host pause has no Member behind it; the handle names the Host itself.
+    actor: activity.actor ?? 'agent-team',
     projectRef: activity.projectRef,
-    memberId: activity.memberId,
+    ...('memberId' in activity ? { memberId: activity.memberId } : { subscriptionRef: activity.subscriptionRef }),
   }
 }
 
@@ -97,7 +102,10 @@ export function activityIdentity(fact: ActivityFact): ActivityIdentity {
 
 /** Complete immutable event fields, without current Task/Claim state or empty optional lists. */
 export function activityText(fact: ActivityFact): string {
-  if (fact.scope === 'main') return `${fact.sequence} ${fact.actor} ${fact.kind} Member ${fact.memberId} · Project ${fact.projectRef} · ${fact.activityRef}`
+  if (fact.scope === 'main') {
+    const subject = fact.memberId === undefined ? `Subscription ${fact.subscriptionRef ?? 'unknown'}` : `Member ${fact.memberId}`
+    return `${fact.sequence} ${fact.actor} ${fact.kind} ${subject} · Project ${fact.projectRef} · ${fact.activityRef}`
+  }
   const fields = [`${fact.sequence} ${fact.actor} ${fact.kind} Task ${fact.taskRef} · Thread ${fact.threadRef} · ${fact.activityRef}`]
   if (fact.claimRef !== null) fields.push(`Claim ${fact.claimRef}`)
   if (fact.claimRefs.length > 0) fields.push(`claims released ${fact.claimRefs.join(', ')}`)

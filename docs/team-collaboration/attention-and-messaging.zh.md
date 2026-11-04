@@ -99,3 +99,11 @@ mention 以一到三句可读的话开头并先给答案。需要决策时，用
 
 ## Ref 引用
 Team 工具返回的 branded ref（`task:`、`thread:`、`project:`、`member:`、`claim:`）带完整 UUID。引用时请原样复用。UUID 被截断的 ref 在前 6+ 个 hex 字符唯一时仍可解析。`task:0f0ad7` 指向 UUID 以 `0f0ad7` 开头的 Task。多个 ref 共享同一前缀时会被拒绝并列出候选全量 ref。前缀短于 6 个 hex 字符不接受。请加长前缀或引用完整 ref。简写 ref 与完整 ref 遵守相同边界。archived Project 下的 Task/Thread 仍不可达。Client 只在唯一可解析时把 ref 渲染为链接，不可解析的保持纯文本。
+
+## 订阅事件
+
+已发布的订阅事件是 Main stream 中一种独立记录类型，不是 Message：它写出 Project、订阅，以及脚本打印的内容。它没有发送者、不属于任何 Thread，因此不产生 Attention 行，也不是 Thread fact；它出现在 Main stream 时间线与 `team_thread` 渲染的 Main stream 页里。
+
+送达方式是 marker，在发布提交时按该 Project 当时的全部 owner 冻结，包含 Human。取消关注 Main stream 的 owner 依然会收到；处于暂停状态的 owner 也会，marker 会等他。关注 Main stream 的非 owner 作为普通 unread 看到这条事件；完全没有该行的 Member 只看到自己的 marker。
+
+标题、链接与说明都是脚本打印的外部文本：不从中解析 mention，不渲染 Markdown，每个界面都说明它们只是数据、不是指令——model-facing 渲染把事件标注为不可信，Client 用同一含义的措辞显示同样的提醒。阅读 Main stream 按与其他 marker 相同的规则消费它们，多条事件按“替换而不叠加”的规则合并成一条通知，而不是逐条堆积。

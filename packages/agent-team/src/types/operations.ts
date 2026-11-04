@@ -24,8 +24,13 @@ import type {
   AgentTeamThread,
   AgentTeamThreadAttention,
   AgentTeamThreadRef,
+  AgentTeamSubscription,
+  AgentTeamSubscriptionActivity,
+  AgentTeamSubscriptionRef,
+  AgentTeamOwnerActivity,
   AgentTeamReminderRef,
 } from "./entities.ts"
+import type { SubscriptionEvent } from "../subscriptions.ts"
 
 /** The first durable operation in every Agent Team ledger. */
 export interface AgentTeamInitializedOperation extends AgentTeamOperationBase {
@@ -155,7 +160,7 @@ export interface AgentTeamProjectOwnerAddedOperation extends AgentTeamOperationB
     readonly workspaceId: WorkspaceId
     readonly projectRef: AgentTeamProjectRef
     readonly memberId: AgentTeamMemberId
-    readonly activity: AgentTeamMainActivity
+    readonly activity: AgentTeamOwnerActivity
     readonly inbox: AgentTeamInboxDelta
   }
 }
@@ -167,7 +172,7 @@ export interface AgentTeamProjectOwnerRemovedOperation extends AgentTeamOperatio
     readonly workspaceId: WorkspaceId
     readonly projectRef: AgentTeamProjectRef
     readonly memberId: AgentTeamMemberId
-    readonly activity: AgentTeamMainActivity
+    readonly activity: AgentTeamOwnerActivity
     readonly inbox: AgentTeamInboxDelta
     readonly transfers: readonly AgentTeamTaskActivity[]
     readonly tasks: readonly AgentTeamTask[]
@@ -520,6 +525,111 @@ export interface AgentTeamDmSentOperation extends AgentTeamOperationBase {
   }
 }
 
+/** Durable creation of one Project subscription, with the Main stream line that announces it. */
+export interface AgentTeamSubscriptionCreatedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-created'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly subscription: AgentTeamSubscription
+    readonly activity: AgentTeamSubscriptionActivity
+    /** The trial run's ids this subscription must never publish; empty means "ignore that history". */
+    readonly baselineIds: readonly string[]
+  }
+}
+
+/** Durable configuration change; the revision it moved from and the line that announces it. */
+export interface AgentTeamSubscriptionUpdatedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-updated'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly subscription: AgentTeamSubscription
+    readonly previousRevision: number
+    readonly activity: AgentTeamSubscriptionActivity
+  }
+}
+
+/** Manual or automatic pause. The revision does not move: this is a state transition, not an edit. */
+export interface AgentTeamSubscriptionPausedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-paused'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly subscription: AgentTeamSubscription
+    readonly activity: AgentTeamSubscriptionActivity
+  }
+}
+
+/** Resume after a passing trial run; the revision does not move. */
+export interface AgentTeamSubscriptionResumedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-resumed'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly subscription: AgentTeamSubscription
+    readonly activity: AgentTeamSubscriptionActivity
+  }
+}
+
+/** Terminal state. Delete is the barrier: nothing accepted, published, or run afterwards revives it. */
+export interface AgentTeamSubscriptionDeletedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-deleted'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly subscription: AgentTeamSubscription
+    readonly activity: AgentTeamSubscriptionActivity
+  }
+}
+
+/** Append-only deduplication waterline: the ids this subscription must never publish again. */
+export interface AgentTeamSubscriptionBaselineOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-baseline'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly subscriptionRef: AgentTeamSubscriptionRef
+    readonly ids: readonly string[]
+  }
+}
+
+/** One run's validated output, accepted as durable facts before any of it is published. */
+export interface AgentTeamSubscriptionEventsAcceptedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-events-accepted'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly subscriptionRef: AgentTeamSubscriptionRef
+    /** The version the producing run pinned; a run that crossed an update keeps its own. */
+    readonly subscriptionRevision: number
+    readonly scriptHash: string
+    readonly events: readonly SubscriptionEvent[]
+  }
+}
+
+/** One accepted event published to the Main stream, with the frozen recipient markers of that moment. */
+export interface AgentTeamSubscriptionEventPublishedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-event-published'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly projectRef: AgentTeamProjectRef
+    readonly subscriptionRef: AgentTeamSubscriptionRef
+    /** The subscription's name when this event was published; a later rename does not rewrite history. */
+    readonly subscriptionName: string
+    /** The accepting operation, and which of its events this is: the accept record is the content authority. */
+    readonly acceptedSequence: number
+    readonly eventId: string
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/** Every subscription record: its lifecycle writes, the deduplication waterline, and event acceptance/publication. */
+export type AgentTeamSubscriptionOperation =
+  | AgentTeamSubscriptionCreatedOperation
+  | AgentTeamSubscriptionUpdatedOperation
+  | AgentTeamSubscriptionPausedOperation
+  | AgentTeamSubscriptionResumedOperation
+  | AgentTeamSubscriptionDeletedOperation
+  | AgentTeamSubscriptionBaselineOperation
+  | AgentTeamSubscriptionEventsAcceptedOperation
+  | AgentTeamSubscriptionEventPublishedOperation
+
 /** Closed union of durable Agent Team operations. */
 export type AgentTeamOperation =
   | AgentTeamInitializedOperation
@@ -564,4 +674,12 @@ export type AgentTeamOperation =
   | AgentTeamMemberReminderCancelledOperation
   | AgentTeamMemberRemovedOperation
   | AgentTeamDmSentOperation
+  | AgentTeamSubscriptionCreatedOperation
+  | AgentTeamSubscriptionUpdatedOperation
+  | AgentTeamSubscriptionPausedOperation
+  | AgentTeamSubscriptionResumedOperation
+  | AgentTeamSubscriptionDeletedOperation
+  | AgentTeamSubscriptionBaselineOperation
+  | AgentTeamSubscriptionEventsAcceptedOperation
+  | AgentTeamSubscriptionEventPublishedOperation
 

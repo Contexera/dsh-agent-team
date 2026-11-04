@@ -18,13 +18,13 @@ Service 自己持有 SQLite-backed DomainFacility，并使用 `ctx.workspaceRegi
 
 `storage-domain` 在持久读取处校验每条 record，并拒绝被其他版本标记的 backend unit。Team 只在 `KvTable.put()` 完成后更新 projection。其 Fiber 持有 Domain handle；dispose 通过 Cordis 移除拒绝新的 Service 调用，排空已接受的 Domain write，并在名称可重新打开前关闭 backend unit。
 
-创建 Member 时，先提交稳定的 Member/session/Workspace/preset/private-memory 身份，再执行 unpublished Agent setup。创建 Workspace 记录为 Member 的创建地；更多 Workspace 通过参与操作（`team/member-workspace-joined`/`team/member-workspace-left`）加入与退出——加入即获得协作能力，不移动 Session。Setup 挂载指定 preset，并在发布前检查带 marker 的 `team_message` 和全部八个 Team tools。失败只把该 Member 标为 unavailable。Suspend 等待所属 `AgentHandle` 完全停止；resume 和 Host remount 恢复同一个持久 session。
+创建 Member 时，先提交稳定的 Member/session/Workspace/preset/private-memory 身份，再执行 unpublished Agent setup。创建 Workspace 记录为 Member 的创建地；更多 Workspace 通过参与操作（`team/member-workspace-joined`/`team/member-workspace-left`）加入与退出——加入即获得协作能力，不移动 Session。Setup 挂载指定 preset，并在发布前检查带 marker 的 `team_message` 和全部九个 Team tools。失败只把该 Member 标为 unavailable。Suspend 等待所属 `AgentHandle` 完全停止；resume 和 Host remount 恢复同一个持久 session。
 
 归档（archival）是介于 suspend 与 remove 之间的可逆第三态，Member 与 Project 通用。`archiveMember` 提交 `team/member-archived`，dispose 活跃 session（私有记忆与 Session log 留在磁盘），把 Session 从分组面归档，并释放该 Member 的活跃 Claim（公开 `claims_released` Activity + Attention/marker 清理）。`archiveProject` 提交 `team/project-archived`，对该项目全部 Threads 上所有 owner 做同样的释放。两种归档都保留 Memberships——是隐藏而非离开。归档实体在所有 Team API 面上"默认不存在"：投影、ref 解析（其 Task ref 不再解析，消息正文渲染为纯文本）、按 ref 的读取（`readThread`/`threadHistory`/`threadObservations`/`listClaims` 以明确的 archived 错误拒绝）——而事实在 ledger 中完整保留，供重放与未来恢复；这条边界正是归档与 remove 的分界。从归档态 remove 仍可用（数据卫生路径）；本轮有意不提供恢复入口（对齐 dsh session 归档现状）。
 
 Member 可携带持久能力意图（`capabilities.tools.allow`、`capabilities.skills.allow`）。它随全部 lifecycle operation 原样流转，Host restart 后原样重放，commit 时不做已知名校验（Harness 升级不会破坏旧 ledger）；与已知名的偏差在 activation 时派生为不持久化的 `capabilityWarnings`。`tools.allow` 是有意的接口预留：当前没有 UI 写入路径。编辑语义与 `model` 一致，都是局部更新：字段缺省即保持已存储的值，显式传 `null` 才清除。不管理 capabilities 的调用方可以直接省略该字段。
 
-每个 Member 都限制为使用 preset 工具与 `working_directory`，未配置 `tools.allow` 时也生效。allow-list 只能缩减范围，保留八个 Team tools 与 `working_directory`；范围外的名字产生 warning。后来插件添加的工具会从请求中滤除，调用也会被拒绝；同名替换会使请求组装失败。其他插件的提示仍然可见，不会因此阻止对话。检查与限制见 [Tools and preset](../../docs/architecture/tools-and-preset.zh.md)。对 live Member 的编辑在 turn 边界同 Session 换装 restriction，后续 lifecycle 操作在其后排队。激活失败只使该 Member 不可用。
+每个 Member 都限制为使用 preset 工具与 `working_directory`，未配置 `tools.allow` 时也生效。allow-list 只能缩减范围，保留九个 Team tools 与 `working_directory`；范围外的名字产生 warning。后来插件添加的工具会从请求中滤除，调用也会被拒绝；同名替换会使请求组装失败。其他插件的提示仍然可见，不会因此阻止对话。检查与限制见 [Tools and preset](../../docs/architecture/tools-and-preset.zh.md)。对 live Member 的编辑在 turn 边界同 Session 换装 restriction，后续 lifecycle 操作在其后排队。激活失败只使该 Member 不可用。
 
 Skills 是 Member 私有的：preset 不带共享 skill-filesystem row，Host 为每个 Member 注册一个 provider，只扫插件内置的只读 core skills（`packages/agent-team/core-skills/`——`member-skill-manager` meta skill，全部 skill 写作/安装/credentials 引导都在它里面）加该 Member 可写的私有 `skills/` 目录（排除默认 roots）。安装就是往自己目录写——目录形态 `skills/<name>/SKILL.md` + 可选 references/scripts，或平铺 `.md`——有意不提供上传 Remote。persona 只陈述私有空间物理事实，meta skill 的 description 负责"涉及 skill 管理工作时先读我"。`skills.allow` 通过已挂载 provider 上同一 turn 边界换装的 live selection swap 过滤 catalog；自装后的发现由 filesystem watcher 驱动。
 
@@ -46,7 +46,7 @@ M1 支持单个 Host writer。Ledger 永久保留，不提供 snapshot 或 compa
 
 Bundle 使用 Host 已有的 singleton provider，不重复挂载 `agents`、默认模型选择、`tools`、`fs`、`sandboxPolicy`、Session store/persistence、或 Workspace registry 的替代实现。私有 SQLite DomainFacility 不替换 Host 的全局 storage service，因此开关 bundle 不会重建无关的 storage consumers。Host services 只挂载一次，再挂载本 Service 及 invariant companion。Team Web Client 是唯一的 Human 控制面。
 
-Team-enabled preset 在自身 Agent scope 注册八个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
+Team-enabled preset 在自身 Agent scope 注册九个工具，并用 `markAgentTeamPreset()` 标记 `team_message` definition。Preset row 应在执行时读取 `ctx.agentTeam`，不能声明静态 inject：Host 在自身激活期间恢复 Member 时就会挂载成员 preset，声明依赖 `agentTeam` 的 row 无法激活，会让每次启动恢复失败。Scoped tool 重名会在 unpublished setup 阶段失败，只使对应 Member unavailable。Host service provider 重复则仍是 composition error，应删除重复行，不做叠加。
 
 Member 上下文只有两个机制，且没有模型工具。preset 的 `member-compaction-engine` 把摘要与持久化缩减交给 Harness，Team 则在每次请求前控制输入和输出预算；这些数值归 [`../../docs/team-collaboration/memory-and-context.zh.md`](../../docs/team-collaboration/memory-and-context.zh.md)。换代是唤醒边界上 Host 的决定：`team-context-management.ts` 等真正 idle、复查 owned-jobs guard、以 Host actor 提交幂等的 `team/member-session-recycled` operation、退役旧 Session（dispose 并归档，绝不删除）、再激活一代新的、lineage parent 指向被替换的那一代。身份、模型、私有记忆、skills、Claims 和 Attention 全部保留，进程内状态在崩溃后可从 durable log 重建。没有任何 Remote 写入口会 renew、rollover 或重置 Member 的上下文。
 

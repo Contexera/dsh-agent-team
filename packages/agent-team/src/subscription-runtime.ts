@@ -1,0 +1,416 @@
+/**
+ * The interval scheduler: admission, the wait queue, failure counting, and the
+ * publication budget. Every decision here is made from injected ports, so a
+ * fake clock and a fake executor can prove the boundaries the ticket names
+ * without a real shell, a real timer, or a real ledger.
+ * @module @contexera/dsh-agent-team/subscription-runtime
+ */
+
+import {
+  nextDueAfter,
+  scheduleAction,
+  SUBSCRIPTION_CONCURRENT_RUNS,
+  SUBSCRIPTION_FAILURES_BEFORE_PAUSE,
+  SUBSCRIPTION_FIRST_RUN_MAX_DELAY_MS,
+  SUBSCRIPTION_PUBLISH_PER_MINUTE,
+  type SubscriptionShell,
+} from './subscriptions.ts'
+import type { AgentTeamSubscription, AgentTeamSubscriptionRef } from './types/entities.ts'
+
+/**
+ * What one run turned into, as the scheduler needs it. `accepted` and `empty`
+ * are successful runs (the second found nothing new); `failed` and `backlog`
+ * count towards the pause; `dropped` means the output could not be applied at
+ * all because the subscription stopped being live while it ran — a terminal
+ * barrier that is neither a success nor a failure of the script.
+ */
+export type SubscriptionRunOutcome = 'accepted' | 'empty' | 'failed' | 'backlog' | 'dropped'
+
+/** Durable scheduler state for one subscription. It is not a Team fact: deleting it changes no domain result. */
+export interface SubscriptionCheckpoint {
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  /** Absolute UTC instant the next timer run is due; absent before the Host ever scheduled it. */
+  readonly dueAt?: number | undefined
+  /** Failed runs in a row. Independent of the run records, which are diagnostics. */
+  readonly consecutiveFailures: number
+  /** When this subscription's output was last accepted. */
+  readonly lastSuccessAt?: string | undefined
+  /** The publish rate window: the minute it counts and how many events left the queue inside it. */
+  readonly publishWindowMinute?: number | undefined
+  readonly publishedInWindow: number
+}
+
+export const INITIAL_CHECKPOINT = { consecutiveFailures: 0, publishedInWindow: 0 } as const
+
+/** The narrow host surface the scheduler drives. */
+export interface SubscriptionRuntimePorts {
+  readonly now: () => number
+  readonly random: () => number
+  readonly schedule: (run: () => void, delayMs: number) => unknown
+  readonly cancel: (handle: unknown) => void
+  readonly log: (message: string) => void
+  /** Every subscription the ledger holds, deleted ones included. */
+  readonly subscriptions: () => readonly AgentTeamSubscription[]
+  /**
+   * The definition the ledger holds for one ref right now, or `undefined` when
+   * the ref was never stored — a create's draft trial. A queue entry holds a
+   * snapshot, so this is how admission sees a delete that happened meanwhile.
+   */
+  readonly current: (subscriptionRef: AgentTeamSubscriptionRef) => AgentTeamSubscription | undefined
+  /** Whether the Project that owns a subscription still runs. */
+  readonly projectActive: (subscription: AgentTeamSubscription) => boolean
+  readonly workspacePath: (subscription: AgentTeamSubscription) => string | undefined
+  /** Accepted-but-unpublished events of one subscription, oldest first. */
+  readonly pending: (subscriptionRef: AgentTeamSubscriptionRef) => readonly { readonly acceptedSequence: number; readonly eventId: string }[]
+  /** Execute one timer run end to end (execute, validate, accept). */
+  readonly run: (subscription: AgentTeamSubscription) => Promise<SubscriptionRunOutcome>
+  /** Publish one accepted event; resolves when it is durable. */
+  readonly publish: (subscription: AgentTeamSubscription, acceptedSequence: number, eventId: string) => Promise<void>
+  /** Stop a subscription after repeated failures; the reason is the ledger's own. */
+  readonly pauseForFailures: (subscription: AgentTeamSubscription) => Promise<void>
+  readonly checkpoint: (subscriptionRef: AgentTeamSubscriptionRef) => SubscriptionCheckpoint
+  readonly save: (checkpoint: SubscriptionCheckpoint) => Promise<void>
+}
+
+/** What a queue entry asks for: a timer run the loop found due, or an owner-requested trial. */
+interface QueuedRun {
+  readonly subscription: AgentTeamSubscription
+  /**
+   * Ordering key: the due instant a timer run answers, or the instant a trial
+   * was requested. The queue is kept in this order, so a run that has waited
+   * longest — whichever entry point produced it — goes first.
+   */
+  readonly orderAt: number
+  /** Trial tasks carry the caller's own promise; timer runs report through the outcome port. */
+  readonly task?: (() => Promise<unknown>) | undefined
+  readonly settle?: ((outcome: { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: unknown }) => void) | undefined
+}
+
+const TICK_MS = 1_000
+
+/**
+ * Owns the timer loop, the four run slots, and the per-minute publication
+ * budget. A run and a publication are separate steps on purpose: a run that
+ * succeeded only waits for budget, and is never executed twice for it.
+ */
+export class SubscriptionScheduler {
+  private handle: unknown
+  /** Whether the timer loop runs; a scheduler a test drives by hand is never started. */
+  private stopped = true
+  /** Set by {@link stop}: nothing new is admitted, and the queue is settled. */
+  private draining = false
+  private ticking: Promise<void> | undefined
+  private readonly running = new Set<AgentTeamSubscriptionRef>()
+  /** The due instant each executing timer run answers, so a tick can tell it is already spent. */
+  private readonly runningDue = new Map<AgentTeamSubscriptionRef, number>()
+  /** Executions that already hold a slot: teardown waits for these, not for the queue. */
+  private readonly inFlight = new Set<Promise<void>>()
+  private readonly queue: QueuedRun[] = []
+
+  constructor(private readonly ports: SubscriptionRuntimePorts) {}
+
+  /** Start the loop and give every timer subscription its first due instant. */
+  start(): void {
+    this.stopped = false
+    this.handle = this.ports.schedule(() => { this.tick() }, TICK_MS)
+  }
+
+  /**
+   * Stop admitting work and converge: reject every trial that never started,
+   * then wait for the executions already holding a slot. A Host closes its
+   * stores only after this resolves, so a late run cannot write a closed one.
+   */
+  async stop(): Promise<void> {
+    this.stopped = true
+    this.draining = true
+    if (this.handle !== undefined) this.ports.cancel(this.handle)
+    this.handle = undefined
+    for (const entry of this.queue.splice(0)) {
+      entry.settle?.({ ok: false, error: new Error('the Host is shutting down, so this run never started') })
+    }
+    const pending = [...(this.ticking === undefined ? [] : [this.ticking]), ...this.inFlight]
+    await Promise.allSettled(pending)
+  }
+
+  /** Timer entry point. A tick never overlaps itself: one slow await must not queue the next one behind it. */
+  private tick(): void {
+    if (this.stopped) return
+    this.handle = this.ports.schedule(() => { this.tick() }, TICK_MS)
+    if (this.ticking !== undefined) return
+    this.ticking = this.runTick()
+      .catch((error: unknown) => {
+        this.ports.log(`subscription tick failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      .finally(() => { this.ticking = undefined })
+  }
+
+  /** Run one scheduler pass immediately; exposed so tests and a manual nudge share the production path. */
+  async runTick(): Promise<void> {
+    if (this.draining) return
+    await this.publishPass()
+    await this.timerPass()
+    await this.admit()
+  }
+
+  /**
+   * One owner-requested execution — the trial behind create, update, test, and
+   * resume — under the same four slots as a timer run. A trial is not a second
+   * kind of capacity: without this, twenty creates would start twenty scripts.
+   */
+  runTrial<T>(subscription: AgentTeamSubscription, task: () => Promise<T>): Promise<T> {
+    if (this.draining) return Promise.reject(new Error('the Host is shutting down, so this run never started'))
+    return new Promise<T>((resolve, reject) => {
+      this.enqueue({ subscription, orderAt: this.ports.now(), task,
+        settle: outcome => { if (outcome.ok) resolve(outcome.value as T); else reject(outcome.error) } })
+      void this.admit()
+    })
+  }
+
+  /** Spread the first timer run of every subscription over one minute, and catch up a missed run exactly once. */
+  async settleBoot(): Promise<void> {
+    const now = this.ports.now()
+    for (const subscription of this.ports.subscriptions()) {
+      if (subscription.triggers.interval === undefined) continue
+      if (subscription.state !== 'active' || !this.ports.projectActive(subscription)) continue
+      const checkpoint = this.ports.checkpoint(subscription.subscriptionRef)
+      if (checkpoint.dueAt !== undefined) continue
+      const delay = Math.floor(this.ports.random() * SUBSCRIPTION_FIRST_RUN_MAX_DELAY_MS)
+      await this.ports.save({ ...checkpoint, dueAt: now + delay })
+    }
+  }
+
+  private timerPass(): Promise<void> {
+    const work: Promise<void>[] = []
+    const now = this.ports.now()
+    for (const subscription of this.ports.subscriptions()) {
+      // The ledger's current record, not the snapshot this iteration happens to
+      // hold: a deletion must stop the timer at the moment it is decided, not
+      // one admission later.
+      const live = this.ports.current(subscription.subscriptionRef) ?? subscription
+      const interval = live.triggers.interval
+      if (interval === undefined) continue
+      const checkpoint = this.ports.checkpoint(live.subscriptionRef)
+      const queued = this.queue.some(entry => entry.task === undefined
+        && entry.subscription.subscriptionRef === live.subscriptionRef)
+      const action = scheduleAction({
+        ...(checkpoint.dueAt === undefined ? {} : { dueAt: checkpoint.dueAt }),
+        now,
+        paused: live.state !== 'active',
+        deleted: live.state === 'deleted',
+        archived: !this.ports.projectActive(live),
+        pending: this.ports.pending(live.subscriptionRef).length,
+        // A due instant already being executed is spent, so it merges like a
+        // queued one. A subscription that is merely busy with a trial still
+        // takes its due place now — admission refuses to start it beside that
+        // run — because waiting would hand its turn to a later request.
+        busy: queued || this.runningDue.get(live.subscriptionRef) === checkpoint.dueAt,
+      })
+      if (action === 'wait') continue
+      if (action === 'skip') {
+        // A terminal record keeps no checkpoint: the deletion already removed
+        // it and nothing will ever run again, so writing one here would only
+        // revive a row nobody reads. A paused or backlogged subscription does
+        // keep moving its due instant, or every tick would re-decide it.
+        if (live.state === 'deleted' || !this.ports.projectActive(live)) continue
+        work.push(this.saveDue(live, nextDueAfter(now, interval.minutes)))
+        continue
+      }
+      // Wait in due order: an entry waiting for its own trial to finish keeps
+      // the instant it came due, so the fairness rule stays "longest wait first".
+      this.enqueue({ subscription: live, orderAt: checkpoint.dueAt ?? now })
+    }
+    return Promise.all(work).then(() => {})
+  }
+
+  private async admit(): Promise<void> {
+    if (this.draining) return
+    while (this.running.size < SUBSCRIPTION_CONCURRENT_RUNS) {
+      // Skip entries whose own subscription is executing; they keep their place,
+      // and blocking the whole queue behind one busy subscription would be worse.
+      const index = this.queue.findIndex(entry => !this.running.has(entry.subscription.subscriptionRef))
+      if (index === -1) return
+      const [next] = this.queue.splice(index, 1)
+      if (next === undefined) return
+      // An entry waited with a snapshot, so the terminal barrier is read again
+      // here from the ledger: one that was deleted or archived meanwhile must
+      // not spend a slot, let alone run a script for a record that is gone.
+      const stored = this.ports.current(next.subscription.subscriptionRef)
+      const live = stored ?? next.subscription
+      if (next.task !== undefined) {
+        const refusal = this.trialRefusal(stored, live)
+        if (refusal !== undefined) {
+          next.settle?.({ ok: false, error: refusal })
+          continue
+        }
+        this.track(this.launchTrial(next))
+        continue
+      }
+      // A subscription deleted or paused while it waited loses its turn: the
+      // terminal barrier is checked again at admission, not only at enqueue.
+      if (live.state !== 'active' || !this.ports.projectActive(live)) continue
+      this.track(this.launchTimer(live, next.orderAt))
+    }
+  }
+
+  /**
+   * Why a queued trial may no longer run, or `undefined` when it may. A draft —
+   * a create's trial, never stored — is judged by its own snapshot; a stored
+   * record by the state it holds now, so `test` and `resume` still reach a
+   * paused subscription while a deleted one is refused.
+   */
+  private trialRefusal(stored: AgentTeamSubscription | undefined, live: AgentTeamSubscription): Error | undefined {
+    const ref = live.subscriptionRef
+    if (stored !== undefined && stored.state === 'deleted') {
+      return new Error(`subscription '${ref}' was deleted while this trial waited, so the script never ran`)
+    }
+    if (!this.ports.projectActive(live)) {
+      return new Error(`the Project of subscription '${ref}' was archived while this trial waited, so the script never ran`)
+    }
+    return undefined
+  }
+
+  private track(work: Promise<void>): void {
+    this.inFlight.add(work)
+    void work
+      .catch((error: unknown) => {
+        this.ports.log(`subscription run failed: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      .finally(() => { this.inFlight.delete(work) })
+  }
+
+  private async launchTrial(entry: QueuedRun): Promise<void> {
+    const ref = entry.subscription.subscriptionRef
+    const task = entry.task!
+    this.running.add(ref)
+    try {
+      entry.settle?.({ ok: true, value: await task() })
+    } catch (error) {
+      entry.settle?.({ ok: false, error })
+    } finally {
+      this.running.delete(ref)
+      // A freed slot is admitted immediately: a queued create must not wait for
+      // the next timer tick to start.
+      void this.admit()
+    }
+  }
+
+  private async launchTimer(subscription: AgentTeamSubscription, dueAt: number): Promise<void> {
+    const ref = subscription.subscriptionRef
+    this.running.add(ref)
+    this.runningDue.set(ref, dueAt)
+    const interval = subscription.triggers.interval
+    let outcome: SubscriptionRunOutcome = 'failed'
+    try {
+      outcome = await this.ports.run(subscription)
+    } catch (error) {
+      this.ports.log(`subscription '${ref}' run failed: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      this.running.delete(ref)
+      this.runningDue.delete(ref)
+      void this.admit()
+    }
+    // Recording the outcome and publishing are each best-effort steps of their
+    // own: a checkpoint write or a publication that throws must not skip the
+    // other, and must never surface as an unhandled rejection.
+    await this.settleOutcome(subscription, outcome, interval).catch((error: unknown) => {
+      this.ports.log(`subscription '${ref}' could not record its outcome: ${error instanceof Error ? error.message : String(error)}`)
+    })
+    await this.publishPass().catch((error: unknown) => {
+      this.ports.log(`subscription '${ref}' could not publish after its run: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+
+  private async settleOutcome(subscription: AgentTeamSubscription, outcome: SubscriptionRunOutcome,
+    interval: AgentTeamSubscription['triggers']['interval']): Promise<void> {
+    const ref = subscription.subscriptionRef
+    const now = this.ports.now()
+    const checkpoint = this.ports.checkpoint(ref)
+    const due = interval === undefined ? {} : { dueAt: nextDueAfter(now, interval.minutes) }
+    if (outcome === 'accepted' || outcome === 'empty') {
+      await this.ports.save({ ...checkpoint, consecutiveFailures: 0,
+        ...(outcome === 'accepted' ? { lastSuccessAt: new Date(now).toISOString() } : {}), ...due })
+      return
+    }
+    if (outcome === 'dropped') {
+      // Neither a success nor a failure, and no write either: the record it
+      // would have updated is gone or archived, so saving here would revive a
+      // checkpoint that the deletion already removed.
+      return
+    }
+    const failures = checkpoint.consecutiveFailures + 1
+    await this.ports.save({ ...checkpoint, consecutiveFailures: failures, ...due })
+    if (failures >= SUBSCRIPTION_FAILURES_BEFORE_PAUSE) await this.ports.pauseForFailures(subscription)
+  }
+
+  private async saveDue(subscription: AgentTeamSubscription, dueAt: number): Promise<void> {
+    await this.ports.save({ ...this.ports.checkpoint(subscription.subscriptionRef), dueAt })
+  }
+
+  /** Keep the wait queue in due order: the longest wait is admitted first, whatever produced it. */
+  private enqueue(entry: QueuedRun): void {
+    const index = this.queue.findIndex(queued => queued.orderAt > entry.orderAt)
+    if (index === -1) this.queue.push(entry)
+    else this.queue.splice(index, 0, entry)
+  }
+
+  /**
+   * Publish what the budget allows, oldest accepted first, one subscription at
+   * a time. A publication that fails leaves the event pending: the ledger has
+   * no record of it, so the next pass retries from the same queue. One
+   * subscription's storage failure must not abort the others' publications.
+   */
+  private async publishPass(): Promise<void> {
+    for (const subscription of this.ports.subscriptions()) {
+      try {
+        await this.publishOne(subscription)
+      } catch (error) {
+        this.ports.log(`subscription '${subscription.subscriptionRef}' could not publish: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+  }
+
+  /** One subscription's share of a publication pass. */
+  private async publishOne(subscription: AgentTeamSubscription): Promise<void> {
+    // A terminal record publishes nothing, and its checkpoint is not rewritten
+    // either: the accepted output stays unpublished, instead of being retried
+    // and logged on every tick for a subscription that no longer exists. A
+    // paused subscription still publishes — pausing stops runs, not delivery.
+    const live = this.ports.current(subscription.subscriptionRef) ?? subscription
+    if (live.state === 'deleted' || !this.ports.projectActive(live)) return
+    // The window is per minute per subscription, and it survives a restart
+    // because it lives in the checkpoint, not in memory.
+    let checkpoint = this.ports.checkpoint(subscription.subscriptionRef)
+    const minute = Math.floor(this.ports.now() / 60_000)
+    if (checkpoint.publishWindowMinute !== minute) {
+      checkpoint = { ...checkpoint, publishWindowMinute: minute, publishedInWindow: 0 }
+      await this.ports.save(checkpoint)
+    }
+    let budget = SUBSCRIPTION_PUBLISH_PER_MINUTE - checkpoint.publishedInWindow
+    if (budget <= 0) return
+    for (const entry of this.ports.pending(subscription.subscriptionRef)) {
+      if (budget <= 0) break
+      try {
+        await this.ports.publish(live, entry.acceptedSequence, entry.eventId)
+      } catch (error) {
+        this.ports.log(`subscription '${subscription.subscriptionRef}' could not publish '${entry.eventId}': ${error instanceof Error ? error.message : String(error)}`)
+        break
+      }
+      checkpoint = { ...this.ports.checkpoint(subscription.subscriptionRef), publishedInWindow: checkpoint.publishedInWindow + 1,
+        publishWindowMinute: minute }
+      await this.ports.save(checkpoint)
+      budget -= 1
+    }
+  }
+
+  /** Live state for diagnostics and tests: what is running and what is waiting. */
+  state(): { readonly running: readonly AgentTeamSubscriptionRef[]; readonly queued: readonly AgentTeamSubscriptionRef[] } {
+    return Object.freeze({ running: Object.freeze([...this.running]), queued: Object.freeze(this.queue.map(entry => entry.subscription.subscriptionRef)) })
+  }
+}
+
+/** The shell a snapshot was recorded under, as the executor reported itself; a mismatch fails the run with this. */
+export function shellMismatchReason(recorded: SubscriptionShell, actual: SubscriptionShell | undefined): string | undefined {
+  if (actual === undefined) return 'no shell executor is available for unattended runs'
+  if (recorded === actual) return undefined
+  return `this subscription was created for ${recorded}, but the Host runs ${actual}`
+}

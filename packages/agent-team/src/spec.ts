@@ -19,6 +19,8 @@ import type {
   AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadRef,
+  AgentTeamSubscriptionEventRef,
+  AgentTeamSubscriptionRef,
 } from './types.ts'
 
 const operationIdSchema = z.string().regex(/^operation:[^:]+$/).transform(value => value as AgentTeamOperationId)
@@ -241,7 +243,61 @@ const mainMessageSchema = z.object({
   occurredAt: z.string().datetime(),
 }).strict().transform(omitUndefined)
 
-const mainActivitySchema = z.object({
+const subscriptionRefSchema = z.string().regex(/^subscription:[^:]+$/).transform(value => value as AgentTeamSubscriptionRef)
+const eventRefSchema = z.string().regex(/^event:[1-9][0-9]*$/).transform(value => value as AgentTeamSubscriptionEventRef)
+
+const subscriptionEventSchema = z.object({
+  id: z.string().min(1).max(200),
+  title: z.string().min(1).max(200),
+  url: z.string().min(1).max(2000).optional(),
+  detail: z.string().max(2000).optional(),
+}).strict().transform(omitUndefined)
+
+const subscriptionCredentialSchema = z.object({
+  ref: z.string().min(1),
+  env: z.string().min(1),
+}).strict()
+
+const subscriptionScriptSchema = z.object({
+  content: z.string().min(1),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  shell: z.union([z.literal('bash'), z.literal('pwsh')]),
+}).strict()
+
+const subscriptionTriggersSchema = z.object({
+  interval: z.object({ minutes: z.number().int().positive() }).strict().optional(),
+  webhook: z.literal(true).optional(),
+}).strict().transform(omitUndefined)
+
+const subscriptionSchema = z.object({
+  subscriptionRef: subscriptionRefSchema,
+  projectRef: projectRefSchema,
+  name: z.string().min(1),
+  triggers: subscriptionTriggersSchema,
+  script: subscriptionScriptSchema,
+  credentials: z.array(subscriptionCredentialSchema),
+  revision: z.number().int().positive(),
+  state: z.union([z.literal('active'), z.literal('paused'), z.literal('deleted')]),
+  pausedReason: z.union([z.literal('manual'), z.literal('failures')]).optional(),
+  createdBy: memberIdSchema,
+  createdAt: z.string().datetime(),
+}).strict().transform(omitUndefined)
+
+const subscriptionActivitySchema = z.object({
+  activityRef: activityRefSchema,
+  projectRef: projectRefSchema,
+  kind: z.union([z.literal('subscription-created'), z.literal('subscription-updated'), z.literal('subscription-paused'),
+    z.literal('subscription-resumed'), z.literal('subscription-deleted')]),
+  subscriptionRef: subscriptionRefSchema,
+  subscriptionName: z.string().min(1),
+  revision: z.number().int().positive(),
+  reason: z.union([z.literal('manual'), z.literal('failures')]).optional(),
+  actor: memberIdSchema.optional(),
+  sequence: z.number().int().positive(),
+  occurredAt: z.string().datetime(),
+}).strict().transform(omitUndefined)
+
+const ownerActivitySchema = z.object({
   activityRef: activityRefSchema,
   projectRef: projectRefSchema,
   kind: z.union([z.literal('owner-added'), z.literal('owner-removed')]),
@@ -251,9 +307,12 @@ const mainActivitySchema = z.object({
   occurredAt: z.string().datetime(),
 }).strict()
 
+const mainActivitySchema = z.union([ownerActivitySchema, subscriptionActivitySchema])
+
 const mainMarkerSchema = z.union([
   z.object({ memberId: memberIdSchema, projectRef: projectRefSchema, messageRef: messageRefSchema, sequence: z.number().int().positive() }).strict(),
   z.object({ memberId: memberIdSchema, projectRef: projectRefSchema, activityRef: activityRefSchema, sequence: z.number().int().positive() }).strict(),
+  z.object({ memberId: memberIdSchema, projectRef: projectRefSchema, eventRef: eventRefSchema, sequence: z.number().int().positive() }).strict(),
 ])
 
 const mainAttentionSchema = z.object({
@@ -782,6 +841,61 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       member: memberSchema,
       ...releaseSnapshotSchema,
     }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-created'),
+    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema,
+      baselineIds: z.array(z.string().min(1).max(200)) }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-updated'),
+    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, previousRevision: z.number().int().positive(),
+      activity: subscriptionActivitySchema }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-paused'),
+    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-resumed'),
+    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-deleted'),
+    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-baseline'),
+    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, subscriptionRef: subscriptionRefSchema,
+      ids: z.array(z.string().min(1).max(200)).min(1) }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-events-accepted'),
+    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, subscriptionRef: subscriptionRefSchema,
+      subscriptionRevision: z.number().int().positive(), scriptHash: z.string().regex(/^[0-9a-f]{64}$/),
+      events: z.array(subscriptionEventSchema).min(1) }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-event-published'),
+    data: z.object({ workspaceId: workspaceIdSchema, projectRef: projectRefSchema, subscriptionRef: subscriptionRefSchema,
+      subscriptionName: z.string().min(1), acceptedSequence: z.number().int().positive(), eventId: z.string().min(1).max(200),
+      inbox: inboxDeltaSchema }).strict(),
   }).strict(),
   z.object({
     ...operationBase,

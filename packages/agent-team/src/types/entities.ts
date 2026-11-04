@@ -390,16 +390,6 @@ export interface AgentTeamMainMessage {
 }
 
 /** Project-level change shown in the Main stream: a Human grant or withdrawal of Project ownership. Rules version 2 and later only. */
-export interface AgentTeamMainActivity {
-  readonly activityRef: AgentTeamActivityRef
-  readonly projectRef: AgentTeamProjectRef
-  readonly kind: 'owner-added' | 'owner-removed'
-  /** The Agent Member whose ownership changed. */
-  readonly memberId: AgentTeamMemberId
-  readonly actor: AgentTeamMemberId
-  readonly sequence: number
-  readonly occurredAt: string
-}
 
 /** Sparse direct marker for one Main stream Message that mentions or answers a Member. Its own shape: the Thread marker requires a `threadRef`. */
 export interface AgentTeamMainMessageMarker {
@@ -417,8 +407,16 @@ export interface AgentTeamMainActivityMarker {
   readonly sequence: number
 }
 
+/** Sparse marker for one published subscription event; every owner of the Project holds one. */
+export interface AgentTeamMainEventMarker {
+  readonly memberId: AgentTeamMemberId
+  readonly projectRef: AgentTeamProjectRef
+  readonly eventRef: Branded<'AgentTeamSubscriptionEventRef'>
+  readonly sequence: number
+}
+
 /** Main stream marker: what a non-owner's Main stream unread consists of, and what an owner keeps on top of the ordinary unread. */
-export type AgentTeamMainMarker = AgentTeamMainMessageMarker | AgentTeamMainActivityMarker
+export type AgentTeamMainMarker = AgentTeamMainMessageMarker | AgentTeamMainActivityMarker | AgentTeamMainEventMarker
 
 /** A Host reminder aimed at one Member. It is not a public Thread fact: reading its Task consumes only the recipient's marker. */
 export interface AgentTeamReminderMarker {
@@ -592,3 +590,89 @@ export interface AgentTeamStoredThreadReadFact {
   readonly direct: boolean
 }
 
+
+/** Stable identifier of one Project subscription. */
+export type AgentTeamSubscriptionRef = Branded<'AgentTeamSubscriptionRef'>
+
+/** Stable identifier of one published subscription event; it is also the event's Main stream address. */
+export type AgentTeamSubscriptionEventRef = Branded<'AgentTeamSubscriptionEventRef'>
+
+/**
+ * One Project subscription's durable configuration. The script is a snapshot:
+ * the file it was read from is never consulted again, and `revision` moves only
+ * on `update`, so a run's identity survives a later edit.
+ */
+export interface AgentTeamSubscription {
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly name: string
+  readonly triggers: import('../subscriptions.ts').SubscriptionTriggers
+  readonly script: import('../subscriptions.ts').SubscriptionScriptSnapshot
+  /** References only: every value stays in the Harness credential store. */
+  readonly credentials: readonly import('../subscriptions.ts').SubscriptionCredential[]
+  readonly revision: number
+  readonly state: 'active' | 'paused' | 'deleted'
+  /** Why it is paused; absent while active, and `'failures'` records an automatic pause. */
+  readonly pausedReason?: 'manual' | 'failures' | undefined
+  readonly createdBy: AgentTeamMemberId
+  readonly createdAt: string
+}
+
+/** One accepted event: a Ledger fact from the moment its run's output passed validation, published later under the rate limit. */
+export interface AgentTeamSubscriptionEventAccepted {
+  /** Ledger sequence of the accept operation; the event's identity inside its subscription. */
+  readonly acceptedSequence: number
+  readonly event: import('../subscriptions.ts').SubscriptionEvent
+  /** The revision and script hash the producing run pinned, so a late r1 run never reads as r2. */
+  readonly subscriptionRevision: number
+  readonly scriptHash: string
+  readonly acceptedAt: string
+  /** Set once the event was published; its absence is the whole pending queue. */
+  readonly publishedSequence?: number | undefined
+}
+
+/** A published event as the Main stream holds it: a record type of its own, never a Message. */
+export interface AgentTeamSubscriptionEventPublished {
+  readonly eventRef: AgentTeamSubscriptionEventRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly subscriptionName: string
+  readonly event: import('../subscriptions.ts').SubscriptionEvent
+  /** The accept operation this event came from. */
+  readonly acceptedSequence: number
+  /** The publicizing operation, which is also this record's Main stream sequence. */
+  readonly sequence: number
+  readonly occurredAt: string
+}
+
+/** A Project ownership change: the one Main stream Activity that concerns exactly one Member. */
+export interface AgentTeamOwnerActivity {
+  readonly activityRef: AgentTeamActivityRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly kind: 'owner-added' | 'owner-removed'
+  /** The Agent Member whose ownership changed. */
+  readonly memberId: AgentTeamMemberId
+  readonly actor: AgentTeamMemberId
+  readonly sequence: number
+  readonly occurredAt: string
+}
+
+/** One subscription lifecycle line in the Main stream, naming the operator who caused it. */
+export interface AgentTeamSubscriptionActivity {
+  readonly activityRef: AgentTeamActivityRef
+  readonly projectRef: AgentTeamProjectRef
+  readonly kind: 'subscription-created' | 'subscription-updated' | 'subscription-paused' | 'subscription-resumed' | 'subscription-deleted'
+  readonly subscriptionRef: AgentTeamSubscriptionRef
+  readonly subscriptionName: string
+  /** The revision this line describes. */
+  readonly revision: number
+  /** Why a pause happened; absent on every other kind. */
+  readonly reason?: 'manual' | 'failures' | undefined
+  /** Who did it; absent only when the Host paused the subscription itself after repeated failures. */
+  readonly actor?: AgentTeamMemberId | undefined
+  readonly sequence: number
+  readonly occurredAt: string
+}
+
+/** One Main stream Activity: an ownership change, or a subscription lifecycle line. */
+export type AgentTeamMainActivity = AgentTeamOwnerActivity | AgentTeamSubscriptionActivity

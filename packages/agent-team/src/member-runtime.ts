@@ -37,6 +37,7 @@ export const AGENT_TEAM_TOOL_NAMES = Object.freeze([
   'team_dm',
   'team_task',
   'team_view',
+  'team_subscription',
   'team_reminder',
 ] as const)
 

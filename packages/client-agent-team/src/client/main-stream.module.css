@@ -90,3 +90,15 @@
   outline-offset: 2px;
 }
 .startCheck:has(input:disabled) { color: var(--dsw-alias-label-dimmed); cursor: default; }
+
+/* A published subscription event is script output, not Team prose: the title
+   carries the weight, the detail stays secondary, and the untrusted marker is
+   part of the block so a reader who scrolls to any part of it still sees it. */
+.subscriptionEventTitle {
+  font-weight: 600;
+  margin: 2px 0 0 14px;
+  overflow-wrap: anywhere;
+}
+.subscriptionEventUrl { font-size: 0.85em; margin: 2px 0 0 14px; overflow-wrap: anywhere; opacity: 0.8; }
+.subscriptionEventDetail { margin: 4px 0 0 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.subscriptionEventNotice { color: var(--dsw-alias-fg-secondary); font-size: 0.8em; margin: 4px 0 0 14px; }

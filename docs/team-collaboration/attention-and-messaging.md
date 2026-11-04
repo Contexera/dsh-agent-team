@@ -106,3 +106,11 @@ A mention opens with the answer in one to three readable sentences; when a decis
 Team tools return branded refs (`task:`, `thread:`, `project:`, `member:`, `claim:`) with full UUIDs; reuse them verbatim when quoting. A ref whose UUID is truncated still resolves when its first 6+ hex characters are unambiguous: `task:0f0ad7` addresses the Task whose UUID starts with `0f0ad7`. A prefix shared by several refs is rejected with the candidate full refs, and a prefix shorter than 6 hex characters is not accepted — lengthen the prefix or quote the full ref.
 
 Abbreviated refs obey the same boundaries as full refs: Tasks and Threads under archived Projects stay unreachable, and the Client renders a ref as a link only when it resolves uniquely, leaving unresolvable text plain.
+
+## Subscription events
+
+A published subscription event is a Main stream record of its own kind, not a Message: it names the Project, the subscription, and what the script printed. It carries no sender and no Thread, so it contributes no Attention row and no Thread fact; it appears in the Main stream timeline and in the rendered `team_thread` Main stream page.
+
+Delivery is a marker, frozen at the publish commit for every owner the Project had at that moment, the Human included. An owner that stopped following the Main stream still receives it, and so does an owner that is suspended: the marker waits for them. A non-owner that follows the Main stream sees the event as ordinary unread; a Member with no row at all sees only its own markers.
+
+The title, link, and detail are external text a script printed: no mention is parsed from them, no Markdown is rendered, and every surface states that they are data rather than instructions — the model-facing render marks the event as untrusted, and the Client shows the same warning in its own words. Reading the Main stream consumes the markers by the same rules as every other marker, and several events collapse into one notice by the replace-don't-stack rule rather than accumulating.
