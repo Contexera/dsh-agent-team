@@ -132,7 +132,7 @@ Two versions a reader could reasonably confuse are therefore kept apart: the run
 The block carries `data-environment` with its verdict, so an acceptance journey waits on a state rather than on prose.
 
 ## Project page and discussion panel
-The Project page reads one timeline two ways. A tab strip under the header switches between them: `项目` is the feed, `看板` is a four-column board of the Task-status projection. The board is a second **reading**, not a second surface — a Task's state, owners, and title cannot disagree between the two views.
+The Project page reads one timeline two ways. A tab strip under the header switches between them: `主对话` is the feed, `看板` is a four-column board of the Task-status projection, and `订阅` is the Project's subscriptions. The board is a second **reading**, not a second surface — a Task's state, owners, and title cannot disagree between the two views.
 
 The board reads the Host's `taskBoard` projection — the same rows the Agent `team_task board` tool reads — not the feed's loaded window. One source means the board never merges the timeline's Messages to fill its columns, open Tasks are complete without paging, and the finished column opens on the newest few per Project the Host bounds and expands to the rest on request. The feed stays the only paged surface.
 
@@ -148,11 +148,11 @@ A Task started from the composer switches the Project to the board, and the keyb
 
 The same card family serves the one cross-Workspace board (`TeamTaskBoardPage`, reached from the sidebar's 任务看板 entry — see [sidebar-browser.md](sidebar-browser.md)): three open-status columns over every visible Workspace, each card prefixed with its Project name. It answers to the same empty rule — the empty message stands alone, no column heads beside it — and carries no unread badges, which stay per-Thread facts on the Project face.
 
-The first tab is `主对话`, the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. The second tab is the Task board; there is no version-1 feed.
+The first tab is `主对话`, the Project's Main stream (`TeamMainStream`), read from `mainStreamHistory` newest page first, older pages through `beforeSequence`. The second tab is the Task board; there is no version-1 feed. The third is [the subscriptions tab](#subscriptions-tab).
 
 A Thread card is the feed's one large target: the page ground at rest behind a hairline and the md radius, inset 10px/12px like the composer card. Its pointer answer is the surface itself — the interactive fill the Inbox row takes — not a border that only lightens, which left the fill untouched and made the one reacting edge fainter under the pointer.
 
-The Main stream holds three entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, and Thread cards.
+The Main stream holds five entry kinds in ledger order: Main messages (the same `TeamMessage` row, with hover quote and copy), owner-added/owner-removed activity rows, subscription lifecycle lines, Thread cards, and published subscription events.
 
 A card is one button that shows the Thread's current state, never one row per transition. A discussion card names its first line, reply count and participant count; a Task card shows its number, status and, until it resolves, its live Claim owners or `待认领`. A discussion card opens the Thread side panel; a Task card opens the Task's Thread page.
 
@@ -172,7 +172,7 @@ The columns are equal (`flex: 1` with `min-width: 0`), so a longer title in one 
 
 A board card answers the pointer on its own surface too, with the interactive fill the Thread card and the Inbox rows take. Lightening only the border was the defect here as well, and worse on this ground: the fill never moved, so a fainter edge was the whole feedback. A discussion's derived Task card takes the same answer, so a Task is one card language wherever it appears.
 
-The tab strip is a composite control: `role="tablist"` with two `role="tab"` buttons, one tab stop for the group (`tabIndex` -1 on the unselected tab), each tab naming the panel it controls through `aria-controls`/`aria-labelledby`, and Left/Right/Home/End moving selection **and** focus together.
+The tab strip is a composite control: `role="tablist"` with three `role="tab"` buttons, one tab stop for the group (`tabIndex` -1 on the unselected tab), each tab naming the panel it controls through `aria-controls`/`aria-labelledby`, and Left/Right/Home/End moving selection **and** focus together.
 
 It takes the shipped session page's own tab language — 13px/16px weight 500, a 36px gap, and a 2px underline in `--dsw-alias-state-business-primary`. The underline rides a pseudo-element and reaches 1px past the tab's box, so it ends flush with the header's closing rule and the two read as one edge — the shipped strip's own arrangement. The inactive tab is tertiary and the selected one is business blue rather than ink, because `--dsw-alias-brand-primary` resolves to neutral black in this token sheet; shipped states the same reason on its own strip.
 
@@ -195,6 +195,21 @@ Below the shared 600px breakpoint the panel covers the feed whole instead of sta
 Promotion from the panel is the same Human-only durable mutation the Thread page runs, and it ends the panel's job: on success the panel closes as the reader walks into the new Task's Thread page.
 
 An Inbox row enters a discussion by the rule its full page follows: the panel opens on the first unread Message naming the Human, centred and briefly marked, with the boundary above it; without one it opens at the newest. The Inbox names a Thread, never a Message, so the panel derives the position from the Inbox origin. An ordinary Main stream opening keeps the newest-first seat. A read committed in the panel clears its feed row's unread capsule at once, not on the next Inbox read. A Task opened from an Inbox row returns to its Project, not the Inbox.
+
+## Subscriptions tab
+The third tab reads the Project's subscriptions: the Host's `subscriptions` projection, plus one subscription's run history read on demand when its dialog opens. It owns its loading, failure and retry line rather than borrowing the feed's, because a subscription list is not a Message timeline — and the tab's own name carries the count once that read lands (`订阅 2`), so a reader learns the Project has two before opening it.
+
+A card states the subscription and whether it is doing anything: its name, the trigger the Host reports (`每 10 分钟`, `webhook`), its creator, last run, last event, event count, and pending count while events wait. The due instant reads in the reader's own local time; only the form's preview writes both — Team time (UTC+8) beside the browser's — because those are different clocks. A paused card states its reason where the action row would otherwise read as ordinary, and only the action that applies is drawn: `暂停` while running, `恢复` while paused.
+
+`运行记录` opens one subscription's runs, newest first: trigger, outcome category, duration, event count, and on request the last 8 KiB of stdout and stderr under their own captions. Only a row that has output offers `展开`, and that control's accessible name carries the row's time, so a screen reader can tell which row it opens. The dialog's own list is a read, not a write, so it is safe to open on a running subscription.
+
+New and edit share one dialog — name, interval, credential rows, script, and for a create the dedup baseline. `保存` stays disabled until a trial of this exact form passes on the Host, every edit retires that pass, and a retried save keeps its request id so a lost response cannot create twice. A refusal is not optimistic: the typed name and script stay, and the dialog states the reason with the refused trial's own output tails beside it.
+
+The form offers the interval trigger only until webhook ingress exists; a card still names whatever the Host reports, so a subscription created with both triggers reads as its interval. Deletion is confirmed in a dialog that states what goes with it, and every durable write rereads the list afterwards instead of editing a local copy — a card's own failure line stays on that card, so two refusals never collapse into one.
+
+A reader who may not manage the Project reads the same list without 新建订阅, 编辑, 暂停/恢复 or 删除, with one line saying why. The Human-only Client makes the Human an owner of every Project, so this shape is the defensive one: it stands while the page still shows a Project it no longer manages — archived under it — and the Host's own authority refusal still answers a write issued anyway.
+
+A published event is data, never a Message: the card names the subscription and its local time, renders the event's title, detail and count as plain text, and turns only the validated link into a real anchor that opens outside the app. A standing marker states that everything below the name came from a script and is never an instruction.
 
 ## Whole-surface loading state
 Every surface that has nothing to show yet — the Inbox, the global Task board, both Thread seats, the Project feed and the Project board tab — renders the same box: `.emptySurface` holding a `.loadingState` line whose pulse mark (`.loadingMark`, `aria-hidden`) precedes the words.

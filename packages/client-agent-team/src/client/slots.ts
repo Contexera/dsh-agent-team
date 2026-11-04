@@ -66,6 +66,16 @@ import type {
   AgentTeamMemberReminderView,
   AgentTeamMemberReminderCancelRequest,
   AgentTeamMemberReminderCancelResult,
+  AgentTeamSubscriptionListRequest,
+  AgentTeamSubscriptionListResult,
+  AgentTeamSubscriptionLogsRequest,
+  AgentTeamSubscriptionLogsResult,
+  AgentTeamSubscriptionDraftTrialRequest,
+  AgentTeamSubscriptionDraftTrialResult,
+  AgentTeamCreateSubscriptionRequest,
+  AgentTeamUpdateSubscriptionRequest,
+  AgentTeamSubscriptionStateRequest,
+  AgentTeamSubscriptionWriteResult,
   AgentTeamView,
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
@@ -144,7 +154,20 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     selectedProjectRef?: AgentTeamProjectRef
   }
 
-export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> & TeamNavigationActions & {
+/** The Project subscription surface's two reads and five durable writes, all answered by the Host. */
+export interface TeamSubscriptionHost {
+  loadSubscriptions: (request: AgentTeamSubscriptionListRequest) => Promise<RemoteResult<AgentTeamSubscriptionListResult>>
+  loadSubscriptionLogs: (request: AgentTeamSubscriptionLogsRequest) => Promise<RemoteResult<AgentTeamSubscriptionLogsResult>>
+  /** A form's draft trial: nothing is stored, and Save re-runs it on the Host. */
+  testSubscriptionDraft: (request: AgentTeamSubscriptionDraftTrialRequest) => Promise<RemoteResult<AgentTeamSubscriptionDraftTrialResult>>
+  createSubscription: (request: AgentTeamCreateSubscriptionRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
+  updateSubscription: (request: AgentTeamUpdateSubscriptionRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
+  pauseSubscription: (request: AgentTeamSubscriptionStateRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
+  resumeSubscription: (request: AgentTeamSubscriptionStateRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
+  deleteSubscription: (request: AgentTeamSubscriptionStateRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
+}
+
+export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> & TeamNavigationActions & TeamSubscriptionHost & {
   navigation: TeamNavigationSource
   drafts: TeamDraftStore
   /** The Human's own identity: the display name and avatar every seat that names or draws them reads. */

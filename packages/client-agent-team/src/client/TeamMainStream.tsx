@@ -16,7 +16,7 @@ import { TeamMessage } from './TeamMessage.tsx'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
 import { TeamRunDivider } from './TeamRunDivider.tsx'
 import { TeamThreadCard } from './TeamThreadCard.tsx'
-import { mentionNamesOf, plainGist } from './team-formatters.ts'
+import { formatAbsoluteTime, formatInboxTime, mentionNamesOf, plainGist } from './team-formatters.ts'
 import { chunkRunsWithDays, isRunGap } from './team-separators.ts'
 import { useTimelineScroll } from './timeline-scroll.ts'
 import css from './conversation.module.css'
@@ -209,9 +209,14 @@ export function TeamMainStream({
       // mentions or Markdown, and the marker states that boundary on screen.
       const { event } = entry.event
       return <div className={streamCss.entry} data-main-entry="subscription-event" data-unread={unread} key={mainEntryKey(entry)}>
-        <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{t('mainSubscriptionEvent', { name: entry.event.subscriptionName })}</span></p>
+        <div className={streamCss.subscriptionEventHead}>
+          <p className={threadCss.activityRow}><span className={threadCss.activityMark} aria-hidden="true" /><span className={threadCss.activityText}>{t('mainSubscriptionEvent', { name: entry.event.subscriptionName })}</span></p>
+          <time className={streamCss.subscriptionEventTime} dateTime={entry.occurredAt} title={formatAbsoluteTime(entry.occurredAt)}>{formatInboxTime(entry.occurredAt, t)}</time>
+        </div>
         <p className={streamCss.subscriptionEventTitle}>{event.title}</p>
-        {event.url === undefined ? null : <p className={streamCss.subscriptionEventUrl}>{event.url}</p>}
+        {event.url === undefined ? null : <p className={streamCss.subscriptionEventUrl}>
+          <a href={event.url} target="_blank" rel="noreferrer noopener">{event.url}</a>
+        </p>}
         {event.detail === undefined ? null : <p className={streamCss.subscriptionEventDetail}>{event.detail}</p>}
         <p className={streamCss.subscriptionEventNotice}>{t('mainSubscriptionEventUntrusted')}</p>
       </div>

@@ -101,4 +101,35 @@
 }
 .subscriptionEventUrl { font-size: 0.85em; margin: 2px 0 0 14px; overflow-wrap: anywhere; opacity: 0.8; }
 .subscriptionEventDetail { margin: 4px 0 0 14px; overflow-wrap: anywhere; white-space: pre-wrap; }
-.subscriptionEventNotice { color: var(--dsw-alias-fg-secondary); font-size: 0.8em; margin: 4px 0 0 14px; }
+.subscriptionEventNotice { color: var(--dsw-alias-label-secondary); font-size: 0.8em; margin: 4px 0 0 14px; }
+
+/* The event line keeps its clock on the same row as the subscription name. A
+   script's URL is data, so it is a real link with no referrer back to the app. */
+.subscriptionEventHead {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.subscriptionEventTime {
+  color: var(--dsw-alias-label-tertiary);
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+
+.subscriptionEventUrl a {
+  color: var(--dsw-alias-state-business-primary);
+  text-decoration: none;
+}
+
+.subscriptionEventUrl a:hover {
+  text-decoration: underline;
+}
+
+.subscriptionEventUrl a:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}

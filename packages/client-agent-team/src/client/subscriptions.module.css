@@ -1,0 +1,438 @@
+/* The subscription tab borrows the timeline's scroll seat and keeps its content
+   in the same 880px reading column as the feed. */
+.panel {
+  box-sizing: border-box;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px clamp(18px, 3vw, 36px) 24px;
+}
+
+.column {
+  display: grid;
+  gap: 10px;
+  margin: 0 auto;
+  max-width: 880px;
+  min-width: 0;
+}
+
+.emptyHint {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  margin: 0;
+  max-width: 440px;
+  text-align: center;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+.readOnlyNote {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.card {
+  background: var(--dsw-alias-bg-base);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-md);
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.cardHead {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.cardName {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.trigger {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 999px;
+  color: var(--dsw-alias-label-secondary);
+  corner-shape: round;
+  font-size: 12px;
+  line-height: 18px;
+  padding: 1px 8px;
+}
+
+.creator {
+  color: var(--dsw-alias-label-caption);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.facts {
+  color: var(--dsw-alias-label-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 2px 6px;
+  line-height: 18px;
+  margin: 0;
+}
+
+/* One separator between facts, so a wrapped run of them still reads as a list
+   of statements rather than one long sentence. */
+.facts > span + span::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.paused {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inlineFailure {
+  color: var(--dsw-alias-state-error-primary);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  line-height: 18px;
+}
+
+.failureDetails summary {
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.failureDetails summary:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.tails {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.tails h4 {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  margin: 0 0 2px;
+}
+
+.tails pre {
+  background: var(--dsw-alias-bg-module-platform);
+  border-radius: var(--dsw-radius-sm);
+  font-size: 11px;
+  line-height: 16px;
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.scriptBlock {
+  background: var(--dsw-alias-bg-module-platform);
+  border-radius: var(--dsw-radius-sm);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.credentialList {
+  margin-top: 12px;
+}
+
+.sectionTitle {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  margin: 0 0 4px;
+}
+
+.credentialList ul {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.credentialList li {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.notice {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  margin: 0;
+}
+
+.error {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.hint {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.hint[data-invalid="true"] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.runList {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.runRow {
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  padding: 6px 0;
+}
+
+.runRow:last-child {
+  border-bottom: 0;
+}
+
+.runHead {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.runTime {
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+}
+
+.runTrigger,
+.runMeta {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.runOutcome {
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.runOutcome[data-succeeded="true"] {
+  color: var(--dsw-alias-label-primary);
+}
+
+.runOutcome[data-succeeded="false"] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.runHead button {
+  margin-left: auto;
+}
+
+.runBody {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.runReason {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.trialFailure,
+.trialPass {
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  line-height: 18px;
+}
+
+.trialFailure p,
+.trialPass p {
+  margin: 0;
+}
+
+.trialFailure {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.fieldset {
+  border: 0;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.fieldset legend {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  padding: 0 0 2px;
+}
+
+.credentialRow {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+}
+
+/* The add control is a field's peer, not a full-width band. */
+.fieldset > button {
+  justify-self: start;
+}
+
+.intervalRow {
+  align-items: center;
+  color: var(--dsw-alias-label-primary);
+  display: flex;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.minutesInput {
+  box-sizing: border-box;
+  width: 88px;
+}
+
+.scriptInput {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm, 8px);
+  box-sizing: border-box;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  line-height: 18px;
+  min-height: 160px;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
+.scriptInput:focus-visible {
+  border-color: var(--dsw-alias-brand-primary);
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 1px;
+}
+
+.scriptInput[aria-invalid="true"] {
+  border-color: var(--dsw-alias-state-error-primary);
+}
+
+.radioRow {
+  align-items: start;
+  color: var(--dsw-alias-label-primary);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  line-height: 20px;
+}
+
+.radioRow input {
+  margin: 4px 0 0;
+}
+
+@media (max-width: 600px) {
+  .credentialRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .credentialRow > :nth-child(2) {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .credentialRow > :last-child {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+}
+
+/* A code card or a run list is not form-sized: the shipped dialog asks for
+   380px, and wrapped script lines there cost more than the extra width. */
+.dialogWide {
+  width: min(560px, 100%);
+}
+
+/* The head keeps the title and the close button, so only the form scrolls. */
+.formViewport {
+  max-height: min(56vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* A verdict carries two output tails at most; its own cap keeps the fixed head
+   and foot of the dialog on screen when one of them is expanded. */
+.verdict {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  max-height: min(30vh, 260px);
+  overflow-y: auto;
+}
+
+.listViewport {
+  max-height: min(58vh, 500px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 600px) {
+  .formViewport {
+    max-height: 40vh;
+  }
+
+  .verdict {
+    max-height: 24vh;
+  }
+}

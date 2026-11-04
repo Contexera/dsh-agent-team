@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { AgentTeamClientMemberStatus, AgentTeamProjectRef, AgentTeamInbox, AgentTeamMemberId, AgentTeamTask, AgentTeamView,
-  AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamTaskBoard, AgentTeamTaskBoardItem,
+  AgentTeamTaskRef, AgentTeamThreadRef, AgentTeamTaskBoard, AgentTeamTaskBoardItem, AgentTeamSubscriptionListEntry,
 } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
@@ -9,6 +9,7 @@ import type { TeamConversationProps } from './slots.ts'
 import type { TeamDiscussionAnchor } from './navigation.ts'
 import type { TeamDraftStore } from './drafts.ts'
 import { TeamMainStream } from './TeamMainStream.tsx'
+import { TeamSubscriptionsTab } from './TeamSubscriptionsTab.tsx'
 import { TeamProjectPanel } from './TeamProjectPanel.tsx'
 import { resolvePanelWidth, readPanelWidthPreference } from './panel-width.ts'
 import type { TeamAvatarHuman } from './TeamAvatarStack.tsx'
@@ -33,6 +34,14 @@ interface TeamProjectPageProps {
   /** The Human's own unread per Thread: the Host's three-class judgement, never a Client guess. */
   readonly loadInbox: TeamConversationProps['loadInbox']
   readonly loadTaskBoard: TeamConversationProps['loadTaskBoard']
+  readonly loadSubscriptions: TeamConversationProps['loadSubscriptions']
+  readonly loadSubscriptionLogs: TeamConversationProps['loadSubscriptionLogs']
+  readonly testSubscriptionDraft: TeamConversationProps['testSubscriptionDraft']
+  readonly createSubscription: TeamConversationProps['createSubscription']
+  readonly updateSubscription: TeamConversationProps['updateSubscription']
+  readonly pauseSubscription: TeamConversationProps['pauseSubscription']
+  readonly resumeSubscription: TeamConversationProps['resumeSubscription']
+  readonly deleteSubscription: TeamConversationProps['deleteSubscription']
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -89,7 +98,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, loadSubscriptions, loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
@@ -104,7 +113,16 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const [finishedLimit, setFinishedLimit] = useState(FINISHED_PAGE)
   const finishedLimitRef = useRef(FINISHED_PAGE)
   const [expandingFinished, setExpandingFinished] = useState(false)
-  const [tab, setTab] = useState<'main' | 'board'>('main')
+  const [tab, setTab] = useState<'main' | 'board' | 'subscriptions'>('main')
+  // The subscription tab's projection: read on mount for the tab's count, then
+  // re-read while the tab is open and after every write it commits.
+  const [subscriptions, setSubscriptions] = useState<readonly AgentTeamSubscriptionListEntry[]>()
+  const [subscriptionsLoading, setSubscriptionsLoading] = useState(true)
+  const [subscriptionsError, setSubscriptionsError] = useState<string>()
+  // The mirror ref is what the re-read reads: the change listener holds the
+  // closure from the first render, where the list was still undefined, so a
+  // state read there would blank a loaded list on every Project change.
+  const subscriptionsLoadedRef = useRef(false)
   // The surface owns the panel-width variable; a drag writes it there so this page never re-renders.
   const [panelSurface, setPanelSurface] = useState<HTMLElement | null>(null)
   const mountedRef = useRef(false)
@@ -112,14 +130,17 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const loadedRef = useRef(false)
   const refreshSequenceRef = useRef(0)
   const tabIdPrefix = useId()
+  const subscriptionSequenceRef = useRef(0)
   const mainTabRef = useRef<HTMLButtonElement>(null)
   const boardTabRef = useRef<HTMLButtonElement>(null)
+  const subscriptionsTabRef = useRef<HTMLButtonElement>(null)
   const boardPanelRef = useRef<HTMLElement>(null)
   // Enter and Space need no branch: the button's own activation fires click.
   const onTabKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
-    const order: readonly { readonly value: 'main' | 'board'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
+    const order: readonly { readonly value: 'main' | 'board' | 'subscriptions'; readonly ref: React.RefObject<HTMLButtonElement | null> }[] = [
       { value: 'main', ref: mainTabRef },
       { value: 'board', ref: boardTabRef },
+      { value: 'subscriptions', ref: subscriptionsTabRef },
     ]
     const current = order.findIndex(entry => entry.value === tab)
     if (current < 0) return
@@ -274,6 +295,34 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
   const projectMemberIds = new Set(view?.members.filter(item => item.projectRef === projectRef).map(item => item.memberId) ?? [])
   const projectOwnerIds = new Set((view?.owners ?? []).filter(item => item.projectRef === projectRef).map(item => item.memberId))
 
+  // A re-read after a write keeps the rows on screen: only a first read has
+  // nothing to show, and blanking the list for every pause would make the page
+  // flicker on each committed write.
+  const refreshSubscriptions = async (clearError = false): Promise<void> => {
+    if (!mountedRef.current) return
+    const sequence = subscriptionSequenceRef.current + 1
+    subscriptionSequenceRef.current = sequence
+    if (!subscriptionsLoadedRef.current) setSubscriptionsLoading(true)
+    if (clearError) setSubscriptionsError(undefined)
+    try {
+      const result = await loadSubscriptions({ workspaceId, projectRef })
+      if (!mountedRef.current || sequence !== subscriptionSequenceRef.current) return
+      if (result.ok) {
+        setSubscriptions(result.value.entries)
+        setSubscriptionsError(undefined)
+        subscriptionsLoadedRef.current = true
+      } else {
+        setSubscriptionsError(result.error.message)
+      }
+    } catch (cause) {
+      if (mountedRef.current && sequence === subscriptionSequenceRef.current) {
+        setSubscriptionsError(cause instanceof Error ? cause.message : String(cause))
+      }
+    } finally {
+      if (mountedRef.current && sequence === subscriptionSequenceRef.current) setSubscriptionsLoading(false)
+    }
+  }
+
   const refresh = async (clearError = false) => {
     if (!mountedRef.current) return false
     const sequence = refreshSequenceRef.current + 1
@@ -324,12 +373,21 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     setTab('main')
     setLoadError(undefined)
     setLoading(true)
+    setSubscriptions(undefined)
+    setSubscriptionsError(undefined)
+    setSubscriptionsLoading(true)
+    subscriptionsLoadedRef.current = false
+    subscriptionSequenceRef.current = 0
     void refresh()
+    void refreshSubscriptions()
     const disposers = [
       subscribeChanges({ kind: 'project', projectRef }, update => {
         if (!mountedRef.current) return
         if (update.type === 'failed') { setLoadError(update.message); return }
         void refresh()
+        // The count is on the tab itself, so the list is re-read even while the
+        // feed stands in front: a stale number on a tab is a wrong claim.
+        void refreshSubscriptions()
       }),
       subscribeChanges({ kind: 'workspace', workspaceId }, update => {
         if (!mountedRef.current) return
@@ -349,6 +407,14 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     }
   }, [workspaceId, projectRef])
 
+  useEffect(() => {
+    if (tab === 'subscriptions') void refreshSubscriptions()
+  }, [tab])
+
+  const liveSubscriptions = subscriptions?.filter(entry => entry.subscription.state !== 'deleted')
+  const subscriptionsLabel = liveSubscriptions === undefined ? t('projectTabSubscriptions')
+    : t('projectTabSubscriptionsWithCount', { count: liveSubscriptions.length })
+
   return <main className={css.surface} data-team-project={projectRef} ref={setPanelSurface}>
     <div className={`${css.surfaceHeader} ${css.surfaceHeaderWithTabs}`}>
       <header className={css.headerRow}>
@@ -362,6 +428,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
       <nav className={projectCss.tabs} role="tablist" aria-label={project === undefined ? '# …' : `# ${project.name}`} onKeyDown={onTabKeyDown}>
         <button ref={mainTabRef} id={`${tabIdPrefix}-main`} type="button" role="tab" aria-selected={tab === 'main'} aria-controls={`${tabIdPrefix}-main-panel`} tabIndex={tab === 'main' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('main') }}>{t('projectTabMain')}</button>
         <button ref={boardTabRef} id={`${tabIdPrefix}-board`} type="button" role="tab" aria-selected={tab === 'board'} aria-controls={`${tabIdPrefix}-board-panel`} tabIndex={tab === 'board' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('board') }}>{t('projectTabBoard')}</button>
+        <button ref={subscriptionsTabRef} id={`${tabIdPrefix}-subscriptions`} type="button" role="tab" aria-selected={tab === 'subscriptions'} aria-controls={`${tabIdPrefix}-subscriptions-panel`} tabIndex={tab === 'subscriptions' ? 0 : -1} className={projectCss.tab} onClick={() => { setTab('subscriptions') }}>{subscriptionsLabel}</button>
       </nav>
     </div>
 
@@ -386,6 +453,22 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
         </div>)}
       </div>}
     </section>}
+
+    {tab === 'subscriptions' && <TeamSubscriptionsTab
+      workspaceId={workspaceId}
+      projectRef={projectRef}
+      host={{ loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription }}
+      entries={subscriptions}
+      loading={subscriptionsLoading}
+      error={subscriptionsError}
+      onRetry={() => { void refreshSubscriptions(true) }}
+      onChanged={() => { void refreshSubscriptions() }}
+      canManage={project?.state === 'active'}
+      memberOf={memberOf}
+      panelId={`${tabIdPrefix}-subscriptions-panel`}
+      labelledBy={`${tabIdPrefix}-subscriptions`}
+      t={t}
+    />}
 
     {tab === 'main' && <div id={`${tabIdPrefix}-main-panel`} role="tabpanel" aria-labelledby={`${tabIdPrefix}-main`} className={projectCss.feedStage} data-panel={discussionRef === undefined ? 'closed' : 'open'}>
       {project !== undefined && view !== undefined ? <TeamMainStream

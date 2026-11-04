@@ -4,10 +4,22 @@ vi.setConfig({ testTimeout: 30_000 })
 import { cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
 import { runtimeWithTeam } from './harness.tsx'
+import type { AgentTeamMemberId, AgentTeamProjectRef, AgentTeamSubscription, AgentTeamSubscriptionListEntry } from '@contexera/dsh-agent-team/types'
 
 usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
+
+const storedSubscription: AgentTeamSubscription = {
+  subscriptionRef: 'subscription:ci' as AgentTeamSubscription['subscriptionRef'],
+  projectRef: 'project:engineering' as AgentTeamProjectRef,
+  name: 'main CI',
+  triggers: { interval: { minutes: 10 } },
+  script: { content: 'printf events\n', sha256: 'a'.repeat(64), shell: 'bash' },
+  credentials: [], revision: 1, state: 'active',
+  createdBy: 'member:human' as AgentTeamMemberId, createdAt: '2026-11-03T01:00:00.000Z',
+}
+const subscriptionEntry: AgentTeamSubscriptionListEntry = { subscription: storedSubscription, unpublished: 0, eventCount: 0 }
 
 describe('Team Project board', () => {
   it('switches feed and board through the header tabs and opens a Task card on the Thread level', async () => {
@@ -86,13 +98,14 @@ describe('Team Project board', () => {
     await b.runtime.dispose()
   })
 
-  it('moves the selection with the arrow keys and reaches both tabs from the keyboard', async () => {
+  it('moves the selection with the arrow keys and reaches every tab from the keyboard', async () => {
     const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, seedTaskStatus: 'todo', seededMessages: [
       { body: '实现 API 网关', occurredAt: '2026-10-14T09:00:00.000Z' },
     ] })
     fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
     const feedTab = await b.view.findByRole('tab', { name: '主对话' })
     const boardTab = b.view.getByRole('tab', { name: '看板' })
+    const subscriptionsTab = b.view.getByRole('tab', { name: /^订阅/ })
     feedTab.focus()
     // Right moves the selection and the focus together, so the reader never has
     // to press a key on a tab that is not the one they are standing on.
@@ -100,16 +113,46 @@ describe('Team Project board', () => {
     expect(boardTab.getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement).toBe(boardTab)
     fireEvent.keyDown(b.view.getByRole('tablist'), { key: 'ArrowRight' })
+    expect(subscriptionsTab.getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement).toBe(subscriptionsTab)
+    fireEvent.keyDown(b.view.getByRole('tablist'), { key: 'ArrowRight' })
     expect(feedTab.getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement).toBe(feedTab)
     // Home and End reach the ends of the strip without stepping through it.
     fireEvent.keyDown(b.view.getByRole('tablist'), { key: 'End' })
-    expect(boardTab.getAttribute('aria-selected')).toBe('true')
+    expect(subscriptionsTab.getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(b.view.getByRole('tablist'), { key: 'Home' })
     expect(feedTab.getAttribute('aria-selected')).toBe('true')
     // An unrelated key is left alone: it must not steal typing or scrolling.
     fireEvent.keyDown(b.view.getByRole('tablist'), { key: 'ArrowDown' })
     expect(feedTab.getAttribute('aria-selected')).toBe('true')
+    await b.runtime.dispose()
+  })
+
+  /**
+   * A Project change re-reads the subscription list so the tab's count stays
+   * honest, but the rows already on screen stay: the first read's loading face
+   * is not a re-read's. The re-read below is held open on purpose, because the
+   * defect this catches was a flash of 「正在加载订阅…」 that a fast answer would
+   * have hidden.
+   */
+  it('keeps loaded subscription rows while a Project change re-reads them', async () => {
+    const b = await runtimeWithTeam({ mode: 'team', workspaceId: 'w1', initialProjects: true, subscriptions: [subscriptionEntry] })
+    fireEvent.click(await b.view.findByRole('button', { name: '# engineering' }))
+    fireEvent.click(await b.view.getByRole('tab', { name: /^订阅/ }))
+    expect(await b.view.findByText('main CI')).toBeTruthy()
+    let release: () => void = () => {}
+    b.loadSubscriptions.mockImplementationOnce(() => new Promise(resolve => {
+      release = () => { resolve({ ok: true, value: { entries: [subscriptionEntry] } }) }
+    }))
+    const before = b.loadSubscriptions.mock.calls.length
+    b.publishProjectUpdate()
+    await waitFor(() => expect(b.loadSubscriptions.mock.calls.length).toBeGreaterThan(before))
+    // The held re-read is in flight: the list must still be the one on screen.
+    expect(b.view.queryByText('正在加载订阅…')).toBeNull()
+    expect(b.view.getByText('main CI')).toBeTruthy()
+    release()
+    await waitFor(() => expect(b.view.getByText('main CI')).toBeTruthy())
     await b.runtime.dispose()
   })
 

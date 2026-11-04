@@ -161,6 +161,8 @@ import type {
   AgentTeamSubscriptionBaselineResult,
   AgentTeamSubscriptionDeliveriesRequest,
   AgentTeamSubscriptionDeliveriesResult,
+  AgentTeamSubscriptionDraftTrialRequest,
+  AgentTeamSubscriptionDraftTrialResult,
   AgentTeamSubscriptionListRequest,
   AgentTeamSubscriptionListResult,
   AgentTeamSubscriptionLogEntry,
@@ -3355,9 +3357,22 @@ export default class AgentTeam extends TypertRemoteService {
     // Listing carries the scripts themselves, so it is gated like the reads it
     // answers: a Workspace share is not a Project membership.
     ledger.assertSubscriptionReadAuthority(actor, request.projectRef, request.workspaceId)
-    const entries = ledger.subscriptionsOfProject(request.projectRef).map(subscription => Object.freeze({
-      subscription, unpublished: ledger.pendingSubscriptionEvents(subscription.subscriptionRef).length,
-    }))
+    const entries = ledger.subscriptionsOfProject(request.projectRef).map(subscription => {
+      const subscriptionRef = subscription.subscriptionRef
+      // The page scans one row per subscription: what the ledger accepted, and
+      // the newest run and due instant the private checkpoints already hold.
+      const accepted = ledger.subscriptionEvents(subscriptionRef)
+      const lastRun = this.runRecordsOf(subscriptionRef)[0]
+      const dueAt = this.checkpointFor(subscriptionRef).dueAt
+      return Object.freeze({
+        subscription,
+        unpublished: ledger.pendingSubscriptionEvents(subscriptionRef).length,
+        eventCount: accepted.length,
+        ...(accepted.length === 0 ? {} : { lastEventAt: accepted.at(-1)!.acceptedAt }),
+        ...(lastRun === undefined ? {} : { lastRun: runSummaryOf(lastRun) }),
+        ...(dueAt === undefined ? {} : { nextRunAt: new Date(dueAt).toISOString() }),
+      })
+    })
     return Object.freeze({ entries: Object.freeze(entries) })
   }
 
@@ -3863,8 +3878,13 @@ export default class AgentTeam extends TypertRemoteService {
    * A trial runs under the same execution path as a live run, so validation
    * cannot pass a script production would refuse — and through the same
    * admission, so five creates in parallel still run four scripts at most.
+   *
+   * `record` is false for a create draft's trial: there is no stored definition
+   * for that run to describe, and its throwaway ref would leave a run record
+   * nobody can ever read or retire. An edit draft does name a stored
+   * subscription, so its trial is recorded like any other test run.
    */
-  private trialSubscriptionRun(subscription: AgentTeamSubscription): Promise<SubscriptionRunReport> {
+  private trialSubscriptionRun(subscription: AgentTeamSubscription, record = true): Promise<SubscriptionRunReport> {
     const execute = async (): Promise<SubscriptionRunReport> => {
       const startedAt = Date.now()
       const report = await this.executeSubscriptionRun(subscription, 'test')
@@ -3872,8 +3892,10 @@ export default class AgentTeam extends TypertRemoteService {
       // pause nor clears it, and passing never moves the success waterline. It
       // is recorded, because an owner asking "did my fix pass?" reads the same
       // history as the runs — and it counts no events, because it publishes none.
-      await this.recordSubscriptionRun(runRecordOf({ subscription, trigger: 'test', startedAt, durationMs: Date.now() - startedAt,
-        category: report.ok ? 'verified' : failureCategory(report), eventCount: 0, report }))
+      if (record) {
+        await this.recordSubscriptionRun(runRecordOf({ subscription, trigger: 'test', startedAt, durationMs: Date.now() - startedAt,
+          category: report.ok ? 'verified' : failureCategory(report), eventCount: 0, report }))
+      }
       return report
     }
     const scheduler = this.subscriptionScheduler
@@ -3991,6 +4013,56 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('testSubscription')
   async testSubscriptionForClient(request: AgentTeamTestSubscriptionRequest): Promise<AgentTeamSubscriptionTrialResult> {
     return this.testSubscription(request, this.humanCall(request.workspaceId))
+  }
+
+  /**
+   * A page's trial of the definition its form holds. No Team fact is written:
+   * the script runs through the same validation and executor as a save, and the
+   * answer names the snapshot and revision the Client may bind Save to. An edit
+   * draft does leave one private test run, like any other trial of a stored
+   * subscription; a create draft leaves nothing, because its throwaway ref would
+   * belong to no stored definition. Save still re-runs the trial in create/
+   * update, so a cached pass is never trusted.
+   */
+  @Remote('testSubscriptionDraft')
+  async testSubscriptionDraft(request: AgentTeamSubscriptionDraftTrialRequest): Promise<AgentTeamSubscriptionDraftTrialResult> {
+    this.requireAccepting()
+    const actor = this.humanCall(request.workspaceId)
+    const ledger = this.requireLedger()
+    ledger.assertSubscriptionAuthority(actor, request.projectRef, request.workspaceId)
+    const prior = request.subscriptionRef === undefined ? undefined : ledger.subscription(request.subscriptionRef)
+    if (request.subscriptionRef !== undefined) {
+      if (prior === undefined || prior.projectRef !== request.projectRef) {
+        throw new Error(`subscription '${request.subscriptionRef}' does not belong to Project '${request.projectRef}'`)
+      }
+      if (prior.state === 'deleted') throw new Error(`subscription '${request.subscriptionRef}' is deleted (subscription_deleted)`)
+      if (request.expectedRevision === undefined) {
+        throw new Error(`a draft trial of '${prior.subscriptionRef}' needs the revision the form started from`)
+      }
+      if (request.expectedRevision !== prior.revision) {
+        throw new Error(`subscription '${prior.subscriptionRef}' is at revision ${prior.revision}, not ${request.expectedRevision} (stale_revision)`)
+      }
+    } else if (request.expectedRevision !== undefined) {
+      throw new Error('a draft trial without a subscription cannot name a revision')
+    }
+    const script = await this.snapshotSubscriptionScript({ scriptContent: request.scriptContent }, undefined)
+    const triggers: SubscriptionTriggers = Object.freeze({ interval: Object.freeze({ minutes: request.intervalMinutes }) })
+    const credentials = Object.freeze([...(request.credentials ?? [])])
+    const name = request.name.trim()
+    const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
+    if (problem !== undefined) throw new Error(`this subscription cannot be saved: ${problem}`)
+    const missing = await missingCredentials(this.credentialProvider(), credentials)
+    if (missing.length > 0) throw new Error(this.missingCredentialMessage(missing))
+    // An edit keeps the stored definition as the base, so the trial sees the
+    // baseline and revision the save would keep; a create draft has neither.
+    const draft = prior === undefined
+      ? this.draftSubscription(actor, { projectRef: request.projectRef, name, triggers, script, credentials })
+      : Object.freeze({ ...prior, name, triggers, script, credentials })
+    const trial = await this.trialSubscriptionRun(draft, prior !== undefined)
+    const outcome: AgentTeamSubscriptionTrialResult = trial.ok
+      ? Object.freeze({ kind: 'tested', events: trial.events, stdoutTail: failureTail(trial.stdout), stderrTail: failureTail(trial.stderr) })
+      : Object.freeze({ kind: 'trial-failed', failure: this.trialFailureOf(trial) })
+    return Object.freeze({ ...outcome, scriptHash: script.sha256, revision: draft.revision })
   }
 
   async pauseSubscriptionForAgent(agent: Agent, request: AgentTeamSubscriptionStateRequest): Promise<AgentTeamSubscriptionWriteResult> {

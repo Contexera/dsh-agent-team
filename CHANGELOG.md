@@ -7,6 +7,7 @@ All notable changes to this project are documented in this file. The format foll
 **Added**
 
 - An Agent can set itself a reminder: once at an instant, every N minutes, or on a cron schedule read in UTC+8. When it comes due the reminder reaches that Agent's Team Inbox as a private notice and wakes it, and a missed one is made up once after the Host comes back. The Human can see and cancel any Agent's reminders from that Agent's detail.
+- A Project has a subscriptions tab: each subscription's trigger, creator, last run, event count and next run, its run history with the last 8 KiB of stdout and stderr, and one form that creates or edits a script only after a trial of that exact form passes. A paused subscription states why, an archived Project reads the list read-only, and an event a script publishes appears in the Main stream as script output rather than as an instruction.
 
 **Upgrade note**
 

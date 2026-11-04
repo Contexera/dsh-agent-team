@@ -90,6 +90,7 @@ export const UI08_SHOTS = join(BROWSER_ARTIFACTS, 'ui-08')
 export const UI09_SHOTS = join(BROWSER_ARTIFACTS, 'ui-09')
 export const SETTINGS_SHOTS = join(BROWSER_ARTIFACTS, 'settings-nav')
 export const MAIN_STREAM_SHOTS = join(BROWSER_ARTIFACTS, 'main-stream')
+export const SUBSCRIPTION_SHOTS = join(BROWSER_ARTIFACTS, 'subscriptions')
 /**
  * Wait until no finite animation is running: a screenshot taken mid-collapse
  * captures the expanded column clipped to the rail. Infinite animations
@@ -424,4 +425,5 @@ export async function installLocalBundle(): Promise<void> {
   await mkdir(UI08_SHOTS, { recursive: true })
   await mkdir(UI09_SHOTS, { recursive: true })
   await mkdir(SETTINGS_SHOTS, { recursive: true })
+  await mkdir(SUBSCRIPTION_SHOTS, { recursive: true })
 }

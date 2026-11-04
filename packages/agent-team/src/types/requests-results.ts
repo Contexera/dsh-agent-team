@@ -1167,23 +1167,11 @@ export type AgentTeamSubscriptionScriptSource =
   | { readonly scriptPath: string }
   | { readonly scriptContent: string }
 
-/** One stored subscription with the size of its unpublished backlog, as an owner sees the list. */
-export interface AgentTeamSubscriptionListEntry {
-  readonly subscription: AgentTeamSubscription
-  readonly unpublished: number
-}
-
-export interface AgentTeamSubscriptionListRequest {
-  readonly workspaceId: WorkspaceId
-  readonly projectRef: AgentTeamProjectRef
-}
-
-export interface AgentTeamSubscriptionListResult {
-  readonly entries: readonly AgentTeamSubscriptionListEntry[]
-}
-
-/** One recorded run as a log read returns it: the summary everyone sees, the tails only an owner does. */
-export interface AgentTeamSubscriptionLogEntry {
+/**
+ * One recorded run's summary. Every Project member reads this much; the tails
+ * and the failure reason stay with an owner.
+ */
+export interface AgentTeamSubscriptionRunSummary {
   readonly runRef: string
   readonly trigger: 'interval' | 'webhook' | 'test'
   /** ISO instant the script started. */
@@ -1196,6 +1184,36 @@ export interface AgentTeamSubscriptionLogEntry {
   readonly exitCode: number | null
   readonly timedOut: boolean
   readonly subscriptionRevision: number
+}
+
+/**
+ * One stored subscription as the Project page lists it: its backlog, what the
+ * ledger counts as events, and the timestamps a reader scans for.
+ */
+export interface AgentTeamSubscriptionListEntry {
+  readonly subscription: AgentTeamSubscription
+  readonly unpublished: number
+  /** Events this subscription's runs had accepted into the ledger, published or waiting. */
+  readonly eventCount: number
+  /** When the newest accepted event was accepted; absent before the first. */
+  readonly lastEventAt?: string | undefined
+  /** The newest recorded run, trial runs included; absent before the first. */
+  readonly lastRun?: AgentTeamSubscriptionRunSummary | undefined
+  /** The persisted instant the Host will next consider a timer run; absent while it waits for boot scheduling. */
+  readonly nextRunAt?: string | undefined
+}
+
+export interface AgentTeamSubscriptionListRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+}
+
+export interface AgentTeamSubscriptionListResult {
+  readonly entries: readonly AgentTeamSubscriptionListEntry[]
+}
+
+/** One recorded run as a log read returns it: the summary everyone sees, the tails only an owner does. */
+export interface AgentTeamSubscriptionLogEntry extends AgentTeamSubscriptionRunSummary {
   /** Owner-only: why a failed run failed, in the words the run itself used. */
   readonly reason?: string | undefined
   /** Owner-only: the last 8 KiB of each stream, exactly what a refusal would show. */
@@ -1311,6 +1329,32 @@ export interface AgentTeamTestSubscriptionRequest {
   readonly workspaceId: WorkspaceId
   readonly projectRef: AgentTeamProjectRef
   readonly subscriptionRef: AgentTeamSubscriptionRef
+}
+
+/**
+ * A form's own definition, tried before anything is stored. An edit names the
+ * subscription and the revision it started from, so the trial runs against the
+ * same deduplication baseline the save would keep.
+ */
+export interface AgentTeamSubscriptionDraftTrialRequest {
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  /** The stored subscription an edit starts from; absent for a create draft. */
+  readonly subscriptionRef?: AgentTeamSubscriptionRef | undefined
+  /** Required with `subscriptionRef`: the revision the form was filled from. */
+  readonly expectedRevision?: number | undefined
+  readonly name: string
+  readonly intervalMinutes: number
+  readonly scriptContent: string
+  readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
+}
+
+/** A draft trial's verdict plus the identity the Client binds its form to. */
+export type AgentTeamSubscriptionDraftTrialResult = AgentTeamSubscriptionTrialResult & {
+  /** The snapshot this trial executed: a form saved with other bytes was not tested. */
+  readonly scriptHash: string
+  /** The revision the trial ran under: the prior revision on an edit, 1 on a create draft. */
+  readonly revision: number
 }
 
 export interface AgentTeamSubscriptionStateRequest {

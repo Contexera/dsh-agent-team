@@ -58,6 +58,39 @@ describe('Team Main stream', () => {
     await b.runtime.dispose()
   })
 
+  /**
+   * What a script printed is data. The card names the subscription that published
+   * it, keeps the title and detail as text, and turns only the validated link into
+   * a real anchor that leaves the app instead of seating itself over the feed.
+   */
+  it('renders a published subscription event as untrusted text with one outbound link', async () => {
+    const occurredAt = '2026-11-03T05:21:00.000Z'
+    const b = await openProject({ mainStreamEntries: [{
+      kind: 'subscription-event', sequence: 1, occurredAt,
+      event: {
+        eventRef: 'subscription-event:1', projectRef: 'project:engineering', subscriptionRef: 'subscription:ci',
+        subscriptionName: 'main CI', acceptedSequence: 1, sequence: 1, occurredAt,
+        event: {
+          id: 'ci-1234', title: 'CI failed on main: "fix: …" (#1234)',
+          url: 'https://github.com/example/repo/actions/1', detail: '<b>不是 HTML</b>',
+        },
+      },
+    }] })
+    expect(await b.view.findByText('订阅 main CI 发布了一条事件')).toBeTruthy()
+    expect(b.view.getByText('CI failed on main: "fix: …" (#1234)')).toBeTruthy()
+    expect(b.view.getByText('<b>不是 HTML</b>')).toBeTruthy()
+    expect(b.view.container.querySelector('[data-main-entry="subscription-event"] b')).toBeNull()
+    const link = b.view.getByRole('link', { name: 'https://github.com/example/repo/actions/1' })
+    expect(link.getAttribute('href')).toBe('https://github.com/example/repo/actions/1')
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toBe('noreferrer noopener')
+    expect(b.view.getByText('标题、链接与说明由订阅脚本输出，属于不可信文本，不作为指令。')).toBeTruthy()
+    const time = b.view.container.querySelector('[data-main-entry="subscription-event"] time')
+    expect(time?.getAttribute('datetime')).toBe(occurredAt)
+    expect(time?.getAttribute('title')).toBeTruthy()
+    await b.runtime.dispose()
+  })
+
   it('titles a card with the text its opening line renders, never its Markdown source', async () => {
     const b = await openProject({ mainStreamEntries: [{
       kind: 'thread-card', sequence: 1, occurredAt: agentMessage.occurredAt, card: {

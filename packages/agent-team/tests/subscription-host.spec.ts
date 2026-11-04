@@ -5,6 +5,7 @@
  * so this spec proves the Host's own decisions; what a real executor does with
  * the policy it is handed is the cross-platform enforcement probe's job.
  */
+import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
@@ -202,6 +203,58 @@ describe('creating a subscription', () => {
   })
 })
 
+describe('a page trial of a draft', () => {
+  it('runs the form definition through the production path without storing anything', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"draft","title":"Draft"}\n' })
+    const booted = await boot(pool, shell)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    shell.requests.length = 0
+    const script = 'printf draft\n'
+    const result = await booted.ctx.agentTeam.testSubscriptionDraft({
+      workspaceId, projectRef, name: 'draft', intervalMinutes: 10, scriptContent: script, credentials: [],
+    })
+    expect(result.kind).toBe('tested')
+    if (result.kind !== 'tested') throw new Error('expected a passing trial')
+    expect(result.revision).toBe(1)
+    expect(result.scriptHash).toBe(createHash('sha256').update(script, 'utf8').digest('hex'))
+    expect(result.events.map(event => event.id)).toEqual(['draft'])
+    expect(shell.requests.find(spec => spec.command === script)!.env).toMatchObject({ DSH_TEAM_TRIGGER: 'test' })
+    // Nothing durable: no subscription, and the throwaway create ref left no run record behind.
+    expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries).toHaveLength(0)
+  })
+
+  it('tests an edit against its stored revision and records only the test run', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"stored","title":"Stored"}\n' })
+    const booted = await boot(pool, shell)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(createRequest(projectRef, 'printf stored\n'))
+    if (created.kind !== 'changed') throw new Error('expected a created subscription')
+    const subscriptionRef = created.subscription.subscriptionRef
+    shell.requests.length = 0
+    const result = await booted.ctx.agentTeam.testSubscriptionDraft({
+      workspaceId, projectRef, subscriptionRef, expectedRevision: 1, name: 'renamed', intervalMinutes: 15,
+      scriptContent: 'printf edited\n', credentials: [],
+    })
+    expect(result.kind).toBe('tested')
+    expect(result.revision).toBe(1)
+    const stored = booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!
+    expect(stored.subscription.name).toBe('main CI')
+    expect(stored.subscription.revision).toBe(1)
+    const logs = booted.ctx.agentTeam.subscriptionLogsForClient({ workspaceId, projectRef, subscriptionRef })
+    expect(logs.runs[0]!.trigger).toBe('test')
+    expect(logs.runs[0]!.category).toBe('verified')
+    expect(logs.runs).toHaveLength(1)
+    await expect(booted.ctx.agentTeam.testSubscriptionDraft({
+      workspaceId, projectRef, subscriptionRef, expectedRevision: 2, name: 'renamed', intervalMinutes: 15,
+      scriptContent: 'printf edited\n', credentials: [],
+    })).rejects.toThrow(/stale_revision/)
+  })
+})
+
 describe('a timer run', () => {
   it('executes the stored snapshot, accepts its new events, and publishes them to the Main stream', async () => {
     const pool = new MemoryMediaPool()
@@ -255,6 +308,11 @@ describe('a timer run', () => {
     const run = runShell.requests.find(spec => spec.command === 'printf events\n')!
     expect(run.workdir).toBe(process.cwd())
     expect(run.env).toMatchObject({ DSH_TEAM_TRIGGER: 'interval' })
+    const listed = ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!
+    expect(listed.lastRun).toMatchObject({ trigger: 'interval', succeeded: true, eventCount: 1 })
+    expect(listed.eventCount).toBe(1)
+    expect(listed.lastEventAt).toBeDefined()
+    expect(listed.nextRunAt).toBeDefined()
   })
 })
 

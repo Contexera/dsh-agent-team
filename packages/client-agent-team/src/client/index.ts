@@ -35,6 +35,12 @@ import type {
   AgentTeamUpdateMemberRequest,
   AgentTeamMemberReminderListRequest,
   AgentTeamMemberReminderCancelRequest,
+  AgentTeamSubscriptionListRequest,
+  AgentTeamSubscriptionLogsRequest,
+  AgentTeamSubscriptionDraftTrialRequest,
+  AgentTeamCreateSubscriptionRequest,
+  AgentTeamUpdateSubscriptionRequest,
+  AgentTeamSubscriptionStateRequest,
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
 import agentTeamRemote from '@contexera/dsh-agent-team/remote'
@@ -266,6 +272,16 @@ function teamSeatInject(
       resolveTaskRefs: (request: AgentTeamResolveTaskRefsRequest) => ctx.remote.agentTeam.resolveTaskRefs(request),
       resolveThreadRefs: (request: AgentTeamResolveThreadRefsRequest) => ctx.remote.agentTeam.resolveThreadRefs(request),
       resolveMessageRefs: (request: AgentTeamResolveMessageRefsRequest) => ctx.remote.agentTeam.resolveMessageRefs(request),
+      // A Project's subscriptions are the Project page's own surface: the list,
+      // the owner-only run tails, and the writes that each reread the Host.
+      loadSubscriptions: (request: AgentTeamSubscriptionListRequest) => ctx.remote.agentTeam.subscriptions(request),
+      loadSubscriptionLogs: (request: AgentTeamSubscriptionLogsRequest) => ctx.remote.agentTeam.subscriptionLogs(request),
+      testSubscriptionDraft: (request: AgentTeamSubscriptionDraftTrialRequest) => ctx.remote.agentTeam.testSubscriptionDraft(request),
+      createSubscription: (request: AgentTeamCreateSubscriptionRequest) => ctx.remote.agentTeam.createSubscription(request),
+      updateSubscription: (request: AgentTeamUpdateSubscriptionRequest) => ctx.remote.agentTeam.updateSubscription(request),
+      pauseSubscription: (request: AgentTeamSubscriptionStateRequest) => ctx.remote.agentTeam.pauseSubscription(request),
+      resumeSubscription: (request: AgentTeamSubscriptionStateRequest) => ctx.remote.agentTeam.resumeSubscription(request),
+      deleteSubscription: (request: AgentTeamSubscriptionStateRequest) => ctx.remote.agentTeam.deleteSubscription(request),
     } : {}),
     ...(name === 'sidebar.workspaces' ? {
       addMember: (request: AgentTeamAddMemberRequest) => ctx.remote.agentTeam.addMember(request),

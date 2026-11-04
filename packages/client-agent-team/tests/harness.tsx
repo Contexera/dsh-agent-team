@@ -4,7 +4,7 @@ import { afterEach, expect, vi } from 'vitest'
 import { fireEvent, type RenderResult } from '@testing-library/react'
 import { useState } from 'react'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import type { AgentTeamAddMemberRequest, AgentTeamCreateProjectRequest, AgentTeamMemberDiagnostic, AgentTeamReplyRequest, AgentTeamTask } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamAddMemberRequest, AgentTeamCreateProjectRequest, AgentTeamMemberDiagnostic, AgentTeamReplyRequest, AgentTeamSubscriptionListEntry, AgentTeamSubscriptionLogEntry, AgentTeamTask } from '@contexera/dsh-agent-team/types'
 import { COMMON_NS, LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { en as commonEn, zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/index.ts'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
@@ -98,7 +98,7 @@ export function pressStartTask(view: TeamView): void {
 }
 
 /** One Main stream entry as the Host projects it; the harness fills the flags a spec does not care about. */
-export type MainStreamSeedEntry = { readonly kind: 'message' | 'activity' | 'thread-card'; readonly sequence: number; readonly occurredAt: string; readonly unread?: boolean } & Record<string, unknown>
+export type MainStreamSeedEntry = { readonly kind: 'message' | 'activity' | 'thread-card' | 'subscription-event'; readonly sequence: number; readonly occurredAt: string; readonly unread?: boolean } & Record<string, unknown>
 
 interface SeededMessage {
   readonly body: string
@@ -107,7 +107,7 @@ interface SeededMessage {
   readonly mentions?: readonly string[]
 }
 
-export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedsAsMainMessages?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; mainStreamEntries?: readonly MainStreamSeedEntry[]; mainStreamUnread?: number; environment?: EnvironmentSeed; environmentFailure?: string }) {
+export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: string; workspaceId?: string; initialProjects?: boolean; remainingUnreadCounts?: readonly number[]; seededMessages?: readonly SeededMessage[]; seedTaskRef?: string; seedThreadRef?: string; seedTaskless?: boolean; seedsAsMainMessages?: boolean; seedTaskStatus?: AgentTeamTask['status']; seedFollowers?: readonly string[]; humanProfile?: HumanProfileSeed; humanProfileFailure?: string; mainStreamEntries?: readonly MainStreamSeedEntry[]; mainStreamUnread?: number; environment?: EnvironmentSeed; environmentFailure?: string; subscriptions?: readonly AgentTeamSubscriptionListEntry[]; subscriptionFailure?: string; subscriptionRuns?: Readonly<Record<string, readonly AgentTeamSubscriptionLogEntry[]>>; subscriptionDraftFailure?: string }) {
   if (options?.mode !== undefined) {
     localStorage.setItem('dsh.agent-team.navigation', JSON.stringify({ mode: options.mode, ...(options.workspaceId === undefined ? {} : { workspaceId: options.workspaceId }) }))
   }
@@ -700,6 +700,32 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
     return { ok: true as const, value: { humanMemberId: 'member:human', open: items.filter(item => !['done', 'closed'].includes(item.task.status)).sort(newestFirst),
       finished: finished.slice(0, finishedLimitOrDefault), finishedTruncated: finished.length > finishedLimitOrDefault } }
   })
+  // The Project page's subscription projection: the tab's count comes from this
+  // read, so a spec seeds it before mount exactly as the Host would answer.
+  let subscriptionRows: readonly AgentTeamSubscriptionListEntry[] = options?.subscriptions ?? []
+  let subscriptionFailure: string | undefined = options?.subscriptionFailure
+  let subscriptionDraftFailure: string | undefined = options?.subscriptionDraftFailure
+  const subscriptionRuns = new Map<string, readonly AgentTeamSubscriptionLogEntry[]>(Object.entries(options?.subscriptionRuns ?? {}))
+  const loadSubscriptions = vi.fn(async () => subscriptionFailure === undefined
+    ? { ok: true as const, value: { entries: subscriptionRows } }
+    : { ok: false as const, error: { message: subscriptionFailure } })
+  const loadSubscriptionLogs = vi.fn(async ({ subscriptionRef }: { subscriptionRef: string }) => {
+    const row = subscriptionRows.find(entry => entry.subscription.subscriptionRef === subscriptionRef)
+    if (row === undefined) return { ok: false as const, error: { message: 'unknown subscription' } }
+    return { ok: true as const, value: { subscription: row.subscription, runs: subscriptionRuns.get(subscriptionRef) ?? [] } }
+  })
+  const testSubscriptionDraft = vi.fn(async () => subscriptionDraftFailure === undefined
+    ? { ok: true as const, value: { kind: 'tested' as const, events: [], stdoutTail: '', stderrTail: '', scriptHash: 'a'.repeat(64), revision: 1 } }
+    : { ok: false as const, error: { message: subscriptionDraftFailure } })
+  const unwiredSubscriptionWrite = vi.fn(async () => ({ ok: false as const, error: { message: 'subscription write not seeded' } }))
+  const seedSubscriptions = (rows: readonly AgentTeamSubscriptionListEntry[]): void => { subscriptionRows = rows }
+  const failSubscriptions = (message?: string): void => { subscriptionFailure = message }
+  const seedSubscriptionRuns = (runs: Readonly<Record<string, readonly AgentTeamSubscriptionLogEntry[]>>): void => {
+    subscriptionRuns.clear()
+    for (const [ref, entries] of Object.entries(runs)) subscriptionRuns.set(ref, entries)
+  }
+  const failSubscriptionDraft = (message?: string): void => { subscriptionDraftFailure = message }
+
   const changesStream = async function* (request: AgentTeamChangesRequest, signal?: AbortSignal) {
     let pending = false
     let resume: (() => void) | undefined
@@ -836,7 +862,7 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   // refuses by contract.
   runtime.remote.provideNamespaces({
     session: { modelCatalog },
-    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, changeAttention, transferTask, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar },
+    agentTeam: { members, joinWorkspace, leaveWorkspace, addMember, view: viewProjects, inbox, taskBoard: loadTaskBoard, readThread, threadHistory: loadThreadHistory, threadObservations, putAttachment, getAttachment, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, updateMember, recoverMember, archiveMember, postMainMessage, startThread, readMainStream, mainStreamHistory, reply, changeTask, promoteThread, changeAttention, transferTask, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, changes, environment, humanProfile, setHumanProfile, putHumanAvatar, getHumanAvatar, removeHumanAvatar, subscriptions: loadSubscriptions, subscriptionLogs: loadSubscriptionLogs, testSubscriptionDraft, createSubscription: unwiredSubscriptionWrite, updateSubscription: unwiredSubscriptionWrite, pauseSubscription: unwiredSubscriptionWrite, resumeSubscription: unwiredSubscriptionWrite, deleteSubscription: unwiredSubscriptionWrite },
   })
   Object.assign(runtime.remote, {
     $stream: <T,>(options: ConstructorParameters<typeof RemoteStream<T>>[1]) => new RemoteStream(connection, options),
@@ -880,5 +906,5 @@ export async function runtimeWithTeam(options?: { mode?: 'team'; mainPanelId?: s
   const view = runtime.renderRoot()
   const failThreadHistory = (message?: string): void => { threadHistoryFailure = message }
   const failTaskBoard = (message?: string): void => { taskBoardFailure = message }
-  return { runtime, team, view, seedMainInbox, loadTaskBoard, failTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, changeAttention, transferTask, failAttention, seedTransferOutcome, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady }
+  return { runtime, team, view, seedMainInbox, loadTaskBoard, failTaskBoard, panelInfo: runtime.panelInfo, selectPanel, disposeWorkspace, disposeSettings, members, humanProfile, setHumanProfile, getHumanAvatar, putHumanAvatar, removeHumanAvatar, seedHumanProfile, failHumanProfile, failHumanProfileWrite, environment, seedEnvironment, failEnvironment, joinWorkspace, leaveWorkspace, addMember, status, viewProjects, createProject, updateProject, archiveProject, addProjectOwner, removeProjectOwner, failProjectOwnerWrite, putAttachment, getAttachment, updateMember, recoverMember, archiveMember, modelCatalog, postMainMessage, startThread, readMainStream, mainStreamHistory, requireMainRead, reply, changeTask, promoteThread, changeAttention, transferTask, failAttention, seedTransferOutcome, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, publishAgentReply, publishPresence, publishWorkspaceUpdate, publishGlobalUpdate, seedProject, publishProjectUpdate, failChanges, recoverChanges, readThread, loadThreadHistory, threadObservations, changes, inbox, seedInbox, openSession, failThreadHistory, changeSubscriptionsReady, loadSubscriptions, loadSubscriptionLogs, testSubscriptionDraft, seedSubscriptions, failSubscriptions, seedSubscriptionRuns, failSubscriptionDraft }
 }

@@ -1139,7 +1139,7 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await expect.poll(async () => await page.getByRole('textbox', { name: '消息内容' }).count()).toBeGreaterThanOrEqual(1)
   await feedTab.focus()
   await page.keyboard.press('End')
-  await expect.poll(async () => await boardTab.getAttribute('aria-selected')).toBe('true')
+  await expect.poll(async () => await page.getByRole('tab', { name: /^订阅/ }).getAttribute('aria-selected')).toBe('true')
   await page.keyboard.press('Home')
   await expect.poll(async () => await feedTab.getAttribute('aria-selected')).toBe('true')
 
