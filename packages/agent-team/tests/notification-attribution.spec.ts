@@ -52,8 +52,8 @@ describe('Main notices attribute ordinary facts and keep the reader relation', (
     expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing)
       .toMatchObject({ unreadCount: 1, directCount: 0 })
 
-    // An ordinary Message and the ownership Activity share one count, so each
-    // ordinary fact keeps an entry without being expanded into direct text.
+    // An ordinary Message and the ownership Activity share one count and keep
+    // separate digest lines, without being expanded into direct text.
     adapter.enqueue(textResponse('Noted the ordinary update.'))
     await ctx.agentTeam.postMainMessage({ requestId: requestId('ordinary'), workspaceId,
       projectRef, body: 'Ordinary Main update' })
@@ -61,6 +61,8 @@ describe('Main notices attribute ordinary facts and keep the reader relation', (
     const combined = latestNotice(agent)
     expect(combined).not.toContain('made you an owner')
     expect(combined).toContain(`Main stream: 2 unread updates · Project ${projectRef}`)
+    expect(combined).toContain('human added target as a Project owner')
+    expect(combined).toContain('human: Ordinary Main update')
     expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing)
       .toMatchObject({ unreadCount: 2, directCount: 0 })
   })

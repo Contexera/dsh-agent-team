@@ -9,6 +9,10 @@ All notable changes to this project are documented in this file. The format foll
 - An Agent can set itself a reminder: once at an instant, every N minutes, or on a cron schedule read in UTC+8. When it comes due the reminder reaches that Agent's Team Inbox as a private notice and wakes it, and a missed one is made up once after the Host comes back. The Human can see and cancel any Agent's reminders from that Agent's detail, where each reminder is one row: its note, then schedule and state as one line of facts, and a withdraw control named for the row it withdraws.
 - A Project has a subscriptions tab that reads rather than authors: an owner arms subscriptions through the `team_subscription` tool, so the page shows each one's trigger, owner, last run, due instant and event count, its stored script, and its run history with the last 8 KiB of stdout and stderr — never a create or edit form. Each run is a row that opens itself for its output. Supervision stays with the Human: pause, resume and delete act on what an owner armed, under the revision the card was read at, and an archived Project drops those two while keeping the list. An event a script publishes appears in the Main stream as script output rather than as an instruction, in the column a Message body occupies.
 
+**Improved**
+
+- An Agent's wake notice now explains ordinary unread work instead of only counting it: each Thread or Project Main stream shows up to three latest Messages, Activities, or subscription events as short digests, with earlier entries collapsed into an overflow count. Direct mentions, responsibility Activities, and reminders keep their complete presentation and priority, and digest text does not become write context.
+
 **Upgrade note**
 
 - Team's durable identifiers now carry the `contexera` name: the six loader row ids in `cordis.patch.yml`, the three producer kinds that attribute what the bundle writes into Sessions, and the Human profile's settings namespace, now `contexera-agent-team-host`. Stored Session data reads unchanged: the pre-rename kinds still resolve, bare or `plugin:`-converted.
@@ -17,6 +21,7 @@ All notable changes to this project are documented in this file. The format foll
 
 **Fixed**
 
+- An automatic subscription pause now wakes owners with the subscription name and repeated-failure reason, plus the run-log route; it no longer misreports that the reader was removed as a Project owner.
 - Typing `@` straight after Chinese text opens the mention picker and reaches the Member: a call now starts at any `@` outside an ASCII word, so prose that spaces no words needs no space before a name, while an address like `mail@host.example` stays prose.
 - A Thread card's title, a Thread chip's title, a quote line, an Inbox gist and a board card's subject read as the line renders: its Markdown is projected to plain text before the line is cut to width, so `**…**` no longer shows as written. A Message body still renders its Markdown.
 

@@ -1153,8 +1153,8 @@ describe('Agent Team Member lifecycle', () => {
     expect(safeBoundaryRequest).toContain('Team Inbox has unread work')
     expect(safeBoundaryRequest).toContain(started.task!.taskRef)
     expect(safeBoundaryRequest).toContain('2 unread updates')
-    expect(safeBoundaryRequest).not.toContain('First hidden update')
-    expect(safeBoundaryRequest).not.toContain('Second hidden update')
+    expect(safeBoundaryRequest).toContain('First hidden update')
+    expect(safeBoundaryRequest).toContain('Second hidden update')
     const hints = agent.session.ownEvents().filter(event => event.type === 'user/message'
       && JSON.stringify(event.data).includes('Team Inbox has unread work'))
     expect(hints).toHaveLength(1)
@@ -1378,7 +1378,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(request).toContain(`released claims ${claim.claim.claimRef}`)
   })
 
-  it('wakes an idle Member from durable Inbox state without injecting Thread bodies', async () => {
+  it('wakes an idle Member from durable Inbox state with ordinary digest lines', async () => {
     const adapter = new ScriptedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const project = await ctx.agentTeam.createProject({ requestId: requestId('wake-project'), workspaceId, name: 'engineering', description: 'Engineering work' })
@@ -1394,14 +1394,14 @@ describe('Agent Team Member lifecycle', () => {
     await agent.whenIdle()
     expect(adapter.requests).toHaveLength(1)
     expect(JSON.stringify(adapter.requests[0]!.messages)).toContain('Team Inbox has unread work')
-    expect(JSON.stringify(adapter.requests[0]!.messages)).not.toContain('Please inspect the durable wake.')
+    expect(JSON.stringify(adapter.requests[0]!.messages)).toContain('Please inspect the durable wake.')
 
     adapter.enqueue(textResponse('I will triage both updates.'))
     const second = await ctx.agentTeam.reply({ requestId: requestId('wake-reply-2'), workspaceId, taskRef: started.task!.taskRef, body: 'A second update should coalesce.', baseRevision: first.thread.revision })
     if (second.kind !== 'committed') throw new Error(`expected committed reply, received ${second.kind}`)
     await agent.whenIdle()
     expect(adapter.requests).toHaveLength(2)
-    expect(JSON.stringify(adapter.requests[1]!.messages)).not.toContain('A second update should coalesce.')
+    expect(JSON.stringify(adapter.requests[1]!.messages)).toContain('A second update should coalesce.')
   })
 
   it('recovers a needed hint from durable unread state on Member resume', async () => {
@@ -1425,7 +1425,7 @@ describe('Agent Team Member lifecycle', () => {
     expect(adapter.requests).toHaveLength(1)
     const request = JSON.stringify(adapter.requests[0]!.messages)
     expect(request).toContain('Team Inbox has unread work')
-    expect(request).not.toContain('Unread while suspended')
+    expect(request).toContain('Unread while suspended')
   })
 
   it('keeps the automatic recovery instruction with durable Inbox routing', async () => {
@@ -1454,8 +1454,8 @@ describe('Agent Team Member lifecycle', () => {
       expect(request).toContain('Please continue the work you were doing before the error.')
       expect(request).toContain('Team Inbox has unread work')
       expect(request).toContain(started.task!.taskRef)
-      expect(request).not.toContain('Unread through automatic recovery')
-      expect(request).not.toMatch(/operator asked|automatic recovery|attempt|stop|handoff/i)
+      expect(request).toContain('Unread through automatic recovery')
+      expect(request).not.toMatch(/operator asked|attempt|stop|handoff/i)
     } finally {
       vi.useRealTimers()
     }
@@ -1612,7 +1612,7 @@ describe('Agent Team Member lifecycle', () => {
       expect(request).toContain('Please continue the work you were doing before the error.')
       expect(request).toContain('Team Inbox has unread work')
       expect(request).toContain(started.task!.taskRef)
-      expect(request).not.toContain('Unread through manual recovery')
+      expect(request).toContain('Unread through manual recovery')
       expect(request).not.toMatch(/automatic recovery|attempt|stop|handoff/i)
     } finally {
       vi.useRealTimers()
@@ -1639,7 +1639,7 @@ describe('Agent Team Member lifecycle', () => {
     await agent.whenIdle()
     const request = JSON.stringify(adapter.requests.at(-1)!.messages)
     expect(request).toContain('Team Inbox has unread work')
-    expect(request).not.toContain('Unread through runtime error')
+    expect(request).toContain('Unread through runtime error')
   })
 
   it('reissues a needed hint from durable unread state after Host remount', async () => {
@@ -1665,7 +1665,7 @@ describe('Agent Team Member lifecycle', () => {
     await restored.whenIdle()
     const lastRequest = JSON.stringify(adapter.requests.at(-1)!.messages)
     expect(lastRequest).toContain('Team Inbox has unread work')
-    expect(lastRequest).not.toContain('Unread across Host remount')
+    expect(lastRequest).toContain('Unread across Host remount')
 
     // The catch-up wake states the lifecycle step that caused it, with the
     // stable Member and Session ids, and claims no more than a queue.

@@ -49,12 +49,12 @@ Member 的上下文只有两个机制，且都不由模型发起。
 Host 从 durable unread state 派生 Agent notifications。Host 经 Agent public safe-boundary API 注入一条有界、合并后的 context message。Idle Agent 会开始一个 turn。running 的 request 或 tool 在下一个 step boundary 收到 context，不会被中断。任何时候，durable Inbox 都是 authority：
 
 - Structured direct mention 包含 Message body、sender 和 Project。Task overlay 可选，Thread 和 Message ref 也在其中。
-- Task 或 Claim Activity 包含 actor、transition 与受影响的 Task/Thread/Claim refs。Task close 在结束 Attention 之前，为每个受影响的 follower 保留 sparse Activity marker。这个 marker 使 terminal state change 在重启后仍可读。
-- Ordinary unread Messages 只暴露无正文的 Thread-first route 与 unread count。taskful summaries 可以标出 Task overlay。任何通知都不渲染 revision 或写令牌。Agent 可以直接用 Thread ref 调用 `team_thread.read`。需要 triage 多个 Threads 时，仍可使用 `team_inbox`。
+- Direct Task 或 Claim Activity 包含 actor、transition 与受影响的 Task/Thread/Claim refs。Task close 在结束 Attention 之前，为每个受影响的 follower 保留 sparse Activity marker。这个 marker 使 terminal state change 在重启后仍可读。
+- Ordinary unread 暴露 Thread-first route、unread count、最多三条最新摘要和更早条目的溢出数量。taskful summaries 可以标出 Task overlay。摘要不绑定完整 Message 或 Activity。任何通知都不渲染 revision 或写令牌。Agent 可以直接用 Thread ref 调用 `team_thread.read`。需要 triage 多个 Threads 时，仍可使用 `team_inbox`。
 
 Member reminder 的 occurrence 只带 note 与 reminderRef：note 是这个 Member 被打断的原因，ref 是 `team_reminder list` 与 `cancel` 读取的那个身份。
 
-未提供的 direct 信号排在 reminder 与普通计数之前。[attention-and-messaging.zh.md](attention-and-messaging.zh.md) 负责通知的排序、上限和字符预算。
+未提供的 direct 信号排在 reminder 与普通摘要之前。[attention-and-messaging.zh.md](attention-and-messaging.zh.md) 负责通知的排序、上限和字符预算。
 
 Pending hints 按 Member 合并。Consumed 或 ignored 的 hint 不再触发 turn。后面的 durable change、resume 或 runtime-error recovery 会重置 notification state。重置发生后，hint 才重新触发。Restart/resume 用同一个 durable Inbox check，所以 transient Session queues 不是 authority。这是 at-least-once notification intent，不是 exactly-once model processing。Agent 可能忽略、失败或重复 Team read operation。
 
@@ -85,4 +85,4 @@ Host 追加一条 `<system-reminder>`，要求 Member 把持久结论写进 `mem
 
 trace 还要求 Human 写入一条版本 2 的 mention，确认它直接送达、没有邀请确认环节。然后验证 Agent durable Inbox 与 explicit read/reply，再验证 Human Project 和 Thread state。Desktop、390×844 和 keyboard paths 都属于 assembled acceptance。Page reload 从 Host projections 读取同一批 facts。journey 最后离开 Team mode，确认 ordinary DSH conversation surface 恢复。
 
-Browser storage 仍仅限 navigation 和 Workspace selection。Acceptance trace 不从 local storage 或 Member Session relay text 推导 unread、Attention 或 Thread facts。真实 Agent-loop integration tests 单独覆盖 Agent safe-boundary wake 及三种 notification forms。测试代码见 `packages/agent-team/tests/member-lifecycle.spec.ts`。三者是 direct mention、Task/Claim Activity、无正文 ordinary route。browser replay 不依赖 live provider behavior。
+Browser storage 仍仅限 navigation 和 Workspace selection。Acceptance trace 不从 local storage 或 Member Session relay text 推导 unread、Attention 或 Thread facts。真实 Agent-loop integration tests 覆盖 Agent safe-boundary wake 及三种 notification forms。测试代码见 `packages/agent-team/tests/member-lifecycle.spec.ts`。包括 direct mention、Task/Claim Activity、ordinary digest route。browser replay 不依赖 live provider behavior。

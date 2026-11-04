@@ -108,7 +108,7 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     expect(text).toContain(body)
   })
 
-  it('an ordinary notice carries no body, so its own fact stays unexempt', async () => {
+  it('an ordinary digest carries text without attesting its complete fact', async () => {
     const { ctx } = await harness()
     const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId: alpha, name: 'engineering', description: 'Engineering' })
     const member = await addLiveMember(ctx, project.project.projectRef)
@@ -125,8 +125,8 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     await ctx.agentTeam['ledger']!.changeAttention({ requestId: requestId('follow'), workspaceId: alpha, threadRef: anchor.thread.threadRef,
       action: 'follow', actor: { kind: 'member', memberId: member.memberId, handle: member.handle } })
     state.calls.length = 0
-    // The update is an ordinary reply: it names nobody, so the notice's only
-    // account of it is a count.
+    // The update is an ordinary reply: it names nobody, so the notice renders
+    // a digest rather than a complete bound Message.
     const body = 'background note nobody was mentioned in'
     const sent = await ctx.agentTeam.reply({ requestId: requestId('ordinary'), workspaceId: alpha,
       threadRef: anchor.thread.threadRef, body, baseRevision: anchor.thread.revision })
@@ -139,10 +139,10 @@ describe('the Host notice rendering and the probe agree on the same bytes', () =
     const unread = ctx.agentTeam['ledger']!.notificationFacts(member.memberId).flatMap(entry => entry.facts)
     const ordinary = unread.filter(entry => !entry.direct)
     expect(ordinary).toHaveLength(1)
-    // An ordinary notice renders a count and not one character of body, so the
-    // probe correctly refuses to attest it and the write stays gated.
+    // The digest makes the update intelligible, but binds no complete body, so
+    // the probe correctly refuses to attest it and the write stays gated.
     const ordinaryText = state.calls[0]!.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n')
-    expect(ordinaryText).not.toContain(body)
+    expect(ordinaryText).toContain(body)
     expect(isFactOnSurface(visibleTeamSurface(agent), ordinary[0]!, anchor.thread.threadRef)).toBe(false)
   })
 })

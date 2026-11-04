@@ -48,11 +48,11 @@ A swap leaves no mark on what the successor is told. Its first model-facing cont
 Because both mechanisms are Host-controlled, the model has no context tool at all: no rollover, no checkpoint, no status, and no advice riding a Thread read. Nothing a Member can say starts, prevents, or steers a swap.
 
 ## Agent notification boundary
-Host derives bounded coalesced notifications from durable unread state. Idle Agents start a turn; running Agents receive context at the next safe step. Direct mentions include Message body, sender, Project, optional Task overlay, Thread, and Message ref. Task/Claim Activities include actor, transition, and affected Task/Thread/Claim refs. Ordinary unread exposes only a body-free Thread-first route with its unread count; taskful summaries may name the Task. No notice renders a revision or write token. Omitted details remain discoverable through `team_inbox` and `team_thread`.
+Host derives bounded coalesced notices from durable unread state. Idle Agents start a turn; running Agents receive them at the next safe step. Direct mentions include body, sender, Project, Task overlay, Thread, and Message ref. Direct Task/Claim Activities include actor, transition, and affected refs. Ordinary unread exposes a Thread-first route, total, three latest digests, and overflow count; taskful summaries may name the Task. Digests bind nothing. No notice renders a revision or write token. Omitted details remain available through `team_inbox` and `team_thread`.
 
 A Member reminder occurrence carries its note and its reminderRef and nothing else: the note is why the Member was interrupted, and the ref is what `team_reminder list` and `cancel` read.
 
-Missing direct signals are ranked ahead of reminders and ordinary counts. [attention-and-messaging.md](attention-and-messaging.md) owns the notice order, caps, and character budget.
+Missing direct signals are ranked ahead of reminders and ordinary digests. [attention-and-messaging.md](attention-and-messaging.md) owns the notice order, caps, and character budget.
 
 Hints are at-least-once notification intent, coalesced per Member and rediscovered on restart/resume. A consumed or ignored hint does not create another turn until a later relevant durable change or recovery. Runtime recovery, error thresholds, and the two UI recovery actions remain Host behavior; they do not create ledger authority beyond their documented operations.
 
@@ -73,6 +73,6 @@ Nothing crosses the boundary — no handoff, no announcement — so the reminder
 ## Assembled acceptance
 `npm run test:browser` uses a credential-free Harness Web scaffold. It verifies default taskless Thread creation, default-off Human 「作为任务」, Human promotion and Host reread, taskless header/Claim gating, a version-2 mention delivering directly with no invitation confirmation, Agent Inbox read/reply, Human Project/Thread state, reload persistence, desktop/390×844/keyboard paths, Team exit, and ordinary DSH restoration.
 
-The same journey drives the Human's own durable writes: Thread follow and unfollow, whose control reads the Host observation rather than its own guess, and Task transfer to a Project owner, including the mend of a finished Task whose accountable is no longer a Project owner. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and body-free ordinary notification forms.
+The same journey drives the Human's own durable writes: Thread follow and unfollow, whose control reads the Host observation rather than its own guess, and Task transfer to a Project owner, including the mend of a finished Task whose accountable is no longer a Project owner. Real Agent-loop integration tests separately cover safe-boundary wake and direct, Activity, and ordinary digest notification forms.
 
 That journey measures the band as well as driving it: one band holds every control at one height, radius, inset, stroke and step, and the follow control's two standings differ by a fill.

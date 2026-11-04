@@ -188,7 +188,8 @@ describe('post-commit delivery', () => {
     expect(state.calls).toHaveLength(1)
     const notice = state.calls[0]!.content[0]
     expect(notice).toMatchObject({ type: 'text', text: expect.stringContaining('1 unread update') })
-    // No direct marker is involved, so nothing in the notice quotes a body.
+    // No direct marker is involved: the body is only a digest, not direct text.
+    expect(notice).toMatchObject({ type: 'text', text: expect.stringContaining('First ordinary update') })
     expect(notice).not.toMatchObject({ text: expect.stringContaining('Direct Team mention') })
 
     // A second ordinary update on an unread Thread spends its own attempt: the

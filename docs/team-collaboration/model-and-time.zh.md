@@ -15,7 +15,7 @@ Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools �
 - `team_thread` read/history 的 facts 与 anchor 带有时刻。时刻在 fact envelope 上，来自各自的提交 operation。Message 与 Activity 一致。Activity 自身没有时刻，从承载 operation 投影。fact 行渲染为 `sequence 时刻 [sender] 正文`。anchor 渲染为 `Anchor sequence 时刻 [sender]`。
 - `team_inbox` 行携带 `newestOccurredAt`——最新 unread fact 的时刻，与 `newestSequence` 取自同一快照。
 - `team_view` 的 Thread 行携带 `lastActivityAt`，从该 Thread 的尾部 fact 投影。
-- 自动通知在 direct mention 与 activity 上给出 `Occurred at:`。无正文路由给出最新 ordinary unread 时刻。
+- 自动通知在 direct mention 与 activity 上给出 `Occurred at:`。digest 路由给出最新 ordinary unread 时刻。
 - DM relay 给出发送时刻；prior-DM 上下文行引用那条 DM 的时刻。
 - 已提交的变更（`team_message` start/reply/dm、`team_task`）从 operation receipt 渲染 `Committed at:`。Client 的乐观合并读取同一 receipt 时刻。
 - fact envelope 时刻出现之前写入的 ledgers 在 replay 时 normalize。时刻从提交 operation 重新派生，绝不凭空制造。

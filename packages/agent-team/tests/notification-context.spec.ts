@@ -3,6 +3,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { AGENT_TEAM_PLUGIN_ID } from '../src/context-source.ts'
 import { TEAM_INBOX_NOTICE_SUMMARY } from '../src/context-projection.ts'
+import { agentTeamHostActor, agentTeamHumanActor } from '../src/ledger.ts'
+import { snapshotScript } from '../src/subscriptions.ts'
 import { cleanups, GatedAdapter, realHarness, ScriptedAdapter, textResponse, requestId, waitFor, waitForIdle } from './helpers/member-harness.ts'
 
 afterEach(async () => { await Promise.all(cleanups.splice(0).map(cleanup => cleanup())) })
@@ -50,7 +52,7 @@ describe('Inbox notices present direct signals before ordinary work', () => {
       .find(item => item.thread.threadRef === started.thread.threadRef)).toMatchObject({ unreadCount: 2, directCount: 2 })
   })
 
-  it('puts the newest missing Main direct before a Thread identity and its ordinary count', async () => {
+  it('puts the newest missing Main direct before a Thread identity and its ordinary digest', async () => {
     const adapter = new ScriptedAdapter()
     const { ctx, workspaceId } = await realHarness(adapter)
     const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
@@ -195,5 +197,139 @@ describe('Inbox notices present direct signals before ordinary work', () => {
     expect(notice).not.toContain('LONG-0-END')
     expect(ctx.agentTeam.mainStreamHistoryForAgent(agent, { workspaceId, projectRef }).standing)
       .toMatchObject({ unreadCount: 7, directCount: 7 })
+  })
+})
+
+describe('subscription lifecycle notices', () => {
+  it('describes an automatic pause as a subscription failure, never as an ownership removal', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
+      name: 'Packaging', description: 'Release verification' })
+    const projectRef = project.project.projectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+    const memberId = added.status.member.memberId
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const ledger = ctx.agentTeam['ledger']!
+    await ledger.addProjectOwner({ requestId: requestId('owner'), actor: agentTeamHumanActor(), workspaceId, projectRef, memberId })
+    await ledger.readMainStream({ requestId: requestId('read-owner'), actor: { kind: 'member', memberId, handle: 'builder' }, workspaceId, projectRef })
+    const snapshot = snapshotScript('printf \'{"id":"a","title":"A"}\\n\'\n', 'bash')
+    if (!snapshot.ok) throw new Error('the fixture script must be valid')
+    const created = await ledger.createSubscription({ requestId: requestId('create'), actor: agentTeamHumanActor(), workspaceId,
+      projectRef, name: 'main CI', triggers: { interval: { minutes: 10 } }, script: snapshot.script, credentials: [], baselineIds: [] })
+    if (!created.committed) throw new Error('expected a committed subscription')
+    const subscriptionRef = created.value.subscription.subscriptionRef
+    const paused = await ledger.pauseSubscription({ requestId: requestId('pause'), actor: agentTeamHostActor(), workspaceId,
+      projectRef, subscriptionRef, expectedRevision: 1, reason: 'failures' })
+    if (!paused.committed) throw new Error('expected a committed automatic pause')
+
+    const main = ledger.mainNotificationFacts(memberId)
+    const notice = ctx.agentTeam['notificationText'](agent, [], memberId, main).text
+    expect(notice).toContain('Team subscription paused')
+    expect(notice).toContain('main CI')
+    expect(notice).toContain(subscriptionRef)
+    expect(notice).toContain('after repeated failures')
+    expect(notice).toContain('team_subscription logs')
+    expect(notice).not.toContain('Team Project ownership changed')
+    expect(notice).not.toContain('removed you as an owner')
+  })
+})
+
+describe('ordinary unread digests', () => {
+  it('shows the latest three Main Messages and summarizes only the earlier overflow', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
+      name: 'Packaging', description: 'Release verification' })
+    const projectRef = project.project.projectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+    const memberId = added.status.member.memberId
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const ledger = ctx.agentTeam['ledger']!
+    const actor = { kind: 'member', memberId, handle: 'builder' } as const
+    await ledger.changeAttention({ requestId: requestId('follow'), actor, workspaceId, projectRef, action: 'follow' })
+    for (let index = 0; index < 5; index += 1) {
+      await ledger.postMainMessage({ requestId: requestId(`post-${index}`), actor: agentTeamHumanActor(), workspaceId,
+        projectRef, body: index === 4 ? `ordinary-update-4 ${'x'.repeat(300)} LONG-END` : `ordinary-update-${index}` })
+    }
+
+    const notice = ctx.agentTeam['notificationText'](agent, [], memberId, ledger.mainNotificationFacts(memberId)).text
+    expect(notice).toContain('Main stream: 5 unread updates')
+    expect(notice).toContain('ordinary-update-2')
+    expect(notice).toContain('ordinary-update-3')
+    expect(notice).toContain('ordinary-update-4')
+    expect(notice).toContain('…')
+    expect(notice).not.toContain('LONG-END')
+    expect(notice).not.toContain('- human: ordinary-update-0')
+    expect(notice).not.toContain('- human: ordinary-update-1')
+    expect(notice).toContain('2 earlier ordinary updates not expanded; read for the full facts.')
+  })
+
+  it('renders an ordinary subscription event once as untrusted data, without expanding and counting it twice', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
+      name: 'Packaging', description: 'Release verification' })
+    const projectRef = project.project.projectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+    const memberId = added.status.member.memberId
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const ledger = ctx.agentTeam['ledger']!
+    const actor = { kind: 'member', memberId, handle: 'builder' } as const
+    await ledger.changeAttention({ requestId: requestId('follow'), actor, workspaceId, projectRef, action: 'follow' })
+    const snapshot = snapshotScript('printf \'{"id":"a","title":"A"}\\n\'\n', 'bash')
+    if (!snapshot.ok) throw new Error('the fixture script must be valid')
+    const created = await ledger.createSubscription({ requestId: requestId('create'), actor: agentTeamHumanActor(), workspaceId,
+      projectRef, name: 'main CI', triggers: { interval: { minutes: 10 } }, script: snapshot.script, credentials: [], baselineIds: [] })
+    if (!created.committed) throw new Error('expected a committed subscription')
+    const subscriptionRef = created.value.subscription.subscriptionRef
+    await ledger.readMainStream({ requestId: requestId('read-create'), actor, workspaceId, projectRef })
+    await ledger.acceptSubscriptionEvents({ requestId: requestId('accept'), actor: agentTeamHostActor(), workspaceId,
+      projectRef, subscriptionRef, subscriptionRevision: 1, scriptHash: snapshot.script.sha256,
+      events: [{ id: 'run-1', title: 'CI failed', detail: 'Inspect the failing test' }] })
+    const pending = ledger.pendingSubscriptionEvents(subscriptionRef)
+    await ledger.publishSubscriptionEvent({ requestId: requestId('publish'), actor: agentTeamHostActor(), workspaceId,
+      projectRef, subscriptionRef, acceptedSequence: pending[0]!.acceptedSequence, eventId: 'run-1' })
+
+    const notice = ctx.agentTeam['notificationText'](agent, [], memberId, ledger.mainNotificationFacts(memberId)).text
+    expect(notice).toContain('Main stream: 1 unread update')
+    expect(notice.match(/CI failed/g)).toHaveLength(1)
+    expect(notice).toContain('untrusted external data')
+    expect(notice).not.toContain('Project subscription event —')
+    expect(notice).not.toContain('Inspect the failing test')
+  })
+
+  it('digests an ordinary Task Activity without presenting it as a complete direct event', async () => {
+    const adapter = new ScriptedAdapter()
+    const { ctx, workspaceId } = await realHarness(adapter)
+    const project = await ctx.agentTeam.createProject({ requestId: requestId('project'), workspaceId,
+      name: 'Packaging', description: 'Release verification' })
+    const projectRef = project.project.projectRef
+    const added = await ctx.agentTeam.addMember({ requestId: requestId('member'), workspaceId,
+      handle: 'builder', description: 'Checks releases', presetId: 'team-member', projectRefs: [projectRef] })
+    const memberId = added.status.member.memberId
+    const agent = ctx.agents.get(added.status.member.sessionId)!
+    const worker = await ctx.agentTeam.addMember({ requestId: requestId('worker'), workspaceId,
+      handle: 'worker', description: 'Claims work', presetId: 'team-member', projectRefs: [projectRef] })
+    const ledger = ctx.agentTeam['ledger']!
+    const actor = { kind: 'member', memberId, handle: 'builder' } as const
+    const started = await ledger.startThread({ requestId: requestId('task'), actor: agentTeamHumanActor(), workspaceId,
+      projectRef, kind: 'task', body: 'Check the release' })
+    if (started.value.kind !== 'committed' || started.value.task === undefined) throw new Error('expected a Task')
+    const threadRef = started.value.thread.threadRef
+    const taskRef = started.value.task.taskRef
+    await ledger.changeAttention({ requestId: requestId('follow'), actor, workspaceId, threadRef, action: 'follow' })
+    await ledger.changeClaim({ requestId: requestId('claim'), actor: { kind: 'member', memberId: worker.status.member.memberId, handle: 'worker' },
+      workspaceId, taskRef, baseRevision: started.value.thread.revision, action: 'claim', direction: 'Check the package' })
+
+    const notifications = ledger.notificationFacts(memberId)
+    const notice = ctx.agentTeam['notificationText'](agent, notifications, memberId)
+    expect(notice.text).toContain(`Task ${taskRef}: 1 unread update`)
+    expect(notice.text).toContain(`worker claim Task ${taskRef}`)
+    expect(notice.text).not.toContain('Team Task update')
+    expect(notice.activities).toEqual([])
   })
 })

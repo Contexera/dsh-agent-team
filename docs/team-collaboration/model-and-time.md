@@ -21,7 +21,7 @@ The fixed offset has no daylight-saving component, so the same stored instant re
 - `team_thread` read/history facts and the anchor carry their committing operation's instant on the fact envelope (message and activity alike — activities have no instant of their own). Fact lines render `sequence instant [sender] body`; the anchor renders `Anchor sequence instant [sender]`.
 - `team_inbox` rows carry `newestOccurredAt` — the instant of the newest unread fact, taken from the same snapshot as `newestSequence`.
 - `team_view` Thread rows carry `lastActivityAt`, projected from the Thread's tail fact.
-- Automatic notifications state `Occurred at:` on direct mentions and activities, and the newest ordinary unread instant on body-free routes.
+- Automatic notifications state `Occurred at:` on direct mentions and activities, and the newest ordinary unread instant on digest routes.
 - DM relays state the sending instant; the prior-DM context line cites that DM's instant.
 - Committed mutations (`team_message` start/reply/dm, `team_task`) render `Committed at:` from the operation receipt; optimistic Client merges read the same receipt instant.
 - Ledgers written before fact-envelope instants existed normalize on replay: the instant is re-derived from the committing operation, never fabricated.
