@@ -41,6 +41,7 @@
 | 2026-08 | ui-redesign | Client presentation 的 native-feel 重做，不动 Host/ledger/Remote。 | [README](archive/2026-08/ui-redesign/README.md) |
 | 2026-09 | agent-team-architecture | 文件与包结构审计；交付为 Client panel 去中间层、纠正「三包独立」错误表述。 | [README](archive/2026-09/agent-team-architecture/README.md) |
 | 2026-09 | agent-team-simplification-audit | 全仓简化审查（机械→消融→语义）加消融仪器；8 月审计裁决逐条复核维持。 | [README](archive/2026-09/agent-team-simplification-audit/README.md) |
+| 2026-09 | avatar-svg-assets | 12 张预设头像候选视觉方向确认，实施暂停未动代码；重启从 research.md 接续。 | [README](archive/2026-09/avatar-svg-assets/README.md) |
 | 2026-09 | claim-panel-ux | Claim 面板与 Thread/Channel 顶层栏走查；真因是顶栏过高，压高度并给分区留距。 | [README](archive/2026-09/claim-panel-ux/README.md) |
 | 2026-09 | context-continuity | Context 引擎抽为独立插件并接入；检索阶梯经 Human 决定撤回，Team 只发八工具。 | [README](archive/2026-09/context-continuity/README.md) |
 | 2026-09 | context-self-management | Context 自管理（rollover/checkpoint/fold/压力）四票完成并验收。 | [README](archive/2026-09/context-self-management/README.md) |
