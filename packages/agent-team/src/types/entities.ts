@@ -430,6 +430,38 @@ export interface AgentTeamReminderMarker {
   readonly sequence: number
 }
 
+/** Stable identifier of one Member's own time promise. */
+export type AgentTeamReminderRef = Branded<'AgentTeamReminderRef'>
+
+/** When a Member reminder fires: one instant, a fixed interval, or a cron expression read in the fixed Team zone (UTC+8). */
+export type AgentTeamReminderSchedule =
+  | { readonly kind: 'once'; readonly at: string }
+  | { readonly kind: 'every'; readonly minutes: number }
+  | { readonly kind: 'cron'; readonly expression: string }
+
+/** A time promise one Member makes to itself. It belongs to no Thread and no Project: the creating Member is also its only recipient. */
+export interface AgentTeamMemberReminder {
+  readonly reminderRef: AgentTeamReminderRef
+  readonly memberId: AgentTeamMemberId
+  readonly schedule: AgentTeamReminderSchedule
+  /** Handed to the Member when an occurrence fires. */
+  readonly note: string
+  /** `active` waits for its next occurrence, `done` has fired its last (a one-shot), `cancelled` was withdrawn. */
+  readonly state: AgentTeamMemberReminderState
+  /** Instant the reminder was created, ISO 8601; the first interval occurrence is measured from it. */
+  readonly createdAt: string
+}
+
+export type AgentTeamMemberReminderState = 'active' | 'done' | 'cancelled'
+
+/** One unconsumed Member reminder occurrence: the private Inbox unread that wakes the Member it belongs to. */
+export interface AgentTeamMemberReminderMarker {
+  readonly memberId: AgentTeamMemberId
+  readonly reminderRef: AgentTeamReminderRef
+  /** Sequence of the operation that raised this occurrence. */
+  readonly sequence: number
+}
+
 /** Durable changes to private Member inbox state carried by one operation. */
 export interface AgentTeamInboxDelta {
   readonly attention: {
@@ -450,6 +482,11 @@ export interface AgentTeamInboxDelta {
   readonly reminderMarkers?: {
     readonly added: readonly AgentTeamReminderMarker[]
     readonly removed: readonly AgentTeamReminderMarker[]
+  }
+  /** Present only when it changes something, so every delta written before Member reminders existed keeps its stored bytes. */
+  readonly memberReminderMarkers?: {
+    readonly added: readonly AgentTeamMemberReminderMarker[]
+    readonly removed: readonly AgentTeamMemberReminderMarker[]
   }
   /** Present only when it changes something, so every rules-version-1 delta keeps its stored bytes. */
   readonly mainMarkers?: {

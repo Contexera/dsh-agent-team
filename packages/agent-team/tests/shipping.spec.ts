@@ -232,7 +232,7 @@ describe('Agent Team shipping contract', () => {
     expect([...dshPeerRanges(bundleManifest)]).toEqual(['>=0.2.1-rc.2 <0.2.2'])
     expect(preset).toContain('compaction: true')
     expect(preset).toContain('toolResultPruner: true')
-    expect(preset).toContain('team_inbox, team_thread, team_attention, team_message, team_dm, team_task, and team_view')
+    expect(preset).toContain('team_inbox, team_thread, team_attention, team_message, team_dm, team_task, team_view, and team_reminder')
     expect(preset).toContain('from a fully drained team_thread read, your own committed mutation, or a complete Thread rejection that provides one')
     expect(preset).toContain('A rejection is not a commit')
     expect(preset).toContain('only read does that')
@@ -285,7 +285,7 @@ describe('Agent Team shipping contract', () => {
     expect(preset).toContain('past 16 KiB it is not injected at all')
     expect(preset).toContain('the bundled `member-memory-manager` skill')
     expect([...teamTools().keys()].sort()).toEqual([
-      'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view',
+      'team_inbox', 'team_attention', 'team_thread', 'team_dm', 'team_message', 'team_task', 'team_view', 'team_reminder',
     ].sort())
 
     const manifest = JSON.parse(manifestText) as {

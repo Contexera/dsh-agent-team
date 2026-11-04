@@ -50,6 +50,8 @@ Because both mechanisms are Host-controlled, the model has no context tool at al
 ## Agent notification boundary
 Host derives bounded coalesced notifications from durable unread state. Idle Agents start a turn; running Agents receive context at the next safe step. Direct mentions include Message body, sender, Project, optional Task overlay, Thread, and Message ref. Task/Claim Activities include actor, transition, and affected Task/Thread/Claim refs. Ordinary unread exposes only a body-free Thread-first route with its unread count; taskful summaries may name the Task. No notice renders a revision or write token. Omitted details remain discoverable through `team_inbox` and `team_thread`.
 
+A Member reminder occurrence carries its note and its reminderRef and nothing else: the note is why the Member was interrupted, and the ref is what `team_reminder list` and `cancel` read.
+
 Missing direct signals are ranked ahead of reminders and ordinary counts. [attention-and-messaging.md](attention-and-messaging.md) owns the notice order, caps, and character budget.
 
 Hints are at-least-once notification intent, coalesced per Member and rediscovered on restart/resume. A consumed or ignored hint does not create another turn until a later relevant durable change or recovery. Runtime recovery, error thresholds, and the two UI recovery actions remain Host behavior; they do not create ledger authority beyond their documented operations.

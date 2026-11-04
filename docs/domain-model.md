@@ -102,6 +102,20 @@ A recorded collaboration-state fact. Claim create/done/release, Task accept/clos
 
 A safe-boundary hint derived from durable Thread Inbox state. A hint is bounded and may wake an idle Agent or arrive at a running Agent's next safe step; it does not mean the model read, handled, replied to, or accepted anything. Durable Inbox is rediscovered after resume.
 
+## Member Reminder
+
+A time promise a Member makes to itself, stored in the ledger and bound to the Member rather than to a Session, Thread, or Workspace. Its schedule is one of three kinds — `once` at an instant, `every` a whole number of minutes, or `cron` over five fields read in the fixed UTC+8 zone — plus a `note` of at most 2000 characters that is handed back when an occurrence fires. States are active, done, and cancelled. A reminder has exactly one recipient, so only its Member creates one; the Human may withdraw any Member's.
+
+Each due moment is an occurrence with its own identity, and an unconsumed occurrence of the same recurring reminder is replaced by the next one instead of stacking. Occurrences travel the same private Inbox notice as every other unread fact, which [attention-and-messaging.md](team-collaboration/attention-and-messaging.md) owns; the tool contract is in [tools.md](team-collaboration/tools.md).
+
+Consumption is recorded per occurrence, not per reminder: a notice answers for the occurrences its text actually rendered. One the detail cap or the character budget dropped was never delivered, so it stays unread and stays outside the notice's coverage, and the next notice answers it. A recovery instruction renders the same snapshot, so it consumes exactly what it rendered too, and an occurrence that came due after that instruction was queued is still owed rather than answered by it.
+
+A consumption write that fails leaves the occurrence owed, so the coverage that notice earned falls with it and the Host rederives the notice at once: the same durable facts must not read as already answered. That retry is bounded, and standing down leaves the occurrence unread and uncovered for the next Team fact that touches the Member.
+
+A reminder's ref is derived from the creating tool call, with the two characters the ref shape reserves percent-escaped, so a nested sub-call's id still yields one ref the durable schema parses back. A create whose request id already exists answers with the stored operation only when the normalized schedule and note match as well; a moved time or a rewritten note under a reused request id is a collision.
+
+A suspended Member's reminders keep timing and deliver when it resumes; archiving or removing the Member cancels them all. The Member Lifecycle table below derives that effect, so no second cleanup operation exists.
+
 ## Operation
 
 One immutable atomic business commit in the Team ledger. Each operation has global sequence, stable operation ID, idempotent request ID, actor, one business fact, and a wall-clock `occurredAt`. Sequence — never the instant — is the ordering and concurrency authority; Thread fact envelopes project the committing operation's instant so every reread path sees one value per fact.

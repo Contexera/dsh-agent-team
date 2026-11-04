@@ -1,4 +1,4 @@
-import type { AgentTeamProjectRef, AgentTeamThreadReadFact, AgentTeamThreadRef } from './types/entities.ts'
+import type { AgentTeamProjectRef, AgentTeamReminderRef, AgentTeamThreadReadFact, AgentTeamThreadRef } from './types/entities.ts'
 import type { AgentTeamInboxItem, AgentTeamInboxReminder, AgentTeamMainTimelineEntry } from './types/requests-results.ts'
 
 /**
@@ -25,9 +25,28 @@ export interface InboxMainUnread {
   readonly entries: readonly AgentTeamMainTimelineEntry[]
 }
 
+/** One unconsumed Member reminder occurrence, by the marker identity that carries it. */
+export interface InboxMemberReminder {
+  readonly reminderRef: AgentTeamReminderRef
+  readonly sequence: number
+}
+
 export interface InboxDeliveryInput {
   readonly threads: readonly InboxThreadUnread[]
   readonly main: readonly InboxMainUnread[]
+  /**
+   * Unconsumed Member reminders. Like a Task reminder, one is always delivered:
+   * it is the whole reason the notice exists when nothing else is unread, and
+   * its identity in the signature is what makes a replacement, not a stack.
+   */
+  readonly reminders?: readonly InboxMemberReminder[] | undefined
+  /**
+   * The reminders the notice actually rendered, when the detail cap or the
+   * character budget dropped some of them. An occurrence that never reached the
+   * text was never delivered, so it stays out of `covered` and stays unread
+   * until a notice can render it.
+   */
+  readonly deliveredReminders?: readonly InboxMemberReminder[] | undefined
   /** Signature of the immediate facts the last delivery attempt answered. */
   readonly covered: string | undefined
   /**
@@ -74,6 +93,12 @@ export function planInboxDelivery(input: InboxDeliveryInput): InboxDeliveryPlan 
     // them as owed and re-attempts instead of standing down.
     if (now.length > 0 && !undelivered.has(threadRef)) delivered.push([threadRef, ...now])
     threads.push(Object.freeze({ threadRef, role: item.attention === undefined ? 'member' : 'follower' }))
+  }
+  for (const reminder of input.reminders ?? []) {
+    immediate.push(['member-reminder', reminder.reminderRef, reminder.sequence])
+  }
+  for (const reminder of input.deliveredReminders ?? input.reminders ?? []) {
+    delivered.push(['member-reminder', reminder.reminderRef, reminder.sequence])
   }
   for (const { projectRef, entries } of input.main) {
     if (entries.length > 0) { immediate.push([projectRef, ...entries.map(entry => entry.sequence)]); delivered.push([projectRef, ...entries.map(entry => entry.sequence)]) }

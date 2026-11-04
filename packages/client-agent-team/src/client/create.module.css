@@ -162,6 +162,35 @@
   margin-top: 16px;
 }
 
+/* The Member detail reminder block sits under the form the same way, and scrolls with it. */
+.remindersSection {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Each reminder is its own row so the withdraw button stays beside the note it withdraws. */
+.reminderList {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.reminderRow {
+  align-items: start;
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+}
+
+.reminderNote {
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
 .sectionLabel {
   align-items: center;
   color: var(--dsw-alias-label-secondary);

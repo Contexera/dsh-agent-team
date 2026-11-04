@@ -27,7 +27,11 @@ Team 是每个 DSH home 内唯一的协作域。append-only operation ledger 是
 - 每个 durable Member state 只有一组期望的外部 effect，即 [Member Lifecycle](../domain-model.zh.md#member-lifecycle) 表。每一次 lifecycle operation 在 commit 之后重跑这组 effect。startup 对每个非 enabled Member 也重跑同一组。archive、suspension、remove 因此走同一条推导重跑收敛，不做第二次 durable 写入。即使 Workspace/Session/filesystem 调用被 crash 或失败打断，也一样收敛。
 - startup 绝不把非 enabled Member 激活为 enabled。启动阶段失败的 effect 只记日志，下一次 boot 重试，不让 boot 失败。同一 Member 的 lifecycle operation 按提交序串行；不同 Member 从不排在彼此的等待之后。
 - Task 提醒由 Host 在 Team 事件后评估并写入 `team/reminder-raised`，不使用 timer。其可选 `reminderMarkers` Inbox delta 仅属于一个接收者；marker 被读取消费后，replay 仍保留完整 episode 用于去重。
-- reminder operation 会使对应 Task Thread 的 change scope 失效，让 Human Inbox 刷新，但不增加公开 fact 或 revision。accept、close 与生命周期清理会移除已经失效的未读 marker，同时保留 episode 历史。Agent idle 是进程内观测，跨 generation 替换保留，Host 重启后丢弃；idle 未知时不满足时间条件。
+- Member reminder 由 Host 写入 `team/member-reminder-created`、`team/member-reminder-raised`、`team/member-reminder-consumed`、`team/member-reminder-cancelled`。触发依据是 Host 自己的 timer 与 Team 事件，不是模型写的 schedule 文本。
+- ledger 只存创建、每次 raise、消费与取消。raise 出的 occurrence 带只属于其唯一接收者的私有 `memberReminderMarkers` Inbox delta；每个 reminder 只写一个 marker，未读的 occurrence 因此被替换而不是叠加。archived 或 removed 的 Member 与 Member Lifecycle 表同样派生：全部取消。
+- 消费要指明它结账的那个 marker sequence，因此渲染过较旧 occurrence 的通知不会顺带消费掉替换它的较新 occurrence。durable ref 形状解析不回来的 reminder ref 在创建边界就被拒绝，而不是留到 replay 时才失败。
+- 消费写失败时，这条通知赚到的 coverage 随之失效，Host 为活着的 Session 重新派生该通知——occurrence 仍然欠着，同样的 durable facts 不该被读成已结账。重试按连续失败次数设上限；stand down 之后 occurrence 保持未读且不在 coverage 里，直到下一条触及该 Member 的 Team 事件。
+- reminder operation 会使对应 Task Thread 的 change scope 失效，让 Human Inbox 刷新，但不增加公开 fact 或 revision。Member reminder 的 occurrence 不让任何公开 scope 失效，它只到达一个 Member 的私有 Inbox。accept、close 与生命周期清理会移除已经失效的未读 marker，同时保留 episode 历史。Agent idle 是进程内观测，跨 generation 替换保留，Host 重启后丢弃；idle 未知时不满足时间条件。
 
 - ledger append 之后剩下的是 delivery 效果：commit listeners、Client change invalidation、participation notice。每个受影响的 Member 还会收到一次 wake。每一项都经过同一条边界：普通失败只记日志，不让操作本身失败，调用方仍收到 committed result。
 - 通知读取只在一次同步 read set 内共享 Thread/Main 未读材料，文本渲染复用本次 delivery plan，不跨 commit 缓存。`running` 边沿先从当前未读事实重新派生，再判断是否已经覆盖；读取之后不能仅凭上一条通知的 coverage 作此判断。

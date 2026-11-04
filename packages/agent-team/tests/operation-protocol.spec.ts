@@ -51,10 +51,12 @@ import type {
   AgentTeamMainActivity,
   AgentTeamMemberActor,
   AgentTeamMemberId,
+  AgentTeamMemberReminder,
   AgentTeamMessageRef,
   AgentTeamOperation,
   AgentTeamOperationId,
   AgentTeamOperationReceipt,
+  AgentTeamReminderRef,
   AgentTeamRequestId,
   AgentTeamTask,
   AgentTeamTaskRef,
@@ -672,6 +674,50 @@ const reminderRaised: Op<'team/reminder-raised'> = {
   },
 }
 
+const memberReminder: AgentTeamMemberReminder = {
+  reminderRef: 'reminder:protocol-1' as AgentTeamReminderRef,
+  memberId,
+  schedule: { kind: 'every', minutes: 30 },
+  note: 'protocol fixture reminder',
+  state: 'active',
+  createdAt: instant,
+}
+
+const memberReminderCreated: Op<'team/member-reminder-created'> = {
+  ...opBase('operation:protocol-member-reminder-created', 'request:protocol-member-reminder-created', 41, memberActor),
+  previousOperationId,
+  kind: 'team/member-reminder-created',
+  data: { workspaceId: alpha, reminder: memberReminder },
+}
+
+const memberReminderRaised: Op<'team/member-reminder-raised'> = {
+  ...opBase('operation:protocol-member-reminder-raised', 'request:protocol-member-reminder-raised', 42, hostActor),
+  previousOperationId,
+  kind: 'team/member-reminder-raised',
+  data: {
+    workspaceId: alpha, memberId, reminderRef: memberReminder.reminderRef, scheduledAt: instant,
+    inbox: { ...emptyInbox, memberReminderMarkers: { added: [{ memberId, reminderRef: memberReminder.reminderRef, sequence: 42 }], removed: [] } },
+  },
+}
+
+const memberReminderConsumed: Op<'team/member-reminder-consumed'> = {
+  ...opBase('operation:protocol-member-reminder-consumed', 'request:protocol-member-reminder-consumed', 43, hostActor),
+  previousOperationId,
+  kind: 'team/member-reminder-consumed',
+  data: {
+    workspaceId: alpha, memberId, reminderRef: memberReminder.reminderRef,
+    inbox: { ...emptyInbox, memberReminderMarkers: { added: [], removed: [{ memberId, reminderRef: memberReminder.reminderRef, sequence: 42 }] } },
+  },
+}
+
+const memberReminderCancelled: Op<'team/member-reminder-cancelled'> = {
+  ...opBase('operation:protocol-member-reminder-cancelled', 'request:protocol-member-reminder-cancelled', 44, memberActor),
+  previousOperationId,
+  kind: 'team/member-reminder-cancelled',
+  data: { workspaceId: alpha, memberId, reminderRef: memberReminder.reminderRef,
+    reminder: { ...memberReminder, state: 'cancelled' }, inbox: emptyInbox },
+}
+
 const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
   'team/initialized': {
     stored: initialized,
@@ -1242,6 +1288,72 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     retry: { replayOnly: 'Host-internal: event evaluation appends an episode once and deduplicates it by its durable key, so no caller request id can retry or collide' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'no-op', inbox: 'delta' },
+  },
+  'team/member-reminder-created': {
+    stored: memberReminderCreated,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.createMemberReminder({
+          requestId: memberReminderCreated.requestId,
+          actor: memberActor,
+          workspaceId: memberReminderCreated.data.workspaceId,
+          reminderRef: memberReminderCreated.data.reminder.reminderRef,
+          schedule: memberReminderCreated.data.reminder.schedule,
+          note: memberReminderCreated.data.reminder.note,
+        })
+        expect(out.value.reminder.reminderRef, 'the create mapper answers with the stored reminder identity').toBe(memberReminder.reminderRef)
+        return out
+      },
+      changed: () => ledger.createMemberReminder({
+        requestId: memberReminderCreated.requestId,
+        actor: memberActor,
+        workspaceId: memberReminderCreated.data.workspaceId,
+        reminderRef: 'reminder:protocol-other' as AgentTeamReminderRef,
+        schedule: memberReminderCreated.data.reminder.schedule,
+        note: memberReminderCreated.data.reminder.note,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/member-reminder-raised': {
+    stored: memberReminderRaised,
+    legacyShapes: [],
+    retry: { replayOnly: 'Host-internal: the scheduler raises one occurrence per due reminder and deduplicates it by the reminder ref and its raise sequence, so no caller request id can retry or collide' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/member-reminder-consumed': {
+    stored: memberReminderConsumed,
+    legacyShapes: [],
+    retry: { replayOnly: 'Host-internal: consumption is recorded once per occurrence when it reaches the Member context, so no caller request id can retry or collide' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
+  },
+  'team/member-reminder-cancelled': {
+    stored: memberReminderCancelled,
+    legacyShapes: [],
+    retry: {
+      same: async () => {
+        const out = await ledger.cancelMemberReminder({
+          requestId: memberReminderCancelled.requestId,
+          actor: memberActor,
+          workspaceId: memberReminderCancelled.data.workspaceId,
+          reminderRef: memberReminderCancelled.data.reminderRef,
+        })
+        expect(out.value.reminder.state, 'the cancel mapper answers with the withdrawn reminder').toBe('cancelled')
+        return out
+      },
+      changed: () => ledger.cancelMemberReminder({
+        requestId: memberReminderCancelled.requestId,
+        actor: memberActor,
+        workspaceId: memberReminderCancelled.data.workspaceId,
+        reminderRef: 'reminder:protocol-other' as AgentTeamReminderRef,
+      }),
+    },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'delta' },
   },
   'team/thread-attention-changed': {
     stored: threadAttentionChanged,

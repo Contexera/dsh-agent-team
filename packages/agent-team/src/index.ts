@@ -57,7 +57,7 @@ import { StoredSessionReadError, StoredSessionReader, sessionFailureOf, type Sto
 import { agentTeamDomainSpec } from './spec.ts'
 import { SqliteStorageBackend } from './vendor/storage-sqlite/index.ts'
 import { formatTeamTimestamp } from './time-format.ts'
-import { planInboxDelivery, type InboxDeliveryPlan } from './inbox-delivery.ts'
+import { planInboxDelivery, type InboxDeliveryPlan, type InboxMemberReminder } from './inbox-delivery.ts'
 import { MemberIdleTracker } from './member-idle.ts'
 import type {
   AgentTeamAddMemberRequest,
@@ -178,6 +178,13 @@ import type {
   AgentTeamUpdateMemberResult,
   AgentTeamView,
   AgentTeamViewRequest,
+  AgentTeamMemberReminderView,
+  AgentTeamMemberReminderListRequest,
+  AgentTeamMemberReminderCreateRequest,
+  AgentTeamMemberReminderCreateResult,
+  AgentTeamMemberReminderCancelRequest,
+  AgentTeamMemberReminderCancelResult,
+  AgentTeamUnreadMemberReminder,
 } from './types.ts'
 
 export { agentTeamDomainSpec, agentTeamOperationSchema } from './spec.ts'
@@ -188,12 +195,23 @@ export { HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTI
 export { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
+export { MEMBER_REMINDER_REF_PATTERN, reminderRefForCallId, reminderRefIsStorable } from './member-reminders.ts'
 
 /** Process-stable marker carried by the final Team message tool definition. */
 export const AGENT_TEAM_PRESET_MARKER = Symbol.for('@contexera/dsh-agent-team.preset')
 
 const ORPHANED_MEMBER_DIAGNOSTIC = 'Member preset composition was lost after a reload; its tools are unavailable. Resume rebuilds the member in place.'
 const NOTIFICATION_QUEUE_THRESHOLD = 8
+/**
+ * How many consecutive Member-reminder consumption writes may fail before the
+ * Host stops rederiving the notice for them. Each retry spends one of the
+ * Member's turns, so a persistent storage outage must not spend them forever;
+ * the occurrence stays owed and the coverage stays dropped either way.
+ */
+const MAX_MEMBER_REMINDER_CONSUME_RETRIES = 3
+
+/** Node caps one `setTimeout` delay at 2^31-1 ms and silently shortens a longer one to 1 ms, so a farther wake arms in capped slices and re-evaluates when a slice ends. */
+const MEMBER_REMINDER_TIMER_MAX_DELAY_MS = 2 ** 31 - 1
 
 /** Read one profile or settings document, or `undefined` when it is absent or unreadable; both are steady states on a first boot. */
 async function readProfileDocument(path: string): Promise<string | undefined> {
@@ -231,6 +249,7 @@ type NotificationCause =
   | { readonly kind: 'transition'; readonly requestId: AgentTeamRequestId; readonly previousSessionId: SessionId }
   | { readonly kind: 'activation'; readonly previousSessionId?: SessionId }
   | { readonly kind: 'running' }
+  | { readonly kind: 'consumption-retry' }
 
 /**
  * One Member's Inbox notice delivery state. `covered` is the durable fact set the queued notice answers;
@@ -366,6 +385,21 @@ export default class AgentTeam extends TypertRemoteService {
    * A retry after a failed wake spends the next attempt over the same durable facts, never a second operation.
    */
   private readonly inboxNoticeDeliveries = new Map<AgentTeamMemberId, InboxNoticeDelivery>()
+  /**
+   * Queued Team notices that carry Member reminders, keyed by message id. The
+   * claim of a message is the only evidence that its reminders reached a turn,
+   * and each entry names the occurrences that message actually rendered, so a
+   * claim consumes exactly those and nothing newer.
+   */
+  private readonly memberReminderWakes = new Map<string, { readonly memberId: AgentTeamMemberId; readonly reminders: readonly InboxMemberReminder[] }>()
+  /**
+   * Consecutive Member-reminder consumption writes that failed for one Member.
+   * Process-local like the notice coverage it bounds: a restart starts over, and
+   * a successful write clears it.
+   */
+  private readonly memberReminderConsumeFailures = new Map<AgentTeamMemberId, number>()
+  /** The timer armed for the next Member-reminder occurrence, rearmed after every raise. */
+  private memberReminderTimer?: ReturnType<typeof setTimeout> | undefined
   private attachmentGcTimer?: ReturnType<typeof setInterval> | undefined
   /**
    * New-release check behind the settings footnote. Memory-only and background-refreshed,
@@ -796,6 +830,13 @@ export default class AgentTeam extends TypertRemoteService {
     // did not itself retire is the narrowest Team-owned signal of a drop.
     this.ctx.on('agent/inbox/claimed', ({ message }) => {
       this.pendingTeamWakes.delete(message.id)
+      // The notice reached a turn: that is the moment a Member reminder stops
+      // being owed. A Host that dies before this write leaves the marker
+      // unconsumed, so the next wake redelivers the same occurrence.
+      const carried = this.memberReminderWakes.get(message.id)
+      if (carried === undefined) return
+      this.memberReminderWakes.delete(message.id)
+      this.consumeMemberReminders(carried)
     })
     this.ctx.on('agent/inbox/discarded', ({ agent, message }) => {
       // A discard this Host itself initiated is expected whatever tracked it: the
@@ -805,6 +846,7 @@ export default class AgentTeam extends TypertRemoteService {
       const pending = this.pendingTeamWakes.get(message.id)
       if (pending === undefined) return
       this.pendingTeamWakes.delete(message.id)
+      this.memberReminderWakes.delete(message.id)
       const member = this.memberForAgent(agent)
       if (member === undefined || member.state !== 'enabled' || agent.id !== pending.sessionId) return
       this.setPreTurnCancellation(member.memberId, pending.sessionId)
@@ -824,6 +866,10 @@ export default class AgentTeam extends TypertRemoteService {
       this.contextManagement.dispose()
       if (this.attachmentGcTimer !== undefined) clearInterval(this.attachmentGcTimer)
       this.attachmentGcTimer = undefined
+      if (this.memberReminderTimer !== undefined) clearTimeout(this.memberReminderTimer)
+      this.memberReminderTimer = undefined
+      this.memberReminderWakes.clear()
+      this.memberReminderConsumeFailures.clear()
       this.emitChanged()
       // Every lifecycle operation enqueued before `accepting` flipped is in
       // one of the two maps (new ones reject at enqueue), so this snapshot
@@ -857,6 +903,9 @@ export default class AgentTeam extends TypertRemoteService {
     const initialization = await ledger.initialize()
     if (initialization.committed) this.emitCommitted(initialization.value)
     this.startAttachmentGc(ledger)
+    // A downtime make-up is derived from the durable ledger, so boot evaluates
+    // it once rather than waiting for the next scheduled occurrence.
+    this.scheduleMemberReminderEvaluation()
     // One metadata listing serves every Member restore; per-member list calls
     // would repeat the same I/O linearly during startup.
     const persistedSessions = new Set((await this.persistedSessionHeaders()).map(snapshot => snapshot.header.id))
@@ -1382,7 +1431,12 @@ export default class AgentTeam extends TypertRemoteService {
     const material = this.requireLedger().notificationSnapshot(member.memberId)
     const notifications = material.threads
     const mainNotifications = material.main
-    const notice = notifications.length === 0 && mainNotifications.length === 0 ? undefined : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, undefined, text)
+    const memberReminders = material.memberReminders
+    // A Member reminder is unread like any other durable fact, so the recovery
+    // instruction carries it too: otherwise the reminder would be answered by a
+    // notice that never mentioned it, and a one-shot would never fire again.
+    const notice = notifications.length === 0 && mainNotifications.length === 0 && memberReminders.length === 0 ? undefined
+      : this.notificationText(handle.agent, notifications, member.memberId, mainNotifications, undefined, text, memberReminders)
     const body = notice === undefined ? text : `${text}\n\n${notice.text}`
     const hint = createUserMessage({
       content: [{ type: 'text', text: body }],
@@ -1393,8 +1447,13 @@ export default class AgentTeam extends TypertRemoteService {
       if (this.isInboxNotice(pending)) this.removeExpectedTeamWake(handle.agent, pending)
     }
     this.trackTeamWake(handle.agent, hint)
+    // The occurrences this recovery instruction rendered are the ones its claim
+    // consumes, exactly as an Inbox notice's claim does.
+    if (notice !== undefined && notice.deliveredReminders.length > 0) {
+      this.memberReminderWakes.set(hint.id, { memberId: member.memberId, reminders: notice.deliveredReminders })
+    }
     handle.agent.steer(hint)
-    this.ctx.logger.info(`agent-team: ${trigger} continuation steered for ${this.memberScope(member.memberId, handle.agent.session.id)}${notifications.length === 0 && mainNotifications.length === 0 ? '' : ` carrying ${this.notificationIdentity(notifications, mainNotifications)}`}: it is queued for the Member's next step, not yet read by the model`)
+    this.ctx.logger.info(`agent-team: ${trigger} continuation steered for ${this.memberScope(member.memberId, handle.agent.session.id)}${notifications.length === 0 && mainNotifications.length === 0 && memberReminders.length === 0 ? '' : ` carrying ${this.notificationIdentity(notifications, mainNotifications, memberReminders)}`}: it is queued for the Member's next step, not yet read by the model`)
   }
 
   /** Automatic-recovery wakeup; throwing tells the coordinator the target is gone. */
@@ -1921,6 +1980,53 @@ export default class AgentTeam extends TypertRemoteService {
     if (request.workspaceId === undefined) return this.requireLedger().memberTaskBoard(actor, request)
     this.requireAgentWorkspace(actor, request.workspaceId)
     return this.requireLedger().taskBoard(actor, { ...request, workspaceId: request.workspaceId })
+  }
+
+  /**
+   * Agent-only read of the caller's own Member reminders. Reading also re-derives
+   * what is due, so a Member that just learned it has reminders sees them raised.
+   */
+  memberRemindersForAgent(agent: Agent, request: { readonly workspaceId?: WorkspaceId }): readonly AgentTeamMemberReminderView[] {
+    const actor = this.memberActor(agent)
+    if (request.workspaceId !== undefined) this.requireAgentWorkspace(actor, request.workspaceId)
+    this.scheduleMemberReminderEvaluation()
+    return this.requireLedger().memberRemindersOf(actor.memberId)
+  }
+
+  /** Agent-only creation of a reminder for the caller itself: a reminder has exactly one recipient. */
+  async createMemberReminderForAgent(agent: Agent, request: Omit<AgentTeamMemberReminderCreateRequest, 'actor'>): Promise<AgentTeamMemberReminderCreateResult> {
+    const actor = this.memberCall(agent, request.workspaceId)
+    const result = await this.requireLedger().createMemberReminder({ ...request, actor })
+    if (result.committed) this.emitCommitted(result.value.receipt)
+    return result.value
+  }
+
+  /** Agent-only withdrawal of one of the caller's own reminders. */
+  async cancelMemberReminderForAgent(agent: Agent, request: Omit<AgentTeamMemberReminderCancelRequest, 'actor'>): Promise<AgentTeamMemberReminderCancelResult> {
+    const actor = this.memberCall(agent, request.workspaceId)
+    const result = await this.requireLedger().cancelMemberReminder({ ...request, actor })
+    if (result.committed) this.emitCommitted(result.value.receipt)
+    return result.value
+  }
+
+  /** Human read of one Member's reminders, for Member detail. */
+  @Remote('memberReminders')
+  memberRemindersForClient(request: AgentTeamMemberReminderListRequest): readonly AgentTeamMemberReminderView[] {
+    this.requireWorkspace(request.workspaceId)
+    const ledger = this.requireLedger()
+    if (!ledger.participatesIn(request.memberId, request.workspaceId)) {
+      throw new Error(`Member '${request.memberId}' does not participate in Workspace '${request.workspaceId}'`)
+    }
+    return ledger.memberRemindersOf(request.memberId)
+  }
+
+  /** Human withdrawal of one Member's reminder, for Member detail; the Human may withdraw any. */
+  @Remote('cancelMemberReminder')
+  async cancelMemberReminderForClient(request: Omit<AgentTeamMemberReminderCancelRequest, 'actor'>): Promise<AgentTeamMemberReminderCancelResult> {
+    this.requireWorkspace(request.workspaceId)
+    const result = await this.requireLedger().cancelMemberReminder({ ...request, actor: agentTeamHumanActor() })
+    if (result.committed) this.emitCommitted(result.value.receipt)
+    return result.value
   }
 
   inboxForAgent(agent: Agent, request: { readonly workspaceId?: WorkspaceId; readonly limit?: number }): AgentTeamInbox {
@@ -2707,6 +2813,99 @@ export default class AgentTeam extends TypertRemoteService {
     return this.reminderEvaluationTail
   }
 
+  /**
+   * Record that these Member reminders reached a turn, one operation per
+   * reminder. The write is the Host's own, so a failure degrades to a retry
+   * rather than a log line: the occurrence is still owed, and a coverage that
+   * still names it would keep the same durable facts from ever being delivered
+   * again.
+   */
+  private consumeMemberReminders(carried: { readonly memberId: AgentTeamMemberId; readonly reminders: readonly InboxMemberReminder[] }): void {
+    if (!this.accepting || this.ledger === undefined || carried.reminders.length === 0) return
+    void this.requireLedger().consumeMemberReminders(carried.memberId, carried.reminders).then(receipts => {
+      this.memberReminderConsumeFailures.delete(carried.memberId)
+      for (const receipt of receipts) this.emitCommitted(receipt)
+    }).catch(error => {
+      this.retryMemberReminderConsumption(carried, error)
+    })
+  }
+
+  /**
+   * A consumption write that failed leaves the occurrence unread, so the coverage
+   * the notice earned for it falls with it — otherwise the next redelivery sees
+   * the same durable facts as already answered and stays silent. The retry is
+   * active: the live Session is rederived now instead of waiting for an unrelated
+   * Team fact or a restart. It is bounded, because every retry spends one of the
+   * Member's turns and a persistent outage must not spend them forever; standing
+   * down still leaves the occurrence owed and the coverage dropped.
+   */
+  private retryMemberReminderConsumption(carried: { readonly memberId: AgentTeamMemberId; readonly reminders: readonly InboxMemberReminder[] }, error: unknown): void {
+    const failures = (this.memberReminderConsumeFailures.get(carried.memberId) ?? 0) + 1
+    this.memberReminderConsumeFailures.set(carried.memberId, failures)
+    this.dropInboxCoverage(carried.memberId)
+    const scope = this.memberScope(carried.memberId)
+    const detail = failureDetail(error)
+    if (failures > MAX_MEMBER_REMINDER_CONSUME_RETRIES) {
+      this.ctx.logger.warn(`agent-team: could not record Member reminder consumption for ${scope} after ${failures} consecutive failure(s): ${detail}; the occurrence stays unread and is delivered by the next Team fact touching this Member`)
+      return
+    }
+    this.ctx.logger.warn(`agent-team: could not record Member reminder consumption for ${scope} on attempt ${failures} of at most ${MAX_MEMBER_REMINDER_CONSUME_RETRIES}: ${detail}; the coverage is dropped and the notice is rederived`)
+    // A Member without a live Session, or one mid-swap, is rederived by its own
+    // activation; the dropped coverage is what keeps the occurrence owed until then.
+    const handle = this.accepting ? this.handles.get(carried.memberId) : undefined
+    if (handle === undefined) {
+      this.ctx.logger.debug(`agent-team: Member reminder consumption retry for ${scope} has no live session to rederive: the occurrence stays unread until the next Team fact or activation`)
+      return
+    }
+    this.notifyMember(handle.agent, { kind: 'consumption-retry' })
+  }
+
+  /**
+   * Member reminders are time promises in the ledger, so the Host only decides
+   * when to look: on any commit that could have changed them, on boot, and on a
+   * timer armed to the next occurrence. Evaluation never waits for a turn.
+   */
+  private scheduleMemberReminderEvaluation(): void {
+    if (!this.accepting || this.ledger === undefined) return
+    this.reminderEvaluationRequested = true
+    void this.evaluateMemberReminders()
+  }
+
+  private evaluateMemberReminders(): Promise<void> {
+    this.reminderEvaluationTail = this.reminderEvaluationTail.then(async () => {
+      if (this.ledger === undefined) return
+      do {
+        this.reminderEvaluationRequested = false
+        const nowMs = Date.now()
+        for (const candidate of this.requireLedger().planMemberReminders(nowMs)) {
+          const receipt = await this.requireLedger().raiseMemberReminder(candidate)
+          // A baseline that moved while the write waited raises nothing; the
+          // rearmed timer brings the same occurrence back.
+          if (receipt !== undefined) this.emitCommitted(receipt)
+        }
+        this.armMemberReminderTimer(nowMs)
+      } while (this.reminderEvaluationRequested)
+    }).catch(error => {
+      this.ctx.logger.warn(`agent-team: Member reminder evaluation failed: ${failureDetail(error)}`)
+    })
+    return this.reminderEvaluationTail
+  }
+
+  /** Arm one timer for the soonest pending occurrence; nothing pending disarms it. */
+  private armMemberReminderTimer(nowMs: number): void {
+    if (this.memberReminderTimer !== undefined) clearTimeout(this.memberReminderTimer)
+    this.memberReminderTimer = undefined
+    if (!this.accepting || this.ledger === undefined) return
+    const at = this.requireLedger().nextMemberReminderWakeAt(nowMs)
+    if (at === undefined) return
+    const delay = Math.min(Math.max(0, at - Date.now()), MEMBER_REMINDER_TIMER_MAX_DELAY_MS)
+    this.memberReminderTimer = setTimeout(() => {
+      this.memberReminderTimer = undefined
+      this.scheduleMemberReminderEvaluation()
+    }, delay)
+    this.memberReminderTimer.unref?.()
+  }
+
   private requireLedger(): AgentTeamLedger {
     if (this.ledger === undefined || this.domain === undefined) throw new Error('agent-team service is not initialized')
     return this.ledger
@@ -2728,6 +2927,9 @@ export default class AgentTeam extends TypertRemoteService {
     const ledger = this.requireLedger()
     this.afterCommit('change invalidation', () => this.emitChanged(ledger.changeScopesOf(operation)))
     if (operation.kind !== 'team/reminder-raised') this.scheduleTaskReminderEvaluation()
+    // Member lifecycle decides which reminders still time (suspended keeps
+    // timing, archived and inactive cancel), and the reminder kinds move them.
+    if (operation.kind.startsWith('team/member-')) this.scheduleMemberReminderEvaluation()
     if (operation.kind === 'team/member-workspace-joined' || operation.kind === 'team/member-workspace-left') {
       this.afterCommit('participation notice', () => {
         const agent = this.handles.get(operation.data.memberId)?.agent
@@ -2862,20 +3064,38 @@ export default class AgentTeam extends TypertRemoteService {
         ? 'Member activation'
         : `Member activation previousSession '${cause.previousSessionId}'`
     }
+    if (cause.kind === 'consumption-retry') return 'Member reminder consumption write failed'
     return 'running transition'
   }
 
-  private inboxDeliveryPlan(notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
-    main: ReturnType<AgentTeamLedger['mainNotificationFacts']>, previous?: InboxNoticeDelivery): InboxDeliveryPlan {
-    return planInboxDelivery({ threads: notifications, main: main.map(({ project, entries }) => ({ projectRef: project.projectRef, entries })),
-      covered: previous?.covered, undelivered: previous?.undelivered })
+  /**
+   * The delivery plan for one redelivery. `deliveredReminders` narrows the
+   * coverage to the occurrences a notice actually rendered: the plan decides
+   * that an attempt is owed, the notice earns what it covers.
+   */
+  private inboxDeliveryPlan(input: {
+    readonly notifications: ReturnType<AgentTeamLedger['notificationFacts']>
+    readonly main: ReturnType<AgentTeamLedger['mainNotificationFacts']>
+    readonly memberReminders?: readonly AgentTeamUnreadMemberReminder[] | undefined
+    readonly deliveredReminders?: readonly InboxMemberReminder[] | undefined
+    readonly previous?: InboxNoticeDelivery | undefined
+  }): InboxDeliveryPlan {
+    return planInboxDelivery({
+      threads: input.notifications,
+      main: input.main.map(({ project, entries }) => ({ projectRef: project.projectRef, entries })),
+      reminders: (input.memberReminders ?? []).map(entry => ({ reminderRef: entry.reminder.reminderRef, sequence: entry.sequence })),
+      deliveredReminders: input.deliveredReminders,
+      covered: input.previous?.covered, undelivered: input.previous?.undelivered })
   }
 
-  private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = []): string {
+  private notificationIdentity(notifications: ReturnType<AgentTeamLedger['notificationFacts']>,
+    main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], memberReminders: readonly AgentTeamUnreadMemberReminder[] = []): string {
     let newest = 0
     for (const { item } of notifications) newest = Math.max(newest, item.newestSequence)
     for (const { entries } of main) newest = Math.max(newest, entries.at(-1)?.sequence ?? 0)
-    return `${notifications.length} unread Thread(s)${main.length === 0 ? '' : `, ${main.length} Project Main stream(s)`}, newest unread fact sequence ${newest}`
+    for (const entry of memberReminders) newest = Math.max(newest, entry.sequence)
+    return `${notifications.length} unread Thread(s)${main.length === 0 ? '' : `, ${main.length} Project Main stream(s)`}`
+      + `${memberReminders.length === 0 ? '' : `, ${memberReminders.length} due Member reminder(s)`}, newest unread fact sequence ${newest}`
   }
 
   /**
@@ -2908,6 +3128,7 @@ export default class AgentTeam extends TypertRemoteService {
 
   private async notifyMemberAtWake(memberId: AgentTeamMemberId, agent: Agent, cause: NotificationCause, sequenced: boolean): Promise<void> {
     this.scheduleTaskReminderEvaluation()
+    this.scheduleMemberReminderEvaluation()
     let gate: Error | undefined
     try {
       gate = await this.wakeGateFor(agent)
@@ -2931,9 +3152,10 @@ export default class AgentTeam extends TypertRemoteService {
     const material = this.requireLedger().notificationSnapshot(member.memberId)
     const notifications = material.threads
     const mainNotifications = material.main
+    const memberReminders = material.memberReminders
     const scope = this.memberScope(member.memberId, agent.id)
     const causeText = this.notificationCauseText(cause)
-    if (notifications.length === 0 && mainNotifications.length === 0) {
+    if (notifications.length === 0 && mainNotifications.length === 0 && memberReminders.length === 0) {
       this.dropInboxCoverage(member.memberId)
       this.ctx.logger.debug(`agent-team: Team Inbox notice not attempted for ${scope} cause ${causeText}: the Member has no unread Team facts`)
       return
@@ -2945,8 +3167,8 @@ export default class AgentTeam extends TypertRemoteService {
       sequenced = agent.inbox.nextTurn.some(message => message.source.kind === 'user')
     }
     const previous = this.inboxNoticeDeliveries.get(member.memberId)
-    const plan = this.inboxDeliveryPlan(notifications, mainNotifications, previous)
-    const facts = this.notificationIdentity(notifications, mainNotifications)
+    const plan = this.inboxDeliveryPlan({ notifications, main: mainNotifications, memberReminders, previous })
+    const facts = this.notificationIdentity(notifications, mainNotifications, memberReminders)
     // An unchanged rederivation spends no attempt: the delivery already made
     // for these facts stands, which is what keeps a repeated commit's logging
     // bounded.
@@ -2960,19 +3182,35 @@ export default class AgentTeam extends TypertRemoteService {
     // steerResume already combines the recovery instruction and these durable
     // facts. Its synchronous running transition must not replace that notice.
     if (pending.some(message => this.isRecoveryNotice(message))) {
-      this.coverInboxFacts(member.memberId, plan)
+      // Only the occurrences that recovery instruction actually rendered are
+      // answered by it. One raised after it was queued was never in its text, so
+      // it stays out of `covered` and stays owed: the claim of that instruction
+      // rederives the Inbox and delivers it.
+      const recovery = pending.find(message => this.isRecoveryNotice(message))!
+      this.coverInboxFacts(member.memberId, this.inboxDeliveryPlan({ notifications, main: mainNotifications,
+        deliveredReminders: this.memberReminderWakes.get(recovery.id)?.reminders ?? [], previous }))
       this.ctx.logger.info(`agent-team: Team Inbox notice carried by the queued recovery instruction for ${scope} cause ${causeText} (${facts}): queued with that recovery instruction, not yet read by the model`)
       return
     }
     const existingInboxHint = pending.find(message => this.isInboxNotice(message))
     if (existingInboxHint !== undefined) this.removeExpectedTeamWake(agent, existingInboxHint)
-    const notice = this.notificationText(agent, notifications, member.memberId, mainNotifications, plan)
+    const notice = this.notificationText(agent, notifications, member.memberId, mainNotifications, plan, '', memberReminders)
     const hint = createUserMessage({
       content: [{ type: 'text', text: notice.text }],
       source: { kind: AGENT_TEAM_PLUGIN_ID, form: 'notice', summary: TEAM_INBOX_NOTICE_SUMMARY, teamFacts: teamMessageSurface(notice.text, notice.messages, notice.activities) },
     })
     this.trackTeamWake(agent, hint)
-    const attempt = this.beginInboxDelivery(member.memberId, plan, notice.undelivered)
+    // A Member reminder is consumed when its notice reaches a turn, so the queued
+    // message carries the occurrences it rendered for the claim that reads them.
+    if (notice.deliveredReminders.length > 0) {
+      this.memberReminderWakes.set(hint.id, { memberId: member.memberId, reminders: notice.deliveredReminders })
+    }
+    // Coverage is what the notice rendered, not what the plan offered: an
+    // occurrence the detail cap or the character budget dropped never reached
+    // the Member, so it is not answered and stays unread.
+    const earned = notice.deliveredReminders.length === memberReminders.length ? plan
+      : this.inboxDeliveryPlan({ notifications, main: mainNotifications, memberReminders, deliveredReminders: notice.deliveredReminders, previous })
+    const attempt = this.beginInboxDelivery(member.memberId, earned, notice.undelivered)
     try {
       // Steer normally claims the nearest step boundary — which would
       // preempt carried input that a swap or crash recovery queued as
@@ -3031,6 +3269,9 @@ export default class AgentTeam extends TypertRemoteService {
   /** Remove a Team notice that Host code is replacing or disposing on purpose. */
   private removeExpectedTeamWake(agent: Agent, message: UserMessage): void {
     this.expectedInboxDiscards.add(message.id)
+    // The occurrences this message carried were never read, so nothing may
+    // consume them: its successor rederives them from the durable unread.
+    this.memberReminderWakes.delete(message.id)
     if (!agent.inbox.remove(message.id)) {
       this.expectedInboxDiscards.delete(message.id)
       this.pendingTeamWakes.delete(message.id)
@@ -3071,7 +3312,7 @@ export default class AgentTeam extends TypertRemoteService {
       && source.form === 'notice' && source.summary === TEAM_RECOVERY_NOTICE_SUMMARY
   }
 
-  private notificationText(agent: Agent, notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], deliveryPlan?: InboxDeliveryPlan, prefix = ''): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly activities: readonly ActivityFact[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[] } {
+  private notificationText(agent: Agent, notifications: ReturnType<AgentTeamLedger['notificationFacts']>, readerId?: AgentTeamMemberId, main: ReturnType<AgentTeamLedger['mainNotificationFacts']> = [], deliveryPlan?: InboxDeliveryPlan, prefix = '', memberReminders: readonly AgentTeamUnreadMemberReminder[] = []): { readonly text: string; readonly messages: readonly RenderedTeamMessage[]; readonly activities: readonly ActivityFact[]; readonly renderedThreads: ReadonlySet<AgentTeamThreadRef>; readonly undelivered: readonly AgentTeamThreadRef[]; readonly deliveredReminders: readonly InboxMemberReminder[] } {
     const maxCharacters = 32 * 1024
     // The recovery instruction shares this budget, and footers state what was
     // omitted; hold both back so a full notice still fits 32K of UTF-16.
@@ -3093,8 +3334,12 @@ export default class AgentTeam extends TypertRemoteService {
       characterCount += section.length + 2
       return true
     }
-    const plan = deliveryPlan ?? (readerId === undefined ? undefined : this.inboxDeliveryPlan(notifications, main))
+    const plan = deliveryPlan ?? (readerId === undefined ? undefined : this.inboxDeliveryPlan({ notifications, main }))
     const rendered = new Set<AgentTeamThreadRef>()
+    // The Member reminder occurrences this notice actually rendered. An
+    // occurrence the detail cap or the character budget dropped is not here, so
+    // the delivery that follows consumes only what the Member can read.
+    const deliveredReminders: InboxMemberReminder[] = []
     // The notice that is being built is delivery intent, not Session output:
     // only facts already on the live surface may be collapsed to an identity.
     const surface = visibleTeamSurface(agent)
@@ -3110,11 +3355,21 @@ export default class AgentTeam extends TypertRemoteService {
       readonly text: () => string
       readonly message?: RenderedTeamMessage
       readonly activity?: ActivityFact
+      readonly reminder?: InboxMemberReminder
     }
     const candidates: NoticeCandidate[] = []
     let order = 0
     let omittedDirectCount = 0
     const omittedDirectRoutes = new Set<string>()
+    // A Member reminder belongs to no Thread: it is the Member's own promise to
+    // itself, so it reads as its own private scope and is never a Thread route.
+    for (const entry of memberReminders) {
+      const scope: NoticeScope = { key: `member-reminder:${entry.reminder.reminderRef}`,
+        header: 'Team reminder, private to you' }
+      candidates.push({ scope, priority: 2, order: order++, sequence: entry.sequence, detail: true, direct: false,
+        text: () => this.memberReminderDetail(entry),
+        reminder: { reminderRef: entry.reminder.reminderRef, sequence: entry.sequence } })
+    }
     const scopeRoute = (scope: NoticeScope): string => scope.threadRef === undefined ? `Main stream ${scope.key}` : `Thread ${scope.threadRef}`
     for (const { item, facts, reminders } of notifications) {
       const scoped = plan?.threads.find(thread => thread.threadRef === item.thread.threadRef)
@@ -3248,6 +3503,7 @@ export default class AgentTeam extends TypertRemoteService {
         continue
       }
       if (candidate.detail) detailedFactCount += 1
+      if (candidate.reminder !== undefined) deliveredReminders.push(candidate.reminder)
       if (candidate.message !== undefined) messages.push(candidate.message)
       if (candidate.activity !== undefined) activities.push(candidate.activity)
     }
@@ -3263,7 +3519,7 @@ export default class AgentTeam extends TypertRemoteService {
     // character budget dropped them. Their facts were never delivered, so the
     // next plan must keep them out of `covered`.
     const undelivered = notifications.map(({ item }) => item.thread.threadRef).filter(threadRef => !rendered.has(threadRef))
-    return { text: sections.join('\n\n'), messages, activities, renderedThreads: rendered, undelivered }
+    return { text: sections.join('\n\n'), messages, activities, renderedThreads: rendered, undelivered, deliveredReminders }
   }
 
   private mainNotificationDetail(entry: AgentTeamMainTimelineEntry, project: AgentTeamProject, onSurface = false): string {
@@ -3294,6 +3550,18 @@ export default class AgentTeam extends TypertRemoteService {
     return ['Direct Main stream mention', `Occurred at: ${formatTeamTimestamp(entry.occurredAt)}`, `From: ${this.printableSender(message.sender)}`,
       `Project: ${project.projectRef}`, `Message ref: ${message.messageRef}`, ...(repliesTo === undefined ? [] : [repliesTo]),
       `Message: ${this.boundedNotificationBody(message.body)}`].join('\n')
+  }
+
+  /** One due Member reminder as the notice renders it: the note the Member wrote for itself, and when it came due. */
+  private memberReminderDetail(entry: AgentTeamUnreadMemberReminder): string {
+    const { reminder, scheduledAt } = entry
+    const schedule = reminder.schedule.kind === 'once' ? `once at ${formatTeamTimestamp(reminder.schedule.at)}`
+      : reminder.schedule.kind === 'every' ? `every ${reminder.schedule.minutes} minutes`
+        : `cron '${reminder.schedule.expression}', read in the fixed Team zone UTC+8`
+    return ['You asked to be reminded of this yourself, with team_reminder.', `Note: ${reminder.note}`,
+      `Schedule: ${schedule}`, `Occurred at: ${formatTeamTimestamp(scheduledAt)}`,
+      `Reminder: ${reminder.reminderRef}`,
+      'This reminder is now in your context; act on it, and nothing further is owed for this occurrence.'].join('\n')
   }
 
   private boundedNotificationBody(body: string): string {

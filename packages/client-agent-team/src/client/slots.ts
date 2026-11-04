@@ -62,6 +62,10 @@ import type {
   AgentTeamUpdateProjectRequest,
   AgentTeamUpdateProjectResult,
   AgentTeamUpdateMemberRequest,
+  AgentTeamMemberReminderListRequest,
+  AgentTeamMemberReminderView,
+  AgentTeamMemberReminderCancelRequest,
+  AgentTeamMemberReminderCancelResult,
   AgentTeamView,
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
@@ -126,6 +130,10 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     removeProjectOwner: (request: AgentTeamProjectOwnerRequest) => Promise<RemoteResult<AgentTeamProjectOwnerResult>>
     humanIdentity: TeamHumanIdentitySource
     updateMember: (request: AgentTeamUpdateMemberRequest) => Promise<RemoteResult<AgentTeamMemberResult>>
+    /** One Member's reminders for Member detail; the Host judges participation, never the seat. */
+    loadMemberReminders: (request: AgentTeamMemberReminderListRequest) => Promise<RemoteResult<readonly AgentTeamMemberReminderView[]>>
+    /** Human withdrawal of one reminder from Member detail; only the Member's own reminders are listed to withdraw. */
+    cancelMemberReminder: (request: Omit<AgentTeamMemberReminderCancelRequest, 'actor'>) => Promise<RemoteResult<AgentTeamMemberReminderCancelResult>>
     recoverMember: (request: AgentTeamRecoverMemberRequest) => Promise<RemoteResult<AgentTeamRecoverMemberResult>>
     archiveMember: (request: AgentTeamArchiveMemberRequest) => Promise<RemoteResult<AgentTeamArchiveMemberResult>>
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => Promise<RemoteResult<AgentTeamJoinWorkspaceResult>>

@@ -16,6 +16,11 @@ import type {
   AgentTeamMainMessage,
   AgentTeamMemberCapabilities,
   AgentTeamMemberId,
+  AgentTeamHumanActor,
+  AgentTeamMemberActor,
+  AgentTeamMemberReminder,
+  AgentTeamReminderRef,
+  AgentTeamReminderSchedule,
   AgentTeamMessage,
   AgentTeamMessageRef,
   AgentTeamMessageReplyContext,
@@ -770,6 +775,73 @@ export interface AgentTeamInboxActor {
   readonly name: string
   /** Agent lifecycle for accountable-owner display; absent for the Human and ordinary message actors. */
   readonly state?: AgentTeamAgentMember['state']
+}
+
+/** One Member reminder as a surface renders it: the durable entity plus the occurrence facts derived from the ledger. */
+export interface AgentTeamMemberReminderView {
+  readonly reminder: AgentTeamMemberReminder
+  /** Instant the occurrence waiting to be read was raised at; absent when nothing is pending. */
+  readonly pendingOccurrenceAt?: string | undefined
+  /** Instant the last occurrence was raised at; absent when this reminder has never fired. */
+  readonly lastOccurrenceAt?: string | undefined
+  /** Instant the next occurrence is due; absent when this reminder will not fire again. */
+  readonly nextOccurrenceAt?: string | undefined
+}
+
+/** A Member's intent to make itself a time promise. Only the creating Member may do this: a reminder has exactly one recipient. */
+export interface AgentTeamMemberReminderCreateRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly actor: AgentTeamMemberActor
+  readonly workspaceId: WorkspaceId
+  readonly reminderRef: AgentTeamReminderRef
+  readonly schedule: AgentTeamReminderSchedule
+  readonly note: string
+}
+
+export interface AgentTeamMemberReminderCreateResult {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly workspaceId: WorkspaceId
+  readonly reminder: AgentTeamMemberReminder
+  /** Active reminders this Member carries after the creation, against the per-Member ceiling. */
+  readonly activeCount: number
+}
+
+/** A Member's own reminders, as a list read returns them. */
+export interface AgentTeamMemberReminderListRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly workspaceId: WorkspaceId
+  readonly memberId: AgentTeamMemberId
+}
+
+/** Withdrawal of one reminder by the Member that owns it, or by the Human on its behalf. */
+export interface AgentTeamMemberReminderCancelRequest {
+  readonly requestId: AgentTeamRequestId
+  readonly actor: AgentTeamMemberActor | AgentTeamHumanActor
+  readonly workspaceId: WorkspaceId
+  readonly reminderRef: AgentTeamReminderRef
+}
+
+export interface AgentTeamMemberReminderCancelResult {
+  readonly receipt: AgentTeamOperationReceipt
+  readonly workspaceId: WorkspaceId
+  readonly reminder: AgentTeamMemberReminder
+}
+
+/** One unread private Member reminder; never part of any Thread history. */
+export interface AgentTeamUnreadMemberReminder {
+  readonly reminder: AgentTeamMemberReminder
+  readonly scheduledAt: string
+  readonly sequence: number
+}
+
+/**
+ * One occurrence of a Member reminder by the marker identity that delivered it.
+ * Consumption is by this identity, so a notice that named an older occurrence
+ * never consumes the newer one that replaced it while the notice waited unread.
+ */
+export interface AgentTeamMemberReminderOccurrenceRef {
+  readonly reminderRef: AgentTeamReminderRef
+  readonly sequence: number
 }
 
 /** One unread private Task reminder; never part of the public Thread history. */

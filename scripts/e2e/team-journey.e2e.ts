@@ -439,6 +439,21 @@ it('drives the complete opt-in Agent Team journey in real Web', async () => {
   await modelMenu.getByRole('menuitem', { name: '跟随全局默认' }).click()
   await expect.poll(() => page.locator('[role="menu"]').count()).toBe(0)
   await page.screenshot({ path: join(UI04_SHOTS, 'agent-edit-modal.png'), fullPage: true })
+  // The Member's own reminders read under the form through the Human Remote. This
+  // Agent has set none, so the block states that rather than rendering an empty list.
+  const reminders = agentEditor.getByRole('group', { name: '提醒' })
+  await reminders.waitFor()
+  await expect.poll(() => reminders.textContent()).toContain('这个 Agent 还没有给自己设过提醒。')
+  await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-empty.png'), fullPage: true })
+  // The same block at the narrow lane: the dialog reflows inside the 390px viewport
+  // instead of overflowing it, exactly as the create and Project dialogs do.
+  await page.setViewportSize({ width: 390, height: 844 })
+  const narrowRemindersBox = await reminders.boundingBox()
+  expect(narrowRemindersBox).not.toBeNull()
+  expect(narrowRemindersBox!.x).toBeGreaterThanOrEqual(0)
+  expect(narrowRemindersBox!.x + narrowRemindersBox!.width).toBeLessThanOrEqual(390)
+  await page.screenshot({ path: join(UI04_SHOTS, 'agent-reminders-empty-narrow.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 960 })
   await agentEditor.getByRole('button', { name: '关闭', exact: true }).click()
 
   // Row menus omit any clear-context entry: the Host recycles a Member's

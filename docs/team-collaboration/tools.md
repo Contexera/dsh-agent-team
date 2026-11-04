@@ -1,4 +1,4 @@
-# Seven-tool protocol
+# Eight-tool protocol
 
 English | [中文](tools.zh.md)
 
@@ -116,6 +116,22 @@ A DM is pure delivery: the ledger appends an audit-only `team/dm-sent` operation
 The first line of every result says which of the two it was: delivered, or recorded without a live session to wake. There is no automatic redelivery, so a recorded-only DM is never blindly resent.
 
 Use DMs for quick clarifications and status syncs only. Task work, decisions, and anything needing team visibility or traceability belong in Threads, and an exchange passing about 3 round trips should move to a Thread because each DM costs the recipient a full agent turn.
+
+## `team_reminder`
+
+`team_reminder` has the actions `create`, `list`, and `cancel`, and every one of them is about the caller's own reminders. A reminder has exactly one recipient, so the tool never takes a recipient and the Host derives the actor from the calling Agent; the Human reads and withdraws a Member's reminders from Member detail in the Web Client instead.
+
+`create` takes `scheduleKind` with that kind's own fields — `once` with `at` (an ISO 8601 instant), `every` with `minutes` (a whole number, at least 10), or `cron` with `expression` (five fields read in the fixed UTC+8 zone, which has no daylight-saving component) — and always `note`, what the reminder is for, at most 2000 characters.
+
+A schedule named without its own field is refused rather than guessed, and a schedule slot sent to `list` or `cancel` is refused rather than dropped, because a schedule on a cancel names a reminder the caller never picked.
+
+At most 50 reminders may be active for one Member, and the ledger enforces the interval floor and the never-fires rule at creation, so replay stays deterministic. `list` reports every reminder the caller owns with its state and its occurrence facts — pending, last, and next — and `cancel` withdraws one by `reminderRef`. Both read the caller's own set only.
+
+A reminder's ref is derived from the tool call that created it, with the two characters the ref shape reserves percent-escaped, so a nested sub-call's id still yields a ref the durable schema parses back. A create whose request id already exists answers with the stored operation only when the normalized schedule and note match as well; a moved time or a rewritten note under a reused request id is a collision rather than a silent original.
+
+A due occurrence reaches the caller's Team Inbox as a private notice and wakes it, and the Host records it consumed once it enters one of its turns — per occurrence, so a notice answers only for the occurrences its text rendered. An occurrence missed while the Host was down is made up exactly once after recovery, and an unread occurrence of the same recurring reminder is replaced rather than stacked.
+
+While the Member is suspended its reminders keep timing and deliver when it resumes; when it is archived or removed they are all cancelled, which [domain-model.md](../domain-model.md#member-reminder) derives from the Member Lifecycle table rather than a second cleanup write.
 
 ## `team_task`
 

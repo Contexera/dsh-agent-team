@@ -14,6 +14,7 @@ import type {
   AgentTeamMainActivity,
   AgentTeamMainMessage,
   AgentTeamMemberId,
+  AgentTeamMemberReminder,
   AgentTeamMessage,
   AgentTeamStoredMessage,
   AgentTeamStoredThreadReadFact,
@@ -23,6 +24,7 @@ import type {
   AgentTeamThread,
   AgentTeamThreadAttention,
   AgentTeamThreadRef,
+  AgentTeamReminderRef,
 } from "./entities.ts"
 
 /** The first durable operation in every Agent Team ledger. */
@@ -384,6 +386,56 @@ export interface AgentTeamReminderRaisedOperation extends AgentTeamOperationBase
   }
 }
 
+/** A Member's own time promise, created for and by that Member alone. It carries no Inbox delta: nothing is unread until an occurrence fires. */
+export interface AgentTeamMemberReminderCreatedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/member-reminder-created'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly reminder: AgentTeamMemberReminder
+  }
+}
+
+/**
+ * One occurrence of a Member reminder, raised by the Host when it comes due. The
+ * marker it adds is the private Inbox unread; a marker it removes is the
+ * previous occurrence of the same reminder, which this one replaces rather than
+ * stacks on.
+ */
+export interface AgentTeamMemberReminderRaisedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/member-reminder-raised'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly memberId: AgentTeamMemberId
+    readonly reminderRef: AgentTeamReminderRef
+    /** Instant this occurrence was raised at, ISO 8601. */
+    readonly scheduledAt: string
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/** The occurrence reached the Member's context, so its private Inbox marker is consumed. */
+export interface AgentTeamMemberReminderConsumedOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/member-reminder-consumed'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly memberId: AgentTeamMemberId
+    readonly reminderRef: AgentTeamReminderRef
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
+/** Withdrawal by the Member that owns the reminder, or by the Human on its behalf. */
+export interface AgentTeamMemberReminderCancelledOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/member-reminder-cancelled'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly memberId: AgentTeamMemberId
+    readonly reminderRef: AgentTeamReminderRef
+    readonly reminder: AgentTeamMemberReminder
+    readonly inbox: AgentTeamInboxDelta
+  }
+}
+
 /** Durable personal Attention follow or unfollow; it does not revise the Thread. */
 export interface AgentTeamThreadAttentionChangedOperation extends AgentTeamOperationBase {
   readonly kind: 'team/thread-attention-changed'
@@ -506,6 +558,10 @@ export type AgentTeamOperation =
   | AgentTeamMainAttentionChangedOperation
   | AgentTeamThreadReadOperation
   | AgentTeamReminderRaisedOperation
+  | AgentTeamMemberReminderCreatedOperation
+  | AgentTeamMemberReminderRaisedOperation
+  | AgentTeamMemberReminderConsumedOperation
+  | AgentTeamMemberReminderCancelledOperation
   | AgentTeamMemberRemovedOperation
   | AgentTeamDmSentOperation
 

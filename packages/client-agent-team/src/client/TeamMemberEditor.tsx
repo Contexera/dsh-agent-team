@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
-import type { AgentTeamClientMemberStatus, AgentTeamModelSelection } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamClientMemberStatus, AgentTeamMemberReminderView, AgentTeamModelSelection, AgentTeamReminderSchedule } from '@contexera/dsh-agent-team/types'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
+import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { TeamModelCatalog, TeamModelEffortOption, TeamModelProviderGroup, TeamSidebarProps } from './slots.ts'
+import type { TeamKey } from './locales.ts'
+import { formatAbsoluteTime } from './team-formatters.ts'
 import { Button, IconChevronDownOutlineRegular, Input, Menu, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { mintRequestId } from './requests.ts'
@@ -203,10 +206,132 @@ export function ModelPickerField({ model, onModelChange, loadModels, disabled, t
   </div>
 }
 
-export function AgentEditorDialog({ status, updateMember, loadModels, onCommitted, onClose, t }: {
+/**
+ * One Member's reminders in Member detail. Read-only by construction: the Human sees what the
+ * Member asked of itself and may withdraw a reminder, but never invents one — a reminder has
+ * exactly one recipient, and only that Member creates its own. Every write re-reads the list,
+ * so the rows are never an optimistic guess at what the Host stored.
+ */
+export function MemberRemindersSection({ workspaceId, memberId, loadMemberReminders, cancelMemberReminder, disabled, t }: {
+  readonly workspaceId: WorkspaceId
+  readonly memberId: AgentTeamClientMemberStatus['member']['memberId']
+  readonly loadMemberReminders: TeamSidebarProps['loadMemberReminders']
+  readonly cancelMemberReminder: TeamSidebarProps['cancelMemberReminder']
+  readonly disabled: boolean
+  readonly t: TeamSidebarProps['t']
+}) {
+  const [reminders, setReminders] = useState<readonly AgentTeamMemberReminderView[]>()
+  const [error, setError] = useState<string>()
+  const [reloadToken, setReloadToken] = useState(0)
+  const [withdrawing, setWithdrawing] = useState<AgentTeamMemberReminderView['reminder']['reminderRef']>()
+  useEffect(() => {
+    let mounted = true
+    let pending: Promise<RemoteResult<readonly AgentTeamMemberReminderView[]>>
+    try {
+      pending = loadMemberReminders({ requestId: mintRequestId(), workspaceId, memberId })
+    } catch (cause) {
+      // A synchronously refused read (an undeclared remote, a dead scope) is the same retryable failure.
+      setError(cause instanceof Error ? cause.message : String(cause))
+      return
+    }
+    void pending.then(
+      (result) => {
+        if (!mounted) return
+        if (result.ok) {
+          setReminders(result.value)
+          setError(undefined)
+        } else {
+          setError(result.error.message)
+        }
+      },
+      (cause: unknown) => {
+        if (!mounted) return
+        setError(cause instanceof Error ? cause.message : String(cause))
+      },
+    )
+    return () => { mounted = false }
+  }, [loadMemberReminders, workspaceId, memberId, reloadToken])
+
+  const cancel = async (reminderRef: AgentTeamMemberReminderView['reminder']['reminderRef']): Promise<void> => {
+    if (withdrawing !== undefined) return
+    setWithdrawing(reminderRef)
+    try {
+      const result = await cancelMemberReminder({ requestId: mintRequestId(), workspaceId, reminderRef })
+      if (!result.ok) throw new Error(result.error.message)
+      setReloadToken(token => token + 1)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setWithdrawing(undefined)
+    }
+  }
+
+  return (
+    <div className={createCss.remindersSection} role="group" aria-label={t('memberReminders')} data-team-member-reminders>
+      <span className={createCss.sectionLabel}>{t('memberReminders')}</span>
+      {reminders === undefined && error === undefined && <small className={css.editHint}>{t('memberRemindersLoading')}</small>}
+      {reminders !== undefined && reminders.length === 0 && <small className={css.editHint}>{t('memberRemindersEmpty')}</small>}
+      {reminders !== undefined && reminders.length > 0 && (
+        <ul className={createCss.reminderList}>
+          {reminders.map(view => (
+            <li className={createCss.reminderRow} key={view.reminder.reminderRef} data-reminder-state={view.reminder.state}>
+              <span className={createCss.reminderNote}>{view.reminder.note}</span>
+              <small className={css.editHint}>
+                {reminderScheduleText(view.reminder.schedule, t)}
+                {' · '}
+                {t(REMINDER_STATE_KEYS[view.reminder.state])}
+              </small>
+              {view.nextOccurrenceAt !== undefined && <small className={css.editHint}>{t('memberReminderNext', { time: formatAbsoluteTime(view.nextOccurrenceAt) })}</small>}
+              {view.pendingOccurrenceAt !== undefined && <small className={css.editHint}>{t('memberReminderPending', { time: formatAbsoluteTime(view.pendingOccurrenceAt) })}</small>}
+              {view.lastOccurrenceAt !== undefined && view.pendingOccurrenceAt === undefined && view.nextOccurrenceAt === undefined && (
+                <small className={css.editHint}>{t('memberReminderLast', { time: formatAbsoluteTime(view.lastOccurrenceAt) })}</small>
+              )}
+              {view.reminder.state === 'active' && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={disabled || withdrawing !== undefined}
+                  onClick={() => { void cancel(view.reminder.reminderRef) }}
+                >
+                  {withdrawing === view.reminder.reminderRef ? t('memberReminderCancelling') : t('memberReminderCancel')}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {error !== undefined && (
+        <p className={createCss.failure} role="alert">
+          <span>{t('memberRemindersFailed', { message: error })}</span>
+          <Button size="sm" variant="outline" disabled={disabled} onClick={() => { setError(undefined); setReloadToken(token => token + 1) }}>
+            {t('retry')}
+          </Button>
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The one label per stored state, so a new state cannot silently render as nothing. */
+const REMINDER_STATE_KEYS = {
+  active: 'memberReminderActive',
+  done: 'memberReminderDone',
+  cancelled: 'memberReminderCancelled',
+} as const satisfies Record<AgentTeamMemberReminderView['reminder']['state'], TeamKey>
+
+/** One schedule as the Human reads it: the stored form, with cron naming the zone it is read in. */
+function reminderScheduleText(schedule: AgentTeamReminderSchedule, t: TeamSidebarProps['t']): string {
+  if (schedule.kind === 'once') return `${t('memberReminderOnce')} ${formatAbsoluteTime(schedule.at)}`
+  if (schedule.kind === 'every') return t('memberReminderEvery', { minutes: schedule.minutes })
+  return t('memberReminderCron', { expression: schedule.expression })
+}
+
+export function AgentEditorDialog({ status, updateMember, loadModels, loadMemberReminders, cancelMemberReminder, onCommitted, onClose, t }: {
   readonly status: AgentTeamClientMemberStatus
   readonly updateMember: TeamSidebarProps['updateMember']
   readonly loadModels: TeamSidebarProps['loadModels']
+  readonly loadMemberReminders: TeamSidebarProps['loadMemberReminders']
+  readonly cancelMemberReminder: TeamSidebarProps['cancelMemberReminder']
   readonly onCommitted: () => Promise<void> | void
   readonly onClose: () => void
   readonly t: TeamSidebarProps['t']
@@ -265,6 +390,15 @@ export function AgentEditorDialog({ status, updateMember, loadModels, onCommitte
         <ModelPickerField model={model} onModelChange={choice => { invalidate(); setModel(choice) }} loadModels={loadModels} disabled={saving} t={t} />
         {error !== undefined && <p className={createCss.error} role="alert">{error}</p>}
       </form>
+      {/* Outside the form: a reminder withdrawal is its own write, never part of the profile save. */}
+      <MemberRemindersSection
+        workspaceId={status.member.workspaceId}
+        memberId={memberId}
+        loadMemberReminders={loadMemberReminders}
+        cancelMemberReminder={cancelMemberReminder}
+        disabled={saving}
+        t={t}
+      />
     </Modal>
   )
 }

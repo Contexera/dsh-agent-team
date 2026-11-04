@@ -78,6 +78,19 @@ import type {
   AgentTeamMemberArchivedOperation,
   AgentTeamMemberCapabilities,
   AgentTeamMemberId,
+  AgentTeamMemberReminder,
+  AgentTeamMemberReminderCancelledOperation,
+  AgentTeamMemberReminderConsumedOperation,
+  AgentTeamMemberReminderCreatedOperation,
+  AgentTeamMemberReminderMarker,
+  AgentTeamMemberReminderRaisedOperation,
+  AgentTeamMemberReminderView,
+  AgentTeamMemberReminderCreateRequest,
+  AgentTeamMemberReminderCreateResult,
+  AgentTeamMemberReminderCancelRequest,
+  AgentTeamMemberReminderCancelResult,
+  AgentTeamMemberReminderOccurrenceRef,
+  AgentTeamUnreadMemberReminder,
   AgentTeamMemberRemovedOperation,
   AgentTeamMemberResumedOperation,
   AgentTeamMemberSessionRecycledOperation,
@@ -107,6 +120,7 @@ import type {
   AgentTeamRequestId,
   AgentTeamReminderMarker,
   AgentTeamReminderRaisedOperation,
+  AgentTeamReminderRef,
   AgentTeamResolvedMessageRef,
   AgentTeamReadMessageRequest,
   AgentTeamReadMessageResult,
@@ -171,6 +185,8 @@ import { formatTeamTimestamp } from './time-format.ts'
 import { resolveBodyMentions } from './mentions.ts'
 import { recoveryFor } from './recovery-hints.ts'
 import { planTaskReminders, reviewReminderRecipient } from './task-reminders.ts'
+import { MAX_ACTIVE_REMINDERS_PER_MEMBER, MAX_REMINDER_NOTE_CHARACTERS, nextOccurrenceAt, nextReminderWakeAt, parseReminderNote, parseReminderSchedule, planMemberReminders, reminderRefIsStorable, reminderScheduleIsSound, sameReminderIntent } from './member-reminders.ts'
+import type { MemberReminderCandidate, MemberReminderPlanEntry } from './member-reminders.ts'
 import type { AgentTeamBodyMentionCandidate } from './mentions.ts'
 
 /** Stable Human Member identity shared by every replay of one dshHome Team. */
@@ -437,6 +453,14 @@ interface Projection {
   readonly reminderMarkers: Map<string, AgentTeamReminderMarker>
   /** Complete reminder episodes, including consumed markers, for durable deduplication. */
   readonly reminderEpisodes: Map<string, AgentTeamReminderRaisedOperation>
+  /** Every Member reminder by ref, including finished and cancelled ones: the entity the operations revise. */
+  readonly memberReminders: Map<AgentTeamReminderRef, AgentTeamMemberReminder>
+  /** Latest occurrence per reminder: what fired, and whether it reached the Member's context. */
+  readonly memberReminderOccurrences: Map<AgentTeamReminderRef, MemberReminderOccurrence>
+  /** Unconsumed Member reminder occurrences — the private Inbox unread that wakes their Member. */
+  readonly memberReminderMarkers: Map<string, AgentTeamMemberReminderMarker>
+  /** Unconsumed Member reminder occurrences bucketed per Member, keyed by reminder ref. */
+  readonly memberReminderMarkersByMember: Map<AgentTeamMemberId, Map<AgentTeamReminderRef, AgentTeamMemberReminderMarker[]>>
   /** Current Task status and the operation that entered it; ordinary replies do not move this baseline. */
   readonly taskStatusBaselines: Map<AgentTeamTaskRef, { readonly status: AgentTeamTask['status']; readonly sequence: number }>
   /** Derived read indexes; rebuilt by replay, never a second durable authority. */
@@ -490,7 +514,8 @@ interface Projection {
 }
 
 /** Kinds a rules-version-1 segment rejects (owner operations carry their own check), and the one kind version 2 stops writing. */
-const V2_ONLY_KINDS: readonly string[] = ['team/main-message-posted', 'team/main-stream-read', 'team/thread-started', 'team/task-accountable-changed', 'team/reminder-raised']
+const V2_ONLY_KINDS: readonly string[] = ['team/main-message-posted', 'team/main-stream-read', 'team/thread-started', 'team/task-accountable-changed', 'team/reminder-raised',
+  'team/member-reminder-created', 'team/member-reminder-raised', 'team/member-reminder-consumed', 'team/member-reminder-cancelled']
 const REPLACED_AT_V2_KINDS: readonly string[] = ['team/message-sent']
 
 /** One entry of a reader's unread Main stream: why it is unread (ordinary owner unread, a marker, or both). */
@@ -516,6 +541,22 @@ interface AgentTeamAttentionObservation {
   readonly action: 'follow' | 'unfollow'
 }
 
+/** One occurrence of a Member reminder: what fired, when, and whether it reached the Member's context. */
+interface MemberReminderOccurrence {
+  readonly reminderRef: AgentTeamReminderRef
+  readonly memberId: AgentTeamMemberId
+  /** Instant the Host raised this occurrence at, ISO 8601. */
+  readonly scheduledAt: string
+  readonly raisedSequence: number
+  /** Sequence of the operation that recorded the occurrence as delivered; absent until it is. */
+  readonly consumedSequence?: number
+}
+
+/** One marker per Member and reminder: the key that makes a replacement a replacement. */
+function memberReminderMarkerKey(marker: Pick<AgentTeamMemberReminderMarker, 'memberId' | 'reminderRef'>): string {
+  return `${marker.memberId}|${marker.reminderRef}`
+}
+
 /**
  * Operation kinds whose durable record is history alone: they must replay, but
  * they move no projection state, so replay skips them after indexing the
@@ -537,6 +578,7 @@ function emptyProjection(): Projection {
   return { byRequest: new Map(), byOperation: new Map(), ordered: [], occurredAtBySequence: new Map(), projects: new Map(), members: new Map(), participations: new Map(), memberships: new Map(),
     claims: new Map(), tasks: new Map(), threads: new Map(), attention: new Map(), directMarkers: new Map(), activityMarkers: new Map(),
     reminderMarkers: new Map(), reminderEpisodes: new Map(), taskStatusBaselines: new Map(), orderedFacts: [], claimsByTask: new Map(), claimCreatedSequenceByRef: new Map(), factsByThread: new Map(), projectRefByThread: new Map(), mentionsByMessage: new Map(), messageCountByThread: new Map(),
+    memberReminders: new Map(), memberReminderOccurrences: new Map(), memberReminderMarkers: new Map(), memberReminderMarkersByMember: new Map(),
     messagesByRef: new Map(),
     attentionByThread: new Map(), sessionTransitions: new Map(),
     anchorByThread: new Map(), taskNumberByTask: new Map(), taskCountByProject: new Map(), attentionThreadsByMember: new Map(),
@@ -759,6 +801,253 @@ export class AgentTeamLedger {
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
       return this.receipt(operation)
+    })
+  }
+
+  /** Every reminder one Member owns, newest creation first, with the occurrence facts a surface renders. */
+  memberRemindersOf(memberId: AgentTeamMemberId): readonly AgentTeamMemberReminderView[] {
+    return this.memberRemindersOfFrom(this.state, memberId)
+  }
+
+  private memberRemindersOfFrom(projection: Projection, memberId: AgentTeamMemberId): readonly AgentTeamMemberReminderView[] {
+    const member = projection.members.get(memberId)
+    // An archived or removed Member's reminders are all cancelled: the lifecycle
+    // rule is derived, so replay never depends on a second cleanup write.
+    const lifecycleState = member?.state
+    const reminders = [...projection.memberReminders.values()]
+      .filter(reminder => reminder.memberId === memberId)
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.reminderRef.localeCompare(left.reminderRef))
+    return Object.freeze(reminders.map(reminder => {
+      const occurrence = projection.memberReminderOccurrences.get(reminder.reminderRef)
+      const cancelled = member === undefined || lifecycleState === 'archived' || lifecycleState === 'inactive'
+      const state = cancelled ? 'cancelled' as const : reminder.state
+      const pending = occurrence?.consumedSequence === undefined ? occurrence : undefined
+      const next = state === 'active'
+        ? nextOccurrenceAt(reminder.schedule, occurrence === undefined ? Date.parse(reminder.createdAt) : Date.parse(occurrence.scheduledAt))
+        : undefined
+      return Object.freeze({
+        reminder: state === reminder.state ? reminder : { ...reminder, state },
+        ...(pending === undefined ? {} : { pendingOccurrenceAt: pending.scheduledAt }),
+        ...(occurrence === undefined ? {} : { lastOccurrenceAt: occurrence.scheduledAt }),
+        ...(next === undefined || !Number.isFinite(next) ? {} : { nextOccurrenceAt: new Date(next).toISOString() }),
+      })
+    }))
+  }
+
+  /** Active reminders one Member carries; the create ceiling compares against this. */
+  activeMemberReminderCount(memberId: AgentTeamMemberId): number {
+    return this.activeMemberReminderCountFrom(this.state, memberId)
+  }
+
+  private activeMemberReminderCountFrom(projection: Projection, memberId: AgentTeamMemberId): number {
+    const member = projection.members.get(memberId)
+    if (member !== undefined && (member.state === 'archived' || member.state === 'inactive')) return 0
+    return [...projection.memberReminders.values()].filter(reminder => reminder.memberId === memberId && reminder.state === 'active').length
+  }
+
+  /** Unconsumed occurrences of one Member's reminders: the private Inbox unread that wakes them. */
+  unreadMemberRemindersFor(memberId: AgentTeamMemberId): readonly AgentTeamUnreadMemberReminder[] {
+    const member = this.state.members.get(memberId)
+    // Archived and removed Members have every reminder cancelled, so the private
+    // unread an earlier occurrence left behind is withdrawn with them.
+    if (member !== undefined && (member.state === 'archived' || member.state === 'inactive')) return []
+    const markers = this.state.memberReminderMarkersByMember.get(memberId)
+    if (markers === undefined || markers.size === 0) return []
+    const unread: AgentTeamUnreadMemberReminder[] = []
+    for (const bucket of markers.values()) {
+      for (const marker of bucket) {
+        const reminder = this.state.memberReminders.get(marker.reminderRef)
+        const occurrence = this.state.memberReminderOccurrences.get(marker.reminderRef)
+        if (reminder === undefined || occurrence === undefined || occurrence.consumedSequence !== undefined) continue
+        unread.push(Object.freeze({ reminder, scheduledAt: occurrence.scheduledAt, sequence: marker.sequence }))
+      }
+    }
+    return Object.freeze(unread.sort((left, right) => left.sequence - right.sequence))
+  }
+
+  /** A Member's own reminders, as the tool renders them. */
+  memberReminderList(memberId: AgentTeamMemberId): readonly AgentTeamMemberReminderView[] {
+    return this.memberRemindersOf(memberId)
+  }
+
+  /**
+   * A Member creates a reminder for itself. The schedule and note are validated
+   * here rather than at the caller so one authority decides what is committable,
+   * and the per-Member ceiling counts the reminders that are still active.
+   */
+  createMemberReminder(
+    request: AgentTeamMemberReminderCreateRequest,
+  ): Promise<AgentTeamLedgerResult<AgentTeamMemberReminderCreateResult>> {
+    return this.enqueue(async () => {
+      // A ref the durable schema cannot parse back would leave a record that
+      // fails on replay, so the create boundary refuses it rather than the next
+      // Host start.
+      if (!reminderRefIsStorable(request.reminderRef)) {
+        throw new Error(`Reminder ref '${request.reminderRef}' is not storable: it must be 'reminder:' followed by a value with no further colon`)
+      }
+      // Normalized first, so an idempotent replay compares the promise itself
+      // rather than the spelling of it, and a changed schedule or note under a
+      // reused request id is a collision instead of a silent original.
+      const schedule = parseReminderSchedule(request.schedule)
+      if (!schedule.ok) throw new Error(schedule.reason)
+      const note = parseReminderNote(request.note)
+      if (!note.ok) throw new Error(note.reason)
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        if (existing.kind !== 'team/member-reminder-created') this.throwRequestCollision(request.requestId)
+        if (existing.data.workspaceId !== request.workspaceId || existing.data.reminder.reminderRef !== request.reminderRef
+          || existing.data.reminder.memberId !== request.actor.memberId
+          || !sameReminderIntent(existing.data.reminder, schedule.schedule, note.note)) {
+          this.throwRequestCollision(request.requestId)
+        }
+        return this.resolved({ receipt: this.receipt(existing), workspaceId: existing.data.workspaceId, reminder: existing.data.reminder,
+          activeCount: this.activeMemberReminderCount(existing.data.reminder.memberId) })
+      }
+      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+      const member = this.state.members.get(actor.memberId)
+      if (member === undefined || member.state !== 'enabled') throw new Error(`Member '${actor.memberId}' cannot create a reminder while it is ${member?.state ?? 'unknown'}`)
+      if (this.state.memberReminders.has(request.reminderRef)) throw new Error(`Reminder '${request.reminderRef}' already exists`)
+      const activeCount = this.activeMemberReminderCount(actor.memberId)
+      if (activeCount >= MAX_ACTIVE_REMINDERS_PER_MEMBER) {
+        throw new Error(`Member '${actor.memberId}' already carries ${activeCount} active reminders, the maximum of ${MAX_ACTIVE_REMINDERS_PER_MEMBER}; cancel one before creating another`)
+      }
+      const reminder: AgentTeamMemberReminder = Object.freeze({
+        reminderRef: request.reminderRef, memberId: actor.memberId, schedule: schedule.schedule, note: note.note,
+        state: 'active' as const, createdAt: this.createOccurredAt(),
+      })
+      const operation: AgentTeamMemberReminderCreatedOperation = Object.freeze({
+        ...this.operationBase(request, this.nextSequence()), kind: 'team/member-reminder-created',
+        data: Object.freeze({ workspaceId: request.workspaceId, reminder }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed({ receipt: this.receipt(operation), workspaceId: request.workspaceId, reminder, activeCount: activeCount + 1 })
+    })
+  }
+
+  /**
+   * Withdraw one reminder. The Member that owns it withdraws its own; the Human
+   * may withdraw any, because the Human sees them in Member detail.
+   */
+  cancelMemberReminder(
+    request: AgentTeamMemberReminderCancelRequest,
+  ): Promise<AgentTeamLedgerResult<AgentTeamMemberReminderCancelResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        if (existing.kind !== 'team/member-reminder-cancelled') this.throwRequestCollision(request.requestId)
+        if (existing.data.workspaceId !== request.workspaceId || existing.data.reminderRef !== request.reminderRef
+          || existing.data.memberId !== (request.actor.kind === 'member' ? request.actor.memberId : existing.data.memberId)) {
+          this.throwRequestCollision(request.requestId)
+        }
+        return this.resolved({ receipt: this.receipt(existing), workspaceId: existing.data.workspaceId, reminder: existing.data.reminder })
+      }
+      const actor = this.assertActorForWorkspace(request.actor, request.workspaceId)
+      const current = this.state.memberReminders.get(request.reminderRef)
+      if (current === undefined) throw new Error(`Reminder '${request.reminderRef}' does not exist`)
+      if (actor.kind === 'member' && current.memberId !== actor.memberId) {
+        throw new Error(`Reminder '${request.reminderRef}' belongs to Member '${current.memberId}', not to '${actor.memberId}'`)
+      }
+      if (current.state !== 'active') throw new Error(`Reminder '${request.reminderRef}' is already ${current.state}`)
+      const marker = this.state.memberReminderMarkers.get(`${current.memberId}|${current.reminderRef}`)
+      const reminder: AgentTeamMemberReminder = { ...current, state: 'cancelled' }
+      const operation: AgentTeamMemberReminderCancelledOperation = Object.freeze({
+        ...this.operationBase(request, this.nextSequence()), kind: 'team/member-reminder-cancelled',
+        data: Object.freeze({ workspaceId: request.workspaceId, memberId: current.memberId, reminderRef: request.reminderRef, reminder,
+          inbox: this.memberReminderInboxDelta([], marker === undefined ? [] : [marker]) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed({ receipt: this.receipt(operation), workspaceId: request.workspaceId, reminder })
+    })
+  }
+
+  /** Every active reminder as the planner sees it: durable facts plus the Member lifecycle that still governs it. */
+  private memberReminderPlanEntries(): readonly MemberReminderPlanEntry[] {
+    return [...this.state.memberReminders.values()].filter(reminder => reminder.state === 'active').map(reminder => {
+      const occurrence = this.state.memberReminderOccurrences.get(reminder.reminderRef)
+      return Object.freeze({
+        reminderRef: reminder.reminderRef as string,
+        memberId: reminder.memberId as string,
+        schedule: reminder.schedule,
+        state: reminder.state,
+        memberState: this.state.members.get(reminder.memberId)?.state ?? 'inactive',
+        createdAtMs: Date.parse(reminder.createdAt),
+        lastOccurrenceAtMs: occurrence === undefined ? undefined : Date.parse(occurrence.scheduledAt),
+      })
+    })
+  }
+
+  /** Occurrences due now, at most one per reminder. */
+  planMemberReminders(nowMs: number): readonly MemberReminderCandidate[] {
+    return planMemberReminders({ nowMs, reminders: this.memberReminderPlanEntries() })
+  }
+
+  /** The instant the Host must next wake for, or undefined while nothing is pending. */
+  nextMemberReminderWakeAt(nowMs: number): number | undefined {
+    return nextReminderWakeAt(this.memberReminderPlanEntries(), nowMs)
+  }
+
+  /**
+   * Raise one occurrence. Replanned first, exactly as a Task reminder is, so a
+   * baseline that moved while the write waited is not committed.
+   */
+  raiseMemberReminder(candidate: MemberReminderCandidate): Promise<AgentTeamOperationReceipt | undefined> {
+    return this.enqueue(async () => {
+      const reminderRef = candidate.reminderRef as AgentTeamReminderRef
+      const stillDue = this.planMemberReminders(Date.now()).some(planned => planned.reminderRef === candidate.reminderRef)
+      if (!stillDue) return undefined
+      const reminder = this.state.memberReminders.get(reminderRef)
+      if (reminder === undefined || reminder.state !== 'active') return undefined
+      const member = this.state.members.get(reminder.memberId)
+      if (member === undefined || (member.state !== 'enabled' && member.state !== 'suspended')) return undefined
+      const previous = this.state.memberReminderMarkers.get(`${reminder.memberId}|${reminderRef}`)
+      const sequence = this.nextSequence()
+      const marker: AgentTeamMemberReminderMarker = Object.freeze({ memberId: reminder.memberId, reminderRef, sequence })
+      const requestId = `agent-team:member-reminder:${reminderRef}:${sequence}` as AgentTeamRequestId
+      const operation: AgentTeamMemberReminderRaisedOperation = Object.freeze({
+        ...this.operationBase({ requestId, actor: HOST_ACTOR }, sequence), kind: 'team/member-reminder-raised',
+        data: Object.freeze({ workspaceId: member.workspaceId, memberId: reminder.memberId, reminderRef, scheduledAt: candidate.scheduledAt,
+          inbox: this.memberReminderInboxDelta([marker], previous === undefined ? [] : [previous]) }),
+      })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.receipt(operation)
+    })
+  }
+
+  /**
+   * Record that these occurrences reached their Member's context, consuming
+   * their markers. Consumption is by occurrence identity, not by reminder: a
+   * notice that named an older occurrence must not consume the newer one that
+   * replaced it while the notice waited unread. A Host that restarts before this
+   * write leaves the markers unconsumed, so the next wake redelivers the same
+   * occurrence: at least once.
+   */
+  consumeMemberReminders(memberId: AgentTeamMemberId, occurrences: readonly AgentTeamMemberReminderOccurrenceRef[]): Promise<readonly AgentTeamOperationReceipt[]> {
+    return this.enqueue(async () => {
+      const receipts: AgentTeamOperationReceipt[] = []
+      for (const occurrence of occurrences) {
+        const marker = this.state.memberReminderMarkers.get(`${memberId}|${occurrence.reminderRef}`)
+        const raised = this.state.memberReminderOccurrences.get(occurrence.reminderRef)
+        const member = this.state.members.get(memberId)
+        // The marker still stored is the one this occurrence delivered: a newer
+        // occurrence has replaced it, so this one is already superseded and the
+        // newer one has never entered a turn.
+        if (marker === undefined || marker.sequence !== occurrence.sequence) continue
+        if (raised === undefined || raised.consumedSequence !== undefined || member === undefined) continue
+        const sequence = this.nextSequence()
+        const requestId = `agent-team:member-reminder-consumed:${memberId}:${occurrence.reminderRef}:${sequence}` as AgentTeamRequestId
+        const operation: AgentTeamMemberReminderConsumedOperation = Object.freeze({
+          ...this.operationBase({ requestId, actor: HOST_ACTOR }, sequence), kind: 'team/member-reminder-consumed',
+          data: Object.freeze({ workspaceId: member.workspaceId, memberId, reminderRef: occurrence.reminderRef,
+            inbox: this.memberReminderInboxDelta([], [marker]) }),
+        })
+        await this.table.put(operation.operationId, operation)
+        this.applyAndAdvanceProjectionVersion(operation)
+        receipts.push(this.receipt(operation))
+      }
+      return receipts
     })
   }
 
@@ -2204,12 +2493,18 @@ export class AgentTeamLedger {
     })
   }
 
-  /** Thread and Main notification material share one bounded read set for one delivery attempt. */
+  /**
+   * Thread, Main and Member-reminder notification material share one bounded
+   * read set for one delivery attempt. A Member reminder is the third unread
+   * source: it belongs to no Thread, so it rides the same private notice.
+   */
   notificationSnapshot(memberId: AgentTeamMemberId): {
     readonly threads: ReturnType<AgentTeamLedger['notificationFacts']>
     readonly main: ReturnType<AgentTeamLedger['mainNotificationFacts']>
+    readonly memberReminders: readonly AgentTeamUnreadMemberReminder[]
   } {
-    return this.withNotificationReadSet(memberId, () => ({ threads: this.notificationFacts(memberId), main: this.mainNotificationFacts(memberId) }))
+    return this.withNotificationReadSet(memberId, () => ({ threads: this.notificationFacts(memberId),
+      main: this.mainNotificationFacts(memberId), memberReminders: this.unreadMemberRemindersFor(memberId) }))
   }
 
   private withNotificationReadSet<T>(memberId: AgentTeamMemberId, read: () => T): T {
@@ -2796,6 +3091,13 @@ export class AgentTeamLedger {
         const task = this.state.tasks.get(operation.data.taskRef)
         return task === undefined ? [] : [{ kind: 'thread', threadRef: task.threadRef }]
       }
+      case 'team/member-reminder-created':
+      case 'team/member-reminder-raised':
+      case 'team/member-reminder-consumed':
+      case 'team/member-reminder-cancelled':
+        // A Member reminder belongs to no Thread and no Project, but the Human's
+        // Member detail renders it, so the whole Workspace catalog refetches.
+        return [{ kind: 'workspace', workspaceId: operation.data.workspaceId }]
       case 'team/thread-read':
         // A read advances only the reader's private watermark; no projection
         // visible to other participants changes, so nobody is woken.
@@ -2836,6 +3138,8 @@ export class AgentTeamLedger {
       for (const marker of delta.activityMarkers.removed) members.add(marker.memberId)
       for (const marker of delta.reminderMarkers?.added ?? []) members.add(marker.memberId)
       for (const marker of delta.reminderMarkers?.removed ?? []) members.add(marker.memberId)
+      for (const marker of delta.memberReminderMarkers?.added ?? []) members.add(marker.memberId)
+      for (const marker of delta.memberReminderMarkers?.removed ?? []) members.add(marker.memberId)
       for (const marker of delta.mainMarkers?.added ?? []) members.add(marker.memberId)
       for (const marker of delta.mainMarkers?.removed ?? []) members.add(marker.memberId)
     }
@@ -2909,6 +3213,10 @@ export class AgentTeamLedger {
       case 'team/rules-version-adopted':
       case 'team/project-owner-added':
       case 'team/project-owner-removed':
+      case 'team/member-reminder-created':
+      case 'team/member-reminder-raised':
+      case 'team/member-reminder-consumed':
+      case 'team/member-reminder-cancelled':
         return []
       default:
         return assertUnhandledKind(operation)
@@ -3540,6 +3848,81 @@ export class AgentTeamLedger {
       this.validateInboxDelta(inbox, projection, refs)
       return
     }
+    if (operation.kind === 'team/member-reminder-created') {
+      const member = assertMember()
+      const { reminder } = operation.data
+      if (reminder.memberId !== member.memberId || projection.memberReminders.has(reminder.reminderRef)
+        || reminder.state !== 'active' || !reminderScheduleIsSound(reminder.schedule)
+        || !reminderRefIsStorable(reminder.reminderRef)
+        || !Number.isFinite(Date.parse(reminder.createdAt))
+        || [...reminder.note].length > MAX_REMINDER_NOTE_CHARACTERS || reminder.note.trim() === ''
+        || reminder.reminderRef === '' || this.activeMemberReminderCountFrom(projection, member.memberId) > MAX_ACTIVE_REMINDERS_PER_MEMBER) {
+        throw new Error('invalid Member reminder creation')
+      }
+      return
+    }
+    if (operation.kind === 'team/member-reminder-raised') {
+      if (operation.actor.kind !== 'host') throw new Error('invalid Member reminder authority')
+      const { memberId, reminderRef, scheduledAt, inbox } = operation.data
+      const reminder = projection.memberReminders.get(reminderRef)
+      const previous = projection.memberReminderOccurrences.get(reminderRef)
+      const added = inbox.memberReminderMarkers?.added ?? []
+      const removed = inbox.memberReminderMarkers?.removed ?? []
+      const member = projection.members.get(memberId)
+      const stored = projection.memberReminderMarkers.get(memberReminderMarkerKey({ memberId, reminderRef }))
+      const at = Date.parse(scheduledAt)
+      const previousAt = previous === undefined ? undefined : Date.parse(previous.scheduledAt)
+      if (reminder === undefined || reminder.memberId !== memberId || reminder.state !== 'active'
+        || member === undefined || (member.state !== 'enabled' && member.state !== 'suspended')
+        || !Number.isFinite(at) || !reminderScheduleIsSound(reminder.schedule)
+        || (reminder.schedule.kind === 'once' && previous !== undefined)
+        || (previousAt !== undefined && at < previousAt)
+        || added.length === 0 || removed.length > 1
+        || added.some(marker => marker.memberId !== memberId || marker.reminderRef !== reminderRef || marker.sequence !== operation.sequence)
+        || (stored === undefined) !== (removed.length === 0)
+        || removed.some(marker => marker.memberId !== memberId || marker.reminderRef !== reminderRef
+          || !isDeepStrictEqual(projection.memberReminderMarkers.get(memberReminderMarkerKey(marker)), marker))
+        || inbox.reminderMarkers !== undefined || inbox.mainMarkers !== undefined) {
+        throw new Error('invalid Member reminder occurrence')
+      }
+      this.validateInboxDelta(inbox, projection, refs)
+      return
+    }
+    if (operation.kind === 'team/member-reminder-consumed') {
+      if (operation.actor.kind !== 'host') throw new Error('invalid Member reminder authority')
+      const { memberId, reminderRef, inbox } = operation.data
+      const occurrence = projection.memberReminderOccurrences.get(reminderRef)
+      const removed = inbox.memberReminderMarkers?.removed ?? []
+      const marker = projection.memberReminderMarkers.get(`${memberId}|${reminderRef}`)
+      if (occurrence === undefined || occurrence.memberId !== memberId || occurrence.consumedSequence !== undefined
+        || marker === undefined || removed.length !== 1 || (inbox.memberReminderMarkers?.added.length ?? 0) !== 0
+        || !isDeepStrictEqual(removed[0], marker)) {
+        throw new Error('invalid Member reminder consumption')
+      }
+      this.validateInboxDelta(inbox, projection, refs)
+      return
+    }
+    if (operation.kind === 'team/member-reminder-cancelled') {
+      const { memberId, reminderRef, reminder, inbox } = operation.data
+      const current = projection.memberReminders.get(reminderRef)
+      const marker = projection.memberReminderMarkers.get(`${memberId}|${reminderRef}`)
+      const removed = inbox.memberReminderMarkers?.removed ?? []
+      const added = inbox.memberReminderMarkers?.added ?? []
+      // The Member that owns the reminder withdraws it; the Human may withdraw any.
+      if (operation.actor.kind === 'member') {
+        if (actorMemberId() !== memberId) throw new Error('invalid Member reminder cancellation authority')
+      } else assertHuman()
+      if (current === undefined || current.state !== 'active' || current.memberId !== memberId
+        || reminder.reminderRef !== reminderRef || reminder.memberId !== memberId || reminder.state !== 'cancelled'
+        || !isDeepStrictEqual({ ...current, state: 'cancelled' }, reminder)
+        || removed.length > 1 || added.length !== 0
+        || (marker === undefined) !== (removed.length === 0)
+        || (marker !== undefined && removed.length === 1 && !isDeepStrictEqual(removed[0], marker))) {
+        throw new Error('invalid Member reminder cancellation')
+      }
+      this.validateInboxDelta(inbox, projection, refs)
+      return
+    }
     if (operation.kind === 'team/dm-sent') {
       const sender = assertMember()
       const recipient = projection.members.get(operation.data.recipientMemberId)
@@ -3654,6 +4037,22 @@ export class AgentTeamLedger {
       const key = reminderMarkerKey(marker)
       if (reminderKeys.has(key) || !isDeepStrictEqual(projection.reminderMarkers.get(key), marker)) throw new Error('invalid Task reminder marker removal')
       reminderKeys.add(key)
+    }
+    const removedMemberReminderKeys = new Set<string>()
+    for (const marker of delta.memberReminderMarkers?.removed ?? []) {
+      const key = memberReminderMarkerKey(marker)
+      if (!isDeepStrictEqual(projection.memberReminderMarkers.get(key), marker)) throw new Error('invalid Member reminder marker removal')
+      removedMemberReminderKeys.add(key)
+    }
+    const memberReminderKeys = new Set<string>()
+    for (const marker of delta.memberReminderMarkers?.added ?? []) {
+      const key = memberReminderMarkerKey(marker)
+      // One marker per reminder: an addition either opens the key or replaces the
+      // marker this same record removes, and never stacks a second one.
+      if (memberReminderKeys.has(key) || (projection.memberReminderMarkers.has(key) && !removedMemberReminderKeys.has(key))) {
+        throw new Error('invalid Member reminder marker addition')
+      }
+      memberReminderKeys.add(key)
     }
     const mainKeys = new Set<string>()
     for (const marker of delta.mainMarkers?.added ?? []) {
@@ -4097,6 +4496,35 @@ export class AgentTeamLedger {
       this.applyInboxDelta(target, operation.data.inbox)
       return
     }
+    if (operation.kind === 'team/member-reminder-created') {
+      target.memberReminders.set(operation.data.reminder.reminderRef, operation.data.reminder)
+      return
+    }
+    if (operation.kind === 'team/member-reminder-cancelled') {
+      target.memberReminders.set(operation.data.reminder.reminderRef, operation.data.reminder)
+      target.memberReminderOccurrences.delete(operation.data.reminderRef)
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+    if (operation.kind === 'team/member-reminder-raised') {
+      const { memberId, reminderRef, scheduledAt } = operation.data
+      const reminder = target.memberReminders.get(reminderRef)
+      // A fresh occurrence starts unconsumed, whatever the occurrence it replaced did.
+      target.memberReminderOccurrences.set(reminderRef, { reminderRef, memberId, scheduledAt, raisedSequence: operation.sequence })
+      if (reminder !== undefined && reminder.schedule.kind === 'once') {
+        target.memberReminders.set(reminderRef, { ...reminder, state: 'done' })
+      }
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
+    if (operation.kind === 'team/member-reminder-consumed') {
+      const previous = target.memberReminderOccurrences.get(operation.data.reminderRef)
+      if (previous !== undefined) {
+        target.memberReminderOccurrences.set(operation.data.reminderRef, { ...previous, consumedSequence: operation.sequence })
+      }
+      this.applyInboxDelta(target, operation.data.inbox)
+      return
+    }
     if (operation.kind === 'team/thread-attention-changed' || operation.kind === 'team/thread-read') {
       this.recordAttentionObservations(target, operation, operation.data.inbox)
       this.applyInboxDelta(target, operation.data.inbox)
@@ -4302,6 +4730,14 @@ export class AgentTeamLedger {
     for (const marker of delta.reminderMarkers?.added ?? []) {
       target.reminderMarkers.set(reminderMarkerKey(marker), marker)
       this.insertBucketedMarker(target.reminderMarkersByMember, marker.memberId, marker.threadRef, marker)
+    }
+    for (const marker of delta.memberReminderMarkers?.removed ?? []) {
+      target.memberReminderMarkers.delete(memberReminderMarkerKey(marker))
+      this.removeBucketedMarker(target.memberReminderMarkersByMember, marker.memberId, marker.reminderRef, memberReminderMarkerKey(marker), memberReminderMarkerKey)
+    }
+    for (const marker of delta.memberReminderMarkers?.added ?? []) {
+      target.memberReminderMarkers.set(memberReminderMarkerKey(marker), marker)
+      this.insertBucketedMarker(target.memberReminderMarkersByMember, marker.memberId, marker.reminderRef, marker)
     }
     for (const marker of delta.mainMarkers?.removed ?? []) {
       target.mainMarkers.delete(mainMarkerKey(marker))
@@ -4799,6 +5235,8 @@ export class AgentTeamLedger {
     removedReminderMarkers: readonly AgentTeamReminderMarker[] = [],
     setMainAttention: readonly AgentTeamMainAttention[] = [],
     removedMainAttention: readonly AgentTeamMainAttentionKey[] = [],
+    addedMemberReminderMarkers: readonly AgentTeamMemberReminderMarker[] = [],
+    removedMemberReminderMarkers: readonly AgentTeamMemberReminderMarker[] = [],
   ): AgentTeamInboxDelta {
     return Object.freeze({
       attention: Object.freeze({ set: Object.freeze(set), removed: Object.freeze(removed) }),
@@ -4806,6 +5244,9 @@ export class AgentTeamLedger {
       activityMarkers: Object.freeze({ added: Object.freeze(addedActivityMarkers), removed: Object.freeze(removedActivityMarkers) }),
       ...(addedReminderMarkers.length === 0 && removedReminderMarkers.length === 0 ? {}
         : { reminderMarkers: Object.freeze({ added: Object.freeze(addedReminderMarkers), removed: Object.freeze(removedReminderMarkers) }) }),
+      // Absent unless it changes something, so every delta written before Member reminders existed keeps its stored bytes.
+      ...(addedMemberReminderMarkers.length === 0 && removedMemberReminderMarkers.length === 0 ? {}
+        : { memberReminderMarkers: Object.freeze({ added: Object.freeze(addedMemberReminderMarkers), removed: Object.freeze(removedMemberReminderMarkers) }) }),
       // Absent unless it changes something: a rules-version-1 delta keeps its stored bytes.
       ...(addedMainMarkers.length === 0 && removedMainMarkers.length === 0 ? {}
         : { mainMarkers: Object.freeze({ added: Object.freeze(addedMainMarkers), removed: Object.freeze(removedMainMarkers) }) }),
@@ -4813,6 +5254,14 @@ export class AgentTeamLedger {
       ...(setMainAttention.length === 0 && removedMainAttention.length === 0 ? {}
         : { mainAttention: Object.freeze({ set: Object.freeze(setMainAttention), removed: Object.freeze(removedMainAttention) }) }),
     })
+  }
+
+  /** A delta that moves only Member reminder markers; every other family stays untouched. */
+  private memberReminderInboxDelta(
+    added: readonly AgentTeamMemberReminderMarker[] = [],
+    removed: readonly AgentTeamMemberReminderMarker[] = [],
+  ): AgentTeamInboxDelta {
+    return this.inboxDelta([], [], [], [], [], [], [], [], [], [], [], [], added, removed)
   }
 
   /** A Thread Attention period starting at `startSequence`, established by `source`. */

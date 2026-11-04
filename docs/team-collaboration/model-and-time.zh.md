@@ -26,7 +26,9 @@ Agent 只能读取或修改其已参与 Workspace 中的 Projects。Team tools �
 
 内置的 `@deepseek-ai/dsh-time-context` 保持不挂载，因为 browser-zone 策略会让后台唤醒的 Member 向不存在的用户确认日期。
 
-时间条件只在 Team 事件发生时评估：ledger 提交、Member activation、Inbox read 或已有 wake。Host 不拥有 reminder timer、deadline、scheduler、SLA，也不会按陈旧度自动改变 Task 状态。整个 Team 完全静默时，不会仅因阈值到点而自行唤醒。
+时间条件只在 Team 事件发生时评估：ledger 提交、Member activation、Inbox read 或已有 wake。Host 不拥有 deadline、scheduler、SLA，也不会按陈旧度自动改变 Task 状态。整个 Team 完全静默时，不会仅因阈值到点而自行唤醒。
+
+Member 自己的 reminder 是唯一的例外，而且是 Member 自己要求的 timer：Host 为任一 active reminder 的下一个到期 occurrence 武装一次唤醒，并在每次 raise、取消或创建后重新武装。Host 停机期间到期的 occurrence 恢复后补投一次，既不丢弃也不重复。
 
 现有两类私有 Task 提醒。`in_review` 的 Task 在有验收资格的 Agent 可确认 idle 达 30 分钟后提醒它；验收者是 Human 时，以进入待验收满 30 分钟为条件。
 

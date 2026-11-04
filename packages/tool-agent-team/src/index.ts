@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset, teamMessageSurface, activityText } from '@contexera/dsh-agent-team/host'
+import AgentTeam, { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamDmDeliveryError, markAgentTeamPreset, reminderRefForCallId, teamMessageSurface, activityText } from '@contexera/dsh-agent-team/host'
 import { formatTeamTimestamp } from '@contexera/dsh-agent-team/time-format'
 import { projectRefOf, service, workspaceOf, workspaceParam } from './host-access.ts'
 import { recoveryFor } from '@contexera/dsh-agent-team/recovery-hints'
@@ -8,6 +8,9 @@ import type {
   AgentTeamAttentionSource,
   AgentTeamClaimRef,
   AgentTeamInboxReminder,
+  AgentTeamMemberReminder,
+  AgentTeamReminderRef,
+  AgentTeamReminderSchedule,
   AgentTeamMemberId,
   AgentTeamRequestId,
   AgentTeamMessageRef,
@@ -233,10 +236,22 @@ function blankToAbsent<T extends { readonly [key: string]: unknown }>(args: T, k
 
 /** The address/selection parameters every Team tool treats as optional presence. */
 const OPTIONAL_ADDRESS_KEYS = ['workspace', 'projectRef', 'threadRef', 'taskRef', 'messageRef', 'replyToMessageRef',
-  'claimRef', 'memberRef', 'accountable', 'target', 'beforeSequence', 'limit', 'cursor', 'mine', 'baseRevision'] as const
+  'claimRef', 'memberRef', 'accountable', 'target', 'beforeSequence', 'limit', 'cursor', 'mine', 'baseRevision',
+  'reminderRef'] as const
 
 /** Optional collection parameters where `[]` names nothing and must not be read as a real argument. */
 const OPTIONAL_COLLECTION_KEYS = ['attachments', 'sourceThreadRefs'] as const
+
+/**
+ * A reminder's schedule slots, which `create` alone takes. They are normalized
+ * like an address so a model that fills every slot on a list or a cancel is not
+ * charged a retry for blanks it never meant; a value that is actually there is
+ * refused, because a schedule on a cancel names a reminder the caller did not pick.
+ */
+const OPTIONAL_SCHEDULE_KEYS = ['scheduleKind', 'at', 'minutes', 'expression'] as const
+
+/** The slots that belong to `create` alone: a schedule, and the note the occurrence hands back. */
+const CREATE_ONLY_REMINDER_KEYS = [...OPTIONAL_SCHEDULE_KEYS, 'note'] as const
 
 /** One fact as a rejection render receives it: the read fields with tag fields widened to plain strings, because the tool's output schema types `kind` as a string rather than a literal union. */
 type RejectedFact = {
@@ -1526,8 +1541,142 @@ const teamView = defineTool({
   },
 })
 
+/** One schedule as the model names it, and the ledger stores it. */
+function reminderScheduleOf(args: { readonly scheduleKind?: string | undefined; readonly at?: string | undefined; readonly minutes?: number | undefined; readonly expression?: string | undefined }): AgentTeamReminderSchedule {
+  if (args.scheduleKind === 'once') {
+    if (args.at === undefined) throw new Error(`team_reminder create with scheduleKind 'once' needs \`at\` as an ISO 8601 instant — ${recoveryFor('reminder_schedule_incomplete').sentence({})}`)
+    return { kind: 'once', at: args.at }
+  }
+  if (args.scheduleKind === 'every') {
+    if (args.minutes === undefined) throw new Error(`team_reminder create with scheduleKind 'every' needs \`minutes\` as a whole number of minutes, at least 10 — ${recoveryFor('reminder_schedule_incomplete').sentence({})}`)
+    return { kind: 'every', minutes: args.minutes }
+  }
+  if (args.scheduleKind === 'cron') {
+    if (args.expression === undefined) throw new Error(`team_reminder create with scheduleKind 'cron' needs \`expression\` as five cron fields (minute hour day-of-month month day-of-week) — ${recoveryFor('reminder_schedule_incomplete').sentence({})}`)
+    return { kind: 'cron', expression: args.expression }
+  }
+  throw new Error(`team_reminder create needs scheduleKind as 'once', 'every' or 'cron' — ${recoveryFor('reminder_schedule_incomplete').sentence({})}`)
+}
+
+/** One schedule as the result renders it: the stored form, with cron naming the zone it is read in. */
+function reminderScheduleText(schedule: AgentTeamReminderSchedule): string {
+  if (schedule.kind === 'once') return `once at ${formatTeamTimestamp(schedule.at)}`
+  if (schedule.kind === 'every') return `every ${schedule.minutes} minutes`
+  return `cron '${schedule.expression}' read in UTC+8`
+}
+
+const REMINDER_VIEW_SCHEMA = { type: 'object', additionalProperties: false, properties: {
+  reminderRef: { type: 'string', required: true }, state: { type: 'string', required: true },
+  schedule: { type: 'string', required: true }, note: { type: 'string', required: true }, createdAt: { type: 'string', required: true },
+  lastOccurrenceAt: { type: 'string' }, pendingOccurrenceAt: { type: 'string' }, nextOccurrenceAt: { type: 'string' },
+} } as const
+
+/**
+ * A Member reminder is a time promise the Member makes to itself. It is the one
+ * Team surface with no other audience: creation is self-only by construction, and
+ * the occurrence reaches the same private Inbox notice every other unread fact
+ * travels on, so a reminder never needs a Thread, a Project, or a write token.
+ */
+const teamReminder = defineTool({
+  name: 'team_reminder',
+  description: `Create, list, or cancel a reminder for yourself. A reminder is a time promise bound to you as a Member, not to a Session: when it comes due it reaches your Team Inbox as a private notice and wakes you, and the Host records it consumed once it enters one of your turns. create takes scheduleKind with that kind's own fields: 'once' with \`at\` (an ISO 8601 instant), 'every' with \`minutes\` (a whole number, at least 10), or 'cron' with \`expression\` (five fields: minute hour day-of-month month day-of-week) read in the fixed Team zone UTC+8, which has no daylight-saving component. Every create also takes \`note\`: what the reminder is for, at most 2000 characters. At most 50 reminders may be active for you at once, and a recurring reminder never fires closer than 10 minutes. list reports every reminder you own with its state and occurrence facts; cancel withdraws one by reminderRef. You can only create reminders for yourself and only cancel your own. While your Member is suspended your reminders keep timing and deliver when it resumes; when it is archived or removed they are all cancelled. An occurrence missed while the Host was down is made up exactly once after recovery, and an unread occurrence of the same recurring reminder is replaced by the next one instead of stacking.`,
+  parameters: {
+    action: { type: 'string', required: true, enum: ['create', 'list', 'cancel'] },
+    scheduleKind: { type: 'string', enum: ['once', 'every', 'cron'], description: "create only: 'once' for a single instant, 'every' for a fixed interval, or 'cron' for a five-field expression." },
+    at: { type: 'string', description: "create with scheduleKind 'once' only: the instant to fire at, as ISO 8601 (for example 2026-11-04T02:00:00.000Z)." },
+    minutes: { type: 'number', description: 'create with scheduleKind \'every\' only: the whole number of minutes between two fires, at least 10.' },
+    expression: { type: 'string', description: "create with scheduleKind 'cron' only: five whitespace-separated fields (minute hour day-of-month month day-of-week), read in the fixed Team zone UTC+8." },
+    note: { type: 'string', description: 'create only: what this reminder is for, at most 2000 characters. It is handed back to you when the occurrence fires.' },
+    reminderRef: { type: 'string', description: "cancel only: the full branded ref of one of your own reminders, exactly as list or a create returned it (for example reminder:0f0a…)." },
+    workspace: workspaceParam,
+  },
+  output: {
+    schema: { type: 'object', additionalProperties: false, properties: {
+      action: { type: 'string', required: true }, workspaceId: { type: 'string', required: true },
+      created: { type: 'boolean', required: true }, cancelled: { type: 'boolean', required: true },
+      activeCount: { type: 'number', required: true },
+      reminders: { type: 'array', required: true, items: REMINDER_VIEW_SCHEMA },
+    } },
+    render: (_args, value) => {
+      const head = `Reminders — ${value.action} · ${value.activeCount} active`
+      const rows = value.reminders.map(reminder => [
+        `${reminder.reminderRef} · ${reminder.state} · ${reminder.schedule}`,
+        `Note: ${reminder.note}`,
+        `Created at: ${formatTeamTimestamp(reminder.createdAt)}`,
+        ...(reminder.lastOccurrenceAt === undefined ? [] : [`Last occurrence: ${formatTeamTimestamp(reminder.lastOccurrenceAt)}`]),
+        ...(reminder.pendingOccurrenceAt === undefined ? [] : [`Waiting to be read since: ${formatTeamTimestamp(reminder.pendingOccurrenceAt)}`]),
+        ...(reminder.nextOccurrenceAt === undefined ? [] : [`Next occurrence: ${formatTeamTimestamp(reminder.nextOccurrenceAt)}`]),
+      ].join('\n'))
+      const tail = value.action === 'create'
+        ? `Reminder created for you alone; it reaches your Team Inbox when it comes due. ${value.activeCount} of at most 50 active.`
+        : value.action === 'cancel'
+          ? 'Reminder cancelled; no further occurrence will fire for it.'
+          : 'These are your own reminders. Create one with team_reminder create, or cancel one by reminderRef.'
+      return [{ type: 'text', text: [head, ...rows, tail].join('\n') }]
+    },
+  },
+  async execute(rawArgs, exec) {
+    const args = blankToAbsent(rawArgs, [...OPTIONAL_ADDRESS_KEYS, ...OPTIONAL_SCHEDULE_KEYS])
+    const agent = exec.agent
+    if (agent === undefined) throw new Error('team_reminder requires an Agent session')
+    const host = service(agent)
+    const workspaceId = workspaceOf(args, agent)
+    if (args.action === 'create') {
+      // `reminderRef` is the Host's identity for a reminder that already exists; a create
+      // carrying one would be a cancel wearing a create's clothes, so it is refused rather
+      // than dropped into a request whose ref the tool derives itself.
+      if (args.reminderRef !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'create', parameter: 'reminderRef', owner: 'cancel' }))
+      if (args.note === undefined) throw new Error(`team_reminder create needs \`note\`, what this reminder is for — ${recoveryFor('reminder_note_required').sentence({})}`)
+      const result = await host.createMemberReminderForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId,
+        reminderRef: reminderRefForCallId(exec.callId), schedule: reminderScheduleOf(args), note: args.note })
+      return reminderResult('create', workspaceId, [{ reminder: result.reminder }], result.activeCount)
+    }
+    if (args.action === 'cancel') {
+      if (args.reminderRef === undefined) throw new Error(`team_reminder cancel needs reminderRef, one of your own reminders — ${recoveryFor('reminder_ref_required').sentence({})}`)
+      // A schedule on a cancel names a reminder the caller never picked; the note belongs to
+      // the create that made it. Neither can be honored here, so neither is dropped quietly.
+      for (const parameter of CREATE_ONLY_REMINDER_KEYS) {
+        if (args[parameter] !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'cancel', parameter, owner: 'create' }))
+      }
+      const result = await host.cancelMemberReminderForAgent(agent, { requestId: requestId(agent.id, exec.callId), workspaceId,
+        reminderRef: args.reminderRef as AgentTeamReminderRef })
+      const activeCount = host.memberRemindersForAgent(agent, { workspaceId }).filter(view => view.reminder.state === 'active').length
+      return reminderResult('cancel', workspaceId, [{ reminder: result.reminder }], activeCount)
+    }
+    // A list reads; it writes nothing, so every write-only slot is a mis-send rather than a default.
+    if (args.reminderRef !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'list', parameter: 'reminderRef', owner: 'cancel' }))
+    for (const parameter of CREATE_ONLY_REMINDER_KEYS) {
+      if (args[parameter] !== undefined) throw new Error(recoveryFor('action_only_arguments').sentence({ action: 'list', parameter, owner: 'create' }))
+    }
+    const reminders = host.memberRemindersForAgent(agent, { workspaceId })
+    return reminderResult('list', workspaceId, reminders, reminders.filter(view => view.reminder.state === 'active').length)
+  },
+})
+
+/** What a reminder action reports about each reminder it touched: the entity plus the occurrence facts a view carries. */
+interface ReminderReport {
+  readonly reminder: AgentTeamMemberReminder
+  readonly lastOccurrenceAt?: string | undefined
+  readonly pendingOccurrenceAt?: string | undefined
+  readonly nextOccurrenceAt?: string | undefined
+}
+
+function reminderResult(action: 'create' | 'list' | 'cancel', workspaceId: string, reminders: readonly ReminderReport[], activeCount: number) {
+  return {
+    action, workspaceId, created: action === 'create', cancelled: action === 'cancel', activeCount,
+    reminders: reminders.map(view => ({
+      reminderRef: view.reminder.reminderRef, state: view.reminder.state, schedule: reminderScheduleText(view.reminder.schedule),
+      note: view.reminder.note, createdAt: view.reminder.createdAt,
+      ...(view.lastOccurrenceAt === undefined ? {} : { lastOccurrenceAt: view.lastOccurrenceAt }),
+      ...(view.pendingOccurrenceAt === undefined ? {} : { pendingOccurrenceAt: view.pendingOccurrenceAt }),
+      ...(view.nextOccurrenceAt === undefined ? {} : { nextOccurrenceAt: view.nextOccurrenceAt }),
+    })),
+  }
+}
+
 export function apply(ctx: Context): void {
   ctx.tools.register(teamInbox)
+  ctx.tools.register(teamReminder)
   ctx.tools.register(teamThread)
   ctx.tools.register(teamAttention)
   ctx.tools.register(teamMessage)

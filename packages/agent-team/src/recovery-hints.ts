@@ -188,6 +188,18 @@ export const RECOVERY_REGISTRY: readonly RecoveryEntry[] = Object.freeze([
     sentence: ({ refused }: RecoveryContext) => `${refused ?? 'That ref'} matches several entries — reuse a longer prefix, or the full ref exactly as returned by Team tools.`,
   },
   {
+    kind: 'reminder_schedule_incomplete',
+    sentence: ({ action }: RecoveryContext) => `Choose scheduleKind with that kind's own fields: 'once' with \`at\`, 'every' with \`minutes\`, or 'cron' with \`expression\`.${action === undefined ? '' : ` (${action})`}`,
+  },
+  {
+    kind: 'reminder_note_required',
+    sentence: () => 'Use the `note` parameter of team_reminder create for what this reminder is for, at most 2000 characters; it is handed back to you when the occurrence fires.',
+  },
+  {
+    kind: 'reminder_ref_required',
+    sentence: () => 'Copy a reminderRef from team_reminder list, or from the create that made it, and pass it to team_reminder cancel.',
+  },
+  {
     kind: 'workspace_required',
     sentence: ({ refused }: RecoveryContext) => `workspace is required when you participate in multiple Workspaces — choose one of: ${refused ?? ''}.`,
   },

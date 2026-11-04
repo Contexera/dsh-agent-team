@@ -100,6 +100,20 @@ Agent Team 记下的协作状态事实。Claim create/done/release 与 Task acce
 
 Host 从 durable Thread Inbox 状态里给 Agent 派生出的安全边界提示。提示有界：能唤醒 idle Agent，也能在 running Agent 的下一个安全步骤送达；它不代表模型已经读取、处理、回复或验收。恢复后照 durable unread 重新派生。
 
+## Member Reminder
+
+Member 对自己许下的时间承诺，记在 ledger 里，绑定的是 Member 本身，而不是 Session、Thread 或 Workspace。schedule 三种：`once` 落在一个时刻，`every` 隔整数分钟，`cron` 五个字段、按固定 UTC+8 读取。另有 `note`，最多 2000 字符，occurrence 触发时原样交回。state 为 active、done、cancelled。一个 reminder 只有一个接收者，因此只有它的 Member 能创建；Human 可以撤回任何 Member 的。
+
+每个到期时刻是一个有自己身份的 occurrence。同一个循环 reminder 上一次未消费的 occurrence 由下一次替换，不会叠加。occurrence 与其他未读事实走同一条私有 Inbox 通知，投递规则归 [`attention-and-messaging.zh.md`](team-collaboration/attention-and-messaging.zh.md)，工具契约在 [`tools.zh.md`](team-collaboration/tools.zh.md)。
+
+消费按 occurrence 记，不按 reminder 记：一条通知只为它正文里真正渲染出的那些 occurrence 结账。被 detail 条数上限或字符预算裁掉的 occurrence 从未送达，因此保持未读、也不进这条通知的 coverage，由下一条通知结账。恢复指令渲染的是同一份快照，所以它也只消费自己渲染出的那些；在它入队之后才到期的 occurrence 仍然欠着，不会被它顺手结掉。
+
+消费写失败时 occurrence 仍然欠着，因此这条通知赚到的 coverage 随之失效，Host 立刻重新派生这条通知——同样的 durable facts 不该被当成已经结账。这个重试有上限；stand down 之后 occurrence 依然未读、依然不在 coverage 里，等下一条触及该 Member 的 Team 事件送达。
+
+reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的两个字符按百分号转义，因此嵌套子调用的 id 也得到一个 durable schema 能解析回来的 ref。request id 已存在时的 create 只有在规范化后的 schedule 与 note 都相同才交回原 operation；时间被移动或 note 被改写都是 collision。
+
+suspended Member 的 reminder 继续计时，恢复时补投；archived 或 removed 的 Member 全部取消。这个效果由下面的 Member Lifecycle 表派生，不存在第二次清理 Operation。
+
 ## Operation
 
 Agent Team ledger 里一次不可变的原子业务提交。每个 Operation 有全局递增 sequence、稳定 operation id、幂等 request id、actor、一种业务事实和一个 wall-clock `occurredAt`。顺序与并发 authority 是 sequence，绝不是时刻。Thread fact envelope 会投影提交 operation 的时刻，让每条 fact 在任何重读路径上只看到一个值。

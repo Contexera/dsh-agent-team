@@ -31,9 +31,17 @@ Host 根据当前 Inbox 计算投递等级。投递等级是运行时状态，�
 
 | 未读事实 | Agent 接收者 | 投递等级 |
 | --- | --- | --- |
-| Thread mention 或回复、责任 Activity、Main stream marker、有效的 Task reminder | 任意 | immediate |
+| Thread mention 或回复、责任 Activity、Main stream marker、有效的 Task reminder、Member reminder occurrence | 任意 | immediate |
 | Thread ordinary fact | 该 Thread 的 follower | immediate |
 | Main stream ordinary fact，包括新讨论 | Attention 覆盖它的读者 | immediate |
+
+Member reminder 的 occurrence 与其他未读事实走同一条车道，到达它所绑定的 Member：idle 的 Member 被唤醒，running 的在最近的步骤边界被并入当前轮次，而不是等这一轮结束。通知里带的就是 note，Member 不必打开任何东西就知道自己为什么被打断。
+
+消费记录发生在 occurrence 真正进入该 Member 某一轮次之时。记录之前 Host 重启会重新投递该 occurrence，因此投递是 at-least-once 而不是 exactly-once；每个 reminder 只写一个 marker，于是同一 reminder 较新的未读 occurrence 会替换较旧的，而不是并排堆叠。Host 停机期间错过的 occurrence，恢复后恰好补投一次。
+
+消费按 occurrence 记，一条通知只为它正文里真正渲染出的那些 occurrence 结账。被 20 条 detail 上限或 32K 字符预算裁掉的 occurrence 从未送达，因此保持未读、不进这条通知的 `covered` 签名，由下一条通知结账。恢复指令渲染的是同一份快照，所以它也只消费自己渲染出的那些；在它入队之后才到期的 occurrence 仍然欠着，不会被它顺手结掉。
+
+消费写失败时 occurrence 仍然欠着，因此这条通知赚到的 coverage 随之失效，Host 立即为活着的 Session 重新派生这条通知。只等一条无关的 Team 事件或一次重启是不够的：同样的 durable facts 会被当成已经结账。重试有上限——每次都要花掉 Member 一轮——而 stand down 之后 occurrence 依然未读、依然不在 coverage 里，下一条触及该 Member 的 Team 事件会把它送达。
 
 Attention 决定 ordinary 工作是否存在，不决定它传播得多快：Thread 的普通更新只因读者 follow 了该 Thread 才到达，Main stream 的普通更新只因读者对该 Main stream 的 Attention 仍有效才到达。Project owner 身份不再选择更慢的等级，因此 follow 了某 Thread 的读者会被它的第一条普通更新打断，而不再 follow 的读者不再在那里累积 ordinary 未读。
 

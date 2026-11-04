@@ -314,9 +314,10 @@ describe('post-commit delivery', () => {
     await team.postMainMessage({ requestId: requestId('snapshot-main'), workspaceId: alpha,
       projectRef: project.project.projectRef, body: `@${member.handle} main update` })
     const snapshot = ledger.notificationSnapshot(member.memberId)
-    expect(snapshot).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId) })
+    expect(snapshot).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId),
+      memberReminders: ledger.unreadMemberRemindersFor(member.memberId) })
     expect(ledger['notificationReadSet']).toBeUndefined()
-    const plan = team['inboxDeliveryPlan'](snapshot.threads, snapshot.main)
+    const plan = team['inboxDeliveryPlan']({ notifications: snapshot.threads, main: snapshot.main })
     const delivery = structuredClone(team['inboxNoticeDeliveries'].get(member.memberId))
     const planned = team['notificationText'](agent, snapshot.threads, member.memberId, snapshot.main, plan)
     expect(planned).toEqual(team['notificationText'](agent, snapshot.threads, member.memberId, snapshot.main))
@@ -331,7 +332,8 @@ describe('post-commit delivery', () => {
       projectRef: project.project.projectRef, body: `@${member.handle} next update` })
     const next = ledger.notificationSnapshot(member.memberId)
     expect(next.main).not.toEqual(snapshot.main)
-    expect(next).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId) })
+    expect(next).toEqual({ threads: ledger.notificationFacts(member.memberId), main: ledger.mainNotificationFacts(member.memberId),
+      memberReminders: ledger.unreadMemberRemindersFor(member.memberId) })
   })
 
   it('preserves notice text, coverage, attempts and wake routing through failures and generation replacement', async () => {

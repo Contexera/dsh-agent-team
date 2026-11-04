@@ -1,4 +1,4 @@
-# 七工具协议
+# 八工具协议
 
 [English](tools.md) | 中文
 
@@ -108,6 +108,18 @@ DM 是纯送达。ledger 追加一个 audit-only 的 `team/dm-sent` operation，
 每条结果的第一行都说明它是哪一种：已送达，还是只记录在案、没有可唤醒的 live session。没有自动重投，因此只记录在案的 DM 绝不被盲目重发。
 
 DM 只用于快速澄清与状态同步。任务工作、决策和任何需要团队可见或可追溯的内容一律走 Thread。同一对象往来超过约 3 轮应转 Thread，因为每条 DM 消耗收件人一次完整 agent turn。
+
+## `team_reminder`
+
+`team_reminder` 的动作为 `create`、`list`、`cancel`，三个动作都只关于调用方自己的 reminder。一个 reminder 只有一个接收者，因此工具不接受收件人参数，actor 由 Host 从调用 Agent 自身推导；Human 要查看或撤回某个 Member 的 reminder，走 Web Client 的 Member 详情，不用这个工具。
+
+`create` 取 `scheduleKind` 与该种类自己的字段——`once` 配 `at`（ISO 8601 时刻）、`every` 配 `minutes`（整数分钟，至少 10）、`cron` 配 `expression`（五个字段，按固定 UTC+8 读取，无夏令时）——并且总要 `note`：这个 reminder 是做什么的，最多 2000 字符。schedule 只报种类而不给该种类的字段会被拒绝，而不是被猜一个；发给 `list` 或 `cancel` 的 schedule 字段同样被拒绝而不是被丢掉，因为 cancel 上的 schedule 指向的是调用方并没有选中的那个 reminder。
+
+单个 Member 最多 50 个 active reminder；间隔下限和永不到期的判定由 ledger 在创建时执行，replay 因此保持确定。`list` 报告调用方自己的全部 reminder 及其 state 与 occurrence 事实——待读取、上次、下次；`cancel` 按 `reminderRef` 撤回一个。两者都只读调用方自己那一份。
+
+reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的两个字符按百分号转义，因此嵌套子调用的 id 也得到一个 durable schema 能解析回来的 ref。request id 已存在时的 create 只有在规范化后的 schedule 与 note 都相同才交回原 operation；时间被移动或 note 被改写都是 collision，不会静默交回原来那个。
+
+到期的 occurrence 以私有通知进入调用方的 Team Inbox 并唤醒它，Host 在它真正进入某一轮次时按 occurrence 记录 consumed——一条通知只为它正文里渲染出的那些 occurrence 结账。Host 停机期间错过的 occurrence 恢复后恰好补投一次，同一循环 reminder 未读的 occurrence 由下一次替换而不是叠加。Member suspended 期间 reminder 继续计时、恢复时送达；archived 或 removed 时全部取消——这个效果由 [`domain-model.zh.md`](../domain-model.zh.md) 的 Member Lifecycle 表派生，不存在第二次清理 Operation。
 
 ## `team_task`
 

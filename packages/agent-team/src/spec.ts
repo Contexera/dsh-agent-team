@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { AgentTeamMemberCapabilities, AgentTeamModelSelection } from './types.ts'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
+import { MEMBER_REMINDER_REF_PATTERN } from './member-reminders.ts'
 import type { SessionId, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {
@@ -14,6 +15,7 @@ import type {
   AgentTeamMessageRef,
   AgentTeamOperation,
   AgentTeamOperationId,
+  AgentTeamReminderRef,
   AgentTeamRequestId,
   AgentTeamTaskRef,
   AgentTeamThreadRef,
@@ -204,6 +206,29 @@ const reminderMarkerSchema = z.object({
   sequence: z.number().int().positive(),
 }).strict()
 
+const reminderRefSchema = z.string().regex(MEMBER_REMINDER_REF_PATTERN).transform(value => value as AgentTeamReminderRef)
+
+const reminderScheduleSchema = z.union([
+  z.object({ kind: z.literal('once'), at: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal('every'), minutes: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal('cron'), expression: z.string().min(1) }).strict(),
+])
+
+const memberReminderSchema = z.object({
+  reminderRef: reminderRefSchema,
+  memberId: memberIdSchema,
+  schedule: reminderScheduleSchema,
+  note: z.string(),
+  state: z.enum(['active', 'done', 'cancelled']),
+  createdAt: z.string().min(1),
+}).strict()
+
+const memberReminderMarkerSchema = z.object({
+  memberId: memberIdSchema,
+  reminderRef: reminderRefSchema,
+  sequence: z.number().int().positive(),
+}).strict()
+
 const mainMessageSchema = z.object({
   messageRef: messageRefSchema,
   projectRef: projectRefSchema,
@@ -260,6 +285,10 @@ const inboxDeltaSchema = z.object({
   reminderMarkers: z.object({
     added: z.array(reminderMarkerSchema),
     removed: z.array(reminderMarkerSchema),
+  }).strict().optional(),
+  memberReminderMarkers: z.object({
+    added: z.array(memberReminderMarkerSchema),
+    removed: z.array(memberReminderMarkerSchema),
   }).strict().optional(),
   mainMarkers: z.object({
     added: z.array(mainMarkerSchema),
@@ -654,6 +683,50 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
       activity: taskActivitySchema,
       task: taskSchema,
       thread: threadSchema,
+      inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/member-reminder-created'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      reminder: memberReminderSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/member-reminder-raised'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      memberId: memberIdSchema,
+      reminderRef: reminderRefSchema,
+      scheduledAt: z.string().min(1),
+      inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/member-reminder-consumed'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      memberId: memberIdSchema,
+      reminderRef: reminderRefSchema,
+      inbox: inboxDeltaSchema,
+    }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/member-reminder-cancelled'),
+    data: z.object({
+      workspaceId: workspaceIdSchema,
+      memberId: memberIdSchema,
+      reminderRef: reminderRefSchema,
+      reminder: memberReminderSchema,
       inbox: inboxDeltaSchema,
     }).strict(),
   }).strict(),

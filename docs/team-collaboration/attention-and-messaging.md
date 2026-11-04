@@ -32,9 +32,17 @@ The Host computes delivery from the current Inbox; delivery class is runtime sta
 
 | Unread fact | Agent recipient | Delivery |
 | --- | --- | --- |
-| Thread mention or reply, responsibility Activity, Main stream marker, or live Task reminder | Any | Immediate |
+| Thread mention or reply, responsibility Activity, Main stream marker, live Task reminder, or Member reminder occurrence | Any | Immediate |
 | Thread ordinary fact | A follower of that Thread | Immediate |
 | Main stream ordinary fact, including a new discussion | A reader whose Attention covers it | Immediate |
+
+A Member reminder occurrence reaches the Member it is bound to through the same lane as every other unread fact: an idle Member is woken, and a running one is steered into its current turn at the nearest step boundary rather than waiting for the turn to end. Its note is what the notice carries, so the Member reads why it was interrupted without opening anything.
+
+Consumption is recorded when the occurrence actually enters one of that Member's turns. A Host restart before that record redelivers the occurrence, so delivery is at-least-once rather than exactly-once, and the marker written per reminder means a newer occurrence of the same reminder replaces an unread older one instead of stacking beside it. An occurrence missed while the Host was down is made up exactly once after recovery.
+
+Consumption is per occurrence, and a notice answers only for the occurrences its text actually rendered. An occurrence the twenty-detail cap or the 32K budget dropped was never delivered, so it stays unread, stays out of that notice's `covered` signature, and is answered by the next notice. A recovery instruction renders the same snapshot, so it consumes exactly what it rendered as well; an occurrence that came due after that instruction was queued is still owed rather than answered by it.
+
+A consumption write that fails leaves the occurrence owed, so the coverage that notice earned falls with it and the Host rederives the notice for the live Session immediately. Waiting for an unrelated Team fact or a restart is not enough, because the same durable facts would otherwise read as already answered. The retry is bounded — each one spends one of the Member's turns — and standing down still leaves the occurrence unread and uncovered, so the next Team fact touching that Member delivers it.
 
 Attention decides whether ordinary work exists at all, never how fast it travels: an ordinary Thread update reaches a reader only because it follows that Thread, and an ordinary Main stream update only because its Attention covers that Main stream. Owning a Project does not choose a slower class, so a reader that follows a Thread is interrupted by its first ordinary update, and a reader that stops following it stops accumulating ordinary unread there.
 

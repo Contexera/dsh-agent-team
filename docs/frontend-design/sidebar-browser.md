@@ -30,7 +30,11 @@ A question mark beside the sidebar's Projects label, and another beside this sec
 
 When a Member's generation is swapped, the Agents panel observes the old→new Session binding and follows exactly once — only when the embedded page equals the observed old live Session id — and never redirects an archive view. No surface offers to reset a Member's context. The narrow rail's four icon buttons read top-down Inbox (`IconQueueOutlineRegular`) → Task board (`IconChecklistOutlineRegular`) → Projects (`IconListPenOutlineRegular`) → Agents (`IconAgentPresetOutlineRegular`), all at 16px; the member icon stays unused by the rail.
 
-The Inbox and Task board icons are destinations: clicking one opens its page and expands the sidebar; the Projects/Agents icons expand the sidebar and focus their section header. Agent creation carries no Project page and the Agent editor carries no membership section. Project participation is derived from taking part in a Thread, so no surface manages it: the create dialog still seeds initial members and a Project-less Member stays reachable through its DM view.
+The Inbox and Task board icons are destinations: clicking one opens its page and expands the sidebar; the Projects/Agents icons expand the sidebar and focus their section header. Agent creation carries no Project page and the Agent editor carries no membership section.
+
+The Agent editor does carry that Member's own reminders, as a block under the form rather than inside it: each row shows the note, the stored schedule, the state, and the occurrence facts, and only a reminder that can still fire carries a withdraw button.
+
+The block reads through the `memberReminders` Remote and withdraws through `cancelMemberReminder`, never optimistically — the row keeps its withdraw affordance until the Host answers with the cancelled state. Project participation is derived from taking part in a Thread, so no surface manages it: the create dialog still seeds initial members and a Project-less Member stays reachable through its DM view.
 
 The create dialog is also the one import entry: a single disclosure button toggles between creating a new Member and bringing an existing one in from another Workspace. The import view reuses the shared `TeamMemberRow` roster and offers only Members that exist globally and do not yet participate here (suspended Members included — joining does not depend on availability). Confirming routes the durable `joinWorkspace` and the row appears through the workspace refetch, with retry reusing the exact failed request.
 

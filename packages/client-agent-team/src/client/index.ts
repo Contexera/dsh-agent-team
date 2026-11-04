@@ -33,6 +33,8 @@ import type {
   AgentTeamTransferTaskRequest,
   AgentTeamUpdateProjectRequest,
   AgentTeamUpdateMemberRequest,
+  AgentTeamMemberReminderListRequest,
+  AgentTeamMemberReminderCancelRequest,
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
 import agentTeamRemote from '@contexera/dsh-agent-team/remote'
@@ -205,6 +207,10 @@ function teamSharedRemotes(
     addProjectOwner: (request: AgentTeamProjectOwnerRequest) => ctx.remote.agentTeam.addProjectOwner(request),
     removeProjectOwner: (request: AgentTeamProjectOwnerRequest) => ctx.remote.agentTeam.removeProjectOwner(request),
     updateMember: (request: AgentTeamUpdateMemberRequest) => ctx.remote.agentTeam.updateMember(request),
+    // Member detail's reminder list and cancel: a Human surface over the same Host authority
+    // the Member's own `team_reminder` tool uses, so a reminder is withdrawn exactly once.
+    loadMemberReminders: (request: AgentTeamMemberReminderListRequest) => ctx.remote.agentTeam.memberReminders(request),
+    cancelMemberReminder: (request: Omit<AgentTeamMemberReminderCancelRequest, 'actor'>) => ctx.remote.agentTeam.cancelMemberReminder(request),
     recoverMember: (request: AgentTeamRecoverMemberRequest) => ctx.remote.agentTeam.recoverMember(request),
     archiveMember: (request: AgentTeamArchiveMemberRequest) => ctx.remote.agentTeam.archiveMember(request),
     joinWorkspace: (request: AgentTeamJoinWorkspaceRequest) => ctx.remote.agentTeam.joinWorkspace(request),

@@ -32,7 +32,9 @@ Later steps of the same turn stay quiet unless the turn has run longer than the 
 
 The baseline folds from the Member Session's own events, so restart, resume, and compaction derive identical values without a second store; a generation swap starts a fresh log and renders elapsed as `unavailable` rather than guessing across generations; a wall-clock rollback clamps elapsed to `0s` without rewriting history. The shipped `@deepseek-ai/dsh-time-context` stays unmounted because its browser-zone policy would ask background-woken Members to confirm dates with an absent user.
 
-Time conditions are evaluated only when Team events occur: a ledger commit, Member activation, an Inbox read, or an existing wake. The Host owns no reminder timer, deadline, scheduler, SLA, or staleness-driven state change. A completely silent Team therefore does not wake itself merely because a threshold passed.
+Time conditions are evaluated only when Team events occur: a ledger commit, Member activation, an Inbox read, or an existing wake. The Host owns no deadline, scheduler, SLA, or staleness-driven state change for those conditions, so a completely silent Team does not wake itself merely because a threshold passed.
+
+A Member's own reminders are the one exception, and it is a timer the Member asked for: the Host arms one wake for the next due occurrence of any active reminder and rearms it after every raise, cancel, or create. An occurrence due while the Host was down is made up once after recovery rather than dropped or repeated.
 
 Two private Task reminders exist. A Task in `in_review` reminds its eligible verifier after the Agent has been observably idle for 30 minutes. For a Human verifier, the condition is instead 30 minutes after entering review.
 
