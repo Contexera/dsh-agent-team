@@ -583,6 +583,22 @@ export interface AgentTeamSubscriptionDeletedOperation extends AgentTeamOperatio
   }
 }
 
+/**
+ * A new webhook address under the same subscription: the token is replaced and
+ * the generation moves by one, while the revision does not. Deliveries already
+ * accepted stay in their queue; only the old address stops meaning anything.
+ */
+export interface AgentTeamSubscriptionWebhookResetOperation extends AgentTeamOperationBase {
+  readonly kind: 'team/subscription-webhook-reset'
+  readonly data: {
+    readonly workspaceId: WorkspaceId
+    readonly subscription: AgentTeamSubscription
+    /** The generation this reset replaced, so a replay can prove the move is exactly one. */
+    readonly previousGeneration: number
+    readonly activity: AgentTeamSubscriptionActivity
+  }
+}
+
 /** Append-only deduplication waterline: the ids this subscription must never publish again. */
 export interface AgentTeamSubscriptionBaselineOperation extends AgentTeamOperationBase {
   readonly kind: 'team/subscription-baseline'
@@ -634,6 +650,7 @@ export type AgentTeamSubscriptionOperation =
   | AgentTeamSubscriptionBaselineOperation
   | AgentTeamSubscriptionEventsAcceptedOperation
   | AgentTeamSubscriptionEventPublishedOperation
+  | AgentTeamSubscriptionWebhookResetOperation
 
 /** Closed union of durable Agent Team operations. */
 export type AgentTeamOperation =
@@ -687,4 +704,4 @@ export type AgentTeamOperation =
   | AgentTeamSubscriptionBaselineOperation
   | AgentTeamSubscriptionEventsAcceptedOperation
   | AgentTeamSubscriptionEventPublishedOperation
-
+  | AgentTeamSubscriptionWebhookResetOperation

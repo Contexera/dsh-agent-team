@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react'
-import type { AgentTeamCreateSubscriptionRequest, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamSubscription, AgentTeamSubscriptionListEntry } from '@contexera/dsh-agent-team/types'
+import type { AgentTeamCreateSubscriptionRequest, AgentTeamMemberId, AgentTeamProjectRef, AgentTeamSubscription, AgentTeamSubscriptionDeliveriesRequest, AgentTeamSubscriptionDraftTrialRequest, AgentTeamSubscriptionListEntry, AgentTeamSubscriptionReplayRequest, AgentTeamSubscriptionStateRequest } from '@contexera/dsh-agent-team/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { zh } from '../src/client/locales.ts'
 import type { TeamConversationProps } from '../src/client/slots.ts'
@@ -55,6 +55,9 @@ function host(overrides: Partial<TeamSubscriptionsTabProps['host']> = {}): TeamS
     pauseSubscription: vi.fn(async () => ({ ok: false as const, error: { message: 'not used' } } as never)),
     resumeSubscription: vi.fn(async () => ({ ok: false as const, error: { message: 'not used' } } as never)),
     deleteSubscription: vi.fn(async () => ({ ok: false as const, error: { message: 'not used' } } as never)),
+    resetSubscriptionWebhook: vi.fn(async () => ({ ok: false as const, error: { message: 'not used' } } as never)),
+    loadSubscriptionDeliveries: vi.fn(async () => ({ ok: true as const, value: { deliveries: [] } })),
+    replaySubscriptionDelivery: vi.fn(async () => ({ ok: false as const, error: { message: 'not used' } } as never)),
     ...overrides,
   }
 }
@@ -223,6 +226,99 @@ describe('the Project subscription tab', () => {
     expect((dialog.querySelector('textarea') as HTMLTextAreaElement).value).toBe('exit 1\n')
     expect((view.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true)
     expect(create).not.toHaveBeenCalled()
+  })
+
+  it('names both triggers on a card, and arms a webhook-only subscription from the form', async () => {
+    const arm = { tokenHash: 'b'.repeat(64), generation: 1, armedAt: '2026-11-04T02:00:00.000Z' }
+    const both = entry({}, { triggers: { interval: { minutes: 10 }, webhook: true }, webhook: arm })
+    const readOnly = renderTab({ entries: [both], canManage: false })
+    expect(readOnly.view.getByText('每 10 分钟 · webhook')).toBeTruthy()
+    // Nobody but an owner can move the address, and a subscription without one has no button.
+    expect(readOnly.view.queryByRole('button', { name: /^重置地址/ })).toBeNull()
+    cleanup()
+    const armed = renderTab({ entries: [{ ...both, subscription: { ...both.subscription, triggers: { webhook: true } } }] })
+    expect(armed.view.getByText('webhook')).toBeTruthy()
+    expect(armed.view.getByRole('button', { name: '重置地址 · main CI' })).toBeTruthy()
+    cleanup()
+
+    const testDraft = vi.fn(async (_request: AgentTeamSubscriptionDraftTrialRequest) => ({ ok: true as const, value: { kind: 'tested' as const, events: [], stdoutTail: '', stderrTail: '', scriptHash: 'b'.repeat(64), revision: 1 } }))
+    const create = vi.fn(async (_request: AgentTeamCreateSubscriptionRequest) => ({ ok: true as const, value: { kind: 'changed' as const,
+      subscription: subscription(), activity: {}, webhookAddress: 'https://team.example.com/team/hooks/abc' } } as never))
+    const form = renderTab({ host: host({ testSubscriptionDraft: testDraft, createSubscription: create }) })
+    fireEvent.click(form.view.getByRole('button', { name: '新建订阅' }))
+    const dialog = form.view.getByRole('dialog', { name: '新建订阅' })
+    // Untick the timer and tick the webhook: the form asks for one trigger, not a made-up interval.
+    fireEvent.click(dialog.querySelectorAll('input[type="checkbox"]')[0]!)
+    fireEvent.click(dialog.querySelectorAll('input[type="checkbox"]')[1]!)
+    expect(dialog.querySelector('input[type="number"]')).toBeNull()
+    fireEvent.change(dialog.querySelector('input:not([type])')!, { target: { value: 'hooks only' } })
+    fireEvent.change(dialog.querySelector('textarea')!, { target: { value: 'json-body\n' } })
+    fireEvent.click(form.view.getByRole('button', { name: '试运行' }))
+    await waitFor(() => expect((form.view.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(testDraft.mock.calls[0]![0]).toMatchObject({ webhook: true, name: 'hooks only' })
+    expect(testDraft.mock.calls[0]![0]).not.toHaveProperty('intervalMinutes')
+    fireEvent.click(form.view.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    // The address the save armed is shown once, with the way to keep it.
+    const address = await form.view.findByRole('dialog', { name: 'Webhook 地址 · hooks only' })
+    expect(address.textContent).toContain('https://team.example.com/team/hooks/abc')
+    expect(address.textContent).toContain('完整地址只显示这一次')
+    // The dialog carries its own close control beside the header's.
+    fireEvent.click(form.view.getAllByRole('button', { name: '关闭' })[0]!)
+    await waitFor(() => expect(form.view.queryByRole('dialog', { name: 'Webhook 地址 · hooks only' })).toBeNull())
+    expect(form.view.queryByText('https://team.example.com/team/hooks/abc')).toBeNull()
+  })
+
+  it('lists the deliveries whose retries are spent, and replays one into the ledger', async () => {
+    const delivery = { deliveryRef: 'delivery:d1', receivedRevision: 3, receivedScriptHash: 'a'.repeat(64),
+      receivedAt: '2026-11-04T02:00:00.000Z', expiresAt: '2026-11-11T02:00:00.000Z', attempts: 4,
+      lastError: 'the script exited with code 1' }
+    const load = vi.fn(async (_request: AgentTeamSubscriptionDeliveriesRequest) => ({ ok: true as const, value: { deliveries: [delivery] } }))
+    const replay = vi.fn(async (_request: AgentTeamSubscriptionReplayRequest) => ({ ok: true as const, value: {
+      kind: 'replayed' as const, delivery, runRef: 'run:9', eventCount: 2 } }))
+    const { view, onChanged } = renderTab({ entries: [entry()], host: host({ loadSubscriptionDeliveries: load, replaySubscriptionDelivery: replay }) })
+    fireEvent.click(view.getByRole('button', { name: '失败投递 · main CI' }))
+    const dialog = await view.findByRole('dialog', { name: '失败投递 · main CI' })
+    await waitFor(() => expect(dialog.textContent).toContain('delivery:d1'))
+    expect(dialog.textContent).toContain('4 次尝试')
+    expect(dialog.textContent).toContain('最后一次错误：the script exited with code 1')
+    fireEvent.click(view.getByRole('button', { name: '重放 · delivery:d1' }))
+    await waitFor(() => expect(replay).toHaveBeenCalledTimes(1))
+    expect(replay.mock.calls[0]![0]).toMatchObject({ subscriptionRef: 'subscription:1', deliveryRef: 'delivery:d1' })
+    await waitFor(() => expect(dialog.textContent).toContain('重放成功：2 条事件'))
+    expect(onChanged).toHaveBeenCalled()
+    cleanup()
+
+    // A read-only viewer has no list to open: a record carries the request body.
+    const readOnly = renderTab({ entries: [entry()], canManage: false })
+    expect(readOnly.view.queryByRole('button', { name: /^失败投递/ })).toBeNull()
+    cleanup()
+
+    const empty = renderTab({ entries: [entry()] })
+    fireEvent.click(empty.view.getByRole('button', { name: '失败投递 · main CI' }))
+    const none = await empty.view.findByRole('dialog', { name: '失败投递 · main CI' })
+    await waitFor(() => expect(none.textContent).toContain('没有失败投递'))
+  })
+
+  it('moves the address under the revision it read, and keeps the dialog shut when the Host refuses', async () => {
+    const hooked = entry({}, { triggers: { webhook: true },
+      webhook: { tokenHash: 'b'.repeat(64), generation: 1, armedAt: '2026-11-04T02:00:00.000Z' } })
+    const reset = vi.fn(async (_request: AgentTeamSubscriptionStateRequest) => ({ ok: true as const, value: { kind: 'changed' as const,
+      subscription: subscription(), activity: {}, webhookAddress: 'https://team.example.com/team/hooks/next' } } as never))
+    const { view, onChanged } = renderTab({ entries: [hooked], host: host({ resetSubscriptionWebhook: reset }) })
+    fireEvent.click(view.getByRole('button', { name: '重置地址 · main CI' }))
+    await waitFor(() => expect(reset).toHaveBeenCalledTimes(1))
+    expect(reset.mock.calls[0]![0]).toMatchObject({ subscriptionRef: 'subscription:1', expectedRevision: 3 })
+    const dialog = await view.findByRole('dialog', { name: 'Webhook 地址 · main CI' })
+    expect(dialog.textContent).toContain('https://team.example.com/team/hooks/next')
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    cleanup()
+
+    const refused = vi.fn(async () => ({ ok: false as const, error: { message: 'stale_revision' } } as never))
+    const failing = renderTab({ entries: [hooked], host: host({ resetSubscriptionWebhook: refused }) })
+    fireEvent.click(failing.view.getByRole('button', { name: '重置地址 · main CI' }))
+    await waitFor(() => expect(failing.view.getByRole('alert').textContent).toContain('重置失败：stale_revision'))
+    expect(failing.view.queryByRole('dialog', { name: /Webhook 地址/ })).toBeNull()
   })
 
   it('keeps the delete dialog open with the Host error when the write is refused', async () => {

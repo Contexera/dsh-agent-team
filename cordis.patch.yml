@@ -231,3 +231,23 @@
     # the companion no longer depends on it (packages/agent-team/src/invariant.ts).
     - id: contexera-agent-team-invariant
       name: '@contexera/dsh-agent-team/invariant'
+    # The public webhook entry rides on a second WebServer in an isolated realm,
+    # so a provider that reaches this port never touches the browser API the
+    # host's own listener serves. `isolate: { webServer: true }` gives this row
+    # its own instance of that one service, and the row mounts the server itself
+    # (packages/agent-team/src/webhook-ingress.ts): a row naming
+    # `@deepseek-ai/dsh-host-webserver` would put a Harness-protected module in
+    # this bundle, and Harness then refuses to disable the bundle again
+    # (`management-required`), which is exactly the runtime toggle an operator
+    # uses. The Team Host and its ledger stay shared, so the entry asks the
+    # ordinary Host what a delivery means. The bind address belongs to
+    # deployment: loopback by default, and a tunnel or reverse proxy publishes it
+    # under the volatile `webhook.publicOrigin` setting the Human writes on the
+    # Host row.
+    - id: contexera-agent-team-webhook-ingress
+      name: '@contexera/dsh-agent-team/webhook-ingress'
+      isolate:
+        webServer: true
+      config:
+        host: '127.0.0.1'
+        port: !!js Number(process.env.DSH_TEAM_WEBHOOK_PORT ?? 3081)

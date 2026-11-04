@@ -614,6 +614,12 @@ export interface AgentTeamSubscription {
   readonly state: 'active' | 'paused' | 'deleted'
   /** Why it is paused; absent while active, and `'failures'` records an automatic pause. */
   readonly pausedReason?: 'manual' | 'failures' | undefined
+  /**
+   * Present exactly while this subscription can be posted to from outside. The
+   * full address is derived from the Host's public origin and the token a create
+   * or reset returned once; nothing durable holds that token in the clear.
+   */
+  readonly webhook?: import('../subscription-webhook.ts').SubscriptionWebhookArm | undefined
   readonly createdBy: AgentTeamMemberId
   readonly createdAt: string
 }
@@ -662,6 +668,7 @@ export interface AgentTeamSubscriptionActivity {
   readonly activityRef: AgentTeamActivityRef
   readonly projectRef: AgentTeamProjectRef
   readonly kind: 'subscription-created' | 'subscription-updated' | 'subscription-paused' | 'subscription-resumed' | 'subscription-deleted'
+    | 'subscription-webhook-reset'
   readonly subscriptionRef: AgentTeamSubscriptionRef
   readonly subscriptionName: string
   /** The revision this line describes. */

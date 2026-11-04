@@ -143,9 +143,15 @@ reminder 的 ref 由创建它的那次工具调用派生，ref 形状保留的�
 
 ## `team_subscription`
 
-`team_subscription` 创建并维护某个 Project 的定时订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份按间隔运行的脚本。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`、`logs`、`deliveries`、`replay`。只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）；Project 内任何成员都可以列出订阅、读取运行历史。HTTP 上的 webhook 入口与订阅页面不属于这个工具。
+`team_subscription` 创建并维护某个 Project 的订阅：一段由 Host 在没有 Session 的情况下、以该 Project 的身份运行的脚本——按间隔、收到 webhook 时，或两者兼有。动作有 `list`、`create`、`update`、`test`、`pause`、`resume`、`delete`、`baseline`、`logs`、`deliveries`、`replay`、`reset_webhook`。只有该 Project 的 owner 可以修改、试运行或重放投递（否则返回 `project_owner_required`）；Project 内任何成员都可以列出订阅、读取运行历史。
+
+`create` 与 `update` 用 `intervalMinutes` 指定定时、用 `webhook: true` 指定地址，也可以两者都要，两者都不给会被拒绝。`update` 里两者的省略语义不同：不给 `intervalMinutes` 就是去掉定时，而不给 `webhook` 表示地址照旧，只有显式 `false` 才会卸下它——不认识 webhook 的调用方不该把正在用的提供方连接切断。启用触发需要部署已配置公网地址（Host 行的 `webhook.publicOrigin`）。
+
+启用或重置的那次调用会带回完整地址，而那也是唯一能读到它的时刻：账本只存 token 的哈希，所以同一请求的重试、之后的 `list`、订阅页面都不会再显示它。`reset_webhook` 按调用方读到的 `expectedRevision` 移动地址；旧地址立即失效，而已入队的投递继续处理。
 
 `logs` 读最近的运行记录——每个订阅保留 50 条，最新在前——带触发方式、开始时间、耗时、结构化类别、事件数、退出码或超时、这次运行固定的 revision，webhook 运行还带发起它的投递与 attempt。事件数是这次运行真正被账本接受的数量，所以只打印了订阅早已知道的 id 的运行计 0。
+
+webhook 运行若在未发布队列里找不到空位也不会丢：已校验的事件随这条投递保存，之后某一趟会原样接受它们，且不消耗投递的重试次数——只有一次运行自己就印出超过 500 条事件的，才会变成 `deliveries` 里的一条。
 
 Project 的 owner 与 Human 还能看到每次运行的原因和两路输出各自末尾 8 KiB——成功的运行同样如此；其他成员只看到摘要，因为脚本是在该 Project 的凭据下跑的。`deliveries` 只对 owner 列出（因为投递带着它到达时的请求体）自动重试用尽的 webhook 投递，带稳定 ref、接收时的 revision、最后一次错误与到期时间。每条在重试用尽时只计 1 次失败，所以三条这样的投递和三次失败的运行一样会暂停订阅。
 

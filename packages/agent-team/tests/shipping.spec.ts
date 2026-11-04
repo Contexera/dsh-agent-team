@@ -94,6 +94,30 @@ function personaInstructionText(preset: string): string {
 }
 
 describe('Agent Team shipping contract', () => {
+  it('mounts the webhook ingress without naming a module Harness protects', async () => {
+    const [patch, manifest] = await Promise.all([
+      readFile(resolve(root, 'cordis.patch.yml'), 'utf8'),
+      readFile(resolve(root, 'package.json'), 'utf8'),
+    ])
+    // Harness's plugin manager holds a set of protected modules — its web server,
+    // plugin manager, API gateway, client module host, and their kin — and refuses
+    // to disable a bundle that names one of them (`management-required`). A row
+    // here would therefore cost the runtime toggle an operator uses, and that set
+    // changes between Harness versions, so this bundle names no Harness module at
+    // all: the entry mounts its own listener under its own row instead
+    // (packages/agent-team/src/webhook-ingress.ts).
+    const rowNames = [...patch.matchAll(/^ {4,8}name: '([^']+)'$/gm)].map(match => match[1]!)
+    expect(rowNames.length).toBeGreaterThan(0)
+    expect(rowNames.filter(name => name.startsWith('@deepseek-ai/'))).toEqual([])
+    const start = rowStartByName(patch, '@contexera/dsh-agent-team/webhook-ingress')
+    expect(start, 'the ingress row is part of the composition').toBeGreaterThanOrEqual(0)
+    expect(patch.slice(start, start + 600), 'and it owns the realm its listener serves from')
+      .toMatch(/isolate:\s*\n\s+webServer: true/)
+    // The listener package is still what the row mounts, so it stays a peer.
+    const peer = (JSON.parse(manifest) as { peerDependencies: Record<string, string> }).peerDependencies
+    expect(peer['@deepseek-ai/dsh-host-webserver']).toBeDefined()
+  })
+
   it('ships an opt-in Host patch and one explicit team-member preset', async () => {
     const [patch, manifestText] = await Promise.all([
       readFile(resolve(root, 'cordis.patch.yml'), 'utf8'),
@@ -174,13 +198,18 @@ describe('Agent Team shipping contract', () => {
     // volatile node, so a write lands without a remount and the settings
     // service can derive it at all.
     const rowFields = TEAM_HOST_ROW_SETTINGS_SCHEMA.dict ?? {}
-    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'wakeRecycle'])
+    expect(Object.keys(rowFields).sort()).toEqual(['avatarRef', 'memberCompaction', 'name', 'wakeRecycle', 'webhook'])
     expect(rowFields.wakeRecycle?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.wakeRecycle?.dict ?? {}).sort()).toEqual(['enabled', 'idleMs', 'minContextTokens'])
     expect(Object.values(rowFields.wakeRecycle?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
     expect(rowFields.memberCompaction?.meta.volatile).toBe(true)
     expect(Object.keys(rowFields.memberCompaction?.dict ?? {}).sort()).toEqual(['enabled', 'tokens'])
     expect(Object.values(rowFields.memberCompaction?.dict ?? {}).every(child => child.meta.default !== undefined)).toBe(true)
+    // The webhook entry's public address is deployment, not Team fact: it is a
+    // volatile group on the same row, and its only field defaults to "unset".
+    expect(rowFields.webhook?.meta.volatile).toBe(true)
+    expect(Object.keys(rowFields.webhook?.dict ?? {}).sort()).toEqual(['publicOrigin'])
+    expect(rowFields.webhook?.dict?.publicOrigin?.meta.default).toBe('')
 
     expect(preset).toContain("name: '@contexera/dsh-agent-team/tools'")
     expect(preset).toContain("name: '@deepseek-ai/dsh-agent-tool-presentation'")

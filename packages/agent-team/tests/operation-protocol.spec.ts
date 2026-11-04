@@ -630,8 +630,8 @@ const fixtureSubscription: AgentTeamSubscription = {
   createdAt: instant,
 }
 
-const subscriptionActivity = (kind: 'created' | 'updated' | 'paused' | 'resumed' | 'deleted', revision: number, sequence: number,
-  reason?: 'manual' | 'failures'): AgentTeamSubscriptionActivity => ({
+const subscriptionActivity = (kind: 'created' | 'updated' | 'paused' | 'resumed' | 'deleted' | 'webhook-reset',
+  revision: number, sequence: number, reason?: 'manual' | 'failures'): AgentTeamSubscriptionActivity => ({
   activityRef: `activity:protocol-subscription-${kind}` as AgentTeamActivityRef, projectRef,
   kind: `subscription-${kind}` as AgentTeamSubscriptionActivity['kind'],
   subscriptionRef: fixtureSubscription.subscriptionRef, subscriptionName: fixtureSubscription.name, revision,
@@ -693,6 +693,19 @@ const subscriptionBaseline: Op<'team/subscription-baseline'> = {
   previousOperationId,
   kind: 'team/subscription-baseline',
   data: { workspaceId: alpha, projectRef, subscriptionRef: fixtureSubscription.subscriptionRef, ids: ['ignored-1'] },
+}
+
+const subscriptionWebhookReset: Op<'team/subscription-webhook-reset'> = {
+  ...opBase('operation:protocol-50', 'request:protocol-subscription-webhook-reset', 50),
+  previousOperationId,
+  kind: 'team/subscription-webhook-reset',
+  data: {
+    workspaceId: alpha,
+    subscription: { ...fixtureSubscription, triggers: { webhook: true },
+      webhook: { tokenHash: 'a'.repeat(64), generation: 2, armedAt: instant } },
+    previousGeneration: 1,
+    activity: subscriptionActivity('webhook-reset', 1, 50),
+  },
 }
 
 const fixtureSubscriptionEvent = { id: 'event-1', title: 'Protocol fixture event', url: 'https://example.test/1', detail: 'detail' }
@@ -1652,6 +1665,13 @@ const protocol: Record<AgentTeamOperation['kind'], ProtocolRow> = {
     stored: subscriptionBaseline,
     legacyShapes: [],
     retry: { replayOnly: 'an append-only baseline carries no comparable request payload; subscription-ledger.spec.ts drives the baseline retry' },
+    legacy: { normalize: 'none', repair: 'none' },
+    intent: { scopes: 'derived', inbox: 'none' },
+  },
+  'team/subscription-webhook-reset': {
+    stored: subscriptionWebhookReset,
+    legacyShapes: [],
+    retry: { replayOnly: 'a state transition: its idempotent branch resolves the stored record without comparing a payload; subscription-ledger.spec.ts drives the reset retry' },
     legacy: { normalize: 'none', repair: 'none' },
     intent: { scopes: 'derived', inbox: 'none' },
   },

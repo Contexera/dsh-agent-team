@@ -19,12 +19,12 @@ import type { AgentTeamSubscription, AgentTeamSubscriptionRef } from './types/en
 
 /**
  * What one run turned into, as the scheduler needs it. `accepted` and `empty`
- * are successful runs (the second found nothing new); `failed` and `backlog`
- * count towards the pause; `dropped` means the output could not be applied at
- * all because the subscription stopped being live while it ran — a terminal
- * barrier that is neither a success nor a failure of the script.
+ * are successful runs (the second found nothing new); `failed`, `backlog` and
+ * `deferred` — a valid batch with no room in the unpublished queue — count
+ * towards the pause; `dropped` means the subscription stopped being live while
+ * the script ran.
  */
-export type SubscriptionRunOutcome = 'accepted' | 'empty' | 'failed' | 'backlog' | 'dropped'
+export type SubscriptionRunOutcome = 'accepted' | 'empty' | 'failed' | 'backlog' | 'deferred' | 'dropped'
 
 /** Durable scheduler state for one subscription. It is not a Team fact: deleting it changes no domain result. */
 export interface SubscriptionCheckpoint {
@@ -364,7 +364,8 @@ export class SubscriptionScheduler {
    * instant its output was accepted, because only the accept knows that instant
    * — so this advances the next due time and nothing else. A failure increments
    * the count it reads at the write, under the same lock, so the count it adds to
-   * is the one the previous writer committed.
+   * is the one the previous writer committed. `deferred` counts like a failure:
+   * a timer pulls, so its next run prints the same output again.
    */
   private async settleOutcome(subscription: AgentTeamSubscription, outcome: SubscriptionRunOutcome,
     interval: AgentTeamSubscription['triggers']['interval']): Promise<void> {

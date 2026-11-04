@@ -109,6 +109,14 @@
       "types": "./packages/agent-team/lib/types/invariant.d.ts",
       "default": "./packages/agent-team/lib/invariant.js"
     },
+    "./webhook": {
+      "types": "./packages/agent-team/lib/types/webhook.d.ts",
+      "default": "./packages/agent-team/lib/webhook.js"
+    },
+    "./webhook-ingress": {
+      "types": "./packages/agent-team/lib/types/webhook-ingress.d.ts",
+      "default": "./packages/agent-team/lib/webhook-ingress.js"
+    },
     "./types": {
       "types": "./packages/agent-team/lib/types/types.d.ts",
       "default": "./packages/agent-team/lib/types.js"
@@ -194,6 +202,7 @@
     "@deepseek-ai/dsh-compaction-basic": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-compaction-tool-result-pruner": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-home-paths": ">=0.2.1-rc.2 <0.2.2",
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-llm": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-credentials": ">=0.2.1-rc.2 <0.2.2",
     "@deepseek-ai/dsh-sandbox-policy": ">=0.2.1-rc.2 <0.2.2",

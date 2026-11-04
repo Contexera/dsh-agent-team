@@ -76,6 +76,10 @@ import type {
   AgentTeamUpdateSubscriptionRequest,
   AgentTeamSubscriptionStateRequest,
   AgentTeamSubscriptionWriteResult,
+  AgentTeamSubscriptionDeliveriesRequest,
+  AgentTeamSubscriptionDeliveriesResult,
+  AgentTeamSubscriptionReplayRequest,
+  AgentTeamSubscriptionReplayResult,
   AgentTeamView,
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
@@ -154,7 +158,7 @@ export type TeamSidebarProps = PropsRuntime<'sidebar.workspaces'>
     selectedProjectRef?: AgentTeamProjectRef
   }
 
-/** The Project subscription surface's two reads and five durable writes, all answered by the Host. */
+/** The Project subscription surface's two reads and its durable writes, all answered by the Host. */
 export interface TeamSubscriptionHost {
   loadSubscriptions: (request: AgentTeamSubscriptionListRequest) => Promise<RemoteResult<AgentTeamSubscriptionListResult>>
   loadSubscriptionLogs: (request: AgentTeamSubscriptionLogsRequest) => Promise<RemoteResult<AgentTeamSubscriptionLogsResult>>
@@ -165,6 +169,11 @@ export interface TeamSubscriptionHost {
   pauseSubscription: (request: AgentTeamSubscriptionStateRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
   resumeSubscription: (request: AgentTeamSubscriptionStateRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
   deleteSubscription: (request: AgentTeamSubscriptionStateRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
+  /** Moves the webhook address: the answer carries the new one, and only that answer ever does. */
+  resetSubscriptionWebhook: (request: AgentTeamSubscriptionStateRequest) => Promise<RemoteResult<AgentTeamSubscriptionWriteResult>>
+  /** The deliveries whose automatic retries are spent, and the owner's explicit replay of one. */
+  loadSubscriptionDeliveries: (request: AgentTeamSubscriptionDeliveriesRequest) => Promise<RemoteResult<AgentTeamSubscriptionDeliveriesResult>>
+  replaySubscriptionDelivery: (request: AgentTeamSubscriptionReplayRequest) => Promise<RemoteResult<AgentTeamSubscriptionReplayResult>>
 }
 
 export type TeamConversationProps = PropsRuntime<'main'> & PropsLocale<'team'> & TeamNavigationActions & TeamSubscriptionHost & {

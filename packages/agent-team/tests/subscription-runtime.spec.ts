@@ -219,6 +219,17 @@ describe('failure handling', () => {
     expect(test.paused).toEqual([entry.subscriptionRef])
   })
 
+  it('counts a run whose output found no room in the unpublished queue as a failure', async () => {
+    const entry = subscription('s0')
+    const test = harness({ subscriptions: [entry], outcomes: ['deferred'] })
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
+    await test.scheduler.runTick()
+    await test.settle()
+    // A timer pulls, so its next run prints the same output again: the batch is
+    // not kept, and the run counts like any other failure of the subscription.
+    expect(test.checkpoints.get(entry.subscriptionRef)?.consecutiveFailures).toBe(1)
+  })
+
   it('settles a success only as the next due instant, because the accept clears the count itself', async () => {
     const entry = subscription('s0')
     const test = harness({ subscriptions: [entry], outcomes: ['accepted'] })

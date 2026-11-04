@@ -10,6 +10,7 @@
 import { z } from 'zod'
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { AgentTeamSubscriptionRef } from './types/entities.ts'
+import { SUBSCRIPTION_ADMISSION_STATES, type SubscriptionAdmissionRecord, type SubscriptionAdmissionState } from './subscription-admissions.ts'
 import type { SubscriptionCheckpoint } from './subscription-runtime.ts'
 import { SUBSCRIPTION_RUN_CATEGORIES, type SubscriptionRunCategory } from './subscription-runner.ts'
 import {
@@ -67,6 +68,8 @@ const runSchema = z.object({
 
 const deliverySchema = z.object({
   deliveryRef: z.string().regex(/^delivery:[^:]+$/),
+  /** The Host admission this delivery came from: the id a replay hands the script again. */
+  admissionRef: z.string().min(1).optional(),
   subscriptionRef: subscriptionRefSchema,
   projectRef: z.string().regex(/^project:[^:]+$/),
   receivedRevision: z.number().int().positive(),
@@ -108,17 +111,52 @@ const replaySchema = z.object({
   expiresAt: z.string().datetime(),
 }).strict().transform((value): SubscriptionReplayRecord => Object.freeze(value as SubscriptionReplayRecord))
 
+/** One event a delivery kept for later acceptance: shape only, since the run already bounded its lengths. */
+const heldEventSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  url: z.string().optional(),
+  detail: z.string().optional(),
+}).strict()
+
+/**
+ * One queued webhook delivery as it is read back. The header map is the narrowed
+ * one the entry computed — lowercased, whitelisted, size-checked — so a row can
+ * never carry a credential header a later version might learn to forward.
+ */
+const admissionSchema = z.object({
+  admissionRef: z.string().regex(/^admission:[^:]+$/),
+  subscriptionRef: subscriptionRefSchema,
+  projectRef: z.string().regex(/^project:[^:]+$/),
+  deliveryRef: z.string().regex(/^delivery:[^:]+$/),
+  receivedRevision: z.number().int().positive(),
+  receivedScriptHash: z.string().regex(/^[0-9a-f]{64}$/),
+  script: scriptSchema,
+  credentials: z.array(credentialSchema).max(8),
+  headers: z.record(z.string(), z.string()),
+  body: z.string(),
+  receivedAt: z.string().datetime(),
+  attempts: z.number().int().nonnegative(),
+  state: z.enum(SUBSCRIPTION_ADMISSION_STATES as unknown as readonly [SubscriptionAdmissionState, ...SubscriptionAdmissionState[]]),
+  nextAttemptAt: z.string().datetime().optional(),
+  lastError: z.string().optional(),
+  heldEvents: z.array(heldEventSchema).optional(),
+}).strict().transform((value): SubscriptionAdmissionRecord => Object.freeze(value as unknown as SubscriptionAdmissionRecord))
+
 export const subscriptionDomainSpec = defineDomain({
   name: 'agent_team_subscriptions',
   // Version 2 added the run history and the failed deliveries; version 3 adds
-  // the replay index that makes a request id a whole idempotency key. An older
-  // document only lacks tables, and the current schemas still accept its rows.
-  version: 3,
-  compatibleVersions: [1, 2],
+  // the replay index that makes a request id a whole idempotency key; version 4
+  // adds the webhook admission queue, which must survive a restart to keep a 202
+  // honest. An older document only lacks tables, and the current schemas still
+  // accept its rows.
+  version: 4,
+  compatibleVersions: [1, 2, 3],
   tables: {
     checkpoints: domainTable<AgentTeamSubscriptionRef, SubscriptionCheckpoint>(checkpointSchema),
     runs: domainTable<string, SubscriptionRunRecord>(runSchema),
     deliveries: domainTable<string, SubscriptionDeliveryRecord>(deliverySchema),
     replays: domainTable<string, SubscriptionReplayRecord>(replaySchema),
+    admissions: domainTable<string, SubscriptionAdmissionRecord>(admissionSchema),
   },
 })

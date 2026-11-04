@@ -331,6 +331,31 @@
   justify-self: start;
 }
 
+/* A trigger is a choice with its own control, so the checkbox and its label sit on one line. */
+.triggerChoice {
+  align-items: center;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  gap: 8px;
+}
+
+/* The one line a complete address occupies: it must stay selectable whole at 390px. */
+.webhookAddress {
+  background: var(--dsw-alias-bg-layer-1);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: var(--dsw-radius-sm, 8px);
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+
+.webhookAddress code {
+  font-family: var(--dsw-alias-font-family-mono, monospace);
+  font-size: 13px;
+}
+
 .intervalRow {
   align-items: center;
   color: var(--dsw-alias-label-primary);

@@ -148,6 +148,8 @@ export function runSummaryOf(record: SubscriptionRunRecord): SubscriptionRunSumm
  */
 export interface SubscriptionDeliveryRecord {
   readonly deliveryRef: string
+  /** The Host admission it came from: a replay hands the script this id again. */
+  readonly admissionRef?: string | undefined
   readonly subscriptionRef: AgentTeamSubscriptionRef
   readonly projectRef: string
   /** The subscription as it stood when the delivery arrived: the version to replay. */
@@ -178,6 +180,8 @@ export interface SubscriptionDeliveryRecord {
 /** What an ingress proves about one delivery when its automatic retries are spent. */
 export interface SubscriptionDeliveryInput {
   readonly deliveryRef: string
+  /** The Host admission the delivery stood for, recorded so a replay reuses its id. */
+  readonly admissionRef?: string | undefined
   /** The subscription as it stood when the delivery arrived: the version a pinned replay runs. */
   readonly receivedRevision: number
   /** The instant it arrived, in epoch milliseconds. */
@@ -198,8 +202,10 @@ export interface SubscriptionDeliveryInput {
 export function deliveryRecordOf(subscription: AgentTeamSubscription, input: SubscriptionDeliveryInput,
   earlier: SubscriptionDeliveryRecord | undefined): SubscriptionDeliveryRecord {
   const receivedAt = earlier?.receivedAt ?? new Date(input.receivedAt).toISOString()
+  const admissionRef = earlier?.admissionRef ?? input.admissionRef
   return Object.freeze({
     deliveryRef: input.deliveryRef,
+    ...(admissionRef === undefined ? {} : { admissionRef }),
     subscriptionRef: subscription.subscriptionRef,
     projectRef: subscription.projectRef,
     receivedRevision: earlier?.receivedRevision ?? input.receivedRevision,

@@ -5,6 +5,7 @@ import type {
   AgentTeamProjectRef,
   AgentTeamSubscription,
   AgentTeamSubscriptionDraftTrialResult,
+  AgentTeamSubscriptionDeliveryEntry,
   AgentTeamSubscriptionListEntry,
   AgentTeamSubscriptionLogEntry,
   AgentTeamSubscriptionRunSummary,
@@ -23,7 +24,8 @@ import createCss from './create.module.css'
 
 type TeamSubscriptionHost = Pick<TeamConversationProps,
   'loadSubscriptionLogs' | 'testSubscriptionDraft' | 'createSubscription' | 'updateSubscription' |
-  'pauseSubscription' | 'resumeSubscription' | 'deleteSubscription'>
+  'pauseSubscription' | 'resumeSubscription' | 'deleteSubscription' | 'resetSubscriptionWebhook' |
+  'loadSubscriptionDeliveries' | 'replaySubscriptionDelivery'>
 
 export interface TeamSubscriptionsTabProps {
   readonly workspaceId: WorkspaceId
@@ -46,7 +48,7 @@ type EditorMode =
   | { readonly kind: 'create' }
   | { readonly kind: 'edit'; readonly entry: AgentTeamSubscriptionListEntry }
 
-type PendingAction = { readonly ref: string; readonly kind: 'pause' | 'resume' }
+type PendingAction = { readonly ref: string; readonly kind: 'pause' | 'resume' | 'reset' }
 
 /** The form's last trial verdict: a draft answer, or a save whose own trial refused. */
 type TrialView = AgentTeamSubscriptionDraftTrialResult | { readonly kind: 'trial-failed'; readonly failure: AgentTeamSubscriptionTrialFailure }
@@ -69,9 +71,13 @@ export function TeamSubscriptionsTab({
   const [editing, setEditing] = useState<EditorMode>()
   const [scriptOf, setScriptOf] = useState<AgentTeamSubscriptionListEntry>()
   const [logsOf, setLogsOf] = useState<AgentTeamSubscriptionListEntry>()
+  const [deliveriesOf, setDeliveriesOf] = useState<AgentTeamSubscriptionListEntry>()
   const [deleting, setDeleting] = useState<AgentTeamSubscriptionListEntry>()
   const [pending, setPending] = useState<PendingAction>()
   const [failure, setFailure] = useState<CardFailure>()
+  // The one time an address is readable: the answer that armed it. It lives
+  // here, not in the card, so closing the dialog really forgets it.
+  const [armed, setArmed] = useState<{ readonly name: string; readonly address: string }>()
 
   const live = (entries ?? []).filter(entry => entry.subscription.state !== 'deleted')
   const runStateAction = async (entry: AgentTeamSubscriptionListEntry, kind: PendingAction['kind']): Promise<void> => {
@@ -93,6 +99,31 @@ export function TeamSubscriptionsTab({
       onChanged()
     } catch (cause) {
       setFailure({ ref, message: t('subscriptionActionFailed', { message: cause instanceof Error ? cause.message : String(cause) }) })
+    } finally {
+      setPending(undefined)
+    }
+  }
+
+  /** Move the address, and show the new one: the Host will never hand it out again. */
+  const runResetAction = async (entry: AgentTeamSubscriptionListEntry): Promise<void> => {
+    if (pending !== undefined) return
+    const ref = entry.subscription.subscriptionRef
+    setPending({ ref, kind: 'reset' })
+    setFailure(undefined)
+    try {
+      const result = await host.resetSubscriptionWebhook({ requestId: mintRequestId(), workspaceId, projectRef,
+        subscriptionRef: ref, expectedRevision: entry.subscription.revision })
+      if (!result.ok) {
+        setFailure({ ref, message: t('subscriptionWebhookResetFailed', { message: result.error.message }) })
+        return
+      }
+      // A reset trialled nothing, so the only answer left is the address itself.
+      if (result.value.kind === 'changed' && result.value.webhookAddress !== undefined) {
+        setArmed({ name: entry.subscription.name, address: result.value.webhookAddress })
+      }
+      onChanged()
+    } catch (cause) {
+      setFailure({ ref, message: t('subscriptionWebhookResetFailed', { message: cause instanceof Error ? cause.message : String(cause) }) })
     } finally {
       setPending(undefined)
     }
@@ -120,8 +151,10 @@ export function TeamSubscriptionsTab({
         onEdit={() => { setEditing({ kind: 'edit', entry }) }}
         onScript={() => { setScriptOf(entry) }}
         onLogs={() => { setLogsOf(entry) }}
+        onDeliveries={() => { setDeliveriesOf(entry) }}
         onPause={() => { void runStateAction(entry, 'pause') }}
         onResume={() => { void runStateAction(entry, 'resume') }}
+        onResetWebhook={() => { void runResetAction(entry) }}
         onDelete={() => { setDeleting(entry) }}
       />)}
       {!loading && error === undefined && live.length > 0 && <div className={css.footer}>
@@ -137,6 +170,13 @@ export function TeamSubscriptionsTab({
       host={host}
       onClose={() => { setEditing(undefined) }}
       onChanged={onChanged}
+      onArmed={setArmed}
+      t={t}
+    />}
+    {armed !== undefined && <SubscriptionWebhookAddressDialog
+      name={armed.name}
+      address={armed.address}
+      onClose={() => { setArmed(undefined) }}
       t={t}
     />}
     {scriptOf !== undefined && <SubscriptionScriptDialog
@@ -156,6 +196,16 @@ export function TeamSubscriptionsTab({
       projectRef={projectRef}
       loadSubscriptionLogs={host.loadSubscriptionLogs}
       onClose={() => { setLogsOf(undefined) }}
+      t={t}
+    />}
+    {deliveriesOf !== undefined && <SubscriptionDeliveriesDialog
+      entry={deliveriesOf}
+      workspaceId={workspaceId}
+      projectRef={projectRef}
+      loadSubscriptionDeliveries={host.loadSubscriptionDeliveries}
+      replaySubscriptionDelivery={host.replaySubscriptionDelivery}
+      onClose={() => { setDeliveriesOf(undefined) }}
+      onChanged={onChanged}
       t={t}
     />}
     {deleting !== undefined && <SubscriptionDeleteDialog
@@ -183,7 +233,7 @@ function SurfaceError({ message, retry, onRetry }: { readonly message: string; r
   </div>
 }
 
-function SubscriptionCard({ entry, canManage, creator, pending, failure, t, onEdit, onScript, onLogs, onPause, onResume, onDelete }: {
+function SubscriptionCard({ entry, canManage, creator, pending, failure, t, onEdit, onScript, onLogs, onDeliveries, onPause, onResume, onResetWebhook, onDelete }: {
   readonly entry: AgentTeamSubscriptionListEntry
   readonly canManage: boolean
   readonly creator: string
@@ -193,8 +243,10 @@ function SubscriptionCard({ entry, canManage, creator, pending, failure, t, onEd
   readonly onEdit: () => void
   readonly onScript: () => void
   readonly onLogs: () => void
+  readonly onDeliveries: () => void
   readonly onPause: () => void
   readonly onResume: () => void
+  readonly onResetWebhook: () => void
   readonly onDelete: () => void
 }) {
   const { subscription } = entry
@@ -229,9 +281,12 @@ function SubscriptionCard({ entry, canManage, creator, pending, failure, t, onEd
       {canManage && <Button size="sm" variant="outline" aria-label={named(t('subscriptionEdit'))} onClick={onEdit}>{t('subscriptionEdit')}</Button>}
       <Button size="sm" variant="outline" aria-label={named(t('subscriptionScript'))} onClick={onScript}>{t('subscriptionScript')}</Button>
       <Button size="sm" variant="outline" aria-label={named(t('subscriptionLogs'))} onClick={onLogs}>{t('subscriptionLogs')}</Button>
+      {canManage && <Button size="sm" variant="outline" aria-label={named(t('subscriptionDeliveries'))} onClick={onDeliveries}>{t('subscriptionDeliveries')}</Button>}
       {canManage && (paused
         ? <Button size="sm" variant="outline" disabled={pending !== undefined} aria-label={named(pending === 'resume' ? t('subscriptionResuming') : t('subscriptionResume'))} onClick={onResume}>{pending === 'resume' ? t('subscriptionResuming') : t('subscriptionResume')}</Button>
         : <Button size="sm" variant="outline" disabled={pending !== undefined} aria-label={named(pending === 'pause' ? t('subscriptionPausing') : t('subscriptionPause'))} onClick={onPause}>{pending === 'pause' ? t('subscriptionPausing') : t('subscriptionPause')}</Button>)}
+      {canManage && subscription.webhook !== undefined && <Button size="sm" variant="outline" disabled={pending !== undefined}
+        aria-label={named(t('subscriptionWebhookReset'))} onClick={onResetWebhook}>{pending === 'reset' ? t('subscriptionWebhookResetting') : t('subscriptionWebhookReset')}</Button>}
       {canManage && <Button size="sm" variant="outline" aria-label={named(t('subscriptionDelete'))} onClick={onDelete}>{t('subscriptionDelete')}</Button>}
     </div>
   </article>
@@ -397,19 +452,162 @@ function SubscriptionDeleteDialog({ entry, workspaceId, projectRef, deleteSubscr
   </Modal>
 }
 
-function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose, onChanged, t }: {
+/**
+ * The deliveries whose automatic retries are spent: the owner's own list, because
+ * a record carries the request body it arrived with. Replaying one is an explicit
+ * action against the version the owner picks, and the Host answers what it did.
+ */
+function SubscriptionDeliveriesDialog({ entry, workspaceId, projectRef, loadSubscriptionDeliveries, replaySubscriptionDelivery,
+  onClose, onChanged, t }: {
+  readonly entry: AgentTeamSubscriptionListEntry
+  readonly workspaceId: WorkspaceId
+  readonly projectRef: AgentTeamProjectRef
+  /** The two Host calls travel on their own, so the dialog's read depends on them and not on a render-scoped bundle. */
+  readonly loadSubscriptionDeliveries: TeamSubscriptionHost['loadSubscriptionDeliveries']
+  readonly replaySubscriptionDelivery: TeamSubscriptionHost['replaySubscriptionDelivery']
+  readonly onClose: () => void
+  readonly onChanged: () => void
+  readonly t: TeamConversationProps['t']
+}) {
+  const subscriptionRef = entry.subscription.subscriptionRef
+  const [deliveries, setDeliveries] = useState<readonly AgentTeamSubscriptionDeliveryEntry[]>()
+  const [error, setError] = useState<string>()
+  const [reloadToken, setReloadToken] = useState(0)
+  const [replaying, setReplaying] = useState<string>()
+  const [replayed, setReplayed] = useState<string>()
+  const [replayError, setReplayError] = useState<string>()
+  useEffect(() => {
+    let mounted = true
+    setError(undefined)
+    void loadSubscriptionDeliveries({ workspaceId, projectRef, subscriptionRef }).then(
+      result => {
+        if (!mounted) return
+        if (result.ok) { setDeliveries(result.value.deliveries); setError(undefined) } else setError(result.error.message)
+      },
+      (cause: unknown) => { if (mounted) setError(cause instanceof Error ? cause.message : String(cause)) },
+    )
+    return () => { mounted = false }
+  }, [workspaceId, projectRef, subscriptionRef, loadSubscriptionDeliveries, reloadToken])
+
+  const replay = async (deliveryRef: string): Promise<void> => {
+    if (replaying !== undefined) return
+    setReplaying(deliveryRef)
+    setReplayError(undefined)
+    setReplayed(undefined)
+    try {
+      const result = await replaySubscriptionDelivery({ requestId: mintRequestId(), workspaceId, projectRef, subscriptionRef, deliveryRef })
+      if (!result.ok) {
+        setReplayError(t('subscriptionDeliveryReplayFailed', { message: result.error.message }))
+        return
+      }
+      if (result.value.kind === 'replay-failed') {
+        setReplayError(t('subscriptionDeliveryReplayFailed', { message: result.value.reason ?? entry.subscription.name }))
+        return
+      }
+      setReplayed(t('subscriptionDeliveryReplayed', { count: result.value.eventCount ?? 0 }))
+      // The Host is the list: a delivery that replayed successfully is gone.
+      setReloadToken(token => token + 1)
+      onChanged()
+    } catch (cause) {
+      setReplayError(t('subscriptionDeliveryReplayFailed', { message: cause instanceof Error ? cause.message : String(cause) }))
+    } finally {
+      setReplaying(undefined)
+    }
+  }
+
+  return <Modal
+    open
+    onClose={onClose}
+    title={t('subscriptionDeliveriesTitle', { name: entry.subscription.name })}
+    description={t('subscriptionDeliveriesDescription')}
+    closeLabel={t('close')}
+    className={css.dialogWide!}
+    footer={<Button variant="outline" onClick={onClose}>{t('close')}</Button>}
+  >
+    {deliveries === undefined && error === undefined && <p className={css.hint}>{t('subscriptionsLoading')}</p>}
+    {error !== undefined && <SurfaceError message={t('subscriptionDeliveriesFailed', { message: error })} retry={t('retry')}
+      onRetry={() => { setReloadToken(token => token + 1) }} />}
+    {deliveries !== undefined && error === undefined && deliveries.length === 0 && <p className={css.hint}>{t('subscriptionDeliveriesEmpty')}</p>}
+    {replayed !== undefined && <p className={css.notice} role="status">{replayed}</p>}
+    {replayError !== undefined && <p className={css.error} role="alert">{replayError}</p>}
+    {deliveries !== undefined && deliveries.length > 0 && <div className={css.listViewport}>
+      <ol className={css.runList}>
+        {deliveries.map(delivery => <li className={css.runRow} key={delivery.deliveryRef} data-team-delivery-ref={delivery.deliveryRef}>
+          <div className={css.runHead}>
+            <code className={css.runMeta}>{delivery.deliveryRef}</code>
+            <span className={css.runMeta}>{t('subscriptionDeliveryLine', {
+              attempts: delivery.attempts, received: timeLabel(delivery.receivedAt), expires: timeLabel(delivery.expiresAt),
+            })}</span>
+          </div>
+          <p className={css.trialFailure}>{t('subscriptionDeliveryLastError', { message: delivery.lastError })}</p>
+          <div className={css.actions}>
+            <Button size="sm" variant="outline" disabled={replaying !== undefined} aria-label={`${t('subscriptionDeliveryReplay')} · ${delivery.deliveryRef}`}
+              onClick={() => { void replay(delivery.deliveryRef) }}>
+              {replaying === delivery.deliveryRef ? t('subscriptionDeliveryReplaying') : t('subscriptionDeliveryReplay')}
+            </Button>
+          </div>
+        </li>)}
+      </ol>
+    </div>}
+  </Modal>
+}
+
+/**
+ * The one place a complete address is shown. Closing it forgets the address:
+ * the Host keeps a hash, so nothing can show it again except a reset.
+ */
+function SubscriptionWebhookAddressDialog({ name, address, onClose, t }: {
+  readonly name: string
+  readonly address: string
+  readonly onClose: () => void
+  readonly t: TeamConversationProps['t']
+}) {
+  const [copied, setCopied] = useState(false)
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(address)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return <Modal
+    open
+    onClose={onClose}
+    title={t('subscriptionWebhookAddressTitle', { name })}
+    description={t('subscriptionWebhookAddressOnce')}
+    closeLabel={t('close')}
+    footer={<Button variant="outline" onClick={onClose}>{t('close')}</Button>}
+  >
+    <p className={css.webhookAddress}><code data-team-webhook-address>{address}</code></p>
+    <div className={css.actions}>
+      <Button size="sm" variant="outline" autoFocus onClick={() => { void copy() }}>
+        {copied ? t('subscriptionWebhookAddressCopied') : t('subscriptionWebhookAddressCopy')}
+      </Button>
+    </div>
+    <p className={css.hint}>{t('subscriptionWebhookRegisterHint')}</p>
+  </Modal>
+}
+
+function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose, onChanged, onArmed, t }: {
   readonly mode: EditorMode
   readonly workspaceId: WorkspaceId
   readonly projectRef: AgentTeamProjectRef
   readonly host: TeamSubscriptionHost
   readonly onClose: () => void
   readonly onChanged: () => void
+  /** The address a save armed, handed up to the dialog that shows it once. */
+  readonly onArmed: (armed: { readonly name: string; readonly address: string }) => void
   readonly t: TeamConversationProps['t']
 }) {
   const editing = mode.kind === 'edit' ? mode.entry.subscription : undefined
   const formId = useId()
   const [name, setName] = useState(editing?.name ?? '')
   const [minutes, setMinutes] = useState(String(editing?.triggers.interval?.minutes ?? 10))
+  // A subscription runs on a timer, on a webhook, or on both: the form edits the
+  // triggers as a pair rather than assuming the timer is always there.
+  const [timer, setTimer] = useState(editing === undefined || editing.triggers.interval !== undefined)
+  const [webhook, setWebhook] = useState(editing?.triggers.webhook === true)
   const [script, setScript] = useState(editing?.script.content ?? '')
   const [credentials, setCredentials] = useState<readonly { readonly ref: string; readonly env: string }[]>(editing?.credentials ?? [])
   const [baseline, setBaseline] = useState<'current-output' | 'ignore-history'>('current-output')
@@ -437,7 +635,14 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
   const scriptBytes = new TextEncoder().encode(script).length
   const scriptBytesValid = scriptBytes <= 16 * 1024
   const credentialsValid = credentials.every(row => row.ref.trim() !== '' && row.env.trim() !== '')
-  const canTest = !busy && name.trim() !== '' && minutesValid && script.trim() !== '' && scriptBytesValid && credentialsValid
+  const triggersValid = webhook || (timer && minutesValid)
+  const canTest = !busy && name.trim() !== '' && triggersValid && script.trim() !== '' && scriptBytesValid && credentialsValid
+
+  /** The triggers as the Host reads them: an interval only when the timer is on, the webhook always when editing. */
+  const triggers = {
+    ...(timer ? { intervalMinutes: minuteValue } : {}),
+    ...(editing === undefined ? (webhook ? { webhook: true } : {}) : { webhook }),
+  }
 
   const cleanCredentials = (): readonly { readonly ref: string; readonly env: string }[] => credentials.map(row => ({ ref: row.ref.trim(), env: row.env.trim() }))
 
@@ -453,7 +658,7 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
       const result = await host.testSubscriptionDraft({
         workspaceId, projectRef,
         ...(editing === undefined ? {} : { subscriptionRef: editing.subscriptionRef, expectedRevision: editing.revision }),
-        name: name.trim(), intervalMinutes: minuteValue, scriptContent: script, credentials: cleanCredentials(),
+        name: name.trim(), ...triggers, scriptContent: script, credentials: cleanCredentials(),
       })
       if (!result.ok) { setTestError(result.error.message); return }
       setTrial(result.value)
@@ -475,7 +680,7 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
       const requestId = (requestIdRef.current ?? mintRequestId()) as AgentTeamCreateSubscriptionRequest['requestId']
       requestIdRef.current = requestId
       const shared = {
-        requestId, workspaceId, projectRef, name: name.trim(), intervalMinutes: minuteValue,
+        requestId, workspaceId, projectRef, name: name.trim(), ...triggers,
         script: { scriptContent: script }, credentials: cleanCredentials(),
       }
       const result = editing === undefined
@@ -488,6 +693,11 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
         setTrial(result.value)
         setTested(undefined)
         return
+      }
+      // The save that armed or reset the address is the only answer that carries
+      // it: show it before the form closes, or it is lost with the request.
+      if (result.value.webhookAddress !== undefined) {
+        onArmed({ name: name.trim(), address: result.value.webhookAddress })
       }
       onChanged()
       onClose()
@@ -518,9 +728,13 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
           <span>{t('subscriptionName')}</span>
           <Input className={createCss.input!} value={name} maxLength={80} disabled={busy} autoFocus onChange={event => { invalidate(); setName(event.target.value) }} />
         </label>
-        <label className={createCss.field}>
-          <span>{t('subscriptionTrigger')}</span>
-          <span className={css.intervalRow}>
+        <fieldset className={css.fieldset}>
+          <legend>{t('subscriptionTrigger')}</legend>
+          <label className={css.triggerChoice}>
+            <input type="checkbox" checked={timer} disabled={busy} onChange={event => { invalidate(); setTimer(event.target.checked) }} />
+            <span>{t('subscriptionTimerEnable')}</span>
+          </label>
+          {timer && <span className={css.intervalRow}>
             <span>{t('subscriptionEveryPrefix')}</span>
             <Input
               className={css.minutesInput!}
@@ -530,12 +744,19 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
               value={minutes}
               disabled={busy}
               aria-invalid={!minutesValid}
+              aria-label={t('subscriptionMinutes')}
               onChange={event => { invalidate(); setMinutes(event.target.value) }}
             />
             <span>{t('subscriptionMinutes')}</span>
-          </span>
-        </label>
-        <p className={css.hint}>{t('subscriptionIntervalHint')}</p>
+          </span>}
+          <label className={css.triggerChoice}>
+            <input type="checkbox" checked={webhook} disabled={busy} onChange={event => { invalidate(); setWebhook(event.target.checked) }} />
+            <span>{t('subscriptionWebhookArm')}</span>
+          </label>
+          {webhook && <p className={css.hint}>{t('subscriptionWebhookHint')}</p>}
+          {!triggersValid && <p className={css.error} role="alert">{t('subscriptionNoTrigger')}</p>}
+        </fieldset>
+        {timer && <p className={css.hint}>{t('subscriptionIntervalHint')}</p>}
         <p className={css.hint}>{t('subscriptionZoneNow', { utc: formatUtc8(new Date().toISOString()), local: formatAbsoluteTime(new Date().toISOString()) })}</p>
         {mode.kind === 'edit' && mode.entry.nextRunAt !== undefined && <p className={css.hint}>{t('subscriptionNextRun', {
           utc: formatUtc8(mode.entry.nextRunAt), local: timeLabel(mode.entry.nextRunAt),
@@ -638,11 +859,15 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
   </Modal>
 }
 
-/** The trigger a reader sees; the form only offers an interval until webhook ingress lands. */
+/** The triggers a reader sees, named as the pair the form edits. */
 function triggerText(triggers: AgentTeamSubscription['triggers'], t: TeamConversationProps['t']): string {
-  if (triggers.interval !== undefined) return t('subscriptionEvery', { minutes: triggers.interval.minutes })
-  if (triggers.webhook === true) return t('subscriptionWebhook')
-  return t('subscriptionNoTrigger')
+  // Two triggers are one subscription: naming only the timer would hide the
+  // address that is also armed.
+  const parts = [
+    ...(triggers.interval === undefined ? [] : [t('subscriptionEvery', { minutes: triggers.interval.minutes })]),
+    ...(triggers.webhook === true ? [t('subscriptionWebhook')] : []),
+  ]
+  return parts.length === 0 ? t('subscriptionNoTrigger') : parts.join(' · ')
 }
 
 function triggerLabel(trigger: AgentTeamSubscriptionLogEntry['trigger'], t: TeamConversationProps['t']): string {

@@ -10,6 +10,10 @@ import { assertScreenshotEvidence } from './browser-evidence.mjs'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const harness = harnessDir
 const chrome = process.env.CHROME_PATH ?? '/usr/bin/google-chrome'
+// The webhook entry listens on its own port. This lane never needs a fixed one — no
+// scenario posts to it from outside — so it takes an ephemeral port instead of
+// fighting a running `dsh web` instance, or the previous scenario, for the default.
+process.env.DSH_TEAM_WEBHOOK_PORT = process.env.DSH_TEAM_WEBHOOK_PORT ?? '0'
 const temporary = await mkdtemp(join(tmpdir(), 'dsh-agent-team-browser-'))
 const home = join(temporary, 'home')
 /** The screenshots this run leaves for review: desktop and the 390×844 narrow lane. */

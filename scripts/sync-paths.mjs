@@ -21,6 +21,8 @@ const base = JSON.parse(cleaned)
 const own = {
   '@contexera/dsh-agent-team/host': ['./packages/agent-team/src/index.ts'],
   '@contexera/dsh-agent-team/invariant': ['./packages/agent-team/src/invariant.ts'],
+  '@contexera/dsh-agent-team/webhook': ['./packages/agent-team/src/webhook.ts'],
+  '@contexera/dsh-agent-team/webhook-ingress': ['./packages/agent-team/src/webhook-ingress.ts'],
   '@contexera/dsh-agent-team/types': ['./packages/agent-team/src/types.ts'],
   '@contexera/dsh-agent-team/typert': ['./packages/agent-team/lib/typert.host.d.ts'],
   '@contexera/dsh-agent-team/remote': ['./packages/agent-team/lib/typert.remote-client.js'],

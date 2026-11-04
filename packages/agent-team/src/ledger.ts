@@ -187,6 +187,7 @@ import type {
   AgentTeamSubscriptionPausedOperation,
   AgentTeamSubscriptionResumedOperation,
   AgentTeamSubscriptionUpdatedOperation,
+  AgentTeamSubscriptionWebhookResetOperation,
   AgentTeamSubscriptionEventRef,
   AgentTeamOwnerActivity,
   AgentTeamSubscriptionActivity,
@@ -217,6 +218,7 @@ import {
   type SubscriptionScriptSnapshot,
   type SubscriptionTriggers,
 } from './subscriptions.ts'
+import { mintWebhookToken, sameWebhookTokenHash, webhookTokenHash, type SubscriptionWebhookArm } from './subscription-webhook.ts'
 import { MAX_ACTIVE_REMINDERS_PER_MEMBER, MAX_REMINDER_NOTE_CHARACTERS, nextOccurrenceAt, nextReminderWakeAt, parseReminderNote, parseReminderSchedule, planMemberReminders, reminderRefIsStorable, reminderScheduleIsSound, sameReminderIntent } from './member-reminders.ts'
 import type { MemberReminderCandidate, MemberReminderPlanEntry } from './member-reminders.ts'
 import type { AgentTeamBodyMentionCandidate } from './mentions.ts'
@@ -503,6 +505,12 @@ export interface AgentTeamLedgerOptions {
   readonly areMainEntriesVisible?: ((memberId: AgentTeamMemberId, entries: readonly AgentTeamMainTimelineEntry[], projectRef: AgentTeamProjectRef) => boolean) | undefined
   /** Highest rules version to adopt and accept; defaults to `AGENT_TEAM_RULES_VERSION`. */
   readonly rulesVersion?: number
+  /**
+   * Mints one webhook token when a write arms an address. The ledger consults
+   * it instead of the platform's CSPRNG directly, so a test commits a known
+   * address and hash rather than a value it could never predict.
+   */
+  readonly webhookToken?: () => string
 }
 
 /** Internal append result indicating whether this call committed a new record. */
@@ -878,6 +886,8 @@ export class AgentTeamLedger {
   private readonly createOperationId: () => AgentTeamOperationId
   private readonly createOccurredAt: () => string
   private readonly createRef: (kind: 'project' | 'message' | 'task' | 'thread' | 'claim' | 'activity' | 'subscription') => string
+  /** How a write that arms a webhook address obtains its token; the default is the platform CSPRNG. */
+  private readonly createWebhookToken: () => string
   /** Host-supplied surface visibility probe; absent means no write is ever exempt. */
   private readonly areFactsVisible?: ((memberId: AgentTeamMemberId, facts: readonly AgentTeamThreadReadFact[], threadRef: AgentTeamThreadRef) => boolean) | undefined
   private readonly areMainEntriesVisible: AgentTeamLedgerOptions['areMainEntriesVisible']
@@ -920,6 +930,7 @@ export class AgentTeamLedger {
     this.areFactsVisible = options.areFactsVisible
     this.areMainEntriesVisible = options.areMainEntriesVisible
     this.rulesVersion = options.rulesVersion ?? AGENT_TEAM_RULES_VERSION
+    this.createWebhookToken = options.webhookToken ?? mintWebhookToken
     this.replay()
     const head = this.state.ordered.at(-1)
     this.bootValidation = Object.freeze({
@@ -1021,6 +1032,20 @@ export class AgentTeamLedger {
     return this.state.subscriptions.get(subscriptionRef)
   }
 
+  /**
+   * The subscription a posted token's address names, or `undefined`: a reset, a dropped
+   * trigger or a deletion leave the old token naming nothing. The scan is constant-time
+   * over every armed subscription and not a hash index, so the search tells nothing.
+   */
+  subscriptionByWebhookToken(token: string): AgentTeamSubscription | undefined {
+    const hash = webhookTokenHash(token)
+    for (const subscription of this.state.subscriptions.values()) {
+      const arm = subscription.webhook
+      if (arm !== undefined && sameWebhookTokenHash(arm.tokenHash, hash)) return subscription
+    }
+    return undefined
+  }
+
   /** The ids one subscription must never publish again: its baseline plus everything it accepted. */
   subscriptionKnownIds(subscriptionRef: AgentTeamSubscriptionRef): ReadonlySet<string> {
     const known = new Set(this.state.subscriptionBaselines.get(subscriptionRef) ?? [])
@@ -1058,6 +1083,7 @@ export class AgentTeamLedger {
       }
       const sequence = this.nextSequence()
       const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
+      const armed = this.armedWebhook(undefined, request.triggers, base.occurredAt)
       const subscription: AgentTeamSubscription = Object.freeze({
         subscriptionRef: this.ref('subscription') as AgentTeamSubscriptionRef,
         projectRef: request.projectRef,
@@ -1067,6 +1093,7 @@ export class AgentTeamLedger {
         credentials: freezeSubscriptionCredentials(request.credentials),
         revision: 1,
         state: 'active',
+        ...(armed.webhook === undefined ? {} : { webhook: armed.webhook }),
         createdBy: this.actorMemberOf(request.actor),
         createdAt: base.occurredAt,
       })
@@ -1075,7 +1102,7 @@ export class AgentTeamLedger {
         data: Object.freeze({ workspaceId: request.workspaceId, subscription, activity, baselineIds: Object.freeze([...request.baselineIds]) }) })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.subscriptionChangeOf(operation))
+      return this.committed(this.subscriptionChangeOf(operation, armed.token))
     })
   }
 
@@ -1093,6 +1120,7 @@ export class AgentTeamLedger {
       if (problem !== undefined) throw new Error(`this update cannot be stored: ${problem}`)
       const sequence = this.nextSequence()
       const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
+      const armed = this.armedWebhook(prior.webhook, request.triggers, base.occurredAt)
       const subscription: AgentTeamSubscription = Object.freeze({
         ...prior,
         name: request.name,
@@ -1100,13 +1128,14 @@ export class AgentTeamLedger {
         script: Object.freeze({ ...request.script }),
         credentials: freezeSubscriptionCredentials(request.credentials),
         revision: prior.revision + 1,
+        webhook: armed.webhook,
       })
       const activity = this.subscriptionActivity(subscription, 'subscription-updated', request.actor, sequence, base.occurredAt)
       const operation: AgentTeamSubscriptionUpdatedOperation = Object.freeze({ ...base, kind: 'team/subscription-updated',
         data: Object.freeze({ workspaceId: request.workspaceId, subscription, previousRevision: prior.revision, activity }) })
       await this.table.put(operation.operationId, operation)
       this.applyAndAdvanceProjectionVersion(operation)
-      return this.committed(this.subscriptionChangeOf(operation))
+      return this.committed(this.subscriptionChangeOf(operation, armed.token))
     })
   }
 
@@ -1152,6 +1181,38 @@ export class AgentTeamLedger {
       if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
       const subscription: AgentTeamSubscription = Object.freeze({ ...prior, state: 'deleted', pausedReason: undefined })
       return this.commitSubscriptionState('team/subscription-deleted', request, subscription, 'subscription-deleted')
+    })
+  }
+
+  /**
+   * Replace one subscription's webhook address. Like pause it is a state transition, so
+   * the revision does not move: accepted deliveries keep their version and only the old
+   * address stops resolving. The new token is returned once, never stored in the clear.
+   */
+  resetSubscriptionWebhook(request: AgentTeamAuthorizedSubscriptionStateRequest): Promise<AgentTeamLedgerResult<AgentTeamSubscriptionChangeResult>> {
+    return this.enqueue(async () => {
+      const existing = this.state.byRequest.get(request.requestId)
+      if (existing !== undefined) {
+        this.assertSameSubscriptionWrite(existing, request)
+        return this.resolved(this.subscriptionChangeOf(existing))
+      }
+      const prior = this.ownedSubscription(request, request.subscriptionRef)
+      if (prior.revision !== request.expectedRevision) throw new Error(this.subscriptionStaleRevision(prior, request.expectedRevision))
+      const armed = prior.webhook
+      if (armed === undefined) {
+        throw new Error(`subscription '${prior.subscriptionRef}' has no webhook address to reset; enable the webhook trigger first`)
+      }
+      const sequence = this.nextSequence()
+      const base = this.operationBase({ requestId: request.requestId, actor: request.actor }, sequence)
+      const token = this.createWebhookToken()
+      const subscription: AgentTeamSubscription = Object.freeze({ ...prior,
+        webhook: Object.freeze({ tokenHash: webhookTokenHash(token), generation: armed.generation + 1, armedAt: base.occurredAt }) })
+      const activity = this.subscriptionActivity(subscription, 'subscription-webhook-reset', request.actor, sequence, base.occurredAt)
+      const operation: AgentTeamSubscriptionWebhookResetOperation = Object.freeze({ ...base, kind: 'team/subscription-webhook-reset',
+        data: Object.freeze({ workspaceId: request.workspaceId, subscription, previousGeneration: armed.generation, activity }) })
+      await this.table.put(operation.operationId, operation)
+      this.applyAndAdvanceProjectionVersion(operation)
+      return this.committed(this.subscriptionChangeOf(operation, token))
     })
   }
 
@@ -1338,13 +1399,28 @@ export class AgentTeamLedger {
     return actor.memberId
   }
 
-  private subscriptionChangeOf(operation: AgentTeamOperation): AgentTeamSubscriptionChangeResult {
+  /**
+   * The webhook arm a write leaves behind. Enabling mints a token the caller receives
+   * once; an edit that keeps the trigger keeps the address, so only a reset or dropping
+   * the trigger moves it. `generation` counts addresses armed under this trigger, so two
+   * resets stay distinguishable without either token.
+   */
+  private armedWebhook(prior: SubscriptionWebhookArm | undefined, triggers: SubscriptionTriggers, armedAt: string):
+  { readonly webhook?: SubscriptionWebhookArm; readonly token?: string } {
+    if (triggers.webhook !== true) return {}
+    if (prior !== undefined) return { webhook: prior }
+    const token = this.createWebhookToken()
+    return { token, webhook: Object.freeze({ tokenHash: webhookTokenHash(token), generation: 1, armedAt }) }
+  }
+
+  private subscriptionChangeOf(operation: AgentTeamOperation, webhookToken?: string): AgentTeamSubscriptionChangeResult {
     if (operation.kind !== 'team/subscription-created' && operation.kind !== 'team/subscription-updated'
       && operation.kind !== 'team/subscription-paused' && operation.kind !== 'team/subscription-resumed'
-      && operation.kind !== 'team/subscription-deleted') {
+      && operation.kind !== 'team/subscription-deleted' && operation.kind !== 'team/subscription-webhook-reset') {
       throw new Error(`operation ${operation.kind} is not a subscription write`)
     }
-    return Object.freeze({ receipt: this.receipt(operation), subscription: operation.data.subscription, activity: operation.data.activity })
+    return Object.freeze({ receipt: this.receipt(operation), subscription: operation.data.subscription, activity: operation.data.activity,
+      ...(webhookToken === undefined ? {} : { webhookToken }) })
   }
 
   private subscriptionAcceptOf(operation: AgentTeamOperation): AgentTeamSubscriptionAcceptResult {
@@ -1409,7 +1485,8 @@ export class AgentTeamLedger {
           && asked.expectedRevision === stored.revision && asked.reason === stored.pausedReason
       }
       case 'team/subscription-resumed':
-      case 'team/subscription-deleted': {
+      case 'team/subscription-deleted':
+      case 'team/subscription-webhook-reset': {
         const asked = request as AgentTeamAuthorizedSubscriptionStateRequest
         const stored = existing.data.subscription
         return asked.projectRef === stored.projectRef && asked.subscriptionRef === stored.subscriptionRef
@@ -3788,6 +3865,7 @@ export class AgentTeamLedger {
       case 'team/subscription-paused':
       case 'team/subscription-resumed':
       case 'team/subscription-deleted':
+      case 'team/subscription-webhook-reset':
         // Subscription state shows in the Project's Main stream and the list.
         return [{ kind: 'project', projectRef: operation.data.subscription.projectRef }]
       case 'team/subscription-baseline':
@@ -3845,7 +3923,8 @@ export class AgentTeamLedger {
     // already turned into a recipient.
     if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
       || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
-      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-event-published') {
+      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-webhook-reset'
+      || operation.kind === 'team/subscription-event-published') {
       const projectRef = 'projectRef' in operation.data
         ? operation.data.projectRef
         : operation.data.subscription.projectRef
@@ -3906,6 +3985,7 @@ export class AgentTeamLedger {
       case 'team/subscription-paused':
       case 'team/subscription-resumed':
       case 'team/subscription-deleted':
+      case 'team/subscription-webhook-reset':
       case 'team/subscription-baseline':
       case 'team/subscription-events-accepted':
       case 'team/subscription-event-published':
@@ -4546,7 +4626,8 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
       || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
-      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-baseline'
+      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-webhook-reset'
+      || operation.kind === 'team/subscription-baseline'
       || operation.kind === 'team/subscription-events-accepted' || operation.kind === 'team/subscription-event-published') {
       this.validateSubscriptionOperation(operation, projection, refs)
       return
@@ -4967,12 +5048,17 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
       || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
-      || operation.kind === 'team/subscription-deleted') {
+      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-webhook-reset') {
       const { subscription, activity } = operation.data
       const prior = projection.subscriptions.get(subscription.subscriptionRef)
       const definition = subscriptionDefinitionProblem(subscription)
       if (definition !== undefined) throw new Error(`${at}: ${definition}`)
       if (subscription.projectRef !== projectRef) throw new Error(`${at} stores a subscription of another Project`)
+      // The address exists exactly as long as the trigger asks for one; a record
+      // that disagrees would make the entry resolve a token nothing can post to.
+      if ((subscription.webhook !== undefined) !== (subscription.triggers.webhook === true)) {
+        throw new Error(`${at} arms a webhook address its triggers do not ask for`)
+      }
       // The Host pauses a subscription itself once runs keep failing. That is
       // the one lifecycle line with no Member behind it, so it records no actor.
       const hostPause = operation.kind === 'team/subscription-paused' && operation.actor.kind === 'host'
@@ -4983,7 +5069,8 @@ export class AgentTeamLedger {
       const kind = operation.kind === 'team/subscription-created' ? 'subscription-created'
         : operation.kind === 'team/subscription-updated' ? 'subscription-updated'
           : operation.kind === 'team/subscription-paused' ? 'subscription-paused'
-            : operation.kind === 'team/subscription-resumed' ? 'subscription-resumed' : 'subscription-deleted'
+            : operation.kind === 'team/subscription-resumed' ? 'subscription-resumed'
+              : operation.kind === 'team/subscription-deleted' ? 'subscription-deleted' : 'subscription-webhook-reset'
       let expectedReason: 'manual' | 'failures' | undefined
       if (operation.kind === 'team/subscription-created') {
         if (prior !== undefined) throw new Error(`${at} recreates an existing subscription`)
@@ -4994,6 +5081,10 @@ export class AgentTeamLedger {
         }
         const ids = subscriptionIdsProblem(operation.data.baselineIds)
         if (ids !== undefined) throw new Error(`${at}: ${ids}`)
+        if (subscription.webhook !== undefined
+          && (subscription.webhook.generation !== 1 || subscription.webhook.armedAt !== operation.occurredAt)) {
+          throw new Error(`${at} arms an initial webhook address outside its first generation`)
+        }
       } else {
         if (prior === undefined) throw new Error(`${at} changes a subscription that does not exist`)
         const sameFacts = prior.projectRef === subscription.projectRef && prior.createdBy === subscription.createdBy
@@ -5002,6 +5093,33 @@ export class AgentTeamLedger {
           if (!sameFacts || prior.revision !== operation.data.previousRevision || subscription.revision !== prior.revision + 1
             || subscription.state !== prior.state || subscription.pausedReason !== prior.pausedReason) {
             throw new Error(`${at} does not move exactly the revision of its prior state`)
+          }
+          if (prior.webhook === undefined) {
+            if (subscription.webhook !== undefined
+              && (subscription.webhook.generation !== 1 || subscription.webhook.armedAt !== operation.occurredAt)) {
+              throw new Error(`${at} arms an initial webhook address outside its first generation`)
+            }
+          } else if (!isDeepStrictEqual(subscription.webhook, prior.webhook)) {
+            // Only a reset moves an address; an edit keeps the one it has or drops
+            // it with the trigger, so an accepted delivery never loses its target.
+            throw new Error(`${at} moves a webhook address outside a reset`)
+          }
+        } else if (operation.kind === 'team/subscription-webhook-reset') {
+          const priorArm = prior.webhook
+          const arm = subscription.webhook
+          if (!sameFacts || prior.revision !== subscription.revision || subscription.state !== prior.state
+            || subscription.pausedReason !== prior.pausedReason) {
+            throw new Error(`${at} does not reset the address of its prior state`)
+          }
+          if (priorArm === undefined || arm === undefined || arm.generation !== priorArm.generation + 1
+            || operation.data.previousGeneration !== priorArm.generation || arm.armedAt !== operation.occurredAt) {
+            throw new Error(`${at} does not arm exactly the next webhook address generation`)
+          }
+          if (arm.tokenHash === priorArm.tokenHash) throw new Error(`${at} keeps the token it resets`)
+          if (subscription.name !== prior.name || !isDeepStrictEqual(subscription.triggers, prior.triggers)
+            || !isDeepStrictEqual(subscription.script, prior.script)
+            || !isDeepStrictEqual(subscription.credentials, prior.credentials)) {
+            throw new Error(`${at} changes more than the webhook address`)
           }
         } else if (operation.kind === 'team/subscription-paused') {
           if (!sameFacts || prior.revision !== subscription.revision || prior.state !== 'active'
@@ -5409,7 +5527,7 @@ export class AgentTeamLedger {
     }
     if (operation.kind === 'team/subscription-created' || operation.kind === 'team/subscription-updated'
       || operation.kind === 'team/subscription-paused' || operation.kind === 'team/subscription-resumed'
-      || operation.kind === 'team/subscription-deleted') {
+      || operation.kind === 'team/subscription-deleted' || operation.kind === 'team/subscription-webhook-reset') {
       const { subscription, activity } = operation.data
       // The creation order is the list order; an update must not move its row.
       if (!target.subscriptions.has(subscription.subscriptionRef)) {

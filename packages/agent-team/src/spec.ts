@@ -269,6 +269,13 @@ const subscriptionTriggersSchema = z.object({
   webhook: z.literal(true).optional(),
 }).strict().transform(omitUndefined)
 
+/** The armed webhook address as the ledger keeps it: the token's hash, which generation minted it, and when. */
+const subscriptionWebhookSchema = z.object({
+  tokenHash: z.string().regex(/^[0-9a-f]{64}$/),
+  generation: z.number().int().positive(),
+  armedAt: z.string().datetime(),
+}).strict()
+
 const subscriptionSchema = z.object({
   subscriptionRef: subscriptionRefSchema,
   projectRef: projectRefSchema,
@@ -279,6 +286,8 @@ const subscriptionSchema = z.object({
   revision: z.number().int().positive(),
   state: z.union([z.literal('active'), z.literal('paused'), z.literal('deleted')]),
   pausedReason: z.union([z.literal('manual'), z.literal('failures')]).optional(),
+  /** Present exactly while this subscription has a webhook address an outside service may post to. */
+  webhook: subscriptionWebhookSchema.optional(),
   createdBy: memberIdSchema,
   createdAt: z.string().datetime(),
 }).strict().transform(omitUndefined)
@@ -287,7 +296,7 @@ const subscriptionActivitySchema = z.object({
   activityRef: activityRefSchema,
   projectRef: projectRefSchema,
   kind: z.union([z.literal('subscription-created'), z.literal('subscription-updated'), z.literal('subscription-paused'),
-    z.literal('subscription-resumed'), z.literal('subscription-deleted')]),
+    z.literal('subscription-resumed'), z.literal('subscription-deleted'), z.literal('subscription-webhook-reset')]),
   subscriptionRef: subscriptionRefSchema,
   subscriptionName: z.string().min(1),
   revision: z.number().int().positive(),
@@ -874,6 +883,13 @@ const storedAgentTeamOperationSchema = z.discriminatedUnion('kind', [
     previousOperationId: operationIdSchema.nullable(),
     kind: z.literal('team/subscription-deleted'),
     data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema, activity: subscriptionActivitySchema }).strict(),
+  }).strict(),
+  z.object({
+    ...operationBase,
+    previousOperationId: operationIdSchema.nullable(),
+    kind: z.literal('team/subscription-webhook-reset'),
+    data: z.object({ workspaceId: workspaceIdSchema, subscription: subscriptionSchema,
+      previousGeneration: z.number().int().positive(), activity: subscriptionActivitySchema }).strict(),
   }).strict(),
   z.object({
     ...operationBase,

@@ -59,7 +59,7 @@ import { subscriptionDomainSpec } from './subscription-store.ts'
 import { INITIAL_CHECKPOINT, SubscriptionScheduler, type SubscriptionCheckpoint, type SubscriptionRunOutcome } from './subscription-runtime.ts'
 import { baselineIdsOf, detectShellFamily, failureCategory, failureTail, missingCredentials, runSubscriptionScript, type SubscriptionCredentials, type SubscriptionRunCategory, type SubscriptionRunReport, type SubscriptionShellExecutor } from './subscription-runner.ts'
 import { deliveryEntryOf, deliveryKey, deliveryKeysOf, deliveryRecordOf, evictedDeliveries, evictedRunKeys, failedDeliveries, replayKey, replayKeysOf, runRecordOf, runSummaryOf, subscriptionRunKey, subscriptionRunKeysOf, SUBSCRIPTION_DELIVERY_LIMIT, SUBSCRIPTION_RUN_HISTORY_LIMIT, type SubscriptionDeliveryInput, type SubscriptionDeliveryRecord, type SubscriptionReplayRecord, type SubscriptionRunRecord, type SubscriptionRunTrigger } from './subscription-runs.ts'
-import { snapshotScript, subscriptionDefinitionProblem, SUBSCRIPTION_FAILURES_BEFORE_PAUSE, SUBSCRIPTION_PENDING_MAX, SUBSCRIPTION_SCRIPT_MAX_BYTES, type SubscriptionCredential, type SubscriptionScriptSnapshot, type SubscriptionShell, type SubscriptionTriggers } from './subscriptions.ts'
+import { snapshotScript, subscriptionDefinitionProblem, SUBSCRIPTION_FAILURES_BEFORE_PAUSE, SUBSCRIPTION_PENDING_MAX, SUBSCRIPTION_SCRIPT_MAX_BYTES, type SubscriptionCredential, type SubscriptionEvent, type SubscriptionScriptSnapshot, type SubscriptionShell, type SubscriptionTriggers } from './subscriptions.ts'
 import { SqliteStorageBackend } from './vendor/storage-sqlite/index.ts'
 import { formatTeamTimestamp } from './time-format.ts'
 import { planInboxDelivery, type InboxDeliveryPlan, type InboxMemberReminder } from './inbox-delivery.ts'
@@ -215,6 +215,8 @@ import type {
   AgentTeamMemberReminderCancelRequest,
   AgentTeamMemberReminderCancelResult,
   AgentTeamUnreadMemberReminder,
+  AgentTeamWebhookIntakeRequest,
+  AgentTeamWebhookIntakeResult,
 } from './types.ts'
 
 export { agentTeamDomainSpec, agentTeamOperationSchema } from './spec.ts'
@@ -241,10 +243,14 @@ export {
   type SubscriptionShell,
   type SubscriptionTriggers,
 } from './subscriptions.ts'
+import { WEBHOOK_QUEUE_LIMIT, WEBHOOK_QUEUE_RETRY_AFTER_SECONDS, webhookAddress, webhookOriginRefusal,
+  WEBHOOK_PUMP_INTERVAL_MS, webhookRetryDelayMs, webhookStdin } from './subscription-webhook.ts'
+import { admissionAttemptRequestId, admissionDeliveryRef, admissionKey, admissionKeysOf, admissionRefFor, dueAdmissions,
+  type SubscriptionAdmissionRecord } from './subscription-admissions.ts'
 export type * from './types.ts'
 export { AGENT_TEAM_HUMAN_HANDLE, AGENT_TEAM_HUMAN_MEMBER_ID, AGENT_TEAM_INITIALIZE_REQUEST_ID } from './ledger.ts'
 export { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_REPO_URL, HUMAN_PROFILE_SETTINGS_SCHEMA, HUMAN_PROFILE_VERSION, assertValidHumanName, normalizeHumanName } from './human-profile.ts'
-export { HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTINGS_SCHEMA, WAKE_RECYCLE_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowField, type HostRowWrite } from './host-row-settings.ts'
+export { DEFAULT_WEBHOOK_CONFIG, HOST_ROW_FIELDS, MEMBER_COMPACTION_SETTINGS_SCHEMA, TEAM_HOST_ROW_SETTINGS_SCHEMA, WAKE_RECYCLE_SETTINGS_SCHEMA, WEBHOOK_SETTINGS_SCHEMA, planHostRowWrite, type Config, type HostRowField, type HostRowWrite, type WebhookConfig } from './host-row-settings.ts'
 export { HUMAN_PROFILE_SETTINGS_NAMESPACE, LEGACY_HUMAN_PROFILE_SETTINGS_NAMESPACE } from './human-settings.ts'
 export { humanAvatarsRoot } from './human-avatar.ts'
 export { AGENT_TEAM_TOOL_NAMES } from './member-runtime.ts'
@@ -299,13 +305,21 @@ interface ChangeWaiter {
  * losing the diagnostic copy must not turn a delivered output into a failure.
  */
 interface SubscriptionRunResult {
-  readonly outcome: 'accepted' | 'empty' | 'failed' | 'backlog'
+  readonly outcome: 'accepted' | 'empty' | 'failed' | 'backlog' | 'deferred'
   readonly report: SubscriptionRunReport
   readonly runRef: string
   readonly recorded: boolean
   /** Events this run had accepted into the ledger; 0 unless the outcome is `accepted`. */
   readonly eventCount: number
 }
+
+/** What accepting one run's output decided, read under the subscription's write lock. */
+type AgentTeamAcceptDecision =
+  | { readonly outcome: 'accepted'; readonly eventCount: number }
+  | { readonly outcome: 'empty' }
+  | { readonly outcome: 'backlog' }
+  | { readonly outcome: 'deferred' }
+  | { readonly outcome: 'dropped' }
 
 /**
  * Why one Inbox wake ran: the committed operation (with its request id) or the lifecycle step rederiving the same durable facts.
@@ -422,6 +436,12 @@ export default class AgentTeam extends TypertRemoteService {
   private subscriptionDeliveriesTable?: KvTable<string, SubscriptionDeliveryRecord>
   /** The answer each replay request already got, keyed by subscription then request id. */
   private subscriptionReplaysTable?: KvTable<string, SubscriptionReplayRecord>
+  /** The deliveries still owing work: one row per admission. */
+  private subscriptionAdmissionsTable?: KvTable<string, SubscriptionAdmissionRecord>
+  /** The pass that runs due webhook deliveries; it stops with the Host. */
+  private admissionPumpTimer?: ReturnType<typeof setInterval> | undefined
+  /** One pass at a time: a second one would read the same rows and start them twice. */
+  private admissionPumpRunning = false
   private subscriptionScheduler?: SubscriptionScheduler
   private readonly subscriptionCheckpoints = new Map<AgentTeamSubscriptionRef, SubscriptionCheckpoint>()
   /**
@@ -957,6 +977,8 @@ export default class AgentTeam extends TypertRemoteService {
       this.contextManagement.dispose()
       if (this.attachmentGcTimer !== undefined) clearInterval(this.attachmentGcTimer)
       this.attachmentGcTimer = undefined
+      if (this.admissionPumpTimer !== undefined) clearInterval(this.admissionPumpTimer)
+      this.admissionPumpTimer = undefined
       if (this.memberReminderTimer !== undefined) clearTimeout(this.memberReminderTimer)
       this.memberReminderTimer = undefined
       this.memberReminderWakes.clear()
@@ -2933,6 +2955,7 @@ export default class AgentTeam extends TypertRemoteService {
     this.subscriptionRunsTable = domain.table('runs')
     this.subscriptionDeliveriesTable = domain.table('deliveries')
     this.subscriptionReplaysTable = domain.table('replays')
+    this.subscriptionAdmissionsTable = domain.table('admissions')
     for (const [subscriptionRef, checkpoint] of table.entries()) this.subscriptionCheckpoints.set(subscriptionRef, checkpoint)
     // A deletion that could not finish its cleanup — a crash between the ledger
     // commit and the row drops, or a storage fault — leaves rows nobody will ever
@@ -2970,6 +2993,11 @@ export default class AgentTeam extends TypertRemoteService {
     this.subscriptionScheduler = scheduler
     await scheduler.settleBoot()
     scheduler.start()
+    // Deliveries accepted before the last shutdown are due now: the queue is
+    // durable, so a boot is the moment it resumes rather than a fresh start.
+    void this.pumpWebhookAdmissions()
+    this.admissionPumpTimer = setInterval(() => { void this.pumpWebhookAdmissions() }, WEBHOOK_PUMP_INTERVAL_MS)
+    this.admissionPumpTimer.unref?.()
   }
 
   /**
@@ -3057,6 +3085,7 @@ export default class AgentTeam extends TypertRemoteService {
       [this.subscriptionRunsTable, 'run'],
       [this.subscriptionDeliveriesTable, 'delivery'],
       [this.subscriptionReplaysTable, 'replay'],
+      [this.subscriptionAdmissionsTable, 'admission'],
     ]
   }
 
@@ -3216,18 +3245,26 @@ export default class AgentTeam extends TypertRemoteService {
       readonly stdin?: string | undefined
       readonly delivery?: { readonly deliveryRef: string; readonly attempt: number } | undefined
       /**
-       * The request this run answers, when the caller has one — a replay. The
-       * accept then commits under that id, so the ledger itself remembers that
-       * this request delivered, and a caller whose private bookkeeping failed
-       * reads the answer back instead of running the script again.
+       * The id the script reads as `DSH_TEAM_DELIVERY_ID`: the Host's own admission (or
+       * the delivery ref), so a retry and a replay run under the id the first attempt saw.
+       */
+      readonly scriptDeliveryId?: string | undefined
+      /**
+       * The request this run answers, when the caller has one — a replay or a queued
+       * delivery. The accept then commits under that id, so the ledger itself
+       * remembers that this request delivered, and a caller whose private
+       * bookkeeping failed reads the answer back instead of running the script again.
        */
       readonly requestId?: AgentTeamRequestId | undefined
+      /** Where a batch with no room goes: the row that owes the delivery, or nowhere. */
+      readonly holdEvents?: ((events: readonly SubscriptionEvent[]) => Promise<void>) | undefined
     } = {},
   ): Promise<SubscriptionRunResult | undefined> {
     const startedAt = Date.now()
     const report = await this.executeSubscriptionRun(subscription, trigger, {
       ...(extra.stdin === undefined ? {} : { stdin: extra.stdin }),
-      ...(extra.delivery === undefined ? {} : { deliveryId: extra.delivery.deliveryRef }),
+      ...(extra.scriptDeliveryId === undefined && extra.delivery === undefined
+        ? {} : { deliveryId: extra.scriptDeliveryId ?? extra.delivery!.deliveryRef }),
     })
     // `eventCount` is what this run had accepted into the ledger, so it is known
     // only once the deduplication has run — never the count the script printed,
@@ -3239,10 +3276,11 @@ export default class AgentTeam extends TypertRemoteService {
       return { outcome, report, runRef: record.runRef, eventCount, recorded: await this.recordSubscriptionRun(record) }
     }
     if (!report.ok) return finish('failed', failureCategory(report), 0)
-    const committed = await this.commitRunOutput(subscription, report, extra.requestId)
+    const committed = await this.commitRunOutput(subscription, report, extra.requestId, extra.holdEvents)
     if (committed === undefined) return undefined
     if (committed.outcome === 'empty') return finish('empty', 'empty', 0)
     if (committed.outcome === 'backlog') return finish('backlog', 'backlog-full', 0)
+    if (committed.outcome === 'deferred') return finish('deferred', 'backlog-full', 0)
     return finish('accepted', 'accepted', committed.eventCount)
   }
 
@@ -3264,8 +3302,9 @@ export default class AgentTeam extends TypertRemoteService {
    * writes nothing at all.
    */
   private commitRunOutput(subscription: AgentTeamSubscription, report: SubscriptionRunReport,
-    requestId: AgentTeamRequestId | undefined
-  ): Promise<{ readonly outcome: 'accepted' | 'empty' | 'backlog'; readonly eventCount: number } | undefined> {
+    requestId: AgentTeamRequestId | undefined,
+    holdEvents?: ((events: readonly SubscriptionEvent[]) => Promise<void>) | undefined,
+  ): Promise<{ readonly outcome: 'accepted' | 'empty' | 'backlog' | 'deferred'; readonly eventCount: number } | undefined> {
     const subscriptionRef = subscription.subscriptionRef
     const ledger = this.requireLedger()
     return this.serializeSubscriptionWrite(subscriptionRef, async () => {
@@ -3274,37 +3313,57 @@ export default class AgentTeam extends TypertRemoteService {
       if (this.writableSubscription(subscriptionRef) === undefined) return undefined
       const known = ledger.subscriptionKnownIds(subscriptionRef)
       const fresh = report.events.filter(event => !known.has(event.id))
-      if (fresh.length === 0) {
-        // Nothing new is a success that accepts nothing: it ends the streak and
-        // leaves the waterline where it was.
-        await this.clearSubscriptionFailuresLocked(subscriptionRef, false)
-        return Object.freeze({ outcome: 'empty' as const, eventCount: 0 })
-      }
-      const pending = ledger.pendingSubscriptionEvents(subscriptionRef).length
-      if (pending + fresh.length > SUBSCRIPTION_PENDING_MAX) {
-        this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' printed ${fresh.length} events past its unpublished ceiling; this batch was refused`)
-        return Object.freeze({ outcome: 'backlog' as const, eventCount: 0 })
-      }
-      const project = ledger.getProject(subscription.projectRef)
-      if (project === undefined) return undefined
-      try {
-        const result = await ledger.acceptSubscriptionEvents({
-          requestId: requestId ?? (randomUUID() as AgentTeamRequestId), workspaceId: project.workspaceId,
-          projectRef: subscription.projectRef, subscriptionRef, subscriptionRevision: subscription.revision,
-          scriptHash: subscription.script.sha256, events: fresh, actor: agentTeamHostActor(),
-        })
-        if (result.committed) this.emitCommitted(result.value.receipt)
-      } catch (error) {
-        // A subscription deleted, or a Project archived, while the script ran
-        // is a terminal barrier rather than a failure of the script.
-        const message = error instanceof Error ? error.message : String(error)
-        if (!message.includes('subscription_deleted') && !message.includes('archived')) throw error
-        this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' finished after it stopped being live; the output was dropped`)
-        return undefined
-      }
-      await this.clearSubscriptionFailuresLocked(subscriptionRef, true)
-      return Object.freeze({ outcome: 'accepted' as const, eventCount: fresh.length })
+      const decision = await this.acceptFreshEvents(subscription, fresh, requestId ?? (randomUUID() as AgentTeamRequestId), holdEvents)
+      if (decision.outcome === 'dropped') return undefined
+      return Object.freeze({ outcome: decision.outcome, eventCount: decision.outcome === 'accepted' ? decision.eventCount : 0 })
     })
+  }
+
+  /**
+   * Accept one run's new events, or say why they wait. The caller holds the write
+   * lock and has read the terminal barrier in it. No room is not a failure: `hold`
+   * keeps a batch its request can never fetch again (`spec.md` §4.4).
+   */
+  private async acceptFreshEvents(subscription: AgentTeamSubscription, events: readonly SubscriptionEvent[],
+    requestId: AgentTeamRequestId, hold?: ((events: readonly SubscriptionEvent[]) => Promise<void>) | undefined,
+  ): Promise<AgentTeamAcceptDecision> {
+    const ledger = this.requireLedger()
+    const subscriptionRef = subscription.subscriptionRef
+    if (events.length === 0) {
+      // Nothing new is a success that accepts nothing: it ends the streak and
+      // leaves the waterline where it was.
+      await this.clearSubscriptionFailuresLocked(subscriptionRef, false)
+      return Object.freeze({ outcome: 'empty' as const })
+    }
+    if (events.length > SUBSCRIPTION_PENDING_MAX) {
+      this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' printed ${events.length} events, past the ${SUBSCRIPTION_PENDING_MAX} it can still publish; this batch was refused`)
+      return Object.freeze({ outcome: 'backlog' as const })
+    }
+    const pending = ledger.pendingSubscriptionEvents(subscriptionRef).length
+    if (pending + events.length > SUBSCRIPTION_PENDING_MAX) {
+      this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' already holds ${pending} unpublished events; ${events.length} more wait for room`)
+      if (hold !== undefined) await hold(events)
+      return Object.freeze({ outcome: 'deferred' as const })
+    }
+    const project = ledger.getProject(subscription.projectRef)
+    if (project === undefined) return Object.freeze({ outcome: 'dropped' as const })
+    try {
+      const result = await ledger.acceptSubscriptionEvents({
+        requestId, workspaceId: project.workspaceId,
+        projectRef: subscription.projectRef, subscriptionRef, subscriptionRevision: subscription.revision,
+        scriptHash: subscription.script.sha256, events, actor: agentTeamHostActor(),
+      })
+      if (result.committed) this.emitCommitted(result.value.receipt)
+    } catch (error) {
+      // A subscription deleted, or a Project archived, while the script ran
+      // is a terminal barrier rather than a failure of the script.
+      const message = error instanceof Error ? error.message : String(error)
+      if (!message.includes('subscription_deleted') && !message.includes('archived')) throw error
+      this.ctx.logger.warn(`agent-team: subscription '${subscriptionRef}' finished after it stopped being live; the output was dropped`)
+      return Object.freeze({ outcome: 'dropped' as const })
+    }
+    await this.clearSubscriptionFailuresLocked(subscriptionRef, true)
+    return Object.freeze({ outcome: 'accepted' as const, eventCount: events.length })
   }
 
   /**
@@ -3476,13 +3535,16 @@ export default class AgentTeam extends TypertRemoteService {
     return this.subscriptionDeliveries(this.memberCall(agent, request.workspaceId), request)
   }
 
+  /** The same list for the Human's page: the failed deliveries an owner reads and replays. */
+  @Remote('subscriptionDeliveries')
+  subscriptionDeliveriesForClient(request: AgentTeamSubscriptionDeliveriesRequest): AgentTeamSubscriptionDeliveriesResult {
+    return this.subscriptionDeliveries(this.humanCall(request.workspaceId), request)
+  }
+
   /**
-   * One subscription's private read-modify-write steps, run one at a time.
-   *
-   * The ingress seam is the only writer the scheduler does not admit, and two
-   * deliveries can arrive together: without this they both read the same old
-   * failure count and one increment is lost, so three spent retries would pause
-   * later than the third — or never.
+   * One subscription's private read-modify-write steps, run one at a time: the ingress
+   * is the only writer the scheduler does not admit, and two deliveries arriving
+   * together would otherwise read the same failure count and lose one increment.
    */
   private serializeSubscriptionWrite<T>(subscriptionRef: AgentTeamSubscriptionRef, task: () => Promise<T>): Promise<T> {
     const previous = this.subscriptionWriteTails.get(subscriptionRef) ?? Promise.resolve()
@@ -3493,6 +3555,247 @@ export default class AgentTeam extends TypertRemoteService {
       if (this.subscriptionWriteTails.get(subscriptionRef) === settled) this.subscriptionWriteTails.delete(subscriptionRef)
     })
     return next
+  }
+
+  /** Every admission one subscription still owes work for, in no particular order. */
+  private admissionRecordsOf(subscriptionRef: AgentTeamSubscriptionRef): readonly SubscriptionAdmissionRecord[] {
+    const table = this.subscriptionAdmissionsTable
+    if (table === undefined) return []
+    return admissionKeysOf(table.keys(), subscriptionRef)
+      .map(key => table.get(key))
+      .filter((record): record is SubscriptionAdmissionRecord => record !== undefined)
+  }
+
+  /**
+   * The public entry's whole decision: whether this request becomes durable work. A
+   * `queued` answer means the row is already written, so a restart before the 202
+   * loses nothing; a storage failure throws and the entry answers 5xx. The token
+   * resolves against the ledger's armed addresses, so a reset, a dropped trigger, a
+   * deletion and an archive all answer "no such address" — while a delivery already
+   * queued keeps its row, because a reset moves an address, not a queue.
+   */
+  async intakeWebhookDelivery(request: AgentTeamWebhookIntakeRequest): Promise<AgentTeamWebhookIntakeResult> {
+    const ledger = this.requireLedger()
+    const claimed = ledger.subscriptionByWebhookToken(request.token)
+    if (claimed === undefined) return Object.freeze({ kind: 'not-found' })
+    const table = this.subscriptionAdmissionsTable
+    if (table === undefined) throw new Error('the subscription store is not open, so this delivery cannot be queued')
+    return this.serializeSubscriptionWrite(claimed.subscriptionRef, async () => {
+      // Read the barriers under the write lock: a delete, archive or pause that
+      // landed while this request waited must win over it.
+      const live = this.writableSubscription(claimed.subscriptionRef)
+      if (live === undefined) return Object.freeze({ kind: 'not-found' })
+      // The token is proof only while it is the one the ledger arms now: a reset that
+      // committed while this request waited moved it.
+      if (ledger.subscriptionByWebhookToken(request.token)?.subscriptionRef !== live.subscriptionRef) {
+        return Object.freeze({ kind: 'not-found' })
+      }
+      if (live.state === 'paused') return Object.freeze({ kind: 'paused' })
+      if (this.admissionRecordsOf(live.subscriptionRef).length >= WEBHOOK_QUEUE_LIMIT) {
+        return Object.freeze({ kind: 'queue-full', retryAfterSeconds: WEBHOOK_QUEUE_RETRY_AFTER_SECONDS })
+      }
+      const admissionRef = admissionRefFor(randomUUID())
+      const record: SubscriptionAdmissionRecord = Object.freeze({
+        admissionRef,
+        subscriptionRef: live.subscriptionRef,
+        projectRef: live.projectRef,
+        deliveryRef: admissionDeliveryRef(admissionRef, request.headers),
+        receivedRevision: live.revision,
+        receivedScriptHash: live.script.sha256,
+        script: live.script,
+        credentials: live.credentials,
+        headers: Object.freeze({ ...request.headers }),
+        body: request.body,
+        receivedAt: new Date().toISOString(),
+        attempts: 0,
+        state: 'queued',
+      })
+      await table.put(admissionKey(live.subscriptionRef, admissionRef), record)
+      return Object.freeze({ kind: 'queued', admissionRef })
+    })
+  }
+
+  /**
+   * Run what is due, one delivery per subscription per pass, through the scheduler's
+   * admission so the four slots and the per-subscription mutex hold as they do for a
+   * timer. A pass never throws out of the loop: the queue is durable, so a failed pass
+   * leaves the rows for the next one.
+   *
+   * The queue is what owes work, not the trigger: a subscription edited into a
+   * timer-only one stops serving its address, but a request already answered 202 is
+   * still owed its run under the definition it arrived with.
+   */
+  private async pumpWebhookAdmissions(): Promise<void> {
+    if (this.admissionPumpRunning || this.ledger === undefined) return
+    this.admissionPumpRunning = true
+    try {
+      for (const subscription of this.ledger.subscriptions()) {
+        // A paused subscription keeps its deliveries; none of them runs.
+        if (subscription.state !== 'active') continue
+        const due = dueAdmissions(this.admissionRecordsOf(subscription.subscriptionRef), Date.now())[0]
+        if (due === undefined) continue
+        await this.runWebhookAdmission(subscription, due)
+      }
+    } catch (error) {
+      this.ctx.logger.warn(`agent-team: the webhook queue pass stopped: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      this.admissionPumpRunning = false
+    }
+  }
+
+  /** One due delivery: run it, then settle its row from what the run reported. */
+  private async runWebhookAdmission(subscription: AgentTeamSubscription, record: SubscriptionAdmissionRecord): Promise<void> {
+    const live = this.writableSubscription(subscription.subscriptionRef)
+    if (live === undefined) {
+      await this.dropWebhookAdmission(record)
+      return
+    }
+    if (live.state !== 'active') return
+    // An accept the ledger already holds is this delivery's success, whatever its row
+    // still says: a Host that stopped before removing it costs a read, not a second run.
+    const attempt = record.attempts + 1
+    const requestId = admissionAttemptRequestId(record.admissionRef, attempt)
+    if (this.acceptedRequestEvents(record.subscriptionRef, requestId) !== undefined) {
+      await this.dropWebhookAdmission(record)
+      return
+    }
+    // A row that already holds a validated batch owes no script: only its accept,
+    // retried until the queue has room (`spec.md` §4.4).
+    if (record.heldEvents !== undefined) {
+      await this.enqueueHeldAdmission(record, requestId)
+      return
+    }
+    // The definition the payload arrived under, not the one that stands now (`spec.md` §4.3).
+    const source = this.replaySource(live, record, 'received')
+    const execute = () => this.runSubscriptionOnce(source, 'webhook', {
+      stdin: webhookStdin(record.headers, record.body),
+      scriptDeliveryId: record.admissionRef,
+      delivery: { deliveryRef: record.deliveryRef, attempt },
+      requestId,
+      holdEvents: events => this.holdAdmissionEvents(record, events),
+    })
+    const scheduler = this.subscriptionScheduler
+    const run = await (scheduler === undefined ? execute() : scheduler.runAdmitted(live, 'run', execute))
+      .catch((error: unknown) => {
+        // A host that is shutting down refuses the admission: nothing ran, so
+        // nothing is owed and the row waits for the next boot.
+        this.ctx.logger.warn(`agent-team: a webhook delivery was not admitted: ${error instanceof Error ? error.message : String(error)}`)
+        return undefined
+      })
+    if (run === undefined) {
+      // Either the subscription stopped being live mid-run, or no slot was
+      // granted: a terminal barrier drops the row, a refused admission keeps it.
+      if (this.writableSubscription(record.subscriptionRef) === undefined) await this.dropWebhookAdmission(record)
+      return
+    }
+    if (run.outcome === 'accepted' || run.outcome === 'empty') {
+      await this.dropWebhookAdmission(record)
+      return
+    }
+    // `deferred` is not a failure: the row now holds the batch and waits for room.
+    if (run.outcome === 'deferred') return
+    // `backlog` is the run that printed more events than the Project can still
+    // accept. The spec spends such a delivery's retries at once, because the
+    // same script would print the same output again and fail the same way.
+    const failure = run.report.ok
+      ? `this run produced more events than the Project can hold (${SUBSCRIPTION_PENDING_MAX} unpublished)`
+      : run.report.reason ?? 'the run failed'
+    await this.retryOrFailWebhookAdmission(live, record, failure, run.outcome !== 'backlog')
+  }
+
+  /** Keep one run's batch on its delivery row: called inside the accept step's lock and barrier read. */
+  private async holdAdmissionEvents(record: SubscriptionAdmissionRecord, events: readonly SubscriptionEvent[]): Promise<void> {
+    const table = this.subscriptionAdmissionsTable
+    const key = admissionKey(record.subscriptionRef, record.admissionRef)
+    if (table === undefined || table.get(key) === undefined) return
+    const { nextAttemptAt: _due, lastError: _error, ...waiting } = record
+    await table.put(key, Object.freeze({ ...waiting, state: 'queued' as const, heldEvents: Object.freeze([...events]) }))
+  }
+
+  /**
+   * Retry only the accept for a held batch: the payload's one run already happened.
+   * A batch whose ids another run published meanwhile owes nothing and leaves too.
+   */
+  private enqueueHeldAdmission(record: SubscriptionAdmissionRecord,
+    requestId: AgentTeamRequestId): Promise<void> {
+    const ledger = this.requireLedger()
+    const subscriptionRef = record.subscriptionRef
+    return this.serializeSubscriptionWrite(subscriptionRef, async () => {
+      const table = this.subscriptionAdmissionsTable
+      const key = admissionKey(subscriptionRef, record.admissionRef)
+      if (table === undefined || table.get(key) === undefined) return
+      // The barrier is read here, inside the lock: a deletion that landed since the
+      // pass began owns the rows, and recreating one would strand it.
+      if (this.writableSubscription(subscriptionRef) === undefined) {
+        await table.delete(key)
+        return
+      }
+      const known = ledger.subscriptionKnownIds(subscriptionRef)
+      const fresh = (record.heldEvents ?? []).filter(event => !known.has(event.id))
+      if (fresh.length === 0) {
+        await table.delete(key)
+        return
+      }
+      const live = this.writableSubscription(subscriptionRef)
+      if (live === undefined) {
+        await table.delete(key)
+        return
+      }
+      const decision = await this.acceptFreshEvents(live, fresh, requestId)
+      // Every answer but `deferred` settles the row: the batch is in the ledger, or
+      // the record it would land on is gone.
+      if (decision.outcome === 'accepted' || decision.outcome === 'empty' || decision.outcome === 'dropped') await table.delete(key)
+    })
+  }
+
+  /**
+   * Count one attempt and decide what the delivery owes next: another try on the
+   * 1/5/30 ladder, or the failed-delivery record an owner replays. One delivery is one
+   * failure however many attempts it took. `retryable` is false for a failure no retry
+   * can change, which sends it straight to that record.
+   */
+  private retryOrFailWebhookAdmission(subscription: AgentTeamSubscription, record: SubscriptionAdmissionRecord,
+    failure: string, retryable = true): Promise<void> {
+    return this.serializeSubscriptionWrite(record.subscriptionRef, async () => {
+      const table = this.subscriptionAdmissionsTable
+      if (table === undefined) return
+      const key = admissionKey(record.subscriptionRef, record.admissionRef)
+      if (table.get(key) === undefined) return
+      const attempts = record.attempts + 1
+      const delay = retryable ? webhookRetryDelayMs(attempts) : undefined
+      const live = this.writableSubscription(record.subscriptionRef)
+      if (live === undefined) {
+        await table.delete(key)
+        return
+      }
+      if (delay !== undefined) {
+        await table.put(key, Object.freeze({ ...record, attempts, state: 'retrying',
+          nextAttemptAt: new Date(Date.now() + delay).toISOString(), lastError: failure }))
+        return
+      }
+      // Retries are spent: the request itself becomes the thing an owner reads
+      // and replays, keeping the body and the stdin the script would read.
+      await table.delete(key)
+      await this.recordFailedDeliveryLocked(live, {
+        deliveryRef: record.deliveryRef,
+        admissionRef: record.admissionRef,
+        receivedRevision: record.receivedRevision,
+        receivedAt: Date.parse(record.receivedAt),
+        script: record.script,
+        credentials: record.credentials,
+        body: webhookStdin(record.headers, record.body),
+        attempts,
+        lastError: failure,
+      })
+      this.ctx.logger.warn(`agent-team: a webhook delivery for '${subscription.subscriptionRef}' spent its retries: ${failure}`)
+    })
+  }
+
+  /** Take a delivery out of the queue: its output was accepted, so no work is owed. */
+  private dropWebhookAdmission(record: SubscriptionAdmissionRecord): Promise<void> {
+    return this.serializeSubscriptionWrite(record.subscriptionRef, async () => {
+      await this.subscriptionAdmissionsTable?.delete(admissionKey(record.subscriptionRef, record.admissionRef))
+    })
   }
 
   /**
@@ -3589,7 +3892,7 @@ export default class AgentTeam extends TypertRemoteService {
       if (answer === undefined || Date.parse(answer.expiresAt) <= now) continue
       // A row written before intents existed carries no state and is an answer.
       const delivered = answer.state === 'running'
-        ? this.replayAcceptanceOf(subscriptionRef, answer.requestId as AgentTeamRequestId) !== undefined
+        ? this.acceptedRequestEvents(subscriptionRef, answer.requestId as AgentTeamRequestId) !== undefined
         : answer.succeeded === true
       if (delivered) replayed.add(answer.deliveryRef)
     }
@@ -3597,13 +3900,14 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The events a replay request already accepted into the ledger, if it did. The
-   * accept commits under the replay's own request id, so this is where a caller
-   * recovers the answer when its private copy could not be written: the output
-   * is already durable, and running the script a second time would publish what
-   * the ledger already holds.
+   * The events one request id already accepted into the ledger, if it did. Every
+   * accept commits under a request id the caller can name again — a replay's own
+   * calls, and a webhook attempt's own id — so this is where a caller recovers the
+   * answer when its private copy could not be written: the output is already
+   * durable, and running the script a second time would publish what the ledger
+   * already holds.
    */
-  private replayAcceptanceOf(subscriptionRef: AgentTeamSubscriptionRef, requestId: AgentTeamRequestId): number | undefined {
+  private acceptedRequestEvents(subscriptionRef: AgentTeamSubscriptionRef, requestId: AgentTeamRequestId): number | undefined {
     const operation = this.ledger?.committedOperation(requestId)
     if (operation?.kind !== 'team/subscription-events-accepted') return undefined
     if (operation.data.subscriptionRef !== subscriptionRef) return undefined
@@ -3617,12 +3921,13 @@ export default class AgentTeam extends TypertRemoteService {
   }
 
   /**
-   * The definition a replay runs. `current` is the definition as it stands now,
-   * because replaying is how an owner confirms a fix; `received` is the version
-   * the delivery arrived under, because an automatic retry must run the bytes
-   * the payload was retried against, not a script that changed under it.
+   * The definition a replay or a queued delivery runs. `current` is the definition
+   * as it stands now, because replaying is how an owner confirms a fix; `received`
+   * is the version the payload arrived under, because an automatic retry must run
+   * the bytes it was queued against, not a script that changed under it.
    */
-  private replaySource(subscription: AgentTeamSubscription, record: SubscriptionDeliveryRecord,
+  private replaySource(subscription: AgentTeamSubscription,
+    record: Pick<SubscriptionDeliveryRecord, 'receivedRevision' | 'script' | 'credentials'>,
     version: AgentTeamSubscriptionReplayVersion): AgentTeamSubscription {
     if (version === 'current') return subscription
     return Object.freeze({ ...subscription, revision: record.receivedRevision, script: record.script, credentials: record.credentials })
@@ -3703,7 +4008,7 @@ export default class AgentTeam extends TypertRemoteService {
       // ledger holds under this request id is the answer that survived; without
       // one there is nothing to stand on, and running the script again would be
       // guessing at what the first attempt did.
-      const accepted = this.replayAcceptanceOf(live.subscriptionRef, request.requestId)
+      const accepted = this.acceptedRequestEvents(live.subscriptionRef, request.requestId)
       if (accepted === undefined) {
         const delivery = this.deliveryRecordOf(live.subscriptionRef, intent.deliveryRef)
         if (delivery === undefined) throw new Error(`delivery '${intent.deliveryRef}' is unknown or has expired`)
@@ -3735,14 +4040,19 @@ export default class AgentTeam extends TypertRemoteService {
     await this.recordReplayIntent(live, record, request.requestId, version)
     const source = this.replaySource(live, record, version)
     const run = await this.runSubscriptionOnce(source, 'webhook',
-      { stdin: record.body, delivery: { deliveryRef: record.deliveryRef, attempt: record.attempts }, requestId: request.requestId })
+      { stdin: record.body, delivery: { deliveryRef: record.deliveryRef, attempt: record.attempts }, requestId: request.requestId,
+        ...(record.admissionRef === undefined ? {} : { scriptDeliveryId: record.admissionRef }) })
     if (run === undefined) {
       return Object.freeze({ kind: 'replay-failed', delivery: deliveryEntryOf(record), eventCount: 0,
         reason: 'the replay finished after the subscription stopped being live, so nothing was delivered' })
     }
     const succeeded = run.outcome === 'accepted' || run.outcome === 'empty'
     const reason = run.report.ok
-      ? run.outcome === 'backlog' ? `the Project already holds ${SUBSCRIPTION_PENDING_MAX} unpublished events, so this output was refused` : undefined
+      ? run.outcome === 'backlog'
+        ? `the Project already holds ${SUBSCRIPTION_PENDING_MAX} unpublished events, so this output was refused`
+        : run.outcome === 'deferred'
+          ? `the Project has no room in its unpublished queue for this output yet (${SUBSCRIPTION_PENDING_MAX} at most), so it was not replayed`
+          : undefined
       : run.report.reason
     const answer: SubscriptionReplayRecord = Object.freeze({
       subscriptionRef: source.subscriptionRef, projectRef: source.projectRef, requestId: request.requestId,
@@ -3837,6 +4147,11 @@ export default class AgentTeam extends TypertRemoteService {
     return this.replaySubscriptionDelivery(this.memberCall(agent, request.workspaceId), request)
   }
 
+  @Remote('replaySubscriptionDelivery')
+  replaySubscriptionDeliveryForClient(request: AgentTeamSubscriptionReplayRequest): Promise<AgentTeamSubscriptionReplayResult> {
+    return this.replaySubscriptionDelivery(this.humanCall(request.workspaceId), request)
+  }
+
   /**
    * Read the script a create or update names. A path is resolved against the
    * calling Agent's own working directory, the one its bash tool uses; a Human
@@ -3918,12 +4233,43 @@ export default class AgentTeam extends TypertRemoteService {
     })
   }
 
+  /**
+   * The triggers a create or edit asks for. A timer is named by its interval; an
+   * address is not, so only an explicit `false` drops one a provider already posts to.
+   */
+  private subscriptionTriggersOf(request: { readonly intervalMinutes?: number | undefined; readonly webhook?: boolean | undefined },
+    prior?: SubscriptionTriggers): SubscriptionTriggers {
+    const webhook = request.webhook ?? prior?.webhook
+    return Object.freeze({
+      ...(request.intervalMinutes === undefined ? {} : { interval: Object.freeze({ minutes: request.intervalMinutes }) }),
+      ...(webhook === true ? { webhook: true } : {}),
+    })
+  }
+
+  /**
+   * The origin hook addresses hang from, or a refusal naming the setting to
+   * write. Arming an address nobody can reach would answer the caller with a
+   * URL that cannot work, so the write stops here instead.
+   */
+  private webhookOrigin(): string {
+    const origin = this.config.webhook.get().publicOrigin
+    const refusal = webhookOriginRefusal(origin)
+    if (refusal !== undefined) throw new Error(refusal)
+    return origin
+  }
+
+  /** The one answer an arming write gives: the complete address, once, or nothing when it armed none. */
+  private armedAddress(origin: string, token: string | undefined): { readonly webhookAddress?: string } {
+    return token === undefined ? {} : { webhookAddress: webhookAddress(origin, token) }
+  }
+
   private async createSubscriptionAs(actor: AgentTeamActor, request: AgentTeamCreateSubscriptionRequest, agent: Agent | undefined): Promise<AgentTeamSubscriptionWriteResult> {
     this.requireAccepting()
     const ledger = this.requireLedger()
     ledger.assertSubscriptionAuthority(actor, request.projectRef, request.workspaceId)
     const script = await this.snapshotSubscriptionScript(request.script, agent)
-    const triggers: SubscriptionTriggers = Object.freeze({ interval: Object.freeze({ minutes: request.intervalMinutes }) })
+    const triggers = this.subscriptionTriggersOf(request)
+    const origin = triggers.webhook === true ? this.webhookOrigin() : undefined
     const credentials = Object.freeze([...(request.credentials ?? [])])
     const name = request.name.trim()
     const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
@@ -3938,7 +4284,8 @@ export default class AgentTeam extends TypertRemoteService {
       credentials, baselineIds, actor,
     })
     if (result.committed) this.emitCommitted(result.value.receipt)
-    return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity })
+    return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity,
+      ...(origin === undefined ? {} : this.armedAddress(origin, result.value.webhookToken)) })
   }
 
   async createSubscriptionForAgent(agent: Agent, request: AgentTeamCreateSubscriptionRequest): Promise<AgentTeamSubscriptionWriteResult> {
@@ -3961,7 +4308,10 @@ export default class AgentTeam extends TypertRemoteService {
     }
     if (prior.state === 'deleted') throw new Error(`subscription '${request.subscriptionRef}' is deleted (subscription_deleted)`)
     const script = await this.snapshotSubscriptionScript(request.script, agent)
-    const triggers: SubscriptionTriggers = Object.freeze({ interval: Object.freeze({ minutes: request.intervalMinutes }) })
+    const triggers = this.subscriptionTriggersOf(request, prior.triggers)
+    // An edit that keeps the address needs no origin check here: the address it
+    // already has stays valid, and only arming a new one depends on the setting.
+    const origin = triggers.webhook === true && prior.webhook === undefined ? this.webhookOrigin() : undefined
     const credentials = Object.freeze([...(request.credentials ?? [])])
     const name = request.name.trim()
     const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
@@ -3977,7 +4327,8 @@ export default class AgentTeam extends TypertRemoteService {
       expectedRevision: request.expectedRevision, name, triggers, script, credentials, actor,
     })
     if (result.committed) this.emitCommitted(result.value.receipt)
-    return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity })
+    return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity,
+      ...(origin === undefined ? {} : this.armedAddress(origin, result.value.webhookToken)) })
   }
 
   async updateSubscriptionForAgent(agent: Agent, request: AgentTeamUpdateSubscriptionRequest): Promise<AgentTeamSubscriptionWriteResult> {
@@ -4046,7 +4397,10 @@ export default class AgentTeam extends TypertRemoteService {
       throw new Error('a draft trial without a subscription cannot name a revision')
     }
     const script = await this.snapshotSubscriptionScript({ scriptContent: request.scriptContent }, undefined)
-    const triggers: SubscriptionTriggers = Object.freeze({ interval: Object.freeze({ minutes: request.intervalMinutes }) })
+    const triggers = this.subscriptionTriggersOf(request)
+    // Arming is refused before the script runs when the Host has no address to
+    // arm, so the form hears the same reason a save would give it — once.
+    if (triggers.webhook === true) this.webhookOrigin()
     const credentials = Object.freeze([...(request.credentials ?? [])])
     const name = request.name.trim()
     const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
@@ -4081,6 +4435,35 @@ export default class AgentTeam extends TypertRemoteService {
   @Remote('resumeSubscription')
   async resumeSubscription(request: AgentTeamSubscriptionStateRequest): Promise<AgentTeamSubscriptionWriteResult> {
     return this.resumeSubscriptionAs(this.humanCall(request.workspaceId), request)
+  }
+
+  async resetSubscriptionWebhookForAgent(agent: Agent, request: AgentTeamSubscriptionStateRequest): Promise<AgentTeamSubscriptionWriteResult> {
+    return this.resetSubscriptionWebhookAs(this.memberCall(agent, request.workspaceId), request)
+  }
+
+  @Remote('resetSubscriptionWebhook')
+  async resetSubscriptionWebhook(request: AgentTeamSubscriptionStateRequest): Promise<AgentTeamSubscriptionWriteResult> {
+    return this.resetSubscriptionWebhookAs(this.humanCall(request.workspaceId), request)
+  }
+
+  /**
+   * Replace the address an outside service posts to. The revision does not
+   * move: deliveries already accepted keep the version they arrived under, and
+   * only the old address stops resolving.
+   *
+   * It takes the write lock the entry re-reads the token under, so a request carrying
+   * the old address is queued before the reset or answered 404, never after it.
+   */
+  private async resetSubscriptionWebhookAs(actor: AgentTeamActor, request: AgentTeamSubscriptionStateRequest): Promise<AgentTeamSubscriptionWriteResult> {
+    this.requireAccepting()
+    const ledger = this.requireLedger()
+    ledger.assertSubscriptionAuthority(actor, request.projectRef, request.workspaceId)
+    const origin = this.webhookOrigin()
+    const result = await this.serializeSubscriptionWrite(request.subscriptionRef,
+      () => ledger.resetSubscriptionWebhook({ ...request, actor }))
+    if (result.committed) this.emitCommitted(result.value.receipt)
+    return Object.freeze({ kind: 'changed', subscription: result.value.subscription, activity: result.value.activity,
+      ...this.armedAddress(origin, result.value.webhookToken) })
   }
 
   async deleteSubscriptionForAgent(agent: Agent, request: AgentTeamSubscriptionStateRequest): Promise<AgentTeamSubscriptionWriteResult> {

@@ -42,6 +42,9 @@ interface TeamProjectPageProps {
   readonly pauseSubscription: TeamConversationProps['pauseSubscription']
   readonly resumeSubscription: TeamConversationProps['resumeSubscription']
   readonly deleteSubscription: TeamConversationProps['deleteSubscription']
+  readonly resetSubscriptionWebhook: TeamConversationProps['resetSubscriptionWebhook']
+  readonly loadSubscriptionDeliveries: TeamConversationProps['loadSubscriptionDeliveries']
+  readonly replaySubscriptionDelivery: TeamConversationProps['replaySubscriptionDelivery']
   readonly drafts: TeamDraftStore
   readonly getAttachment: TeamConversationProps['getAttachment']
   readonly putAttachment: TeamConversationProps['putAttachment']
@@ -98,7 +101,7 @@ function applyInboxRead(
   return new Map(result.value.items.filter(item => item.unreadCount > 0).map(item => [item.thread.threadRef, item.unreadCount]))
 }
 
-export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, loadSubscriptions, loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
+export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvatarUrl, loadProjects, loadTaskBoard, loadSubscriptions, loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription, resetSubscriptionWebhook, loadSubscriptionDeliveries, replaySubscriptionDelivery, subscribeChanges, loadMembers, loadInbox, drafts, putAttachment, getAttachment, postMainMessage, startThread, readMainStream, mainStreamHistory, readThread, loadThreadHistory, threadObservations, reply, promoteThread, changeAttention, selectThread, selectDiscussion, closeDiscussion, selectProject, discussionRef, discussionAnchor, resolveTaskRefs, resolveThreadRefs, resolveMessageRefs, openMemberSession, t }: TeamProjectPageProps) {
   const [view, setView] = useState<AgentTeamView>()
   const [taskBoard, setTaskBoard] = useState<AgentTeamTaskBoard>()
   const [members, setMembers] = useState<readonly AgentTeamClientMemberStatus[]>([])
@@ -457,7 +460,7 @@ export function TeamProjectPage({ workspaceId, projectRef, humanName, humanAvata
     {tab === 'subscriptions' && <TeamSubscriptionsTab
       workspaceId={workspaceId}
       projectRef={projectRef}
-      host={{ loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription }}
+      host={{ loadSubscriptionLogs, testSubscriptionDraft, createSubscription, updateSubscription, pauseSubscription, resumeSubscription, deleteSubscription, resetSubscriptionWebhook, loadSubscriptionDeliveries, replaySubscriptionDelivery }}
       entries={subscriptions}
       loading={subscriptionsLoading}
       error={subscriptionsError}

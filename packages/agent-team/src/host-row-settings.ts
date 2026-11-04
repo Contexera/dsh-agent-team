@@ -12,6 +12,18 @@ import { DEFAULT_WAKE_RECYCLE, type WakeRecycleConfig } from './wake-recycle.ts'
 import { HUMAN_PROFILE_DEFAULT_NAME, HUMAN_PROFILE_SETTINGS_SCHEMA, assertValidHumanName } from './human-profile.ts'
 
 /**
+ * The webhook trigger's deployment facts: not the listener's host and port, which the
+ * isolated group in `cordis.patch.yml` owns, but where an outside service reaches it.
+ */
+export interface WebhookConfig {
+  /** The public origin hook addresses hang from; empty means no address exists yet. */
+  readonly publicOrigin: string
+}
+
+/** The webhook group before a Human has configured anything: no origin, so no address. */
+export const DEFAULT_WEBHOOK_CONFIG: WebhookConfig = Object.freeze({ publicOrigin: '' })
+
+/**
  * Config of the Team Host row. Every field is volatile: the settings service
  * offers a form only for volatile fields, so a non-volatile field would be
  * invisible and unwritable.
@@ -21,6 +33,7 @@ export interface Config {
   avatarRef: Volatile<string | undefined>
   wakeRecycle: Volatile<WakeRecycleConfig>
   memberCompaction: Volatile<MemberCompactionConfig>
+  webhook: Volatile<WebhookConfig>
 }
 
 /**
@@ -47,6 +60,17 @@ export const WAKE_RECYCLE_SETTINGS_SCHEMA = WAKE_RECYCLE_VALUE.default({}).volat
 export const MEMBER_COMPACTION_SETTINGS_SCHEMA = MEMBER_COMPACTION_VALUE.default({}).volatile()
 
 /**
+ * The public origin as one volatile group, judged where it is used by
+ * `webhookOriginProblem`: a second regex here would be a second answer.
+ */
+const WEBHOOK_VALUE = z.object({
+  publicOrigin: z.string().default(DEFAULT_WEBHOOK_CONFIG.publicOrigin),
+})
+
+/** The webhook deployment group. */
+export const WEBHOOK_SETTINGS_SCHEMA = WEBHOOK_VALUE.default({}).volatile()
+
+/**
  * The Host row's whole schema: the profile fields verbatim, so {@link HUMAN_PROFILE_SETTINGS_SCHEMA} keeps owning their volatility and defaults.
  * A patch layer replaces the row's whole config, so the parts are declared together.
  */
@@ -54,16 +78,18 @@ export const TEAM_HOST_ROW_SETTINGS_SCHEMA = z.object({
   ...HUMAN_PROFILE_SETTINGS_SCHEMA.dict,
   wakeRecycle: WAKE_RECYCLE_SETTINGS_SCHEMA,
   memberCompaction: MEMBER_COMPACTION_SETTINGS_SCHEMA,
+  webhook: WEBHOOK_SETTINGS_SCHEMA,
 })
 
 /** Every field the row stores, in the order a migration writes them. */
-export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction'] as const
+export const HOST_ROW_FIELDS = ['name', 'avatarRef', 'wakeRecycle', 'memberCompaction', 'webhook'] as const
 
 export type HostRowField = typeof HOST_ROW_FIELDS[number]
 
 /** The values one migration writes into the current namespace; a field is present only when it must be written. */
 export type HostRowWrite = {
-  readonly [K in HostRowField]?: K extends 'name' | 'avatarRef' ? string : K extends 'wakeRecycle' ? WakeRecycleConfig : MemberCompactionConfig
+  readonly [K in HostRowField]?: K extends 'name' | 'avatarRef' ? string
+    : K extends 'wakeRecycle' ? WakeRecycleConfig : K extends 'memberCompaction' ? MemberCompactionConfig : WebhookConfig
 }
 
 /**
@@ -108,7 +134,8 @@ function carriedField(field: HostRowField, raw: unknown): unknown {
   if (field === 'avatarRef') {
     return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined
   }
-  const schema = field === 'wakeRecycle' ? WAKE_RECYCLE_VALUE : MEMBER_COMPACTION_VALUE
+  const schema = field === 'wakeRecycle' ? WAKE_RECYCLE_VALUE
+    : field === 'memberCompaction' ? MEMBER_COMPACTION_VALUE : WEBHOOK_VALUE
   try {
     // The group schema fills the fields an older row never stored, so a partial
     // group arrives complete instead of silently keeping a stale default.

@@ -14,7 +14,8 @@ import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import { AGENT_TEAM_HUMAN_MEMBER_ID, AgentTeamLedger, agentTeamHostActor, agentTeamHumanActor } from '../src/ledger.ts'
 import { agentTeamDomainSpec } from '../src/spec.ts'
-import { snapshotScript, SUBSCRIPTION_PENDING_MAX } from '../src/subscriptions.ts'
+import { snapshotScript, SUBSCRIPTION_PENDING_MAX, type SubscriptionTriggers } from '../src/subscriptions.ts'
+import { webhookTokenHash } from '../src/subscription-webhook.ts'
 import type {
   AgentTeamAgentMember,
   AgentTeamMemberActor,
@@ -70,10 +71,10 @@ async function addAgent(ledger: AgentTeamLedger, handle: string, projectRefs: Ag
 }
 
 /** One Project with an Agent owner, an enrolled Agent writer, and an Agent that never joined. */
-async function seed() {
+async function seed(options: { readonly webhookToken?: () => string } = {}) {
   const pool = new MemoryMediaPool()
   const table = await openTable(pool)
-  const ledger = new AgentTeamLedger(table, { rulesVersion: 2 })
+  const ledger = new AgentTeamLedger(table, { rulesVersion: 2, ...options })
   await ledger.initialize()
   const projectRef = (await ledger.createProject({ requestId: requestId('project'), actor: human, workspaceId: alpha,
     name: 'alpha', description: '', memberIds: [] })).value.project.projectRef
@@ -354,6 +355,153 @@ describe('the pause the Host writes after repeated failures', () => {
     if (operation.kind !== 'team/subscription-paused') throw new Error('expected the pause at the ledger head')
     expect(operation.data.inbox).toBeUndefined()
     expect(() => replayed(team.table)).not.toThrow()
+  })
+})
+
+describe('the webhook address', () => {
+  /** Two address-shaped tokens, distinguishable in a failure message. */
+  const firstToken = `${'A'.repeat(42)}1`
+  const secondToken = `${'A'.repeat(42)}2`
+
+  /** A mint that hands out the named tokens in order, so an arm's identity is the test's choice. */
+  const minted = (...tokens: string[]): () => string => {
+    const queue = [...tokens]
+    return () => {
+      const next = queue.shift()
+      if (next === undefined) throw new Error('the fixture minted more tokens than it named')
+      return next
+    }
+  }
+
+  const createWebhook = (team: Seeded, label = 'create-webhook') =>
+    team.ledger.createSubscription({ requestId: requestId(label), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, name: 'GitHub PR activity', triggers: { webhook: true }, script, credentials: [], baselineIds: [] })
+
+  const edit = (team: Seeded, subscriptionRef: AgentTeamSubscriptionRef, revision: number,
+    triggers: SubscriptionTriggers, label: string) =>
+    team.ledger.updateSubscription({ requestId: requestId(label), actor: team.owner.actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: revision, name: 'GitHub PR activity', triggers, script, credentials: [] })
+
+  const reset = (team: Seeded, subscriptionRef: AgentTeamSubscriptionRef, revision: number, label = 'reset', actor = team.owner.actor) =>
+    team.ledger.resetSubscriptionWebhook({ requestId: requestId(label), actor, workspaceId: alpha,
+      projectRef: team.projectRef, subscriptionRef, expectedRevision: revision })
+
+  const storedRecords = (pool: MemoryMediaPool): string =>
+    JSON.stringify([...(pool.media.get('agent_team')?.tables.get('operations') ?? new Map())])
+
+  it('arms the address once, stores only its hash, and resolves the token back to its subscription', async () => {
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const created = await createWebhook(team)
+    if (!created.committed) throw new Error('expected a commit')
+    const subscriptionRef = created.value.subscription.subscriptionRef
+    expect(created.value.webhookToken, 'the token exists in exactly this answer').toBe(firstToken)
+    expect(created.value.subscription.webhook).toEqual({ tokenHash: webhookTokenHash(firstToken), generation: 1,
+      armedAt: created.value.subscription.createdAt })
+    expect(team.ledger.subscriptionByWebhookToken(firstToken)?.subscriptionRef).toBe(subscriptionRef)
+    expect(team.ledger.subscriptionByWebhookToken(secondToken), 'a token nobody minted names nothing').toBeUndefined()
+    const stored = storedRecords(team.pool)
+    expect(stored, 'the plaintext token is what the ledger must never persist').not.toContain(firstToken)
+    expect(stored, 'the hash is what a reader finds instead').toContain(webhookTokenHash(firstToken))
+  })
+
+  it('leaves a subscription without the trigger unarmed', async () => {
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const created = await team.create(team.owner.actor)
+    expect(created.value.webhookToken).toBeUndefined()
+    expect(created.value.subscription.webhook).toBeUndefined()
+  })
+
+  it('answers a same-request retry with the stored write and says the address cannot be shown again', async () => {
+    // A second token is minted by nothing here: if a resolved retry ever handed
+    // one out, the fixture would prove it rather than run dry.
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const first = await createWebhook(team)
+    const again = await team.ledger.createSubscription({ requestId: first.value.receipt.requestId, actor: team.owner.actor,
+      workspaceId: alpha, projectRef: team.projectRef, name: 'GitHub PR activity', triggers: { webhook: true }, script,
+      credentials: [], baselineIds: [] })
+    expect(again.committed).toBe(false)
+    expect(again.value.webhookToken, 'the token is not recoverable a second time').toBeUndefined()
+    expect(again.value.subscription.webhook).toEqual(first.value.subscription.webhook)
+  })
+
+  it('keeps the armed address across an edit and drops it with the trigger', async () => {
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const created = await createWebhook(team)
+    const subscriptionRef = created.value.subscription.subscriptionRef
+    const kept = await edit(team, subscriptionRef, 1, { interval: { minutes: 5 }, webhook: true }, 'edit-keep')
+    expect(kept.value.webhookToken, 'an edit never rotates the address').toBeUndefined()
+    expect(kept.value.subscription.webhook).toEqual(created.value.subscription.webhook)
+    expect(team.ledger.subscriptionByWebhookToken(firstToken)?.subscriptionRef).toBe(subscriptionRef)
+
+    const dropped = await edit(team, subscriptionRef, 2, { interval: { minutes: 5 } }, 'edit-drop')
+    expect(dropped.value.subscription.webhook).toBeUndefined()
+    expect(team.ledger.subscriptionByWebhookToken(firstToken), 'a dropped trigger stops resolving its address').toBeUndefined()
+  })
+
+  it('mints a first address when an edit enables the trigger', async () => {
+    const team = await seed({ webhookToken: minted(secondToken) })
+    const subscriptionRef = subscriptionRefOf(await team.create(team.owner.actor))
+    const enabled = await edit(team, subscriptionRef, 1, { webhook: true }, 'enable')
+    expect(enabled.value.webhookToken).toBe(secondToken)
+    expect(enabled.value.subscription.webhook).toMatchObject({ generation: 1, tokenHash: webhookTokenHash(secondToken) })
+  })
+
+  it('rotates the address on reset: a new generation, the same revision, and an old token that stops resolving', async () => {
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const created = await createWebhook(team)
+    const subscriptionRef = created.value.subscription.subscriptionRef
+    const rotated = await reset(team, subscriptionRef, 1)
+    if (!rotated.committed) throw new Error('expected a commit')
+    expect(rotated.value.webhookToken).toBe(secondToken)
+    expect(rotated.value.subscription).toMatchObject({ revision: 1, name: 'GitHub PR activity' })
+    expect(rotated.value.subscription.webhook).toEqual({ tokenHash: webhookTokenHash(secondToken), generation: 2,
+      armedAt: rotated.value.receipt.occurredAt })
+    expect(rotated.value.activity.kind).toBe('subscription-webhook-reset')
+    expect(team.ledger.subscriptionByWebhookToken(firstToken), 'the old address is gone at once').toBeUndefined()
+    expect(team.ledger.subscriptionByWebhookToken(secondToken)?.subscriptionRef).toBe(subscriptionRef)
+    expect(storedRecords(team.pool)).not.toContain(secondToken)
+    expect(() => replayed(team.table)).not.toThrow()
+  })
+
+  it('answers a same-request reset retry with the stored record, and refuses a reset without an address', async () => {
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const created = await createWebhook(team)
+    const subscriptionRef = created.value.subscription.subscriptionRef
+    const done = await reset(team, subscriptionRef, 1)
+    const again = await team.ledger.resetSubscriptionWebhook({ requestId: done.value.receipt.requestId, actor: team.owner.actor,
+      workspaceId: alpha, projectRef: team.projectRef, subscriptionRef, expectedRevision: 1 })
+    expect(again.committed).toBe(false)
+    expect(again.value.webhookToken).toBeUndefined()
+    expect(again.value.subscription.webhook).toEqual(done.value.subscription.webhook)
+
+    const plain = subscriptionRefOf(await team.create(team.owner.actor, { name: 'timer only' }))
+    await expect(reset(team, plain, 1, 'reset-plain')).rejects.toThrow(/no webhook address to reset/)
+  })
+
+  it('refuses a reset from a Member who does not own the Project and one on a stale revision', async () => {
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const subscriptionRef = (await createWebhook(team)).value.subscription.subscriptionRef
+    await expect(reset(team, subscriptionRef, 1, 'reset-writer', team.writer.actor)).rejects.toThrow(/project_owner_required/)
+    await expect(reset(team, subscriptionRef, 2, 'reset-stale')).rejects.toThrow(/stale_revision/)
+  })
+
+  it('refuses a stored reset that keeps the token it claims to replace or skips a generation', async () => {
+    const team = await seed({ webhookToken: minted(firstToken, secondToken) })
+    const created = await createWebhook(team)
+    await reset(team, created.value.subscription.subscriptionRef, 1)
+    const records = [...team.table.entries()].sort((left, right) => left[1].sequence - right[1].sequence)
+    const [key, last] = records.at(-1)!
+    if (last.kind !== 'team/subscription-webhook-reset') throw new Error('expected the reset at the ledger head')
+    const rewrite = (arm: { readonly tokenHash: string; readonly generation: number; readonly armedAt: string }) =>
+      poolOf([...records.slice(0, -1), [key, { ...last, data: { ...last.data,
+        subscription: { ...last.data.subscription, webhook: arm } } }]])
+    const kept = await openTable(rewrite({ ...last.data.subscription.webhook!, tokenHash: webhookTokenHash(firstToken) }))
+    expect(() => replayed(kept)).toThrow(/keeps the token it resets/)
+    // A fresh hash with a generation that skips one is the other forgery a
+    // reset must never accept: the old address would still resolve.
+    const skipped = await openTable(rewrite({ ...last.data.subscription.webhook!, generation: 3,
+      tokenHash: webhookTokenHash(`${'A'.repeat(42)}3`) }))
+    expect(() => replayed(skipped)).toThrow(/next webhook address generation/)
   })
 })
 

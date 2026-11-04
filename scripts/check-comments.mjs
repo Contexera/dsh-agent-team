@@ -101,8 +101,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 // path is not optional, none of which the code can show; scripts 1960→1980
 // carries the assertions that make that seat an equation (panel and feed edges
 // equal at top and bottom, panel+feed width conserved across a drag).
+// 2026-11-04: the webhook trigger raised the Host scope 4150→4162. A public
+// entry, a durable admission queue and a ledger arm each carry a constraint no
+// line of code shows (why the token is only ever hashed, why a reset moves an
+// address and not a queue, why the listener binds loopback); the four docs it
+// added were condensed twice first.
 const COMMENT_BUDGETS = {
-  'packages/agent-team/src': 4150,
+  'packages/agent-team/src': 4162,
   'packages/client-agent-team/src': 2020,
   'packages/tool-agent-team/src': 280,
   'scripts': 2800,

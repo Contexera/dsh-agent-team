@@ -161,9 +161,15 @@ A committed resolution names the action, the resulting status and resolution, th
 
 ## `team_subscription`
 
-`team_subscription` creates and maintains a Project's interval subscription: a script the Host runs on a timer with no Session, as that Project. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, `baseline`, `logs`, `deliveries`, and `replay`. Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise); any member of the Project may list them and read their run history. Webhook admission over HTTP and the subscription page are not part of this tool.
+`team_subscription` creates and maintains a Project's subscription: a script the Host runs with no Session, as that Project, on a timer, on an incoming webhook, or on both. Its actions are `list`, `create`, `update`, `test`, `pause`, `resume`, `delete`, `baseline`, `logs`, `deliveries`, `replay`, and `reset_webhook`. Only the Project's owners may change one, test one, or replay a delivery (`project_owner_required` otherwise); any member of the Project may list them and read their run history.
+
+`create` and `update` take `intervalMinutes` for a timer, `webhook: true` for an address, or both, and refuse a subscription that names neither. On `update` the two triggers read omission differently: leaving out `intervalMinutes` drops the timer, while leaving out `webhook` keeps the address, and only an explicit `false` disarms it — a caller that does not model webhooks must not cut off a live provider. Arming the trigger needs the deployment's public origin (`webhook.publicOrigin` on the Host row).
+
+The answer to an arming or resetting call carries the complete address, and that is the only time it is readable: the ledger keeps a hash of the token, so a retry of the same request, a later `list`, or the subscription page can never show it again. `reset_webhook` moves the address under the `expectedRevision` the caller read; the old one stops resolving immediately, while deliveries already queued keep running.
 
 `logs` reads the newest recorded runs — 50 are kept per subscription, newest first — with the trigger, start instant, duration, structured category, event count, exit code or timeout, the revision the run pinned, and for a webhook run the delivery and attempt that asked for it. The event count is what the run had accepted into the ledger, so a run that printed only ids the subscription already knew counts none.
+
+A webhook run whose batch finds no room in the unpublished queue is not a lost one: the validated events are kept with the delivery and a later pass accepts exactly them, without spending one of the delivery's retries — only a run that alone prints past the 500-event ceiling becomes an item under `deliveries`.
 
 The Project's owners and the Human also get each run's reason and the last 8 KiB of stdout and stderr — of a passing run as well as a failing one; every other member gets the summary alone, because the script ran under the Project's credentials.
 

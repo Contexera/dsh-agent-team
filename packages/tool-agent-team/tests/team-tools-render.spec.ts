@@ -1020,3 +1020,45 @@ describe('team_subscription reads its run history, its failed deliveries, and a 
     }
   })
 })
+
+describe('team_subscription names the webhook trigger and shows its address once', () => {
+  const SUB = 'subscription:8f14e45f-ceea-467f-a7d3-9b0f1a4c7e21'
+  const ADDRESS = 'https://team.example.com/team/hooks/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG'
+
+  it('names each trigger on a list row, because either one alone is a whole subscription', () => {
+    const tool = teamTools().get('team_subscription')!
+    const text = renderText(tool, {}, { workspaceId: 'workspace:alpha', projectRef: PROJECT, kind: 'list', subscriptions: [
+      { subscriptionRef: SUB, name: 'timer only', state: 'active', revision: 1, intervalMinutes: 10, webhook: false, unpublished: 0 },
+      { subscriptionRef: 'subscription:1', name: 'hooks only', state: 'active', revision: 1, webhook: true, unpublished: 0 },
+      { subscriptionRef: 'subscription:2', name: 'both', state: 'active', revision: 1, intervalMinutes: 60, webhook: true, unpublished: 2 },
+    ] })
+    expect(text).toContain('- ' + SUB + ' — timer only · active · r1 · every 10 min')
+    expect(text).toContain('hooks only · active · r1 · webhook')
+    expect(text).toContain('both · active · r1 · every 60 min + webhook · 2 waiting to publish')
+  })
+
+  it('shows the complete address on the call that armed it, and says it is the only time', () => {
+    const tool = teamTools().get('team_subscription')!
+    const armed = renderText(tool, {}, { workspaceId: 'workspace:alpha', projectRef: PROJECT, subscriptionRef: SUB,
+      kind: 'create', name: 'hooks only', state: 'active', revision: 1, webhook: true, webhookAddress: ADDRESS })
+    expect(armed).toContain('webhook')
+    expect(armed).toContain(`Webhook address: ${ADDRESS}`)
+    expect(armed).toContain('this is the one time it is shown')
+    // The retry of the same request has no address to show, and must not pretend otherwise.
+    const retried = renderText(tool, {}, { workspaceId: 'workspace:alpha', projectRef: PROJECT, subscriptionRef: SUB,
+      kind: 'create', name: 'hooks only', state: 'active', revision: 1, webhook: true })
+    expect(retried).not.toContain('Webhook address:')
+  })
+
+  it('declares every field a webhook write carries', () => {
+    const tool = teamTools().get('team_subscription')!
+    for (const result of [
+      { kind: 'reset_webhook', subscriptionRef: SUB, name: 'hooks only', state: 'active', revision: 3, webhook: true, webhookAddress: ADDRESS },
+      { kind: 'update', subscriptionRef: SUB, name: 'both', state: 'active', revision: 2, intervalMinutes: 60, webhook: true },
+      { kind: 'list', subscriptions: [{ subscriptionRef: SUB, name: 'hooks only', state: 'active', revision: 1, webhook: true, unpublished: 0 }] },
+    ]) {
+      expect(validateJsonSchemaValue(tool.output.schema as never, { workspaceId: 'workspace:alpha', projectRef: PROJECT, ...result } as never))
+        .toEqual([])
+    }
+  })
+})

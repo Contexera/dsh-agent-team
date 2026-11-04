@@ -1147,6 +1147,12 @@ export interface AgentTeamSubscriptionChangeResult {
   readonly receipt: AgentTeamOperationReceipt
   readonly subscription: AgentTeamSubscription
   readonly activity: AgentTeamSubscriptionActivity
+  /**
+   * The webhook token this write armed, present exactly once: the ledger keeps
+   * only its hash, so a resolved retry of the same request id answers without
+   * it and the caller must say the address cannot be shown again.
+   */
+  readonly webhookToken?: string | undefined
 }
 
 /** One accepted batch of events, already durable and waiting only for publishing. */
@@ -1306,7 +1312,10 @@ export interface AgentTeamCreateSubscriptionRequest {
   readonly workspaceId: WorkspaceId
   readonly projectRef: AgentTeamProjectRef
   readonly name: string
-  readonly intervalMinutes: number
+  /** Timer interval; omitted for a webhook-only subscription. */
+  readonly intervalMinutes?: number | undefined
+  /** Enable the webhook trigger; the Host refuses when no public address is configured. */
+  readonly webhook?: boolean | undefined
   readonly script: AgentTeamSubscriptionScriptSource
   readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
   readonly baseline?: AgentTeamSubscriptionBaselineChoice | undefined
@@ -1320,7 +1329,9 @@ export interface AgentTeamUpdateSubscriptionRequest {
   readonly subscriptionRef: AgentTeamSubscriptionRef
   readonly expectedRevision: number
   readonly name: string
-  readonly intervalMinutes: number
+  readonly intervalMinutes?: number | undefined
+  /** Enabling mints and returns one address; keeping it enabled keeps that address. */
+  readonly webhook?: boolean | undefined
   readonly script: AgentTeamSubscriptionScriptSource
   readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
 }
@@ -1344,7 +1355,9 @@ export interface AgentTeamSubscriptionDraftTrialRequest {
   /** Required with `subscriptionRef`: the revision the form was filled from. */
   readonly expectedRevision?: number | undefined
   readonly name: string
-  readonly intervalMinutes: number
+  /** A draft keeps one trigger at least: a timer that runs every N minutes, or a webhook, or both. */
+  readonly intervalMinutes?: number | undefined
+  readonly webhook?: boolean | undefined
   readonly scriptContent: string
   readonly credentials?: readonly import('../subscriptions.ts').SubscriptionCredential[] | undefined
 }
@@ -1376,12 +1389,38 @@ export interface AgentTeamBaselineSubscriptionRequest {
 
 /** One write that a trial run refused before it could commit. */
 export type AgentTeamSubscriptionWriteResult =
-  | { readonly kind: 'changed'; readonly subscription: AgentTeamSubscription; readonly activity: AgentTeamSubscriptionActivity }
+  | { readonly kind: 'changed'; readonly subscription: AgentTeamSubscription; readonly activity: AgentTeamSubscriptionActivity
+    /**
+     * The complete webhook address, present only on the call that armed it —
+     * a create, an edit that enables the trigger, or a reset. A resolved retry
+     * of the same request id answers without it: the ledger keeps only the
+     * token's hash, so the caller must report that the address is gone.
+     */
+    readonly webhookAddress?: string | undefined }
   | { readonly kind: 'trial-failed'; readonly failure: AgentTeamSubscriptionTrialFailure }
 
 export type AgentTeamSubscriptionTrialResult =
   | { readonly kind: 'tested'; readonly events: readonly import('../subscriptions.ts').SubscriptionEvent[]; readonly stdoutTail: string; readonly stderrTail: string }
   | { readonly kind: 'trial-failed'; readonly failure: AgentTeamSubscriptionTrialFailure }
+
+/** One public webhook request as the entry proves it: a resolved token, forwarded headers, the raw body. */
+export interface AgentTeamWebhookIntakeRequest {
+  readonly token: string
+  /** Lowercased, already whitelisted, each value within its limit. */
+  readonly headers: Readonly<Record<string, string>>
+  /** The raw request body, verbatim: a signature hashes these bytes. */
+  readonly body: string
+}
+
+/**
+ * What one intake decided. Each variant is a row of the contract's status
+ * table; the entry maps it to a status code and never invents a reason.
+ */
+export type AgentTeamWebhookIntakeResult =
+  | { readonly kind: 'queued'; readonly admissionRef: string }
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'paused' }
+  | { readonly kind: 'queue-full'; readonly retryAfterSeconds: number }
 
 export interface AgentTeamSubscriptionBaselineResult {
   readonly kind: 'baselined'

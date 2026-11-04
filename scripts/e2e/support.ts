@@ -15,7 +15,8 @@
  * because vitest decides which scenario runs last and a late clear would delete
  * screenshots an earlier scenario already produced.
  */
-import { cp, mkdir, readFile, rm } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 import { chromium, type Browser, type Page } from 'playwright'
@@ -49,12 +50,16 @@ export type { WebScaffold } from './scaffold.ts'
  * module-level `scaffold`/`browser` pair each scenario declares is filled in
  * here so its `afterEach` can release them.
  */
-export async function openTeamPage(options: { readonly stayInOrdinaryMode?: boolean } = {}): Promise<{
+export async function openTeamPage(options: { readonly stayInOrdinaryMode?: boolean; readonly webhookOrigin?: string } = {}): Promise<{
   readonly page: Page
   readonly consoleWatch: { warnings: string[]; pageErrors: string[] }
 }> {
   await installLocalBundle()
-  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] } })
+  // The public origin is installation config, not a page setting, so a lane that
+  // arms a webhook declares it here as the deployment would.
+  const overlay = options.webhookOrigin === undefined ? undefined : await webhookOriginOverlay(options.webhookOrigin)
+  scaffold = await launchWebScaffold({ harnessHome: HOME, profile: { packages: [{ dir: STAGED_BUNDLE, enabled: true }] },
+    ...(overlay === undefined ? {} : { extraOverlayPath: overlay }) })
   browser = await chromium.launch({ headless: true, executablePath: CHROME })
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, locale: 'zh-CN' })
   const consoleWatch = watchConsole(page)
@@ -62,6 +67,25 @@ export async function openTeamPage(options: { readonly stayInOrdinaryMode?: bool
   await connectFreshWorkspaceZh(page, scaffold.workspaceCwd, 'team-workspace')
   if (!options.stayInOrdinaryMode) await page.getByRole('button', { name: '团队', exact: true }).click()
   return { page, consoleWatch }
+}
+
+/**
+ * The Team Host row's `webhook.publicOrigin`, as an overlay the scaffold merges
+ * over the bundle's own patch — the same way a deployment writes it into the
+ * profile document. A lane without it cannot arm an address at all.
+ */
+async function webhookOriginOverlay(origin: string): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), 'dsh-team-webhook-overlay-'))
+  const path = join(directory, 'webhook-origin.overlay.yml')
+  await writeFile(path, [
+    '# The deployment public origin for one scenario: installation config, as spec.md §4.5 has it.',
+    '- id: contexera-agent-team-host',
+    '  config:',
+    '    webhook:',
+    `      publicOrigin: '${origin}'`,
+    '',
+  ].join('\n'), 'utf8')
+  return path
 }
 
 /** The one scaffold and browser the current scenario owns; `openTeamPage` fills them. */

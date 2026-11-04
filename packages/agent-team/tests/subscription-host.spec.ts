@@ -6,7 +6,7 @@
  * the policy it is handed is the cross-platform enforcement probe's job.
  */
 import { createHash } from 'node:crypto'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi as fakeTimers } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Storage from '@deepseek-ai/dsh-storage'
 import { DomainFacility } from '@deepseek-ai/dsh-storage-domain'
@@ -16,6 +16,7 @@ import type { ShellExecSpec, ShellRunResult } from '@deepseek-ai/dsh-shell'
 import { MemoryMediaPool, MemoryStorageBackend } from './helpers/memory-backend.ts'
 import AgentTeam from '../src/index.ts'
 import { subscriptionDomainSpec } from '../src/subscription-store.ts'
+import { subscriptionTestStdin } from '../src/subscriptions.ts'
 import type { AgentTeamCreateSubscriptionRequest, AgentTeamProjectRef, AgentTeamRequestId, AgentTeamSubscriptionRef } from '../src/types.ts'
 
 const workspaceId = WorkspaceId('workspace:alpha')
@@ -110,7 +111,8 @@ function gatedShell(stdout: string): GatedShell {
 
 const credentialValues: Record<string, string> = { GH_TOKEN: 'secret-value' }
 
-async function boot(pool: MemoryMediaPool, shell: Pick<FakeShell, 'service'>, workspaceRoot = process.cwd()) {
+async function boot(pool: MemoryMediaPool, shell: Pick<FakeShell, 'service'>, workspaceRoot = process.cwd(),
+  config?: Readonly<Record<string, unknown>>) {
   const ctx = new Context()
   await ctx.plugin(Storage)
   ctx.storage.backend.register('memory', new MemoryStorageBackend(pool))
@@ -131,7 +133,7 @@ async function boot(pool: MemoryMediaPool, shell: Pick<FakeShell, 'service'>, wo
   })
   ctx.provide('tokenMeter', { estimateMessage: () => 0, measure: () => ({ totalTokens: 0, nodes: [] }) })
   await ctx.plugin(SessionProjectionRegistry)
-  const fiber = await ctx.plugin(AgentTeam)
+  const fiber = config === undefined ? await ctx.plugin(AgentTeam) : await ctx.plugin(AgentTeam, config as never)
   return { ctx, fiber, facility }
 }
 
@@ -562,3 +564,615 @@ async function waitFor<T>(probe: () => T | undefined, timeoutMs = 10_000): Promi
     await new Promise(resolve => setTimeout(resolve, 50))
   }
 }
+
+describe('the webhook trigger', () => {
+  const origin = 'https://team.example.com'
+  const configured = { webhook: { publicOrigin: origin } }
+  const addressPattern = new RegExp(`^${origin.replaceAll('.', '\\.')}/team/hooks/[A-Za-z0-9_-]{43}$`)
+  const addressToken = (address: string | undefined): string => {
+    const token = address?.split('/team/hooks/')[1]
+    if (token === undefined) throw new Error(`expected a hook address, received '${String(address)}'`)
+    return token
+  }
+  const webhookOnly = (projectRef: AgentTeamProjectRef, overrides: Partial<AgentTeamCreateSubscriptionRequest> = {}) =>
+    createRequest(projectRef, 'printf events\n', { intervalMinutes: undefined, webhook: true, ...overrides })
+
+  it('refuses to arm an address while no public origin is configured, and runs no script for it', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    shell.requests.length = 0
+    await expect(booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef)))
+      .rejects.toThrow(/set webhook\.publicOrigin in the Team settings/)
+    // The shell-family probe is the only thing that may run: the trial envelope
+    // is what a stored script would have read, and it never happens.
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'a write that cannot carry an address runs no script')
+      .toHaveLength(0)
+    expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries).toHaveLength(0)
+  })
+
+  it('answers the arming write with the complete address once, and a retry of it with none', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const request = webhookOnly(projectRef)
+    const created = await booted.ctx.agentTeam.createSubscription(request)
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    expect(created.webhookAddress).toMatch(addressPattern)
+    expect(created.subscription.webhook?.tokenHash).toMatch(/^[0-9a-f]{64}$/)
+    // The address the owner was handed is the one the entry resolves, so a
+    // provider posting to it really does reach this subscription.
+    await expect(booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' }))
+      .resolves.toMatchObject({ kind: 'queued' })
+    const retried = await booted.ctx.agentTeam.createSubscription(request)
+    if (retried.kind !== 'changed') throw new Error('a retried create resolves the stored subscription')
+    expect(retried.webhookAddress, 'the ledger keeps only the hash, so a retry cannot show the address').toBeUndefined()
+  })
+
+  it('returns the address once when an edit enables the trigger, and never on an edit that keeps it', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(createRequest(projectRef, 'printf events\n', { name: 'timer only' }))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    expect(created.webhookAddress).toBeUndefined()
+    const edit = (value: string, expectedRevision: number, webhook: boolean) => booted.ctx.agentTeam.updateSubscription({
+      requestId: requestId(value), workspaceId, projectRef, subscriptionRef, expectedRevision, name: 'timer only',
+      intervalMinutes: 10, webhook, script: { scriptContent: 'printf events\n' } })
+    const enabled = await edit('enable', 1, true)
+    if (enabled.kind !== 'changed') throw new Error('expected a committed edit')
+    expect(enabled.webhookAddress).toMatch(addressPattern)
+    const kept = await edit('keep', 2, true)
+    if (kept.kind !== 'changed') throw new Error('expected a committed edit')
+    expect(kept.webhookAddress, 'an edit that keeps the trigger keeps the address it already had').toBeUndefined()
+    expect(kept.subscription.webhook).toEqual(enabled.subscription.webhook)
+  })
+
+  it('answers each refusal the status table names: unknown, paused, full, and gone with the subscription', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    const token = addressToken(created.webhookAddress)
+    const intake = () => booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+    expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token: 'B'.repeat(43), headers: {}, body: '{}' }), 'a token nobody minted')
+      .toEqual({ kind: 'not-found' })
+
+    await booted.ctx.agentTeam.pauseSubscription({ requestId: requestId('pause'), workspaceId, projectRef, subscriptionRef, expectedRevision: 1 })
+    expect(await intake(), 'a paused subscription refuses rather than queueing').toEqual({ kind: 'paused' })
+    await booted.ctx.agentTeam.resumeSubscription({ requestId: requestId('resume'), workspaceId, projectRef, subscriptionRef, expectedRevision: 1 })
+
+    const queued = []
+    for (let index = 0; index < 10; index += 1) queued.push(await intake())
+    expect(queued.every(answer => answer.kind === 'queued')).toBe(true)
+    expect(new Set(queued.map(answer => (answer as { admissionRef: string }).admissionRef)).size, 'every delivery is its own admission').toBe(10)
+    expect(await intake(), 'the eleventh delivery waits for the queue to drain').toEqual({ kind: 'queue-full', retryAfterSeconds: 60 })
+
+    await booted.ctx.agentTeam.deleteSubscription({ requestId: requestId('delete'), workspaceId, projectRef, subscriptionRef, expectedRevision: 1 })
+    expect(await intake(), 'a deleted subscription leaves no address behind').toEqual({ kind: 'not-found' })
+  })
+
+  /** The Host's own queue pass, driven directly so a test never waits on the interval. */
+  const pump = (booted: Awaited<ReturnType<typeof boot>>): Promise<void> =>
+    (booted.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }).pumpWebhookAdmissions()
+
+  const admissionRows = (pool: MemoryMediaPool): Array<Record<string, unknown>> =>
+    [...(pool.media.get('agent_team_subscriptions')?.tables.get('admissions')?.values() ?? [])] as Array<Record<string, unknown>>
+
+  it('validates a webhook-only subscription under the trial envelope, so a script that parses stdin can be created', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    shell.requests.length = 0
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const trials = shell.requests.filter(request => request.stdin !== undefined)
+    expect(trials, 'a webhook-only subscription has no request to replay, so its trial reads the sample').toHaveLength(1)
+    expect(trials[0]!.stdin).toBe(subscriptionTestStdin())
+    expect(trials[0]!.env?.DSH_TEAM_TRIGGER, 'a trial is a trial, not a delivery').toBe('test')
+    expect(trials[0]!.env?.DSH_TEAM_DELIVERY_ID, 'no delivery exists yet, so no delivery id').toBeUndefined()
+    // The live delivery replaces that sample with the request it actually arrived with.
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{"zen":"real"}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    shell.stdout = '{"id":"b","title":"B"}\n'
+    shell.requests.length = 0
+    await (booted.ctx.agentTeam as unknown as { pumpWebhookAdmissions(): Promise<void> }).pumpWebhookAdmissions()
+    const run = shell.requests.filter(request => request.stdin !== undefined).at(-1)
+    expect(JSON.parse(run!.stdin ?? '{}'), 'the run reads the request, not the sample').toEqual({ headers: {}, body: '{"zen":"real"}' })
+  })
+
+  it('trials a webhook-only draft, and refuses to arm one the Host has nowhere to publish', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    shell.requests.length = 0
+    const tested = await booted.ctx.agentTeam.testSubscriptionDraft({ workspaceId, projectRef, name: 'draft', webhook: true,
+      scriptContent: 'json-body\n', credentials: [] })
+    expect(tested.kind).toBe('tested')
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'the draft reads the trial envelope, like the create would')
+      .toHaveLength(1)
+    // A Host with no public origin cannot arm anything, and says so before the
+    // script runs rather than after a trial that could never be saved.
+    const bare = await boot(new MemoryMediaPool(), shell)
+    live.push({ dispose: async () => { await bare.fiber.dispose() } })
+    const bareProject = await project(bare)
+    shell.requests.length = 0
+    await expect(bare.ctx.agentTeam.testSubscriptionDraft({ workspaceId, projectRef: bareProject, name: 'draft', webhook: true,
+      scriptContent: 'json-body\n', credentials: [] })).rejects.toThrow(/webhook\.publicOrigin/)
+    expect(shell.requests.filter(request => request.stdin !== undefined)).toHaveLength(0)
+  }, 30_000)
+
+  it('runs a queued delivery under the Host admission id and retires it once its output is accepted', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    // The trial printed 'a' and its ids are the baseline, so the live run must
+    // print something the subscription has not seen.
+    shell.stdout = '{"id":"pr-1","title":"PR opened"}\n'
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress),
+      headers: { 'content-type': 'application/json', 'x-github-event': 'pull_request' }, body: '{"action":"opened"}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    shell.requests.length = 0
+    await pump(booted)
+    const run = shell.requests.filter(request => request.stdin !== undefined).at(-1)
+    expect(run, 'the pass runs the delivery').toBeDefined()
+    expect(run!.env).toMatchObject({ DSH_TEAM_TRIGGER: 'webhook', DSH_TEAM_DELIVERY_ID: queued.admissionRef })
+    expect(JSON.parse(run!.stdin ?? '{}')).toEqual({ headers: { 'content-type': 'application/json', 'x-github-event': 'pull_request' },
+      body: '{"action":"opened"}' })
+    // The accepted output is ledger fact, and the row is gone: no work is owed.
+    await waitFor(() => admissionRows(pool).length === 0 ? true : undefined)
+    expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.eventCount).toBe(1)
+  }, 30_000)
+
+  it('runs the definition the delivery arrived under, not the one an edit replaced it with', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    // The owner rewrites the script while the request is still in the queue.
+    const edited = await booted.ctx.agentTeam.updateSubscription({ requestId: requestId('edit'), workspaceId, projectRef,
+      subscriptionRef, expectedRevision: 1, name: 'main CI', webhook: true, script: { scriptContent: 'printf edited\n' } })
+    if (edited.kind !== 'changed') throw new Error('expected a committed edit')
+    expect(edited.subscription.revision).toBe(2)
+    shell.stdout = '{"id":"pr-1","title":"PR opened"}\n'
+    shell.requests.length = 0
+    await pump(booted)
+    const run = shell.requests.filter(request => request.stdin !== undefined).at(-1)
+    expect(run?.command, 'the payload replays the bytes it was queued against').toBe('printf events\n')
+    const logs = booted.ctx.agentTeam.subscriptionLogsForClient({ workspaceId, projectRef, subscriptionRef })
+    expect(logs.runs.find(entry => entry.trigger === 'webhook'),
+      'the delivery run says which revision it pinned').toMatchObject({ subscriptionRevision: 1, eventCount: 1 })
+  }, 30_000)
+
+  it('keeps the armed address when an edit says nothing about the trigger', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(createRequest(projectRef, 'printf events\n', { name: 'timer only' }))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    const edit = (request: string, expectedRevision: number, extra: { readonly webhook?: boolean }) => booted.ctx.agentTeam.updateSubscription({
+      requestId: requestId(request), workspaceId, projectRef, subscriptionRef, expectedRevision, name: 'renamed',
+      intervalMinutes: 10, ...extra, script: { scriptContent: 'printf events\n' } })
+    const armed = await edit('arm', 1, { webhook: true })
+    if (armed.kind !== 'changed') throw new Error('expected a committed edit')
+    const token = addressToken(armed.webhookAddress)
+    // A provider is already posting to this address, so an edit that does not
+    // mention the trigger keeps it — only an explicit false drops it.
+    const renamed = await edit('rename', 2, {})
+    if (renamed.kind !== 'changed') throw new Error('expected a committed edit')
+    expect(renamed.subscription.webhook, 'an unnamed trigger is kept, not disarmed').toEqual(armed.subscription.webhook)
+    expect(renamed.webhookAddress, 'and an address that is only kept is not shown again').toBeUndefined()
+    await expect(booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).resolves.toMatchObject({ kind: 'queued' })
+    const disarmed = await edit('disarm', 3, { webhook: false })
+    if (disarmed.kind !== 'changed') throw new Error('expected a committed edit')
+    expect(disarmed.subscription.webhook, 'the explicit false is what drops it').toBeUndefined()
+    expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' }), 'and the address stops resolving')
+      .toEqual({ kind: 'not-found' })
+  }, 30_000)
+
+  it('finishes a delivery already accepted when the subscription stops receiving them', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const token = addressToken(created.webhookAddress)
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    // The owner turns the subscription into a timer: the address goes, the queue
+    // does not — the provider already has a 202 for this request.
+    const edited = await booted.ctx.agentTeam.updateSubscription({ requestId: requestId('timer-only'), workspaceId, projectRef,
+      subscriptionRef: created.subscription.subscriptionRef, expectedRevision: 1, name: 'main CI', intervalMinutes: 10, webhook: false,
+      script: { scriptContent: 'printf events\n' } })
+    if (edited.kind !== 'changed') throw new Error('expected a committed edit')
+    expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toEqual({ kind: 'not-found' })
+    shell.stdout = '{"id":"pr-1","title":"PR opened"}\n'
+    shell.requests.length = 0
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined),
+      'the queued request still owes its run, under the definition it arrived with').toHaveLength(1)
+    expect(admissionRows(pool), 'and it leaves the queue once its output is accepted').toHaveLength(0)
+    expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.eventCount).toBe(1)
+  }, 30_000)
+
+  it('holds a batch with no room yet, and retries only the accept', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const token = addressToken(created.webhookAddress)
+    const listed = () => booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!
+    const failures = () => (booted.ctx.agentTeam as unknown as {
+      checkpointFor(ref: AgentTeamSubscriptionRef): { consecutiveFailures: number } }).checkpointFor(created.subscription.subscriptionRef).consecutiveFailures
+    // 490 unpublished events leave room for ten more, not for the twenty the
+    // next request brings.
+    shell.stdout = Array.from({ length: 490 }, (_, index) => `{"id":"f${index}","title":"fill ${index}"}`).join('\n') + '\n'
+    const fill = await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+    if (fill.kind !== 'queued') throw new Error('expected a queued delivery')
+    await pump(booted)
+    expect(listed()).toMatchObject({ unpublished: 490, eventCount: 490 })
+    shell.stdout = Array.from({ length: 20 }, (_, index) => `{"id":"late${index}","title":"late ${index}"}`).join('\n') + '\n'
+    const late = await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+    if (late.kind !== 'queued') throw new Error('expected a queued delivery')
+    shell.requests.length = 0
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'the request is one run').toHaveLength(1)
+    const held = await waitFor(() => admissionRows(pool).find(row => row.heldEvents !== undefined))
+    expect(held.heldEvents, 'the validated batch waits beside the delivery it arrived with').toHaveLength(20)
+    expect(listed(), 'and nothing is accepted past the ceiling yet').toMatchObject({ unpublished: 490, eventCount: 490 })
+    expect(failures(), 'no room yet is not a failure of the run').toBe(0)
+    expect(held.attempts, 'and it spends none of the delivery retries').toBe(0)
+    expect(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.size ?? 0, 'and it is not a failed delivery').toBe(0)
+    // Still no room: the next pass retries the accept, never the script.
+    shell.requests.length = 0
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined)).toHaveLength(0)
+    expect(admissionRows(pool)).toHaveLength(1)
+    // One publication pass frees exactly the room the batch needs.
+    await (booted.ctx.agentTeam as unknown as { subscriptionScheduler: { runTick(): Promise<void> } })
+      .subscriptionScheduler.runTick()
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'the accept is retried without the script').toHaveLength(0)
+    expect(admissionRows(pool), 'the batch is in the ledger, so the delivery is done').toHaveLength(0)
+    expect(listed(), 'all twenty events are accepted and waiting their turn').toMatchObject({ unpublished: 490, eventCount: 510 })
+    expect(failures(), 'a held batch never counts against the subscription').toBe(0)
+  }, 30_000)
+
+  it('refuses a batch no queue could ever take instead of holding it', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    // Five hundred and one events do not fit even into an empty queue, so the
+    // batch is refused outright rather than held for room that never comes.
+    shell.stdout = Array.from({ length: 501 }, (_, index) => `{"id":"e${index}","title":"event ${index}"}`).join('\n') + '\n'
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    await pump(booted)
+    const deliveries = [...(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.values() ?? [])] as Array<Record<string, unknown>>
+    expect(deliveries[0], 'the request becomes a failed delivery an owner can replay').toMatchObject({ attempts: 1 })
+    expect(admissionRows(pool), 'not a held batch').toHaveLength(0)
+  }, 30_000)
+
+  it('refuses an address a reset moved while the request waited for the write lock', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const oldToken = addressToken(created.webhookAddress)
+    const internals = booted.ctx.agentTeam as unknown as {
+      serializeSubscriptionWrite<T>(ref: AgentTeamSubscriptionRef, task: () => Promise<T>): Promise<T>
+    }
+    // Hold the subscription's write lock, then let a reset take its place in the
+    // queue before a request that already resolved the old address.
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const holding = internals.serializeSubscriptionWrite(created.subscription.subscriptionRef, () => gate)
+    const reset = booted.ctx.agentTeam.resetSubscriptionWebhook({ requestId: requestId('reset'), workspaceId, projectRef,
+      subscriptionRef: created.subscription.subscriptionRef, expectedRevision: 1 })
+    const raced = booted.ctx.agentTeam.intakeWebhookDelivery({ token: oldToken, headers: {}, body: '{}' })
+    release()
+    await holding
+    const resetResult = await reset
+    if (resetResult.kind !== 'changed') throw new Error('expected a committed reset')
+    expect(await raced, 'the address it carried stopped resolving under the lock').toEqual({ kind: 'not-found' })
+    expect(admissionRows(pool)).toHaveLength(0)
+    const fresh = addressToken(resetResult.webhookAddress)
+    expect(fresh, 'the reset moved the address').not.toBe(oldToken)
+    await expect(booted.ctx.agentTeam.intakeWebhookDelivery({ token: fresh, headers: {}, body: '{}' })).resolves.toMatchObject({ kind: 'queued' })
+  }, 30_000)
+
+  it('retries a failed delivery on the 1/5/30 ladder and hands every attempt the same id', async () => {
+    fakeTimers.useFakeTimers({ toFake: ['Date'] })
+    live.push({ dispose: async () => { fakeTimers.useRealTimers() } })
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    // The trial has to pass, so the address arms; every live attempt then fails
+    // on its own output.
+    shell.stdout = 'not json\n'
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    const ids: Array<string | undefined> = []
+    shell.requests.length = 0
+    for (const [index, waitMs] of [60_000, 300_000, 1_800_000].entries()) {
+      await pump(booted)
+      const run = shell.requests.filter(request => request.stdin !== undefined).at(-1)
+      ids.push(run?.env?.DSH_TEAM_DELIVERY_ID)
+      const failed = await waitFor(() => admissionRows(pool).find(row => row.state === 'retrying'))
+      expect(failed.attempts, `attempt ${index + 1} is on the row`).toBe(index + 1)
+      const nextAt = Date.parse(String(failed.nextAttemptAt))
+      expect(nextAt - Date.now(), `retry ${index + 1} waits its own delay`).toBe(waitMs)
+      expect(admissionRows(pool), 'a retry is still the same delivery, not a second row').toHaveLength(1)
+      fakeTimers.setSystemTime(new Date(Date.now() + waitMs))
+    }
+    // The fourth failure is the one that spends the retries: the request becomes
+    // the failed delivery an owner replays, and the row leaves the queue.
+    await pump(booted)
+    const failure = await waitFor(() => (pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.size ?? 0) > 0 ? true : undefined)
+    expect(failure).toBe(true)
+    expect(admissionRows(pool), 'the exhausted delivery is no longer queued').toHaveLength(0)
+    expect(new Set(ids), 'every attempt ran under the id the first one had').toEqual(new Set([queued.admissionRef]))
+    const deliveries = [...(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.values() ?? [])] as Array<Record<string, unknown>>
+    expect(deliveries[0]).toMatchObject({ admissionRef: queued.admissionRef, attempts: 4 })
+    expect(String(deliveries[0]!.lastError)).toMatch(/line 1/)
+  }, 30_000)
+
+  it('accepts a batch of several hundred events once, and publishes it without running the script again', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    // 300 new events: past the per-minute publish budget with room left under the
+    // 500-event ceiling, which is the whole point of the pending queue.
+    shell.stdout = Array.from({ length: 300 }, (_, index) => `{"id":"e${index}","title":"event ${index}"}`).join('\n') + '\n'
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    shell.requests.length = 0
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'the batch is one run').toHaveLength(1)
+    const listed = () => booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!
+    expect(listed(), 'every accepted event waits for its turn to publish').toMatchObject({ unpublished: 300, eventCount: 300 })
+    expect(admissionRows(pool), 'the delivery is done: publication is the ledger queue, not the request').toHaveLength(0)
+    // Publication is throttled and lagging, so a later pass finds accepted work —
+    // and still no reason to run the script for it.
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'a lagging publication never re-runs the script').toHaveLength(1)
+    expect(listed().unpublished, 'the events are still the ledger queue, not a second run').toBe(300)
+  }, 30_000)
+
+  it('turns one run past the unpublished ceiling into a failed delivery instead of retrying it', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    // One more event than the ceiling allows: the spec refuses the whole batch
+    // rather than publishing part of it.
+    shell.stdout = Array.from({ length: 501 }, (_, index) => `{"id":"e${index}","title":"event ${index}"}`).join('\n') + '\n'
+    shell.requests.length = 0
+    const token = addressToken(created.webhookAddress)
+    const queueOne = async () => {
+      const answer = await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+      if (answer.kind !== 'queued') throw new Error('expected a queued delivery')
+      await pump(booted)
+      return answer.admissionRef
+    }
+    await queueOne()
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'a refused batch is not retried').toHaveLength(1)
+    const listed = () => booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!
+    expect(listed(), 'nothing is accepted past the ceiling').toMatchObject({ unpublished: 0, eventCount: 0 })
+    const failureRows = () => [...(pool.media.get('agent_team_subscriptions')?.tables.get('deliveries')?.values() ?? [])] as Array<Record<string, unknown>>
+    expect(failureRows()[0]).toMatchObject({ attempts: 1 })
+    expect(String(failureRows()[0]!.lastError)).toMatch(/more events than the Project can hold/)
+    // Retrying would print the same output again, so the delivery spends its three
+    // attempts at once: the third such delivery pauses the subscription, which
+    // only one counted failure each can explain.
+    await queueOne()
+    expect(listed().subscription.state).toBe('active')
+    await queueOne()
+    expect(listed().subscription).toMatchObject({ state: 'paused', pausedReason: 'failures' })
+  }, 30_000)
+
+  it('finishes the bookkeeping of an accepted delivery without running its script again', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    shell.stdout = '{"id":"pr-1","title":"PR opened"}\n'
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    const admissions = pool.media.get('agent_team_subscriptions')!.tables.get('admissions')!
+    const owed = [...admissions.entries()]
+    shell.requests.length = 0
+    await pump(booted)
+    expect(admissions.size, 'the accepted delivery is retired').toBe(0)
+    // The Host stops between the ledger accept and its own bookkeeping: the
+    // output is durable, the row that owed it is still on disk, and the accept
+    // itself names the attempt that produced it.
+    const rows = (booted.ctx.agentTeam as unknown as { subscriptionAdmissionsTable: {
+      put(key: string, record: unknown): Promise<unknown> } }).subscriptionAdmissionsTable
+    for (const [key, row] of owed) await rows.put(key, row)
+    expect(admissions.size, 'the row is back where the crash left it').toBe(1)
+    await pump(booted)
+    expect(admissions.size, 'the next pass retires the row the crash left behind').toBe(0)
+    expect(shell.requests.filter(request => request.stdin !== undefined),
+      'the accept is the run: the script is not executed a second time for it').toHaveLength(1)
+    expect(booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!.eventCount,
+      'the same output is not accepted a second time').toBe(1)
+  }, 30_000)
+
+  it('drops queued deliveries when the subscription is deleted, so a late result cannot revive the queue', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    const token = addressToken(created.webhookAddress)
+    for (let index = 0; index < 3; index += 1) {
+      expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toMatchObject({ kind: 'queued' })
+    }
+    expect(admissionRows(pool)).toHaveLength(3)
+    await booted.ctx.agentTeam.deleteSubscription({ requestId: requestId('delete-queued'), workspaceId, projectRef,
+      subscriptionRef, expectedRevision: 1 })
+    expect(admissionRows(pool), 'the queue goes with the subscription').toHaveLength(0)
+    shell.requests.length = 0
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined), 'no script runs for a delivery nobody owes').toHaveLength(0)
+    expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' }), 'and the address is gone with it')
+      .toEqual({ kind: 'not-found' })
+  })
+
+  it('drops queued deliveries when the Project is archived, and answers its address with 404', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const token = addressToken(created.webhookAddress)
+    expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toMatchObject({ kind: 'queued' })
+    await booted.ctx.agentTeam.archiveProject({ requestId: requestId('archive-project'), workspaceId, projectRef })
+    expect(admissionRows(pool), 'an archived Project owes nothing').toHaveLength(0)
+    shell.requests.length = 0
+    await pump(booted)
+    expect(shell.requests.filter(request => request.stdin !== undefined)).toHaveLength(0)
+    expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toEqual({ kind: 'not-found' })
+  }, 30_000)
+
+  it('ends a delivery on its retry succeeding, without counting a failure against it', async () => {
+    fakeTimers.useFakeTimers({ toFake: ['Date'] })
+    live.push({ dispose: async () => { fakeTimers.useRealTimers() } })
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    shell.stdout = 'not json\n'
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    shell.requests.length = 0
+    await pump(booted)
+    expect(admissionRows(pool)[0]).toMatchObject({ state: 'retrying', attempts: 1 })
+    // The retry succeeds: the delivery is delivered, so it owes nothing more and
+    // the streak it never spent stays where it was.
+    shell.stdout = '{"id":"pr-1","title":"PR opened"}\n'
+    fakeTimers.setSystemTime(new Date(Date.now() + 60_000))
+    await pump(booted)
+    expect(admissionRows(pool)).toHaveLength(0)
+    const listed = booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef }).entries[0]!
+    expect(listed).toMatchObject({ eventCount: 1, unpublished: 1 })
+    expect(listed.subscription.state, 'one failed attempt is not a failure of the subscription').toBe('active')
+    expect(booted.ctx.agentTeam.subscriptionDeliveriesForClient({ workspaceId, projectRef, subscriptionRef }).deliveries).toHaveLength(0)
+  }, 30_000)
+
+  it('replays an exhausted delivery under the id its first attempt saw, and refuses one while paused', async () => {
+    fakeTimers.useFakeTimers({ toFake: ['Date'] })
+    live.push({ dispose: async () => { fakeTimers.useRealTimers() } })
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const subscriptionRef = created.subscription.subscriptionRef
+    shell.stdout = 'not json\n'
+    const queued = await booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' })
+    if (queued.kind !== 'queued') throw new Error('expected a queued delivery')
+    shell.requests.length = 0
+    // Four failing attempts: three retries on the ladder, then the record an owner reads.
+    for (const waitMs of [0, 60_000, 300_000, 1_800_000]) {
+      fakeTimers.setSystemTime(new Date(Date.now() + waitMs))
+      await pump(booted)
+    }
+    expect(admissionRows(pool), 'the exhausted delivery leaves the queue').toHaveLength(0)
+    const listed = () => booted.ctx.agentTeam.subscriptionDeliveriesForClient({ workspaceId, projectRef, subscriptionRef })
+    expect(listed().deliveries, 'and becomes the record the page shows').toHaveLength(1)
+    const deliveryRef = listed().deliveries[0]!.deliveryRef
+    await booted.ctx.agentTeam.pauseSubscription({ requestId: requestId('pause'), workspaceId, projectRef, subscriptionRef, expectedRevision: 1 })
+    await expect(booted.ctx.agentTeam.replaySubscriptionDeliveryForClient({ requestId: requestId('replay-paused'), workspaceId,
+      projectRef, subscriptionRef, deliveryRef })).rejects.toThrow(/paused/)
+    shell.stdout = '{"id":"pr-1","title":"PR opened"}\n'
+    await booted.ctx.agentTeam.resumeSubscription({ requestId: requestId('resume'), workspaceId, projectRef, subscriptionRef, expectedRevision: 1 })
+    shell.requests.length = 0
+    const replayed = await booted.ctx.agentTeam.replaySubscriptionDeliveryForClient({ requestId: requestId('replay'), workspaceId,
+      projectRef, subscriptionRef, deliveryRef })
+    expect(replayed).toMatchObject({ kind: 'replayed', eventCount: 1 })
+    // The third identity: the script reads the same Host admission id it saw on
+    // its first attempt, so a script keyed on it stays idempotent.
+    const run = shell.requests.filter(request => request.stdin !== undefined).at(-1)
+    expect(run!.env?.DSH_TEAM_DELIVERY_ID).toBe(queued.admissionRef)
+    expect(listed().deliveries, 'a delivery that replayed successfully leaves the list').toHaveLength(0)
+  }, 30_000)
+
+  it('keeps the queue across a restart, so an accepted delivery is never lost', async () => {
+    const pool = new MemoryMediaPool()
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const first = await boot(pool, shell, process.cwd(), configured)
+    const projectRef = await project(first)
+    const created = await first.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const token = addressToken(created.webhookAddress)
+    const intake = (host: typeof first) => host.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })
+    for (let index = 0; index < 10; index += 1) expect(await intake(first)).toMatchObject({ kind: 'queued' })
+    // A restart, not a reload: the store closes and a new Host opens the same medium.
+    await first.fiber.dispose()
+    await first.facility.closeAll()
+    const second = await boot(pool, shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await second.fiber.dispose() } })
+    expect(await intake(second), 'ten deliveries were durable before their 202, so none of them died with the process')
+      .toEqual({ kind: 'queue-full', retryAfterSeconds: 60 })
+  })
+})

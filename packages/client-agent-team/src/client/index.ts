@@ -41,6 +41,8 @@ import type {
   AgentTeamCreateSubscriptionRequest,
   AgentTeamUpdateSubscriptionRequest,
   AgentTeamSubscriptionStateRequest,
+  AgentTeamSubscriptionDeliveriesRequest,
+  AgentTeamSubscriptionReplayRequest,
   AgentTeamViewRequest,
 } from '@contexera/dsh-agent-team/types'
 import agentTeamRemote from '@contexera/dsh-agent-team/remote'
@@ -282,6 +284,9 @@ function teamSeatInject(
       pauseSubscription: (request: AgentTeamSubscriptionStateRequest) => ctx.remote.agentTeam.pauseSubscription(request),
       resumeSubscription: (request: AgentTeamSubscriptionStateRequest) => ctx.remote.agentTeam.resumeSubscription(request),
       deleteSubscription: (request: AgentTeamSubscriptionStateRequest) => ctx.remote.agentTeam.deleteSubscription(request),
+      resetSubscriptionWebhook: (request: AgentTeamSubscriptionStateRequest) => ctx.remote.agentTeam.resetSubscriptionWebhook(request),
+      loadSubscriptionDeliveries: (request: AgentTeamSubscriptionDeliveriesRequest) => ctx.remote.agentTeam.subscriptionDeliveries(request),
+      replaySubscriptionDelivery: (request: AgentTeamSubscriptionReplayRequest) => ctx.remote.agentTeam.replaySubscriptionDelivery(request),
     } : {}),
     ...(name === 'sidebar.workspaces' ? {
       addMember: (request: AgentTeamAddMemberRequest) => ctx.remote.agentTeam.addMember(request),

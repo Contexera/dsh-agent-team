@@ -137,7 +137,7 @@ A Member's current failure reason is carried on its status as a `diagnostic` and
 
 ## Host service surface (`ctx.agentTeam`)
 
-The Host row publishes one service, `ctx.agentTeam`, consumed in two distinct ways with different stability promises. There is no CLI, no `bin`, and no loopback HTTP entry: the Web Client is the only Human control surface, and every change reaches the Host through the typed Remote.
+The Host row publishes one service, `ctx.agentTeam`, consumed in two distinct ways with different stability promises. There is no CLI and no `bin`: the Web Client is the only Human control surface, and every change reaches the Host through the typed Remote. The one HTTP entry the bundle mounts is the webhook ingress below, which is not a control surface — it carries an outside service's request and nothing else.
 
 - **Remote methods** (the `@Remote`-decorated ones, e.g. `members`, `view`, `addMember`, `updateMember`, `sendMessage`, `readThread`, `inbox`, `humanProfile`) are the Client contract. They are typed through Typert artefacts generated from the declarations, so the Client, the model-facing tools, and any other consumer compile against the same shape; changing one is a contract change.
 - **Host-only service methods** (e.g. `memberForAgent`, `membersForClient`, `status`, and the activation/lifecycle internals) exist for in-process Host callers — the preset row, commit listeners, and startup derivation. They carry no compatibility promise and may move between releases.
@@ -172,7 +172,9 @@ The accept and that clear are one segment under the subscription's write lock, w
 
 The script itself runs outside the lock — holding it there would stall every delivery for the run's whole duration. An empty success takes the same segment and clears the same way, because it is the same fact: the run worked.
 
-One whose batch would carry the unpublished total past 500 events is a failed run; a subscription already at that ceiling is skipped by admission before its script starts, which is why the skip counts nothing. Only interval and webhook runs count, a trial neither counts nor clears, and a resume clears the count only when it commits — a resume whose trial fails changes neither.
+One that alone prints past the 500-event ceiling is refused, since no later pass could ever publish it, and one that would carry the unpublished total past it is a failed run; a webhook delivery is the exception, because its request can never be fetched again, so it keeps that batch on its row until room opens (the ingress below).
+
+A subscription already at that ceiling is skipped by admission before its script starts, which is why the skip counts nothing. Only interval and webhook runs count, a trial neither counts nor clears, and a resume clears the count only when it commits — a resume whose trial fails changes neither.
 
 A delivery whose retries are spent becomes a row in `deliveries`: a stable `deliveryRef`, the received revision and script hash together with the script and credentials that version ran under, the request body the script reads on stdin, the last error, and a seven-day expiry, at most ten per subscription. It outlives the run records that explain it, and it counts exactly one failure however many attempts it took — a provider that redelivers the same request is still the same delivery.
 
@@ -192,7 +194,23 @@ The answer and the delivery's own tombstone settle in one locked segment, so a d
 
 A storage fault in either of those writes is logged and the call still answers with what the run did: the output is already in the ledger, so a private copy that fails cannot turn a delivered replay into an ungraspable one. The answer goes when retention takes the delivery it explains.
 
-Webhook admission over HTTP is not part of this build: the record, its retention, the owner read, and the replay are.
+The HTTP ingress is a second WebServer of its own, mounted by the bundle's own `webhook-ingress` row under `isolate: { webServer: true }`, so nothing it serves shares the listener the browser API uses. That row mounts the listener itself instead of naming the WebServer in the composition, because the Harness protects that module: a bundle that names one cannot be disabled again, and the runtime toggle is exactly what an operator uses against this bundle. It registers one prefix, `/team/hooks`, and answers only `<prefix>/<token>`: a nested or longer path is not an address.
+
+The listener binds `127.0.0.1` on `DSH_TEAM_WEBHOOK_PORT` (3081 by default), so publishing it is a deployment decision — a tunnel or reverse proxy in front, and the same public origin written into `webhook.publicOrigin`.
+
+The token resolves against the ledger's armed addresses — a hash compared in constant time across every armed subscription — so a reset, a dropped trigger, a deletion, or an archived Project all answer 404, while a delivery already queued keeps its row, because a reset moves an address and not a queue.
+
+The status table is the contract: 202 once the row is durable, 404 for an unknown token or one whose subscription is deleted or archived, 409 while paused, 429 with `Retry-After` when ten deliveries are already queued or retrying, 413 past 256 KiB of body, 405 for anything but POST, 5xx when storage refuses the row.
+
+A header over 1 KiB refuses the delivery rather than truncating it, and a non-identity `content-encoding` is refused too, because a signature has to be verified over the bytes the provider signed.
+
+Only `content-type`, `user-agent`, and names matching `x-*-event`, `x-*-delivery`, `x-*-signature*`, and `x-*-timestamp` reach the script, all lowercased; `authorization`, `cookie`, `x-api-key`, and proxy-inserted headers never do.
+
+The entry answers 202 only after the row is written, so a restart before the answer replays nothing it lost — the queue is private state, and the next pass runs what it owes. A run reads `{headers, body}` on stdin under `DSH_TEAM_TRIGGER=webhook` and the admission's own id as `DSH_TEAM_DELIVERY_ID`, which is what keeps one delivery one identity across its retries and a later replay.
+
+A failed run keeps the row and waits 1, 5, and 30 minutes; the fourth failure turns it into the `deliveries` row an owner replays, and a batch that alone passes the ceiling goes straight there, because retrying it would print the same output again. A retry that succeeds ends the delivery without spending a failure on it.
+
+A reset mints a new token for the same subscription and moves `generation` by one without moving the revision: accepted deliveries keep the version they arrived under, and the address the caller receives is the only copy in the clear, since the ledger keeps a hash.
 
 The scheduler reaches the world only through ports, so the runtime tests drive a fake clock and a fake executor. A timer run executes the stored snapshot through `ctx.shell` — the same executor the Member's shell tool uses — under a policy the Host builds itself from the trusted Workspace record: `workspace-write` rooted at that Workspace, 60 seconds, a 65,536-byte stdout cap, and never the escalating mode, because an unattended run has no one to approve it.
 
