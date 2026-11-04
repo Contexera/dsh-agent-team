@@ -41,7 +41,7 @@ const typeDraft = (b: Awaited<ReturnType<typeof openProject>>, text: string) => 
 
 describe('Team Main stream', () => {
   it('names a webhook reset as a reset, not a deletion', async () => {
-    const reset = { kind: 'activity', sequence: 5, occurredAt: '2026-10-20T08:30:00.000Z', activity: {
+    const reset: MainStreamSeedEntry = { kind: 'activity', sequence: 5, occurredAt: '2026-10-20T08:30:00.000Z', activity: {
       activityRef: 'activity:reset', projectRef: 'project:engineering', kind: 'subscription-webhook-reset',
       subscriptionRef: 'subscription:ci', subscriptionName: 'main CI', revision: 2, actor: 'member:human',
       sequence: 5, occurredAt: '2026-10-20T08:30:00.000Z' } }
