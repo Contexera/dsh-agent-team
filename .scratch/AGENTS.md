@@ -42,6 +42,7 @@ Each `issues/NN-<slug>.md` uses a fixed skeleton, numbered from `01` in dependen
 - **Closing a work item**: close or delete unfinished tickets → move durable conclusions into the `../docs/` maintained documents → delete process material without provenance value → move into `archive/YYYY-MM/`.
 - **Archive is history**: archived states and terminology only represent the working context of their time and never override current implementation; do not rewrite archives to match new code.
 - **Transient artifacts**: logs, debug screenshots, and downloads go in `local/` or `artifacts/` (gitignored), never into active or archive.
+- **Local inventory**: when adding or removing a `local/` entry, update `local/README.md` — one row per entry naming its source work item and why it stays. That index is gitignored with the directory it describes.
 
 ## Version control
 
