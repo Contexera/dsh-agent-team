@@ -269,6 +269,25 @@ describe('the Project subscription tab', () => {
     expect(form.view.queryByText('https://team.example.com/team/hooks/abc')).toBeNull()
   })
 
+  it('tells the reader a retried save cannot fetch the address again', async () => {
+    const testDraft = vi.fn(async (_request: AgentTeamSubscriptionDraftTrialRequest) => ({ ok: true as const, value: { kind: 'tested' as const, events: [], stdoutTail: '', stderrTail: '', scriptHash: 'b'.repeat(64), revision: 1 } }))
+    const create = vi.fn(async (_request: AgentTeamCreateSubscriptionRequest) => ({ ok: true as const, value: { kind: 'changed' as const,
+      subscription: subscription(), activity: {}, webhookAddressGone: true } } as never))
+    const form = renderTab({ host: host({ testSubscriptionDraft: testDraft, createSubscription: create }) })
+    fireEvent.click(form.view.getByRole('button', { name: '新建订阅' }))
+    const dialog = form.view.getByRole('dialog', { name: '新建订阅' })
+    fireEvent.click(dialog.querySelectorAll('input[type="checkbox"]')[0]!)
+    fireEvent.click(dialog.querySelectorAll('input[type="checkbox"]')[1]!)
+    fireEvent.change(dialog.querySelector('input:not([type])')!, { target: { value: 'hooks only' } })
+    fireEvent.change(dialog.querySelector('textarea')!, { target: { value: 'json-body\n' } })
+    fireEvent.click(form.view.getByRole('button', { name: '试运行' }))
+    await waitFor(() => expect((form.view.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(form.view.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    const gone = await form.view.findByRole('dialog', { name: 'Webhook 地址已不可取回 · hooks only' })
+    expect(gone.textContent).toContain('无法再次取回')
+  })
+
   it('lists the deliveries whose retries are spent, and replays one into the ledger', async () => {
     const delivery = { deliveryRef: 'delivery:d1', receivedRevision: 3, receivedScriptHash: 'a'.repeat(64),
       receivedAt: '2026-11-04T02:00:00.000Z', expiresAt: '2026-11-11T02:00:00.000Z', attempts: 4,

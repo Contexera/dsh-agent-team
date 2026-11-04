@@ -126,6 +126,8 @@ export class SubscriptionScheduler {
   /** Executions that already hold a slot: teardown waits for these, not for the queue. */
   private readonly inFlight = new Set<Promise<void>>()
   private readonly queue: QueuedRun[] = []
+  /** One in-flight publication pass per subscription, so overlapping passes cannot spend the same budget. */
+  private readonly publishing = new Map<AgentTeamSubscriptionRef, Promise<void>>()
 
   constructor(private readonly ports: SubscriptionRuntimePorts) {}
 
@@ -236,9 +238,12 @@ export class SubscriptionScheduler {
       if (action === 'skip') {
         // A terminal record keeps no checkpoint: the deletion already removed
         // it and nothing will ever run again, so writing one here would only
-        // revive a row nobody reads. A paused or backlogged subscription does
-        // keep moving its due instant, or every tick would re-decide it.
+        // revive a row nobody reads.
         if (live.state === 'deleted' || !this.ports.projectActive(live)) continue
+        // A due instant still ahead already answers every later decision, so
+        // a paused or backlogged subscription is re-decided each tick without
+        // being re-written; the record advances only once the instant passes.
+        if (checkpoint.dueAt !== undefined && checkpoint.dueAt > now) continue
         work.push(this.saveDue(live, nextDueAfter(now, interval.minutes)))
         continue
       }
@@ -335,28 +340,35 @@ export class SubscriptionScheduler {
 
   private async launchTimer(subscription: AgentTeamSubscription, dueAt: number): Promise<void> {
     const ref = subscription.subscriptionRef
+    // The spent-due marker outlives the execution: a tick that lands between
+    // the run ending and its checkpoint write would re-execute the same due
+    // instant if the marker were already gone.
     this.running.add(ref)
     this.runningDue.set(ref, dueAt)
     const interval = subscription.triggers.interval
     let outcome: SubscriptionRunOutcome = 'failed'
     try {
-      outcome = await this.ports.run(subscription)
-    } catch (error) {
-      this.ports.log(`subscription '${ref}' run failed: ${error instanceof Error ? error.message : String(error)}`)
+      try {
+        outcome = await this.ports.run(subscription)
+      } catch (error) {
+        this.ports.log(`subscription '${ref}' run failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      // Recording the outcome and publishing are each best-effort steps of their
+      // own: a checkpoint write or a publication that throws must not skip the
+      // other, and must never surface as an unhandled rejection.
+      await this.settleOutcome(subscription, outcome, interval).catch((error: unknown) => {
+        this.ports.log(`subscription '${ref}' could not record its outcome: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      await this.publishPass().catch((error: unknown) => {
+        this.ports.log(`subscription '${ref}' could not publish after its run: ${error instanceof Error ? error.message : String(error)}`)
+      })
     } finally {
       this.running.delete(ref)
       this.runningDue.delete(ref)
+      // A freed slot is admitted immediately: a queued create must not wait for
+      // the next timer tick to start.
       void this.admit()
     }
-    // Recording the outcome and publishing are each best-effort steps of their
-    // own: a checkpoint write or a publication that throws must not skip the
-    // other, and must never surface as an unhandled rejection.
-    await this.settleOutcome(subscription, outcome, interval).catch((error: unknown) => {
-      this.ports.log(`subscription '${ref}' could not record its outcome: ${error instanceof Error ? error.message : String(error)}`)
-    })
-    await this.publishPass().catch((error: unknown) => {
-      this.ports.log(`subscription '${ref}' could not publish after its run: ${error instanceof Error ? error.message : String(error)}`)
-    })
   }
 
   /**
@@ -416,6 +428,21 @@ export class SubscriptionScheduler {
 
   /** One subscription's share of a publication pass. */
   private async publishOne(subscription: AgentTeamSubscription): Promise<void> {
+    // Passes serialize per subscription: the tick's pass and a finishing run's
+    // pass can overlap, and two of them reading the same budget and the same
+    // pending head would double-spend the minute and republish one entry.
+    const serialized = subscription.subscriptionRef
+    const chained = (this.publishing.get(serialized) ?? Promise.resolve()).catch(() => {})
+      .then(() => this.publishOnePass(subscription))
+    this.publishing.set(serialized, chained)
+    try {
+      await chained
+    } finally {
+      if (this.publishing.get(serialized) === chained) this.publishing.delete(serialized)
+    }
+  }
+
+  private async publishOnePass(subscription: AgentTeamSubscription): Promise<void> {
     // A terminal record publishes nothing, and its checkpoint is not rewritten
     // either: the accepted output stays unpublished, instead of being retried
     // and logged on every tick for a subscription that no longer exists. A
@@ -423,10 +450,12 @@ export class SubscriptionScheduler {
     const live = this.ports.current(subscription.subscriptionRef) ?? subscription
     if (live.state === 'deleted' || !this.ports.projectActive(live)) return
     // The window is per minute per subscription, and it survives a restart
-    // because it lives in the checkpoint, not in memory.
+    // because it lives in the checkpoint, not in memory. It resets only
+    // forward: a clock that jumps back must not hand out the same minute's
+    // budget twice.
     let checkpoint = this.ports.checkpoint(subscription.subscriptionRef)
     const minute = Math.floor(this.ports.now() / 60_000)
-    if (checkpoint.publishWindowMinute !== minute) {
+    if (checkpoint.publishWindowMinute === undefined || minute > checkpoint.publishWindowMinute) {
       checkpoint = await this.ports.save(subscription.subscriptionRef,
         current => ({ ...current, publishWindowMinute: minute, publishedInWindow: 0 })) ?? checkpoint
     }

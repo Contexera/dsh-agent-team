@@ -11,6 +11,11 @@ import type { AgentTeamSubscription, AgentTeamSubscriptionRef } from '../src/typ
 
 const MINUTE = 60_000
 
+/** Pump the microtask queue until the predicate holds: a released run's settle chain and the admission it frees both finish. */
+async function pumped(predicate: () => boolean): Promise<void> {
+  for (let round = 0; round < 500 && !predicate(); round += 1) await Promise.resolve()
+}
+
 function subscription(name: string, minutes = 5): AgentTeamSubscription {
   return {
     subscriptionRef: `subscription:${name}` as AgentTeamSubscriptionRef,
@@ -37,14 +42,17 @@ interface Harness {
   readonly paused: string[]
   readonly logs: string[]
   /**
-   * Seams: a checkpoint write that rejects, a pass that throws while it reads
-   * the backlog, and the ledger record admission re-reads — mutable, so a test
-   * can delete or archive behind a queued entry.
+   * Seams: a checkpoint write that rejects or hangs, a publication that hangs
+   * mid-entry, a pass that throws while it reads the backlog, and the ledger
+   * record admission re-reads — mutable, so a test can delete or archive
+   * behind a queued entry.
    */
   readonly control: {
     saveThrows: boolean
     pendingThrows: boolean
     archived: boolean
+    holdSaves: Promise<void> | undefined
+    holdPublish: Promise<void> | undefined
     readonly stored: Map<string, AgentTeamSubscription>
   }
   /** Every checkpoint the scheduler wrote, in order, so a terminal record's absence is provable. */
@@ -71,7 +79,8 @@ function harness(options: {
   const logs: string[] = []
   const saves: string[] = []
   const stored = new Map<string, AgentTeamSubscription>(options.subscriptions.map(entry => [entry.subscriptionRef, entry]))
-  const control = { saveThrows: false, pendingThrows: false, archived: false, stored }
+  const control = { saveThrows: false, pendingThrows: false, archived: false,
+    holdSaves: undefined as Promise<void> | undefined, holdPublish: undefined as Promise<void> | undefined, stored }
   let release: Array<() => void> = []
   let scheduled: (() => void) | undefined
   const ports: SubscriptionRuntimePorts = {
@@ -102,11 +111,13 @@ function harness(options: {
     },
     publish: async (entry, _acceptedSequence, eventId) => {
       published.push(`${entry.subscriptionRef}:${eventId}`)
+      if (control.holdPublish !== undefined) await control.holdPublish
       pending[entry.subscriptionRef] = (pending[entry.subscriptionRef] ?? []).filter(queued => queued.eventId !== eventId)
     },
     pauseForFailures: async entry => { paused.push(entry.subscriptionRef) },
     checkpoint: ref => checkpoints.get(ref) ?? { subscriptionRef: ref, ...INITIAL_CHECKPOINT },
     save: async (ref, change) => {
+      if (control.holdSaves !== undefined) await control.holdSaves
       if (control.saveThrows) throw new Error('injected checkpoint failure')
       const checkpoint = change(checkpoints.get(ref) ?? { subscriptionRef: ref, ...INITIAL_CHECKPOINT })
       saves.push(ref)
@@ -243,6 +254,35 @@ describe('failure handling', () => {
     expect(test.checkpoints.get(entry.subscriptionRef)?.consecutiveFailures).toBe(1)
   })
 
+  it('rewrites a skipped subscription only once its due instant passes', async () => {
+    const paused = { ...subscription('s0'), state: 'paused' as const }
+    const test = harness({ subscriptions: [paused] })
+    // The window covers both tick minutes, so the only writes left to observe are the skip branch's.
+    const minute = Math.floor(Date.parse('2026-11-03T00:00:00.000Z') / 60_000)
+    await test.checkpoints.set(paused.subscriptionRef, { subscriptionRef: paused.subscriptionRef, ...INITIAL_CHECKPOINT,
+      dueAt: Date.parse('2026-11-03T00:10:00.000Z'), publishWindowMinute: minute + 11 })
+    await test.scheduler.runTick()
+    await test.scheduler.runTick()
+    expect(test.saves).toEqual([])
+    test.advance(11 * MINUTE)
+    await test.scheduler.runTick()
+    await test.scheduler.runTick()
+    expect(test.saves).toEqual([paused.subscriptionRef])
+    expect(test.checkpoints.get(paused.subscriptionRef)?.dueAt).toBe(Date.parse('2026-11-03T00:16:00.000Z'))
+  })
+
+  it('rewrites a backlogged subscription only once its due instant passes', async () => {
+    const entry = subscription('s0')
+    const backlog = Array.from({ length: SUBSCRIPTION_PENDING_MAX }, (_, index) => ({ acceptedSequence: index, eventId: `e${index}` }))
+    const test = harness({ subscriptions: [entry], pending: { [entry.subscriptionRef]: backlog } })
+    const minute = Math.floor(Date.parse('2026-11-03T00:00:00.000Z') / 60_000)
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT,
+      dueAt: Date.parse('2026-11-03T00:10:00.000Z'), publishWindowMinute: minute, publishedInWindow: SUBSCRIPTION_PUBLISH_PER_MINUTE })
+    await test.scheduler.runTick()
+    expect(test.saves).toEqual([])
+    expect(test.runs).toEqual([])
+  })
+
   it('settles a success only as the next due instant, because the accept clears the count itself', async () => {
     const entry = subscription('s0')
     const test = harness({ subscriptions: [entry], outcomes: ['accepted'] })
@@ -285,6 +325,40 @@ describe('publication', () => {
     await second.checkpoints.set(entry.subscriptionRef, first.checkpoints.get(entry.subscriptionRef)!)
     await second.scheduler.runTick()
     expect(second.published).toEqual([])
+  })
+
+  it('serializes overlapping passes, so one pending entry is never published twice', async () => {
+    const entry = subscription('s0')
+    const test = harness({ subscriptions: [entry], pending: { [entry.subscriptionRef]: [
+      { acceptedSequence: 1, eventId: 'e0' }, { acceptedSequence: 2, eventId: 'e1' }] } })
+    let releasePublish = (): void => {}
+    test.control.holdPublish = new Promise<void>(resolve => { releasePublish = resolve })
+    const first = test.scheduler.runTick()
+    await pumped(() => test.published.length === 1)
+    const second = test.scheduler.runTick()
+    for (let flush = 0; flush < 50; flush += 1) await Promise.resolve()
+    // The second pass is held behind the first: the entry the first pass is
+    // publishing has not left the queue a second time.
+    expect(test.published).toEqual([`${entry.subscriptionRef}:e0`])
+    releasePublish()
+    await Promise.all([first, second])
+    expect(test.published).toEqual([`${entry.subscriptionRef}:e0`, `${entry.subscriptionRef}:e1`])
+  })
+
+  it('keeps the spent window when the clock jumps back, and resets it only forward', async () => {
+    const entry = subscription('s0')
+    const pending = Array.from({ length: SUBSCRIPTION_PUBLISH_PER_MINUTE + 5 }, (_, index) => ({ acceptedSequence: index + 1, eventId: `e${index}` }))
+    const test = harness({ subscriptions: [entry], pending: { [entry.subscriptionRef]: pending } })
+    // A window a minute ahead and fully spent: the state a clock rollback leaves.
+    const minute = Math.floor(Date.parse('2026-11-03T00:00:00.000Z') / 60_000)
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT,
+      publishWindowMinute: minute + 1, publishedInWindow: SUBSCRIPTION_PUBLISH_PER_MINUTE })
+    await test.scheduler.runTick()
+    expect(test.published).toEqual([])
+    // The clock catches up and passes the stored minute: the window resets.
+    test.advance(2 * MINUTE)
+    await test.scheduler.runTick()
+    expect(test.published).toHaveLength(SUBSCRIPTION_PUBLISH_PER_MINUTE)
   })
 
   it('publishes nothing, and rewrites no checkpoint, for a deleted subscription', async () => {
@@ -341,7 +415,7 @@ describe('one admission for every entry point', () => {
 
     // A freed slot admits the trial, and the trial's own answer reaches its caller.
     test.releaseAll()
-    await test.scheduler.runTick()
+    await pumped(() => started.length === 1)
     expect(started).toEqual([trialEntry.subscriptionRef])
     closeTrial()
     await expect(trial).resolves.toBe('done')
@@ -390,7 +464,7 @@ describe('one admission for every entry point', () => {
     for (let flush = 0; flush < 50 && !test.runs.includes(shared.subscriptionRef); flush += 1) await Promise.resolve()
     expect(test.runs.at(-1)).toBe(shared.subscriptionRef)
     expect(started).toEqual([])
-    expect(test.scheduler.state().running).toEqual([shared.subscriptionRef])
+    expect(test.scheduler.state().running.filter(ref => ref === shared.subscriptionRef)).toEqual([shared.subscriptionRef])
 
     // Only when that run finishes does the trial get its turn.
     test.releaseAll()
@@ -523,8 +597,27 @@ describe('one admission for every entry point', () => {
     await test.scheduler.runTick()
     expect(test.scheduler.state().queued).toEqual([early.subscriptionRef, late.subscriptionRef])
     test.releaseAll()
-    await test.scheduler.runTick()
+    await pumped(() => test.runs.length >= SUBSCRIPTION_CONCURRENT_RUNS + 2)
     expect(test.runs.slice(SUBSCRIPTION_CONCURRENT_RUNS)).toEqual([early.subscriptionRef, late.subscriptionRef])
+  })
+
+  it('does not re-execute a due instant that is still settling', async () => {
+    const entry = subscription('s0')
+    const test = harness({ subscriptions: [entry] })
+    const minute = Math.floor(Date.parse('2026-11-03T00:00:00.000Z') / 60_000)
+    await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT,
+      dueAt: 0, publishWindowMinute: minute })
+    let releaseSaves = (): void => {}
+    test.control.holdSaves = new Promise<void>(resolve => { releaseSaves = resolve })
+    await test.scheduler.runTick()
+    test.releaseAll()
+    // The run finished, but its outcome write hangs: a tick that lands inside
+    // that window must not treat the same due instant as free.
+    await test.scheduler.runTick()
+    expect(test.runs).toEqual([entry.subscriptionRef])
+    releaseSaves()
+    await pumped(() => test.saves.includes(entry.subscriptionRef))
+    expect(test.checkpoints.get(entry.subscriptionRef)?.dueAt).toBe(Date.parse('2026-11-03T00:05:00.000Z'))
   })
 
   it('stops admitting, rejects a trial that never started, and waits for the runs in flight', async () => {

@@ -77,7 +77,7 @@ export function TeamSubscriptionsTab({
   const [failure, setFailure] = useState<CardFailure>()
   // The one time an address is readable: the answer that armed it. It lives
   // here, not in the card, so closing the dialog really forgets it.
-  const [armed, setArmed] = useState<{ readonly name: string; readonly address: string }>()
+  const [armed, setArmed] = useState<{ readonly name: string; readonly address: string } | { readonly name: string; readonly gone: true }>()
 
   const live = (entries ?? []).filter(entry => entry.subscription.state !== 'deleted')
   const runStateAction = async (entry: AgentTeamSubscriptionListEntry, kind: PendingAction['kind']): Promise<void> => {
@@ -120,6 +120,9 @@ export function TeamSubscriptionsTab({
       // A reset trialled nothing, so the only answer left is the address itself.
       if (result.value.kind === 'changed' && result.value.webhookAddress !== undefined) {
         setArmed({ name: entry.subscription.name, address: result.value.webhookAddress })
+      }
+      if (result.value.kind === 'changed' && result.value.webhookAddressGone === true) {
+        setArmed({ name: entry.subscription.name, gone: true })
       }
       onChanged()
     } catch (cause) {
@@ -173,12 +176,14 @@ export function TeamSubscriptionsTab({
       onArmed={setArmed}
       t={t}
     />}
-    {armed !== undefined && <SubscriptionWebhookAddressDialog
-      name={armed.name}
-      address={armed.address}
-      onClose={() => { setArmed(undefined) }}
-      t={t}
-    />}
+    {armed !== undefined && (armed.gone === true
+      ? <SubscriptionWebhookGoneDialog name={armed.name} onClose={() => { setArmed(undefined) }} t={t} />
+      : <SubscriptionWebhookAddressDialog
+        name={armed.name}
+        address={armed.address}
+        onClose={() => { setArmed(undefined) }}
+        t={t}
+      />)}
     {scriptOf !== undefined && <SubscriptionScriptDialog
       entry={scriptOf}
       canManage={canManage}
@@ -589,6 +594,25 @@ function SubscriptionWebhookAddressDialog({ name, address, onClose, t }: {
   </Modal>
 }
 
+/**
+ * The answer a retried save or reset gets: the address armed once at the commit
+ * and cannot be fetched again, so the reader is told that instead of nothing.
+ */
+function SubscriptionWebhookGoneDialog({ name, onClose, t }: {
+  readonly name: string
+  readonly onClose: () => void
+  readonly t: TeamConversationProps['t']
+}) {
+  return <Modal
+    open
+    onClose={onClose}
+    title={t('subscriptionWebhookGoneTitle', { name })}
+    description={t('subscriptionWebhookGoneBody')}
+    closeLabel={t('close')}
+    footer={<Button variant="outline" onClick={onClose}>{t('close')}</Button>}
+  />
+}
+
 function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose, onChanged, onArmed, t }: {
   readonly mode: EditorMode
   readonly workspaceId: WorkspaceId
@@ -597,7 +621,7 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
   readonly onClose: () => void
   readonly onChanged: () => void
   /** The address a save armed, handed up to the dialog that shows it once. */
-  readonly onArmed: (armed: { readonly name: string; readonly address: string }) => void
+  readonly onArmed: (armed: { readonly name: string; readonly address: string } | { readonly name: string; readonly gone: true }) => void
   readonly t: TeamConversationProps['t']
 }) {
   const editing = mode.kind === 'edit' ? mode.entry.subscription : undefined
@@ -698,6 +722,10 @@ function SubscriptionEditorDialog({ mode, workspaceId, projectRef, host, onClose
       // it: show it before the form closes, or it is lost with the request.
       if (result.value.webhookAddress !== undefined) {
         onArmed({ name: name.trim(), address: result.value.webhookAddress })
+      }
+      // A retried save answers without the address, so it says why instead.
+      if (result.value.webhookAddressGone === true) {
+        onArmed({ name: name.trim(), gone: true })
       }
       onChanged()
       onClose()

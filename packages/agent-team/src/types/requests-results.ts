@@ -1396,7 +1396,9 @@ export type AgentTeamSubscriptionWriteResult =
      * of the same request id answers without it: the ledger keeps only the
      * token's hash, so the caller must report that the address is gone.
      */
-    readonly webhookAddress?: string | undefined }
+    readonly webhookAddress?: string | undefined
+    /** On a resolved retry of a create or reset that armed the address: it was shown once and cannot be fetched again. */
+    readonly webhookAddressGone?: true | undefined }
   | { readonly kind: 'trial-failed'; readonly failure: AgentTeamSubscriptionTrialFailure }
 
 export type AgentTeamSubscriptionTrialResult =

@@ -24,6 +24,8 @@ interface SubscriptionResult {
   webhook?: boolean
   /** The complete address, present only on the call that armed it or reset it. */
   webhookAddress?: string
+  /** Present when this call is a resolved retry of one that armed the address: it was shown once and cannot be fetched again. */
+  webhookAddressGone?: true
   unpublished?: number
   baselineIds?: string[]
   events?: string[]
@@ -104,7 +106,7 @@ const OUTPUT_SCHEMA = {
     projectRef: { type: 'string', required: true },
     subscriptionRef: { type: 'string' }, name: { type: 'string' }, state: { type: 'string' },
     revision: { type: 'number' }, intervalMinutes: { type: 'number' }, webhook: { type: 'boolean' },
-    webhookAddress: { type: 'string' }, unpublished: { type: 'number' },
+    webhookAddress: { type: 'string' }, webhookAddressGone: { type: 'boolean' }, unpublished: { type: 'number' },
     baselineIds: { type: 'array', items: { type: 'string' } },
     // One rendered line per event: what the script printed, quoted as data.
     events: { type: 'array', items: { type: 'string' } },
@@ -158,7 +160,7 @@ type SubscriptionWrite = { readonly kind: 'changed'; readonly subscription: {
   readonly revision: number
   readonly triggers: { readonly interval?: { readonly minutes: number } | undefined; readonly webhook?: true | undefined }
   readonly webhook?: unknown
-}, readonly webhookAddress?: string | undefined
+}, readonly webhookAddress?: string | undefined, readonly webhookAddressGone?: true | undefined
 } | { readonly kind: 'trial-failed'; readonly failure: { readonly reason: string; readonly stdoutTail: string; readonly stderrTail: string } }
 
 function written(action: string, result: SubscriptionWrite, base: { readonly workspaceId: string; readonly projectRef: string }): SubscriptionResult {
@@ -172,7 +174,8 @@ function written(action: string, result: SubscriptionWrite, base: { readonly wor
     ...(intervalMinutes === undefined ? {} : { intervalMinutes }),
     // Only the call that armed or reset the address has it: the ledger keeps a
     // hash, so this is the one time a caller can read the whole thing.
-    ...(result.webhookAddress === undefined ? {} : { webhookAddress: result.webhookAddress }) }
+    ...(result.webhookAddress === undefined ? {} : { webhookAddress: result.webhookAddress }),
+    ...(result.webhookAddressGone === true ? { webhookAddressGone: true as const } : {}) }
 }
 
 type RenderedRun = NonNullable<SubscriptionResult['runs']>[number]
@@ -271,7 +274,10 @@ export const teamSubscription = defineTool({
       // so the render says both the address and that no later read repeats it.
       const address = value.webhookAddress === undefined ? ''
         : `\nWebhook address: ${value.webhookAddress}\nRegister it with the provider now: only its hash is stored, so this is the one time it is shown. Call reset_webhook if it is lost.`
-      return [{ type: 'text', text: `${where}\n${value.kind}: ${value.name ?? 'subscription'} (${value.subscriptionRef}) · ${value.state ?? 'active'} · r${value.revision ?? 1}${interval}${hook}${address}` }]
+      const gone = value.webhookAddressGone === true
+        ? '\nThe webhook address was shown once when this change committed and cannot be fetched again; call reset_webhook to arm a new one.'
+        : ''
+      return [{ type: 'text', text: `${where}\n${value.kind}: ${value.name ?? 'subscription'} (${value.subscriptionRef}) · ${value.state ?? 'active'} · r${value.revision ?? 1}${interval}${hook}${address}${gone}` }]
     },
   },
   async execute(rawArgs, exec): Promise<SubscriptionResult> {

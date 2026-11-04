@@ -606,9 +606,31 @@ describe('the webhook trigger', () => {
     // provider posting to it really does reach this subscription.
     await expect(booted.ctx.agentTeam.intakeWebhookDelivery({ token: addressToken(created.webhookAddress), headers: {}, body: '{}' }))
       .resolves.toMatchObject({ kind: 'queued' })
+    shell.requests.length = 0
     const retried = await booted.ctx.agentTeam.createSubscription(request)
     if (retried.kind !== 'changed') throw new Error('a retried create resolves the stored subscription')
     expect(retried.webhookAddress, 'the ledger keeps only the hash, so a retry cannot show the address').toBeUndefined()
+    expect(retried.webhookAddressGone, 'and the retry says the address is gone instead of staying silent').toBe(true)
+    expect(shell.requests, 'a retried create never runs the script again').toHaveLength(0)
+  })
+
+  it('answers a retried edit from the ledger, so the script runs once', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(createRequest(projectRef, 'printf events\n'))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    const request = { requestId: requestId('edit-retry'), workspaceId, projectRef,
+      subscriptionRef: created.subscription.subscriptionRef, expectedRevision: 1,
+      name: 'renamed', intervalMinutes: 10, script: { scriptContent: 'printf events\n' } }
+    const first = await booted.ctx.agentTeam.updateSubscription(request)
+    if (first.kind !== 'changed') throw new Error('expected a committed edit')
+    shell.requests.length = 0
+    const retried = await booted.ctx.agentTeam.updateSubscription(request)
+    if (retried.kind !== 'changed') throw new Error('a retried edit resolves the stored subscription')
+    expect(retried.subscription.name).toBe('renamed')
+    expect(shell.requests, 'the retry never runs the script again').toHaveLength(0)
   })
 
   it('returns the address once when an edit enables the trigger, and never on an edit that keeps it', async () => {
@@ -854,6 +876,13 @@ describe('the webhook trigger', () => {
     await pump(booted)
     expect(shell.requests.filter(request => request.stdin !== undefined)).toHaveLength(0)
     expect(admissionRows(pool)).toHaveLength(1)
+    // An update lands while the batch waits: the accept must still attribute
+    // the batch to the definition the payload arrived under, not the new one.
+    const updated = await booted.ctx.agentTeam.updateSubscription({ requestId: requestId('update-held'), workspaceId, projectRef,
+      subscriptionRef: created.subscription.subscriptionRef, expectedRevision: 1, name: 'main CI', webhook: true,
+      script: { scriptContent: 'printf "later version"\n' } })
+    if (updated.kind !== 'changed') throw new Error('expected a committed update')
+    shell.requests.length = 0
     // One publication pass frees exactly the room the batch needs.
     await (booted.ctx.agentTeam as unknown as { subscriptionScheduler: { runTick(): Promise<void> } })
       .subscriptionScheduler.runTick()
@@ -862,6 +891,14 @@ describe('the webhook trigger', () => {
     expect(admissionRows(pool), 'the batch is in the ledger, so the delivery is done').toHaveLength(0)
     expect(listed(), 'all twenty events are accepted and waiting their turn').toMatchObject({ unpublished: 490, eventCount: 510 })
     expect(failures(), 'a held batch never counts against the subscription').toBe(0)
+    const operations = [...(pool.media.get('agent_team')?.tables.get('operations')?.values() ?? [])] as Array<{
+      kind?: string
+      data?: { subscriptionRevision?: number, scriptHash?: string, events?: Array<{ id?: string }> }
+    }>
+    const lateAccept = operations.find(record => record.kind === 'team/subscription-events-accepted'
+      && record.data?.events?.some(event => event.id === 'late0'))
+    expect(lateAccept?.data?.subscriptionRevision, 'the batch is attributed to the revision it ran under').toBe(1)
+    expect(lateAccept?.data?.scriptHash).toBe(created.subscription.script.sha256)
   }, 30_000)
 
   it('refuses a batch no queue could ever take instead of holding it', async () => {
@@ -1086,6 +1123,23 @@ describe('the webhook trigger', () => {
     await pump(booted)
     expect(shell.requests.filter(request => request.stdin !== undefined)).toHaveLength(0)
     expect(await booted.ctx.agentTeam.intakeWebhookDelivery({ token, headers: {}, body: '{}' })).toEqual({ kind: 'not-found' })
+  }, 30_000)
+
+  it('keeps the list readable over an archived Project, while its writes refuse', async () => {
+    const shell = fakeShell({ stdout: '{"id":"a","title":"A"}\n' })
+    const booted = await boot(new MemoryMediaPool(), shell, process.cwd(), configured)
+    live.push({ dispose: async () => { await booted.fiber.dispose() } })
+    const projectRef = await project(booted)
+    const created = await booted.ctx.agentTeam.createSubscription(webhookOnly(projectRef))
+    if (created.kind !== 'changed') throw new Error('expected a committed create')
+    await booted.ctx.agentTeam.archiveProject({ requestId: requestId('archive-readable'), workspaceId, projectRef })
+    // The list is the audit surface of what the Project ran, so archiving
+    // keeps it readable instead of answering the page with an error.
+    const listed = booted.ctx.agentTeam.subscriptionsForClient({ workspaceId, projectRef })
+    expect(listed.entries.map(entry => entry.subscription.subscriptionRef)).toEqual([created.subscription.subscriptionRef])
+    await expect(booted.ctx.agentTeam.pauseSubscription({ requestId: requestId('pause-archived'), workspaceId, projectRef,
+      subscriptionRef: created.subscription.subscriptionRef, expectedRevision: created.subscription.revision }))
+      .rejects.toThrow(/is archived/)
   }, 30_000)
 
   it('ends a delivery on its retry succeeding, without counting a failure against it', async () => {

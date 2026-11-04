@@ -3741,7 +3741,9 @@ export default class AgentTeam extends TypertRemoteService {
         await table.delete(key)
         return
       }
-      const decision = await this.acceptFreshEvents(live, fresh, requestId)
+      // The batch ran under the definition the payload arrived under, so the
+      // accept attributes it to that revision even when an update landed since.
+      const decision = await this.acceptFreshEvents(this.replaySource(live, record, 'received'), fresh, requestId)
       // Every answer but `deferred` settles the row: the batch is in the ledger, or
       // the record it would land on is gone.
       if (decision.outcome === 'accepted' || decision.outcome === 'empty' || decision.outcome === 'dropped') await table.delete(key)
@@ -4263,19 +4265,32 @@ export default class AgentTeam extends TypertRemoteService {
     return token === undefined ? {} : { webhookAddress: webhookAddress(origin, token) }
   }
 
+  /** A retry's answer for a write that already committed: the subscription stands, and an address it armed once is not handed out again. */
+  private replayedSubscriptionWrite(result: AgentTeamSubscriptionChangeResult, addressArmed: boolean): AgentTeamSubscriptionWriteResult {
+    return Object.freeze({ kind: 'changed', subscription: result.subscription, activity: result.activity,
+      ...(addressArmed && result.subscription.triggers.webhook === true ? { webhookAddressGone: true as const } : {}) })
+  }
+
   private async createSubscriptionAs(actor: AgentTeamActor, request: AgentTeamCreateSubscriptionRequest, agent: Agent | undefined): Promise<AgentTeamSubscriptionWriteResult> {
     this.requireAccepting()
     const ledger = this.requireLedger()
     ledger.assertSubscriptionAuthority(actor, request.projectRef, request.workspaceId)
     const script = await this.snapshotSubscriptionScript(request.script, agent)
     const triggers = this.subscriptionTriggersOf(request)
-    const origin = triggers.webhook === true ? this.webhookOrigin() : undefined
     const credentials = Object.freeze([...(request.credentials ?? [])])
     const name = request.name.trim()
     const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
     if (problem !== undefined) throw new Error(`this subscription cannot be created: ${problem}`)
     const missing = await missingCredentials(this.credentialProvider(), credentials)
     if (missing.length > 0) throw new Error(this.missingCredentialMessage(missing))
+    // A retry whose response was lost must not run the script again: what
+    // committed comes back, and the address it armed once is not re-fetched.
+    // The origin is read only past this point, so a retry answers even after
+    // the public origin was unconfigured.
+    const replayed = ledger.subscriptionWriteReplay({ requestId: request.requestId, workspaceId: request.workspaceId,
+      projectRef: request.projectRef, name, triggers, script, credentials, baselineIds: [], actor })
+    if (replayed !== undefined) return this.replayedSubscriptionWrite(replayed, replayed.subscription.triggers.webhook === true)
+    const origin = triggers.webhook === true ? this.webhookOrigin() : undefined
     const trial = await this.trialSubscriptionRun(this.draftSubscription(actor, { projectRef: request.projectRef, name, triggers, script, credentials }))
     if (!trial.ok) return Object.freeze({ kind: 'trial-failed', failure: this.trialFailureOf(trial) })
     const baselineIds = (request.baseline ?? 'current-output') === 'current-output' ? baselineIdsOf(trial.events) : []
@@ -4309,15 +4324,19 @@ export default class AgentTeam extends TypertRemoteService {
     if (prior.state === 'deleted') throw new Error(`subscription '${request.subscriptionRef}' is deleted (subscription_deleted)`)
     const script = await this.snapshotSubscriptionScript(request.script, agent)
     const triggers = this.subscriptionTriggersOf(request, prior.triggers)
-    // An edit that keeps the address needs no origin check here: the address it
-    // already has stays valid, and only arming a new one depends on the setting.
-    const origin = triggers.webhook === true && prior.webhook === undefined ? this.webhookOrigin() : undefined
     const credentials = Object.freeze([...(request.credentials ?? [])])
     const name = request.name.trim()
     const problem = subscriptionDefinitionProblem({ name, triggers, script, credentials })
     if (problem !== undefined) throw new Error(`this subscription cannot be updated: ${problem}`)
     const missing = await missingCredentials(this.credentialProvider(), credentials)
     if (missing.length > 0) throw new Error(this.missingCredentialMessage(missing))
+    // The retry of an update answers from the ledger, so the script runs once.
+    const replayed = ledger.subscriptionWriteReplay({ requestId: request.requestId, workspaceId: request.workspaceId, projectRef: request.projectRef,
+      subscriptionRef: request.subscriptionRef, expectedRevision: request.expectedRevision, name, triggers, script, credentials, actor })
+    if (replayed !== undefined) return this.replayedSubscriptionWrite(replayed, false)
+    // An edit that keeps the address needs no origin check here: the address it
+    // already has stays valid, and only arming a new one depends on the setting.
+    const origin = triggers.webhook === true && prior.webhook === undefined ? this.webhookOrigin() : undefined
     // The trial keeps the existing waterline: an id that appeared between two
     // polls must not be swallowed by an edit.
     const trial = await this.trialSubscriptionRun(Object.freeze({ ...prior, name, triggers, script, credentials }))
@@ -4458,6 +4477,10 @@ export default class AgentTeam extends TypertRemoteService {
     this.requireAccepting()
     const ledger = this.requireLedger()
     ledger.assertSubscriptionAuthority(actor, request.projectRef, request.workspaceId)
+    // The retry of a reset answers from the ledger: the new address armed once
+    // is not re-fetched, and the result says so instead of staying silent.
+    const replayed = ledger.subscriptionWriteReplay({ ...request, actor })
+    if (replayed !== undefined) return this.replayedSubscriptionWrite(replayed, replayed.subscription.triggers.webhook === true)
     const origin = this.webhookOrigin()
     const result = await this.serializeSubscriptionWrite(request.subscriptionRef,
       () => ledger.resetSubscriptionWebhook({ ...request, actor }))
@@ -4501,6 +4524,9 @@ export default class AgentTeam extends TypertRemoteService {
       throw new Error(`subscription '${request.subscriptionRef}' does not belong to Project '${request.projectRef}'`)
     }
     if (subscription.state === 'deleted') throw new Error(`subscription '${request.subscriptionRef}' is deleted (subscription_deleted)`)
+    // The retry of a resume answers from the ledger, so the script runs once.
+    const replayed = ledger.subscriptionWriteReplay({ ...request, actor })
+    if (replayed !== undefined) return this.replayedSubscriptionWrite(replayed, false)
     const trial = await this.trialSubscriptionRun(subscription)
     if (!trial.ok) return Object.freeze({ kind: 'trial-failed', failure: this.trialFailureOf(trial) })
     const result = await ledger.resumeSubscription({ ...request, actor })

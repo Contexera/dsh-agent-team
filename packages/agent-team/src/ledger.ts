@@ -1449,6 +1449,24 @@ export class AgentTeamLedger {
    * only renames the target, moves the revision it expects, or names other
    * event ids is a collision, not a resolved retry.
    */
+  /**
+   * The write a request id already committed, so its Remote retry can answer
+   * from the ledger without running the script again. A create's baseline came
+   * from its trial, which a retry must not re-run, so the committed baseline
+   * stands and every other field is still compared.
+   */
+  subscriptionWriteReplay(request: AgentTeamAuthorizedSubscriptionWrite): AgentTeamSubscriptionChangeResult | undefined {
+    const existing = this.state.byRequest.get(request.requestId)
+    if (existing === undefined) return undefined
+    if (existing.kind === 'team/subscription-created') {
+      const created = request as AgentTeamAuthorizedCreateSubscriptionRequest
+      this.assertSameSubscriptionWrite(existing, { ...created, baselineIds: existing.data.baselineIds })
+    } else {
+      this.assertSameSubscriptionWrite(existing, request)
+    }
+    return this.subscriptionChangeOf(existing)
+  }
+
   private assertSameSubscriptionWrite(existing: AgentTeamOperation, request: AgentTeamAuthorizedSubscriptionWrite): void {
     const data = existing.data as Record<string, unknown>
     if (!this.sameActor(existing.actor, request.actor) || data.workspaceId !== request.workspaceId) {
@@ -3671,7 +3689,12 @@ export class AgentTeamLedger {
    * Member who merely shares the Workspace may not.
    */
   assertSubscriptionReadAuthority(actor: AgentTeamActor, projectRef: AgentTeamProjectRef, workspaceId: WorkspaceId): void {
-    this.activeProject(projectRef, workspaceId)
+    // Reading spans archiving: the list and the run history are the audit
+    // surface of what a Project ran, and archiving must not erase them.
+    const project = this.state.projects.get(projectRef)
+    if (project === undefined || project.workspaceId !== workspaceId) {
+      throw new Error(`Project '${projectRef}' is not in Workspace '${workspaceId}'`)
+    }
     if (actor.kind === 'host') throw new Error('reading subscriptions needs a Human or Agent Member actor')
     this.requireProjectMemberActor(actor, projectRef)
   }

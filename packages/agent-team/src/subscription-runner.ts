@@ -76,6 +76,7 @@ export type SubscriptionRunCategory =
   | 'timeout'
   | 'exit-code'
   | 'stdout-truncated'
+  /** Only run records written before the replacement-character check was removed carry this; a run no longer fails this way. */
   | 'invalid-utf8'
   | 'invalid-output'
   | 'executor-missing'
@@ -273,12 +274,9 @@ export async function runSubscriptionScript(request: SubscriptionRunRequest): Pr
   if (result.exitCode !== 0) {
     return failed('exit-code', `the script exited with code ${result.exitCode === null ? 'null' : result.exitCode}`, stdout, stderr, result.exitCode)
   }
-  // The executor decodes bytes it captured, so an invalid byte already arrived
-  // as U+FFFD. Treating that mark as a failed run is the only way to refuse
-  // output the script never printed as UTF-8.
-  if (stdout.includes('\uFFFD')) {
-    return failed('invalid-utf8', 'the script printed bytes that are not valid UTF-8', stdout, stderr, result.exitCode)
-  }
+  // The executor hands over decoded text, so a replacement character is
+  // indistinguishable from data the script chose to print: the run takes it
+  // as data rather than refusing output a healthy script may legitimately owe.
   const parsed = parseSubscriptionOutput(Buffer.from(stdout, 'utf8'))
   if (!parsed.ok) {
     return failed('invalid-output', parsed.reason, stdout, stderr, result.exitCode)

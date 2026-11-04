@@ -170,14 +170,14 @@ describe('what the streams have to prove', () => {
     expect(report.reason).toMatch(/exited with code 3/)
   })
 
-  it('refuses output that arrived with replaced bytes', async () => {
+  it('takes a replacement character as data instead of refusing the run', async () => {
     const shell = executor(() => ({ stdoutText: '{"id":"a\uFFFD","title":"A"}\n' }))
     const report = await runSubscriptionScript({
       executor: shell, credentials: credentials({}), liveShell: 'bash', subscription: subscription(),
       trigger: 'interval', workspaceRoot: WORKSPACE, lastSuccessAt: undefined,
     })
-    expect(report.ok).toBe(false)
-    expect(report.reason).toMatch(/not valid UTF-8/)
+    expect(report.ok).toBe(true)
+    expect(report.ok && report.events.map(event => event.id)).toEqual(['a\uFFFD'])
   })
 
   it('accepts a complete event stream and reports every event', async () => {
