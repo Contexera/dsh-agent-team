@@ -62,3 +62,11 @@ Team 自身已有 Host 发起的私有提醒（`team/reminder-raised`，类型 `
 - 沙箱只限制文件访问，进程仍与 Host 共用同一个内核和文件系统。需要完整隔离时，应使用容器、microVM 或远程执行器。
 - 来源：Harness `packages/shell`、`packages/sandbox` 的 README。
 - Project 实体带有 `workspaceId`，脚本的工作目录可以取这个 Workspace。
+
+## 修订记录（2026-11-03 复核，supersedes 上文对应说法）
+
+复核基线：Harness `b830ec950`（0.2.1-rc.5），与本文件调查基线 `687f282e`（rc.2）在本文引用的包上源码零差异（仅 package.json 版本号不同）。以下三条上文说法经复核不成立，以本节为准：
+
+1. **“签名校验、HTTP 路由、请求体限制已由 Harness 负责”只对 GitHub adapter 成立。** 验签与 body 上限属于 `@deepseek-ai/dsh-webhook-github`（`handler.ts` 验签、`body.ts` 有界 UTF-8 读取）。通用 `WebRoute` 只提供裸 `req/res`，handler 自负响应生命周期；路由注册（exact/prefix、未匹配 404）是 webserver 的通用能力，不属于 adapter。Team 自建 token 入口必须自己实现 body 限制、状态码、存储失败与路由生命周期。
+2. **“dsh-jobs 只覆盖 Agent 自己启动的本地进程”不成立。** `JobSpec` 是通用任务规格（`jobs/src/types.ts`：owner 可选，run 是 producer callback），实际 kind 包括 bash、workflow、pty-send。不选 jobs 作为订阅 authority 的理由应是生命周期与持久化不匹配（完成通知归属 Session，释放后丢失），不是“只能跑本地进程”。
+3. **gh 凭据可用性不能假定。** `GH_TOKEN`/`GITHUB_TOKEN` 优先于已存凭据；默认存于系统 credential store，明文文件是 fallback。`gh auth login --help` 与 `gh help environment`（2026-11-03 只读执行）确认。

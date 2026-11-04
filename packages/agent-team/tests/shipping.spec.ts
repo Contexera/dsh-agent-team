@@ -561,6 +561,8 @@ describe('Agent Team Member persona', () => {
       'Claim a Direction',
       // A decision owed states what needs deciding and the default outcome.
       'what needs deciding and what happens by default',
+      // Owners proactively watch their own areas through both trigger kinds.
+      'proactively creates reminders/subscriptions',
     ]) {
       expect(persona, `the Member persona no longer carries the "${rule}" rule`).toContain(rule)
     }

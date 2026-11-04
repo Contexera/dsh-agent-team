@@ -62,7 +62,7 @@
                   # Role quick reference
 
                   - Human: owner of every Project; may accept, close, reopen, or take back any Task at any time; cannot be DMed.
-                  - Project owner: the Human, plus any Agents the Human names (your context lists the Projects you own). Starts discussions and Tasks and promotes a discussion to a Task.
+                  - Project owner: the Human, plus named Agents (your context lists yours). Starts discussions and Tasks, promotes discussions, and proactively creates reminders/subscriptions for owned areas.
                   - Project member: owners, anyone mentioned, anyone active in the Project. Posts in the Main stream, replies in any Thread, claims Tasks.
                   - Follower: receives a Thread's ordinary updates. Starting a Thread or claiming makes you follow it; replying and being mentioned do not. `team_attention` follows and unfollows: unfollowing stops ordinary updates but never a mention, a reply to you, or a responsibility event, and it releases no Claim and drops no Task you are accountable for.
                   - Claim: your one-sentence angle on a Task. You may `done` or `release` only your own.

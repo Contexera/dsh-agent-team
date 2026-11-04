@@ -167,6 +167,7 @@ export class SubscriptionScheduler {
   /** Run one scheduler pass immediately; exposed so tests and a manual nudge share the production path. */
   async runTick(): Promise<void> {
     if (this.draining) return
+    await this.settleBoot()
     await this.publishPass()
     await this.timerPass()
     await this.admit()
@@ -192,15 +193,16 @@ export class SubscriptionScheduler {
     return this.runAdmitted(subscription, 'trial', task)
   }
 
-  /** Spread the first timer run of every subscription over one minute, and catch up a missed run exactly once. */
+  /** Give booted or newly created timers a first due instant, preserving every persisted one for catch-up. */
   async settleBoot(): Promise<void> {
     const now = this.ports.now()
     for (const subscription of this.ports.subscriptions()) {
-      if (subscription.triggers.interval === undefined) continue
-      if (subscription.state !== 'active' || !this.ports.projectActive(subscription)) continue
-      if (this.ports.checkpoint(subscription.subscriptionRef).dueAt !== undefined) continue
+      const live = this.ports.current(subscription.subscriptionRef) ?? subscription
+      if (live.triggers.interval === undefined) continue
+      if (live.state !== 'active' || !this.ports.projectActive(live)) continue
+      if (this.ports.checkpoint(live.subscriptionRef).dueAt !== undefined) continue
       const delay = Math.floor(this.ports.random() * SUBSCRIPTION_FIRST_RUN_MAX_DELAY_MS)
-      await this.ports.save(subscription.subscriptionRef, checkpoint => ({ ...checkpoint, dueAt: now + delay }))
+      await this.ports.save(live.subscriptionRef, checkpoint => ({ ...checkpoint, dueAt: now + delay }))
     }
   }
 

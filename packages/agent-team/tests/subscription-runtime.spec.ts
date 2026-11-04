@@ -158,6 +158,19 @@ describe('the first run after boot', () => {
     await test.scheduler.runTick()
     expect(test.runs).toEqual([entry.subscriptionRef])
   })
+
+  it('schedules a subscription created after boot without requiring a restart', async () => {
+    const entries: AgentTeamSubscription[] = []
+    const test = harness({ subscriptions: entries, random: () => 0.5 })
+    await test.scheduler.settleBoot()
+    const created = subscription('created-later')
+    entries.push(created)
+    test.control.stored.set(created.subscriptionRef, created)
+    await test.scheduler.runTick()
+    expect(test.checkpoints.get(created.subscriptionRef)?.dueAt)
+      .toBe(Date.parse('2026-11-03T00:00:00.000Z') + 30_000)
+    expect(test.runs).toEqual([])
+  })
 })
 
 describe('admission', () => {
@@ -390,6 +403,7 @@ describe('one admission for every entry point', () => {
     const victim = subscription('victim')
     const test = harness({ subscriptions: [...busy, victim] })
     for (const entry of busy) await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
+    await test.checkpoints.set(victim.subscriptionRef, { subscriptionRef: victim.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: Number.MAX_SAFE_INTEGER })
     await test.scheduler.runTick()
     let ran = false
     const trial = test.scheduler.runTrial(victim, async () => { ran = true; return 'ok' })
@@ -408,6 +422,7 @@ describe('one admission for every entry point', () => {
     const victim = subscription('victim')
     const test = harness({ subscriptions: [...busy, victim] })
     for (const entry of busy) await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
+    await test.checkpoints.set(victim.subscriptionRef, { subscriptionRef: victim.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: Number.MAX_SAFE_INTEGER })
     await test.scheduler.runTick()
     let ran = false
     const trial = test.scheduler.runTrial(victim, async () => { ran = true; return 'ok' })
@@ -432,6 +447,7 @@ describe('one admission for every entry point', () => {
     for (const entry of [...busy, shared]) {
       await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
     }
+    await test.checkpoints.set(late.subscriptionRef, { subscriptionRef: late.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: Number.MAX_SAFE_INTEGER })
     // The 4th slot goes to this subscription's own trial, which is still running
     // when its timer comes due.
     let closeTrial = (): void => {}
@@ -497,6 +513,9 @@ describe('one admission for every entry point', () => {
     const early = subscription('early')
     const test = harness({ subscriptions: [...busy, late, early] })
     for (const entry of busy) await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 0 })
+    for (const entry of [late, early]) {
+      await test.checkpoints.set(entry.subscriptionRef, { subscriptionRef: entry.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: Number.MAX_SAFE_INTEGER })
+    }
     await test.scheduler.runTick()
     // `late` is iterated before `early`, but `early` came due an hour earlier.
     await test.checkpoints.set(late.subscriptionRef, { subscriptionRef: late.subscriptionRef, ...INITIAL_CHECKPOINT, dueAt: 1_000 })
