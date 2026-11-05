@@ -62,9 +62,13 @@ function rowStartByName(patch: string, name: string): number {
 }
 
 function teamMemberPresetText(patch: string): string {
-  const start = rowStartByName(patch, '@deepseek-ai/dsh-agent-preset')
-  const end = rowStartByName(patch, '@contexera/dsh-agent-team/host')
-  return start >= 0 && end > start ? patch.slice(start, end) : ''
+  // A Windows checkout ends text lines with CRLF. Every assertion below reads
+  // logical YAML lines, so fold the endings once here rather than making each
+  // pattern absorb a platform-specific '\r'.
+  const text = patch.replaceAll('\r\n', '\n')
+  const start = rowStartByName(text, '@deepseek-ai/dsh-agent-preset')
+  const end = rowStartByName(text, '@contexera/dsh-agent-team/host')
+  return start >= 0 && end > start ? text.slice(start, end) : ''
 }
 
 function personaInstructionText(preset: string): string {
@@ -396,6 +400,17 @@ describe('Agent Team shipping contract', () => {
         `preset row '${row}' is neither a host-closure package nor this bundle's own subpath, so a real profile cannot resolve it`,
       ).toBe(true)
     }
+  })
+
+  it('reads the tool-fs applyPatch declaration through a CRLF checkout', async () => {
+    // Windows checks out cordis.patch.yml with CRLF endings. The row that turns
+    // applyPatch off is a logical YAML line, so the byte that ends it must never
+    // hide it from the shipping assertion above, which matches '\n' exactly.
+    const patch = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8')
+    const crlf = patch.replaceAll('\r\n', '\n').replaceAll('\n', '\r\n')
+    const preset = teamMemberPresetText(crlf)
+    expect(preset).not.toContain('\r')
+    expect(preset).toMatch(/- id: tool-fs\n\s+name: '@deepseek-ai\/dsh-tool-fs'\n\s+config:\n\s+applyPatch: false\n/)
   })
 })
 
